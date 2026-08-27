@@ -16,6 +16,7 @@ from typing import Any, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
 from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.ordering import (
     OrderingValidationError,
@@ -144,11 +145,13 @@ def serialize_expert_advice(advice: ExpertAdviceInput) -> str:
 class ExperimentTiming(BaseModel):
     train_time_s: float = Field(
         description=(
-            "Wall time of the WHOLE training subprocess, admission to exit. It "
-            "INCLUDES the 07a validation pass — the budget is measured against "
-            "this number, so it must not be narrowed. Read it beside "
-            "`validation_time_s` (F-SCANE-3): the architecture's own cost is "
-            "`train_time_s - validation_time_s`."
+            "Wall time of the WHOLE training subprocess, spawn to exit — so it "
+            "also contains process start, CUDA init, model and dataset "
+            "construction and checkpoint save, none of which the trainer's own "
+            "clock (which starts after setup) counts. The budget is measured "
+            "against this number, so it must not be narrowed. Read it beside "
+            "`validation_time_s` (F-SCANE-3; N-4 for what the split means): "
+            + TIMING_SPLIT_SEMANTICS
         )
     )
     validation_time_s: float | None = Field(

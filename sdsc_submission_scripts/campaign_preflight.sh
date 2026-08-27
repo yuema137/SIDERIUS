@@ -114,11 +114,33 @@
 #                 machine-local state can move it; the ARM render must differ
 #                 on the declared treatment surfaces.
 #       This arm's surface is PUBLISHED to
-#       {workspace-root}/.campaign_arm_surface_{arm}.json. When the sibling
-#       arm's published surface is already there — written by the OTHER POD —
-#       it is used, and the comparison is genuinely cross-pod. Otherwise the
-#       sibling is captured on this host and the row says so: a same-host
-#       comparison cannot speak for a second pod.
+#       {workspace-root}/.campaign_arm_surface_{arm}.json; the sibling arm's
+#       published surface is used when it is there, otherwise the sibling is
+#       captured on this host.
+#
+#       N-6 — THE LABEL MAY NOT CLAIM MORE THAN THE COMPARISON ESTABLISHED.
+#       This script reports only WHERE it read the sibling surface
+#       (--sibling-source published|local, a fact it cannot be wrong about);
+#       what that file is WORTH is DERIVED by campaign_arm_symmetry.py from
+#       the surface's own recorded host, code revision and captured-at
+#       (schema v2 — a surface without them is REFUSED, exit 2). The derived
+#       evidence state is one of cross_pod_verified / cross_pod_stale /
+#       same_host / revision_mismatch / unverifiable, and R7 prints a caveat
+#       in EVERY one of them — the weaker states louder than the verified
+#       state, never the reverse. Previously "published" was asserted on file
+#       existence alone and the disclaimer was printed ONLY in the local
+#       state, so one same-host rehearsal (or a day-1 publication, which no
+#       cold start removes: R8 globs the per-band workspaces, never the
+#       campaign root) both upgraded the label and deleted the warning.
+#
+#       And a layer that CANNOT differ is reported NOT COMPARED, never as
+#       agreeing: capture_environment() and resolve_stores() take no arm
+#       argument, so on one host the environment, the machine-local stores
+#       and the NEUTRAL prompt render are equal by construction. A DIFFERENCE
+#       in those layers is still a violation in every state — scoping
+#       withholds the claim that agreement proves something; it never
+#       silences a difference. The ARM prompt render and both argv layers
+#       test the treatment wiring, not the machine, and stay COMPARED always.
 #       Field-by-field diff on failure (campaign_arm_symmetry.py; both arms
 #       run from THIS checkout, so the SHA of R2 covers both). SKIPPED under
 #       a gold arm: the checker's arms ARE the X9 pair and it positively
@@ -266,6 +288,58 @@ preflight_isolation_for_arm() {
     esac
 }
 pf_isolation_for_arm() { preflight_isolation_for_arm "$@"; }
+
+# The R7 evidence caveat for a DERIVED sibling-surface evidence state (N-6).
+#
+# WHY THIS IS A FUNCTION, and why it answers for EVERY state. The disclaimer
+# used to be gated on `[ "$PROVENANCE" = "local" ]`, so it DISAPPEARED at
+# exactly the moment the label got stronger — and the label got stronger on
+# `[ -f "$PUBLISHED_OTHER" ]`, file existence alone, with nothing in the
+# artifact for anyone to verify. The rule is now the opposite: every state
+# prints a note, the unverified states print a LOUDER one than the verified
+# state, and an unknown state RETURNS 1 rather than printing nothing —
+# silence is the failure mode this whole row exists to remove.
+#
+# Args: STATE SOURCE OTHER_ARM PUBLISHED_PATH.
+preflight_surface_evidence_note() {
+    local state="$1" source="$2" other_arm="$3" published="$4"
+    local from_here=""
+    [ "$source" = "published" ] && from_here=" The file read from ${published} was written by THIS host."
+    case "$state" in
+        cross_pod_verified)
+            printf '%s\n' "R7 sibling surface VERIFIED cross-pod: the ${other_arm} surface records a DIFFERENT host, the SAME code revision as this checkout, and a capture inside the freshness window. The environment, machine-local-store and neutral-prompt layers were genuinely compared across two pods (source=${source})" ;;
+        cross_pod_stale)
+            printf '%s\n' "R7 CAVEAT — sibling surface is STALE: the ${other_arm} surface was written by another host but is older than the freshness threshold, so nothing has re-measured that pod since. A stale surface survives every cold start: R8 globs the per-band workspaces and never ${published}. Re-run this preflight on the ${other_arm} pod and then re-run here before launching (source=${source})" ;;
+        same_host)
+            printf '%s\n' "R7 CAVEAT — NOT cross-pod evidence: both surfaces were captured on THIS host.${from_here} capture_environment() and resolve_stores() take no arm argument, so the environment, the machine-local stores and the neutral prompt render agree BY CONSTRUCTION and are reported NOT COMPARED, not as agreeing. This comparison cannot speak for a second pod. Run this preflight on the ${other_arm} pod to publish its surface, then re-run here (source=${source})" ;;
+        revision_mismatch)
+            printf '%s\n' "R7 CAVEAT — the two surfaces were rendered by DIFFERENT code revisions, so their prompt bytes compare two renderers rather than two machines; R2 requires one SHA per campaign. R7 FAILS on this (source=${source})" ;;
+        unverifiable)
+            printf '%s\n' "R7 CAVEAT — UNATTRIBUTABLE surface: at least one surface carries no readable host, captured-at or revision, so nothing about its origin can be checked and no cross-pod claim is available from it (source=${source})" ;;
+        *)
+            echo "ERROR: preflight_surface_evidence_note: unknown evidence state '$state'" >&2
+            return 1 ;;
+    esac
+}
+
+# The evidence state the CHECKER derived, read back from its own report.
+# Read, never re-derived: a second opinion formed in bash would be free to
+# drift from the one the checker printed, and the whole finding is a label
+# that was not the comparison's own conclusion. Returns 1 when the line is
+# absent, so a checker that stopped emitting it cannot become "unstated".
+preflight_evidence_state() {
+    local report="$1" value
+    # `|| true` for the same reason pf_resolved_isolation carries it: under
+    # `set -euo pipefail` a grep that matches nothing fails the pipeline, and
+    # a failed command substitution in an assignment ABORTS. The refusal must
+    # come from the explicit emptiness test below — a function whose contract
+    # depends on where `set -e` happens to be suppressed is one whose refusal
+    # nobody can test.
+    value="$(grep -o '^\[arm-symmetry\] evidence-state: .*$' "$report" 2>/dev/null \
+        | tail -1 | sed 's/^.*evidence-state: //' | tr -d '[:space:]' || true)"
+    [ -n "$value" ] || return 1
+    printf '%s\n' "$value"
+}
 
 # Capture ONE arm's surface (rendered prompt bytes / environment /
 # machine-local stores) through the production renderers. PYTHONPATH-pinned
@@ -667,16 +741,24 @@ pf_main() {
             # construction — the row's "one machine" objection.
             local PUBLISHED_SELF="${WORKSPACE_ROOT%/}/.campaign_arm_surface_${ARM}.json"
             local PUBLISHED_OTHER="${WORKSPACE_ROOT%/}/.campaign_arm_surface_${OTHER_ARM}.json"
-            local OTHER_SURFACE="" PROVENANCE="none"
+            # SIBLING_SOURCE records only WHERE the file was read — the one
+            # fact this script cannot be wrong about. It is NOT a strength
+            # label: `published` used to be asserted on this `[ -f ]` alone,
+            # and the artifact carried no captured-at, host or revision for
+            # anyone to check, so one same-host rehearsal (or a day-1
+            # publication that no cold start removes) earned the strongest
+            # claim the report can print. What the file is WORTH is derived
+            # by campaign_arm_symmetry.py from the surfaces' own provenance.
+            local OTHER_SURFACE="" SIBLING_SOURCE="local"
             if [ "$SURF_RC" -eq 0 ]; then
                 cp "${SCRATCH}/surface_${ARM}.json" "$PUBLISHED_SELF" 2>/dev/null \
                     || pf_info "R7 could not publish this arm's surface to $PUBLISHED_SELF (the other pod will capture its own sibling locally)"
                 if [ -f "$PUBLISHED_OTHER" ]; then
                     OTHER_SURFACE="$PUBLISHED_OTHER"
-                    PROVENANCE="published"
+                    SIBLING_SOURCE="published"
                 else
                     OTHER_SURFACE="${SCRATCH}/surface_${OTHER_ARM}.json"
-                    PROVENANCE="local"
+                    SIBLING_SOURCE="local"
                     pf_capture_surface "$OTHER_ARM" "$OTHER_ISO" "$OTHER_SURFACE" || SURF_RC=$?
                 fi
             fi
@@ -690,17 +772,35 @@ pf_main() {
                 if [ "$ARM" = "without-prior-art" ]; then
                     WITH_SURF="$OTHER_SURFACE"; WITHOUT_SURF="${SCRATCH}/surface_${ARM}.json"
                 fi
-                if (cd "$PF_PROJECT_DIR" && PYTHONPATH="${PF_PROJECT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
+                # The report is TEED, not just streamed: the R7 row must
+                # state the evidence state the CHECKER derived, and reading
+                # it back is what keeps this script from forming a second
+                # opinion about how strong its own evidence is.
+                local SYM_REPORT="${SCRATCH}/arm_symmetry_report.txt" SYM_RC=0
+                (cd "$PF_PROJECT_DIR" && PYTHONPATH="${PF_PROJECT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
                         "$PF_PY" "$PF_SYMMETRY" --with-output "$WITH_CAP" --without-output "$WITHOUT_CAP" \
                         --workspace-root "$WORKSPACE_ROOT" --band "$SYMMETRY_BAND" \
                         --with-surface "$WITH_SURF" --without-surface "$WITHOUT_SURF" \
-                        --surface-provenance "$PROVENANCE"); then
-                    pf_pass "R7 arm symmetry holds (#255 argv + F-SCANG-4 surface, sibling provenance=$PROVENANCE): arms differ only in declared policy + derived naming, and their rendered prompt bytes, environment and machine-local stores agree"
+                        --sibling-source "$SIBLING_SOURCE") > "$SYM_REPORT" 2>&1 || SYM_RC=$?
+                cat "$SYM_REPORT"
+                local EV_STATE
+                EV_STATE="$(preflight_evidence_state "$SYM_REPORT")" || EV_STATE=""
+                if [ "$SYM_RC" -eq 0 ]; then
+                    # The row states WHICH layers were compared, and never
+                    # claims agreement for a layer reported NOT COMPARED.
+                    pf_pass "R7 arm symmetry holds for every COMPARED layer (#255 argv + F-SCANG-4 surface; sibling-source=$SIBLING_SOURCE evidence-state=${EV_STATE:-unreported}): arms differ only in declared policy + derived naming. Per-layer verdicts, including any NOT COMPARED layer, are in the checker report above"
                 else
                     pf_fail "R7 arm symmetry VIOLATED (#255 / F-SCANG-4 — launch validity conditioned on this; see the field diff above)"
                 fi
-                if [ "$PROVENANCE" = "local" ]; then
-                    pf_info "R7 the ${OTHER_ARM} surface was captured on THIS host, not read from ${PUBLISHED_OTHER}: the environment and machine-local-store comparison is same-host and cannot speak for a second pod. Run this preflight on the other arm's pod to publish its surface, then re-run here for cross-pod coverage"
+                # Printed in EVERY state, weak states louder than the
+                # verified one. An unreported state is itself a caveat, not
+                # a reason to print nothing.
+                local EV_NOTE=""
+                if [ -n "$EV_STATE" ] \
+                    && EV_NOTE="$(preflight_surface_evidence_note "$EV_STATE" "$SIBLING_SOURCE" "$OTHER_ARM" "$PUBLISHED_OTHER")"; then
+                    pf_info "$EV_NOTE"
+                else
+                    pf_info "R7 CAVEAT — the symmetry checker reported no evidence state this script recognises (got '${EV_STATE:-<none>}'), so the strength of the ${OTHER_ARM} surface is UNKNOWN: treat the environment and machine-local-store layers as NOT COMPARED"
                 fi
             fi
         fi

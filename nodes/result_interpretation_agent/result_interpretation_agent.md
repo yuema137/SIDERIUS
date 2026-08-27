@@ -118,7 +118,10 @@ not mistake either for an oversight:
   a second field that is persisted and read by nothing — the exact defect this
   row records. Closing it properly means carrying a per-model valid-formal
   aggregate through `precompute_evidence` into the CROSS-MODEL synthesis
-  block, beside `per_model_formal`.
+  block, beside `per_model_formal`. (N-2 later added `scientific_authority` to
+  `_stats`, which is NOT this item: that field has a reader —
+  `precompute_evidence`'s authority partition — and was added because it had
+  one.)
 
 ## Position in the pipeline
 
@@ -184,7 +187,7 @@ not mistake either for an oversight:
 | `per_model_training_segments` | `dict[str, int] \| None` | `model_type` → training PSD segments used in the best experiment. |
 | `runtime_vocab` | `list[VocabEntry]` | Updated vocabulary: seed + candidates + discoveries from all iterations. Compressed memory the next iteration reads. |
 | `prediction_evaluation` | `dict[str, Any] \| None` | Evaluation of the previous proposal's `FalsifiablePrediction`. Outcome is SOTA-based: confirmed = beat SOTA, partial = within a tolerance band, refuted = below the band. |
-| `new_discoveries` | `list[VocabEntry]` | New `kind="discovery"` entries from this round's evaluation. Empirical findings expressed as sentences, added to `runtime_vocab`. **F-SCANE-3** — the `timing_{model}_slow` discovery calls its figure an *architectural* resource cost and recommends reducing the model, so when the record carries `timing.validation_time_s` it now states the split (`train=X incl. validation V, architecture X−V`). A record with no split, or an incoherent one (validation > train, which production cannot produce), renders its pre-F-SCANE-3 bytes. |
+| `new_discoveries` | `list[VocabEntry]` | New `kind="discovery"` entries from this round's evaluation. Empirical findings expressed as sentences, added to `runtime_vocab`. **F-SCANE-3** — the `timing_{model}_slow` discovery calls its figure an *architectural* resource cost and recommends reducing the model, so when the record carries `timing.validation_time_s` it states the split (`train=X incl. validation V, training+overhead X−V`). **N-4** renamed the residual from `architecture`: `train_time_s` is the whole subprocess, so X−V also contains process start, CUDA init, dataset construction and checkpoint save. The rule and the rendering belong to `agent/prompt_templates/timing_attribution.py`, not to this module. A record with no split, or an incoherent one (validation > train, which production cannot produce), renders its pre-F-SCANE-3 bytes. |
 | `vocab_changes` | `list[str]` | Human-readable log of vocabulary promotion events made this iteration. |
 | `vocab_diversity_ratio` | `float \| None` | Fraction of feature/capability vocab entries still in candidate tier (range `[0, 1]`). Low values signal vocabulary stagnation. |
 | `cumulative_information_gain` | `float` | Running total of `information_gain` across all iterations. Increases when a bold prediction is confirmed. |
@@ -347,11 +350,17 @@ default set).
 
 ## Scientific aggregation (V20 PR D, D-C5)
 
-`ModelRunSummary.scientific_authority` carries the verdict of the FORMAL record its `formal_score` came from, so the score and its authority cannot describe different experiments. Before any LLM call, `ordering.precompute_evidence()` partitions the summaries via `execute_tools.scientific_aggregation.partition_for_aggregation()` and filters `per_model_formal` to authoritative results only — a non-authoritative formal score therefore never reaches the synthesis prompt and cannot inform a scientific claim. The ordering is not merely conventional: `run()` calls the boundary before Phase 1, and Phase 1 consumes the summary index the same call returns.
+`ModelRunSummary.scientific_authority` carries the verdict of the FORMAL record its `formal_score` came from, so the score and its authority cannot describe different experiments. Before any LLM call, `ordering.precompute_evidence()` partitions the evidence via `execute_tools.scientific_aggregation.partition_for_aggregation()` and filters `per_model_formal` to authoritative results only — a non-authoritative formal score therefore never reaches the synthesis prompt and cannot inform a scientific claim. The ordering is not merely conventional: `run()` calls the boundary before Phase 1, and Phase 1 consumes the summary index the same call returns.
 
-Nothing is deleted. The excluded results are retained in `InterpretationOutput.scientific_aggregation` (`included` / `excluded` / `excluded_count` / `all_excluded` / `no_records` / `exclusion_reason_counts`), written at BOTH the healthy and the degraded assembly so an interpreter LLM failure cannot lose the provenance. Render it with `AggregationScope.provenance_lines()`.
+**The partition ranges over `summaries` AND the cached-only models (N-2).** `per_model_formal` is filled from both, so partitioning only `summaries` left every cached model outside both halves of the verdict: its formal score was dropped by the authority filter and no exclusion reason existed to report it. In a chain subprocess that is the normal case — after the first iteration `model_exploration.run_workflow` passes exactly ONE new summary and carries every other model in `model_knowledge_cache`. A cached model is presented to the partition through the same structural protocol a fresh summary satisfies (`model_type` + `scientific_authority`), never through a second rule.
+
+Nothing is deleted. The excluded results are retained in `InterpretationOutput.scientific_aggregation` (`included` / `excluded` / `excluded_count` / `all_excluded` / `no_records` / `exclusion_reason_counts`), written at BOTH the healthy and the degraded assembly so an interpreter LLM failure cannot lose the provenance. Render it with `AggregationScope.provenance_lines(scope=…)`.
 
 The exclusion is derived and rendered **deterministically, never by the model** (design §4.7): a model may simply omit it, and exclusion text placed inside a prompt can steer the interpretation it then writes. `all_excluded` is explicit because an empty aggregate alone reads identically to a campaign that found nothing — the opposite conclusion.
+
+**The `_stats` cache carries the verdict beside the score it judges (N-2).** Phase 1 writes `scientific_authority` into `_stats` alongside `formal_score`. Caching the number without its verdict made a model's authority expire the moment it went quiet: it could not be checked next iteration, so the score was dropped with nothing to report. A `_stats` block written before this — a resumed pre-N-2 workspace — carries no verdict, resolves to `unreconstructable_legacy` and is excluded fail-closed, which is the frozen rule for anything missing the authority contract.
+
+**A conclusion may not out-scope its partition (N-3).** `provenance_lines()` takes a keyword-only `scope`, defaulting to `"this aggregation"` — the object's own reach, and therefore always true. `run()` passes `scope=f"iteration {inp.iteration}"`, so the all-excluded line reads *"EVERY result was excluded — no scientifically authoritative result is available in iteration N."* It previously concluded *"this campaign produced no scientifically authoritative result"* from one iteration's evidence, printed once per iteration, including in campaigns whose other iterations produced authoritative results. The `scope` word governs only that sentence; a partition that excluded nothing renders byte-identically with or without it.
 
 ### F-SCANE-1 — the exclusion is told, and it does not delete a warning
 
@@ -362,10 +371,11 @@ Two repairs, both required by the frozen `F-SCANE-1` row.
 aggregation] …` line each — immediately after `precompute_evidence()` and
 therefore **before any LLM call**, so an interpreter failure cannot swallow it.
 Until this call the renderer named directly above had ZERO production callers:
-14 of 15 real digests concluded *"EVERY result was excluded — this campaign
-produced no scientifically authoritative result"* and nobody was told. It is
-PRINTED and not prompted, because §4.7 keeps the exclusion narrative
-deterministic and out of the model's reach.
+14 of 15 real digests concluded there was no authoritative result and nobody
+was told. It is PRINTED and not prompted, because §4.7 keeps the exclusion
+narrative deterministic and out of the model's reach. The sentence itself is
+now iteration-scoped — see N-3 above; making it visible was the F-SCANE-1
+repair, re-scoping it was the correction that repair needed.
 
 **A withheld formal score is a NAMED ABSENCE in the synthesis prompt.** The
 authority filter EMPTIES `per_model_formal` when every formal result is
@@ -387,6 +397,16 @@ Only models that HAD a formal score appear there: a model that never produced
 one is an absence, not a withholding, and reporting it as withheld would be a
 second fabrication. A fully authoritative run renders no such line and its
 prompt bytes are unchanged.
+
+**N-2 corrected the SET this ranged over.** As first shipped, the withheld
+line could only be rendered for a model in `summaries` — the first-iteration
+shape. Every later iteration hands the interpreter one new summary and N−1
+cached models, so for N−1 of N models the formal score was still silently
+deleted and the caveat still absent: the F-SCANE-1 defect, reproduced by the
+F-SCANE-1 fix's own blind spot. The partition and the cache write above close
+it, and the witness corpus in
+`tests/unit/agent/result_interpretation_agent/test_fscane1_exclusion_is_told.py`
+now covers the later-iteration shape as well as the first.
 
 ## Fail-closed metric contract (Step 09a)
 

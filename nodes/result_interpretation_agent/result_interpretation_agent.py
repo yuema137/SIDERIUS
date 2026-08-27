@@ -364,7 +364,17 @@ class ResultInterpretationAgent:
         # block, so an interpreter failure cannot swallow it, and printed
         # rather than prompted because §4.7 keeps the exclusion narrative
         # deterministic and out of the model's reach.
-        for _provenance_line in aggregation_scope.provenance_lines():
+        #
+        # N-3 — the SCOPE is stated, because this partition is one iteration's
+        # evidence and nothing more. The renderer's all-excluded sentence used
+        # to conclude "this campaign produced no scientifically authoritative
+        # result" from exactly this call, once per iteration, in a chain where
+        # earlier iterations may have produced several. Making the sentence
+        # visible was right; letting it keep a scope its evidence cannot
+        # support was not.
+        for _provenance_line in aggregation_scope.provenance_lines(
+            scope=f"iteration {inp.iteration}"
+        ):
             print(f"    [scientific aggregation] {_provenance_line}")
 
         # --- Step 09a C6: per-model evidence projection ---
@@ -578,6 +588,15 @@ class ResultInterpretationAgent:
                     "best_config": summary.best_config,
                     "best_valid_config": summary.best_valid_config,
                     "formal_score": summary.formal_score,
+                    # N-2 — the verdict travels WITH the score it judges.
+                    # `formal_score` was cached and `scientific_authority` was
+                    # not, so from the next iteration on the cached number had
+                    # no authority to be checked against: it was dropped from
+                    # the aggregate with no reason to report, and a model that
+                    # HAD established authority lost it to a cache write.
+                    # Whatever `partition_for_aggregation` may conclude, it
+                    # must conclude it from this model's own recorded verdict.
+                    "scientific_authority": summary.scientific_authority,
                     "model_description": model_descriptions.get(mt),
                     # V19 PR 3 — deterministic side of the cache (§3.6):
                     # cached (non-active) models keep their health facts

@@ -189,6 +189,49 @@ class TestTheProvenanceIsRenderedNotWritten:
         assert "used 1 authoritative result." in text
         assert "1 non-authoritative result excluded:" in text
 
+    def test_the_all_excluded_conclusion_never_out_scopes_its_own_partition(self):
+        """N-3 — the defect only this case catches.
+
+        ``AggregationScope`` knows the results it was handed and nothing else.
+        The all-excluded sentence used to conclude *"this campaign produced no
+        scientifically authoritative result"*, which the interpreter then
+        printed once per iteration from that iteration's evidence — telling
+        the operator a campaign had no authoritative result while other
+        iterations had produced several.
+
+        The DEFAULT must therefore be true for any caller: it names the
+        object's own scope. A caller that knows a wider or narrower one says
+        so, and the sentence follows.
+        """
+        scope = partition_for_aggregation([_Summary("d", DIAGNOSTIC)])
+        assert scope.all_excluded is True
+
+        default = "\n".join(scope.provenance_lines())
+        assert "campaign" not in default
+        assert (
+            "EVERY result was excluded — no scientifically authoritative "
+            "result is available in this aggregation." in default
+        )
+
+        named = "\n".join(scope.provenance_lines(scope="iteration 3"))
+        assert (
+            "EVERY result was excluded — no scientifically authoritative "
+            "result is available in iteration 3." in named
+        )
+
+    def test_the_scope_word_governs_only_the_conclusion(self):
+        """The scope names a CONCLUSION's reach, not a decoration.
+
+        A partition that excluded nothing states no scope-bearing conclusion,
+        so passing one must change no byte — otherwise the parameter would be
+        free to drift into lines it does not govern.
+        """
+        clean = partition_for_aggregation([_Summary("g", AUTHORITATIVE)])
+        assert clean.provenance_lines(scope="iteration 3") == clean.provenance_lines()
+
+        empty = partition_for_aggregation([])
+        assert empty.provenance_lines(scope="iteration 3") == empty.provenance_lines()
+
     def test_the_scope_survives_json(self):
         """It is persisted on the interpretation output, so a report reads
         it back rather than re-deriving anything."""

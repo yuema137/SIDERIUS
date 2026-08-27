@@ -52,6 +52,17 @@ Three sections, one per clause of the requirement:
    paths on two pods digests identically; an absolute path never enters the
    hash.
 
+4. ``provenance`` (N-6) — WHO captured this surface, WHEN, and from WHICH
+   CODE. Without it the artifact is unattributable, and a reader that
+   cannot attribute it cannot honestly call it cross-pod evidence: the
+   preflight used to label a sibling surface ``published`` on FILE
+   EXISTENCE alone, so one same-host rehearsal — or a day-1 publication
+   surviving every later cold start, since the cold-start row globs band
+   workspaces and never the campaign root — earned the strongest label the
+   report can print. The label must not claim more than the comparison
+   established, so the strength is DERIVED from these fields by
+   ``campaign_arm_symmetry.py`` and is not a caller's assertion.
+
 Writes JSON to ``--out``. Nothing is printed to stdout on success:
 importing the framework emits plugin-loader chatter, and a caller parsing
 stdout would parse that too.
@@ -64,13 +75,27 @@ import hashlib
 import json
 import os
 import re
+import socket
+import subprocess
 import sys
+import time
 from collections.abc import Iterable, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 
 #: Artifact schema. The comparator refuses a surface it does not know how
 #: to read rather than silently comparing two shapes.
-SURFACE_SCHEMA = "campaign_arm_surface/v1"
+#:
+#: v1 -> v2 (N-6) adds the REQUIRED ``provenance`` section. The bump is the
+#: point: a v1 artifact carries no captured-at, no host and no revision, so
+#: nothing about it can be verified, and a stale v1 file already sitting in
+#: a campaign root must be REFUSED rather than silently read as another
+#: pod's evidence.
+SURFACE_SCHEMA = "campaign_arm_surface/v2"
+
+#: Provenance keys every v2 surface carries. The comparator requires all of
+#: them; a surface missing one is unattributable and is refused.
+PROVENANCE_KEYS = ("captured_at", "captured_at_epoch", "host", "project_dir", "revision")
 
 #: The #255 arm vocabulary this capture speaks. Gold<->Blind treatment
 #: symmetry is a separate blind-launch prerequisite and is deliberately NOT
@@ -106,6 +131,36 @@ _SECRET_SHAPED = re.compile(r"(API_KEY|_TOKEN|_SECRET|PASSWORD|CREDENTIAL)", re.
 
 #: The placeholder recorded instead of a secret's value.
 SECRET_PLACEHOLDER = "<set:value-withheld>"
+
+#: What an occurrence of this surface's own checkout root is rewritten to in
+#: every captured environment VALUE (N-9).
+#:
+#: WHY THIS IS NOT A HOLE. ``PYTHONPATH`` is captured precisely because it
+#: selects WHICH CHECKOUT executes (preflight R2b's E1 trap) and it is NOT
+#: on the comparator's arm-local allowlist, so a difference FAILS. But the
+#: preflight INJECTS it as an ABSOLUTE path to its own checkout, and two
+#: pods legitimately hold that checkout at two different absolute paths —
+#: the cross-pod comparison would then be red for a reason that is not an
+#: asymmetry, and a gate that cannot pass on two real pods gets switched
+#: off. This is the SAME portability argument ``digest_paths`` already
+#: makes for the stores, applied to the environment: the identity of the
+#: checkout is compared as the surface's recorded ``revision``, and its
+#: mount point is normalised away. Anything else on the path — a second
+#: clone injected on one pod only — still differs and still fails.
+PROJECT_DIR_TOKEN = "<project_dir>"
+
+# --- machine-local stores: what is CONTENT and what is DERIVED -------------
+
+#: Directory names skipped when digesting a store, and file suffixes skipped
+#: within it (N-9). A ``.pyc`` is DERIVED from a ``.py`` that is already in
+#: the digest, and under Python's default timestamp invalidation its header
+#: embeds the SOURCE MTIME — which is host-local. Two pods holding an
+#: identical store therefore digest differently as soon as either has
+#: imported from it, so hashing bytecode makes the store layer red for a
+#: reason that is not a content difference. Excluding it removes no
+#: detection: a plugin whose SOURCE differs still moves the digest.
+DERIVED_STORE_DIRS = ("__pycache__",)
+DERIVED_STORE_SUFFIXES = (".pyc", ".pyo")
 
 # --- machine-local stores: the DECLARED roster -----------------------------
 
@@ -143,8 +198,12 @@ def digest_text(text: str) -> dict:
 
 def _iter_files(root: Path) -> Iterable[Path]:
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames.sort()
+        # In place: os.walk reads this list back to decide where to descend,
+        # so pruning here is what keeps a bytecode cache out of the digest.
+        dirnames[:] = sorted(d for d in dirnames if d not in DERIVED_STORE_DIRS)
         for name in sorted(filenames):
+            if name.endswith(DERIVED_STORE_SUFFIXES):
+                continue
             yield Path(dirpath) / name
 
 
@@ -156,7 +215,9 @@ def digest_paths(labelled_paths: Sequence[tuple[str, str]]) -> dict:
     file's own sha256, so the digest is a function of CONTENT and STRUCTURE
     only — never of where the store is mounted. Two pods holding the same
     store at different absolute paths therefore agree, which is the whole
-    point of comparing them across hosts.
+    point of comparing them across hosts. For the same reason DERIVED
+    bytecode (:data:`DERIVED_STORE_DIRS` / :data:`DERIVED_STORE_SUFFIXES`)
+    is excluded: its header carries the host-local source mtime.
 
     Returns ``{"present", "entry_count", "content_sha256", "sample"}``, or
     an ``{"error": ...}`` entry when the store is too large to hash.
@@ -200,14 +261,81 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def capture_environment(environ: Mapping[str, str]) -> dict[str, str]:
-    """The declared environment slice, with secret VALUES withheld."""
+def capture_environment(
+    environ: Mapping[str, str], *, project_dir: str | None = None
+) -> dict[str, str]:
+    """The declared environment slice, with secret VALUES withheld.
+
+    When ``project_dir`` is given, every occurrence of that checkout root in
+    a captured VALUE is rewritten to :data:`PROJECT_DIR_TOKEN` — see that
+    constant for why this is a portability normalisation and not a hole.
+    Omitting it (the default) captures values verbatim.
+    """
+    root = project_dir.rstrip("/") if project_dir else ""
     captured: dict[str, str] = {}
     for name, value in environ.items():
         if not (name.startswith(ENVIRONMENT_PREFIXES) or name in ENVIRONMENT_EXPLICIT_NAMES):
             continue
-        captured[name] = SECRET_PLACEHOLDER if _SECRET_SHAPED.search(name) else value
+        if _SECRET_SHAPED.search(name):
+            captured[name] = SECRET_PLACEHOLDER
+            continue
+        captured[name] = value.replace(root, PROJECT_DIR_TOKEN) if root else value
     return dict(sorted(captured.items()))
+
+
+def resolve_revision(project_dir: str) -> tuple[str | None, bool | None]:
+    """``(HEAD sha, dirty)`` for the checkout that rendered this surface.
+
+    ``(None, None)`` when the directory is not a readable git checkout. The
+    comparator treats an unknown revision as UNVERIFIABLE rather than as
+    agreement: two surfaces rendered by different code are comparing two
+    renderers, not two machines, and that must be visible.
+    """
+    try:
+        sha = subprocess.run(
+            ["git", "-C", project_dir, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "-C", project_dir, "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    return (sha or None), bool(status)
+
+
+def capture_provenance(
+    *,
+    project_dir: str,
+    host: str,
+    captured_at_epoch: float,
+    revision: str | None,
+    revision_dirty: bool | None,
+) -> dict:
+    """WHO captured this surface, WHEN, and from WHICH CODE (N-6).
+
+    Pure: every value is supplied. The strength of the claim a reader may
+    make about this artifact is DERIVED from these fields by the
+    comparator — the reader never accepts a strength label as an assertion,
+    because the defect this section closes is exactly a label asserted on
+    file existence.
+    """
+    epoch = int(captured_at_epoch)
+    return {
+        "captured_at": datetime.fromtimestamp(epoch, tz=UTC).isoformat(),
+        "captured_at_epoch": epoch,
+        "host": host,
+        "project_dir": project_dir,
+        "revision": revision,
+        "revision_dirty": revision_dirty,
+    }
 
 
 def render_prompt_surfaces(*, baseline_isolation: bool) -> dict[str, str]:
@@ -275,6 +403,7 @@ def build_surface(
     baseline_isolation: bool,
     environ: Mapping[str, str],
     stores: Mapping[str, Sequence[tuple[str, str]]],
+    provenance: Mapping[str, object],
 ) -> dict:
     """The complete arm surface artifact.
 
@@ -282,6 +411,11 @@ def build_surface(
     CLI resolves those through the production authorities. Passing them in
     keeps this function pure and lets a test drive it against ``tmp_path``
     instead of the developer's home directory.
+
+    ``provenance`` comes from :func:`capture_provenance` and is REQUIRED: a
+    surface nobody can attribute is a surface nobody can call cross-pod
+    evidence, and the artifact is written once and read later by a
+    different pod.
     """
     if arm not in ARMS:
         raise ValueError(f"unknown arm {arm!r} (expected one of {ARMS})")
@@ -291,6 +425,9 @@ def build_surface(
     missing = sorted(set(STORE_IDS) - set(stores))
     if missing:
         raise ValueError(f"store id(s) not resolved: {missing}")
+    missing_provenance = sorted(set(PROVENANCE_KEYS) - set(provenance))
+    if missing_provenance:
+        raise ValueError(f"provenance key(s) not captured: {missing_provenance}")
 
     arm_render = render_prompt_surfaces(baseline_isolation=baseline_isolation)
     neutral_render = render_prompt_surfaces(baseline_isolation=False)
@@ -305,8 +442,9 @@ def build_surface(
         "schema": SURFACE_SCHEMA,
         "arm": arm,
         "baseline_isolation": baseline_isolation,
+        "provenance": dict(provenance),
         "prompt_bytes": prompt_bytes,
-        "environment": capture_environment(environ),
+        "environment": capture_environment(environ, project_dir=str(provenance["project_dir"])),
         "machine_local_stores": {
             store_id: digest_paths(stores[store_id]) for store_id in STORE_IDS
         },
@@ -363,11 +501,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     project_dir = os.path.abspath(args.project_dir)
     try:
+        revision, revision_dirty = resolve_revision(project_dir)
         surface = build_surface(
             arm=args.arm,
             baseline_isolation=args.baseline_isolation == "true",
             environ=os.environ,
             stores=resolve_stores(project_dir, os.environ),
+            provenance=capture_provenance(
+                project_dir=project_dir,
+                host=socket.gethostname(),
+                captured_at_epoch=time.time(),
+                revision=revision,
+                revision_dirty=revision_dirty,
+            ),
         )
     # A launch gate reports its failure; it never hands an operator a
     # traceback in the middle of a preflight summary.

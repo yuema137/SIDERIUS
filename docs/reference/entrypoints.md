@@ -21,9 +21,63 @@ the flags that decide *what a run is*.
 | run exactly one iteration (or debug one) | `sdsc_submission_scripts/run_one_iteration.py` |
 | drive the workflow directly from Python | `workflows/model_exploration.py` |
 | compare a built-in TIDMAD model against baselines | `scripts/run_comparison.py` |
+| gate a campaign launch before running any of the above | `sdsc_submission_scripts/campaign_preflight.sh` (see below) |
 
 > Note the directory: the chain launchers live in `sdsc_submission_scripts/`,
 > **not** in `scripts/`. Several older documents said otherwise.
+
+## `campaign_preflight.sh` — the launch-blocking gate
+
+One gate, rows `R1`…`R9`, each printing `PASS` / `FAIL` / `SKIP` / `INFO`
+with its evidence; any `FAIL` exits non-zero. Full row descriptions live in
+the script's own `--help` and in `sdsc_submission_scripts/README.md`. Two
+things about its output are worth knowing before you read a report.
+
+**A `SKIP` is not a `PASS`.** Rows bound to the X9 launcher (`R6`, `R7`) or
+to the X9 four-way co-residency posture (`R4`) are skipped by name under
+`--arm goldpod`. A row that the topology cannot exercise has proven
+nothing, and it does not count as a failure either.
+
+**R7 states which layers it actually compared.** The arm-symmetry row
+(#255, launch validity is conditioned on it) compares five layers, and not
+all of them are meaningful in every situation:
+
+| layer | comparable when |
+|---|---|
+| resolved-config + child argv | always |
+| prompt bytes / arm render (declared treatment wiring) | always |
+| prompt bytes / neutral render (machine contamination) | the two surfaces come from two different hosts |
+| environment | the two surfaces come from two different hosts |
+| machine-local stores | the two surfaces come from two different hosts |
+
+The last three are captured with no arm argument, so on ONE host they agree
+by construction. R7 reports them as **`NOT COMPARED`** in that case — a
+named absence, never a pass. A *difference* in those layers is still a
+violation in every state; only the claim that their agreement proves
+something is withheld.
+
+Each arm publishes its surface to
+`{workspace-root}/.campaign_arm_surface_{arm}.json`. How much that sibling
+file is worth is **derived from the artifact's own recorded host, code
+revision and capture time** — the preflight reports only *where it read the
+file* (`--sibling-source published|local`, default `local`, so a forgotten
+argument yields the weakest claim rather than the strongest). A surface
+with no provenance
+section (a pre-N-6 `campaign_arm_surface/v1` artifact) is **refused**, not
+read. The derived state appears in the row and in the checker report:
+
+| evidence state | meaning | R7 |
+|---|---|---|
+| `cross_pod_verified` | different hosts, same revision, within the freshness window | all five layers compared |
+| `cross_pod_stale` | different hosts, same revision, but the older surface is beyond `--sibling-max-age-hours` (default 24; a future-dated surface counts as stale too) | compared, with a loud staleness caveat |
+| `same_host` | both surfaces were captured on this host — including a *published* file this host wrote | three layers `NOT COMPARED` |
+| `revision_mismatch` | the two surfaces were rendered by different code revisions | **FAIL** — the prompt bytes compare two renderers, not two machines |
+| `unverifiable` | a surface carries no readable host, capture time or revision | three layers `NOT COMPARED` |
+
+A caveat is printed in **every** state, and the unverified states are
+louder than the verified one. For genuine cross-pod coverage, run the
+preflight on the other arm's pod first so its surface is published, then
+re-run here.
 
 ## `run_chain.sh` — the chain launcher
 

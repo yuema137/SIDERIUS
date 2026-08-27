@@ -1307,8 +1307,67 @@ the last run exceeded it, reduce model complexity"* — a candidate could be
 shrunk for time spent validating it.
 
 ```text
-architecture cost = train_time_s − validation_time_s
+training + fixed subprocess overhead = train_time_s − validation_time_s
 ```
+
+**N-4 — what the split does NOT mean.** As first shipped, F-SCANE-3 told the
+planner two things the code contradicts, in four places at once:
+
+* *"Validation time … does not shrink when the model shrinks."* The
+  validation pass runs `output_seq = model(input_seq)` per batch
+  (`execute_tools/train_engine_sandbox.py::_validation_pass`) — a forward pass
+  of the model under test.
+* *"the architecture's own cost is `train_time_s − validation_time_s`."*
+  `train_time_s` is the PARENT's wall clock around the whole subprocess
+  (`execution.py`), while the trainer's own analogue starts at
+  `t_train_start`, set **after** setup. The residual therefore also carries
+  process spawn, CUDA init, model/optimizer construction, epoch-0 dataset
+  materialization and checkpoint save — fixed overhead no design change
+  removes. It is an **upper bound** on the architecture's training cost.
+
+Under a hard budget those two together told the planner to ignore the one term
+that does respond to shrinking the model and to attribute to its own design a
+residual containing cost no design removes — under-pricing large candidates
+and over-pricing small ones. The corrected wording, both renderers and the
+coherence rule now live in **one** authority,
+`agent/prompt_templates/timing_attribution.py`; the planner block, the
+interpreter's timing discovery and both `timing` field descriptions consume it
+rather than restating it. The residual is rendered as `training+overhead`,
+never `architecture cost` — a label is read far more often than a note.
+
+**N-4b — the first correction was itself false, in the half it rewrote.** It
+replaced bullet 1 with *"a forward pass of the model under test over a FIXED
+evaluation scope, so it shrinks with a smaller model but not with fewer epochs
+or less training data."* Both clauses are wrong:
+
+* **The evaluation scope is not fixed in a trial round — it is the planner's
+  own lever.** `policy._resolve_sample_set_cfg`'s `trial` branch returns
+  `"eval_portion": plan.eval_portion`; that value reaches
+  `scope_acquisition.build_eval_scope(portion=…)`, becomes the attempt's
+  `eval_sample_set`, crosses to the trainer as `--eval_sample_set_json` and is
+  materialized as the validation dataset. `agent/prompts.py` asks the model
+  for `eval_portion` by name (*"fraction of segments per file for
+  validation"*) and tells it to increase it; on the campaign path the value is
+  `AGENT_CONTROLLED`. Only a **formal** round fixes it — strategy locked to
+  `snapshot`, portion from the operator's `formal_eval_portion`. The optional
+  `validation_max_samples` ceiling (07c C6, default `None`) caps the eval leg
+  but does not make it fixed.
+* **It is paid once per epoch.** `_validation_pass` runs INSIDE
+  `for ep in range(train_cfg.epochs)`, appending `validation_seconds` per
+  epoch, and `records._validation_time_s` reports the SUM. `max_epochs=1` on
+  the real path today, so this clause names a lever with no range until
+  D-BUD-6's frozen `trial_max_epochs: 2` lands; the trial-scope clause carries
+  the finding on its own.
+
+This mattered because the planner reads the sentence immediately before *"the
+time budget is a HARD UPPER LIMIT … reduce model complexity"*: telling it that
+the one cost component it directly authors in trial rounds is fixed steers a
+large overrunning candidate toward capacity reduction instead of the cheap,
+agent-owned eval reduction. That is F-SCANE-3's own failure class — *the agent
+is told to attribute to architecture a cost it cannot see* — reproduced by
+F-SCANE-3's remediation, one lever over. What validation genuinely does **not**
+respond to is `trial_portion` / `train_portion`, which size the training scope
+only.
 
 `None` means the producer recorded **no split** — a legacy record, a failure
 record, or an attempt that ran no validation pass. It never means the pass
@@ -1316,7 +1375,7 @@ took zero seconds, and the two renderers that consume it (the planner's
 `LAST EXPERIMENT TIMING` block and the interpreter's timing discovery) render
 their pre-F-SCANE-3 bytes when it is `None`. They also refuse an
 **incoherent** split — negative, or larger than `train_time_s` — which
-production cannot produce, rather than printing a negative architecture cost.
+production cannot produce, rather than printing a negative residual.
 
 ### `memory.time_mode` is timing metadata, not a second authority
 

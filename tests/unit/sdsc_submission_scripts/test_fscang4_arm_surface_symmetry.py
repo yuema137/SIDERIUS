@@ -55,9 +55,34 @@ Each test names the defect only it catches.
   surface into the shared campaign root (what makes the comparison
   cross-pod) and passes both surfaces to the checker; the arm's isolation
   flag is READ from its own resolved-config print rather than re-derived;
-  and the gold arm still SKIPS the whole row, because Gold<->Blind
-  treatment symmetry is a separate blind-launch prerequisite this script
-  deliberately does not serve.
+  the evidence caveat is printed in EVERY derived state and an unknown
+  state refuses rather than falling silent; and the gold arm still SKIPS
+  the whole row, because Gold<->Blind treatment symmetry is a separate
+  blind-launch prerequisite this script deliberately does not serve.
+
+N-6 (release blocker) added two more classes, because layer 3 was labelling
+evidence it never verified — *the label must not claim more than the
+comparison established*:
+
+* ``TestSurfaceAttribution`` — half A. ``published`` was asserted on
+  ``[ -f <path> ]`` alone and the artifact carried no captured-at, host or
+  revision, so nothing about it could be checked; the honesty disclaimer was
+  printed only in the weaker ``local`` state and therefore VANISHED on the
+  upgrade. The strength is now derived from the surfaces themselves, and an
+  unattributable surface is refused rather than read.
+* ``TestLayerScoping`` — half B. ``capture_environment`` and
+  ``resolve_stores`` take no arm argument, so on one host the environment,
+  the machine-local stores and the neutral prompt render agree BY
+  CONSTRUCTION; the row nonetheless reported that they agree. They are now
+  reported NOT COMPARED — a named absence, the same rule this codebase
+  spells ``inapplicable``. The paired discrimination test proves the scoping
+  never SILENCES a difference, only withholds the claim that agreement
+  proves something.
+* ``TestCrossPodPortability`` — N-9. Two host-local facts were compared as
+  content facts: an absolute ``PYTHONPATH`` injected by the preflight
+  itself, and ``.pyc`` headers carrying the source mtime. Either would
+  false-FAIL R7 between two genuinely different pods, and a gate that
+  cannot pass on two real pods gets switched off.
 
 No GPU, no LLM, no training.
 """
@@ -135,12 +160,36 @@ def _store(marker: str, entries: int = 3) -> dict:
     }
 
 
+#: A fixed "now" so age assertions do not depend on wall time.
+NOW_EPOCH = 1_800_000_000.0
+
+#: The default provenance of a synthetic surface: two DIFFERENT hosts, one
+#: revision, captured a minute ago. That is the only combination that earns
+#: the strong label, so every N-6 FAIL case perturbs exactly one field of it.
+DEFAULT_HOSTS = {"with-prior-art": "podA", "without-prior-art": "podB"}
+DEFAULT_REVISION = "f69c9acf" + "0" * 32
+
+
+def make_provenance(arm: str, **overrides) -> dict:
+    provenance = {
+        "captured_at": "2027-01-15T08:00:00+00:00",
+        "captured_at_epoch": int(NOW_EPOCH - 60),
+        "host": DEFAULT_HOSTS[arm],
+        "project_dir": f"/pods/{DEFAULT_HOSTS[arm]}/SIDERIUS",
+        "revision": DEFAULT_REVISION,
+        "revision_dirty": False,
+    }
+    provenance.update(overrides)
+    return provenance
+
+
 def make_surface(
     arm: str,
     *,
     prompts: dict | None = None,
     environment: dict | None = None,
     stores: dict | None = None,
+    provenance: dict | None = None,
 ) -> dict:
     """A synthetic, SYMMETRIC arm surface — the baseline every FAIL case
     perturbs by exactly one field, so a red verdict names one cause."""
@@ -167,6 +216,7 @@ def make_surface(
         "schema": surface_mod.SURFACE_SCHEMA,
         "arm": arm,
         "baseline_isolation": arm == "without-prior-art",
+        "provenance": make_provenance(arm) if provenance is None else provenance,
         "prompt_bytes": prompt_bytes,
         "environment": (
             {"PYTHONPATH": "/repo", "SIDERIUS_TASK": "tidmad"}
@@ -283,7 +333,11 @@ class TestSurfaceContract:
         stores["a_store_nobody_declared"] = []
         with pytest.raises(ValueError, match="undeclared store id"):
             surface_mod.build_surface(
-                arm=ARMS[0], baseline_isolation=False, environ={}, stores=stores
+                arm=ARMS[0],
+                baseline_isolation=False,
+                environ={},
+                stores=stores,
+                provenance=make_provenance(ARMS[0]),
             )
 
     def test_a_missing_store_id_is_refused(self, monkeypatch):
@@ -295,7 +349,11 @@ class TestSurfaceContract:
         stores = {sid: [] for sid in surface_mod.STORE_IDS if sid != "root_papers_cache"}
         with pytest.raises(ValueError, match="not resolved"):
             surface_mod.build_surface(
-                arm=ARMS[0], baseline_isolation=False, environ={}, stores=stores
+                arm=ARMS[0],
+                baseline_isolation=False,
+                environ={},
+                stores=stores,
+                provenance=make_provenance(ARMS[0]),
             )
 
     def test_an_unknown_arm_is_refused(self, monkeypatch):
@@ -308,6 +366,7 @@ class TestSurfaceContract:
                 baseline_isolation=False,
                 environ={},
                 stores={sid: [] for sid in surface_mod.STORE_IDS},
+                provenance=make_provenance(ARMS[0]),
             )
 
 
@@ -697,6 +756,355 @@ class TestProductionWitness:
         assert symmetry_mod.check_surfaces(with_surface, without_surface) == []
 
 
+class TestSurfaceAttribution:
+    """N-6 half A — a `published` label was earned by FILE EXISTENCE alone.
+
+    Nothing in a v1 artifact could be checked: no captured-at, no host, no
+    revision, and ``_load_surface`` required none. So one same-host
+    rehearsal, or a day-1 publication that no cold start removes (R8 globs
+    the per-band workspaces, never the campaign root), produced the
+    strongest provenance label the report can print.
+    """
+
+    def test_a_surface_with_no_provenance_is_refused_not_read(self, tmp_path):
+        """The reader's refusal. Without it a pre-N-6 artifact still sitting
+        in a campaign root is read as another pod's evidence by a checker
+        that has no way to tell — which is how the label came free."""
+        for name in ("s_with.json", "s_without.json"):
+            surface = make_surface(ARMS[0] if "with." in name else ARMS[1])
+            del surface["provenance"]
+            surface["schema"] = symmetry_mod.SURFACE_SCHEMA
+            (tmp_path / name).write_text(json.dumps(surface))
+        result = _run_symmetry_cli(
+            tmp_path,
+            "--with-surface",
+            str(tmp_path / "s_with.json"),
+            "--without-surface",
+            str(tmp_path / "s_without.json"),
+        )
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "provenance" in result.stderr, result.stderr
+
+    def test_a_partial_provenance_is_refused_field_by_field(self, tmp_path):
+        """Discrimination for the above: the section EXISTING is not the
+        same as the section being usable. A surface carrying only a
+        captured-at still cannot be attributed to a host."""
+        surface = make_surface(ARMS[0], provenance={"captured_at": "2027-01-15T08:00:00+00:00"})
+        path = tmp_path / "s.json"
+        path.write_text(json.dumps(surface))
+        with pytest.raises(ValueError, match="provenance is missing"):
+            symmetry_mod._load_surface(str(path))
+
+    def test_a_published_surface_written_by_this_host_is_not_cross_pod(self):
+        """The witness for the finding, as the auditor demonstrated it: two
+        same-host runs upgraded `local` to `published`. The state is now
+        derived from the surfaces, so the same pair reads `same_host` no
+        matter what the caller says it read."""
+        scope = symmetry_mod.classify_comparison(
+            make_surface(ARMS[0], provenance=make_provenance(ARMS[0], host="podA")),
+            make_surface(ARMS[1], provenance=make_provenance(ARMS[1], host="podA")),
+            now_epoch=NOW_EPOCH,
+        )
+        assert scope["evidence_state"] == symmetry_mod.EVIDENCE_SAME_HOST
+        assert scope["cross_pod_layers_comparable"] is False
+
+    def test_two_different_hosts_at_one_revision_earn_the_verified_state(self):
+        """The legal PASS case. A rule that can only downgrade would be
+        switched off, and the row would reopen wearing a green check."""
+        scope = symmetry_mod.classify_comparison(
+            make_surface(ARMS[0]), make_surface(ARMS[1]), now_epoch=NOW_EPOCH
+        )
+        assert scope["evidence_state"] == symmetry_mod.EVIDENCE_CROSS_POD_VERIFIED
+        assert scope["cross_pod_layers_comparable"] is True
+
+    def test_a_day_old_publication_loses_the_verified_label(self):
+        """The stale-artifact half. The campaign root is not swept by the
+        cold-start row, so a day-1 surface survives every later cold start;
+        before N-6 it was indistinguishable from one written minutes ago."""
+        stale = make_provenance(ARMS[1], captured_at_epoch=int(NOW_EPOCH - 40 * 3600))
+        scope = symmetry_mod.classify_comparison(
+            make_surface(ARMS[0]),
+            make_surface(ARMS[1], provenance=stale),
+            now_epoch=NOW_EPOCH,
+            max_age_hours=24,
+        )
+        assert scope["evidence_state"] == symmetry_mod.EVIDENCE_CROSS_POD_STALE
+        assert scope["age_seconds"] == 40 * 3600
+
+    def test_a_stale_surface_is_a_downgrade_not_a_violation(self):
+        """Deliberate boundary: an old surface that still AGREES is not
+        evidence of asymmetry, and turning it into a failure would trade one
+        dishonesty for another."""
+        stale = make_provenance(ARMS[1], captured_at_epoch=int(NOW_EPOCH - 40 * 3600))
+        scope = symmetry_mod.classify_comparison(
+            make_surface(ARMS[0]),
+            make_surface(ARMS[1], provenance=stale),
+            now_epoch=NOW_EPOCH,
+        )
+        assert symmetry_mod.check_provenance(scope) == []
+        assert scope["cross_pod_layers_comparable"] is True
+
+    def test_two_surfaces_rendered_by_different_code_fail(self):
+        """A real violation, not a downgrade: prompt bytes rendered by two
+        different revisions compare two RENDERERS, not two machines, so
+        every verdict below them is meaningless. R2 already requires one SHA
+        per campaign."""
+        other = make_provenance(ARMS[1], revision="deadbeef" + "1" * 32)
+        scope = symmetry_mod.classify_comparison(
+            make_surface(ARMS[0]),
+            make_surface(ARMS[1], provenance=other),
+            now_epoch=NOW_EPOCH,
+        )
+        assert scope["evidence_state"] == symmetry_mod.EVIDENCE_REVISION_MISMATCH
+        problems = symmetry_mod.check_provenance(scope)
+        assert any("DIFFERENT code" in p for p in problems), problems
+
+    def test_a_future_dated_surface_cannot_out_run_the_freshness_gate(self):
+        """A one-sided freshness test is bypassed by a clock: a surface
+        stamped in the future never ages out, so a pod with a wrong clock
+        could publish once and keep the verified label indefinitely."""
+        future = make_provenance(ARMS[1], captured_at_epoch=int(NOW_EPOCH + 30 * 24 * 3600))
+        scope = symmetry_mod.classify_comparison(
+            make_surface(ARMS[0]),
+            make_surface(ARMS[1], provenance=future),
+            now_epoch=NOW_EPOCH,
+        )
+        assert scope["evidence_state"] == symmetry_mod.EVIDENCE_CROSS_POD_STALE
+
+    def test_ordinary_clock_skew_does_not_downgrade_a_fresh_surface(self):
+        """Discrimination: two pods are never NTP-identical to the second,
+        and a gate that fired on a few seconds of skew would be switched
+        off."""
+        skewed = make_provenance(ARMS[1], captured_at_epoch=int(NOW_EPOCH + 30))
+        scope = symmetry_mod.classify_comparison(
+            make_surface(ARMS[0]),
+            make_surface(ARMS[1], provenance=skewed),
+            now_epoch=NOW_EPOCH,
+        )
+        assert scope["evidence_state"] == symmetry_mod.EVIDENCE_CROSS_POD_VERIFIED
+
+    def test_an_unreadable_revision_is_unverifiable_not_agreement(self):
+        """Fail-closed on absence. `None == None` is agreement to Python and
+        proof of nothing to a reader."""
+        scope = symmetry_mod.classify_comparison(
+            make_surface(ARMS[0], provenance=make_provenance(ARMS[0], revision=None)),
+            make_surface(ARMS[1], provenance=make_provenance(ARMS[1], revision=None)),
+            now_epoch=NOW_EPOCH,
+        )
+        assert scope["evidence_state"] == symmetry_mod.EVIDENCE_UNVERIFIABLE
+        assert scope["cross_pod_layers_comparable"] is False
+
+
+class TestLayerScoping:
+    """N-6 half B — in local mode two of the three compared layers are
+    structurally incapable of differing, and the row said they agreed.
+
+    ``capture_environment`` and ``resolve_stores`` take no arm argument, so
+    on one host both surfaces read one machine. The neutral prompt render is
+    the same: it holds the treatment constant precisely so that only the
+    machine can move it. A check that cannot distinguish PASS from FAIL is
+    not evidence, and reporting it as agreement is the over-claim.
+    """
+
+    @staticmethod
+    def _verdicts(scope_kwargs: dict | None = None, **surface_kwargs) -> dict[str, str]:
+        with_surface = make_surface(ARMS[0], **surface_kwargs.get("with_kwargs", {}))
+        without_surface = make_surface(ARMS[1], **surface_kwargs.get("without_kwargs", {}))
+        scope = symmetry_mod.classify_comparison(
+            with_surface, without_surface, now_epoch=NOW_EPOCH, **(scope_kwargs or {})
+        )
+        by_layer = symmetry_mod.check_surfaces_by_layer(with_surface, without_surface, scope=scope)
+        return {
+            layer: verdict for verdict, layer, _ in symmetry_mod.layer_verdicts(by_layer, scope)
+        }
+
+    def test_same_host_layers_are_not_compared_never_passed(self):
+        """The finding itself. Before N-6 this exact input printed
+        'environment and machine-local stores agree'."""
+        same = {"provenance": make_provenance(ARMS[1], host=DEFAULT_HOSTS[ARMS[0]])}
+        verdicts = self._verdicts(without_kwargs=same)
+        assert verdicts[symmetry_mod.LAYER_ENVIRONMENT] == "NOT COMPARED"
+        assert verdicts[symmetry_mod.LAYER_STORES] == "NOT COMPARED"
+        assert verdicts[symmetry_mod.LAYER_PROMPT_NEUTRAL] == "NOT COMPARED"
+
+    def test_the_treatment_and_argv_layers_stay_compared_on_one_host(self):
+        """The scoping must be surgical. The ARM render tests the treatment
+        WIRING, not the machine, so it is arm-comparable on one host; a
+        blanket downgrade would delete the only layer that can catch two
+        arms rendering identical prompts."""
+        same = {"provenance": make_provenance(ARMS[1], host=DEFAULT_HOSTS[ARMS[0]])}
+        verdicts = self._verdicts(without_kwargs=same)
+        assert verdicts[symmetry_mod.LAYER_PROMPT_ARM] == "COMPARED"
+        assert verdicts[symmetry_mod.LAYER_ARGV] == "COMPARED"
+
+    def test_cross_pod_surfaces_report_every_layer_compared(self):
+        """The legal PASS case for the scoping rule: with two real pods
+        every layer is evidence again, so the rule cannot be satisfied by
+        never comparing anything."""
+        verdicts = self._verdicts()
+        assert set(verdicts.values()) == {"COMPARED"}
+
+    def test_a_same_host_difference_is_still_a_violation(self):
+        """Non-weakening, and the reason scoping withholds the CLAIM rather
+        than skipping the CHECK: a difference can only ever be a true
+        positive, so it must be named in every state. If NOT COMPARED
+        silenced the comparison, the fix would have deleted a real
+        detector."""
+        same_host = make_provenance(ARMS[1], host=DEFAULT_HOSTS[ARMS[0]])
+        with_surface = make_surface(ARMS[0], environment={"SIDERIUS_TASK": "tidmad"})
+        without_surface = make_surface(
+            ARMS[1], environment={"SIDERIUS_TASK": "other"}, provenance=same_host
+        )
+        scope = symmetry_mod.classify_comparison(with_surface, without_surface, now_epoch=NOW_EPOCH)
+        assert scope["evidence_state"] == symmetry_mod.EVIDENCE_SAME_HOST
+        by_layer = symmetry_mod.check_surfaces_by_layer(with_surface, without_surface, scope=scope)
+        verdicts = {layer: v for v, layer, _ in symmetry_mod.layer_verdicts(by_layer, scope)}
+        assert verdicts[symmetry_mod.LAYER_ENVIRONMENT] == "FAILED"
+        assert any("SIDERIUS_TASK" in p for p in by_layer[symmetry_mod.LAYER_ENVIRONMENT])
+
+    def test_a_not_compared_verdict_names_the_reason_that_actually_applies(self):
+        """A row that explains its verdict with the wrong reason is the same
+        over-claim in a different place. Under `revision_mismatch` the hosts
+        DIFFER, so 'on one machine it agrees by construction' would be
+        simply false."""
+        other_rev = make_provenance(ARMS[1], revision="deadbeef" + "1" * 32)
+        scope = symmetry_mod.classify_comparison(
+            make_surface(ARMS[0]),
+            make_surface(ARMS[1], provenance=other_rev),
+            now_epoch=NOW_EPOCH,
+        )
+        reason = symmetry_mod._not_compared_reason(scope)
+        assert "different code revisions" in reason
+        assert "ONE host" not in reason
+
+    def test_the_cross_pod_only_layers_are_exactly_the_arm_blind_ones(self):
+        """Hardcoded. A layer joins this set only because its capture takes
+        no arm argument; adding one silently would re-open the finding under
+        a different name."""
+        assert symmetry_mod.CROSS_POD_ONLY_LAYERS == frozenset(
+            {
+                symmetry_mod.LAYER_PROMPT_NEUTRAL,
+                symmetry_mod.LAYER_ENVIRONMENT,
+                symmetry_mod.LAYER_STORES,
+            }
+        )
+
+    def test_the_report_states_what_was_not_proven(self, tmp_path):
+        """End to end through the real CLI: a same-host pair must not print
+        a sentence claiming the environment and stores agree."""
+        same_host = make_provenance(ARMS[1], host=DEFAULT_HOSTS[ARMS[0]])
+        (tmp_path / "s_with.json").write_text(json.dumps(make_surface(ARMS[0])))
+        (tmp_path / "s_without.json").write_text(
+            json.dumps(make_surface(ARMS[1], provenance=same_host))
+        )
+        (tmp_path / "with.out").write_text(_dry_run_capture(ARMS[0]))
+        (tmp_path / "without.out").write_text(_dry_run_capture(ARMS[1]))
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SYMMETRY_SCRIPT),
+                "--with-output",
+                str(tmp_path / "with.out"),
+                "--without-output",
+                str(tmp_path / "without.out"),
+                "--workspace-root",
+                "/persist/camp",
+                "--band",
+                "0-3",
+                "--with-surface",
+                str(tmp_path / "s_with.json"),
+                "--without-surface",
+                str(tmp_path / "s_without.json"),
+                "--sibling-source",
+                "published",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "evidence-state: same_host" in result.stdout, result.stdout
+        assert "NOT PROVEN" in result.stdout, result.stdout
+        assert "machine-local stores agree" not in result.stdout, result.stdout
+
+
+class TestCrossPodPortability:
+    """N-9 — R7 false-FAILs across genuinely DIFFERENT pods.
+
+    Both halves are the same mistake in two places: hashing or comparing a
+    HOST-LOCAL fact as if it were a content fact. ``digest_paths`` already
+    argues this for absolute store paths; these two routes did not follow
+    it. A gate that cannot pass on two real pods gets switched off, and the
+    finding reopens wearing a green check.
+    """
+
+    def test_the_same_checkout_at_two_mount_points_agrees_on_pythonpath(self):
+        """Half 1. The preflight INJECTS PYTHONPATH as an absolute path to
+        its own checkout, and PYTHONPATH is deliberately NOT arm-local, so
+        two pods holding the checkout at different paths failed the
+        environment layer for a reason that is not an asymmetry."""
+        a = surface_mod.capture_environment(
+            {"PYTHONPATH": "/pods/podA/SIDERIUS"}, project_dir="/pods/podA/SIDERIUS"
+        )
+        b = surface_mod.capture_environment(
+            {"PYTHONPATH": "/data/checkouts/SIDERIUS"}, project_dir="/data/checkouts/SIDERIUS"
+        )
+        assert a == b
+        assert a["PYTHONPATH"] == surface_mod.PROJECT_DIR_TOKEN
+
+    def test_a_second_clone_injected_on_one_pod_still_differs(self):
+        """Discrimination, and the reason this is a normalisation and not a
+        hole: only the surface's OWN checkout root is rewritten. The E1 trap
+        PYTHONPATH exists to catch — another tree on the path — is
+        untouched."""
+        a = surface_mod.capture_environment(
+            {"PYTHONPATH": "/pods/podA/SIDERIUS"}, project_dir="/pods/podA/SIDERIUS"
+        )
+        b = surface_mod.capture_environment(
+            {"PYTHONPATH": "/data/SIDERIUS:/opt/another_clone"}, project_dir="/data/SIDERIUS"
+        )
+        assert a != b
+        assert b["PYTHONPATH"] == f"{surface_mod.PROJECT_DIR_TOKEN}:/opt/another_clone"
+
+    def test_bytecode_caches_do_not_enter_a_store_digest(self, tmp_path):
+        """Half 2, measured rather than argued. A .pyc header carries the
+        SOURCE MTIME under Python's default invalidation, so two pods with
+        an identical store digest differently the moment either imports from
+        it — and `checkout_capability_state` is `agent_generated/models`,
+        which has a `__pycache__` on any machine that has run a chain."""
+        podA, podB = tmp_path / "podA", tmp_path / "podB"
+        for root, mtime in ((podA, 1_700_000_000), (podB, 1_710_000_000)):
+            (root / "__pycache__").mkdir(parents=True)
+            source = root / "plugin.py"
+            source.write_text("X = 1\n")
+            os.utime(source, (mtime, mtime))
+            # Byte-different bytecode, exactly as two mtimes produce. BOTH
+            # exclusion rules are exercised, because either alone would let
+            # this test pass while the other is dead: the directory prune
+            # (a non-.pyc file inside __pycache__) and the suffix rule (a
+            # .pyc sitting beside the source, as -B / a stale tree leaves).
+            (root / "__pycache__" / "plugin.cpython-312.pyc").write_bytes(
+                b"\xcb\x0d\x0d\x0a" + mtime.to_bytes(8, "little")
+            )
+            (root / "__pycache__" / "cache.tag").write_text(str(mtime))
+            (root / "plugin.pyc").write_bytes(mtime.to_bytes(8, "little"))
+        a = surface_mod.digest_paths([("models", str(podA))])
+        b = surface_mod.digest_paths([("models", str(podB))])
+        assert a["content_sha256"] == b["content_sha256"]
+        assert a["entry_count"] == 1, a["sample"]
+
+    def test_a_changed_plugin_source_still_moves_the_digest(self, tmp_path):
+        """Discrimination for the exclusion: dropping derived bytecode must
+        remove no detection. The .py is what reaches the prompt."""
+        root = tmp_path / "models"
+        (root / "__pycache__").mkdir(parents=True)
+        (root / "__pycache__" / "p.cpython-312.pyc").write_bytes(b"\x00")
+        (root / "p.py").write_text("A")
+        before = surface_mod.digest_paths([("models", str(root))])["content_sha256"]
+        (root / "p.py").write_text("B")
+        assert surface_mod.digest_paths([("models", str(root))])["content_sha256"] != before
+
+
 class TestPreflightWiring:
     @pytest.fixture(scope="class")
     def preflight_text(self) -> str:
@@ -715,7 +1123,7 @@ class TestPreflightWiring:
     def test_a_local_sibling_surface_is_reported_as_weaker_evidence(self, preflight_text):
         """Same-host capture cannot speak for a second pod, and the row's
         whole complaint is a gate that says more than it proved."""
-        assert "--surface-provenance" in preflight_text
+        assert "--sibling-source" in preflight_text
         assert "cannot speak for a second pod" in preflight_text
 
     @pytest.mark.parametrize(
@@ -772,6 +1180,132 @@ class TestPreflightWiring:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == expected
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            "cross_pod_verified",
+            "cross_pod_stale",
+            "same_host",
+            "revision_mismatch",
+            "unverifiable",
+        ],
+    )
+    def test_every_evidence_state_prints_a_note(self, state):
+        """N-6 clause 3: the disclaimer must not weaken as the claimed
+        provenance strengthens. It used to be gated on
+        `[ "$PROVENANCE" = "local" ]`, so it DISAPPEARED on the upgrade —
+        the weakest evidence state lost its warning at exactly the moment
+        the label got stronger. Fails if any state falls back to silence."""
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'source "{PREFLIGHT}"\n'
+                f"preflight_surface_evidence_note {state} published without-prior-art /ws/.s.json\n",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip(), f"{state} printed no note"
+
+    def test_an_unverified_state_is_louder_than_the_verified_one(self):
+        """Direction, not just presence: 'an unverified published surface
+        needs a LOUDER caveat than a local one, not none'."""
+        notes = {}
+        for state in ("cross_pod_verified", "same_host", "cross_pod_stale", "unverifiable"):
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f'source "{PREFLIGHT}"\n'
+                    f"preflight_surface_evidence_note {state} published without-prior-art "
+                    "/ws/.s.json\n",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert result.returncode == 0, result.stderr
+            notes[state] = result.stdout
+        assert "CAVEAT" not in notes["cross_pod_verified"]
+        for weak in ("same_host", "cross_pod_stale", "unverifiable"):
+            assert "CAVEAT" in notes[weak], weak
+        # A published-but-same-host surface must say WHOSE file it read.
+        assert "written by THIS host" in notes["same_host"]
+
+    def test_an_unknown_evidence_state_refuses_rather_than_printing_nothing(self):
+        """Fail closed. Silence is the exact failure mode this row exists to
+        remove, so an unrecognised state must not produce an empty note."""
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'source "{PREFLIGHT}"\n'
+                "preflight_surface_evidence_note something_new published without-prior-art /ws/s\n",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 1
+        assert result.stdout.strip() == ""
+
+    def test_the_evidence_state_is_read_from_the_checker_not_re_derived(self, tmp_path):
+        """The row must state the state the CHECKER derived. A second
+        opinion formed in bash is free to drift from the one printed, and a
+        drifting strength label is the whole finding."""
+        report = tmp_path / "report.txt"
+        report.write_text(
+            "[arm-symmetry] N-6 sibling-surface attribution:\n"
+            "[arm-symmetry] evidence-state: cross_pod_stale\n"
+            "[arm-symmetry] layer verdicts:\n"
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'source "{PREFLIGHT}"\n'
+                f'STATE="$(preflight_evidence_state "{report}")" || STATE="<refused>"\n'
+                'printf "%s" "$STATE"\n',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "cross_pod_stale", result.stdout
+
+    def test_a_report_without_the_state_line_refuses(self, tmp_path):
+        """A checker that stopped emitting the line must not become
+        'unstated' silently — the caller falls back to the loud caveat.
+
+        The probe uses the PRODUCTION calling idiom
+        (``X="$(fn ...)" || X=""``) deliberately. Calling the function bare
+        under ``set -euo pipefail`` makes the non-matching grep abort the
+        assignment, so a bare probe reports exit 1 and empty stdout for a
+        reason that has nothing to do with the refusal — it passes even when
+        the refusal has been replaced by a default. That is exactly a test
+        green for the wrong reason, and it was: this assertion only became
+        real once the probe matched the call site."""
+        report = tmp_path / "report.txt"
+        report.write_text("[arm-symmetry] PASS — nothing to see here\n")
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'source "{PREFLIGHT}"\n'
+                f'STATE="$(preflight_evidence_state "{report}")" || STATE="<refused>"\n'
+                'printf "%s" "$STATE"\n',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "<refused>", result.stdout
 
     def test_the_gold_arm_still_skips_the_whole_row(self, tmp_path):
         """The boundary. Gold<->Blind treatment symmetry is a separate

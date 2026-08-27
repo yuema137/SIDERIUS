@@ -1,5 +1,5 @@
 {
-  "_captured_at": "captured at a325f33b9ce44f81f3ef688e2cf53a0bfdc6662e (Step-09a C1a base, UNMODIFIED production code); uncommitted at capture time: test-only files (tests/unit/agent/result_interpretation_agent/_step09a_fixture.py, tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py) | REGENERATED at Step 09a C2 (run MetricSpec transport). DECLARED DELTA: exactly ONE key added, `metric_identity` = {\"metric_id\": \"tidmad_denoising_score\", \"direction\": \"higher\"} \u2014 the ordering provenance echoed from the run's bound MetricSpec (child design \u00a73.2-6). ZERO existing keys changed or removed, and the LLM-call manifest is unchanged, so this commit adds a field and moves no behaviour. | REGENERATED at Step 09a C4 (prediction v2). DECLARED DELTA, all four parts predicted by the frozen child design \u00a74.5: (1) FOUR keys added \u2014 prediction_evaluation_semantics='metric_order_signsafe_v2', prediction_outcomes_by_semantics={V2:{confirmed:1,partial:0,refuted:0}}, cumulative_information_gain_by_semantics={V2:0.12}, prediction_pool_sizes={legacy_v1:2, V2:1}; (2) prediction_outcomes_history reverts to the INPUT value {confirmed:1,partial:0,refuted:1} \u2014 the legacy pool is no longer incremented; (3) cumulative_information_gain reverts to the INPUT 0.3 \u2014 the legacy scalar no longer accumulates; (4) scientific_accuracy becomes v2-only {confirmed:1.0,partial:0.0,refuted:0.0} and prediction_evaluation gains the uniform-shape keys metric_resolution / notes / prediction_evaluation_semantics. The LLM-call manifest is UNCHANGED. The outcome itself is still 'confirmed' with gain 0.12: v1 and v2 agree on this fixture by construction, so the delta is the version PARTITION alone. | REGENERATED at Step 09a C6 (evidence projection). DECLARED DELTA: TWO keys added \u2014 per_model_failure_counts (authority-derived counts for the two NEW summaries; punet is cached with no stored counts and is therefore ABSENT rather than reported as zero failures) and per_model_secondary_metrics (EMPTY in production, Q-09-7 = B); plus the additive `_stats['failure_counts']` cache key on the two models that got a fresh per-model call, which is the design's own \u00a73.5 provision so a model that goes quiet keeps its counts. NOTHING else changed inside model_knowledge_cache (verified key-by-key), no existing top-level key moved, and the LLM-call manifest is unchanged. | REGENERATED at Step 09b C2 (task blocks + TIDMAD science ownership migration), branch step09-pr09b-interpretation-prompts-task-blocks on frozen base 2bd9caf2. DECLARED DELTA (design ledger \u00a722.2): task science left the framework templates and re-enters through TIDMAD's InterpretationTaskBlocks sections; DW-1..DW-9 framework rewordings applied. Digest delta: NONE (byte-identical \u2014 blocks change no deterministic field). | REGENERATED at Step 09b C3 (explicit evidence renderers). DECLARED DELTA: per-model USER prompts gain the presence-gated metric-identity line, '### Training dynamics', '### Secondary metrics' and '### Record outcomes' sections; the synthesis USER prompt gains the run-level 'Metric:' line. Digest delta: NONE (rendering only). | REGENERATED at Step 09b C4 (version-aware prediction track record). DECLARED DELTA: the synthesis USER prompt's gain line becomes the version-labelled track record. Digest delta: NONE (rendering only). | C4 helper reword: DECLARED digest delta \u2014 keys new_discoveries, runtime_vocab carry the timing-discovery sentence, whose framework remedy no longer names a TIDMAD data-prep hyperparameter (design \u00a72.5/\u00a722.4). The discovery's identity, kind, tier and every other digest key are unchanged.",
+  "_captured_at": "captured at a325f33b9ce44f81f3ef688e2cf53a0bfdc6662e (Step-09a C1a base, UNMODIFIED production code); uncommitted at capture time: test-only files (tests/unit/agent/result_interpretation_agent/_step09a_fixture.py, tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py) | REGENERATED at Step 09a C2 (run MetricSpec transport). DECLARED DELTA: exactly ONE key added, `metric_identity` = {\"metric_id\": \"tidmad_denoising_score\", \"direction\": \"higher\"} \u2014 the ordering provenance echoed from the run's bound MetricSpec (child design \u00a73.2-6). ZERO existing keys changed or removed, and the LLM-call manifest is unchanged, so this commit adds a field and moves no behaviour. | REGENERATED at Step 09a C4 (prediction v2). DECLARED DELTA, all four parts predicted by the frozen child design \u00a74.5: (1) FOUR keys added \u2014 prediction_evaluation_semantics='metric_order_signsafe_v2', prediction_outcomes_by_semantics={V2:{confirmed:1,partial:0,refuted:0}}, cumulative_information_gain_by_semantics={V2:0.12}, prediction_pool_sizes={legacy_v1:2, V2:1}; (2) prediction_outcomes_history reverts to the INPUT value {confirmed:1,partial:0,refuted:1} \u2014 the legacy pool is no longer incremented; (3) cumulative_information_gain reverts to the INPUT 0.3 \u2014 the legacy scalar no longer accumulates; (4) scientific_accuracy becomes v2-only {confirmed:1.0,partial:0.0,refuted:0.0} and prediction_evaluation gains the uniform-shape keys metric_resolution / notes / prediction_evaluation_semantics. The LLM-call manifest is UNCHANGED. The outcome itself is still 'confirmed' with gain 0.12: v1 and v2 agree on this fixture by construction, so the delta is the version PARTITION alone. | REGENERATED at Step 09a C6 (evidence projection). DECLARED DELTA: TWO keys added \u2014 per_model_failure_counts (authority-derived counts for the two NEW summaries; punet is cached with no stored counts and is therefore ABSENT rather than reported as zero failures) and per_model_secondary_metrics (EMPTY in production, Q-09-7 = B); plus the additive `_stats['failure_counts']` cache key on the two models that got a fresh per-model call, which is the design's own \u00a73.5 provision so a model that goes quiet keeps its counts. NOTHING else changed inside model_knowledge_cache (verified key-by-key), no existing top-level key moved, and the LLM-call manifest is unchanged. | REGENERATED at Step 09b C2 (task blocks + TIDMAD science ownership migration), branch step09-pr09b-interpretation-prompts-task-blocks on frozen base 2bd9caf2. DECLARED DELTA (design ledger \u00a722.2): task science left the framework templates and re-enters through TIDMAD's InterpretationTaskBlocks sections; DW-1..DW-9 framework rewordings applied. Digest delta: NONE (byte-identical \u2014 blocks change no deterministic field). | REGENERATED at Step 09b C3 (explicit evidence renderers). DECLARED DELTA: per-model USER prompts gain the presence-gated metric-identity line, '### Training dynamics', '### Secondary metrics' and '### Record outcomes' sections; the synthesis USER prompt gains the run-level 'Metric:' line. Digest delta: NONE (rendering only). | REGENERATED at Step 09b C4 (version-aware prediction track record). DECLARED DELTA: the synthesis USER prompt's gain line becomes the version-labelled track record. Digest delta: NONE (rendering only). | C4 helper reword: DECLARED digest delta \u2014 keys new_discoveries, runtime_vocab carry the timing-discovery sentence, whose framework remedy no longer names a TIDMAD data-prep hyperparameter (design \u00a72.5/\u00a722.4). The discovery's identity, kind, tier and every other digest key are unchanged. | REGENERATED at N-2 (the WITHHELD warning must range over the same set the formal aggregate does), branch fix/honesty-n2-n3-n4 on base f69c9acf. DECLARED DELTA, two parts and nothing else: (1) `model_knowledge_cache[mt]['_stats']` gains `scientific_authority` on the two models that got a fresh per-model call \u2014 `null` for bidirectional_gated_tcn (no formal record) and wavenet's own recorded verdict \u2014 because the verdict must be cached WITH the score it judges; before this the score was cached and its authority was not. (2) `scientific_aggregation.excluded` gains `punet` with reason `unreconstructable_legacy` (excluded_count 1 -> 2), because the authority partition now ranges over the cached-only models too. punet's cached `_stats` predates part (1) IN THIS FIXTURE, so it carries no verdict and is excluded fail-closed \u2014 which is the correct outcome, and is now REPORTED instead of dropped in silence. NOTHING else changed: no other digest key moved, and the LLM-call manifest `step09a_differential_llm_calls.json` is UNCHANGED (punet is a compressed/stable model in this fixture, so its block carries no formal line either way).",
   "model_types": [
     "bidirectional_gated_tcn",
     "punet",
@@ -41,14 +41,19 @@
         "record_id": "bidirectional_gated_tcn",
         "reason": "unreconstructable_legacy",
         "basis": "unreconstructable_legacy"
+      },
+      {
+        "record_id": "punet",
+        "reason": "unreconstructable_legacy",
+        "basis": "unreconstructable_legacy"
       }
     ],
     "included_count": 1,
-    "excluded_count": 1,
+    "excluded_count": 2,
     "all_excluded": false,
     "no_records": false,
     "exclusion_reason_counts": {
-      "unreconstructable_legacy": 1
+      "unreconstructable_legacy": 2
     }
   },
   "best_denoising_score": -2.0,
@@ -350,6 +355,7 @@
           }
         },
         "formal_score": -2.43,
+        "scientific_authority": null,
         "model_description": "bidirectional_gated_tcn: gated temporal conv, both directions (step09a fixture).",
         "round_health_counts": {
           "valid": 3,
@@ -963,6 +969,16 @@
           }
         },
         "formal_score": -2.0,
+        "scientific_authority": {
+          "healthgate_mode": "blocking",
+          "declared_result_authority": "scientific",
+          "formal_validity": "valid",
+          "blocking_reasons": [],
+          "authoritative": true,
+          "primary_basis": "blocking_scientific_formal_valid",
+          "enters_incumbent_selection": true,
+          "enters_scientific_aggregation": true
+        },
         "model_description": "wavenet: dilated causal convolution stack (step09a fixture).",
         "round_health_counts": {
           "valid": 2,

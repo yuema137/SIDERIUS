@@ -10,6 +10,7 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
+from agent.prompt_templates.timing_attribution import render_discovery_train_term
 from agent.schemas.interpretation import OUTCOME_UNEVALUATED
 from agent.schemas.proposal import VocabEntry
 from execute_tools.metric_order import MetricOrder
@@ -376,22 +377,15 @@ def generate_discoveries(
             # ARCHITECTURAL resource cost and its remedy is "reduce the
             # model", so it is the same failure class as the planner's timing
             # block: `train_time_s` is the whole subprocess and includes the
-            # 07a validation pass, which does not shrink with the model. The
-            # split is stated when the record carries it; a record with no
-            # split renders byte-identically to before.
-            # An INCOHERENT split (negative, or larger than the whole) is
-            # refused for the same reason the planner's block refuses it:
-            # production cannot produce one, so it means two different
-            # clocks, and a negative architecture cost is worse than silence.
-            val_s = timing.get("validation_time_s")
-            train_part = (
-                f"train={train_s / 60:.1f}"
-                if val_s is None or val_s < 0 or val_s > train_s
-                else (
-                    f"train={train_s / 60:.1f} incl. validation {val_s / 60:.1f}, "
-                    f"architecture {(train_s - val_s) / 60:.1f}"
-                )
-            )
+            # 07a validation pass. The split is stated when the record carries
+            # it; a record with no split, or an incoherent one, renders
+            # byte-identically to before.
+            #
+            # N-4 — the rule and the rendering are `timing_attribution`'s, not
+            # a second copy here. The residual is deliberately no longer
+            # labelled "architecture": it also contains process start, CUDA
+            # init, dataset construction and checkpoint save.
+            train_part = render_discovery_train_term(train_s, timing.get("validation_time_s"))
             desc = (
                 f"{model_type}: {total_s / 60:.1f} min/experiment "
                 f"({train_part}, infer={infer_s / 60:.1f} min). "

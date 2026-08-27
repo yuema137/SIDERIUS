@@ -41,6 +41,16 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from core.scientific_authority import RecordAuthority, resolve_record_authority
 
+#: What ``provenance_lines`` calls its own scope when the caller names none.
+#:
+#: N-3. The all-excluded sentence used to say "this CAMPAIGN produced no
+#: scientifically authoritative result" from a partition that knows nothing
+#: about a campaign — the interpreter renders it once per iteration over that
+#: iteration's evidence, so a campaign with authoritative results in other
+#: iterations was told, in the operator's own chain log, that it had none.
+#: A default must not out-scope the object it is rendered from.
+DEFAULT_AGGREGATION_SCOPE_NAME = "this aggregation"
+
 
 class HasScientificAuthority(Protocol):
     """The minimum a record must expose to be partitioned.
@@ -121,11 +131,21 @@ class AggregationScope(BaseModel):
             counts[item.reason] = counts.get(item.reason, 0) + 1
         return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
 
-    def provenance_lines(self) -> list[str]:
+    def provenance_lines(self, *, scope: str = DEFAULT_AGGREGATION_SCOPE_NAME) -> list[str]:
         """The fixed provenance section, derived — never model-written.
 
         Returns lines rather than one blob so a caller can indent or prefix
         them without re-parsing text.
+
+        Args:
+            scope: what this partition actually covers, named as a noun
+                phrase that can follow "available in" — ``"iteration 3"``,
+                ``"this campaign"``. **A conclusion may not out-scope its
+                partition** (N-3): this object knows only the results it was
+                handed, so it cannot know whether a campaign produced an
+                authoritative result in some other iteration. The default
+                names the object's own scope and is therefore always true;
+                a caller that knows a wider or narrower scope says so.
         """
         if self.no_records:
             return ["Scientific aggregation used 0 results: none were submitted."]
@@ -143,8 +163,8 @@ class AggregationScope(BaseModel):
         lines += [f"  - {n} {reason}" for reason, n in self.exclusion_reason_counts.items()]
         if self.all_excluded:
             lines.append(
-                "EVERY result was excluded — this campaign produced no "
-                "scientifically authoritative result."
+                f"EVERY result was excluded — no scientifically authoritative "
+                f"result is available in {scope}."
             )
         return lines
 

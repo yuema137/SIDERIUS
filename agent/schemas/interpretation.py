@@ -22,6 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
 from agent.schemas.health_feedback import (
     CollapseFingerprint,
     CollapseFingerprintHistoryEntry,
@@ -499,10 +500,9 @@ class ModelRunSummary(BaseModel):
         description="Timing dict from the best experiment: "
         "train_time_s, validation_time_s, inference_time_s, scoring_time_s. "
         "Used to generate timing discoveries and warn the planner. "
-        "F-SCANE-3 — `train_time_s` is the WHOLE training subprocess and "
-        "INCLUDES the validation pass; `validation_time_s` is that term, "
-        "so the architecture's own cost is the difference. `None` where "
-        "the producer recorded no split, never 0.0.",
+        "F-SCANE-3; N-4 for what the split means: " + TIMING_SPLIT_SEMANTICS + " "
+        "`validation_time_s` is `None` where the producer recorded no split, "
+        "never 0.0.",
     )
 
     # --- Data volume context ---

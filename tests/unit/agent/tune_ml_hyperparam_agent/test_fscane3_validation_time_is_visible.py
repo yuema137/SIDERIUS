@@ -33,6 +33,15 @@ Three properties, each with its own mutation:
 Byte parity is asserted against strings captured in a PRISTINE ``3995400b``
 worktree: a record with no split renders exactly as before, and so does an
 INCOHERENT split (validation > train, which production cannot produce).
+
+N-4 — what the split MEANS
+--------------------------
+Making the term visible was necessary; the sentences F-SCANE-3 wrote about it
+were false, in four places at once. ``TestTheAttributionClaimIsTrue`` and
+``TestOneAuthorityForFourSurfaces`` at the end of this file own that: the
+first pins the two corrected claims against hardcoded text, the second fails
+when a surface states the split in its own words instead of consuming
+``agent.prompt_templates.timing_attribution``.
 """
 
 from __future__ import annotations
@@ -44,6 +53,10 @@ from pathlib import Path
 import pytest
 from pytest import MonkeyPatch
 
+from agent.prompt_templates.timing_attribution import (
+    TIMING_ATTRIBUTION_NOTE,
+    TIMING_SPLIT_SEMANTICS,
+)
 from agent.prompts import get_planner_user_prompt
 from execute_tools.metric_order import MetricOrder
 from nodes.interpretation_helpers import generate_discoveries
@@ -158,7 +171,7 @@ class TestTheRecordCarriesTheSplit:
         prompt = get_planner_user_prompt([record], current_round=2, max_rounds=3)
         block = _timing_block(prompt)
         assert f"validation {validation_s / 60:.1f} min of that" in block
-        assert "architecture cost" in block
+        assert "training+overhead" in block
         assert "training_history" not in prompt
         assert "validation_seconds" not in prompt
 
@@ -202,7 +215,7 @@ def _timing_block(prompt: str) -> str:
 
 
 class TestThePlannerPromptStatesTheTerm:
-    def test_the_split_is_rendered_with_the_architecture_cost_and_the_attribution(self):
+    def test_the_split_is_rendered_with_the_residual_and_the_attribution(self):
         block = _timing_block(
             get_planner_user_prompt(
                 [
@@ -220,11 +233,8 @@ class TestThePlannerPromptStatesTheTerm:
             )
         )
         assert "validation 3.0 min of that" in block
-        assert "architecture cost 17.0 min" in block
-        assert (
-            "Validation time is a fixed cost of the evaluation pass, not an "
-            "architecture cost" in block
-        )
+        assert "training+overhead 17.0 min" in block
+        assert TIMING_ATTRIBUTION_NOTE.strip() in block
         # The instruction the row objects to is still present — the fix is to
         # let the model apply it to the right number, not to remove it.
         assert "reduce model complexity" in block
@@ -250,7 +260,7 @@ class TestThePlannerPromptStatesTheTerm:
     def test_an_incoherent_split_is_refused_rather_than_rendered_negative(self):
         """A part cannot exceed its whole. Production cannot produce this
         (the validation pass runs inside the timed subprocess), so it means
-        two different clocks — and "architecture cost -2.0 min" at an LLM is
+        two different clocks — and "training+overhead -2.0 min" at an LLM is
         worse than saying nothing."""
         block = _timing_block(
             get_planner_user_prompt(
@@ -268,7 +278,7 @@ class TestThePlannerPromptStatesTheTerm:
                 max_rounds=3,
             )
         )
-        assert "architecture cost" not in block
+        assert "training+overhead" not in block
         assert "-" not in block.split("\n")[1].split("—")[0]
 
 
@@ -305,7 +315,7 @@ class TestTheTimingDiscoveryStatesTheTerm:
             }
         )
         assert "incl. validation 3.0" in desc
-        assert "architecture 17.0" in desc
+        assert "training+overhead 17.0" in desc
 
     def test_a_record_without_the_split_renders_the_pristine_bytes(self):
         assert (
@@ -382,3 +392,204 @@ class TestTheSumIsTheProducersOwnNumber:
         )
         assert _validation_time_s(results) is None
         assert _validation_time_s(None) is None
+
+
+# ---------------------------------------------------------------------------
+# N-4 — what the split MEANS, and the one place that owns the answer
+# ---------------------------------------------------------------------------
+
+
+class TestTheAttributionClaimIsTrue:
+    """The defect only this class catches.
+
+    F-SCANE-3 made the validation term visible and then told the LLM two
+    things about it that the code contradicts:
+
+    1. *"Validation time ... does not shrink when the model shrinks."*
+       ``train_engine_sandbox._validation_pass`` runs
+       ``output_seq = model(input_seq)`` per batch — a forward pass of the
+       model under test.
+    2. *"the architecture's own cost is ``train_time_s - validation_time_s``".*
+       ``train_time_s`` is the PARENT's wall clock around the whole training
+       subprocess, while the trainer's own analogue starts at
+       ``t_train_start``, set AFTER setup. The residual also carries spawn,
+       CUDA init, model/dataset construction and checkpoint save.
+
+    Together, under a hard budget, the planner was told to ignore the one term
+    that DOES respond to shrinking the model and to attribute to its own
+    design a residual containing cost no design removes — under-pricing large
+    candidates and over-pricing small ones.
+
+    **N-4b — this class used to hold a defect in place.** The correction for
+    (1) asserted the PRESENCE of *"a forward pass of the model under test over
+    a FIXED evaluation scope, so it shrinks with a smaller model but not with
+    fewer epochs or less training data"*, and both of those clauses are false:
+
+    * the evaluation scope is the PLANNER's lever in a trial round —
+      ``policy._resolve_sample_set_cfg``'s trial branch returns
+      ``"eval_portion": plan.eval_portion``, which reaches
+      ``build_eval_scope(portion=…)``, the attempt's ``eval_sample_set``, and
+      the trainer as ``--eval_sample_set_json``; ``agent/prompts.py`` asks the
+      model for the value and tells it to increase it, and on the campaign
+      path it is ``AGENT_CONTROLLED``;
+    * it is paid PER EPOCH — ``_validation_pass`` is called inside
+      ``for ep in range(train_cfg.epochs)`` and ``records._validation_time_s``
+      sums ``validation_seconds``. (``max_epochs=1`` on the real path today,
+      so this clause has no range until D-BUD-6's ``trial_max_epochs: 2``
+      lands; the trial-scope clause carries the finding alone.)
+
+    A guard in a class named *the attribution claim is true*, asserting the
+    false substring is present, goes RED on the repair. The assertions below
+    now pin the CORRECTED wording, so they fail on the false sentence instead.
+
+    Expectations here are HARDCODED, never read back from the module: a test
+    that asserts ``NOTE == NOTE`` passes for any sentence, including the false
+    one this class exists to keep out.
+    """
+
+    def test_the_note_does_not_claim_validation_is_model_independent(self):
+        assert "does not shrink when the model shrinks" not in TIMING_SPLIT_SEMANTICS
+        assert "fixed cost of the evaluation pass" not in TIMING_SPLIT_SEMANTICS
+        assert (
+            "`validation_time_s` is that pass, summed over epochs: once per epoch "
+            "the model under test runs a forward pass over the round's EVALUATION "
+            "scope. It therefore shrinks with a smaller model, with fewer epochs, "
+            "and with a smaller `eval_portion`" in TIMING_SPLIT_SEMANTICS
+        )
+
+    def test_the_note_does_not_claim_the_evaluation_scope_is_fixed(self):
+        """The clause that carries the finding on its own.
+
+        In a trial round the evaluation scope IS the plan's ``eval_portion``.
+        Calling it fixed, immediately before "reduce model complexity", steers
+        an overrunning candidate toward capacity reduction instead of the
+        cheap, agent-owned eval reduction.
+        """
+        assert "FIXED evaluation scope" not in TIMING_SPLIT_SEMANTICS
+        assert (
+            "in a trial round that is the plan's own value, so the evaluation "
+            "scope is a lever you set, not a fixed cost (a formal round fixes "
+            "it)" in TIMING_SPLIT_SEMANTICS
+        )
+        # The levers validation genuinely does NOT respond to — named, so the
+        # repair does not swing to "everything shrinks it".
+        assert (
+            "What it does NOT respond to is `trial_portion` / `train_portion`: "
+            "those size the TRAINING scope only." in TIMING_SPLIT_SEMANTICS
+        )
+
+    def test_the_trial_evaluation_scope_really_is_the_planners_own_value(self):
+        """Reachability for the claim the sentence now makes.
+
+        Driven through the production resolver rather than asserted about it:
+        if the trial branch ever stops sourcing ``eval_portion`` from the plan,
+        the prompt's new sentence becomes the false one — in the other
+        direction — and this turns red.
+        """
+        from nodes.ml_hyperparameter_tune_agent.policy import _resolve_sample_set_cfg
+
+        class _Plan:
+            trial_strategy = "snapshot"
+            trial_portion = 0.05
+            train_portion = 0.1
+            eval_strategy = "snapshot"
+            eval_portion = 0.37  # a value only the plan could have supplied
+
+        class _Input:
+            formal_strategy = "snapshot"
+            formal_portion = 1.0
+            formal_train_portion = 1.0
+            formal_eval_portion = 1.0
+
+        trial = _resolve_sample_set_cfg("trial", _Input(), _Plan())  # type: ignore[arg-type]
+        assert trial["eval_portion"] == 0.37, (
+            "the trial round no longer takes its evaluation scope from the plan"
+        )
+        # ...and the formal round genuinely does fix it, which is the other
+        # half of what the sentence promises.
+        formal = _resolve_sample_set_cfg("formal", _Input(), _Plan())  # type: ignore[arg-type]
+        assert formal["eval_portion"] == 1.0
+        assert formal["eval_strategy"] == "snapshot"
+
+    def test_the_note_does_not_call_the_residual_the_architectures_cost(self):
+        assert (
+            "The remainder (`train_time_s - validation_time_s`) is NOT the "
+            "architecture's own cost either" in TIMING_SPLIT_SEMANTICS
+        )
+        assert (
+            "it still contains process start, CUDA init, model and dataset "
+            "construction and checkpoint save" in TIMING_SPLIT_SEMANTICS
+        )
+        assert "UPPER BOUND" in TIMING_SPLIT_SEMANTICS
+        # The instruction that made the false claim actionable.
+        assert "Attribute only the architecture cost to your design" not in TIMING_SPLIT_SEMANTICS
+
+
+class TestOneAuthorityForFourSurfaces:
+    """Four copies of a sentence are four chances to drift, and F-SCANE-3
+    shipped four copies that were wrong in the same two ways.
+
+    These assertions fail when a surface re-inlines its own wording instead of
+    consuming ``agent.prompt_templates.timing_attribution`` — which is the
+    state that let one correction miss three sites.
+    """
+
+    #: Every surface that states what the split means.
+    _CONSUMERS = (
+        "agent/prompts.py",
+        "nodes/interpretation_helpers.py",
+        "agent/schemas/hyperparam_tuning.py",
+        "agent/schemas/interpretation.py",
+    )
+    _REPO = Path(__file__).resolve().parents[4]
+
+    def test_no_production_surface_still_calls_the_residual_an_architecture_cost(self):
+        offenders = {
+            rel: line
+            for rel in self._CONSUMERS
+            for line in (self._REPO / rel).read_text(encoding="utf-8").splitlines()
+            if "architecture cost" in line or "architecture's own cost is" in line
+        }
+        assert offenders == {}, (
+            f"a surface still names the residual as the architecture's cost: {offenders}"
+        )
+
+    def test_every_surface_consumes_the_authority(self):
+        missing = [
+            rel
+            for rel in self._CONSUMERS
+            if "timing_attribution" not in (self._REPO / rel).read_text(encoding="utf-8")
+        ]
+        assert missing == [], f"these surfaces state the split without the authority: {missing}"
+
+    def test_the_two_schema_descriptions_carry_the_authority_verbatim(self):
+        """A field description is read by pyright, by an operator AND by any
+        model shown the record schema. Paraphrasing it is how the two halves
+        of one claim start disagreeing."""
+        from agent.schemas.hyperparam_tuning import ExperimentTiming
+        from agent.schemas.interpretation import ModelRunSummary
+
+        for model, field in ((ExperimentTiming, "train_time_s"), (ModelRunSummary, "best_timing")):
+            description = model.model_fields[field].description or ""
+            assert TIMING_SPLIT_SEMANTICS in description, (
+                f"{model.__name__}.{field} states the split in its own words"
+            )
+
+    def test_the_planner_note_is_the_authority_and_not_a_copy(self):
+        block = _timing_block(
+            get_planner_user_prompt(
+                [
+                    _planner_record(
+                        {
+                            "train_time_s": 1200.0,
+                            "validation_time_s": 180.0,
+                            "inference_time_s": 300.0,
+                            "scoring_time_s": 10.0,
+                        }
+                    )
+                ],
+                current_round=2,
+                max_rounds=3,
+            )
+        )
+        assert TIMING_ATTRIBUTION_NOTE.strip() in block

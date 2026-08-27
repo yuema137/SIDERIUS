@@ -6,6 +6,11 @@ from typing import Any
 # ==========================================
 # 1. SYSTEM PROMPTS (The Core Logic)
 # ==========================================
+from agent.prompt_templates.timing_attribution import (
+    TIMING_ATTRIBUTION_NOTE,
+    is_coherent_split,
+    render_planner_train_term,
+)
 from agent.prompt_templates.tuner.rendering import (
     EFFICIENCY_BAND_PCT,
     render_builtin_model_roster,
@@ -1299,36 +1304,23 @@ def get_planner_user_prompt(
         seg = last.get("params", {}).get("model_config", {}).get("segmentation_size")
         # F-SCANE-3 — the planner is told to attribute `train` to architecture
         # and to "reduce model complexity" when it is too high. `train_time_s`
-        # is the WHOLE subprocess and includes the 07a validation pass, which
-        # is a fixed cost of the eval scope and does not shrink with the model,
-        # so without the split a candidate can be shrunk for time spent
+        # is the WHOLE subprocess and includes the 07a validation pass, so
+        # without the split a candidate can be shrunk for time spent
         # validating it. `validation_time_s` is `None` on a producer that
         # recorded no split (legacy records, attempts with no validation pass)
         # and those prompts stay byte-identical: an absent split must not be
-        # rendered as a zero one.
+        # rendered as a zero one. An INCOHERENT split (negative, or larger
+        # than the whole) is refused for the same reason.
         #
-        # The split is also refused when it is INCOHERENT — negative, or
-        # larger than the whole it is part of. In production it cannot be
-        # (the validation pass runs inside the timed subprocess), so a
-        # violation means the two numbers came from different clocks: a
-        # pseudo/stub record, a hand-edited artifact. Rendering
-        # "architecture cost -1.0 min" at an LLM would be worse than
-        # rendering nothing.
+        # N-4 — the coherence rule, the rendering AND the prose live in
+        # `timing_attribution`. They used to live at four sites and were wrong
+        # at all four in the same two ways: validation was said not to shrink
+        # with the model (it is a forward pass OF the model), and the residual
+        # was called the architecture's cost (it also holds spawn, CUDA init,
+        # dataset construction and checkpoint save).
         val_s = t.get("validation_time_s")
-        if val_s is None or val_s < 0 or val_s > train_s:
-            train_line = f"train={train_s / 60:.1f} min"
-            attribution_note = ""
-        else:
-            train_line = (
-                f"train={train_s / 60:.1f} min "
-                f"(validation {val_s / 60:.1f} min of that; "
-                f"architecture cost {(train_s - val_s) / 60:.1f} min)"
-            )
-            attribution_note = (
-                "Validation time is a fixed cost of the evaluation pass, not an "
-                "architecture cost: it does not shrink when the model shrinks. "
-                "Attribute only the architecture cost to your design.\n"
-            )
+        train_line = render_planner_train_term(train_s, val_s)
+        attribution_note = TIMING_ATTRIBUTION_NOTE if is_coherent_split(train_s, val_s) else ""
         slow_warning = (
             f"\n### ⏱  LAST EXPERIMENT TIMING:\n"
             f"{train_line}, inference={infer_s / 60:.1f} min, "
