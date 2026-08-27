@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from core.execution_calibration import MalformedCeilingOverride
 from core.runtime_control.pair_admission import (
     BYTES_PER_GIB,
     BYTES_PER_MIB,
@@ -106,12 +107,31 @@ class TestCeilingResolution:
         monkeypatch.setenv(PAIR_CEILING_GIB_ENV, "24")
         assert pair_ceiling_gib() == 24.0
 
-    @pytest.mark.parametrize("bad", ["", "not-a-number", "0", "-5"])
-    def test_a_malformed_setting_falls_back_rather_than_crashing(self, monkeypatch, bad):
-        monkeypatch.setenv(PAIR_CEILING_GIB_ENV, bad)
-        monkeypatch.setenv(HOST_VRAM_QUOTA_MIB_ENV, bad)
+    def test_an_empty_setting_behaves_as_unset(self, monkeypatch):
+        """An empty value is the shell-wrapper pass-through pattern
+        (``VAR="${VAR:-}"``), not a typo'd number — the one deliberate
+        F-SCANG-3 divergence from SIDERIUS_SUBPROCESS_RSS_GB, which
+        refuses ""."""
+        monkeypatch.setenv(PAIR_CEILING_GIB_ENV, "")
+        monkeypatch.setenv(HOST_VRAM_QUOTA_MIB_ENV, "")
         assert pair_ceiling_gib() == DEFAULT_PAIR_CEILING_GIB
         assert host_quota_gib() is None
+
+    @pytest.mark.parametrize("bad", ["not-a-number", "0", "-5"])
+    def test_a_malformed_setting_refuses_rather_than_falling_back(self, monkeypatch, bad):
+        """F-SCANG-3 UPGRADE: this test formerly PINNED the silent
+        fallback (typo -> 28.0 default / quota -> None, no diagnostic).
+        Set-but-unusable now refuses via MalformedCeilingOverride, the
+        same contract SIDERIUS_SUBPROCESS_RSS_GB already carries; the
+        full refusal matrix lives in test_scang3_env_override_refusal.py."""
+        monkeypatch.setenv(PAIR_CEILING_GIB_ENV, bad)
+        monkeypatch.delenv(HOST_VRAM_QUOTA_MIB_ENV, raising=False)
+        with pytest.raises(MalformedCeilingOverride, match=PAIR_CEILING_GIB_ENV):
+            pair_ceiling_gib()
+        monkeypatch.delenv(PAIR_CEILING_GIB_ENV, raising=False)
+        monkeypatch.setenv(HOST_VRAM_QUOTA_MIB_ENV, bad)
+        with pytest.raises(MalformedCeilingOverride, match=HOST_VRAM_QUOTA_MIB_ENV):
+            host_quota_gib()
 
 
 class TestPairDecision:

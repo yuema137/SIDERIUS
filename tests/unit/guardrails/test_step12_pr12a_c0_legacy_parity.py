@@ -433,6 +433,15 @@ class TestTheProposingStageIsOneDeclaredEditFromEpochOne:
 #: ``source: env``. The arXiv U1/U3 CANONICAL keys are deliberately NOT
 #: here — they are omitted at their defaults, which is exactly the legacy
 #: byte-parity this pin owns.
+#:
+#: DECLARED DELTA (F-SCANH-1, wave2 R1; the pin fired — working as
+#: designed): ``task_config_sha256`` joined as a CANONICAL key. An
+#: UN-COMPOSED run now pins the raw bytes of the ``configs/task_config.yaml``
+#: its prompt surfaces read, so a mid-workspace operator edit refuses the
+#: resume — it was the ONE tracked config the lock did not pin. Present
+#: here because this pinned run IS un-composed; a COMPOSED run's lock, and
+#: every pre-pin legacy lock, still omit the key (omitted-when-``None``),
+#: which the F-SCANH-1 witness suite owns.
 LEGACY_LOCK_KEYS: frozenset[str] = frozenset(
     {
         "resolved_data_scope",
@@ -448,6 +457,7 @@ LEGACY_LOCK_KEYS: frozenset[str] = frozenset(
         "created_at",
         "execution_calibration",
         "generated_library",
+        "task_config_sha256",
     }
 )
 

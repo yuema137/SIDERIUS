@@ -58,6 +58,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.execution_calibration import MalformedCeilingOverride
 from core.runtime_control.probe import descendant_pids
 from core.subprocess_env import subprocess_env
 
@@ -114,6 +115,24 @@ def vram_attribution_threshold_gb(device_vram_gb: float) -> float:
     An explicitly configured quota wins when it is the tighter bound —
     on a shared host the enforced quota, not the card, is the real
     ceiling.
+
+    F-SCANG-3: a quota that is SET but unusable — non-numeric, zero, or
+    negative — is REFUSED via :class:`MalformedCeilingOverride` instead
+    of silently resolving to the fraction bound. The silent shape made a
+    typo'd quota indistinguishable from an undeclared one, so a kill at
+    the real (tighter) quota boundary was misattributed. There is no
+    0-disables semantics here (unlike ``SIDERIUS_SUBPROCESS_RSS_GB``):
+    unset the variable to fall back to the fraction bound.
+
+    An EMPTY string ("") still behaves as unset — a deliberate,
+    preserved-behavior DIVERGENCE from ``SIDERIUS_SUBPROCESS_RSS_GB``,
+    which refuses "". An empty value is the shell-wrapper pass-through
+    pattern (``VAR="${VAR:-}"``), not a typo'd number; the class this
+    refusal repairs is silently-consumed TYPOS.
+
+    Raises:
+        MalformedCeilingOverride: the variable is set to a non-numeric
+            or non-positive value.
     """
     fraction_bound = DEFAULT_VRAM_ATTRIBUTION_FRACTION * device_vram_gb
     raw = os.environ.get(VRAM_QUOTA_ENV)
@@ -122,8 +141,21 @@ def vram_attribution_threshold_gb(device_vram_gb: float) -> float:
     try:
         quota = float(raw)
     except ValueError:
-        return fraction_bound
-    return min(quota, fraction_bound) if quota > 0 else fraction_bound
+        raise MalformedCeilingOverride(
+            f"{VRAM_QUOTA_ENV}={raw!r} is not a number of GiB. Set a "
+            f"positive number of GiB, or unset it to fall back to the "
+            f"device-fraction bound. It is NOT ignored: a "
+            f"silently-ignored override is how a run comes to execute "
+            f"under limits nobody chose."
+        ) from None
+    if quota <= 0:
+        raise MalformedCeilingOverride(
+            f"{VRAM_QUOTA_ENV}={raw!r} is not positive. There is NO "
+            f"0-disables semantics for this variable (unlike "
+            f"SIDERIUS_SUBPROCESS_RSS_GB); unset it to fall back to the "
+            f"device-fraction bound."
+        )
+    return min(quota, fraction_bound)
 
 
 def sample_worker_vram_gb(pgid: int) -> float | None:

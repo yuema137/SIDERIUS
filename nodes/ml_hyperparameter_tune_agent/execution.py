@@ -203,6 +203,44 @@ def wall_time_preflight_applicable(run_profile: object) -> bool:
     return declares_tidmad_topology(run_profile)
 
 
+def _structured_mapping(value: object) -> dict[str, Any]:
+    """``value`` when it is a dict; ``{}`` for every other member of the union.
+
+    F-SCANB-2. The VRAM pre-flight worker deliberately replaces an oversized
+    rich diagnostic field with the truncation-marker STRING
+    ``"[dropped: exceeded the rich-field budget]"``
+    (``agent/skills/evaluate_vram_skill/preflight_worker_main.py``,
+    ``_bounded_rich_fields``) so the field's absence is explicit rather than
+    silent, and the parent-side schema types the forwarded fields as unions —
+    ``IsolatedProbeResult.memory_killer`` / ``offending_config`` are
+    ``dict[str, Any] | str | None`` (``isolated_probe.py``). A consumer that
+    calls ``.get`` on that union crashes on the ``str`` member: twice
+    historically, a CORRECT VRAM rejection died in an ``AttributeError``
+    and spent the attempt instead of reaching its ``skipped_oom_risk``
+    record. The marker and ``None`` both map to ``{}`` here — the absence of
+    structure stays explicit through the record's forwarded
+    verdict/suggestion text and through the marker value itself wherever the
+    raw union field is carried.
+    """
+    return value if isinstance(value, dict) else {}
+
+
+def _structured_items(value: object) -> list[Any]:
+    """``value`` when it is a list; ``[]`` for every other member of the union.
+
+    F-SCANB-2, the ``violations`` twin of :func:`_structured_mapping`. The
+    worker's ``_bounded_rich_fields``
+    (``agent/skills/evaluate_vram_skill/preflight_worker_main.py``)
+    substitutes the same ``"[dropped: exceeded the rich-field budget]"``
+    marker for an oversized ``violations`` payload, and
+    ``IsolatedProbeResult.violations`` is ``list[Any] | str | None``
+    (``isolated_probe.py``). Iterating the marker yields CHARACTERS, so
+    ``v.get(...)`` raised ``AttributeError`` in the schema-violation branch
+    before its ``skipped_schema_violation`` record could be emitted.
+    """
+    return value if isinstance(value, list) else []
+
+
 def run_admission_preflight(
     bindings: RunBindings,
     prepared: PreparedAttempt,
@@ -353,7 +391,9 @@ def run_admission_preflight(
     # the attempt does NOT count as a completed round.
     # See docs/improving_validation_awareness.md §D.4.
     if resource_check.get("status") == "schema_violation":
-        violations = resource_check.get("violations", [])
+        # F-SCANB-2 — the worker may have replaced the list with its
+        # truncation-marker string; normalize SHAPE once, at the binding.
+        violations = _structured_items(resource_check.get("violations", []))
         offending = resource_check.get("offending_config", {})
         violating_fields = ", ".join(v.get("loc", "?") for v in violations) or "unknown"
         print("Schema violation — this attempt does NOT count as a round.")
@@ -401,7 +441,9 @@ def run_admission_preflight(
         # aggregate and feed it back to the next Proposer
         # iteration as a [PHYSICAL REJECTION] string.
         # See docs/phase66_ws_b_proposer_hardening.md §2.3.
-        _killer = resource_check.get("memory_killer") or {}
+        # F-SCANB-2 — the union's str member (the worker's truncation
+        # marker) must map to "no structure", exactly like None/absent.
+        _killer = _structured_mapping(resource_check.get("memory_killer"))
         _binding = _killer.get("binding_cap", "vram")
         _dom_bytes = _killer.get("dominant_layer_bytes") or 0
         _attempt_snapshot = {

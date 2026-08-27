@@ -34,6 +34,8 @@ import os
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from core.execution_calibration import MalformedCeilingOverride
+
 #: Exact, 1024-based. Named so no call site has to remember which it is.
 BYTES_PER_KIB = 1024
 BYTES_PER_MIB = 1024**2
@@ -77,6 +79,24 @@ def host_quota_gib() -> float | None:
 
     Undeclared means unknown, not unlimited: callers must not treat None
     as headroom.
+
+    F-SCANG-3: a value that is SET but unusable — non-numeric, zero, or
+    negative — is REFUSED via :class:`MalformedCeilingOverride` instead of
+    silently resolving to "undeclared". The silent shape let a typo'd
+    quota vanish, so every admission decision ran as if the host had
+    never declared one, with no diagnostic anywhere. There is no
+    0-disables semantics here (unlike ``SIDERIUS_SUBPROCESS_RSS_GB``):
+    unset the variable to mean undeclared.
+
+    An EMPTY string ("") still behaves as unset — a deliberate,
+    preserved-behavior DIVERGENCE from ``SIDERIUS_SUBPROCESS_RSS_GB``,
+    which refuses "". An empty value is the shell-wrapper pass-through
+    pattern (``VAR="${VAR:-}"``), not a typo'd number; the class this
+    refusal repairs is silently-consumed TYPOS.
+
+    Raises:
+        MalformedCeilingOverride: the variable is set to a non-numeric
+            or non-positive value.
     """
     raw = os.environ.get(HOST_VRAM_QUOTA_MIB_ENV)
     if not raw:
@@ -84,8 +104,20 @@ def host_quota_gib() -> float | None:
     try:
         mib = float(raw)
     except ValueError:
-        return None
-    return gib_from_mib(mib) if mib > 0 else None
+        raise MalformedCeilingOverride(
+            f"{HOST_VRAM_QUOTA_MIB_ENV}={raw!r} is not a number of MiB. "
+            f"Set a positive number of MiB, or unset it to mean "
+            f"undeclared. It is NOT ignored: a silently-ignored override "
+            f"is how a run comes to execute under limits nobody chose."
+        ) from None
+    if mib <= 0:
+        raise MalformedCeilingOverride(
+            f"{HOST_VRAM_QUOTA_MIB_ENV}={raw!r} is not positive. There is "
+            f"NO 0-disables semantics for this variable (unlike "
+            f"SIDERIUS_SUBPROCESS_RSS_GB); unset it to mean "
+            f"undeclared/default."
+        )
+    return gib_from_mib(mib)
 
 
 def pair_ceiling_gib() -> float:
@@ -94,16 +126,51 @@ def pair_ceiling_gib() -> float:
     The operator ceiling stands unless the deployment declares a quota
     that is tighter still, in which case the quota wins — a ceiling above
     the enforced limit would be no ceiling at all.
+
+    F-SCANG-3: an override that is SET but unusable — non-numeric, zero,
+    or negative — is REFUSED via :class:`MalformedCeilingOverride`. The
+    silent shape was the named incident: a typo'd value silently capped
+    the arm at :data:`DEFAULT_PAIR_CEILING_GIB` (28.0 — the operator
+    default calibrated on the lilab RTX 5090 host) with no diagnostic —
+    no log line, no lock entry, no preflight row.
+    There is no 0-disables semantics here (unlike
+    ``SIDERIUS_SUBPROCESS_RSS_GB``): unset the variable to use the
+    operator default.
+
+    An EMPTY string ("") still behaves as unset — a deliberate,
+    preserved-behavior DIVERGENCE from ``SIDERIUS_SUBPROCESS_RSS_GB``,
+    which refuses "". An empty value is the shell-wrapper pass-through
+    pattern (``VAR="${VAR:-}"``), not a typo'd number; the class this
+    refusal repairs is silently-consumed TYPOS.
+
+    Raises:
+        MalformedCeilingOverride: this variable — or, transitively,
+            ``SIDERIUS_GPU_VRAM_QUOTA_MIB`` via :func:`host_quota_gib` —
+            is set to a non-numeric or non-positive value.
     """
     ceiling = DEFAULT_PAIR_CEILING_GIB
     raw = os.environ.get(PAIR_CEILING_GIB_ENV)
     if raw:
         try:
             configured = float(raw)
-            if configured > 0:
-                ceiling = configured
         except ValueError:
-            pass
+            raise MalformedCeilingOverride(
+                f"{PAIR_CEILING_GIB_ENV}={raw!r} is not a number of GiB. "
+                f"Set a positive number of GiB, or unset it to use the "
+                f"operator default ({DEFAULT_PAIR_CEILING_GIB} GiB). It "
+                f"is NOT ignored: before this refusal, a typo here "
+                f"silently capped the arm at the "
+                f"{DEFAULT_PAIR_CEILING_GIB} GiB default with no "
+                f"diagnostic."
+            ) from None
+        if configured <= 0:
+            raise MalformedCeilingOverride(
+                f"{PAIR_CEILING_GIB_ENV}={raw!r} is not positive. There "
+                f"is NO 0-disables semantics for this variable (unlike "
+                f"SIDERIUS_SUBPROCESS_RSS_GB); unset it to use the "
+                f"operator default ({DEFAULT_PAIR_CEILING_GIB} GiB)."
+            )
+        ceiling = configured
     quota = host_quota_gib()
     return min(ceiling, quota) if quota is not None else ceiling
 

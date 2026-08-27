@@ -30,21 +30,38 @@ wall-time budget the launch already carries
 (``--trial/--formal_time_budget_minutes``); qualification runs under that
 bound until it measures real values and writes the overlay.
 
+A THIRD state exists beside those two layers (**F-H100-WD-1-PRETAG**,
+operator-ruled Route B): a run may DECLARE a :class:`RequiredProfileBinding`
+— the ``<gpu_slug>/<regime>`` key it requires plus the sha256 of the
+measured-overlay file certified for it. A declared binding FAILS CLOSED:
+wrong hardware/regime, a missing or divergent overlay, or a verified
+overlay lacking the required row all raise
+:class:`RequiredProfileBindingError` instead of falling back — the run does
+not start. UNDECLARED (``required_binding=None``) keeps the legacy
+fail-open-to-outer-budget behavior above byte-identical. The binding is the
+MECHANISM only; campaign values (H100 rows, measured numbers) are post-tag
+qualification data recorded in the overlay, never shipped here.
+
 Explicit operator flags always override the profile — an override is a
 recorded launch decision, not a hidden fallback. Device identity comes from
 the existing authority, ``core.hardware_context.discover()`` (CPU fallback
-included), never from a parallel probe.
+included), never from a parallel probe. A declared REQUIRED binding is the
+one exception: combining it with an explicit enablement flag is a
+contradiction (the flag would bypass the very resolution the binding
+certifies) and refuses loudly — see
+:func:`resolve_watchdog_launch_settings`.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from agent.skills.evaluate_time_skill.calibration import calibration_dir, gpu_slug
 
@@ -66,6 +83,65 @@ class MalformedRuntimeProfile(ValueError):
     The execution-calibration precedent: a malformed override must never be
     silently ignored, because the operator believes it is in force.
     """
+
+
+class RequiredProfileBindingError(ValueError):
+    """A run DECLARED a required runtime profile and it cannot be certified.
+
+    The fail-CLOSED counterpart of the honest UNCALIBRATED state
+    (**F-H100-WD-1-PRETAG**, operator-ruled Route B). UNCALIBRATED fails
+    open on purpose — watchdog off, the outer wall-time budgets bound the
+    run — which is the right posture for exploratory work and exactly the
+    wrong one for a formal campaign that certified its numbers: there, a
+    missing or divergent overlay must STOP the launch, never degrade it
+    silently. Raised when the discovered ``(device, regime)`` is not the
+    declared one, when the bound overlay is missing or does not hash to the
+    declared sha256, or when the verified overlay lacks the required row.
+    The run does not start. The declared digest comes from a prior
+    qualification run's recorded provenance (e.g. the overlay sha captured
+    on the qualified host), so certification is against evidence, never
+    memory.
+    """
+
+
+class RequiredProfileBinding(BaseModel):
+    """A declared, certifiable identity for the profile a run REQUIRES.
+
+    The ``core/execution_calibration.py`` precedent: a declared value
+    carries machine-readable provenance and is REFUSED when it cannot be
+    honored — never silently substituted. Here the declaration is the pair
+    (which profile, which exact overlay bytes): the launch layer states
+    both up front, and resolution certifies both or raises
+    :class:`RequiredProfileBindingError`.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    profile_key: str = Field(
+        min_length=3,
+        description="The declared profile identity, '<gpu_slug>/<regime>' "
+        "exactly as _profile_key produces (e.g. copied from a prior "
+        "qualification run's recorded provenance). Resolution refuses when "
+        "the DISCOVERED pair differs — wrong hardware or regime is a "
+        "refusal, not a fallback.",
+    )
+    expected_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$",
+        description="sha256 hex digest of the measured-overlay FILE bytes "
+        "certified for this run. Hashed over the exact bytes parsed "
+        "(single read, never re-opened), so the profile consumed is "
+        "provably the one the operator qualified.",
+    )
+
+    @field_validator("profile_key")
+    @classmethod
+    def _profile_key_is_slug_slash_regime(cls, value: str) -> str:
+        if "/" not in value:
+            raise ValueError(
+                f"profile_key {value!r} is not of the form '<gpu_slug>/<regime>' "
+                f"(the exact shape _profile_key produces)"
+            )
+        return value
 
 
 class _ProfileEntry(BaseModel):
@@ -97,7 +173,7 @@ class RuntimeProfile(BaseModel):
     watchdog_floor_seconds: float = _LEGACY_FLOOR_SECONDS
     provenance: str = Field(
         description="Where these values came from: 'shipped:<key>', "
-        "'measured:<path>', or 'uncalibrated'."
+        "'measured:<path>', 'bound:<path>#sha256=<hex>', or 'uncalibrated'."
     )
 
 
@@ -175,19 +251,115 @@ def _load_measured(device_name: str) -> dict[str, Any]:
     return profiles
 
 
+def _load_bound_overlay(path: str, binding: RequiredProfileBinding) -> tuple[dict[str, Any], str]:
+    """Read, certify and parse a REQUIRED overlay from ONE read of the file.
+
+    TOCTOU-safe by construction (operator rule: hash THE EXACT BYTES
+    PARSED): the file is read exactly once with ``Path.read_bytes``; the
+    sha256 is computed over that bytes object and ``json.loads`` parses the
+    SAME object — never a re-open, so no window exists in which a swapped
+    file is hashed as one content and parsed as another.
+
+    Returns:
+        ``(profiles mapping, sha256 hexdigest of the verified bytes)``.
+
+    Raises:
+        RequiredProfileBindingError: the file is missing/unreadable, or its
+            digest is not ``binding.expected_sha256`` (both digests named).
+        MalformedRuntimeProfile: the VERIFIED bytes do not parse or lack the
+            'profiles:' mapping (mirrors ``_load_measured``).
+    """
+    try:
+        data = Path(path).read_bytes()
+    except FileNotFoundError:
+        raise RequiredProfileBindingError(
+            f"required runtime-profile binding {binding.profile_key!r} cannot be "
+            f"certified: the measured overlay at {path} does not exist. A REQUIRED "
+            f"binding never falls back to shipped or uncalibrated — the run does "
+            f"not start."
+        ) from None
+    except OSError as exc:
+        raise RequiredProfileBindingError(
+            f"required runtime-profile binding {binding.profile_key!r} cannot be "
+            f"certified: the measured overlay at {path} is unreadable: {exc}"
+        ) from exc
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != binding.expected_sha256:
+        raise RequiredProfileBindingError(
+            f"required runtime-profile binding {binding.profile_key!r} cannot be "
+            f"certified: the overlay at {path} hashes to sha256={digest}, but the "
+            f"binding declares sha256={binding.expected_sha256}. The file is not "
+            f"the one that was certified — refuse, never resolve from it."
+        )
+    try:
+        raw = json.loads(data)
+    except json.JSONDecodeError as exc:
+        raise MalformedRuntimeProfile(
+            f"measured runtime-profile overlay at {path} does not parse: {exc}. "
+            "Fix or remove it — a malformed overlay is never silently ignored."
+        ) from exc
+    profiles = raw.get("profiles")
+    if not isinstance(profiles, dict):
+        raise MalformedRuntimeProfile(
+            f"measured runtime-profile overlay at {path} must carry a "
+            f"'profiles:' mapping; got {type(profiles).__name__}."
+        )
+    return profiles, digest
+
+
 def _profile_key(device_name: str, execution_regime: str) -> str:
     return f"{gpu_slug(device_name)}/{execution_regime}"
 
 
-def resolve_runtime_profile(device_name: str, execution_regime: str) -> RuntimeProfile:
+def resolve_runtime_profile(
+    device_name: str,
+    execution_regime: str,
+    *,
+    required_binding: RequiredProfileBinding | None = None,
+) -> RuntimeProfile:
     """The ONE resolution: measured overlay > shipped defaults > UNCALIBRATED.
 
     Precedence mirrors the execution-calibration two-layer rule: a value
     measured ON THIS MACHINE outranks the shipped default; an unknown pair
     resolves to the explicit uncalibrated profile rather than any invented
     or borrowed number.
+
+    With ``required_binding`` DECLARED the ladder is replaced by fail-closed
+    certification (**F-H100-WD-1-PRETAG**): the discovered
+    ``<gpu_slug>/<regime>`` key must equal the declared one, the measured
+    overlay must hash to the declared sha256 (single read — the exact bytes
+    parsed), and the verified overlay must carry the required row. Any miss
+    raises :class:`RequiredProfileBindingError`; there is no fall-through
+    to shipped or uncalibrated. ``required_binding=None`` keeps the ladder
+    above byte-identical.
     """
     key = _profile_key(device_name, execution_regime)
+
+    if required_binding is not None:
+        if key != required_binding.profile_key:
+            raise RequiredProfileBindingError(
+                f"required runtime-profile binding declares "
+                f"{required_binding.profile_key!r}, but this launch discovered "
+                f"{key!r} (device={device_name!r}, regime={execution_regime!r}). "
+                f"Wrong hardware or regime is a refusal, not a fallback."
+            )
+        path = _measured_overlay_path(device_name)
+        profiles, digest = _load_bound_overlay(path, required_binding)
+        if key not in profiles:
+            raise RequiredProfileBindingError(
+                f"required runtime-profile binding {key!r} cannot be certified: "
+                f"the verified overlay at {path} (sha256={digest}) does not carry "
+                f"that row. A verified overlay LACKING the required profile "
+                f"refuses — it never falls through to shipped or uncalibrated."
+            )
+        entry = _validate_entry(profiles[key], key=key, source=path)
+        return RuntimeProfile(
+            device_name=device_name,
+            execution_regime=execution_regime,
+            calibrated=True,
+            provenance=f"bound:{path}#sha256={digest}",
+            **entry.model_dump(),
+        )
 
     measured = _load_measured(device_name)
     if key in measured:
@@ -230,6 +402,7 @@ def resolve_watchdog_launch_settings(
     cli_floor_seconds: float | None,
     execution_regime: str,
     device_name: str | None = None,
+    required_binding: RequiredProfileBinding | None = None,
 ) -> ResolvedWatchdogSettings:
     """Merge operator flags with the device profile — flags always win.
 
@@ -246,9 +419,30 @@ def resolve_watchdog_launch_settings(
     60.0), so the only behavioral delta anywhere is a bare launch on a pair
     that HAS a calibrated profile.
 
+    REQUIRED BINDING (``required_binding`` declared, **F-H100-WD-1-PRETAG**):
+    PROFILE MODE resolves through the fail-closed certification in
+    :func:`resolve_runtime_profile` — e.g. a formal campaign pinning the
+    overlay sha captured on its qualification host. Combining a binding
+    with an explicit
+    enablement flag REFUSES loudly: OPERATOR MODE never consults the
+    profile, so a declared REQUIRED binding would be silently unenforced —
+    exactly the fail-open this mechanism removes. Field-level
+    ``cli_safety_factor``/``cli_floor_seconds`` overrides in PROFILE MODE
+    remain legal: the binding governs WHICH profile is consumed, not the
+    recorded per-field launch overrides.
+
     ``device_name=None`` probes through ``core.hardware_context.discover()``
     (the existing identity authority; CPU fallback built in).
     """
+    if required_binding is not None and cli_enabled is not None:
+        raise RequiredProfileBindingError(
+            f"a required runtime-profile binding ({required_binding.profile_key!r}) "
+            f"was declared together with an explicit watchdog enablement flag "
+            f"(cli_enabled={cli_enabled!r}). OPERATOR MODE bypasses profile "
+            f"resolution entirely, so the declared requirement would be silently "
+            f"unenforced — drop the enablement flag (field-level factor/floor "
+            f"overrides stay legal in PROFILE MODE) or drop the binding."
+        )
     if cli_enabled is not None:
         return ResolvedWatchdogSettings(
             enabled=cli_enabled,
@@ -264,7 +458,9 @@ def resolve_watchdog_launch_settings(
 
         device_name = discover().device_name
 
-    profile = resolve_runtime_profile(device_name, execution_regime)
+    profile = resolve_runtime_profile(
+        device_name, execution_regime, required_binding=required_binding
+    )
     return ResolvedWatchdogSettings(
         enabled=profile.watchdog_enabled,
         safety_factor=(

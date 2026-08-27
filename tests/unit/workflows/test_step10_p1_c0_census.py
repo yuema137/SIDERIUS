@@ -658,7 +658,17 @@ class TestCensusDLegacyLockKeySet:
         R2), and ``baseline_isolation`` (the WITHOUT arm's explicit behaviour
         flag; a toggle on one workspace is a different experiment). All four
         are omitted-at-default in the serialized lock, so every legacy lock
-        file stays byte-identical."""
+        file stays byte-identical.
+
+        DECLARED DELTA (F-SCANH-1, wave2 R1; the census fired again —
+        working as designed): ``task_config_sha256`` joined — the sha256 of
+        the raw ``configs/task_config.yaml`` bytes an UN-COMPOSED run's
+        prompt surfaces read. It was the ONE tracked config the lock did
+        not pin, and ``_snapshot_task_config`` is first-writer-wins, so a
+        mid-workspace operator edit reached the LLM with no refusal.
+        ``None`` for composed runs (identity = the fingerprint) and legacy
+        locks; omitted-at-``None`` in the serialized lock, so those bytes
+        are unchanged."""
         from core.run_invariants import RunInvariants
 
         assert RunInvariants._CANONICAL == (
@@ -673,6 +683,8 @@ class TestCensusDLegacyLockKeySet:
             "runtime_estimator_identity",
             "runtime_policy_identity",
             "task_composition_fingerprint",
+            # F-SCANH-1 — the declared delta documented above.
+            "task_config_sha256",
             # arXiv U1/U3 — the declared delta documented above.
             "lit_review_enabled",
             "lit_review_config_sha256",

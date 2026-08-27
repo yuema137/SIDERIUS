@@ -121,7 +121,8 @@
       ],
       "runtime_estimator_identity": "runtime_estimator@1.0.0+7b74a26d6843",
       "runtime_policy_identity": "runtime_decision_policy@1.0.0+78bba7be3a2b",
-      "structured_health_feedback_enabled": false
+      "structured_health_feedback_enabled": false,
+      "task_config_sha256": "51cfe9c869a2ae09e4858bafa0bcb13d6d6f5451b73ffb69ce5c155a164eb7f1"
     }
   },
   "node_calls": {

@@ -419,14 +419,21 @@ class TestCapacityAttribution:
         monkeypatch.setenv(VRAM_QUOTA_ENV, "20")
         assert vram_attribution_threshold_gb(31.34) == 20.0
 
-    def test_a_malformed_quota_falls_back_rather_than_crashing(self, tmp_path, monkeypatch):
+    def test_a_malformed_quota_refuses_rather_than_falling_back(self, tmp_path, monkeypatch):
+        """F-SCANG-3 UPGRADE: this test formerly PINNED the silent
+        fallback (typo -> device-fraction bound, no diagnostic).
+        Set-but-unusable now refuses via MalformedCeilingOverride, the
+        same contract SIDERIUS_SUBPROCESS_RSS_GB already carries; the
+        full refusal matrix lives in test_scang3_env_override_refusal.py."""
+        from core.execution_calibration import MalformedCeilingOverride
         from core.runtime_control.probe_subprocess import (
             VRAM_QUOTA_ENV,
             vram_attribution_threshold_gb,
         )
 
         monkeypatch.setenv(VRAM_QUOTA_ENV, "not-a-number")
-        assert vram_attribution_threshold_gb(10.0) == pytest.approx(9.0)
+        with pytest.raises(MalformedCeilingOverride, match=VRAM_QUOTA_ENV):
+            vram_attribution_threshold_gb(10.0)
 
     def test_capacity_evidence_still_requires_candidate_work(self, tmp_path):
         """Holding VRAM at start-up, before any phase, proves nothing."""

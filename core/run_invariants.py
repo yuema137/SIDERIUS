@@ -160,6 +160,22 @@ class RunInvariants(BaseModel):
     # from the serialized lock when None (see `write_run_invariants`), so a
     # legacy lock file stays byte-identical to its pre-P1 form.
     task_composition_fingerprint: str | None = None
+    # F-SCANH-1 — sha256 of the raw bytes of the task-config FILE an
+    # UN-COMPOSED run reads (``configs/task_config.yaml``, the source of the
+    # prompt surfaces' TASK_DESCRIPTION / FORWARD_CONTRACT). It was the ONE
+    # tracked config the lock did not pin: `_snapshot_task_config` is
+    # first-writer-wins, so an iteration-2+ edit reached the LLM with no
+    # snapshot and no refusal. `None` means either (a) a COMPOSED run — the
+    # file is unread, the task identity is owned by
+    # `task_composition_fingerprint`, and pinning an unread config is
+    # exactly what the lit-review sha validator refuses — or (b) a legacy
+    # lock, where the default exists only to PARSE; a legacy lock meeting a
+    # pinning build REFUSES via the ordinary canonical comparison (the 12a
+    # composition-fingerprint precedent: intended, no compatibility bypass).
+    # The key is OMITTED from the serialized lock when None (see
+    # `write_run_invariants`), so composed and legacy locks stay
+    # byte-identical.
+    task_config_sha256: str | None = None
     # arXiv U1 (#253 / #254) — the run's WORKFLOW TOPOLOGY and its
     # EXPERIMENT ARM. All three are CANONICAL: two workspaces that differ
     # in whether the literature-review node ran, in WHICH lit-review config
@@ -247,6 +263,11 @@ class RunInvariants(BaseModel):
         "runtime_estimator_identity",
         "runtime_policy_identity",
         "task_composition_fingerprint",
+        # F-SCANH-1 — the un-composed task-config pin is COMPARED (supervisor
+        # ruling; never `_PROVENANCE`): an operator edit to
+        # configs/task_config.yaml mid-workspace changes what the LLM reads
+        # and must refuse the resume.
+        "task_config_sha256",
         # arXiv U1 — topology + arm are compared, never interpreted.
         "lit_review_enabled",
         "lit_review_config_sha256",
@@ -391,6 +412,12 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
     # composed with nothing. Pydantic's default makes it parse back to None.
     if payload.get("task_composition_fingerprint") is None:
         payload.pop("task_composition_fingerprint", None)
+    # F-SCANH-1 — same rule for the task-config pin: a COMPOSED run reads no
+    # task-config file (its identity is the composition fingerprint above)
+    # and a legacy lock predates the pin, so the key is ABSENT rather than
+    # `null` and both lock forms keep their prior bytes.
+    if payload.get("task_config_sha256") is None:
+        payload.pop("task_config_sha256", None)
     # arXiv U1 — same rule for the topology + arm keys: an unlabelled,
     # lit-review-OFF run (every run that predates them) writes none of the
     # three, so its lock is byte-identical to its pre-U1 form and parses
@@ -582,6 +609,13 @@ def build_run_invariants(
     read. Workflow startup and the standalone tuner both call this — never
     duplicate the normalization/hashing logic at a call site.
 
+    F-SCANH-1: an UN-COMPOSED run (``task_composition_fingerprint is
+    None``) also pins the task-config FILE its prompt surfaces read —
+    ``workflows.task_config.task_config_file_sha256()``, the loader's own
+    resolution — so an operator edit mid-workspace refuses the resume. A
+    composed run pins ``None``: its task config is bound, not read from
+    this file, and its identity is the fingerprint.
+
     Args:
         resolved_data_scope: Already-resolved sorted file indices (the
             caller runs its scope validation — e.g.
@@ -646,6 +680,17 @@ def build_run_invariants(
         )
     else:
         effective_path, sha = None, None
+    # F-SCANH-1 — pin the task-config FILE an un-composed run reads. The
+    # deferred function-scope import matches the module's convention above
+    # (the lock primitives stay importable without the workflows package).
+    # A composed run reads no file — its identity is the fingerprint — so
+    # it pins None and its lock bytes are unchanged.
+    if task_composition_fingerprint is None:
+        from workflows.task_config import task_config_file_sha256
+
+        task_config_sha: str | None = task_config_file_sha256()
+    else:
+        task_config_sha = None
     return (
         RunInvariants(
             resolved_data_scope=list(resolved_data_scope),
@@ -666,6 +711,10 @@ def build_run_invariants(
             # runner, standalone tuner) locks the same identities — the
             # builder is the one shared path by contract.
             task_composition_fingerprint=task_composition_fingerprint,
+            # F-SCANH-1 — computed above from the mode, never a parameter:
+            # the builder is the one shared path, so every un-composed
+            # entry point pins the same file the same way.
+            task_config_sha256=task_config_sha,
             # arXiv U1 — CANONICAL, so threaded explicitly by every caller
             # (a compared value must never arrive ambiently); the defaults
             # are the legacy state the documented default caller

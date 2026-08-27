@@ -12,6 +12,9 @@ Public API:
   * :func:`load_task_config` — read and validate the YAML; fail-fast on a
     missing file, an empty ``task_description``, or a typo in any
     ``forward_contract`` key.
+  * :func:`task_config_file_sha256` — sha256 of the raw file bytes, the
+    run-invariants lock pin of the config the prompt surfaces read
+    (F-SCANH-1).
   * :func:`render_forward_contract` — render a populated
     :class:`~agent.schemas.task_config.ForwardContract` into the multi-line
     block that gets substituted into the ``{FORWARD_CONTRACT}`` placeholder.
@@ -26,6 +29,7 @@ tripping through the filesystem.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -268,6 +272,42 @@ def load_task_config(path: str | None = None) -> dict[str, Any]:
     config["forward_contract"] = contract.model_dump(mode="json")
     _CACHE[resolved] = config
     return config
+
+
+def task_config_file_sha256(path: str | None = None) -> str:
+    """sha256 hexdigest of the raw bytes of the task-config FILE.
+
+    F-SCANH-1 — this is the run-invariants lock pin of the file the prompt
+    surfaces read through :func:`load_task_config`: an operator edit to
+    ``configs/task_config.yaml`` mid-workspace changes what the LLM reads,
+    and the lock comparison over this digest is what refuses the resume.
+    A COMPOSED run never calls it — its task config arrives via
+    :func:`bind_task_config` and its identity is owned by the lock's
+    ``task_composition_fingerprint``.
+
+    Resolution mirrors :func:`load_task_config` exactly
+    (``os.path.abspath(path or _DEFAULT_CONFIG_PATH)``). The digest is
+    computed over the raw file bytes on EVERY call — deliberately no
+    caching, because the lock pin must see fresh bytes at every startup;
+    the loader's parse cache is a separate concern (it serves parsed
+    values, not file identity).
+
+    Args:
+        path: Optional override for the YAML location, resolved exactly as
+            the loader resolves it. Production omits it.
+
+    Returns:
+        sha256 hexdigest of the file bytes.
+
+    Raises:
+        FileNotFoundError: When the file does not exist on disk, carrying
+            the same operator-facing remediation text as the loader.
+    """
+    resolved = os.path.abspath(path or _DEFAULT_CONFIG_PATH)
+    if not os.path.isfile(resolved):
+        raise FileNotFoundError(_MISSING_FILE_REMEDIATION.format(path=path or _DEFAULT_CONFIG_PATH))
+    with open(resolved, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
 
 
 def run_bound_model_io_contract(path: str | None = None) -> ModelIOContract | None:
