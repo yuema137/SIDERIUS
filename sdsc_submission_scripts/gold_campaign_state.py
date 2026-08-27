@@ -16,8 +16,12 @@ existing verifiers:
       section 1: ``status == "success"``, ``is_trial`` ABSENT or ``False``
       (the persisted record always carries the materialized default —
       see ``_is_formal_role``; #316 B2),
-      ``is_valid_candidate(record)`` (the ONE eligibility authority,
-      ``execute_tools/health_checks/candidate_eligibility.py``), maximal
+      HealthGate-valid under the WORKSPACE'S OWN pinned effective config
+      (``pinned_workspace_gate_ids`` + ``classify_under_pinned_policy``,
+      the ONE eligibility authority,
+      ``execute_tools/health_checks/candidate_eligibility.py``; the
+      repo-current shipped config is never consulted and an
+      unestablished roster is UNKNOWN, never a pass), maximal
       ``denoising_score`` under ``MetricOrder`` (direction from the run's
       stamped ``metric_spec`` — NEVER assumed; a score-bearing formal
       candidate without a stamped spec is a NAMED refusal, Step-09a rule);
@@ -79,7 +83,11 @@ from execute_tools.evaluation_metric import (  # noqa: E402
     MetricSpec,
     metric_spec_from_declaration,
 )
-from execute_tools.health_checks.candidate_eligibility import is_valid_candidate  # noqa: E402
+from execute_tools.health_checks.candidate_eligibility import (  # noqa: E402
+    CandidateHealthValidity,
+    classify_under_pinned_policy,
+    pinned_workspace_gate_ids,
+)
 from execute_tools.metric_order import MetricOrder  # noqa: E402
 
 
@@ -221,7 +229,22 @@ def _scan_formal_candidates(
     score but its run output has NO stamped ``metric_spec`` (direction
     would have to be assumed), or when two outputs disagree on the metric
     identity or direction (their scalars are not one comparison).
+
+    **F-4 — validity is judged against THIS RUN'S pinned policy.** Eligibility
+    used to be asked as ``is_valid_candidate(rec)``, whose zero-argument
+    default resolves the REPO-CURRENT ``configs/health_checks.yaml`` and
+    collapses UNKNOWN to the empty set on the way. A record whose own run
+    declared a different roster was therefore judged against a roster it never
+    ran: a record whose run-declared blocking gate FAILED came back valid,
+    because the repo-current gates it happened to also carry all passed. That
+    boolean is the band incumbent, the FCNet+2 stop input and
+    ``healthgate_valid`` in Stage-2's ``COMPLETE.json``.
     """
+    # The workspace's OWN pinned effective config, exactly as
+    # `stage3_composed_best.select_band_winner` resolves it. `None` is
+    # UNKNOWN — a run that materialized no effective config — and
+    # `classify_under_pinned_policy` is what may never turn that into a pass.
+    required_gate_ids = pinned_workspace_gate_ids(workspace)
     counts = ScanCounts()
     candidates: list[FormalCandidate] = []
     spec_seen: MetricSpec | None = None
@@ -259,7 +282,10 @@ def _scan_formal_candidates(
                     counts.nonfinite_scores += 1
                     continue
                 counts.formal_success += 1
-                valid = bool(is_valid_candidate(rec))
+                valid = (
+                    classify_under_pinned_policy(rec, required_gate_ids)
+                    is CandidateHealthValidity.VALID
+                )
                 if valid:
                     counts.healthgate_valid += 1
                 if require_valid and not valid:

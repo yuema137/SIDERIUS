@@ -16,9 +16,10 @@ producer, and it enforces its side of the rule structurally:
   named :class:`TerminalNamespaceViolationError` before any side effect;
 - a champion without HealthGate-valid provenance is refused by name
   (:class:`InvalidChampionError`) through the ONE eligibility authority,
-  ``is_valid_candidate`` (``execute_tools/health_checks/
-  candidate_eligibility.py``) — a numerically excellent invalid champion
-  must NOT be terminal-evaluated as a success;
+  ``classify_under_pinned_policy`` (``execute_tools/health_checks/
+  candidate_eligibility.py``), against the gate set the champion's OWN
+  workspace pinned — a numerically excellent invalid champion must NOT be
+  terminal-evaluated as a success, and neither must an UNKNOWN one;
 - the read-closure guard (:func:`audit_terminal_read_closure` /
   :func:`assert_terminal_read_closure`) enumerates the input roots of
   every search-side consumer per the contract's enumerated-roots clause
@@ -65,7 +66,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from execute_tools.build_anchor_map import default_anchor_map_path
 from execute_tools.evaluation_metric import MetricSpec, MetricSpecField
-from execute_tools.health_checks.candidate_eligibility import is_valid_candidate
+from execute_tools.health_checks.candidate_eligibility import (
+    CandidateHealthValidity,
+    classify_under_pinned_policy,
+    pinned_workspace_gate_ids,
+)
 
 # ---------------------------------------------------------------------------
 # Frozen contract constants
@@ -210,7 +215,8 @@ class TerminalChampion(BaseModel):
 
     ``provenance_records`` are the persisted ``ExperimentRecord`` dicts
     backing the champion (one per contributing winner/unit). Eligibility is
-    decided by the ONE authority ``is_valid_candidate``; an empty list is
+    decided by the ONE authority in
+    ``execute_tools/health_checks/candidate_eligibility.py``; an empty list is
     "without HealthGate-valid provenance" and is refused by name.
     """
 
@@ -219,6 +225,16 @@ class TerminalChampion(BaseModel):
     identity: ChampionIdentity
     deliverable_dirs: list[str] = Field(min_length=1)
     provenance_records: list[dict[str, Any]] = Field(default_factory=list)
+    #: The run workspace whose PINNED ``health_checks_effective.yaml`` governs
+    #: every record in ``provenance_records`` (F-4). Required, and required
+    #: rather than defaulted because the value it would default to — the
+    #: repo-current shipped config — is a DIFFERENT run's policy, and judging
+    #: a record against a roster its run never declared is the defect this
+    #: field exists to make unstatable. Whoever assembles the champion knows
+    #: which workspace produced its provenance; this module must not guess.
+    #: A champion pooling records from runs with DIFFERENT Health declarations
+    #: is not expressible here and must not be assembled.
+    provenance_workspace: Path
     #: The champion's RECONCILED 09a metric stamp (local-gate Step-09a
     #: ruling, 2026-08-26): stamped by whoever assembles the champion from
     #: the winner's persisted outputs, TRANSPORTED here, and never derived
@@ -231,10 +247,20 @@ class TerminalChampion(BaseModel):
 def require_healthgate_valid(champion: TerminalChampion) -> None:
     """Refuse a champion without HealthGate-valid provenance, by name.
 
-    Every provenance record must satisfy ``is_valid_candidate`` (the ONE
-    eligibility authority, called exactly as the contract writes it —
-    never re-implemented from gate fields). UNKNOWN is not valid: a record
-    whose gates are absent or not established is a refusal, not a pass.
+    Every provenance record must classify VALID under the ONE eligibility
+    authority (called exactly as the contract writes it — never
+    re-implemented from gate fields). UNKNOWN is not valid: a record whose
+    gates are absent or not established is a refusal, not a pass.
+
+    **F-4 — the gate set comes from the champion's OWN pinned effective
+    config**, resolved by ``pinned_workspace_gate_ids`` exactly as
+    ``stage3_composed_best.select_band_winner`` resolves a band's. The
+    zero-argument default this used to take reads the REPO-CURRENT shipped
+    config, which belongs to no particular run, and collapses UNKNOWN to the
+    empty set — so a champion whose run-declared blocking gate FAILED could
+    be terminal-evaluated as a success. A workspace that pinned no roster is
+    UNKNOWN and refuses here, which is the same answer the docstring above
+    already promised.
 
     Raises:
         InvalidChampionError: naming the champion and the failing record.
@@ -247,15 +273,19 @@ def require_healthgate_valid(champion: TerminalChampion) -> None:
             "provenance records: without HealthGate-valid provenance it must not be "
             "terminal-evaluated."
         )
+    required_gate_ids = pinned_workspace_gate_ids(champion.provenance_workspace)
     for index, record in enumerate(champion.provenance_records):
-        if not is_valid_candidate(record):
+        validity = classify_under_pinned_policy(record, required_gate_ids)
+        if validity is not CandidateHealthValidity.VALID:
             record_exp_id = record.get("exp_id", "<missing exp_id>")
             raise InvalidChampionError(
                 f"champion {identity.exp_id!r} (model_type={identity.model_type!r}, "
                 f"iteration={identity.iteration}, arm={identity.experiment_arm!r}) is NOT "
                 f"HealthGate-valid: provenance record {index} (exp_id={record_exp_id!r}) "
-                "failed is_valid_candidate — a numerically excellent invalid champion "
-                "must not be terminal-evaluated as a success."
+                f"classified {validity.value!r} against the gate set pinned by "
+                f"{str(champion.provenance_workspace)!r} — a numerically excellent "
+                "invalid champion must not be terminal-evaluated as a success, and an "
+                "UNKNOWN one is a refusal rather than a pass."
             )
 
 
@@ -593,8 +623,11 @@ def run_terminal_eval(
             "record_exp_ids": [record.get("exp_id") for record in champion.provenance_records],
             "healthgate_valid": True,
             "eligibility_authority": (
-                "execute_tools.health_checks.candidate_eligibility.is_valid_candidate"
+                "execute_tools.health_checks.candidate_eligibility.classify_under_pinned_policy"
             ),
+            # WHICH policy that authority was asked about — the champion's own
+            # pinned effective config, not the repo-current shipped one.
+            "eligibility_policy_workspace": str(champion.provenance_workspace),
         },
     }
     score_payload = {

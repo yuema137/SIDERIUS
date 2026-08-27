@@ -151,12 +151,21 @@ class _ComposeStub:
 CHAMPION_SPEC = derive_tidmad_metric_spec(resolve_dataset_profile())
 
 
-def _champion(deliv: Path, records: list[dict[str, Any]] | None = None) -> TerminalChampion:
+def _champion(
+    deliv: Path,
+    records: list[dict[str, Any]] | None = None,
+    provenance_workspace: Path | None = None,
+) -> TerminalChampion:
     return TerminalChampion(
         identity=_identity(),
         deliverable_dirs=[str(deliv)],
         provenance_records=[_valid_record()] if records is None else records,
         metric_spec=CHAMPION_SPEC,
+        # The band workspace the deliverables came from — the run whose pinned
+        # effective HealthGate config governs the provenance records (F-4).
+        provenance_workspace=(
+            deliv.parents[1] if provenance_workspace is None else provenance_workspace
+        ),
     )
 
 
@@ -310,12 +319,115 @@ def test_invalid_champion_refused_by_name_before_any_effect(tmp_path: Path) -> N
     assert not terminal_namespace(ws).exists()
 
 
+def test_a_champion_failing_its_RUNS_OWN_blocking_gate_is_refused(tmp_path: Path) -> None:
+    """F-4 — the gate set comes from the champion's OWN pinned config.
+
+    The record below carries every gate the REPO-CURRENT shipped roster asks
+    for, all passing, PLUS the run's own declared blocking gate, failed. Asked
+    against the repo-current roster — which is what the zero-argument
+    ``is_valid_candidate(record)`` default resolves, collapsing UNKNOWN to the
+    empty set on the way — it is VALID and the champion is terminal-evaluated
+    as a success. Asked against the roster its own workspace PINNED, it is
+    INVALID.
+
+    Fails as: no refusal at all, i.e. a champion measured on a run whose own
+    blocking gate said no. That boolean is the same one Stage-2 records as
+    ``healthgate_valid`` and Strict Best's negative control trusts.
+    """
+    from execute_tools.health_checks.candidate_eligibility import (
+        pinned_workspace_gate_ids,
+        required_blocking_gate_ids,
+    )
+    from tests.helpers.health_task_config import write_pinned_effective_config
+
+    ws = _make_campaign_workspace(tmp_path)
+    deliv = _make_deliverables(ws)
+    band_ws = deliv.parents[1]
+
+    write_pinned_effective_config(band_ws, ["witness_run_declared_blocking"])
+    run_declared = pinned_workspace_gate_ids(band_ws) or frozenset()
+    repo_current = required_blocking_gate_ids()
+    # Vacuity guards: both rosters non-empty and DISJOINT, or a champion
+    # satisfying one would satisfy the other and this proves nothing.
+    assert run_declared, "the run's pinned roster is empty — the witness is vacuous"
+    assert repo_current, "shipped blocking-gate roster unexpectedly empty"
+    assert not (run_declared & repo_current), "the two rosters must not overlap"
+
+    def _gate(name: str, passed: bool) -> dict[str, Any]:
+        return {"gate_name": name, "execution_status": "passed", "check_passed": passed}
+
+    record = {
+        "status": "success",
+        "denoising_score": 9.99,
+        "exp_id": "exp_champ",
+        "health_gate_results": [
+            *(_gate(gate_id, True) for gate_id in sorted(repo_current)),
+            *(_gate(gate_id, False) for gate_id in sorted(run_declared)),
+        ],
+    }
+
+    stub = _ComposeStub()
+    with pytest.raises(InvalidChampionError, match="exp_champ"):
+        run_terminal_eval(
+            _champion(deliv, records=[record]),
+            ws,
+            compose_and_score_fn=stub,
+            anchor_map_path=_make_anchor(tmp_path),
+            repo_sha="x",
+        )
+    assert stub.calls == [], "an invalid champion must never reach the composer"
+    assert not terminal_namespace(ws).exists()
+
+
+def test_a_champion_passing_its_RUNS_OWN_blocking_gate_is_measured(tmp_path: Path) -> None:
+    """The same wiring from the other side, so the refusal above is not
+    merely "everything is refused now".
+
+    This record carries ONLY the run's own declared gate, passing, and NONE of
+    the repo-current ones. Under the repo-current roster it is UNKNOWN and
+    would be refused; under its own run's roster it is VALID and measured.
+    """
+    from tests.helpers.health_task_config import write_pinned_effective_config
+
+    ws = _make_campaign_workspace(tmp_path)
+    deliv = _make_deliverables(ws)
+    write_pinned_effective_config(deliv.parents[1], ["witness_run_declared_blocking"])
+
+    record = {
+        "status": "success",
+        "denoising_score": 6.1,
+        "exp_id": "exp_champ",
+        "health_gate_results": [
+            {
+                "gate_name": "witness_run_declared_blocking",
+                "execution_status": "passed",
+                "check_passed": True,
+            }
+        ],
+    }
+
+    stub = _ComposeStub()
+    result = run_terminal_eval(
+        _champion(deliv, records=[record]),
+        ws,
+        compose_and_score_fn=stub,
+        anchor_map_path=_make_anchor(tmp_path),
+        repo_sha="x",
+    )
+    assert len(stub.calls) == 1
+    assert len(result.file_vector) == 20
+
+
 def test_numerically_excellent_champion_without_gate_evidence_refused(tmp_path: Path) -> None:
     """The exact hazard the semantics freeze names: numerically excellent
     but not HealthGate-valid. A success record with a huge score and NO
     gate results is UNKNOWN to the ONE eligibility authority — refused,
-    never measured. Fails when: is_valid_candidate wiring is bypassed or
-    replaced by a score/status check."""
+    never measured. Fails when: the eligibility wiring is bypassed or
+    replaced by a score/status check.
+
+    Under F-4 it is also the UNKNOWN-policy case: this workspace pinned no
+    effective config, so the run's roster cannot be established, and an
+    unestablished roster is a refusal rather than a pass."""
     from execute_tools.health_checks.candidate_eligibility import required_blocking_gate_ids
 
     # Precondition (keeps this witness non-vacuous): the shipped config

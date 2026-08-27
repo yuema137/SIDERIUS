@@ -224,7 +224,10 @@ taken AFTER search freezes; the terminal number never feeds back into
 search. Everything it writes lives under the isolation namespace
 `{workspace_root}/stage3/terminal_eval/` (contract §3): output paths are
 validated against the namespace at construction, a champion without
-HealthGate-valid provenance is refused by name through `is_valid_candidate`,
+HealthGate-valid provenance is refused by name through
+`classify_under_pinned_policy` — against the gate set the champion's OWN
+workspace pinned, never the repo-current shipped config, and an
+unestablished roster is UNKNOWN and therefore a refusal —
 scoring goes through the shared `compose_and_score` exactly once, and the
 write path refuses band-shaped scalar fields. The module also ships the
 read-closure guard (`audit_terminal_read_closure` /
@@ -242,7 +245,10 @@ Flags (both required): `--champion_json` (a JSON file with the
 `TerminalChampion` shape — identity + `deliverable_dirs` +
 `provenance_records` + `metric_spec`, the champion's reconciled 09a stamp,
 required since the Step-09a gate ruling; a spec-less champion is a pre-09a
-shape and refuses at validation), `--workspace_root`. Refusals exit
+shape and refuses at validation — plus `provenance_workspace`, the run
+workspace whose pinned `health_checks_effective.yaml` governs every
+provenance record, required since F-4 because the value it would otherwise
+default to is a different run's policy), `--workspace_root`. Refusals exit
 non-zero with the named reason on stderr — a refusal must never look like
 a successful terminal measurement.
 

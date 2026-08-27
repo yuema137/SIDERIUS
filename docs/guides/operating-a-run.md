@@ -111,7 +111,10 @@ A run that stops early on a streak of failed rounds is doing so by design
 
 - The planner and reflector can use different models
   (`--reflect_provider` / `--reflect_model_id`) — roughly halves top-tier quota
-  use.
+  use. Each provider needs its OWN key in the environment: naming a reflect
+  provider whose key variable is unset refuses at construction rather than
+  building a client, because the OpenAI SDK's fallback would otherwise send
+  `OPENAI_API_KEY` to that provider's endpoint.
 - `llm_configs/*.json` route each stage to a chosen provider and model.
 - Trial rounds exist precisely so that formal-budget compute is spent on
   candidates that have already shown something.

@@ -17,6 +17,7 @@ import contextlib
 import hashlib
 import os
 import tempfile
+from pathlib import Path
 from typing import Any, Literal
 
 import yaml
@@ -27,6 +28,7 @@ from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks._composition import (
     DEFAULT_DISPOSITION_POLICY,
     LEGACY_DEFAULT_TASK_HEALTH_CONFIG,
+    SIDERIUS_ROOT,
     DispositionPolicy,
     HealthBindingState,
     TaskHealthBinding,
@@ -37,7 +39,13 @@ from execute_tools.health_checks._plugin_binding import ResolvedHealthPlugin
 from execute_tools.health_checks._task_health_config import TaskHealthConfig
 from execute_tools.health_checks.schemas import GateAction
 
-_DEFAULT_CONFIG_PATH: str = os.path.join("configs", "health_checks.yaml")
+# F-7: anchored to THIS checkout, not to the caller's working directory. See
+# `_composition.SIDERIUS_ROOT` for why (a campaign launched from outside the
+# repo root refused every band scan). This value is for RESOLUTION only —
+# what gets WRITTEN into a persisted artifact goes through `_record_path`,
+# which renders an in-repo config repo-relative so the artifact does not carry
+# the path of whichever checkout produced it.
+_DEFAULT_CONFIG_PATH: str = os.path.join(SIDERIUS_ROOT, "configs", "health_checks.yaml")
 
 # Basename of the per-workspace materialized effective config — the single
 # path every downstream loader reads once the run-level monitored-file
@@ -324,6 +332,29 @@ class HealthChecksConfig(BaseModel):
         ),
     )
 
+    task_health_binding: str | None = Field(
+        default=None,
+        # EXCLUDED from serialization for the same reason `health_policy` is,
+        # and additionally because `materialize_effective_config` writes this
+        # key itself from `body_markers`. Emitting it from the model too would
+        # put it in the document twice and move the pinned sha of every
+        # existing workspace for a change in nothing.
+        exclude=True,
+        description=(
+            "The binding state a MATERIALIZED effective config was composed "
+            "under, as written into its hashed body by "
+            "``_composition.body_markers``: ``legacy_default`` / "
+            "``explicit_none`` / ``explicit``.\n\n"
+            "``None`` means the document does not declare one — a framework "
+            "policy file, or a pre-08b hand-written YAML. Declared here so "
+            "the marker SURVIVES the load: it is the only thing that "
+            "distinguishes an EXPLICITLY EMPTY roster from an absent one, "
+            "and while it was dropped as an undeclared extra an "
+            "``explicit_none`` effective config read back as 'no roster "
+            "supplied' and acquired the legacy task's family (F-6)."
+        ),
+    )
+
     def resolved_policy(self) -> dict[str, DispositionPolicy]:
         """The policy table in effect — declared, or the built-in default."""
         return self.health_policy or DEFAULT_DISPOSITION_POLICY
@@ -441,8 +472,9 @@ def load_health_gates_config(path: str | None = None) -> HealthChecksConfig:
     asking the same question and keep getting the roster that will actually
     run.
 
-    A file that already carries gates — a materialized effective config, or
-    a pre-08b/custom YAML — is returned untouched (see
+    A file that is already composed — a materialized effective config (which
+    DECLARES its binding, including an explicitly EMPTY roster), or a
+    pre-08b/custom YAML carrying its own gates — is returned untouched (see
     :func:`load_composed_health_config`).
 
     **F-C12P-CP12-1: the memo is keyed on the RESOLVED BINDING, because
@@ -547,10 +579,19 @@ def apply_monitored_files(config: HealthChecksConfig, files: list[int]) -> Healt
         for check in gate.get("checks", []):
             check_cfg = check.setdefault("config", {})
             check_cfg["peek_file_indices"] = list(normalized)
-    # ``health_policy`` is excluded from the dump (see its Field), so it is
-    # carried across explicitly. A "pure transform" that silently dropped a
-    # field would be a worse defect than the one this function fixes.
-    return HealthChecksConfig.model_validate({**dumped, "health_policy": config.health_policy})
+    # ``health_policy`` and ``task_health_binding`` are excluded from the dump
+    # (see their Fields), so they are carried across explicitly. A "pure
+    # transform" that silently dropped a field would be a worse defect than
+    # the one this function fixes — and dropping the binding marker is
+    # precisely how an explicitly-empty roster stopped being distinguishable
+    # from an absent one (F-6).
+    return HealthChecksConfig.model_validate(
+        {
+            **dumped,
+            "health_policy": config.health_policy,
+            "task_health_binding": config.task_health_binding,
+        }
+    )
 
 
 def validate_health_scope(config: HealthChecksConfig, resolved_scope: list[int]) -> None:
@@ -645,13 +686,25 @@ def load_composed_health_config(
     the ROSTER should use, because after Step 08b C5 the framework file
     carries policy only and the roster is the task's.
 
-    A config that ALREADY carries gates is returned untouched. That covers
-    two important cases with one rule: a materialized effective config (whose
-    gates are the composed result and must not be composed again), and a
-    pre-08b or hand-written custom YAML that still carries its own roster.
+    A config that is ALREADY COMPOSED is returned untouched, and there are two
+    independent ways to recognize one:
+
+    * it DECLARES the binding it was composed under
+      (``task_health_binding``, written into every materialized effective
+      config by :func:`~execute_tools.health_checks._composition.body_markers`);
+    * or it carries gates — a pre-08b or hand-written custom YAML with its own
+      roster, and any effective config materialized before the marker existed.
+
     Neither should acquire a second roster from a task binding, and the
     "two authorities" refusal in :func:`resolve_composed_gates` states the
     same principle from the other side.
+
+    **F-6: the declaration is asked FIRST, and the gate list's truthiness is
+    not a substitute for it.** ``EXPLICIT_NONE`` materializes ``health_gates:
+    []`` — a roster that is EMPTY BY DECISION — and ``if cfg.health_gates:``
+    reads that as "no roster supplied", so reading such a config back composed
+    the legacy task's family into a run that had declared it has none. That is
+    the one thing ``EXPLICIT_NONE`` exists to make impossible.
 
     Returns:
         ``(config, task_config, resolved_plugins)`` — the latter two are
@@ -665,7 +718,7 @@ def load_composed_health_config(
         # a roster, least of all another task's.
         return cfg.model_copy(update={"health_gates": []}), None, ()
 
-    if cfg.health_gates:
+    if cfg.task_health_binding is not None or cfg.health_gates:
         return cfg, None, ()
 
     task_config, resolved_plugins = _load_task_binding(task_health_binding)
@@ -679,6 +732,43 @@ def load_composed_health_config(
         task_config,
         resolved_plugins,
     )
+
+
+def _record_path(path: str) -> str:
+    """How a config path is RENDERED into a persisted artifact.
+
+    **Resolve absolutely; record relatively.** F-7 anchored the shipped-config
+    defaults to ``SIDERIUS_ROOT`` so they stop depending on the caller's
+    working directory — a correct fix for LOADING, and the wrong string to
+    WRITE DOWN. A materialized effective config that names
+    ``/home/<whoever>/<some-checkout>/configs/health_checks.yaml`` embeds the
+    identity of the machine that produced it, and its byte length then varies
+    by environment: the Step-09.5a envelope oracle caught exactly that, and
+    the deeper problem is that no stable baseline for it could exist. A
+    persisted artifact carrying one developer's absolute path is the failure
+    CLAUDE.md's portability section is written about — so closing F-7 must not
+    reintroduce it one layer over.
+
+    The header's job is PROVENANCE — *which framework config was this composed
+    from* — and ``configs/health_checks.yaml`` answers that better on every
+    machine than an absolute path that is true on exactly one.
+
+    An EXTERNAL file keeps its absolute form, deliberately: there the absolute
+    path IS the informative answer, and no repo-relative rendering of it could
+    be either honest or stable.
+
+    Args:
+        path: the path as resolved for loading (absolute or relative).
+
+    Returns:
+        The repo-relative path when it lies inside this checkout, else the
+        absolute path.
+    """
+    absolute = Path(path).resolve()
+    root = Path(SIDERIUS_ROOT).resolve()
+    if absolute.is_relative_to(root):
+        return str(absolute.relative_to(root))
+    return str(absolute)
 
 
 def materialize_effective_config(
@@ -731,7 +821,11 @@ def materialize_effective_config(
     header = (
         "# Materialized effective HealthGate config — do not edit.\n"
         "# Written by materialize_effective_config (enable_partial_file_list DS4).\n"
-        f"# source: {source_path or _DEFAULT_CONFIG_PATH}\n"
+        # Rendered, not the resolved string: see `_record_path`. This line is
+        # provenance for a human reader and is never parsed back, but it IS
+        # written, so it must not make the artifact's bytes depend on which
+        # checkout produced them.
+        f"# source: {_record_path(source_path or _DEFAULT_CONFIG_PATH)}\n"
         f"# health_gate_files: {files_repr}\n"
         f"# sha256: {sha}\n"
     )

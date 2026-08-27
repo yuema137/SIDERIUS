@@ -278,3 +278,139 @@ class TestTheBoundaryReportsWhetherGatesActuallyRan:
         assert outcome.resolved_action is GateAction.INVALIDATE_ROUND
         assert outcome.is_degenerate is True
         assert outcome.failure_reason == "gate_failed"
+
+
+class TestARunThatDeclaresNoHealthEvaluatesZeroGates:
+    """F-6 — the run's OWN pinned effective config decides, AT THE FIRING SITE.
+
+    A task may declare it has no Health family (``task_health: none: true``,
+    the ``EXPLICIT_NONE`` binding state). The run then materializes
+    ``health_checks_effective.yaml`` carrying ``health_gates: []`` plus the
+    marker ``task_health_binding: explicit_none``, pins its sha into the
+    run-invariants lock, and the tuner swaps that path into
+    ``agent_input.health_checks_config`` — which is the ``config_path`` this
+    boundary is handed.
+
+    **Observed in production before the fix**, on two real composed
+    non-TIDMAD chains: six TIDMAD gates fired on a run whose own pinned config
+    declared none, every one of them raising ``ValueError: this dataset
+    profile declares no TIDMAD topology``, invalidating the round. The
+    composition layer was innocent — the artifact on disk was correct, pinned
+    and hashed. The loader read ``health_gates: []`` as "no roster supplied"
+    (its truthiness, not its declaration) and composed the LEGACY task's
+    family in its place. The pinned sha therefore described something other
+    than what executed, which is worse than an unpinned run.
+
+    Why the assertions are HERE and not only at the loader: a test proving an
+    ``EXPLICIT_NONE`` config round-trips through
+    ``load_health_gates_config`` does not prove a composed ROUND fires zero
+    gates. Both layers of the firing path re-ask the loader — the position
+    lookup (``get_gates_for_position``) and the engine
+    (``evaluate_and_persist_health_gates``) — so the discriminating witness is
+    the one that drives them.
+    """
+
+    @pytest.fixture
+    def explicit_none_config(self, tmp_path):
+        """A REAL materialized effective config for a run declaring no Health.
+
+        Produced by the production writer, not hand-written: the defect was
+        invisible precisely because the artifact was correct.
+        """
+        from execute_tools.health_checks._composition import HealthBindingState
+        from execute_tools.health_checks.config import materialize_effective_config
+
+        path, _sha = materialize_effective_config(
+            None,
+            None,
+            str(tmp_path / "ws"),
+            task_health_binding=HealthBindingState.EXPLICIT_NONE,
+        )
+        return path
+
+    def test_the_position_lookup_selects_no_gates(self, explicit_none_config):
+        """Fails as: the shipped TIDMAD roster, for a run that declared none."""
+        from execute_tools.health_checks import get_gates_for_position
+
+        for round_index in (1, 2, 3, 7):
+            assert get_gates_for_position(round_index, config_path=explicit_none_config) == [], (
+                "a run whose pinned effective config declares EXPLICIT_NONE "
+                "selected gates at the firing site"
+            )
+
+    def test_the_path_route_tells_the_four_config_states_apart(self, tmp_path):
+        """The discrimination that makes the fix a REPAIR and not a special case.
+
+        Two of these four were indistinguishable at the firing site — an
+        ``explicit_none`` config and NO config produced the same six gates —
+        which is what made "an EXPLICIT_NONE config yields zero gates"
+        insufficient as a witness on its own. A fix that merely made an empty
+        roster mean "no gates" would collapse the three-state binding
+        vocabulary: state 2b below would go to zero with it, and a pre-08b or
+        hand-written empty YAML would silently stop resolving the legacy
+        family it is supposed to resolve.
+
+        What is actually asked is the DECLARATION: the marker
+        ``task_health_binding`` is now a declared field, so it survives the
+        load and the loader consumes it. The decision therefore travels IN
+        the document — which is what the path route needs, since
+        ``load_health_gates_config`` takes a path and no binding argument.
+        """
+        from execute_tools.health_checks import get_gates_for_position
+        from execute_tools.health_checks._composition import HealthBindingState
+        from execute_tools.health_checks.config import materialize_effective_config
+
+        legacy, _ = materialize_effective_config(None, None, str(tmp_path / "ws_legacy"))
+        explicit_none, _ = materialize_effective_config(
+            None,
+            None,
+            str(tmp_path / "ws_none"),
+            task_health_binding=HealthBindingState.EXPLICIT_NONE,
+        )
+        bare_empty = tmp_path / "bare_empty.yaml"
+        bare_empty.write_text("health_gates: []\n", encoding="utf-8")
+
+        # 1 — a file with its own roster: exactly that roster.
+        assert get_gates_for_position(1, config_path=legacy) != []
+        # 2 — `health_gates: []` DECLARING `explicit_none`: no gates.
+        assert get_gates_for_position(1, config_path=explicit_none) == []
+        # 2b — `health_gates: []` declaring NOTHING: an ABSENT roster, which
+        #      still composes the legacy default. Emptiness is not a decision.
+        assert get_gates_for_position(1, config_path=str(bare_empty)) != []
+        # 3 — no config at all: the same absent-roster answer as 2b.
+        assert get_gates_for_position(1) != []
+        assert get_gates_for_position(1, config_path=str(bare_empty)) == get_gates_for_position(1)
+
+    def test_the_round_boundary_runs_the_real_engine_and_persists_nothing(
+        self, explicit_none_config
+    ):
+        """The production question, asked of the production boundary.
+
+        The engine is NOT stubbed here — this is the only test in the file
+        that lets the real one run — because the defect lived in what the
+        engine loaded, not in whether it was called. The deliverable and raw
+        resolvers refuse by name: any gate that actually fires reaches for one
+        of them, so a reintroduction fails LOUDLY and says which.
+        """
+
+        def _must_not_be_called(index):
+            raise AssertionError(
+                f"a HealthGate asked for input {index!r} on a run that "
+                "declared it has no Health family"
+            )
+
+        outcome = _call(
+            config_path=explicit_none_config,
+            production_config_path=explicit_none_config,
+            denoised_filename_fn=_must_not_be_called,
+            target_path_fn=_must_not_be_called,
+        )
+
+        assert outcome.evaluated is True, (
+            "the subsystem is ENABLED — 'evaluated' distinguishes that from "
+            "'disabled', and conflating them is F2"
+        )
+        assert outcome.persisted == []
+        assert outcome.resolved_action is GateAction.CONTINUE
+        assert outcome.is_degenerate is False
+        assert outcome.failure_reason is None

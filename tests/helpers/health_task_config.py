@@ -21,7 +21,11 @@ from typing import Any
 import yaml
 
 from execute_tools.health_checks._composition import LEGACY_DEFAULT_TASK_HEALTH_CONFIG
-from execute_tools.health_checks.config import HealthChecksConfig, load_composed_health_config
+from execute_tools.health_checks.config import (
+    EFFECTIVE_CONFIG_BASENAME,
+    HealthChecksConfig,
+    load_composed_health_config,
+)
 
 
 def compose_with_declared_peek_files(peek_files: list[int]) -> HealthChecksConfig:
@@ -72,4 +76,54 @@ def write_composed_config(peek_files: list[int], directory: str | Path) -> str:
     config = compose_with_declared_peek_files(peek_files)
     path = Path(directory) / "composed_health_checks.yaml"
     path.write_text(yaml.safe_dump(config.model_dump(mode="json"), sort_keys=True))
+    return str(path)
+
+
+def write_pinned_effective_config(workspace: str | Path, gate_ids: list[str]) -> str:
+    """Pin a workspace's own effective HealthGate roster, hermetically.
+
+    For F-4 witnesses: a run whose OWN pinned
+    ``health_checks_effective.yaml`` declares a roster that DIFFERS from the
+    repo-current shipped one. The distinguishing property being tested is
+    which roster eligibility is resolved against, so the gate ids need only
+    be declared, never evaluated.
+
+    Written directly rather than composed through a task package on purpose.
+    Composition registers plugins and view providers process-globally, and
+    two tests in one pytest session then collide on a registry that has no
+    per-test reset outside ``tests/unit/execute_tools/health_checks``. A
+    document that already carries gates is returned untouched by
+    ``load_health_gates_config`` — no composition, no binding, no registry —
+    which is exactly the read path a materialized effective config takes.
+
+    Args:
+        workspace: the run workspace directory; created if absent.
+        gate_ids: the blocking gate ids this run declares.
+
+    Returns:
+        The path written.
+    """
+    root = Path(workspace)
+    root.mkdir(parents=True, exist_ok=True)
+    document = {
+        "health_gates": [
+            {
+                "id": gate_id,
+                "gate_role": "blocking",
+                "after_round": "every",
+                "short_circuit": True,
+                "checks": [{"name": "output_std", "config": {}}],
+                "on_pass": {"action": "continue"},
+                "on_fail": {"action": "invalidate_round"},
+                "reason": "witness roster — declared, never evaluated",
+            }
+            for gate_id in gate_ids
+        ],
+        # The materialization marker a real effective config carries. Present
+        # so this fixture is the artifact shape production writes, not a
+        # near-miss of it.
+        "task_health_binding": "explicit",
+    }
+    path = root / EFFECTIVE_CONFIG_BASENAME
+    path.write_text(yaml.safe_dump(document, sort_keys=True), encoding="utf-8")
     return str(path)

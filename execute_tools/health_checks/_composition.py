@@ -89,7 +89,23 @@ TaskHealthBinding = HealthBindingState | str
 """Either a binding state, or a path to a task health config (state C)."""
 
 
-LEGACY_DEFAULT_TASK_HEALTH_CONFIG: str = os.path.join("configs", "task_health", "tidmad.yaml")
+SIDERIUS_ROOT: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+"""This checkout's repository root, derived from this file's own location.
+
+**F-7.** The two shipped-config defaults below and in ``config.py`` were
+RELATIVE paths, so they resolved against the caller's working directory. The
+stage scripts never ``cd``, so a campaign launched from anywhere but the repo
+root raised ``FileNotFoundError: 'configs/task_health/tidmad.yaml'`` and
+refused every band scan and every Stage-2 finalize. CLAUDE.md's portability
+rule names exactly this: path resolution derives from the file's own location
+or a supplied root, never from the caller's cwd. Every sibling authority in
+the repository (``core/sandbox_executor.py``, ``workflows/task_config.py``,
+``nodes/…``) already anchors this way; these two were the stragglers."""
+
+
+LEGACY_DEFAULT_TASK_HEALTH_CONFIG: str = os.path.join(
+    SIDERIUS_ROOT, "configs", "task_health", "tidmad.yaml"
+)
 """Where state A (legacy omitted) finds its task Health config.
 
 **This is the bounded legacy compatibility path, not the extension

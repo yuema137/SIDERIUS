@@ -20,9 +20,26 @@ the provider to gemini, so a user with only ``OPENAI_API_KEY`` set and no
 explicit provider argument reaches this with nothing wrong in their command.
 That is what makes it a security defect rather than a usability one: the
 failure mode is silent egress, and the user did nothing unusual.
+
+**F-8 (v0.1.0 blinded review) — the same defect on the sibling path.** The
+refusal above guarded the MAIN client only. ``LLMBridge`` builds a SECOND
+client whenever ``reflect_provider`` differs from ``provider``, and that
+branch read the reflect provider's key env with no ``None`` check at all, so
+``--reflect_provider gemini`` with ``GEMINI_API_KEY`` unset reproduced the
+leak one argument over. Re-verified by construction before the fix::
+
+    GEMINI_API_KEY unset, OPENAI_API_KEY="sk-SENTINEL-openai-key"
+    LLMBridge(provider="openai", reflect_provider="gemini")
+    bridge.reflect_client.api_key  -> "sk-SENTINEL-openai-key"
+    bridge.reflect_client.base_url -> https://generativelanguage.googleapis.com/...
+
+Both clients now resolve through ``_provider_credential_or_refuse``, so the
+rule is written once and the two paths cannot drift apart again.
 """
 
 from __future__ import annotations
+
+from unittest.mock import patch
 
 import pytest
 
@@ -109,6 +126,101 @@ class TestTheRefusalIsScopedToTheActualHazard:
             monkeypatch.delenv(_KNOWN_PROVIDERS[name]["api_key_env"], raising=False)
             with pytest.raises(LLMBridgeContextError):
                 LLMBridge(provider=name, model_id=_KNOWN_PROVIDERS[name]["default_model"])
+
+
+class TestTheReflectClientCannotLeaveWithTheWrongCredentialEither:
+    """F-8 — the second client the bridge builds is the same hazard.
+
+    ``reflect_provider`` is a whole client, with its own ``base_url`` and its
+    own key env. The main-path refusal above says nothing about it, so these
+    cases fail the moment the reflect branch stops asking
+    ``_provider_credential_or_refuse``.
+    """
+
+    def test_construction_refuses_when_the_reflect_providers_key_env_is_unset(
+        self, only_openai_key
+    ):
+        """RED before the fix: construction SUCCEEDED and bound the sentinel
+        to Google's endpoint."""
+        with pytest.raises(LLMBridgeContextError) as excinfo:
+            LLMBridge(provider="openai", model_id="gpt-4o-mini", reflect_provider="gemini")
+
+        message = str(excinfo.value)
+        assert "GEMINI_API_KEY" in message, "the refusal must NAME the missing variable"
+        assert "gemini" in message, "and the provider it belongs to"
+
+    def test_no_second_client_is_ever_constructed(self, only_openai_key):
+        """The refusal happens BEFORE the second client exists.
+
+        The main client legitimately exists by this point (it was built with
+        its own key); what must not exist is a client bound to the OTHER
+        provider's endpoint holding this one's credential. Counting the
+        constructor calls is the only way to see that from outside — the
+        bridge is never assigned, so there is no object to inspect.
+        """
+        with patch("agent.llm_bridge.OpenAI") as mock_openai:
+            with pytest.raises(LLMBridgeContextError):
+                LLMBridge(provider="openai", model_id="gpt-4o-mini", reflect_provider="gemini")
+
+        assert mock_openai.call_count == 1, (
+            "exactly one client (the main one) may be constructed before the "
+            f"reflect refusal; saw {mock_openai.call_count}"
+        )
+
+    def test_the_sentinel_never_reaches_the_reflect_endpoint(self, only_openai_key, monkeypatch):
+        """The property, stated positively: when a reflect client for a
+        non-OpenAI provider DOES get built, its key is that provider's own."""
+        monkeypatch.setenv("GEMINI_API_KEY", "gm-real-key")
+        bridge = LLMBridge(provider="openai", model_id="gpt-4o-mini", reflect_provider="gemini")
+
+        assert "googleapis" in str(bridge.reflect_client.base_url)
+        assert bridge.reflect_client.api_key == "gm-real-key"
+        assert bridge.reflect_client.api_key != SENTINEL
+        # ...and the main client is untouched by the reflect resolution.
+        assert bridge.client.api_key == SENTINEL
+
+    def test_every_reflect_provider_whose_key_env_differs_is_covered(self, monkeypatch):
+        """The same census as the main path, over the reflect argument.
+
+        Derived from the provider table so a provider added later is covered
+        on BOTH paths without editing this test — which is the property that
+        was missing when the main path was fixed alone.
+        """
+        from agent.llm_bridge import _KNOWN_PROVIDERS, _SDK_FALLBACK_KEY_ENV
+
+        at_risk = [
+            name
+            for name, cfg in _KNOWN_PROVIDERS.items()
+            if cfg["api_key_env"] != _SDK_FALLBACK_KEY_ENV
+        ]
+        assert at_risk, "vacuity guard: the census must find providers to check"
+
+        monkeypatch.setenv(_SDK_FALLBACK_KEY_ENV, SENTINEL)
+        for name in at_risk:
+            monkeypatch.delenv(_KNOWN_PROVIDERS[name]["api_key_env"], raising=False)
+            with pytest.raises(LLMBridgeContextError):
+                LLMBridge(
+                    provider="openai",
+                    model_id="gpt-4o-mini",
+                    reflect_provider=name,
+                    reflect_model_id=_KNOWN_PROVIDERS[name]["default_model"],
+                )
+
+    def test_an_openai_reflect_provider_is_left_to_the_sdk(self, monkeypatch):
+        """Scoped exactly like the main path: the SDK's fallback variable IS
+        openai's own key env, so no foreign credential can be substituted and
+        pre-empting the SDK's error here would be dishonest."""
+        monkeypatch.setenv("GEMINI_API_KEY", "gm-real-key")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        with pytest.raises(Exception) as excinfo:
+            LLMBridge(
+                provider="gemini",
+                model_id="gemini-3.1-flash-lite-preview",
+                reflect_provider="openai",
+            )
+        assert not isinstance(excinfo.value, LLMBridgeContextError), (
+            "an openai reflect provider must be left to the SDK's own error"
+        )
 
 
 class TestTheFixChangesNothingElse:

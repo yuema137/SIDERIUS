@@ -150,6 +150,69 @@ _KNOWN_PROVIDERS: dict[str, _ProviderConfig] = {
 }
 
 
+def _provider_credential_or_refuse(provider: str, known: _ProviderConfig) -> str | None:
+    """This provider's credential from its declared env var, or a REFUSAL.
+
+    **F-SCANI-1 — a SECURITY refusal, not a convenience check, and the ONE
+    place the rule is written.** Every client this module builds resolves its
+    key here: the main client and the cross-provider reflect client are the
+    same hazard, so they must not be able to disagree about it.
+
+    Leaving ``api_key=None`` does not fail; it hands the SDK a ``None``, and
+    the SDK falls back to ``OPENAI_API_KEY`` (``openai/_client.py``).
+    Combined with this provider's ``base_url``, the OPENAI key is then
+    transmitted as a Bearer header TO THE OTHER PROVIDER'S ENDPOINT, and the
+    only symptom is an opaque 401 — raised AFTER the credential has left the
+    machine.
+
+    Reachable by OMISSION rather than by misconfiguration: the provider
+    defaults to gemini in several launch paths, so a user with only
+    ``OPENAI_API_KEY`` set and no explicit provider reaches this with nothing
+    wrong in their command. ``--reflect_provider gemini`` with ``GEMINI_API_KEY``
+    unset is the same command, one argument over.
+
+    NARROWED to the providers that can actually leak. The SDK's fallback is to
+    ``OPENAI_API_KEY``, so the cross-provider hazard exists exactly when this
+    provider's key env is NOT that variable: then an unset key silently
+    substitutes a DIFFERENT provider's credential and sends it to this
+    provider's endpoint. For ``provider="openai"`` the fallback variable IS
+    this provider's own key env, so nothing foreign can be transmitted, and
+    the SDK already raises its own ``OpenAIError``. Refusing here too would
+    duplicate that with a message this code cannot honestly make — "this
+    provider's endpoint would receive that credential" is FALSE when the
+    credential is the endpoint's own.
+
+    Refusing by NAME, before any client exists, is the smallest repair that
+    makes the credential unable to leave. Deliberately NOT accompanied by
+    provenance-vs-endpoint validation — see the scope pin in
+    ``tests/unit/agent/llm_bridge/test_fscani1_key_env_refusal.py``.
+
+    Args:
+        provider: the normalized provider name, for the refusal message.
+        known: that provider's ``_KNOWN_PROVIDERS`` entry.
+
+    Returns:
+        The credential, or ``None`` only for the provider whose own key env
+        IS the SDK fallback variable (left to the SDK's own error).
+
+    Raises:
+        LLMBridgeContextError: the provider's key env is unset and an unset
+            key here would send a foreign credential to its endpoint.
+    """
+    api_key = os.getenv(known["api_key_env"])
+    if api_key is not None or known["api_key_env"] == _SDK_FALLBACK_KEY_ENV:
+        return api_key
+    raise LLMBridgeContextError(
+        f"provider {provider!r} requires {known['api_key_env']}, "
+        f"which is unset.\n"
+        f"  Refusing to construct the client: with no key for this "
+        f"provider the OpenAI SDK falls back to OPENAI_API_KEY, and "
+        f"this provider's endpoint would receive that credential.\n"
+        f"  Set {known['api_key_env']}, or pass api_key= explicitly, "
+        f"or select a provider whose key you have."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stub-mode model name synthesiser (Commit 4.4 Stage 2).
 #
@@ -436,51 +499,12 @@ class LLMBridge:
 
         known = _KNOWN_PROVIDERS.get(self.provider)
 
-        # Resolve api_key: explicit arg > env var > REFUSE
+        # Resolve api_key: explicit arg > env var > REFUSE.
+        # The refusal rule lives in `_provider_credential_or_refuse`, which
+        # the reflect client below calls too — see its docstring for why an
+        # unset key is a credential-egress hazard rather than a usability one.
         if api_key is None and known:
-            api_key = os.getenv(known["api_key_env"])
-            # NARROWED to the providers that can actually leak. The SDK's
-            # fallback is to OPENAI_API_KEY, so the cross-provider hazard
-            # exists exactly when this provider's key env is NOT that
-            # variable: then an unset key silently substitutes a DIFFERENT
-            # provider's credential and sends it to this provider's endpoint.
-            #
-            # For provider="openai" the fallback variable IS this provider's
-            # own key env, so nothing foreign can be transmitted, and the SDK
-            # already raises its own OpenAIError. Refusing here too would
-            # duplicate that with a message this code cannot honestly make —
-            # "this provider's endpoint would receive that credential" is
-            # FALSE when the credential is the endpoint's own.
-            if api_key is None and known["api_key_env"] != _SDK_FALLBACK_KEY_ENV:
-                # F-SCANI-1 — a SECURITY refusal, not a convenience check.
-                #
-                # Leaving `api_key=None` here does not fail; it hands the SDK
-                # a None, and the SDK falls back to OPENAI_API_KEY
-                # (`openai/_client.py`). Combined with this provider's
-                # `base_url`, the OPENAI key is then transmitted as a Bearer
-                # header TO THE OTHER PROVIDER'S ENDPOINT, and the only
-                # symptom is an opaque 401 — raised AFTER the credential has
-                # left the machine.
-                #
-                # Reachable by OMISSION rather than by misconfiguration: the
-                # provider defaults to gemini in several launch paths, so a
-                # user with only OPENAI_API_KEY set and no explicit provider
-                # reaches this with nothing wrong in their command.
-                #
-                # Refusing by NAME, at construction, before any client
-                # exists, is the smallest repair that makes the credential
-                # unable to leave. Deliberately NOT accompanied by
-                # provenance-vs-endpoint validation — see the scope pin in
-                # `tests/unit/agent/llm_bridge/test_fscani1_key_env_refusal.py`.
-                raise LLMBridgeContextError(
-                    f"provider {self.provider!r} requires {known['api_key_env']}, "
-                    f"which is unset.\n"
-                    f"  Refusing to construct the client: with no key for this "
-                    f"provider the OpenAI SDK falls back to OPENAI_API_KEY, and "
-                    f"this provider's endpoint would receive that credential.\n"
-                    f"  Set {known['api_key_env']}, or pass api_key= explicitly, "
-                    f"or select a provider whose key you have."
-                )
+            api_key = _provider_credential_or_refuse(self.provider, known)
         self.api_key = api_key
 
         # Resolve base_url: explicit arg > known default > None (SDK default)
@@ -553,7 +577,13 @@ class LLMBridge:
                     f"manually and assign it to LLMBridge.reflect_client "
                     f"after construction."
                 )
-            reflect_api_key = os.getenv(reflect_known["api_key_env"])
+            # The SAME rule the main client resolved through, for the same
+            # reason: this branch is reached only when the reflect provider
+            # DIFFERS from the main one, which is exactly the cross-provider
+            # substitution `_provider_credential_or_refuse` refuses.
+            reflect_api_key = _provider_credential_or_refuse(
+                normalized_reflect_provider, reflect_known
+            )
             reflect_base_url = reflect_known["base_url"]
             self.reflect_client = OpenAI(
                 api_key=reflect_api_key,

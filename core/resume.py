@@ -68,7 +68,7 @@ from execute_tools.evaluation_metric import (
 )
 from execute_tools.health_checks.candidate_eligibility import (
     CandidateHealthValidity,
-    classify_candidate_health,
+    classify_under_pinned_policy,
     resolve_scientific_gate_ids,
 )
 from execute_tools.health_checks.config import (
@@ -485,19 +485,17 @@ def _classify_commit_time(
     completeness is judged against the commit-time ``gate_ids`` — and an
     unresolvable policy (``gate_ids is None``) yields UNKNOWN, never a
     fallback to repo-current policy.
+
+    That rule now has ONE home,
+    :func:`~execute_tools.health_checks.candidate_eligibility.classify_under_pinned_policy`,
+    because the Stage-3 and gold-campaign readers need exactly it (F-4) and a
+    second copy is how two readers of the same records start disagreeing.
+    What stays HERE is the resume-specific half above it:
+    :func:`_commit_time_gate_ids` resolves the artifact the ITERATION'S OWN
+    stamped sha verifies, which is a stronger question than "the workspace's
+    pinned config" and is not shared.
     """
-    if record.get("health_gate_enabled") is False:
-        # Delegate: classifier returns VALID for stamped-disabled records
-        # (or INVALID for non-success/non-finite) without touching policy.
-        return classify_candidate_health(record, required_gate_ids=frozenset())
-    if gate_ids is None:
-        # Success-status check still applies: a non-success record is
-        # INVALID regardless of policy resolvability.
-        base = classify_candidate_health(record, required_gate_ids=frozenset())
-        if base is CandidateHealthValidity.INVALID:
-            return CandidateHealthValidity.INVALID
-        return CandidateHealthValidity.UNKNOWN
-    return classify_candidate_health(record, required_gate_ids=gate_ids)
+    return classify_under_pinned_policy(record, gate_ids)
 
 
 def _pick_best(records: list[dict[str, Any]], *, order: MetricOrder) -> dict[str, Any] | None:

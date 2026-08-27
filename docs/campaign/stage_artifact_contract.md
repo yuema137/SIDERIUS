@@ -66,7 +66,7 @@ records in the band workspace satisfying ALL of:
 |---|---|
 | completed scoring | `status == "success"` |
 | FORMAL round | **`is_trial` absent or `False`** (Q-S3-3 correction, 2026-08-26: the BUILDER sets the key only on trial records, but `HyperparamTuningOutput.all_records: list[ExperimentRecord]` re-validates and `model_dump()` MATERIALIZES the defaults `is_trial: False` + `trial_portion: None` onto every PERSISTED formal record — the shape Stage-3 reads; the `BestTracks` authority's own test is falsy-tolerant, `not r.get("is_trial", False)`, `policy.py:650`. The earlier "absence of the `is_trial` key" wording described only the in-memory dicts and made every real formal record refuse. A non-bool `is_trial`, or a non-`None` `trial_portion` on a formal-shaped record, remains a shape production never writes — #316 B2) |
-| HealthGate-valid | `is_valid_candidate(record)` == True (`execute_tools/health_checks/candidate_eligibility.py:310` — the ONE eligibility authority; never re-implement from gate fields) |
+| HealthGate-valid | `classify_under_pinned_policy(record, pinned_workspace_gate_ids(workspace))` == `VALID` (`execute_tools/health_checks/candidate_eligibility.py` — the ONE eligibility authority; never re-implement from gate fields). **F-4 correction, 2026-08-27**: the gate set is the one the RUN'S OWN workspace pinned in `health_checks_effective.yaml`, never the repo-current shipped `configs/health_checks.yaml`. The previous wording named `is_valid_candidate(record)`, whose zero-argument default resolves the repo-current config and collapses UNKNOWN to the empty set — so a record whose run-declared blocking gate FAILED was reported valid on the strength of a roster it never ran. A workspace that pinned no roster is UNKNOWN, and UNKNOWN is a refusal, not a pass. `stage3_composed_best.select_band_winner` already resolved it this way; this is the other two consumers matching it. |
 | identity | `exp_id`, `model_type`, `iteration` (dir), `experiment_arm` (lock + manifest) |
 
 Its deliverables are the 20 files named by the `DeliverableNaming`
@@ -110,7 +110,7 @@ polls; absence == unit not done; partial dirs without it are ignored):
   "model_type": "<plugin model_type>",
   "repo_sha": "<git sha the unit ran at>",
   "denoising_score": <float, the unit's own formal score>,
-  "healthgate_valid": <bool, is_valid_candidate of its record>,
+  "healthgate_valid": <bool, its record's validity under the UNIT WORKSPACE'S OWN pinned effective config — see section 1 (F-4)>,
   "deliverable_count": <int, the TARGET band's file count under the DS8 band vocabulary — Q-S3-2 ruling A>,
   "completed_utc": "<ISO8601>"
 }

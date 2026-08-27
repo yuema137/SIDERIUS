@@ -1788,6 +1788,86 @@ class TestBandStateHelper:
         assert rc == 0, err
         assert data["needs_force_fresh"] is False
 
+    def test_validity_is_judged_against_the_WORKSPACES_OWN_pinned_config(self, tmp_path):
+        """F-4 — the band incumbent must be eligible under the RUN's roster.
+
+        Eligibility used to be asked as ``is_valid_candidate(rec)``, whose
+        zero-argument default resolves the REPO-CURRENT shipped config — a
+        roster belonging to no particular run — and collapses UNKNOWN to the
+        empty set on the way. So a record was judged against gates its own run
+        never declared.
+
+        The two records below make the two answers disagree, which is the only
+        way to see the defect:
+
+        * ``w_run_gate_failed`` (score 9.9) passes every REPO-CURRENT blocking
+          gate and FAILS the run's own. Repo-current says VALID; the run's own
+          roster says INVALID.
+        * ``w_run_gate_passed`` (score 1.0) passes the run's own gate and
+          carries none of the repo-current ones. Repo-current says UNKNOWN
+          (excluded); the run's own roster says VALID.
+
+        Fails as: the incumbent being ``w_run_gate_failed`` — the higher score,
+        promoted on the strength of a roster it never ran. That incumbent is
+        the FCNet+2 stop input and Stage-2's ``healthgate_valid``.
+        """
+        sys.path.insert(0, str(REPO_ROOT))
+        from execute_tools.health_checks.candidate_eligibility import (
+            pinned_workspace_gate_ids,
+            required_blocking_gate_ids,
+        )
+        from tests.helpers.health_task_config import write_pinned_effective_config
+
+        ws = tmp_path / "band"
+        write_pinned_effective_config(ws, ["witness_run_declared_blocking"])
+        run_declared = sorted(pinned_workspace_gate_ids(ws) or ())
+        repo_current = sorted(required_blocking_gate_ids())
+
+        # Vacuity guards: both rosters non-empty and DISJOINT, or a record
+        # satisfying one would satisfy the other and this proves nothing.
+        assert repo_current and run_declared
+        assert not (set(repo_current) & set(run_declared))
+
+        def _gate(name: str, passed: bool) -> dict:
+            return {"gate_name": name, "execution_status": "passed", "check_passed": passed}
+
+        _write_iter(
+            ws,
+            1,
+            [
+                {
+                    "exp_id": "w_run_gate_failed",
+                    "status": "success",
+                    "model_type": "wavenet",
+                    "params": {},
+                    "timestamp": "2026-08-26 00:00:30",
+                    "denoising_score": 9.9,
+                    "health_gate_enabled": True,
+                    "health_gate_results": [
+                        *(_gate(g, True) for g in repo_current),
+                        *(_gate(g, False) for g in run_declared),
+                    ],
+                },
+                {
+                    "exp_id": "w_run_gate_passed",
+                    "status": "success",
+                    "model_type": "wavenet",
+                    "params": {},
+                    "timestamp": "2026-08-26 00:00:30",
+                    "denoising_score": 1.0,
+                    "health_gate_enabled": True,
+                    "health_gate_results": [_gate(g, True) for g in run_declared],
+                },
+            ],
+        )
+
+        rc, data, err = _band_state(ws, tmp_path / "state.json")
+        assert rc == 0, err
+        assert data["incumbent"]["exp_id"] == "w_run_gate_passed"
+        assert data["incumbent"]["denoising_score"] == 1.0
+        assert data["scan"]["formal_success"] == 2
+        assert data["scan"]["healthgate_valid"] == 1
+
 
 class TestStage2Finalize:
     def _build_unit(self, tmp_path: Path, *, band: str, indices: tuple[int, ...]) -> Path:

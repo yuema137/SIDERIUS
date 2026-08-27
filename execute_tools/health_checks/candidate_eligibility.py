@@ -18,6 +18,8 @@ import yaml
 
 from execute_tools.health_checks._composition import HealthBindingState, TaskHealthBinding
 from execute_tools.health_checks.config import (
+    _DEFAULT_CONFIG_PATH,
+    EFFECTIVE_CONFIG_BASENAME,
     load_composed_health_config,
     load_health_gates_config,
 )
@@ -192,9 +194,9 @@ def required_blocking_gate_ids(production_config_path: str | None = None) -> fro
     function collapses UNKNOWN to the empty set and so cannot distinguish
     "no blocking gates" from "roles could not be established".
     """
-    path = production_config_path
-    if path is None:
-        path = str(Path(__file__).resolve().parents[2] / "configs" / "health_checks.yaml")
+    # `_DEFAULT_CONFIG_PATH` rather than a second `__file__` walk to the same
+    # file: two anchors to one path is how one of them drifts (F-7).
+    path = production_config_path if production_config_path is not None else _DEFAULT_CONFIG_PATH
     return resolve_scientific_gate_ids(path) or frozenset()
 
 
@@ -318,3 +320,70 @@ def is_valid_candidate(
         classify_candidate_health(record, required_gate_ids=required_gate_ids)
         is CandidateHealthValidity.VALID
     )
+
+
+def pinned_workspace_gate_ids(workspace: str | Path) -> frozenset[str] | None:
+    """The scientific gate set a WORKSPACE PINNED, or ``None`` for UNKNOWN.
+
+    The counterpart of :func:`required_blocking_gate_ids` for a consumer that
+    is judging ONE RUN'S persisted records. It resolves the run's own
+    materialized ``health_checks_effective.yaml``; the repo-current shipped
+    config is deliberately never consulted, because that is a DIFFERENT run's
+    policy and a record can only be judged against the roster its own run
+    declared. ``scripts/stage3/stage3_composed_best.py`` already resolved
+    eligibility this way — this is that rule, named once, for the consumers
+    that were still taking the zero-argument default.
+
+    ``None`` means UNKNOWN, in either of the two ways a workspace can fail to
+    establish a roster: it pinned no effective config at all (a run with
+    ``health_gate_enabled=False`` materializes none), or its gate roles cannot
+    be resolved. UNKNOWN is never a pass — :func:`classify_under_pinned_policy`
+    is what a caller must put it through.
+
+    Args:
+        workspace: the run workspace directory, not the config file.
+
+    Returns:
+        The blocking-role gate ids, or ``None`` for UNKNOWN.
+    """
+    path = Path(workspace) / EFFECTIVE_CONFIG_BASENAME
+    if not path.is_file():
+        return None
+    return resolve_scientific_gate_ids(str(path))
+
+
+def classify_under_pinned_policy(
+    record: Any,
+    gate_ids: frozenset[str] | None,
+) -> CandidateHealthValidity:
+    """Validity of one persisted record under the RUN'S OWN resolved gate set.
+
+    **The one place the UNKNOWN rule is written.** ``gate_ids is None`` means
+    the run's policy could not be established, and the answer is UNKNOWN —
+    never a silent fall-back to the repo-current shipped config, and never the
+    empty set, which reads as "no gate is required" and would classify every
+    record valid.
+
+    Two things stay decidable without the policy artifact, and both are
+    delegated to :func:`classify_candidate_health` rather than re-read here:
+
+    * the DS5 record-level waiver — a run that stamped
+      ``health_gate_enabled=False`` on the record already answered the
+      question, and needs no roster to be believed;
+    * a non-success or non-finite record, which is INVALID whether or not the
+      policy resolved. An unresolvable policy must not upgrade a failure to
+      "we could not tell".
+
+    Args:
+        record: the persisted record (mapping or model).
+        gate_ids: the run's own scientific gate set, or ``None`` for UNKNOWN —
+            typically from :func:`pinned_workspace_gate_ids`.
+    """
+    if _as_mapping(record).get("health_gate_enabled") is False:
+        return classify_candidate_health(record, required_gate_ids=frozenset())
+    if gate_ids is None:
+        base = classify_candidate_health(record, required_gate_ids=frozenset())
+        if base is CandidateHealthValidity.INVALID:
+            return CandidateHealthValidity.INVALID
+        return CandidateHealthValidity.UNKNOWN
+    return classify_candidate_health(record, required_gate_ids=gate_ids)

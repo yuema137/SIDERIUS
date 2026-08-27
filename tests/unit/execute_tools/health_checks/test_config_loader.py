@@ -13,13 +13,21 @@ predicate is not tested here, only that the YAML parses.
 
 from __future__ import annotations
 
+import os
+import shutil
 import textwrap
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from execute_tools.health_checks._composition import HealthBindingState
+from execute_tools.health_checks import config as config_module
+from execute_tools.health_checks._composition import (
+    LEGACY_DEFAULT_TASK_HEALTH_CONFIG,
+    HealthBindingState,
+)
 from execute_tools.health_checks.config import (
+    _DEFAULT_CONFIG_PATH,
     ActionConfig,
     CheckRef,
     GateConfig,
@@ -27,6 +35,7 @@ from execute_tools.health_checks.config import (
     clear_health_gates_config_cache,
     load_composed_health_config,
     load_health_gates_config,
+    materialize_effective_config,
 )
 from execute_tools.health_checks.schemas import GateAction
 
@@ -349,6 +358,142 @@ class TestLoadHealthGatesConfig:
             # have raised during load.
             assert isinstance(g.on_pass.action, GateAction)
             assert isinstance(g.on_fail.action, GateAction)
+
+
+class TestTheShippedDefaultsDoNotDependOnTheWorkingDirectory:
+    """F-7 — the shipped-config defaults are anchored to THIS checkout.
+
+    Both defaults used to be RELATIVE paths, resolved against the caller's
+    working directory. The stage scripts never ``cd``, so a campaign launched
+    from anywhere but the repo root raised
+    ``FileNotFoundError: 'configs/task_health/tidmad.yaml'`` and refused every
+    band scan and every Stage-2 finalize. It fails loud, which is why it
+    ranked below the silent defects — but the released framework's documented
+    launch surface should not carry a working-directory assumption.
+
+    CLAUDE.md's portability rule is the governing one: path resolution derives
+    from the file's own location or a supplied root, never from the caller's
+    cwd.
+    """
+
+    def test_the_loaders_resolve_from_an_unrelated_working_directory(self, tmp_path, monkeypatch):
+        """Fails as: FileNotFoundError on a relative shipped-config path.
+
+        All three routes are exercised because they fail separately: the
+        zero-argument loader resolves the FRAMEWORK default, and the other two
+        resolve an absolute framework path and then compose the TASK default,
+        which is a second constant.
+        """
+        from execute_tools.health_checks.candidate_eligibility import required_blocking_gate_ids
+
+        monkeypatch.chdir(tmp_path)
+
+        assert load_health_gates_config(None).health_gates, "zero-argument loader"
+        assert required_blocking_gate_ids(), "the eligibility shim's own default"
+        assert load_health_gates_config(_DEFAULT_CONFIG_PATH).health_gates, (
+            "explicit framework path"
+        )
+
+    def test_both_defaults_point_into_THIS_checkout(self):
+        """Absolute is not enough — it must be THIS tree.
+
+        An absolute path anchored to some other clone would pass a
+        cwd-independence test while validating the wrong repository, which is
+        the exact failure CLAUDE.md's portability section records.
+        """
+        repo_root = Path(__file__).resolve().parents[4]
+
+        assert Path(_DEFAULT_CONFIG_PATH) == repo_root / "configs" / "health_checks.yaml"
+        assert (
+            Path(LEGACY_DEFAULT_TASK_HEALTH_CONFIG)
+            == repo_root / "configs" / "task_health" / "tidmad.yaml"
+        )
+
+
+class TestAMaterializedConfigDoesNotRecordWhichCheckoutProducedIt:
+    """F-7, second half — resolve absolutely, RECORD relatively.
+
+    Anchoring the shipped-config defaults to ``SIDERIUS_ROOT`` was the right
+    fix for LOADING and the wrong string to WRITE DOWN. The materialization
+    header renders the source path, so the artifact began naming
+    ``/home/<whoever>/<some-checkout>/configs/health_checks.yaml`` — the
+    identity of the machine that produced it — and its byte length then varied
+    by environment. Two runs of the SAME code observed 4945 and 5009 bytes for
+    the same document, differing only in where the checkout lived.
+
+    The Step-09.5a envelope oracle caught the length change, but the oracle is
+    the weaker instrument twice over: it notices only because the number
+    happened to move, and re-baselining it would have been impossible, because
+    the number depends on the machine. A persisted artifact carrying one
+    developer's absolute path is precisely the failure CLAUDE.md's portability
+    section exists for, so closing F-7 must not reintroduce it one layer up.
+
+    The property below is the one that means something: the same config
+    materialized from two DIFFERENT checkout roots produces byte-identical
+    output.
+    """
+
+    @staticmethod
+    def _second_checkout(tmp_path: Path) -> Path:
+        """A second checkout of the same framework config, at another path."""
+        root = tmp_path / "another" / "checkout" / "at" / "a" / "much" / "longer" / "path"
+        (root / "configs").mkdir(parents=True)
+        shutil.copyfile(Path(_DEFAULT_CONFIG_PATH), root / "configs" / "health_checks.yaml")
+        return root
+
+    def test_the_artifact_is_byte_identical_across_two_checkout_roots(self, tmp_path, monkeypatch):
+        """Fails as: two identical runs producing different bytes.
+
+        The path lengths are deliberately very different, so a renderer that
+        leaked the absolute path cannot pass by coincidence.
+        """
+        from_real = Path(
+            materialize_effective_config(None, None, str(tmp_path / "ws_real"))[0]
+        ).read_bytes()
+
+        root_b = self._second_checkout(tmp_path)
+        monkeypatch.setattr(config_module, "SIDERIUS_ROOT", str(root_b))
+        monkeypatch.setattr(
+            config_module, "_DEFAULT_CONFIG_PATH", str(root_b / "configs" / "health_checks.yaml")
+        )
+        clear_health_gates_config_cache()
+        from_other = Path(
+            materialize_effective_config(None, None, str(tmp_path / "ws_other"))[0]
+        ).read_bytes()
+
+        assert from_real == from_other, (
+            "the materialized effective config differs between two checkouts of "
+            "the same framework config — it is recording which machine produced it"
+        )
+        assert b"# source: configs/health_checks.yaml\n" in from_real
+
+    def test_an_external_config_keeps_its_absolute_path(self, tmp_path):
+        """The deliberate exception, pinned so it reads as a decision.
+
+        For a config OUTSIDE the checkout the absolute path is the informative
+        answer, and no repo-relative rendering of it could be honest or
+        stable. Byte-stability is not available there and is not claimed.
+        """
+        external = tmp_path / "outside" / "custom_health.yaml"
+        external.parent.mkdir(parents=True)
+        shutil.copyfile(Path(_DEFAULT_CONFIG_PATH), external)
+
+        written = Path(
+            materialize_effective_config(str(external), None, str(tmp_path / "ws"))[0]
+        ).read_text(encoding="utf-8")
+
+        assert f"# source: {external}\n" in written
+
+    def test_the_recorded_path_is_never_absolute_for_an_in_repo_config(self):
+        """The rule itself, stated over both shipped configs.
+
+        A census rather than one example: an in-repo config must never render
+        absolutely, whichever one a run names.
+        """
+        for shipped in sorted((Path(_DEFAULT_CONFIG_PATH).parent).glob("health_checks*.yaml")):
+            rendered = config_module._record_path(str(shipped))
+            assert not os.path.isabs(rendered), f"{shipped.name} rendered absolutely: {rendered}"
+            assert rendered.startswith("configs/"), rendered
 
 
 # Note (commit-6): TestLegacyClasses + TestLegacyLoader used to live here

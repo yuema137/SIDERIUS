@@ -227,6 +227,12 @@ def test_three_mechanisms_end_to_end_against_real_composer(
                 },
                 "deliverable_dirs": winner_dirs,
                 "provenance_records": [_valid_record()],
+                # F-4: the run workspace whose PINNED effective HealthGate
+                # config governs the provenance record — never the
+                # repo-current shipped one.
+                "provenance_workspace": str(
+                    (tmp_path / "stage2" / f"wavenetA_{BANDS[0]}" / "workspace").resolve()
+                ),
                 # The champion's reconciled 09a stamp (§4 amendment): the
                 # round-trip-safe MetricSpecField re-hydrates this dump.
                 "metric_spec": FULL_STAMP,

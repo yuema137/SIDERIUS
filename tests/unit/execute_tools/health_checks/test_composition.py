@@ -51,6 +51,7 @@ from execute_tools.health_checks._task_health_config import (
     TaskHealthConfig,
 )
 from execute_tools.health_checks.config import (
+    load_health_gates_config,
     materialize_effective_config,
     read_effective_config_body_sha,
 )
@@ -462,6 +463,50 @@ class TestThreeBindingStatesAreDistinct:
         _, legacy = materialize_effective_config(None, None, str(tmp_path / "a"))
 
         assert explicit_none != legacy
+
+    def test_explicit_none_survives_being_READ_BACK(self, tmp_path):
+        """F-6 — the named absence must survive the round trip, not just the write.
+
+        The two tests above prove the ARTIFACT records the decision. Nothing
+        proved the LOADER still honoured it, and it did not: every path-based
+        consumer reads the materialized file back through
+        ``load_health_gates_config``, whose composition guard asked
+        ``if cfg.health_gates:`` — FALSY for a roster that is empty BY
+        DECISION. So an ``explicit_none`` effective config was treated as "no
+        roster supplied" and acquired the LEGACY task's family, which is the
+        one outcome this binding state exists to make impossible.
+
+        Fails as: a non-empty roster coming back out of a config that declares
+        none, or the marker not surviving the load (it is the only thing that
+        distinguishes explicitly-empty from absent, and it was being dropped
+        as an undeclared extra).
+        """
+        path, _ = materialize_effective_config(
+            None,
+            None,
+            str(tmp_path / "ws"),
+            task_health_binding=HealthBindingState.EXPLICIT_NONE,
+        )
+
+        reloaded = load_health_gates_config(path)
+
+        assert [g.id for g in reloaded.health_gates] == []
+        assert reloaded.task_health_binding == "explicit_none"
+
+    def test_a_composed_roster_that_is_read_back_is_not_composed_again(self, tmp_path):
+        """The same guard from the other side, so the fix is not a special case.
+
+        A LEGACY_OMITTED effective config carries a real roster AND the
+        marker. Reading it back must return exactly what was written — not a
+        second composition pass over it.
+        """
+        path, _ = materialize_effective_config(None, None, str(tmp_path / "ws"))
+        written = yaml.safe_load(Path(path).read_text())
+
+        reloaded = load_health_gates_config(path)
+
+        assert [g.id for g in reloaded.health_gates] == [g["id"] for g in written["health_gates"]]
+        assert reloaded.task_health_binding == "legacy_default"
 
     def test_an_explicit_binding_composes_the_task_roster(self, tmp_path, clean_registry):
         config_path = _task_package(tmp_path / "pkg")
