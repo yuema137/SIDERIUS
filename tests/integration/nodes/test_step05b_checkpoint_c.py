@@ -258,7 +258,8 @@ def _drive_tuner(tmp_path, harness, *, capture: dict):
             "nodes.ml_hyperparameter_tune_agent.execution.run_production_preflight", _spy_preflight
         ),
         patch(
-            "nodes.ml_hyperparameter_tune_agent.execution.get_gates_for_position", return_value=[]
+            "nodes.ml_hyperparameter_tune_agent.round_health.get_gates_for_position",
+            return_value=[],
         ),
         patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor,
         patch(

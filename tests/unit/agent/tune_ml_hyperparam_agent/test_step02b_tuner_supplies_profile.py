@@ -47,7 +47,7 @@ class _AmbientConsulted(RuntimeError):
 @pytest.fixture(autouse=True)
 def _disable_health_gates():
     with patch(
-        "nodes.ml_hyperparameter_tune_agent.execution.get_gates_for_position",
+        "nodes.ml_hyperparameter_tune_agent.round_health.get_gates_for_position",
         return_value=[],
     ):
         yield

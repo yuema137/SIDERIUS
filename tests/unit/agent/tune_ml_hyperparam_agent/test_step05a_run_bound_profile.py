@@ -192,7 +192,8 @@ def _run_tuner(
             return_value=_synth_reference(),
         ),
         patch(
-            "nodes.ml_hyperparameter_tune_agent.execution.get_gates_for_position", return_value=[]
+            "nodes.ml_hyperparameter_tune_agent.round_health.get_gates_for_position",
+            return_value=[],
         ),
         patch("os.path.exists", return_value=True),
         resolver_patch,

@@ -293,20 +293,46 @@ def rev3_vocab_and_tee_checks() -> dict:
     checks["retry_artifacts_distinct"] = rows[0]["response_content"] != rows[1]["response_content"]
 
     # 10: no production source file modified (calibration scope only).
-    diff = subprocess.run(
+    #
+    # F-M2-2 — this check FAILS CLOSED when it cannot look.
+    #
+    # The call used to be `subprocess.run(...).stdout.splitlines()` with no
+    # `check=True` and no returncode inspection. Any git failure — not a
+    # repository, git absent, an unreadable index — produced empty stdout, so
+    # `offenders` was `[]` and the check reported PASS. A guard that passes
+    # because it could not perform its check is worse than no guard: CLAUDE.md
+    # carries "production untouched at launch" as a binding precondition of
+    # the PR3-L2 calibration protocol, so a silent green here lets a
+    # calibration run start from a dirty tree with its central precondition
+    # unverified.
+    #
+    # "No offenders found" and "could not look for offenders" are different
+    # facts and must never share a verdict. Same fail-open family as F2, where
+    # an empty gate list meant "nothing ran" and read as "nothing fired".
+    #
+    # `tests/` was swept for this class; `scripts/` never was.
+    diff_proc = subprocess.run(
         ["git", "diff", "--name-only"], capture_output=True, text=True, cwd=REPO
-    ).stdout.splitlines()
-    offenders = [
-        f
-        for f in diff
-        if f
-        and not f.startswith(("scripts/pr3_l2_calibration/", "tests/", "docs/", "reports/"))
-        # Documentation cannot change production behavior — node/operator
-        # .md edits (e.g. pending doc-sync commits) are not launch blockers.
-        and not f.endswith(".md")
-    ]
-    checks["no_production_file_modified"] = offenders == []
-    checks["_offending_files"] = offenders
+    )
+    if diff_proc.returncode != 0:
+        detail = diff_proc.stderr.strip() or "no stderr"
+        checks["no_production_file_modified"] = False
+        checks["_offending_files"] = [
+            f"UNVERIFIABLE: `git diff --name-only` failed in {REPO} "
+            f"(exit {diff_proc.returncode}): {detail}"
+        ]
+    else:
+        offenders = [
+            f
+            for f in diff_proc.stdout.splitlines()
+            if f
+            and not f.startswith(("scripts/pr3_l2_calibration/", "tests/", "docs/", "reports/"))
+            # Documentation cannot change production behavior — node/operator
+            # .md edits (e.g. pending doc-sync commits) are not launch blockers.
+            and not f.endswith(".md")
+        ]
+        checks["no_production_file_modified"] = offenders == []
+        checks["_offending_files"] = offenders
     for key, value in checks.items():
         if not key.startswith("_"):
             assert value, f"rev-3 preflight check failed: {key} ({checks.get('_offending_files')})"

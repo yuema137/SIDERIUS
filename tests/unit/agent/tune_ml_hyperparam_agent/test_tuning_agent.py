@@ -205,7 +205,7 @@ FAKE_SCORE_RESULT = {
 def _disable_health_gates_for_legacy_tuner_tests():
     """Keep non-gate tuner tests isolated from filesystem-backed HealthGates."""
     with patch(
-        "nodes.ml_hyperparameter_tune_agent.execution.get_gates_for_position",
+        "nodes.ml_hyperparameter_tune_agent.round_health.get_gates_for_position",
         return_value=[],
     ):
         yield

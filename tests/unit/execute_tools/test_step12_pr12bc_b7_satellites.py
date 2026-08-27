@@ -160,20 +160,33 @@ class TestValidateSampleSetFollowsTheRunsOwnProfile:
 # ======================================================================
 
 
+#: Every module the peek resolver may legitimately live in.
+#:
+#: The FILE SET is part of this guard, not scaffolding around it. The resolver
+#: moved from ``execution.py`` to ``round_health.py`` when gate evaluation was
+#: hoisted to the round boundary (F2); a guard that kept naming only the old
+#: module would have gone green by looking where the code no longer is —
+#: the census-blindness shape where the exemption can never fire.
+_PEEK_MODULES = (
+    "nodes/ml_hyperparameter_tune_agent/execution.py",
+    "nodes/ml_hyperparameter_tune_agent/round_health.py",
+)
+
+
+def _peek_sources() -> dict[str, str]:
+    return {rel: (REPO_ROOT / rel).read_text(encoding="utf-8") for rel in _PEEK_MODULES}
+
+
 class TestThePeekPathComesFromTheRunsAuthorities:
     def test_the_inline_tidmad_filename_literal_is_gone(self):
-        src = (REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "execution.py").read_text(
-            encoding="utf-8"
-        )
-        code = "\n".join(ln for ln in src.splitlines() if not ln.strip().startswith("#"))
-        assert "abra_validation_{i:04d}.h5" not in code
+        for rel, src in _peek_sources().items():
+            code = "\n".join(ln for ln in src.splitlines() if not ln.strip().startswith("#"))
+            assert "abra_validation_{i:04d}.h5" not in code, rel
 
     def test_the_import_time_tidmad_root_is_gone(self):
-        src = (REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "execution.py").read_text(
-            encoding="utf-8"
-        )
-        code = "\n".join(ln for ln in src.splitlines() if not ln.strip().startswith("#"))
-        assert "TIDMAD_DATA_DIR" not in code
+        for rel, src in _peek_sources().items():
+            code = "\n".join(ln for ln in src.splitlines() if not ln.strip().startswith("#"))
+            assert "TIDMAD_DATA_DIR" not in code, rel
 
     def test_the_path_is_built_from_the_composed_root_and_the_declaration(self):
         """Both halves, at the site. A fix that replaced only the filename
@@ -186,20 +199,40 @@ class TestThePeekPathComesFromTheRunsAuthorities:
         matters is what the resolver READS: the COMPOSED physical root, and
         ``validation_file_name`` from an authority the run owns rather than
         an inline template. Both are asserted against the resolver's own AST.
+
+        **F2 — the ROOT half is now asserted the same way, and the docstring
+        above is finally true of both.** It had been left as the source string
+        ``'_peek_root = sandbox.dirs["data"]'``, so this test went RED again on
+        the very rename class it was rewritten to survive: the root read moved
+        INSIDE the resolver (lazily, so a run with no physical data root does
+        not pay for a peek it never asked for) and the substring vanished while
+        the property held exactly. Asserting it on the resolver's AST is
+        STRICTLY STRONGER than the substring was — the old form would have
+        passed had ``_peek_root`` been assigned and never used, and could not
+        say the read happens where the path is built.
         """
         import ast as _ast
 
-        src = (REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "execution.py").read_text(
-            encoding="utf-8"
+        resolver = None
+        for src in _peek_sources().values():
+            resolver = next(
+                (
+                    node
+                    for node in _ast.walk(_ast.parse(src))
+                    if isinstance(node, _ast.FunctionDef) and node.name == "_target_fn"
+                ),
+                resolver,
+            )
+        assert resolver is not None, (
+            f"the raw-target peek resolver `_target_fn` is in none of {_PEEK_MODULES} — "
+            "it was renamed or removed without updating this guard's file set"
         )
-        assert '_peek_root = sandbox.dirs["data"]' in src, "the COMPOSED root half"
 
-        resolver = next(
-            node
-            for node in _ast.walk(_ast.parse(src))
-            if isinstance(node, _ast.FunctionDef) and node.name == "_target_fn"
-        )
         body = _ast.unparse(resolver)
+        assert 'dirs["data"]' in body or "dirs['data']" in body, (
+            "the COMPOSED root half: the resolver must read the run's own "
+            "physical data root, at the point it builds the path"
+        )
         assert "validation_file_name" in body, (
             "the filename must still come from the declared template authority"
         )

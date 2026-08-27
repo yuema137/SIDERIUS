@@ -38,6 +38,35 @@ from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.scoring_reference import ReferenceScores
 
 
+@pytest.fixture(autouse=True)
+def _no_gates_declared_for_these_positions():
+    """This module's subject is ATTEMPT BUDGETING, not Health.
+
+    Every case here drives the tuner over a MagicMock sandbox that writes no
+    deliverable to disk. Before F2, HealthGates were unreachable on the route
+    these cases take, so nothing ever tried to read one and every round came
+    back ``success`` — the tests were relying, without saying so, on gates
+    never running.
+
+    Now that gates fire at the round boundary on EVERY route, those same
+    rounds would fail their I/O and return ``failed_mode_collapse``, which
+    would make budget accounting untestable for a reason that has nothing to
+    do with budgets.
+
+    So the round position is declared to carry NO gates — a legal
+    configuration, and the honest way to isolate the subject. The assertions
+    below are unchanged; what changed is that the isolation is now explicit
+    instead of accidental. Health behaviour is owned by
+    ``tests/unit/execute_tools/health_checks/`` and
+    ``tests/unit/nodes/test_f2_round_boundary_health.py``.
+    """
+    with patch(
+        "nodes.ml_hyperparameter_tune_agent.round_health.get_gates_for_position",
+        return_value=[],
+    ):
+        yield
+
+
 def _synth_reference_stub() -> ReferenceScores:
     """Minimal in-memory ReferenceScores so the agent's pre-loop
     ``load_reference_scores()`` call is hermetic — no on-disk JSONs required.

@@ -1063,7 +1063,7 @@ contract have exactly one source for the whole run.
 | Element | Where | What |
 |---|---|---|
 | binding | `run()`, run scope, after `run_deliverable_spec` | `run_metric = resolve_run_metric(run_profile, run_deliverable_spec)` — **Step 10 P1**, moved into the metric module at **Step 12 / PR-12d seam B** (byte-identical to the `resolve_bound_run_metric() or derive_tidmad_metric(...)` expression it replaced): a COMPOSED run's declared metric wins; un-composed falls through to the Regime-A derivation, byte-identical, and resumed un-composed runs re-derive the same value; a composed run declaring neither its own metric nor TIDMAD deliverable geometry is refused (`NoRunMetricError`) rather than deriving TIDMAD's against an invented topology. Exactly ONE acquisition site, pinned by census (`tests/unit/workflows/test_step10_p1_c0_census.py`), which also pins the ORDER — putting the derivation first would make every composed run execute TIDMAD's arithmetic while the composed metric sat unused |
-| live route (`ANCHOR_NORMALIZED`) | the anchor-map scoring branch | `metric_result = sandbox.evaluate_metric(run_metric, sample_set=eval_sample_set, anchor_map=…, s_max=…, denoised_filename_fn=_denoised_fn)`; `file_vector, final_scalar = metric_result.per_sample, metric_result.scalar` — everything downstream (HealthGates, `score_res`, reflector, record) unchanged |
+| live route (`ANCHOR_NORMALIZED`) | the anchor-map scoring branch | `metric_result = sandbox.evaluate_metric(run_metric, sample_set=eval_sample_set, anchor_map=…, s_max=…, denoised_filename_fn=_denoised_fn)`; `file_vector, final_scalar = metric_result.per_sample, metric_result.scalar` — `score_res`, reflector and record unchanged. **HealthGates are no longer part of this branch** (F2, below): they fire once per round for every route |
 | task-owned route (`TASK_OWNED`, **Step 12 / PR-12d**) | scoring subprocess — every composed contrast run, which declares no trial anchor map | the child scores its OWN deliverable through the SAME composed metric and reports `metric_result` (plus declared secondaries) in its JSON output; the tuner ADOPTS them (`_adopt_child_metric_result`, `_adopt_child_secondaries` in `execution.py`) because only the child holds the deliverable and the evaluation scope. Total-function precedence: an anchor-route value, when one was computed, always wins, so adoption can never blank an in-process result |
 | order inside the seam | `TidmadSandbox.evaluate_metric` | DataScope `validate_sample_set` (unchanged, first) → `TidmadScoreabilityContract.check({file_index: path})` → `scoring_utils.score_vector(**the same kwargs as before)` |
 | refusal | `NotScoreableError` from the seam → the scoring `except` → `_build_scoring_failure_record` | `status='error_scoring'`, `failure_stage='scoring'`, `failure_type='not_scoreable'`, `metric_refusal=<NotScoreableResult>`, memory prose naming contract + requirement (never "crashed"); round outcome unchanged (next attempt) |
@@ -1071,6 +1071,43 @@ contract have exactly one source for the whole run.
 | what the LLMs see | planner history dump / reflector `actual_results` | NOTHING new. The reflector's `score_results` is unchanged (the payload never enters it); the planner's history serialization (`agent/prompts.py::_truncate_memory_history`) drops `metric_result` / `metric_refusal` from the verbatim window (`_PLANNER_HIDDEN_RECORD_KEYS`), so planner message bytes are identical to pre-Step-06 for the same run. The payload is persisted for Steps 07a / 09, which own agent-facing rendering. No prompt template changed |
 | legacy 2-tuple seam | `TidmadSandbox.score_vector` | still callable; Regime A resolves TIDMAD through the handle; values identical |
 | pseudo mode | `StubSandbox.evaluate_metric` | synthesises the same 2-tuple stream under the run's real identity/direction |
+
+### HealthGates fire at the ROUND boundary, on every scoring route (F2)
+
+`docs/design/pluggable_health_checks.md` §8 and `CLAUDE.md` both specify that
+gates fire at tuner round boundaries. Until this repair the code did not: the
+tuner's only production gate call sat INSIDE the `ANCHOR_NORMALIZED` scoring
+branch, which requires an anchor map, so
+
+```text
+un-composed + --is_trial     -> ANCHOR_NORMALIZED  -> gates evaluated
+un-composed + --no-is_trial  -> SUBPROCESS_LEGACY  -> gates NEVER evaluated
+composed (any task)          -> TASK_OWNED         -> gates NEVER evaluated
+```
+
+A composed task could declare a roster, materialize it into
+`health_checks_effective.yaml`, have its sha pinned by the run-invariants lock
+and pass `--healthgate_mode blocking` — and nothing was evaluated. The record
+carried `health_gate_results: []` beside `health_gate_enabled: true`, which is
+indistinguishable from a clean pass. **`blocking` was inert on exactly the runs
+it exists to block.**
+
+| Element | Where | What |
+|---|---|---|
+| boundary | `nodes/ml_hyperparameter_tune_agent/round_health.py` | `evaluate_round_health(...) -> RoundHealthOutcome`. A total function with explicit inputs: it resolves the round's gate set, builds the `HealthCheckContext`, calls the engine and projects the score-meta. Extracted rather than widening the `if`, because `run_inference_scoring_health` is already a phase orchestrator and the decomposition rule forbids adding branching to one |
+| call site | `execution.py`, AFTER the scoring `try/except`, before the record is built | Reached on ALL THREE routes. Both routes arrive carrying the same three round facts (`file_vector`, `final_scalar`, `per_sample_evidence`); the task-owned route transports them from the child's payload, where `file_vector = MetricResult.per_sample` gives D18's mapping verbatim. A payload omitting the key entirely yields `PerSampleEvidence.UNDECLARED` — absence is never read as `scalar_only` |
+| scoring failure | unchanged | A scoring exception still takes the `error_scoring` path and never reaches a gate. A gate that could not be evaluated is not a gate that passed |
+| gates disabled | `health_gate_enabled=False` (DataScope DS5) | `evaluated=False`, no engine call, no I/O. Score-validity classification stays active, exactly as before |
+| structural guard | `tests/unit/nodes/test_f2_round_boundary_health.py` | Asserts by AST that the gate call has no `ScoringRoute` condition among its ancestors, and that `execution.py` contains no second gate call. The detector is itself proved to fire on the original defect shape, so the guard cannot pass vacuously |
+
+**Known residual, tracked as follow-up debt.** `RoundHealthOutcome.evaluated`
+answers "did gates RUN?" but is deliberately NOT persisted. `health_gate_results:
+[]` therefore still cannot distinguish "ran, found nothing" from "never
+invoked". Surfacing it means adding a key to `score_results`, which is the
+transport for BOTH the record and the reflector's `actual_results` merge — and
+that key list is a pinned LLM-facing surface (WF-2 golden, frozen at 9). Moving
+a prompt surface is a declared Gate-1 change and did not belong in this repair.
+The typed field exists so the follow-up is a wiring change, not a re-derivation.
 
 **Scoreability (TIDMAD instance)** requires of the DELIVERABLE exactly what the
 live scorer reads: file-level completeness (every in-scope file has an HDF5 that

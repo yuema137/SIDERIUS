@@ -170,7 +170,7 @@ def _run_single_file_tuner(tmp_path):
             return_value=_synth_reference(),
         ),
         patch(
-            "nodes.ml_hyperparameter_tune_agent.execution.get_gates_for_position",
+            "nodes.ml_hyperparameter_tune_agent.round_health.get_gates_for_position",
             return_value=[],
         ),
     ):

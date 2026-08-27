@@ -151,13 +151,23 @@ class TestTheProducerRecordsThem:
         so deleting it here still passed. A mutation proved that, which is
         the only reason it was caught.
         """
-        import inspect
-
-        from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
-
         src = tuner_lifecycle_source()
-        start = src.find("evaluate_and_persist_health_gates(")
-        assert start != -1, "the gate-evaluation call site disappeared"
+        # F2 — the anchor moved with the call it guards. The tuner no longer
+        # calls `evaluate_and_persist_health_gates` directly: gate evaluation
+        # was hoisted out of the ANCHOR_NORMALIZED scoring branch (where it was
+        # unreachable for composed and `--no-is_trial` runs) into the
+        # round-boundary helper, which the tuner calls once per round on EVERY
+        # scoring route.
+        #
+        # The property under test is unchanged and still the right one: the
+        # tuner must PASS ITS OWN DECLARED POSTURE to gate evaluation rather
+        # than let it default. Only the name of the call that receives it moved.
+        # `apply_round_health` is the orchestrator's ONE round-boundary call:
+        # evaluate + merge score-validity + stamp the verdict, which are one
+        # responsibility. The posture must still be threaded from the run's
+        # own declaration rather than defaulted.
+        start = src.find("apply_round_health(")
+        assert start != -1, "the round-boundary gate-evaluation call site disappeared"
         # A bounded window rather than a balanced-paren match: the call
         # contains a nested `os.path.join(...)`, so a non-greedy regex stops
         # at the WRONG closing paren and silently truncates the body.

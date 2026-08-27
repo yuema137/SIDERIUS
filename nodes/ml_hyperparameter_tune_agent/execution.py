@@ -48,11 +48,7 @@ from execute_tools.evaluation_metric import (
     MetricResult,
     NotScoreableResult,
 )
-from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
-from execute_tools.health_checks.runner import get_gates_for_position
 from execute_tools.health_checks.schemas import (
-    GateAction,
-    HealthCheckContext,
     PerSampleEvidence,
 )
 from execute_tools.scoring_helpers import (
@@ -85,6 +81,10 @@ from nodes.ml_hyperparameter_tune_agent.records import (
     _build_skip_record,
     _interpret_training_status,
 )
+from nodes.ml_hyperparameter_tune_agent.round_health import (
+    apply_round_health,
+    build_target_path_fn,
+)
 from nodes.ml_hyperparameter_tune_agent.runtime import (
     PrephaseOutcome,
     RuntimeEvidenceChannelError,
@@ -102,9 +102,6 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     _time_skip_memory_extra,
     _vram_skip_memory_extra,
     is_evidence_refusal,
-)
-from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
-    project_attempt_topology_facts,
 )
 
 # `_emit_record` is the node's ONE record-emission point, called from four
@@ -1178,39 +1175,52 @@ def run_inference_scoring_health(
         # record (matches the error_training/inference pattern
         # above), and continue. See docs/V8_Gap_Report.md Domain 2a.
         _scoring_route = resolve_scoring_route(anchor_map_data, prepared.task_scopes)
+
+        # F2 — these two resolvers are properties of the ROUND (its model, its
+        # deliverable naming, its physical root), not of the scoring route, and
+        # they are hoisted out of the anchor branch so the round-boundary
+        # HealthGate evaluation below can be reached on EVERY route. Neither
+        # construction performs I/O or depends on a score.
+        #
+        # B023 — default-arg locking pins the captured loop
+        # variables at definition time; without it a future
+        # refactor that defers the call would hit the last
+        # iteration's model_type / exp_id.
+        # Bug A fix (PR #101 Gate 2 forensic): return an
+        # absolute path so downstream consumers that use the
+        # string verbatim (HealthCheckContext.get_denoised_path
+        # per the peek helper's path contract in
+        # execute_tools/health_checks/_peek.py:20-24) can open
+        # the file directly. Callers that also os.path.join a
+        # data_dir (scoring_utils.process_segment) are
+        # unaffected — os.path.join discards the base when
+        # the second arg is absolute.
+        def _denoised_fn(
+            fi,
+            model_type=model_type,
+            exp_id=exp_id,
+            base_dir=sandbox.base_dir,
+            naming=run_deliverable_naming,
+        ):
+            return _build_denoised_filename(
+                model_type=model_type,
+                run_name=run_name,
+                exp_id=exp_id,
+                input_identity=fi,
+                base_dir=base_dir,
+                naming=naming,
+            )
+
+        # The RAW validation-file resolver, owned by the health boundary:
+        # nothing on the scoring paths calls it, and it resolves lazily so a
+        # run with no physical data root does not pay for a peek it never
+        # asked for. Rationale in `round_health.build_target_path_fn`.
+        _target_fn = build_target_path_fn(sandbox, run_profile)
+
         try:
             if _scoring_route is ScoringRoute.ANCHOR_NORMALIZED:
                 # Anchor-normalized scoring (both trial and formal modes).
                 # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
-                # B023 — default-arg locking pins the captured loop
-                # variables at definition time; without it a future
-                # refactor that defers the call would hit the last
-                # iteration's model_type / exp_id.
-                # Bug A fix (PR #101 Gate 2 forensic): return an
-                # absolute path so downstream consumers that use the
-                # string verbatim (HealthCheckContext.get_denoised_path
-                # per the peek helper's path contract in
-                # execute_tools/health_checks/_peek.py:20-24) can open
-                # the file directly. Callers that also os.path.join a
-                # data_dir (scoring_utils.process_segment) are
-                # unaffected — os.path.join discards the base when
-                # the second arg is absolute.
-                def _denoised_fn(
-                    fi,
-                    model_type=model_type,
-                    exp_id=exp_id,
-                    base_dir=sandbox.base_dir,
-                    naming=run_deliverable_naming,
-                ):
-                    return _build_denoised_filename(
-                        model_type=model_type,
-                        run_name=run_name,
-                        exp_id=exp_id,
-                        input_identity=fi,
-                        base_dir=base_dir,
-                        naming=naming,
-                    )
-
                 # Step 06 — PRODUCTION SCORING through the
                 # metric handle: scoreability first, then the
                 # frozen TIDMAD arithmetic. A refused
@@ -1271,128 +1281,15 @@ def run_inference_scoring_health(
                     denoised_filename_fn=_denoised_fn,
                 )
 
-                # Tuner-side gate evaluation (commit-5b).
-                # score_vector is pure scoring post-5a; the HealthGate
-                # model runs here at the round boundary per
-                # docs/design/pluggable_health_checks.md §8.
-                # The resolved action feeds the record surface only
-                # (gate_action / is_degenerate); the skip loop-control
-                # actions were retired (F-SCANC-1).
-                # Target-signal path resolver for CH2-comparing
-                # recording checks (pearson_dispersion, etc.).
-                # M8 §3.4: the check module stays task-agnostic;
-                # the tuner constructs the task-specific path here.
-                #
-                # Step 12 / PR-12bc B7, satellite (f). This used to join the
-                # IMPORT-TIME `TIDMAD_DATA_DIR` to an inline
-                # `abra_validation_{i:04d}.h5` literal, bypassing
-                # `validation_file_name` entirely — so a composed run peeked at
-                # TIDMAD's files, under TIDMAD's names, in TIDMAD's directory,
-                # whatever it had declared. Both halves now come from the run's
-                # own authorities: the COMPOSED physical root
-                # (`sandbox.dirs["data"]`, Step 11 C4) and the profile's
-                # declared validation-file template.
-                #
-                # Step 12 / PR-12d, seam B. The decode moved to the ONE
-                # projection this package uses, and the resolution DECLINES BY
-                # NAME when the run's task declares no physical geometry —
-                # rather than dying at construction for every composed
-                # contrast run. That is the honest shape: a raw-target path is
-                # something only a check that compares against the RAW SIGNAL
-                # asks for, and the contrast packs' Health families consume
-                # decoded views of the deliverable instead, so `_target_fn` is
-                # simply never called for them. A check that DID ask gets a
-                # named refusal, never a fabricated filename.
-                _peek_root = sandbox.dirs["data"]
-                _peek_facts = project_attempt_topology_facts(run_profile)
-
-                def _target_fn(i: int, _base: str = _peek_root, _facts=_peek_facts) -> str:
-                    names = _facts.require_physical_dataset(
-                        "resolving a raw validation-file path for a Health peek"
-                    )
-                    return os.path.join(_base, names.validation_file_name(i))
-
-                if agent_input.health_gate_enabled:
-                    _gate_ids = (
-                        get_gates_for_position(
-                            round_index,
-                            config_path=agent_input.health_checks_config,
-                        )
-                        if agent_input.health_checks_config
-                        else get_gates_for_position(round_index)
-                    )
-                    _sandbox_dirs = getattr(sandbox, "dirs", {})
-                    _models_dir = (
-                        _sandbox_dirs.get("models") if isinstance(_sandbox_dirs, dict) else None
-                    )
-                    _checkpoint_path = (
-                        os.path.join(
-                            _models_dir,
-                            f"model_{model_type}_{exp_id}_agent.pth",
-                        )
-                        if _gate_ids and _models_dir
-                        else None
-                    )
-                    _hc_ctx = HealthCheckContext(
-                        model_name=model_type,
-                        run_name=run_name,
-                        round_index=round_index,
-                        denoised_filename_fn=_denoised_fn,
-                        target_path_fn=_target_fn,
-                        checkpoint_path=_checkpoint_path,
-                        file_vector=file_vector,
-                        denoising_score=final_scalar,
-                        per_sample_evidence=per_sample_evidence,
-                    )
-                    _gate_results, _persisted_gate_results, resolved_action = (
-                        evaluate_and_persist_health_gates(
-                            _hc_ctx,
-                            config_path=agent_input.health_checks_config,
-                            production_config_path=os.path.join(
-                                SIDERIUS_ROOT, "configs", "health_checks.yaml"
-                            ),
-                            gate_ids=_gate_ids,
-                            # D-C7b: the run's declaration
-                            # travels onto every gate result,
-                            # so an external reader never has
-                            # to infer the posture from a
-                            # gate id's spelling.
-                            healthgate_mode=agent_input.healthgate_mode,
-                            result_authority=agent_input.result_authority,
-                        )
-                    )
-                    is_degenerate, failure_reason, _gate_action_str = _gate_results_to_score_meta(
-                        _gate_results, resolved_action
-                    )
-                else:
-                    # DataScope DS5 — HealthGate subsystem
-                    # explicitly disabled: no gate evaluation,
-                    # no gate persistence. Score-validity
-                    # classification (the merge below) stays
-                    # active regardless.
-                    _persisted_gate_results = []
-                    resolved_action = GateAction.CONTINUE
-                    is_degenerate, failure_reason, _gate_action_str = (
-                        False,
-                        None,
-                        None,
-                    )
-                is_degenerate, failure_reason = _merge_score_validity_failure(
-                    final_scalar,
-                    is_degenerate=is_degenerate,
-                    failure_reason=failure_reason,
-                )
+                # F2 — the gate evaluation that used to sit HERE now runs once
+                # at the round boundary below, for every scoring route. It was
+                # never anchor-specific: it reads the round's deliverable, not
+                # the way that deliverable was scored.
                 score_res = {
                     "status": "success",
                     "results": {
                         "denoising_score": final_scalar,
                         "file_vector": file_vector,
-                        "is_degenerate": is_degenerate,
-                        "failure_reason": failure_reason,
-                        "gate_action": _gate_action_str,
-                        "health_gate_results": [
-                            item.model_dump(mode="json") for item in _persisted_gate_results
-                        ],
                     },
                 }
             else:
@@ -1410,6 +1307,26 @@ def run_inference_scoring_health(
                 #   every un-composed FORMAL round has always gone. The old
                 #   comment named a condition the code never tested.
                 score_res = _runtime._run_skill("denoising_score_skill", sandbox, **active_params)
+                # F2 — carry the same three round facts the anchor route
+                # produces in-process, so the round-boundary gate evaluation
+                # below is genuinely route-independent rather than an anchor
+                # branch with a second entrance.
+                #
+                # `per_sample_evidence` is TRANSPORTED, never inferred. The
+                # child sets `file_vector` from `MetricResult.per_sample`,
+                # which is `None` exactly when the metric declares no
+                # per-sample concept — so D18's mapping applies verbatim. A
+                # payload that omits the key entirely has stated NOTHING, and
+                # absence must not be read as `scalar_only`: that is the
+                # distinction `PerSampleEvidence.UNDECLARED` exists to keep.
+                _child_results = score_res.get("results", {}) or {}
+                final_scalar = _child_results.get("denoising_score")
+                file_vector = list(_child_results.get("file_vector") or [])
+                per_sample_evidence = (
+                    PerSampleEvidence.for_per_sample(_child_results.get("file_vector"))
+                    if "file_vector" in _child_results
+                    else PerSampleEvidence.UNDECLARED
+                )
         except ScopeViolationError as e:
             # DataScope DS5 — non-retryable: terminate the run
             # (must precede the generic handler below, which
@@ -1450,6 +1367,43 @@ def run_inference_scoring_health(
             phase="post_score",
             workspace=workspace,
             scope="tuner",
+        )
+
+        # F2 — HealthGates fire at the ROUND boundary, on every scoring route.
+        #
+        # Placed after the scoring try/except on purpose: reaching this line
+        # means scoring SUCCEEDED for whichever route ran, so both routes
+        # arrive carrying the same round facts. A scoring failure still takes
+        # the `error_scoring` path above and never reaches a gate — a gate that
+        # could not be evaluated is not a gate that passed.
+        #
+        # Evaluate, merge score-validity and stamp the verdict are one
+        # responsibility and therefore one call; the boundary owns them, this
+        # function keeps sequencing. Full rationale, and the deliberately
+        # unpersisted `evaluated` residual, in `round_health`.
+        apply_round_health(
+            score_res,
+            merge_score_validity=_merge_score_validity_failure,
+            enabled=agent_input.health_gate_enabled,
+            round_index=round_index,
+            config_path=agent_input.health_checks_config,
+            production_config_path=os.path.join(SIDERIUS_ROOT, "configs", "health_checks.yaml"),
+            healthgate_mode=agent_input.healthgate_mode,
+            result_authority=agent_input.result_authority,
+            model_name=model_type,
+            run_name=run_name,
+            exp_id=exp_id,
+            models_dir=(
+                sandbox.dirs.get("models")
+                if isinstance(getattr(sandbox, "dirs", None), dict)
+                else None
+            ),
+            denoised_filename_fn=_denoised_fn,
+            target_path_fn=_target_fn,
+            file_vector=file_vector,
+            denoising_score=final_scalar,
+            per_sample_evidence=per_sample_evidence,
+            gate_results_to_score_meta=_gate_results_to_score_meta,
         )
 
         # Extract results from each stage. Step 07a: the LEGACY

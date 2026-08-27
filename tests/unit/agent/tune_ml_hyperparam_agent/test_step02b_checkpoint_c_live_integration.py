@@ -234,7 +234,8 @@ def live_run(tmp_path):
             return_value=_synth_reference(),
         ),
         patch(
-            "nodes.ml_hyperparameter_tune_agent.execution.get_gates_for_position", return_value=[]
+            "nodes.ml_hyperparameter_tune_agent.round_health.get_gates_for_position",
+            return_value=[],
         ),
         # Runtime-control GPU pre-phase measurement. On a host WITH a real
         # device identity (this one has an RTX 5090) it launches a real
