@@ -45,7 +45,7 @@ bash sdsc_submission_scripts/run_chain.sh --mode sdsc \
 | `run_one_iteration.py` | **PER-ITER PYTHON RUNNER** — executes one iteration of the 5-agent workflow. Called once per iter by both modes. Writes `iter_NNN/manifest.json`. |
 | `launch_prior_baseline_experiment.sh` | **TWO-ARM EXPERIMENT LAUNCHER** (arXiv X9) — wraps `run_chain.sh`; `--arm with-prior-art\|without-prior-art` decides the lit-review topology, the opaque arm label and (WITHOUT arm) `--baseline_isolation`. Refuses seeds and advice files; `--dry-run` prints the child argv AND the resolved launch config JSON; `--h100` sources `h100_posture.env`. **Campaign band mode** (arXiv launch topology): `--band 0-3\|4-9\|10-14\|15-19 --workspace-root DIR` maps the band to the DS8 pair (`--data_scope` + `--health_gate_files`), derives the per-chain workspace/run_name `${ARM}_band${BAND}` under the persistent-volume root, and (with `--h100`) refuses launch until `H100_CORESIDENCY_FACTOR` is probe-filled. **Fixed-candidate mode**: `--fixed-candidate PLAN.json` forwards the chain's existing `--validation_fixed_candidate_plan` seam (proposer bypassed, provenance recorded) and pins `--num_iterations 1` unless given. |
 | `launch_band_fleet.sh` | **BAND FLEET LAUNCHER** — the four band chains of ONE arm on one GPU: sequential `nohup` starts with a stagger, per-chain logs + PID manifest under `${WORKSPACE_ROOT}/fleet_logs/`, honors `CUDA_VISIBLE_DEVICES` (`--gpu N` pins). `--card A\|B` maps to the arm (`C` is refused toward the probe); `--fixed-candidate` fans the frozen champion across all four bands; `--dry-run` walks all four foreground. |
-| `campaign_preflight.sh` | **CAMPAIGN PREFLIGHT** — one launch-blocking gate, exit non-zero on any FAIL: persistent-mount check, revision (`repo_sha=` for the launch packet, dirty tree fails), per-band dataset presence, posture admission arithmetic + coresidency-factor filled, host-RAM headroom vs the recorded 47 GB 4-chain OOM, per-band identity dry-runs, the **#255 arm argv-symmetry check** (`campaign_arm_symmetry.py`), the #260 cold-start rows, and the LLM burst smoke (`campaign_llm_smoke.py`, 8 parallel one-word calls — reachability, never a quota guarantee). Chain flags after `--` forward to every dry-run. |
+| `campaign_preflight.sh` | **CAMPAIGN PREFLIGHT** — one launch-blocking gate, exit non-zero on any FAIL: persistent-mount check, revision (`repo_sha=` for the launch packet, dirty tree fails), per-band dataset presence, posture admission arithmetic + coresidency-factor filled, host-RAM headroom vs the recorded 47 GB 4-chain OOM, per-band identity dry-runs, the **#255 arm argv-symmetry check** (`campaign_arm_symmetry.py`), the #260 cold-start rows, and the LLM burst smoke (`campaign_llm_smoke.py`, 8 parallel one-word calls — reachability, never a quota guarantee). Chain flags after `--` forward to every dry-run. **`--arm with-prior-art\|without-prior-art\|goldpod`** — it gates BOTH topologies, because both build the same per-band workspace `${ARM}_band${BAND}` and the campaign launcher's own refusals point here for the mount (R1) and generated-library (R1c) checks. Under `goldpod` the machine/checkout rows (R1, R1b, R1c, R2, R2b, R3, R5, R8, R9) run and **R8 inspects the real `goldpod_band…` workspaces**; the rows bound to the X9 launcher (R6, R7) or to the X9 four-way co-residency posture (R4) print **`SKIP` with a named reason** — never PASS — and do not count as failures. `blindpod` is refused by name: Gold↔Blind treatment symmetry is a separate blind-launch prerequisite this gate does not check. |
 | `gpu_c_coresidency_probe.sh` | **GPU-C CALIBRATION PROBE** (+ `gpu_c_probe_train_leg.py`) — bounded (~55 min) two-leg measurement of the 4-way co-residency slowdown: solo reference (band 0-3) then four co-resident band legs of REAL zero-LLM baseline-trial training; emits `gpu_c_probe_result.json` (matched-band factor, per-chain VRAM/RSS peaks, host MemAvailable min) + the exact posture line to fill. Refuses a busy GPU. |
 | `submit_one_iteration.slurm` | Slurm wrapper around `run_one_iteration.py`. Used by `run_chain.sh --mode sdsc`; chained via `--dependency=afterany:<prev_job>`. |
 
@@ -61,6 +61,22 @@ workflow: the iteration unit is the existing chain, reused unchanged. The
 X9 launchers above stay untouched (X9 reproducibility); the campaign does
 NOT route through their arm logic. Frozen paths + winner rule:
 `docs/campaign/stage_artifact_contract.md`.
+
+**Preflight the campaign with its OWN arm label**, before stage 1:
+
+```bash
+bash sdsc_submission_scripts/campaign_preflight.sh \
+    --workspace-root /persist/siderius_campaign --arm goldpod \
+    --revision <sha> -- --healthgate_mode blocking --result_authority scientific
+```
+
+`--arm goldpod` is what makes R8 inspect the real `goldpod_band…`
+workspaces and what makes R1/R1c reachable at all — the launcher's own
+refusals send the operator here for both. Passing an X9 arm instead
+checks a different arm's directories and reports cold-start clean about a
+tree the campaign never writes. R4/R6/R7 print `SKIP` there (X9 launcher
+and X9 co-residency posture); nothing after `--` reaches a dry-run, so
+the run is fast.
 
 | file | role |
 |---|---|
