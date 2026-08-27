@@ -4923,8 +4923,25 @@ decisions:
   - decision_id: D-LLM-13-RULING
     parameter: disposition of D-LLM-13 (both halves)
     concept: snapshot pin and served-model capture are release blockers
-    status: FROZEN
+    status: DISCHARGED
+    superseded_status: FROZEN
     control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    reconciled: >-
+      disposition RELEASE_BLOCKER ADDED and status set DISCHARGED 2026-08-27 by
+      ledger reconciliation. The row DECLARED both halves v0.1.0 release
+      blockers in its own frozen_value while carrying NO disposition field, so
+      it was invisible to every disposition-scoped blocker filter - the same
+      filter gap that hides R-OBS-1. Both halves landed as a8146f86 (PR #324), a
+      verified ancestor of origin/master 3995400b. Verified on master: 66a -
+      llm_configs/openai_tiered_pro.json pins gpt-5.5-2026-04-23 in all EIGHT
+      OpenAI role slots (grep count 8); 66b - agent/llm_bridge.py:1517-1519
+      reads served_model from response.model and stores a non-string as None
+      rather than a repr, passing it at :1589 into
+      TokenUsage.served_model (agent/schemas/telemetry/token_usage.py:140). The
+      value is read FROM THE RESPONSE, not from the caller's request, which is
+      exactly the discriminating property witness_specified_by_operator
+      demands. The ruling text itself is unchanged.
     frozen_value: >-
       Both halves of D-LLM-13 are v0.1.0 RELEASE BLOCKERS. 66a is the immutable
       snapshot pin in configuration; 66b is capture of the provider-resolved
@@ -4946,9 +4963,27 @@ decisions:
   - decision_id: F-H100-WD-1-PRETAG
     parameter: explicit hash-verified binding of the runtime-calibration artifact
     concept: the SUPPORT for Route B, not its numeric measurement
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. The
+      required_repair landed as f2d7ae3d (PR #339, the RequiredProfileBinding
+      mechanism) plus 289554df (PR #346, the declaration path that made it
+      reachable); both verified ancestors of origin/master 3995400b. Verified on
+      master: core/runtime_control/watchdog_profile.py declares
+      RequiredProfileBinding (artifact_path / profile_key / expected_sha256,
+      frozen, extra=forbid), _load_bound_overlay hashes the bytes BEFORE
+      json.loads parses the same object, RequiredProfileBindingError becomes
+      SystemExit at run_one_iteration.py:2178-2182, gold_required_profile_args
+      (_gold_campaign_lib.sh:254) validates and emits the triple from the ONE
+      builder both stages consume, and run_gold_campaign.sh:255-257 names the
+      artifact in the launch manifest (null when undeclared). RESIDUAL, recorded
+      not discharged: "resolved identity and hash persisted into run provenance"
+      is carried by the manifest, the resolved-provenance string and the launch
+      banner, and does NOT join RunInvariants - read strictly as the invariants
+      lock, that clause is partial.
     frozen_value: null
     operator_boundary_test: >-
       If making the official Gold run consume the hardware-derived artifact
@@ -5055,7 +5090,31 @@ decisions:
       evidence, ONE semantics end to end.
     superseded_status: PENDING_OPERATOR_DECISION
     control_class: EXPERIMENT_FIXED
-    disposition: RELEASE_BLOCKER
+    disposition: POST_TAG_GOLD_QUALIFICATION
+    reconciled: >-
+      disposition re-routed RELEASE_BLOCKER -> POST_TAG_GOLD_QUALIFICATION on
+      2026-08-27 by ledger reconciliation. status FROZEN, superseded_status and
+      the resolution text are UNCHANGED - the ruling is already recorded and
+      nothing here revisits it. Routing basis: this row's own required_witness
+      and timing_constraint both anchor the remaining work to "BEFORE H100
+      qualification", and F-H100-WD-1-PRETAG's numeric_row_disposition places
+      that qualification POST_TAG under Route B. There is also nothing in tagged
+      code for the unit ruling to change - the ceiling is operator-supplied at
+      launch and deliberately never a constant (_gold_campaign_lib.sh:303-309,
+      "there must never be one"), and 0173de4c (PR #353) landed that transport
+      seam with NO value. The canonical authority the resolution names is
+      already single and already GiB, verified on origin/master 3995400b:
+      agent/skills/evaluate_vram_skill/wrapper.py:93 _GB = 1024**3,
+      core/sandbox_executor.py:176 gb * (1024**3),
+      core/runtime_control/pair_admission.py:42 BYTES_PER_GIB = 1024**3; no
+      second accounting mechanism exists. TWO ITEMS FLAGGED, NOT EDITED.
+      (1) No unit-consistency witness exists in source or tests on master - the
+      row's required_witness is still owed, at qualification. (2) The fold-down
+      itself: D-GOV-10's tiebreak_rule says fold UP, never DOWN, and this row is
+      NOT on D-GOV-10's named membership list, so operator confirmation is
+      requested. One residual an operator may want closed pre-tag anyway:
+      agent/skills/evaluate_vram_skill/killer_report.py:117 formats GiB
+      arithmetic under an ambiguous "GB" label.
     frozen_value: null
     raised: 2026-08-26
     why_neither_lane_may_decide: >-
@@ -5079,9 +5138,26 @@ decisions:
   - decision_id: T-IMPL-1-VERIFIED
     parameter: advice flag refused in both arms
     concept: the treatment delivery mechanism does not function
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: TREATMENT
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work - the
+      FRAMEWORK half this row owns. Landed as 7bb6dc3a (PR #337, the canonical
+      Gold entrypoint), a verified ancestor of origin/master 3995400b. The row's
+      routing said the framework half COUPLES to F-LAUNCH-1's entrypoint ruling,
+      and that is where it landed: the campaign no longer goes through
+      launch_prior_baseline_experiment.sh, whose refusal at :142-146 is the
+      finding, and which remains untouched as the X9 authority. Verified on
+      master: _gold_campaign_lib.sh gold_arm_args() emits
+      --advice "$advice_abs" --advice_sha256 "$observed_sha" for goldpod ONLY,
+      and blindpod REFUSES --gold_advice_file BY NAME as the explicit-absence
+      arm - so the treatment is deliverable AND arm-scoped, which the row's
+      concept ("the treatment delivery mechanism does not function") required.
+      f3222eef (PR #352) added the observed-identity binding. NOT closed here,
+      by the row's own routing: the artifact-AUTHORING half is campaign content
+      and stays a GOLD_LAUNCH_PRECONDITION.
     frozen_value: null
     evidence: launch_prior_baseline_experiment.sh:142-146
     finding: >-
@@ -5133,7 +5209,7 @@ decisions:
   - decision_id: F-LAUNCH-2
     parameter: the band-fleet stack implements a different experiment
     concept: no existing launcher implements this campaign's treatment
-    status: RESOLVED_BY_RULING
+    status: DISCHARGED
     resolution: >-
       The DESIGN QUESTION is resolved by the operator's entrypoint ruling of
       2026-08-26 (D-ARCH-1). The FINDINGS survive as requirements and reuse-map
@@ -5143,6 +5219,27 @@ decisions:
     superseded_status: PENDING_OPERATOR_DECISION
     control_class: TREATMENT
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      status RESOLVED_BY_RULING -> DISCHARGED 2026-08-27 by ledger
+      reconciliation, not by new work. superseded_status is deliberately LEFT at
+      PENDING_OPERATOR_DECISION: the field is a single slot holding the EARLIEST
+      superseded value, not a history stack, so RESOLVED_BY_RULING must not
+      overwrite it. Landed as 7bb6dc3a (PR #337), with f3222eef (PR #352) adding
+      the advice identity binding; both verified ancestors of origin/master
+      3995400b. Both constraints_any_fix_must_satisfy are met on master, and all
+      four consequence_if_launched_as_is items are resolved, verified in
+      _gold_campaign_lib.sh gold_arm_args(): goldpod is
+      (--experiment_arm goldpod --no-ml_lit_review_enabled --advice ...
+      --advice_sha256 ...) and blindpod is
+      (--experiment_arm blindpod --no-ml_lit_review_enabled), so the arms differ
+      in ADVICE ONLY; lit-review is symmetric OFF in both, removing the second
+      variable; baseline_isolation appears NOWHERE in the gold entrypoint stack,
+      removing the third; and the arm label names THIS experiment, with the X9
+      labels refused by name (R-ARM-STAMP-1). The row's bounding_good_news holds
+      - _chain_common.sh:354 already parsed --advice and still does; this was a
+      launcher-layer problem and it was fixed at the launcher layer. The X9
+      launcher is deliberately UNCHANGED, so X9 reproducibility is intact, which
+      is what reframes_f_launch_1 required of any fix.
     frozen_value: null
     raised: 2026-08-26
     authority: campaign-planning lane, mechanically verified
@@ -5360,9 +5457,23 @@ decisions:
   - decision_id: R-ARM-STAMP-1
     parameter: the campaign entrypoint must stamp a campaign-correct arm label
     concept: wrong-but-pinned provenance is worse than absent provenance
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. The
+      requirement landed as 7bb6dc3a (PR #337), a verified ancestor of
+      origin/master 3995400b and the only commit touching this row's id under
+      sdsc_submission_scripts/. Verified on master: _gold_campaign_lib.sh:126
+      declares GOLD_ARMS=("goldpod" "blindpod"); :712 and :731 stamp
+      --experiment_arm goldpod / blindpod; :641-647 refuses
+      with-prior-art|without-prior-art BY NAME and cites this row in the refusal
+      text; --experiment_arm is a reserved passthrough token so it cannot be
+      re-bound from the command line. The row's premise is confirmed too -
+      experiment_arm is in RunInvariants._CANONICAL
+      (core/run_invariants.py:335), so a wrong label would indeed fail closed on
+      resume while looking authoritative.
     decided: 2026-08-26
     authority: operator ruling, relayed by Supervisor [ceb12d]
     requirement: >-
@@ -5402,9 +5513,25 @@ decisions:
   - decision_id: F-SCAND-1
     parameter: a forbidden aggregation is implemented and the proposer is invited to use it
     concept: mean of per-file LOG scores, reachable on band-shaped slices
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. Both
+      halves landed and both commits are verified ancestors of origin/master
+      3995400b. 8636220e (PR #325) made the load-bearing half refuse:
+      nodes/result_interpretation_agent/prediction.py:258-296 returns
+      (None, "refused_forbidden_aggregation") for a slice, landing the
+      prediction in the EXISTING unevaluated pool and deliberately inventing no
+      alternative aggregation. b31275df (PR #328) closed the advertised-grammar
+      half: all three prompt sites this row names now teach the legal index form
+      - evidence_rendering.py:390 and :509 and agent/schemas/proposal.py:61 read
+      'file_vector[17]', and no mean(file_vector[N:M]) remains on any
+      production LLM-facing surface. NOT closed by this row:
+      second_finding_43_percent_silent_parse_failure is a different defect with
+      no requirement stated here and needs its own row rather than being buried
+      by this closure.
     raised: 2026-08-26
     authority: Scan D subagent finding, EVERY HOP independently re-verified by the campaign-planning lane
     finding: >-
@@ -5568,9 +5695,24 @@ decisions:
   - decision_id: F-SCAND-4
     parameter: the correct cross-band construction exists and is unwired
     concept: rows 60/61 have a working, verified precedent
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. The row's
+      finding was that the valid construction exists but is "NOT reachable from
+      production". It is now wired: dc4f4980 (PR #338) added scripts/stage3/,
+      a verified ancestor of origin/master 3995400b. Verified on master:
+      stage3_common.py names scripts/score_tidmad_official_banded.py as the
+      REUSE ANCHOR by path, imports score_vector from
+      execute_tools.scoring_utils and calls it EXACTLY ONCE over the pooled
+      deliverable set, pins the same anchor s_max the banded script pins and
+      REFUSES on mismatch, and the three Stage-3 entrypoints
+      (stage3_composed_best / stage3_strict_best / stage3_terminal_eval)
+      consume that one composer rather than re-inlining the arithmetic - which
+      is the property the reuse-map entry existed to protect. No per-band
+      averaging was introduced.
     finding: >-
       scripts/score_tidmad_official_banded.py performs EXACTLY the valid
       construction: per-band inference writes into ONE directory (:584), the
@@ -5627,9 +5769,24 @@ decisions:
   - decision_id: F-SCANI-1
     parameter: the OpenAI key is transmitted to another provider's endpoint
     concept: credential exposure reachable by omission on a fresh machine
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. The
+      smallest_repair this row specifies landed as 8636220e (PR #325), a
+      verified ancestor of origin/master 3995400b. Verified on master:
+      agent/llm_bridge.py:454 refuses AT CONSTRUCTION, before any client
+      exists - "if api_key is None and known['api_key_env'] !=
+      _SDK_FALLBACK_KEY_ENV" raises LLMBridgeContextError naming the missing
+      variable, the endpoint consequence and the three ways out, so the None
+      never reaches the SDK and the credential cannot leave the machine. The
+      openai provider is deliberately EXCLUDED because for it the SDK fallback
+      variable IS its own key env, so nothing foreign can be transmitted and
+      the SDK raises its own error - the exclusion narrows the refusal to the
+      cross-provider case this row is about. Scope is pinned: the fix is
+      key-env presence, NOT provenance-vs-endpoint validation.
     raised: 2026-08-26
     authority: Scan I subagent finding, every link re-verified by the campaign-planning lane
     chain:
@@ -5695,9 +5852,25 @@ decisions:
   - decision_id: F-SCANH-1
     parameter: configs/task_config.yaml is not pinned by the run-invariants lock
     concept: an ARM-SYMMETRY hole in the exact prompt surface the treatment lives in
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. The
+      launch_gate_requirement's second clause - "its sha256 should join the
+      lock" - landed as f2d7ae3d (PR #339), which names this row in its own
+      title; a verified ancestor of origin/master 3995400b. Verified on master:
+      the row's finding was "core/run_invariants.py contains ZERO occurrences of
+      task_config"; it now contains 13. task_config_sha256 is declared at :188,
+      is a member of _CANONICAL at :331 (so it is COMPARED, not merely
+      recorded), and is computed at :861-889 from
+      workflows.task_config.task_config_file_sha256() - the LOADER's own
+      authority, so the pinned digest is taken over the same file the LLM reads.
+      A mid-workspace edit to the prompt surface now fails the resume closed,
+      which is what the arm-symmetry hole required. The remaining clause - the
+      two arms PROVEN byte-identical at launch - is now enforceable by
+      comparison of that pinned value rather than by nothing.
     raised: 2026-08-26
     authority: Scan H subagent finding, campaign consequence drawn and verified by the campaign-planning lane
     finding: >-
@@ -5953,7 +6126,27 @@ decisions:
     concept: two full-scope FCNet references disagree by 0.583
     status: PENDING_OPERATOR_DECISION
     control_class: EXPERIMENT_FIXED
-    disposition: RELEASE_BLOCKER
+    disposition: GOLD_LAUNCH_PRECONDITION
+    reconciled: >-
+      disposition re-routed RELEASE_BLOCKER -> GOLD_LAUNCH_PRECONDITION on
+      2026-08-27 by ledger reconciliation. status is NOT changed - see the
+      divergence flagged below. Routing basis is not discretionary: D-GOV-10's
+      frozen_value names "FCNet per-band reference" VERBATIM as a member of that
+      disposition, and its anchoring puts such items on PACKAGE FREEZE
+      (criterion B) rather than the CODE TAG (criterion D). Per D-GOV-10 this
+      "blocks the Gold launch absolutely; it is a routing distinction, not a
+      downgrade". No tracked code is involved, verified on origin/master
+      3995400b: the reference arrives at launch as an operator-supplied artifact
+      (run_gold_campaign.sh parses --fcnet_reference_json, refuses a missing
+      file, records it in the launch manifest and forwards it to stage 1;
+      gold_campaign_state.py:339 loads it per band), and neither candidate
+      number appears in ANY executable file - git grep for 6.434693 / 5.851465
+      hits only this ledger. DIVERGENCE FLAGGED, NOT RESOLVED: the
+      campaign-planning branch's copy of this ledger carries status FROZEN plus
+      a ruling_2026_08_26 adopting the 6.434693649697849 lineage; THIS copy - the
+      one origin/master ships - carries neither. Writing the status without the
+      ruling text would make this copy assert a decision it does not hold, so
+      the status is left for that ruling to land here on its own terms.
     raised: 2026-08-26
     authority: Supervisor [ceb12d] found the disagreement; campaign-planning lane localized it
     the_two_references:
@@ -6347,9 +6540,27 @@ decisions:
   - decision_id: F-SCANG-3
     parameter: three of four deployment env vars swallow malformed values silently
     concept: the H100 posture sets two of the three that fail silent
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: HARDWARE_DERIVED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. Landed as
+      f2d7ae3d (PR #339), which names this row in its own title and is a
+      verified ancestor of origin/master 3995400b. Verified on master: ALL THREE
+      siblings now raise MalformedCeilingOverride - the same authority
+      SIDERIUS_SUBPROCESS_RSS_GB already used - on a non-numeric or non-positive
+      value, each naming the variable, the offending value and how to mean
+      "undeclared". pair_admission.py host_quota_gib() covers
+      SIDERIUS_GPU_VRAM_QUOTA_MIB, pair_ceiling_gib() covers
+      SIDERIUS_PAIR_VRAM_CEILING_GIB (and transitively the quota), and
+      probe_subprocess.py vram_attribution_threshold_gb() covers
+      SIDERIUS_GPU_VRAM_QUOTA_GB. The bare "except ValueError: pass" the row
+      names is gone from all three. Two DELIBERATE divergences are documented in
+      place rather than silently adopted: an EMPTY string still means unset (the
+      shell "${VAR:-}" pass-through pattern, not a typo - and typos are the
+      class this repairs), and there is NO 0-disables semantics here, unlike
+      SIDERIUS_SUBPROCESS_RSS_GB.
     finding: >-
       SIDERIUS_SUBPROCESS_RSS_GB refuses loudly
       (core/execution_calibration.py:199-212, MalformedCeilingOverride, rationale
@@ -6399,9 +6610,29 @@ decisions:
   - decision_id: F-SCANB-1
     parameter: a chain whose every iteration died reports success and the wave advances
     concept: R1 - the failure-honesty defect, with an authored unmerged fix
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. The
+      routing this row asked for happened: the content landed as 14f07c82
+      (PR #326), a verified ancestor of origin/master 3995400b, whose squash
+      body carries "fix(F8): a chain's exit status must reflect its iterations'
+      failures" and "fix(F-Q4-1): a manifest's STATUS is the chain's verdict,
+      not its existence" verbatim. Verified on master: _chain_common.sh:929-984
+      accumulates CHAIN_FAILED_ITERATIONS, report_chain_outcome (:1066-1110)
+      derives the verdict from the manifests' STATUS plus those recorded child
+      statuses and NAMES the failed iterations, and run_chain.sh:504
+      "exit $CHAIN_OUTCOME" is the script's LAST statement - so the
+      unconditional fall-through to 0 is gone and v19_queue_runner.sh's EXIT=0
+      gate is no longer pinned true. SAME SQUASH TRAP AS F-SCANB-5, and it is
+      flagged rather than edited because correcting the field is outside a
+      status reconciliation: the_fix_exists_and_is_unmerged cites 090e601b and
+      99d05627 on fix/failure-honesty-exit-status, and BOTH are correctly "not
+      an ancestor" - re-verified here, rc=1 for each. Their CONTENT is on master
+      under a different SHA. Ancestry answers "was this commit object merged",
+      never "did this change land".
     claim_type: SOURCE_FACT
     raised: 2026-08-26
     authority: Scan B subagent finding, verified independently by the campaign-planning lane
@@ -6430,9 +6661,24 @@ decisions:
   - decision_id: F-SCANB-2
     parameter: a correct VRAM rejection crashes the loop and consumes an attempt
     concept: R3 - the explicit-truncation marker kills its own consumer
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. Landed as
+      f2d7ae3d (PR #339), which names this row in its own title and is a
+      verified ancestor of origin/master 3995400b. Verified on master: the
+      crashing expression the row quotes - resource_check.get("memory_killer")
+      or {} followed by .get - no longer exists in production; the only
+      surviving occurrences are this ledger, the review package and the
+      regression witness that asserts it must not come back. execution.py:203
+      declares _structured_mapping(value) -> dict[str, Any], mapping every
+      non-dict member of the union (the truncation-marker STRING and None
+      alike) to {}, and :443 routes memory_killer through it; :228 is the
+      violations twin. The fix is on the CONSUMER side, so the deliberate
+      explicit-rather-than-silent truncation marker the row defends is
+      preserved rather than narrowed away - which was the row's whole point.
     claim_type: SOURCE_FACT
     raised: 2026-08-26
     historical_event: >-
@@ -6506,9 +6752,21 @@ decisions:
   - decision_id: F-SCANB-4
     parameter: auto-resume START_ITER is corrupted by plugin-loader stdout
     concept: R11 - reproduced, and it breaks exactly when resume matters
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. Landed as
+      77e8d748 (PR #342), a verified ancestor of origin/master 3995400b and the
+      only commit introducing extract_validated_next_iter. Verified on master:
+      _chain_common.sh:1149-1157 takes the LAST line of the inspector's output
+      and requires ^[0-9]+$, returning non-zero otherwise - the plugin-loader
+      chatter precedes the value, so this defeats exactly the described
+      corruption; run_chain.sh:387-408 captures the raw output into its own
+      variable, refuses when the validator rejects it, and prints the tail for
+      diagnosis instead of assigning START_ITER unvalidated. The row's known
+      workaround --start_iter N is unchanged and still available.
     claim_type: SOURCE_FACT
     mechanism: >-
       run_chain.sh:376 does START_ITER=$(python inspect_run_state.py
@@ -6529,7 +6787,32 @@ decisions:
     concept: R12 - fail-closed correctly, and blind about why
     status: PENDING_IMPLEMENTATION
     control_class: HARDWARE_DERIVED
-    disposition: RELEASE_BLOCKER
+    disposition: POST_TAG_GOLD_QUALIFICATION
+    reconciled: >-
+      disposition re-routed RELEASE_BLOCKER -> POST_TAG_GOLD_QUALIFICATION on
+      2026-08-27 by ledger reconciliation. status is deliberately LEFT
+      PENDING_IMPLEMENTATION: only the tracked-code half is discharged. That
+      half landed as 14f07c82 (PR #326), a verified ancestor of origin/master
+      3995400b, whose squash body carries "fix(F-Q5-1): the probe assembler must
+      honour the failure contract it states" verbatim. Verified on master:
+      gpu_c_probe_train_leg.py:255-280 _load_leg returns None for an absent or
+      truncated leg record instead of raising, :326 collects the legs that left
+      no record, and :392 persists them as legs_with_no_record - so "the guard
+      works and the evidence to satisfy it cannot be produced" is no longer
+      true. The fail-closed refusals the row relies on are intact
+      (campaign_preflight.sh and launch_prior_baseline_experiment.sh both still
+      refuse an empty H100_CORESIDENCY_FACTOR), so this remains an ABSOLUTE
+      LAUNCH blocker; the re-route is D-GOV-10's routing distinction, not a
+      downgrade. Routing basis: control_class is HARDWARE_DERIVED, no tracked
+      code remains to change, and what_remains_genuinely_open (why the legs died
+      at all) is answerable only by running hardware - D-GOV-10's anchoring
+      category verbatim. TWO ITEMS FLAGGED, NOT EDITED, because they are outside
+      a status reconciliation. (1) fix_authored_unmerged: its ancestry check on
+      df3f1c04 is correct and its conclusion is wrong - a squash merge rewrites
+      the SHA, so ancestry answers "was this commit object merged", never "did
+      this change land". (2) The fold-down itself: D-GOV-10's tiebreak_rule says
+      fold UP, never DOWN, and this row is NOT on D-GOV-10's named membership
+      list, so operator confirmation is requested.
     claim_type: SOURCE_FACT
     mechanism: >-
       gpu_c_probe_train_leg.py:255-257 opens leg files with no existence
@@ -6599,9 +6882,19 @@ decisions:
   - decision_id: F-SCANA-1
     parameter: TrainConfig.lr defaults to 1e-4 while every other authority says 5e-4
     concept: an omitted LLM key silently departs 5x from paper spec
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. Landed as
+      77e8d748 (PR #342), a verified ancestor of origin/master 3995400b.
+      Verified on master: ml_models/models_format_sandbox.py:754 declares
+      lr: float = Field(default=5e-4, ge=1e-6, le=1e-1), so an LLM plan omitting
+      lr now resolves to paper spec through the same Pydantic gate. The row's
+      second surface - the hardcoded prompt literal at agent/prompts.py:130
+      (lr=5e-4) - was correct all along and is UNCHANGED; it now agrees with the
+      owning declaration instead of silently correcting it.
     claim_type: SOURCE_FACT
     finding: >-
       ml_models/models_format_sandbox.py:745 declares lr: float = Field(default=1e-4).
@@ -6623,9 +6916,25 @@ decisions:
   - decision_id: F-SCANA-2
     parameter: task_config.yaml is READ cwd-relative and SNAPSHOTTED repo-relative
     concept: compounds F-SCANH-1 - not merely unpinned but potentially divergent
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. Landed as
+      77e8d748 (PR #342), which names this row in its own title and is a
+      verified ancestor of origin/master 3995400b - the same commit that
+      discharged F-SCANA-1 and F-SCANB-4. Verified on master: the relative
+      _DEFAULT_CONFIG_PATH the row quotes is gone; workflows/task_config.py:59
+      declares default_task_config_path(), anchored at :45 on the repository
+      root derived from the file's own location, and BOTH the loader (:229) and
+      the snapshot writer (:336) resolve through it - so the two halves that
+      used to disagree now read one authority and the divergence the row names
+      cannot open. A CAUTION worth carrying, recorded because this row is where
+      it was learned: a correct finding here was once retracted on evidence the
+      finding itself caused to exist, because the re-check ran against a head
+      that already contained the repair. Check at the BASE the work was routed
+      against, not at the head that contains it.
     claim_type: SOURCE_FACT
     finding: >-
       workflows/task_config.py:44 sets _DEFAULT_CONFIG_PATH = "configs/task_config.yaml"
