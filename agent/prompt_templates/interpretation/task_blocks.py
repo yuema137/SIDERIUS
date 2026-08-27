@@ -22,6 +22,7 @@ from typing import Any
 
 import yaml
 
+from agent.prompt_templates._task_blocks_loader import SIDERIUS_ROOT
 from agent.schemas.interpretation import InterpretationTaskBlocks
 
 #: The bounded legacy compatibility path (the 08b
@@ -31,8 +32,15 @@ from agent.schemas.interpretation import InterpretationTaskBlocks
 #: TIDMAD's guidance without naming the task themselves. An external task
 #: passes its own path — or constructs the typed value directly — and never
 #: touches this.
+#:
+#: Anchored to THIS checkout, not to the caller's working directory (F-7,
+#: second occurrence — see ``_task_blocks_loader.SIDERIUS_ROOT``). The
+#: workflow and the node CLI call the loader zero-arg on the un-composed
+#: branch, so a relative default made the interpreter die in any launch that
+#: did not happen to start at the repo root. Only the anchor is imported:
+#: this module keeps its own loader, which is 09b's frozen evidence.
 LEGACY_DEFAULT_TASK_INTERPRETATION_CONFIG: str = os.path.join(
-    "configs", "task_interpretation", "tidmad.yaml"
+    SIDERIUS_ROOT, "configs", "task_interpretation", "tidmad.yaml"
 )
 
 

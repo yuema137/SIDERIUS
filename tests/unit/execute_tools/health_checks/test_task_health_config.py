@@ -466,6 +466,61 @@ class TestTheTaskCannotStateFrameworkPolicy:
 
         assert "is not a rule this runtime implements" in str(excinfo.value)
 
+    def test_a_blank_declaration_is_refused_at_authoring(self):
+        """The one value the family above could not reach (N-5).
+
+        ``None`` is NOT redundant with ``""``. The empty string is refused by
+        the vocabulary test like any other typo; ``None`` was refused by
+        NOTHING, because it is the value the validator's own early-return
+        used to mean "absent" — so the case that broke the guard was the one
+        case the guard's parameters could not express. Every other member of
+        that list is a value the validator merely looks up; this one changes
+        which branch it takes.
+
+        It matters because the two authorities disagree on it and only on it.
+        ``_composition.compose_gate`` keys on
+        ``entry.parameters.keys()`` — presence — so a bare YAML
+        ``aggregation:`` withholds the framework default, while the
+        consuming checks read ``cfg.get("aggregation", DEFAULT)`` and a
+        present ``None`` defeats that fallback. Verified before the fix: it
+        composed into a BLOCKING gate carrying
+        ``{'aggregation': None, ...}`` with ``on_fail: invalidate_round``.
+
+        Fails as: a successful construction (the validator early-returning on
+        the value again instead of testing membership).
+        """
+        with pytest.raises(ValidationError) as excinfo:
+            HealthRosterEntry(
+                gate_id="g",
+                check="c",
+                disposition=HealthDisposition.BLOCKING,
+                parameters={"aggregation": None},
+            )
+
+        assert "declared with no value" in str(excinfo.value)
+
+    @pytest.mark.parametrize("key", sorted(TASK_DECLARABLE_POLICY_KEYS))
+    def test_no_declarable_policy_key_may_be_present_without_a_value(self, key):
+        """The CONCEPT, not the field: presence must imply a usable value.
+
+        Parametrized over the SET rather than naming ``aggregation``, because
+        the defect is structural — the composer withholds the framework
+        default for any member of this set that is PRESENT, so any member
+        that can be present-and-``None`` reproduces N-5 exactly. A second
+        member added without its own blank guard turns this RED, which is the
+        only thing standing between the next declarable key and the same
+        bug.
+
+        Fails as: a construction that succeeds, for any key in the set.
+        """
+        with pytest.raises(ValidationError):
+            HealthRosterEntry(
+                gate_id="g",
+                check="c",
+                disposition=HealthDisposition.BLOCKING,
+                parameters={key: None},
+            )
+
     def test_task_thresholds_and_task_parameters_are_accepted(self):
         """The counterpart: what the task DOES own passes through untouched.
 

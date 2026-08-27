@@ -406,10 +406,41 @@ class HealthRosterEntry(BaseModel):
         Deliberately NOT a ``Literal`` on a typed field: ``parameters`` is an
         open task-owned mapping and must stay one, so the vocabulary is
         enforced on the value rather than on the field.
+
+        **Keyed on PRESENCE, because the composer is** (release remediation
+        N-5). This validator used to read ``value.get("aggregation")`` and
+        early-return on ``None``, while ``_composition.compose_gate`` decides
+        which framework defaults to withhold from
+        ``TASK_DECLARABLE_POLICY_KEYS & entry.parameters.keys()`` — presence.
+        YAML ``aggregation:`` with no value parses to ``None``, so a blank
+        declaration was PRESENT to the composer (framework default
+        suppressed) and ABSENT to the validator (accepted in silence). The
+        three consuming checks read ``cfg.get("aggregation", DEFAULT)``, and a
+        present ``None`` defeats a fallback, so it composed cleanly into
+        ``health_checks_effective.yaml``, was sha-pinned into the run
+        invariants, and first surfaced as ``unknown aggregation mode None`` —
+        a ``CheckVerdict.ERROR`` on a BLOCKING gate, i.e. ``invalidate_round``
+        every round. Precisely what this validator's docstring says it exists
+        to prevent.
+
+        The validator moved rather than the composer, because "declared
+        nothing" and "declared blank" are different operator intents and only
+        one of them is an error: value-keying the composer would have made a
+        blank declaration silently inherit the framework default, teaching
+        that a half-written line is a working line.
         """
-        declared = value.get("aggregation")
-        if declared is None:
+        if "aggregation" not in value:
             return value
+        declared = value["aggregation"]
+        if declared is None:
+            raise ValueError(
+                "aggregation is declared with no value. In YAML, a bare "
+                "'aggregation:' parses to None — which the composer reads as "
+                "a DECLARATION and therefore withholds the framework default "
+                "for, while no check can act on it. Give it a mode from "
+                f"{sorted(VALID_AGGREGATION_MODES)}, or delete the key to "
+                "inherit health_policy.<disposition>.check_config."
+            )
         if declared not in VALID_AGGREGATION_MODES:
             raise ValueError(
                 f"aggregation {declared!r} is not a rule this runtime "

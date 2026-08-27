@@ -2641,3 +2641,147 @@ class TestAnAgreeingDefaultIsNotABinding:
         assert proc.returncode == 0, proc.stderr
         for flag, value in BUDGETS_BOUND_BY_F_LAUNCH_1.items():
             assert f"frozen {flag.lstrip('-')}={value}" in proc.stdout, flag
+
+
+PROBE_PROFILE_KEY = "nvidia_h100_80gb_hbm3/single"
+PROBE_PROFILE_SHA = "b" * 64
+
+
+def _stage1_direct(campaign_root: dict, *extra: str) -> subprocess.CompletedProcess:
+    """``stage1_search.sh`` invoked DIRECTLY, bypassing the entrypoint.
+
+    Every other dry-run helper in this module goes through
+    ``run_gold_campaign.sh``. That is the whole reason N-7 survived: the
+    entrypoint refuses a half declaration at :193/:196, so the existing
+    half-supply family never reached the stage script's own fan-out.
+    """
+    return _bash(
+        str(STAGE1),
+        "--workspace_root",
+        str(campaign_root["root"]),
+        "--gold_advice_file",
+        str(campaign_root["advice"]),
+        "--only",
+        "0-3",
+        "--dry-run",
+        *extra,
+    )
+
+
+class TestBothOrNeitherIsReachableOnTheDirectStagePath:
+    """N-7 — the group refusals must hold where the fan-out happens.
+
+    ``stage1_search.sh``'s header promises that a direct invocation cannot
+    fork a value away from the entrypoint's. It could. The script keyed each
+    both-or-neither group's forwarding on ONE member — the TRIAL variable for
+    the VRAM pair, the profile KEY for the artifact/key/sha triple — and
+    never called the lib builders that own the refusal. So a supply that left
+    the keyed member empty forwarded nothing at all, and the band's
+    ``gold_frozen_chain_args`` saw a group that was not half-supplied but
+    ABSENT.
+
+    Observed at the pre-fix head, ``stage1_search.sh --dry-run``:
+
+        both                 -> rc=0, both chain tokens forwarded
+        trial-only           -> rc=1 REFUSED
+        formal-only          -> rc=0, chain tokens [], row reads
+                                "vram_budget=(none - no operator ceiling)"
+        full profile triple  -> rc=0, forwarded
+        key-only             -> rc=1 REFUSED
+        path-only, sha-only  -> rc=0, no token, row reads "(none)"
+
+    The consequence is not a crash: a mistyped trial half gives four
+    co-resident bands running formal rounds with NO VRAM cap, exit 0, no
+    error — the exact exhaustion D-HW-6's both-or-neither rule exists to
+    prevent. The profile half is the same shape with a worse story: the
+    operator supplies an artifact and a certified digest, mistypes the key,
+    and the campaign runs on the legacy measured>shipped>uncalibrated ladder
+    believing a profile was pinned.
+
+    These tests are NOT redundant with ``TestVramCeilingTransportSeam``'s
+    half-supply family: that family calls ``_stage1_dry``, i.e. the
+    ENTRYPOINT, where ``gold_vram_budget_args`` has already run. It asserts
+    the refusal exists; this asserts it is reachable where the bands fork.
+    """
+
+    @pytest.mark.parametrize(
+        ("extra", "expected"),
+        [
+            ((("--gold_trial_vram_budget_gb", PROBE_TRIAL_VRAM),), "INCOMPLETE VRAM"),
+            ((("--gold_formal_vram_budget_gb", PROBE_FORMAL_VRAM),), "INCOMPLETE VRAM"),
+            (
+                (("--gold_required_runtime_profile_path", "/tmp/profile.json"),),
+                "INCOMPLETE required runtime-profile",
+            ),
+            (
+                (("--gold_required_runtime_profile", PROBE_PROFILE_KEY),),
+                "INCOMPLETE required runtime-profile",
+            ),
+            (
+                (("--gold_required_runtime_profile_sha256", PROBE_PROFILE_SHA),),
+                "INCOMPLETE required runtime-profile",
+            ),
+        ],
+    )
+    def test_a_half_supply_refuses_before_any_band_forks(self, campaign_root, extra, expected):
+        """Fails as: a ZERO exit from a half supply on the direct path.
+
+        Parametrized over BOTH groups and over EVERY member of each, because
+        the defect is per-member: the one member the forwarding keyed on did
+        refuse, and it is the members that did not which produced a silent
+        drop. A fix that repaired only the keyed member would still pass a
+        single-case test.
+        """
+        proc = _stage1_direct(campaign_root, *[tok for pair in extra for tok in pair])
+
+        assert proc.returncode != 0, (
+            "a half declaration was ACCEPTED by the direct stage path:\n" + proc.stdout
+        )
+        assert expected in proc.stderr, proc.stderr
+        assert "run_chain argv" not in proc.stdout, "a band was walked after a refused group"
+
+    def test_a_complete_supply_still_reaches_every_band(self, campaign_root):
+        """The other half — the refusal must not have become a blanket one.
+
+        Fails as: a complete supply refused, or forwarded to the band without
+        both members, which is the declared-but-unconsumed shape D-HW-6 and
+        F-PROFILE-WIRE-1 were each written to close.
+        """
+        proc = _stage1_direct(
+            campaign_root,
+            "--gold_trial_vram_budget_gb",
+            PROBE_TRIAL_VRAM,
+            "--gold_formal_vram_budget_gb",
+            PROBE_FORMAL_VRAM,
+        )
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+
+        argvs = _band_argvs(proc.stdout)
+        assert argvs, proc.stdout
+        for band, argv in argvs.items():
+            pairs = _pairs(argv)
+            assert pairs["--trial_vram_budget_gb"] == PROBE_TRIAL_VRAM, band
+            assert pairs["--formal_vram_budget_gb"] == PROBE_FORMAL_VRAM, band
+
+    def test_an_unsupplied_group_still_forwards_nothing(self, campaign_root):
+        """ABSENT == UNSUPPLIED must stay byte-identical to the pre-seam argv.
+
+        Fails as: the repair turning "no operator ceiling" into a refusal, or
+        into an emitted token. Both D-HW-6 and F-PROFILE-WIRE-1 state
+        explicitly that omission is NOT an error — the campaign has
+        deliberately not frozen these values.
+        """
+        proc = _stage1_direct(campaign_root)
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+
+        argvs = _band_argvs(proc.stdout)
+        assert argvs, proc.stdout
+        for band, argv in argvs.items():
+            for flag in (
+                "--trial_vram_budget_gb",
+                "--formal_vram_budget_gb",
+                "--required_runtime_profile",
+                "--required_runtime_profile_path",
+                "--required_runtime_profile_sha256",
+            ):
+                assert flag not in argv, (band, flag)

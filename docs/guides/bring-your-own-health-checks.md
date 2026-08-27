@@ -55,7 +55,14 @@ Valid modes are `any_pass`, `all_pass`, `max`, `min`, `mean` and `median`;
 anything else is refused at parse time rather than surfacing later as a
 check error. Declare nothing and you inherit the framework's default for
 your disposition (`all_pass` for `blocking` today), which is what every
-shipped roster does. The point of the exception is per-gate control: you
+shipped roster does.
+
+**Declare it or omit it — a blank line is neither.** A bare `aggregation:`
+with nothing after the colon parses to YAML `null`, and that counts as a
+declaration: the framework then withholds its default for the key, while no
+check can act on the value. It is refused at parse time, naming the blank
+explicitly. Delete the key to inherit the default; write a mode to override
+it. The point of the exception is per-gate control: you
 can make one gate strict without making every other gate strict, which was
 impossible while the value was framework-only.
 

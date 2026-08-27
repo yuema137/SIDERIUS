@@ -149,6 +149,18 @@ nobody decided. A **half** supply is refused at the boundary: a capped trial
 beside an uncapped formal on four co-resident bands is the exhaustion the
 ceiling exists to prevent, and the stage scripts fork one background chain per
 band, so a half-cap noticed downstream has already launched the fleet.
+
+*The boundary is every entry point, not just the entrypoint.* `run_gold_campaign.sh`
+refuses a half supply before the manifest write, and `stage1_search.sh` does the
+same for a **direct** invocation — it calls `gold_vram_budget_args` and
+`gold_required_profile_args` itself and keys each group's forwarding on the
+builder's output, so the pair and the profile triple cannot be dropped at the
+band fan-out. Until the N-7 release remediation it keyed on the trial variable
+alone and never called the builders, so `--gold_formal_vram_budget_gb` on its
+own exited 0 with no ceiling on any band; the profile triple had the identical
+shape (`--gold_required_runtime_profile_path` or `..._sha256` alone was
+silently dropped, and the campaign ran the legacy calibration ladder while the
+operator believed a profile was pinned).
 Malformed values (non-numeric, zero, negative) are refused there too, rather
 than by `argparse` inside four already-running children — note `0` is **not**
 "disabled": `evaluate_vram_skill` computes `min(physical_cap, budget * _GB)`,

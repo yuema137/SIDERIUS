@@ -11,7 +11,11 @@
 #
 # Called by run_gold_campaign.sh; may also be invoked directly with the
 # same argument vocabulary (the frozen boundary is the sourced lib either
-# way, so no value can fork between the two paths).
+# way, so no value can fork between the two paths). That claim is only
+# true because this script calls the lib's group builders ITSELF: the
+# entrypoint's both-or-neither refusals ran one layer above the fan-out,
+# and until N-1..N-7 remediation a direct invocation reached the fan-out
+# without them.
 #
 # Logs   : ${WORKSPACE_ROOT}/gold_stage1_logs/${ARM}_band${BAND}.launch.log
 #          per band, plus a PID manifest gold_stage1_${ARM}_<epoch>.pids
@@ -72,6 +76,20 @@ stage1_main() {
     # library root, and this is what makes GOLD_GENERATED_LIBRARY_DIR
     # populated for the dry-run row in this process.
     gold_require_generated_library || return 1
+    # F-PROFILE-WIRE-1 / D-HW-6 fail-fast, for the SAME reason as the two
+    # calls above and as run_gold_campaign.sh's own (:193, :196): a stage
+    # script invoked directly must refuse the half declarations the
+    # entrypoint refuses. This is not decoration — the fan-out below keys
+    # each group's forwarding on ONE of its members, which is only sound
+    # once a half supply has already been refused. Without these calls a
+    # formal-only VRAM ceiling (or a path-only / sha-only profile triple)
+    # forwarded NOTHING, so the both-or-neither refusal in the band's
+    # gold_frozen_chain_args never saw an incomplete group at all: rc=0,
+    # zero chain tokens, and a frozen-table row reading
+    # "vram_budget=(none — no operator ceiling)". Four co-resident bands
+    # would then run formal rounds with no cap, exit 0, no error.
+    gold_required_profile_args || return 1
+    gold_vram_budget_args || return 1
     if ! [[ "$STAGGER" =~ ^[0-9]+$ ]]; then
         echo "ERROR: --stagger-seconds must be a non-negative integer, got '$STAGGER'" >&2
         return 1
@@ -103,13 +121,22 @@ stage1_main() {
     [ -n "$ADVICE_SHA256" ] && BAND_ARGS_COMMON+=(--gold_advice_sha256 "$ADVICE_SHA256")
     # F-PROFILE-WIRE-1 — forwarded to every band, so all four bands of a
     # declared campaign certify the SAME overlay.
-    [ -n "$GOLD_REQUIRED_RUNTIME_PROFILE" ] && BAND_ARGS_COMMON+=(
+    #
+    # Keyed on the BUILDER'S OUTPUT, not on one member of the triple. The
+    # builder ran above and is the single authority on whether a complete
+    # declaration was supplied; a non-empty GOLD_REQUIRED_PROFILE_ARGS means
+    # exactly that. Keying on $GOLD_REQUIRED_RUNTIME_PROFILE alone is what
+    # let a path-only or sha-only declaration through: the test was false,
+    # nothing was forwarded, and the group never reached the refusal.
+    [ ${#GOLD_REQUIRED_PROFILE_ARGS[@]} -gt 0 ] && BAND_ARGS_COMMON+=(
         --gold_required_runtime_profile_path "$GOLD_REQUIRED_RUNTIME_PROFILE_PATH"
         --gold_required_runtime_profile "$GOLD_REQUIRED_RUNTIME_PROFILE"
         --gold_required_runtime_profile_sha256 "$GOLD_REQUIRED_RUNTIME_PROFILE_SHA256")
     # D-HW-6 — forwarded to every band, so all four bands of a supplied
-    # campaign run under the SAME per-mode ceiling.
-    [ -n "$GOLD_TRIAL_VRAM_BUDGET_GB" ] && BAND_ARGS_COMMON+=(
+    # campaign run under the SAME per-mode ceiling. Keyed on the builder's
+    # output for the same reason as the triple above: keying on the TRIAL
+    # variable alone silently dropped a formal-only ceiling.
+    [ ${#GOLD_VRAM_BUDGET_ARGS[@]} -gt 0 ] && BAND_ARGS_COMMON+=(
         --gold_trial_vram_budget_gb "$GOLD_TRIAL_VRAM_BUDGET_GB"
         --gold_formal_vram_budget_gb "$GOLD_FORMAL_VRAM_BUDGET_GB")
     [ -n "$FCNET_REFERENCE_JSON" ] && BAND_ARGS_COMMON+=(--fcnet_reference_json "$FCNET_REFERENCE_JSON")

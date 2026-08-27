@@ -19,7 +19,10 @@ table, or any conditional that reads it.
 
 import os
 
-from agent.prompt_templates._task_blocks_loader import load_task_blocks_declaration
+from agent.prompt_templates._task_blocks_loader import (
+    SIDERIUS_ROOT,
+    load_task_blocks_declaration,
+)
 from agent.schemas.proposal import ProposalTaskBlocks
 
 #: The bounded legacy compatibility path (the 08b
@@ -29,7 +32,15 @@ from agent.schemas.proposal import ProposalTaskBlocks
 #: quarantined here so the Regime-A workflow resolves TIDMAD's proposer
 #: guidance without naming the task itself. An external task passes its own
 #: path — or constructs the typed value directly — and never touches this.
-LEGACY_DEFAULT_TASK_PROPOSAL_CONFIG: str = os.path.join("configs", "task_proposal", "tidmad.yaml")
+#:
+#: Anchored to THIS checkout, not to the caller's working directory (F-7,
+#: second occurrence — see ``_task_blocks_loader.SIDERIUS_ROOT``). The
+#: workflow calls the loader zero-arg on the un-composed branch, so a
+#: relative default made the proposer die in any launch that did not happen
+#: to start at the repo root.
+LEGACY_DEFAULT_TASK_PROPOSAL_CONFIG: str = os.path.join(
+    SIDERIUS_ROOT, "configs", "task_proposal", "tidmad.yaml"
+)
 
 
 def load_proposal_task_blocks(path: str | None = None) -> ProposalTaskBlocks:

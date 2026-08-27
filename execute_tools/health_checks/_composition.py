@@ -108,9 +108,23 @@ stage scripts never ``cd``, so a campaign launched from anywhere but the repo
 root raised ``FileNotFoundError: 'configs/task_health/tidmad.yaml'`` and
 refused every band scan and every Stage-2 finalize. CLAUDE.md's portability
 rule names exactly this: path resolution derives from the file's own location
-or a supplied root, never from the caller's cwd. Every sibling authority in
-the repository (``core/sandbox_executor.py``, ``workflows/task_config.py``,
-``nodes/…``) already anchors this way; these two were the stragglers."""
+or a supplied root, never from the caller's cwd.
+
+**Correction (release remediation N-1).** The sentence that stood here — "Every
+sibling authority in the repository already anchors this way; these two were
+the stragglers" — was FALSE when it was written, and it was false about the
+three constants whose own comments name THIS one as the idiom they copy:
+``LEGACY_DEFAULT_TASK_PROPOSAL_CONFIG``,
+``LEGACY_DEFAULT_TASK_IMPLEMENTOR_CONFIG`` and
+``LEGACY_DEFAULT_TASK_INTERPRETATION_CONFIG`` all stayed cwd-relative, and the
+un-composed branch of ``workflows/model_exploration.py`` calls their
+fail-closed loaders zero-arg — so the identical launch geometry killed the
+proposer, the implementor and the interpreter. They are anchored now
+(``agent/prompt_templates/_task_blocks_loader.SIDERIUS_ROOT``), and the
+property is stated executably in
+``tests/unit/guardrails/test_cwd_independent_shipped_defaults.py``, which
+DISCOVERS the constants instead of listing them: a prose claim about "every
+sibling" is precisely the kind that stops being true with nobody noticing."""
 
 
 LEGACY_DEFAULT_TASK_HEALTH_CONFIG: str = os.path.join(

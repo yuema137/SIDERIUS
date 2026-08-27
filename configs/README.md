@@ -95,6 +95,7 @@ detected at startup.
 | `task_health` declaring both `none: true` and `config:` | contradictory — a task has a family or explicitly has none |
 | roster `parameters` carrying a framework-owned key | the ownership split working (see `FRAMEWORK_OWNED_PARAMETER_KEYS`) |
 | roster `parameters` carrying an unimplemented `aggregation` | the one declarable policy key, checked against the runtime vocabulary at parse time |
+| roster `parameters` carrying a blank `aggregation:` | YAML `null` is a declaration, so the framework default is withheld and nothing can act on the value — omit the key to inherit the default |
 | resume after editing a composed-in file | the pinned digest moved — new semantics, new workspace |
 
 ## Files normally edited

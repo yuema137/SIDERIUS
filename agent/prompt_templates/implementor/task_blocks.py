@@ -16,15 +16,24 @@ inference.
 
 import os
 
-from agent.prompt_templates._task_blocks_loader import load_task_blocks_declaration
+from agent.prompt_templates._task_blocks_loader import (
+    SIDERIUS_ROOT,
+    load_task_blocks_declaration,
+)
 from agent.schemas.implementor import ImplementorTaskBlocks
 
 #: The bounded legacy compatibility path — a CONSTANT, not a branch, matching
 #: the 08b / 09b / C7-3 idiom. One unconditional default, quarantined here so
 #: the Regime-A workflow resolves TIDMAD's implementor science without naming
 #: the task itself.
+#:
+#: Anchored to THIS checkout, not to the caller's working directory (F-7,
+#: second occurrence — see ``_task_blocks_loader.SIDERIUS_ROOT``). The
+#: workflow calls the loader zero-arg on the un-composed branch, so a
+#: relative default made the implementor die in any launch that did not
+#: happen to start at the repo root.
 LEGACY_DEFAULT_TASK_IMPLEMENTOR_CONFIG: str = os.path.join(
-    "configs", "task_implementor", "tidmad.yaml"
+    SIDERIUS_ROOT, "configs", "task_implementor", "tidmad.yaml"
 )
 
 

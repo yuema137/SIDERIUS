@@ -29,6 +29,12 @@ dependency**.
 | a metric declaration JSON | metric id, direction, aggregation, scoreability |
 | a dataset profile JSON | partition count, anchors, peek set, opaque topology |
 
+When a run declares none of the four `configs/task_*/…` files, each falls back
+to the shipped TIDMAD copy — resolved from **this checkout**, never from the
+directory you launched from. So a chain started from anywhere (a Slurm submit
+dir, `sdsc_submission_scripts/`, `$HOME`) finds them. Your own paths may be
+absolute or relative; a relative one resolves against the repo root too.
+
 ### Framework policy — the framework's, selectable per run
 
 | file | declares | when a run gets it |
