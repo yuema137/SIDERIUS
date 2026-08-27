@@ -81,7 +81,7 @@ the run is fast.
 | file | role |
 |---|---|
 | `run_gold_campaign.sh` | **CANONICAL CAMPAIGN ENTRYPOINT** — thin: binds the frozen boundary (the thirteen typed chain values, the frozen LLM routing config, `--arm goldpod\|blindpod` with the X9 labels refused, lit-review explicitly OFF in both arms, the `--gold_advice_file` treatment boundary, `--task_config` validated + sha-recorded, retention), writes the resolved launch manifest (which records `llm_config` + `llm_config_sha256` beside `task_config`), dispatches `--stage 1\|2`. `--dry-run` prints the frozen table + every fully-resolved per-band/per-unit `run_chain.sh` argv, launches nothing, writes nothing. |
-| `_gold_campaign_lib.sh` | **CAMPAIGN SHARED BOUNDARY** (source-only) — the frozen-value table (one row per value; builder and printer both consult it, so a dropped row fails NAMING the key), the frozen LLM routing authority (`GOLD_LLM_CONFIG_RELPATH=llm_configs/openai_tiered_pro.json`, D-LLM-1 — see below), band vocabulary + band→files + band→GPU maps (0-3→0, 4-9→1, 10-14→2, 15-19→3, single_resident), arm/advice pairing, reserved-passthrough refusals (incl. `--cleanup_denoised`, R-RETENTION-1, and `--llm_config` / `--llm_model`), and the bypass-ceiling probe (`--bypass_formal_time_budget_minutes 200` emitted only once the chain parses it — parallel lane). |
+| `_gold_campaign_lib.sh` | **CAMPAIGN SHARED BOUNDARY** (source-only) — the frozen-value table (one row per value; builder and printer both consult it, so a dropped row fails NAMING the key), the frozen LLM routing authority (`GOLD_LLM_CONFIG_RELPATH=llm_configs/openai_tiered_pro.json`, D-LLM-1 — see below), band vocabulary + band→files + band→GPU maps (0-3→0, 4-9→1, 10-14→2, 15-19→3, single_resident), arm/advice pairing, reserved-passthrough refusals (incl. `--cleanup_denoised`, R-RETENTION-1, `--llm_config` / `--llm_model`, and `--enable_chain_incumbent_formal_gates`), the unconditional incumbent-formal-gate switch (F-GATE-WIRE-1 — see below), and the bypass-ceiling probe (`--bypass_formal_time_budget_minutes 200` emitted only once the chain parses it — parallel lane). |
 
 **LLM routing is bound, not defaulted (D-LLM-1; defect F-LLM-WIRE-1).**
 Every stage-1 band argv and every stage-2 unit argv carries
@@ -101,10 +101,33 @@ launch that cannot resolve the frozen config **refuses by name** rather than
 proceeding, and `--llm_config` / `--llm_model` are reserved passthroughs:
 operator tokens land *after* the frozen ones and the chain's parse loop is
 last-wins, so a passed-through value would silently override the pin.
+
+**The formal gates are armed, not merely declared (F-GATE-WIRE-1, #316 B1).**
+`gold_frozen_chain_args` emits `--enable_chain_incumbent_formal_gates`
+unconditionally, immediately after the two frozen deltas
+`--skip_formal_min_delta -2.0` and
+`--bypass_formal_time_budget_min_delta 0.5`, for **both** stages. It is not a
+frozen-table row because the table emits `--key value` pairs and this is a
+valueless `store_true` switch; it carries no capability probe because both
+transport halves are on disk (`_chain_common.sh` parses at `:370` and
+forwards at `:663`; `run_one_iteration.py` parses at `:1047`) — and a
+self-disabling probe is exactly the failure this closes.
+
+Without the switch the two deltas are transported, parsed and then **never
+consumed**: the tuner nulls the incumbent reference
+(`ml_hyperparameter_tune_agent.py:1103-1107`), so
+`_resolve_formal_comparison_thresholds` returns `gates_disabled` and both the
+SkipFormal and the bypass gate go inert while every surface still displays the
+frozen deltas. `_should_bypass_formal_time_budget` is not itself gates-aware —
+it is inert only because the resolver handed it a `None` threshold — so
+restoring the switch re-arms **both** gates at once. It is a reserved
+passthrough for the same reason `--max_epochs` is: gate activation is a
+scientific-policy fact of the campaign, not of the invocation.
+
 | `stage1_search.sh` | **STAGE-1 FAN-OUT** — one band per GPU per the frozen map; staggered `nohup` starts, per-band logs + PID manifest under `${WORKSPACE_ROOT}/gold_stage1_logs/`; `--only 0-3,4-9` selects bands (selection is order-insensitive and emitted in canonical band order — this is the per-band relaunch path when one band of a four-band campaign dies); `--dry-run` walks each band foreground. |
 | `stage1_run_band.sh` | **STAGE-1 BAND LOOP** — persisted-state orchestrator: scans with `gold_campaign_state.py band-state` (inspector verifiers + the contract winner rule), invokes `run_chain.sh` over the full frozen horizon with auto-resume, watches committed manifests, refreshes `{root}/{arm}_band{B}.gold_status.json` (sibling of the chain workspace), and requests a graceful C13 STOP when the FCNet+2 rule is evaluable and satisfied (`--fcnet_reference_json`; absent = A2-FCNET interim, full horizon). No-progress brake after 3 chain cycles without a new committed iteration. |
 | `stage2_strict_retrain.sh` | **STAGE-2 STRICT RETRAIN** — 4 designs x 4 bands = 16 units under `{root}/stage2/{design}_{band}/` (contract section 2); wave = one design across the four GPUs; each unit is `run_chain.sh --validation_fixed_candidate_plan <design>.json --num_iterations 1 --data_scope <band>` with the same frozen boundary; completed units (COMPLETE.json present) are skipped; finalization copies the unit's TARGET-BAND deliverables only (band file set derived via `DataScope.from_cli` from the unit's own band, count 4/6/5/5; `COMPLETE.json` carries the counted `deliverable_count` — Q-S3-2 ruling A) and writes COMPLETE.json LAST, atomically. `--design_registry DIR` must hold exactly four `<design>.json` plans. |
-| `gold_campaign_state.py` | **PERSISTED-STATE HELPER** — `band-state` (next iteration via the `inspect_run_state` functions, the cumulative HealthGate-valid FORMAL incumbent per the contract winner table under `MetricOrder`, the FCNet+2 verdict) and `stage2-finalize` (unit winner, deliverable copies via the `DeliverableNaming` authority, atomic COMPLETE.json). All diagnostics on stderr; the state JSON is written atomically to `--out`. |
+| `gold_campaign_state.py` | **PERSISTED-STATE HELPER** — `band-state` (next iteration via the `inspect_run_state` functions, the cumulative HealthGate-valid FORMAL incumbent per the contract winner table under `MetricOrder`, the FCNet+2 verdict) and `stage2-finalize` (unit winner, deliverable copies via the `DeliverableNaming` authority, atomic COMPLETE.json). The FORMAL predicate is the frozen contract rule — `is_trial` **absent OR `False`** (`_is_formal_role`; #316 B2), because `model_dump()` materializes `is_trial: False` onto every persisted formal record; the superseded key-absence test discarded every real formal record, leaving the champion permanently empty while Stage 1 still exited 0. All diagnostics on stderr; the state JSON is written atomically to `--out`. |
 
 ### Tier 3 integration test
 

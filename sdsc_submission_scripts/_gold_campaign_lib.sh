@@ -151,6 +151,10 @@ gold_print_frozen_table() {
     echo "[gold-campaign]   frozen stage2_num_iterations=${GOLD_STAGE2_NUM_ITERATIONS} (D-ARCH-2 fixed-candidate pin)"
     echo "[gold-campaign]   frozen fcnet_stop_margin=${GOLD_FCNET_STOP_MARGIN} (evaluable only with a per-band reference; A2-FCNET)"
     echo "[gold-campaign]   frozen llm_config=${GOLD_LLM_CONFIG_RELPATH} (D-LLM-1; resolved absolute at bind, REFUSES if absent)"
+    # F-GATE-WIRE-1 (#316 B1): printed so the two delta rows above can be
+    # read as ARMED rather than merely declared. Without the switch they are
+    # transported, parsed and then never consumed, and no surface says so.
+    echo "[gold-campaign]   frozen enable_chain_incumbent_formal_gates=on (F-GATE-WIRE-1; ARMS skip_formal_min_delta + bypass_formal_time_budget_min_delta — without it both gates resolve gates_disabled)"
     # F-PROFILE-WIRE-1: ALWAYS printed, declared or not — an undeclared
     # runtime-profile binding is a launch decision an operator must be able
     # to SEE, not an absent line they have to know to look for.
@@ -362,6 +366,42 @@ gold_frozen_chain_args() {
         v="$(gold_frozen_value "$key")" || return 1
         GOLD_FROZEN_CHAIN_ARGS+=("--${key}" "$v")
     done
+    # F-GATE-WIRE-1 (#316 B1) — THE SWITCH THAT MAKES THE TWO DELTAS ABOVE
+    # MEAN ANYTHING. Emitted UNCONDITIONALLY, immediately after them, in the
+    # ONE builder both stages consume, so a stage-2 unit can never run under
+    # different formal-gate semantics than the stage-1 band it retrains.
+    #
+    # WHY THIS IS NOT A FROZEN TABLE ROW. GOLD_FROZEN_ROWS is a key=value
+    # table and its consumer loop emits `--${key} "$v"`; this is an argparse
+    # store_true switch that takes NO value. A table row would emit
+    # `--enable_chain_incumbent_formal_gates 1`, and _chain_common.sh:370
+    # `shift`s once — the stray `1` would fall through as an unknown token.
+    # The table's canonical row count is also a pinned frozen declaration.
+    #
+    # WHY THERE IS NO CAPABILITY PROBE, unlike gold_bypass_ceiling_args.
+    # Both transport halves are on disk at this tip (_chain_common.sh:370
+    # parses, :663 forwards; run_one_iteration.py:1047 argparse), so there is
+    # nothing to probe. A probe would also be the WRONG pattern here: the
+    # bypass-ceiling probe SELF-DISABLES when the flag is unparseable, and
+    # silent self-disablement is precisely the defect class this closes.
+    #
+    # WHAT THE OMISSION DID. --skip_formal_min_delta -2.0 and
+    # --bypass_formal_time_budget_min_delta 0.5 were transported and PARSED
+    # all the way down, and then never consumed:
+    # ml_hyperparameter_tune_agent.py:1103-1107 nulls the reference when the
+    # switch is off (`_consumed_reference = ... if
+    # enable_chain_incumbent_formal_gates else None`), so
+    # policy._resolve_formal_comparison_thresholds returns
+    # (None, None, None, "gates_disabled") and BOTH gates go inert —
+    # _should_skip_formal returns False at policy.py:269-270, and
+    # _should_bypass_formal_time_budget (which is NOT itself gates-aware)
+    # returns False on its `threshold is None` guard. The launch still
+    # exits 0 and every surface still shows the frozen deltas. Restoring the
+    # switch re-arms BOTH gates at once — they are one fix, not two.
+    # Provenance: the predecessor campaign emitted this on the line directly
+    # above the same two deltas (launch_v20_campaign.sh:158-160); Gold copied
+    # the deltas and dropped the switch.
+    GOLD_FROZEN_CHAIN_ARGS+=(--enable_chain_incumbent_formal_gates)
     gold_bypass_ceiling_args
     GOLD_FROZEN_CHAIN_ARGS+=(${GOLD_BYPASS_CEILING_ARGS[@]+"${GOLD_BYPASS_CEILING_ARGS[@]}"})
     # D-LLM-1: bound HERE, in the ONE builder both stages consume, so a
@@ -536,6 +576,15 @@ gold_arm_args() {
 #: reserved for the reason --max_epochs is: no second model authority may
 #: reach the child argv, even one the config already shadows.
 #:
+#: --enable_chain_incumbent_formal_gates (F-GATE-WIRE-1, #316 B1): the
+#: campaign's formal-gate policy is typed ONCE at this boundary and emitted
+#: unconditionally by gold_frozen_chain_args. No negative spelling exists
+#: downstream, so a passthrough cannot turn the gates OFF — it is reserved
+#: for the reason --max_epochs is: no SECOND authority may decide a frozen
+#: campaign policy from an operator's command line, even one that is
+#: currently redundant. Gate activation is a scientific-policy fact of the
+#: campaign, not of the invocation.
+#:
 #: --required_runtime_profile / --required_runtime_profile_sha256
 #: (F-PROFILE-WIRE-1): same last-wins hazard. The declaration enters through
 #: the entrypoint's --gold_required_runtime_profile[_sha256], which the
@@ -550,6 +599,7 @@ GOLD_RESERVED_PASSTHROUGH=(
     --trial_time_budget_minutes --formal_time_budget_minutes
     --skip_formal_min_delta --bypass_formal_time_budget_min_delta
     --bypass_formal_time_budget_minutes
+    --enable_chain_incumbent_formal_gates
     --llm_config --llm_model
     --required_runtime_profile --required_runtime_profile_sha256
     --required_runtime_profile_path

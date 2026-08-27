@@ -1488,3 +1488,456 @@ class TestStage2Finalize:
         assert proc.returncode == 2
         assert not (unit / "COMPLETE.json").exists()
         assert "banana" in proc.stderr
+
+
+# ---------------------------------------------------------------------------
+# #316 B2 — the PERSISTED formal-record shape
+# ---------------------------------------------------------------------------
+
+
+def _persisted_record(
+    exp_id: str,
+    score: float,
+    *,
+    trial: bool = False,
+    valid: bool = True,
+) -> dict:
+    """A record in the shape production actually WRITES to disk.
+
+    Built through the PRODUCTION schema path — ``ExperimentRecord``
+    ``model_validate`` -> ``model_dump`` — which is exactly what
+    ``records.py`` does (``:1041`` -> ``:1046`` -> ``:1052``
+    ``publish_json_atomically``) because
+    ``HyperparamTuningOutput.all_records`` is typed
+    ``list[ExperimentRecord]`` and re-validates every dict.
+
+    This is deliberately NOT ``_record()`` above. ``_record()`` hand-builds
+    the dict and sets ``is_trial`` ONLY when ``trial=True``, i.e. it
+    produces the one shape production NEVER persists — which is precisely
+    why the absence-test defect (#316 B2) survived a test suite that
+    appears to cover the winner rule. A hand-built dict cannot witness a
+    materialized-default defect.
+    """
+    sys.path.insert(0, str(REPO_ROOT))
+    from agent.schemas.hyperparam_tuning import ExperimentRecord
+
+    raw = {
+        "exp_id": exp_id,
+        "status": "success",
+        "model_type": "wavenet",
+        "timestamp": "2026-08-26 00:00:30",
+        "params": {},
+        "denoising_score": score,
+        # Same DS5 waiver routing as _record(): False takes the designed
+        # waiver path in is_valid_candidate (VALID), True with no gate
+        # results resolves UNKNOWN (excluded). One eligibility authority.
+        "health_gate_enabled": not valid,
+    }
+    if trial:
+        raw["is_trial"] = True
+        raw["trial_portion"] = 0.1
+    return ExperimentRecord.model_validate(raw).model_dump()
+
+
+class TestPersistedFormalRecordShape:
+    """#316 B2 — the Stage-1/Stage-2 reader must accept the record shape
+    production PERSISTS, not the one the builder holds in memory.
+
+    The frozen contract (``stage_artifact_contract.md`` section 1) is three
+    cases, and the defect lived in the gap between two of them::
+
+        is_trial is True    -> trial   (excluded)
+        is_trial is False   -> FORMAL
+        is_trial absent     -> FORMAL
+
+    ``gold_campaign_state.py`` tested ``"is_trial" in rec``, which collapses
+    the middle case into the first. Every real formal record carries the
+    materialized default ``is_trial: False``, so the champion set was
+    PERMANENTLY EMPTY. Nothing errored: Stage 1 exits 0 having burned its
+    full 20-iteration horizon with a null winner, and Stage 2 refuses all
+    16 units at ``stage2-finalize``.
+    """
+
+    def test_the_production_persisted_shape_carries_the_materialized_defaults(self):
+        """The PREMISE, pinned with hardcoded expectations.
+
+        If this ever stops holding, the three witnesses below stop being
+        about production and become about a fixture. Asserting against
+        ``model_fields[...].default`` would compare the schema to itself.
+        """
+        rec = _persisted_record("w_formal", -1.2)
+        assert "is_trial" in rec, (
+            "ExperimentRecord.model_dump() must MATERIALIZE is_trial onto every "
+            "persisted formal record — that materialization is the whole defect."
+        )
+        assert rec["is_trial"] is False
+        assert rec["trial_portion"] is None
+
+    def test_case_is_trial_FALSE_is_formal_and_a_winner_emerges(self, tmp_path):
+        """CASE 2 (the defect). A band whose ONLY records are
+        production-persisted formal records must yield a NON-EMPTY
+        champion. Under ``"is_trial" in rec`` this band's incumbent was
+        null while the helper still exited 0."""
+        ws = tmp_path / "band"
+        ws.mkdir()
+        (ws / "run_invariants_lock.json").write_text(json.dumps({"experiment_arm": "goldpod"}))
+        _write_iter(ws, 1, [_persisted_record("w_formal_low", -4.0)])
+        _write_iter(ws, 2, [_persisted_record("w_formal_best", -1.2)])
+        rc, data, err = _band_state(ws, tmp_path / "state.json")
+        assert rc == 0, err
+        assert data["incumbent"] is not None, (
+            "champion set EMPTY on a band of purely production-shaped formal "
+            "records — this is #316 B2: Stage 1 burns its horizon silently."
+        )
+        assert data["incumbent"]["exp_id"] == "w_formal_best"
+        assert data["incumbent"]["denoising_score"] == -1.2
+
+    def test_case_is_trial_ABSENT_is_formal_and_a_winner_emerges(self, tmp_path):
+        """CASE 3, witnessed SEPARATELY from case 2 because it is a
+        different input and the old code got this one right by accident.
+
+        A key-less record is the BUILDER's in-memory / legacy shape. The
+        contract admits it as FORMAL, so the fix must not narrow the rule
+        to "is_trial is False" while closing the middle case.
+        """
+        ws = tmp_path / "band"
+        ws.mkdir()
+        (ws / "run_invariants_lock.json").write_text(json.dumps({"experiment_arm": "goldpod"}))
+        keyless = _persisted_record("w_keyless", -2.0)
+        del keyless["is_trial"]
+        del keyless["trial_portion"]
+        _write_iter(ws, 1, [keyless])
+        rc, data, err = _band_state(ws, tmp_path / "state.json")
+        assert rc == 0, err
+        assert data["incumbent"] is not None
+        assert data["incumbent"]["exp_id"] == "w_keyless"
+
+    def test_case_is_trial_TRUE_is_still_excluded(self, tmp_path):
+        """CASE 1, the negative. Widening the predicate must NOT admit
+        trials: a BETTER-scoring persisted TRIAL loses to a WORSE formal
+        record. Without this, `return True` would pass both witnesses
+        above."""
+        ws = tmp_path / "band"
+        ws.mkdir()
+        (ws / "run_invariants_lock.json").write_text(json.dumps({"experiment_arm": "goldpod"}))
+        _write_iter(
+            ws,
+            1,
+            [
+                _persisted_record("w_formal_only", -4.0),
+                _persisted_record("w_trial_better", 9.9, trial=True),
+            ],
+        )
+        rc, data, err = _band_state(ws, tmp_path / "state.json")
+        assert rc == 0, err
+        assert data["incumbent"]["exp_id"] == "w_formal_only"
+        assert data["incumbent"]["denoising_score"] == -4.0
+
+    @pytest.mark.parametrize(
+        ("field", "value", "needle"),
+        [
+            ("is_trial", "yes", "non-bool role"),
+            ("trial_portion", 0.1, "trial-only value"),
+        ],
+    )
+    def test_anomalous_role_shapes_refuse_loudly(self, tmp_path, field, value, needle):
+        """A shape production never writes is REFUSED by name, never
+        silently classified — a silent choice here could silently move the
+        winner."""
+        ws = tmp_path / "band"
+        ws.mkdir()
+        (ws / "run_invariants_lock.json").write_text(json.dumps({"experiment_arm": "goldpod"}))
+        bad = _persisted_record("w_bad", -1.0)
+        bad[field] = value
+        _write_iter(ws, 1, [bad])
+        rc, _data, err = _band_state(ws, tmp_path / "state.json")
+        assert rc == 2, f"expected a loud refusal, got rc={rc}"
+        assert needle in err
+        assert "w_bad" in err
+
+    def test_all_sixteen_stage2_units_finalize_on_persisted_records(self, tmp_path):
+        """The Stage-2 consequence, end to end.
+
+        ``stage2_strict_retrain.sh:217`` gates the whole stage on
+        ``done_count -eq 16``, counting COMPLETE.json markers. Under the
+        absence test EVERY unit's finalize hit
+        "no FORMAL success record with a usable score" (``:496``) -> rc 2
+        (``:499``) -> no marker (``:199``) -> ``done_count`` stuck at 0.
+        Sixteen units whose records are production-shaped must all
+        finalize.
+        """
+        designs = ("wavenetA", "wavenetB", "punetA", "punetB")
+        bands = {
+            "0-3": (0, 1, 2, 3),
+            "4-9": (4, 5, 6, 7, 8, 9),
+            "10-14": (10, 11, 12, 13, 14),
+            "15-19": (15, 16, 17, 18, 19),
+        }
+        sys.path.insert(0, str(REPO_ROOT))
+        from execute_tools.deliverable_spec import default_deliverable_naming
+
+        naming = default_deliverable_naming()
+        stage2_root = tmp_path / "stage2"
+        for design in designs:
+            for band, indices in bands.items():
+                unit = stage2_root / f"{design}_{band}"
+                ws = unit / "workspace"
+                ws.mkdir(parents=True)
+                run_name = f"goldpod_stage2_{design}_{band}"
+                _write_iter(ws, 1, [_persisted_record("w_unit_1", -2.5)], run_name=run_name)
+                data_dir = ws / "iter_001" / "iteration_001" / "wavenet" / "data"
+                data_dir.mkdir()
+                for idx in indices:
+                    (
+                        data_dir
+                        / naming.name(
+                            model_type="wavenet",
+                            run_name=run_name,
+                            exp_id="w_unit_1",
+                            input_identity=idx,
+                        )
+                    ).write_bytes(b"h5-bytes")
+                proc = _helper(
+                    "stage2-finalize",
+                    "--unit-dir",
+                    str(unit),
+                    "--design",
+                    design,
+                    "--target-band",
+                    band,
+                )
+                assert proc.returncode == 0, f"{design}_{band}: {proc.stderr}"
+
+        done_count = len(list(stage2_root.glob("*/COMPLETE.json")))
+        assert done_count == 16, (
+            f"stage2_strict_retrain.sh:217 requires done_count -eq 16; got {done_count}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# #316 B1 / F-GATE-WIRE-1 — the incumbent-formal-gate switch
+# ---------------------------------------------------------------------------
+
+#: The frozen deltas, HARDCODED. Reading them back from the lib would compare
+#: the table to itself and pass for any table (same rule as the thirteen).
+FROZEN_SKIP_DELTA = -2.0
+FROZEN_BYPASS_DELTA = 0.5
+GATE_SWITCH = "--enable_chain_incumbent_formal_gates"
+
+
+class TestIncumbentFormalGateSwitch:
+    """#316 B1 — the Gold launcher declared two formal-gate deltas and never
+    emitted the switch that makes them consumable.
+
+    ``skip_formal_min_delta=-2.0`` and
+    ``bypass_formal_time_budget_min_delta=0.5`` were transported and parsed
+    all the way to the tuner, where
+    ``ml_hyperparameter_tune_agent.py:1103-1107`` nulls the reference unless
+    the switch is on. Both gates then resolve ``gates_disabled`` and go
+    inert. Nothing fails; the campaign runs its whole horizon with a
+    scientific policy that was declared, transported and never applied.
+
+    The predecessor campaign emitted the switch on the line directly above
+    the same two deltas (``launch_v20_campaign.sh:158-160``).
+    """
+
+    def test_the_switch_reaches_every_stage1_band_argv(self, campaign_root):
+        """Textual half, stage 1: all four bands."""
+        proc = _stage1_dry(campaign_root)
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        argvs = _band_argvs(proc.stdout)
+        assert set(argvs) == {"0-3", "4-9", "10-14", "15-19"}
+        for band, argv in argvs.items():
+            assert GATE_SWITCH in argv, f"band {band} argv has no {GATE_SWITCH}"
+            pairs = _pairs(argv)
+            assert float(pairs["--skip_formal_min_delta"]) == FROZEN_SKIP_DELTA
+            assert float(pairs["--bypass_formal_time_budget_min_delta"]) == FROZEN_BYPASS_DELTA
+
+    def test_the_switch_reaches_every_stage2_unit_argv(self, campaign_root, tmp_path):
+        """Textual half, stage 2: a retrain unit must not run under
+        different gate semantics than the band it retrains — which is why
+        the emission lives in the ONE builder both stages consume."""
+        registry = tmp_path / "designs"
+        registry.mkdir()
+        for design in ("wavenetA", "punetB", "rnnC", "fnoD"):
+            (registry / f"{design}.json").write_text("{}\n")
+        proc = _bash(
+            str(ENTRYPOINT),
+            "--workspace_root",
+            str(campaign_root["root"]),
+            "--stage",
+            "2",
+            "--gold_advice_file",
+            str(campaign_root["advice"]),
+            "--design_registry",
+            str(registry),
+            "--dry-run",
+        )
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        unit_argvs = _stage2_unit_argvs(proc.stdout)
+        assert unit_argvs, "no stage-2 unit argv blocks in the dry run"
+        for unit, argv in unit_argvs.items():
+            assert GATE_SWITCH in argv, f"unit {unit} argv has no {GATE_SWITCH}"
+
+    def test_the_real_transport_delivers_an_armed_switch_to_the_runner(self, campaign_root):
+        """The launcher's OWN argv walked through the production hops —
+        ``_chain_common.sh`` ``parse_chain_args`` + ``build_app_args``, then
+        ``run_one_iteration.py``'s REAL argparse.
+
+        ``_chain_common.sh:129`` defaults the switch OFF and ``:662`` forwards
+        it only when it arrives, so this is where a dropped emission becomes
+        an unarmed run."""
+        pytest.importorskip("pydantic")
+        import importlib.util
+
+        proc = _stage1_dry(campaign_root)
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        chain_args = _band_argvs(proc.stdout)["0-3"][3:]
+        built = _bash(
+            "-c",
+            f"source '{CHAIN_COMMON}'; "
+            f"parse_chain_args {' '.join(shlex.quote(a) for a in chain_args)}; "
+            'build_app_args 1; printf "%s\\n" "${APP_ARGS[@]}"',
+        )
+        assert built.returncode == 0, built.stderr
+        app_args = [tok for tok in built.stdout.splitlines() if tok]
+        assert GATE_SWITCH in app_args, "the chain parse+forward dropped the switch"
+
+        spec = importlib.util.spec_from_file_location(
+            "roi_for_gate_wire_test", SDSC / "run_one_iteration.py"
+        )
+        roi = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(roi)
+        ns = roi.build_parser().parse_args(app_args)
+        assert ns.enable_chain_incumbent_formal_gates is True
+        assert ns.skip_formal_min_delta == FROZEN_SKIP_DELTA
+        assert ns.bypass_formal_time_budget_min_delta == FROZEN_BYPASS_DELTA
+
+        # The negative half: the identical parser with the switch absent is
+        # what the campaign was actually running.
+        bare = roi.build_parser().parse_args(["--workspace", "/tmp/x", "--run_name", "t"])
+        assert bare.enable_chain_incumbent_formal_gates is False
+
+    def test_the_gates_evaluate_live_with_the_switch_and_are_inert_without_it(self, campaign_root):
+        """THE BEHAVIOURAL WITNESS. An argv assertion proves a token was
+        copied; this proves a POLICY was applied.
+
+        The real resolver is driven at the production call-site condition
+        (``ml_hyperparameter_tune_agent.py:1103-1107``) for BOTH switch
+        states, with the switch value taken from the REAL parsed args, and
+        both real gate predicates are then evaluated against three winner
+        scores chosen to straddle both thresholds.
+
+        Note ``_should_bypass_formal_time_budget`` takes no ``gates_enabled``
+        argument — it is inert only because the resolver handed it a ``None``
+        threshold. That is why this is ONE fix and not two: the inertness
+        originates at the reference-nulling call site, so restoring the
+        switch re-arms both gates at once.
+        """
+        pytest.importorskip("pydantic")
+        import importlib.util
+
+        proc = _stage1_dry(campaign_root)
+        chain_args = _band_argvs(proc.stdout)["0-3"][3:]
+        built = _bash(
+            "-c",
+            f"source '{CHAIN_COMMON}'; "
+            f"parse_chain_args {' '.join(shlex.quote(a) for a in chain_args)}; "
+            'build_app_args 1; printf "%s\\n" "${APP_ARGS[@]}"',
+        )
+        app_args = [tok for tok in built.stdout.splitlines() if tok]
+        spec = importlib.util.spec_from_file_location(
+            "roi_for_gate_behaviour_test", SDSC / "run_one_iteration.py"
+        )
+        roi = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(roi)
+        ns = roi.build_parser().parse_args(app_args)
+
+        sys.path.insert(0, str(REPO_ROOT))
+        from execute_tools.dataset_config import TIDMAD_PROFILE
+        from execute_tools.evaluation_metric import derive_tidmad_metric_spec
+        from execute_tools.metric_order import MetricOrder
+        from nodes.ml_hyperparameter_tune_agent.policy import (
+            _resolve_formal_comparison_thresholds,
+            _should_bypass_formal_time_budget,
+            _should_skip_formal,
+        )
+
+        order = MetricOrder(derive_tidmad_metric_spec(TIDMAD_PROFILE))
+        assert order.direction == "higher", "fixture assumes the TIDMAD direction"
+        incumbent = 5.0
+
+        def resolve(switch: bool):
+            # The production call-site expression, mirrored verbatim. The
+            # source guard below fails if production stops doing this.
+            consumed = incumbent if switch else None
+            return _resolve_formal_comparison_thresholds(
+                reference_score=consumed,
+                gates_enabled=switch,
+                skip_min_delta=ns.skip_formal_min_delta,
+                bypass_min_delta=ns.bypass_formal_time_budget_min_delta,
+                order=order,
+            )
+
+        # --- switch ON (what this fix delivers) --------------------------
+        ref_on, skip_thr, bypass_thr, source_on = resolve(ns.enable_chain_incumbent_formal_gates)
+        assert source_on == "restored_valid_formal_incumbent"
+        assert ref_on == incumbent
+        # Hardcoded, not recomputed from the deltas under test.
+        assert skip_thr == 3.0, "5.0 loosened by -2.0"
+        assert bypass_thr == 5.5, "5.0 tightened by +0.5"
+
+        # Three winners straddling both thresholds — both gates DECIDE.
+        def gates(score, thr_skip, thr_bypass):
+            winner = {"denoising_score": score}
+            return (
+                _should_skip_formal(
+                    winner,
+                    threshold=thr_skip,
+                    gates_enabled=ns.enable_chain_incumbent_formal_gates,
+                    order=order,
+                ),
+                _should_bypass_formal_time_budget(winner, threshold=thr_bypass, order=order),
+            )
+
+        assert gates(2.0, skip_thr, bypass_thr) == (True, False), "SKIP must fire at 2.0"
+        assert gates(4.0, skip_thr, bypass_thr) == (False, False), "neither at 4.0"
+        assert gates(6.0, skip_thr, bypass_thr) == (False, True), "BYPASS must fire at 6.0"
+
+        # --- switch OFF (the shipped state before this fix) --------------
+        ref_off, skip_off, bypass_off, source_off = resolve(False)
+        assert source_off == "gates_disabled"
+        assert (ref_off, skip_off, bypass_off) == (None, None, None)
+        for score in (2.0, 4.0, 6.0):
+            winner = {"denoising_score": score}
+            assert (
+                _should_skip_formal(winner, threshold=skip_off, gates_enabled=False, order=order)
+                is False
+            )
+            assert (
+                _should_bypass_formal_time_budget(winner, threshold=bypass_off, order=order)
+                is False
+            ), "the bypass gate is inert ONLY via the None threshold"
+
+    def test_the_production_call_site_still_nulls_the_reference_on_the_switch(self):
+        """Reachability guard for the mirror above.
+
+        The behavioural witness reproduces two lines of
+        ``ml_hyperparameter_tune_agent.py``. If production stops nulling the
+        reference on this switch, the mirror would keep testing a condition
+        nothing evaluates — the exact "test captures what production
+        recomputes" failure. This pins the call site instead.
+        """
+        src = (
+            REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "ml_hyperparameter_tune_agent.py"
+        ).read_text()
+        assert "_consumed_reference = (" in src
+        assert "if agent_input.enable_chain_incumbent_formal_gates" in src
+        assert "gates_enabled=agent_input.enable_chain_incumbent_formal_gates" in src
+
+    def test_the_switch_is_a_reserved_passthrough(self, campaign_root):
+        """Gate activation is a frozen campaign policy, typed once at this
+        boundary — not something an invocation may re-decide."""
+        proc = _stage1_dry(campaign_root, GATE_SWITCH)
+        assert proc.returncode != 0
+        assert GATE_SWITCH in proc.stderr

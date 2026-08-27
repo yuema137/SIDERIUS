@@ -13,7 +13,9 @@ existing verifiers:
       gap / tamper refusals included, fail closed);
     * the cumulative HealthGate-valid FORMAL incumbent per the FROZEN
       winner-field table of ``docs/campaign/stage_artifact_contract.md``
-      section 1: ``status == "success"``, ABSENCE of the ``is_trial`` key,
+      section 1: ``status == "success"``, ``is_trial`` ABSENT or ``False``
+      (the persisted record always carries the materialized default —
+      see ``_is_formal_role``; #316 B2),
       ``is_valid_candidate(record)`` (the ONE eligibility authority,
       ``execute_tools/health_checks/candidate_eligibility.py``), maximal
       ``denoising_score`` under ``MetricOrder`` (direction from the run's
@@ -104,6 +106,67 @@ class StateRefusal(RuntimeError):
     """A fail-closed persisted-state refusal (gap, tamper, missing spec)."""
 
 
+def _is_formal_role(rec: dict[str, Any], where: str) -> bool:
+    """True iff ``rec`` is a FORMAL record — ``is_trial`` absent OR ``False``.
+
+    The FROZEN contract rule (``docs/campaign/stage_artifact_contract.md``
+    section 1, "FORMAL round" row), as three cases:
+
+    ==================  ========
+    ``is_trial``        role
+    ==================  ========
+    ``True``            trial (excluded)
+    ``False``           FORMAL
+    key absent          FORMAL
+    ==================  ========
+
+    The superseded wording ("formal == ABSENCE of the ``is_trial`` key")
+    described the BUILDER's IN-MEMORY dicts, where the key is set only on
+    trial records. It does NOT describe the shape this scanner reads.
+    ``HyperparamTuningOutput.all_records: list[ExperimentRecord]``
+    re-validates every dict into the model, so ``model_dump()``
+    (``nodes/ml_hyperparameter_tune_agent/records.py``: ``:1041``
+    ``model_validate`` -> ``:1046`` ``model_dump`` -> ``:1052``
+    ``publish_json_atomically``) MATERIALIZES the field defaults
+    ``is_trial: False`` and ``trial_portion: None`` onto EVERY PERSISTED
+    formal record. Under the absence test every real formal record was
+    discarded, so this scanner's champion set was permanently empty — and
+    an empty champion set is silent, not loud: Stage 1 still exits 0 and
+    burns its whole horizon, and Stage 2 refuses all 16 units at
+    ``stage2-finalize``.
+
+    The falsy-tolerant test matches the two sibling readers that already
+    got this right — the ``BestTracks`` authority
+    (``nodes/ml_hyperparameter_tune_agent/policy.py``:
+    ``not r.get("is_trial", False)``) and Stage-3's ``_formal_role``
+    (``scripts/stage3/stage3_composed_best.py``, Q-S3-3).
+
+    A NON-BOOL ``is_trial``, or a non-``None`` ``trial_portion`` on a
+    record whose ``is_trial`` is not ``True``, is a shape production never
+    writes: refused LOUDLY rather than silently classified either way,
+    because a silent choice here could silently move the winner.
+
+    Raises:
+        StateRefusal: on an anomalous role shape (the refusal type this
+            module's callers already catch and turn into rc 2).
+    """
+    role = rec.get("is_trial")
+    if role is True:
+        return False
+    if role is not None and role is not False:
+        raise StateRefusal(
+            f"record {where} carries is_trial={role!r} — a non-bool role is a "
+            f"shape production never writes; refusing an anomalous role shape."
+        )
+    if rec.get("trial_portion") is not None:
+        raise StateRefusal(
+            f"record {where} is formal-shaped (is_trial={role!r}) but carries "
+            f"trial_portion={rec['trial_portion']!r} — a trial-only value "
+            f"(#316 B2); refusing."
+        )
+    return True
+
+
 class BandIncumbent(BaseModel):
     """The contract section-1 winner identity (plus its locator)."""
 
@@ -182,10 +245,10 @@ def _scan_formal_candidates(
                 counts.records += 1
                 if rec.get("status") != "success":
                     continue
-                # Contract section 1: formal == ABSENCE of the is_trial key
-                # (BestTracks authority; the top-level trial_portion key is
-                # likewise trial-only, #316 B2).
-                if "is_trial" in rec:
+                # Contract section 1: formal == `is_trial` ABSENT or False.
+                # NOT "absence of the key" — the persisted record always
+                # carries the materialized default. See _is_formal_role.
+                if not _is_formal_role(rec, f"{ro_path} exp_id={rec.get('exp_id')!r}"):
                     continue
                 score = rec.get("denoising_score")
                 if (
