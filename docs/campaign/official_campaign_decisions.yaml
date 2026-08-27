@@ -2974,7 +2974,19 @@ decisions:
     parameter: generic task-declarable dynamic/static observable metrics
     status: IMPLEMENTED
     blocking_v0_1_0: true
+    disposition: RELEASE_BLOCKER
     control_class: EXPERIMENT_FIXED
+    reconciled: >-
+      disposition RELEASE_BLOCKER ADDED 2026-08-27 by ledger reconciliation.
+      status is deliberately UNCHANGED - this edit adds no claim about the work,
+      it only makes the row LEGIBLE. The row declared "REQUIRED FOR v0.1.0. Not
+      optional future work." and carried blocking_v0_1_0: true while having NO
+      disposition field, so a disposition-scoped census could not see it in
+      EITHER direction - not as an open blocker, and not as a closed one. That
+      is the 82-percent-no-disposition blind spot biting one of the exactly two
+      rows carrying the precise machine-readable blocking key. Its
+      implementation landed as ac2d115a (PR #359), a verified ancestor of
+      origin/master 67e49c00.
     operator_ruling: >-
       REQUIRED FOR v0.1.0. Not optional future work.
     required_contract:
@@ -3399,7 +3411,17 @@ decisions:
     parameter: observable metrics — Part 6 cross-reference
     status: IMPLEMENTED
     blocking_v0_1_0: true
+    disposition: RELEASE_BLOCKER
     control_class: EXPERIMENT_FIXED
+    reconciled: >-
+      disposition RELEASE_BLOCKER ADDED 2026-08-27 by ledger reconciliation.
+      status is deliberately UNCHANGED - this edit adds no claim about the work,
+      it only makes the row LEGIBLE. Same defect as its cross_reference R-OBS-1:
+      it carries blocking_v0_1_0: true with no disposition, so a
+      disposition-scoped census saw neither its openness nor its closure. These
+      two are the ONLY rows in the ledger carrying that key. Closed with
+      R-OBS-1 as its satellite (ac2d115a, PR #359), per its own closed_2026_08_27
+      note; it is counted as one work item with R-OBS-1, not two.
     frozen_value:
       prohibition: do NOT redefine observable metrics as a Part 6 budget mechanism
       compute_consequence_only:
@@ -5080,7 +5102,30 @@ decisions:
   - decision_id: F-LAUNCH-1
     parameter: campaign launcher entrypoint and the twelve untyped parameters
     concept: the launcher the campaign actually calls types none of them
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. Landed as
+      2a5e6006 (PR #356), a verified ancestor of origin/master 67e49c00.
+      superseded_status is deliberately LEFT at PENDING_OPERATOR_DECISION - the
+      field is a single slot holding the EARLIEST superseded value, not a
+      history stack, so PENDING_IMPLEMENTATION must not overwrite it. ALL TWELVE
+      are now typed: GOLD_FROZEN_ROWS grew 13 -> 19 rows, adding max_rounds=3
+      (D-BUD-3) and the five D-BUD-4 attempt budgets, and it already improved on
+      max_epochs by splitting it into trial_max_epochs / formal_max_epochs.
+      THREE WIRING FACTS CHECKED, not inferred from the table: the emission loop
+      in gold_frozen_chain_args was extended to the six new keys (a table row
+      without a loop entry would be declared-but-unemitted);
+      _chain_common.sh parses all six, so no emitted flag can refuse a launch as
+      unknown; and all six are in GOLD_RESERVED_PASSTHROUGH, which is what makes
+      the typing a BINDING - parse_chain_args is last-wins and passthrough
+      tokens land AFTER the frozen args, so an unreserved --max_rounds 5 would
+      silently reshape the frozen [trial, trial, formal] structure while the
+      printed table still said 3. The residual this lane left open in the
+      previous pass is the one that closed: max_rounds was typed nowhere while
+      the row's own recorded effective value read "3 - matches frozen", so the
+      chain default AGREED and the gap was invisible to every check of effective
+      values. An agreeing default is not a binding, which is why the row
+      demanded TYPING rather than a value check.
     resolution: >-
       The ENTRYPOINT half is answered by D-ARCH-1: neither existing launcher; a
       new thin canonical entrypoint owned by the standalone package. The VALUES
@@ -5945,9 +5990,29 @@ decisions:
   - decision_id: F-SCANI-2
     parameter: VALIDATION_* shell variables are injectable from the environment
     concept: an env route bypasses a launcher's explicit flag refusal
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. Landed as
+      2a5e6006 (PR #356), a verified ancestor of origin/master 67e49c00. The
+      requirement_on_d_arch_1 - treat "initialise every consumed shell variable"
+      as an ENTRY CONDITION, not a cleanup step - is met literally: all five
+      VALIDATION_* are assigned "" in _chain_common.sh's defaults block at
+      source time, alongside every other knob, so a stale export can no longer
+      reach the "[[ -n ... ]]" blocks that append to APP_ARGS and the
+      launch_prior_baseline_experiment.sh refusal of
+      --validation_fixed_candidate_plan can no longer be walked around through
+      the environment. The same_shape observation is closed by DECLARATION
+      rather than by initialisation: CHAIN_DECLARED_ENV_INPUTS=(CHAIN_STOP_FILE)
+      names the one variable the library may legitimately read from the
+      environment, so anything neither declared nor assigned is an injection
+      route BY CONSTRUCTION, and a census test derives every name build_app_args
+      reads and fails when one is unassigned. NOTED, not a residual: "set -u" is
+      still absent and the ":-" read form is retained deliberately, stated
+      in-source as what makes later "set -u" adoption safe - a recorded decision
+      rather than the oversight the finding described.
     finding: >-
       _chain_common.sh:40-41 sets -e and -o pipefail but NOT -u. :496-510 has
       five "if [[ -n ${VALIDATION_*:-} ]]" blocks appending to APP_ARGS, and
@@ -6705,9 +6770,32 @@ decisions:
   - decision_id: F-SCANG-4
     parameter: the symmetry gate cannot see the routes that actually differ
     concept: what campaign_preflight.sh compares, and what it cannot
-    status: PENDING_IMPLEMENTATION
+    status: DISCHARGED
+    superseded_status: PENDING_IMPLEMENTATION
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
+    reconciled: >-
+      DISCHARGED 2026-08-27 by ledger reconciliation, not by new work. Landed as
+      2a5e6006 (PR #356), a verified ancestor of origin/master 67e49c00. The
+      requirement names three things the gate must see, and all three landed as
+      a new THIRD layer (campaign_arm_surface.py, consumed by
+      campaign_arm_symmetry.py alongside the pre-existing resolved-config and
+      argv layers). (1) RENDERED PROMPT BYTES: render_prompt_surfaces calls the
+      PRODUCTION renderers - render_available_models / render_available_losses /
+      load_stage_prompt / get_task_description / render_forward_contract /
+      resolve_run_proposal_blocks - and sha256s what they return, deliberately
+      never re-implementing them, since a second renderer would be free to
+      drift from the one the model actually reads. (2) ENVIRONMENT:
+      capture_environment. (3) MACHINE-LOCAL STORES: digest_paths, with every
+      store classified as STORE_SYMMETRY_REQUIRED or STORE_SYMMETRY_OBSERVED and
+      an unclassified store REFUSED rather than ignored. THE LOAD-BEARING
+      DETAIL, checked rather than assumed: layer 3 is required=True on both
+      --with-surface and --without-surface, so it cannot be forgotten - the
+      in-source rationale states it exactly ("an optional third layer is one the
+      caller can forget, and a forgotten layer 3 is an argv-only gate still"),
+      and campaign_preflight.sh passes both. The row's thesis - that a PASS was
+      much weaker evidence than its name suggested - no longer holds for the
+      routes it named.
     finding: >-
       Scan G's single sentence, recorded because it is the section-10 thesis:
       the launch gate compares two HYPOTHETICAL COMMAND LINES on ONE MACHINE,
