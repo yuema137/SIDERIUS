@@ -310,8 +310,10 @@ def task_scope_argv(configs_dir: str, exp_id: str, task_scopes: object) -> list[
     return fragment
 
 
-def validation_rows_argv(task_scopes: object, data_dir: str) -> list[str]:
-    """The CALLER's declared validation row count — empty unless composed.
+def validation_rows_argv(
+    task_scopes: object, data_dir: str, *, regime_a_eval_declared: bool
+) -> list[str]:
+    """The EXPLICIT eval leg's declared row count — emitted ONLY on that leg.
 
     Step 12 / PR-12d, seam C (B9). ``run_experiment_streaming`` REFUSES an
     explicit ``task_eval_scope`` that arrives without
@@ -320,6 +322,40 @@ def validation_rows_argv(task_scopes: object, data_dir: str) -> list[str]:
     harnesses, which built their own row lists and therefore knew the number.
     A composed contrast run had no such caller, so its training child refused
     before the first epoch.
+
+    **Leg-gated by F-Q4-2 (v0.1.0).** The training child has TWO validation
+    declaration legs and ONE authority per leg, refused crosswise (D14-2 C5b,
+    ``train_engine_sandbox.run_experiment_streaming``): under regime-A
+    (``--eval_sample_set_json``) the child's own preflight is the ONLY
+    declaration authority; only the explicit leg — a transported eval scope
+    WITHOUT a regime-A eval SampleSet — consumes this flag. The first cut of
+    this emitter gated on scope PRESENCE alone (``task_scopes.evaluation is
+    not None``), which is true on EVERY composed run because every shipped
+    implementation declares ``build_eval_scope`` — but a composed run whose
+    task declares physical geometry (composed TIDMAD) still supplies the
+    legacy eval SampleSet too (PR-12bc D-BC-13), so both authorities arrived
+    and 5/5 composed training attempts exited on the crosswise refusal before
+    epoch 0, zero records. PR-12bc's own audit froze the rule this function
+    now implements: under D-BC-13 the composed path is on the regime-A
+    declaration leg and ``validation_requested_rows`` must stay ``None`` —
+    "threading it would have TRIPPED the first refusal."
+
+    ``regime_a_eval_declared`` is therefore REQUIRED, no default: whether the
+    regime-A eval declaration is on this child's argv is the same dichotomy
+    the child itself dispatches on (``eval_sample_set is not None``), and the
+    caller must answer it from the argv actually being built — never from a
+    re-derivation that can drift from the emission site.
+
+    The task-built evaluation scope itself still crosses on the regime-A leg
+    (:func:`task_scope_argv` — scope IDENTITY, consumed by the child's R3
+    pass); what stays home there is the DECLARATION, whose authority the
+    preflight already owns. The two explicit-leg flags — the eval-scope
+    ref/digest pair and this count — must never be able to outrun each other:
+    this function mirrors :func:`task_scope_argv`'s training-scope early
+    return, so the count is emitted only when the eval-scope artifact it
+    declares is transported too. A count without a scope would dangle
+    silently (the engine arms R3 on ``task_eval_scope``, not on the count);
+    a scope without a count on the explicit leg is refused by the engine.
 
     **Why the count is produced HERE and not by the child.** The child's
     ``TrainingHistory`` asserts ``requested == materialized``, and the
@@ -348,10 +384,14 @@ def validation_rows_argv(task_scopes: object, data_dir: str) -> list[str]:
     That is the intended trade — the count must come from the other side of
     the boundary or it proves nothing — but it is a real I/O cost and a real
     failure site, and it went unnoticed until CI (which has no TIDMAD data)
-    failed on a test that passed on every developer machine.
+    failed on a test that passed on every developer machine. The F-Q4-2 leg
+    gate also returns BEFORE this materialization, so the regime-A leg no
+    longer pays parent-side eval I/O for a count the child would have refused.
 
-    Returns ``[]`` when the run is un-composed or acquired no evaluation
-    scope, so a legacy argv is byte-identical.
+    Returns ``[]`` when the run is un-composed, acquired no evaluation scope,
+    or is on the regime-A declaration leg — so a legacy argv is byte-identical
+    and a composed regime-A argv carries exactly ONE validation declaration
+    authority.
     """
     from execute_tools.task_data_path import (
         EvalMaterializationParams,
@@ -360,6 +400,18 @@ def validation_rows_argv(task_scopes: object, data_dir: str) -> list[str]:
 
     evaluation = getattr(task_scopes, "evaluation", None)
     if evaluation is None:
+        return []
+    # PAIRING (F-Q4-2): mirror `task_scope_argv`'s training-scope early return.
+    # Without a training scope that emitter transports NO artifacts — including
+    # the eval-scope ref this count declares — and a declaration must never
+    # outrun the scope it declares.
+    if getattr(task_scopes, "training", None) is None:
+        return []
+    # LEG (F-Q4-2): under regime-A the child's preflight is the ONLY
+    # declaration authority (D14-2 C5b; PR-12bc D-BC-13). The task-built
+    # evaluation scope was still acquired and still crosses as scope identity;
+    # it is deliberately NOT consumed for validation rows here.
+    if regime_a_eval_declared:
         return []
     bound = active_task_data_path()
     if bound is None:

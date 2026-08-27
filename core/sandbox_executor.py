@@ -1539,8 +1539,22 @@ class TidmadSandbox:
             # (`task_scope_argv`/`validation_rows_argv` return `[]` for absent
             # scopes), so an un-composed TIDMAD argv is byte-identical — which is
             # exactly why this is a hoist and not a new branch.
+            #
+            # F-Q4-2 (v0.1.0): the row count belongs to the EXPLICIT validation
+            # leg ONLY. The child dispatches its declaration authority on the
+            # PRESENCE of `--eval_sample_set_json` (regime-A ⇒ its preflight is
+            # the only authority; the count is refused crosswise), so the
+            # parent answers the same question of the same command line it is
+            # building — never a re-derivation that can drift from the
+            # emission site above.
             cmd.extend(task_scope_argv(self.dirs["configs"], exp_id, task_scopes))
-            cmd.extend(validation_rows_argv(task_scopes, self.dirs["data"]))
+            cmd.extend(
+                validation_rows_argv(
+                    task_scopes,
+                    self.dirs["data"],
+                    regime_a_eval_declared="--eval_sample_set_json" in cmd,
+                )
+            )
 
             print(f">>> [Executor] Running training for {exp_id}...")
             _observer = _make_phase_observer(self)

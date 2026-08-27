@@ -393,14 +393,25 @@ class TestValidationRowsDeclaration:
         assert "validation_requested_rows=args.validation_requested_rows" in source
 
     def test_an_uncomposed_run_declares_nothing(self):
-        assert _validation_rows_argv(None, "/nowhere") == []
-        assert _validation_rows_argv(type("S", (), {"evaluation": None})(), "/nowhere") == []
+        # `regime_a_eval_declared` (F-Q4-2) is keyword-only with NO default —
+        # every caller must state the leg; these runs have no scopes at all,
+        # so the answer is irrelevant to the [] result on either value.
+        assert _validation_rows_argv(None, "/nowhere", regime_a_eval_declared=False) == []
+        assert (
+            _validation_rows_argv(
+                type("S", (), {"evaluation": None})(), "/nowhere", regime_a_eval_declared=False
+            )
+            == []
+        )
 
     def test_the_declaration_is_the_scopes_real_row_count(self, pets):
         impl, scope, data_dir, _model = pets
         scopes = type("S", (), {"training": scope, "evaluation": scope})()
         with bind_task_data_path(impl):
-            argv = _validation_rows_argv(scopes, data_dir)
+            # A composed contrast run has no legacy eval SampleSet, so its
+            # training spawn is on the EXPLICIT leg (F-Q4-2): the declaration
+            # is emitted.
+            argv = _validation_rows_argv(scopes, data_dir, regime_a_eval_declared=False)
         assert argv == ["--validation_requested_rows", str(len(scope.rows))]
 
     def test_the_declaration_comes_from_the_PARENT_not_the_pass(self):
