@@ -41,7 +41,7 @@ bash sdsc_submission_scripts/run_chain.sh --mode sdsc \
 | file | role |
 |---|---|
 | `run_chain.sh` | **ENTRY POINT** — `exec` this. Mode-aware: python resolution, auto-resume, slurm vs subprocess dispatch. |
-| `_chain_common.sh` | **SHARED LIBRARY** — `source`d by `run_chain.sh`. Mode-agnostic: defaults, CLI parser, iter loop body, per-iter app-arg builder. |
+| `_chain_common.sh` | **SHARED LIBRARY** — `source`d by `run_chain.sh`. Mode-agnostic: defaults, CLI parser, iter loop body, per-iter app-arg builder. Retention: `--cleanup_denoised` (default ON, the historical behavior) / `--no-cleanup_denoised` (R-RETENTION-1 — official FORMAL execution retains deliverables; the child argv then carries neither token). `--no-cleanup_denoised` is refused in `--mode sdsc`, where `submit_one_iteration.slurm` force-injects the cleanup flag. |
 | `run_one_iteration.py` | **PER-ITER PYTHON RUNNER** — executes one iteration of the 5-agent workflow. Called once per iter by both modes. Writes `iter_NNN/manifest.json`. |
 | `launch_prior_baseline_experiment.sh` | **TWO-ARM EXPERIMENT LAUNCHER** (arXiv X9) — wraps `run_chain.sh`; `--arm with-prior-art\|without-prior-art` decides the lit-review topology, the opaque arm label and (WITHOUT arm) `--baseline_isolation`. Refuses seeds and advice files; `--dry-run` prints the child argv AND the resolved launch config JSON; `--h100` sources `h100_posture.env`. **Campaign band mode** (arXiv launch topology): `--band 0-3\|4-9\|10-14\|15-19 --workspace-root DIR` maps the band to the DS8 pair (`--data_scope` + `--health_gate_files`), derives the per-chain workspace/run_name `${ARM}_band${BAND}` under the persistent-volume root, and (with `--h100`) refuses launch until `H100_CORESIDENCY_FACTOR` is probe-filled. **Fixed-candidate mode**: `--fixed-candidate PLAN.json` forwards the chain's existing `--validation_fixed_candidate_plan` seam (proposer bypassed, provenance recorded) and pins `--num_iterations 1` unless given. |
 | `launch_band_fleet.sh` | **BAND FLEET LAUNCHER** — the four band chains of ONE arm on one GPU: sequential `nohup` starts with a stagger, per-chain logs + PID manifest under `${WORKSPACE_ROOT}/fleet_logs/`, honors `CUDA_VISIBLE_DEVICES` (`--gpu N` pins). `--card A\|B` maps to the arm (`C` is refused toward the probe); `--fixed-candidate` fans the frozen champion across all four bands; `--dry-run` walks all four foreground. |
@@ -53,6 +53,23 @@ The role split between `run_chain.sh` and `_chain_common.sh` keeps the
 iter loop identical across backends so lilab and SDSC can never diverge.
 The shared library is also unit-testable in isolation (see
 `tests/unit/sdsc_submission_scripts/`).
+
+### Gold campaign (F-LAUNCH-1 — D-ARCH-1 hierarchy)
+
+The official campaign's canonical launcher. It implements NO scientific
+workflow: the iteration unit is the existing chain, reused unchanged. The
+X9 launchers above stay untouched (X9 reproducibility); the campaign does
+NOT route through their arm logic. Frozen paths + winner rule:
+`docs/campaign/stage_artifact_contract.md`.
+
+| file | role |
+|---|---|
+| `run_gold_campaign.sh` | **CANONICAL CAMPAIGN ENTRYPOINT** — thin: binds the frozen boundary (the twelve typed chain values, `--arm goldpod\|blindpod` with the X9 labels refused, lit-review explicitly OFF in both arms, the `--gold_advice_file` treatment boundary, `--task_config` validated + sha-recorded, retention), writes the resolved launch manifest, dispatches `--stage 1\|2`. `--dry-run` prints the frozen table + every fully-resolved per-band/per-unit `run_chain.sh` argv, launches nothing, writes nothing. |
+| `_gold_campaign_lib.sh` | **CAMPAIGN SHARED BOUNDARY** (source-only) — the frozen-value table (one row per value; builder and printer both consult it, so a dropped row fails NAMING the key), band vocabulary + band→files + band→GPU maps (0-3→0, 4-9→1, 10-14→2, 15-19→3, single_resident), arm/advice pairing, reserved-passthrough refusals (incl. `--cleanup_denoised`, R-RETENTION-1), and the bypass-ceiling probe (`--bypass_formal_time_budget_minutes 200` emitted only once the chain parses it — parallel lane). |
+| `stage1_search.sh` | **STAGE-1 FAN-OUT** — one band per GPU per the frozen map; staggered `nohup` starts, per-band logs + PID manifest under `${WORKSPACE_ROOT}/gold_stage1_logs/`; `--only 0-3,4-9` selects bands; `--dry-run` walks each band foreground. |
+| `stage1_run_band.sh` | **STAGE-1 BAND LOOP** — persisted-state orchestrator: scans with `gold_campaign_state.py band-state` (inspector verifiers + the contract winner rule), invokes `run_chain.sh` over the full frozen horizon with auto-resume, watches committed manifests, refreshes `{root}/{arm}_band{B}.gold_status.json` (sibling of the chain workspace), and requests a graceful C13 STOP when the FCNet+2 rule is evaluable and satisfied (`--fcnet_reference_json`; absent = A2-FCNET interim, full horizon). No-progress brake after 3 chain cycles without a new committed iteration. |
+| `stage2_strict_retrain.sh` | **STAGE-2 STRICT RETRAIN** — 4 designs x 4 bands = 16 units under `{root}/stage2/{design}_{band}/` (contract section 2); wave = one design across the four GPUs; each unit is `run_chain.sh --validation_fixed_candidate_plan <design>.json --num_iterations 1 --data_scope <band>` with the same frozen boundary; completed units (COMPLETE.json present) are skipped; finalization copies the unit's TARGET-BAND deliverables only (band file set derived via `DataScope.from_cli` from the unit's own band, count 4/6/5/5; `COMPLETE.json` carries the counted `deliverable_count` — Q-S3-2 ruling A) and writes COMPLETE.json LAST, atomically. `--design_registry DIR` must hold exactly four `<design>.json` plans. |
+| `gold_campaign_state.py` | **PERSISTED-STATE HELPER** — `band-state` (next iteration via the `inspect_run_state` functions, the cumulative HealthGate-valid FORMAL incumbent per the contract winner table under `MetricOrder`, the FCNet+2 verdict) and `stage2-finalize` (unit winner, deliverable copies via the `DeliverableNaming` authority, atomic COMPLETE.json). All diagnostics on stderr; the state JSON is written atomically to `--out`. |
 
 ### Tier 3 integration test
 

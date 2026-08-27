@@ -68,6 +68,7 @@ HEALTHGATE_MODE=blocking
 RESULT_AUTHORITY=scientific
 SKIP_FORMAL_MIN_DELTA=-1.0
 BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA=0.0
+BYPASS_FORMAL_TIME_BUDGET_MINUTES=""             # Lane F3: empty == omit == no bypass ceiling extension
 LLM_MODEL="gemini-3.1-pro-preview"  # §3.2: matches run_one_iteration.py default
 LLM_CONFIG=""
 HEALTH_CHECKS_CONFIG=""             # optional; empty preserves tuner's shipped default
@@ -156,6 +157,15 @@ IS_PSEUDO_TRAINING=0
 # halts the *chain* when the most recent N committed iters all carry
 # manifest.status='failed'. Default 3 matches the Python argparse default.
 MAX_FAILED_ITERATIONS=3
+# R-RETENTION-1 (Gold campaign release blocker, 2026-08-26). Default 1
+# preserves the historical chain behavior byte-identically: exploratory
+# chain runs emit --cleanup_denoised because per-experiment denoised .h5
+# files accumulate at ~76 GB / attempt. --no-cleanup_denoised (typed by the
+# campaign entrypoint) suppresses the token so the child argv carries NO
+# cleanup flag and official FORMAL execution RETAINS its deliverables — a
+# cleaned formal winner leaves Stage-3 nothing to pool
+# (docs/campaign/stage_artifact_contract.md, retention clause).
+CLEANUP_DENOISED=1
 
 # --- Unified-orchestrator (run_chain.sh) defaults ---
 # MODE picks the execution backend: lilab (foreground subprocess) or
@@ -313,6 +323,7 @@ parse_chain_args() {
         --result_authority)                   RESULT_AUTHORITY="$2"; shift 2 ;;
         --skip_formal_min_delta)              SKIP_FORMAL_MIN_DELTA="$2"; shift 2 ;;
         --bypass_formal_time_budget_min_delta) BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA="$2"; shift 2 ;;
+        --bypass_formal_time_budget_minutes) BYPASS_FORMAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
         --llm_model)              LLM_MODEL="$2"; shift 2 ;;
         --reflect_provider)       REFLECT_PROVIDER="$2"; shift 2 ;;
         --reflect_model_id)       REFLECT_MODEL_ID="$2"; shift 2 ;;
@@ -407,6 +418,9 @@ parse_chain_args() {
         --is_pseudo_training)        IS_PSEUDO_TRAINING=1; shift ;;
         # Stage 4 / Commit 4.6 — consecutive-iter failure brake
         --max_failed_iterations)     MAX_FAILED_ITERATIONS="$2"; shift 2 ;;
+        # R-RETENTION-1 — formal-deliverable retention (campaign entrypoint).
+        --cleanup_denoised)          CLEANUP_DENOISED=1; shift ;;
+        --no-cleanup_denoised)       CLEANUP_DENOISED=0; shift ;;
         # Slurm-only flags — silently accepted on lilab too (ignored)
         --partition)              PARTITION="$2"; shift 2 ;;
         --time)                   TIME="$2"; shift 2 ;;
@@ -463,6 +477,7 @@ build_app_args() {
         --result_authority "$RESULT_AUTHORITY"
         --skip_formal_min_delta "$SKIP_FORMAL_MIN_DELTA"
         --bypass_formal_time_budget_min_delta "$BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA"
+        ${BYPASS_FORMAL_TIME_BUDGET_MINUTES:+--bypass_formal_time_budget_minutes "$BYPASS_FORMAL_TIME_BUDGET_MINUTES"}
         --llm_model "$LLM_MODEL"
         # Lane F2 — forwarded only when TYPED (empty == omit == the
         # Python tri-state's None == AGENT_CONTROLLED).
@@ -481,12 +496,17 @@ build_app_args() {
         --formal_portion "$FORMAL_PORTION"
         --formal_train_portion "$FORMAL_TRAIN_PORTION"
         --formal_round_strategy "$FORMAL_ROUND_STRATEGY"
-        # Always-on for chain runs: per-experiment denoised .h5 files
-        # accumulate at ~76 GB / attempt and can fill the data drive
-        # within 3-4 iterations of a 20-iter chain. Mirrors what
-        # submit_one_iteration.slurm hardcodes for SDSC mode.
-        --cleanup_denoised
     )
+    # Default-ON for chain runs: per-experiment denoised .h5 files
+    # accumulate at ~76 GB / attempt and can fill the data drive within
+    # 3-4 iterations of a 20-iter chain (mirrors what
+    # submit_one_iteration.slurm hardcodes for SDSC mode). The campaign
+    # entrypoint passes --no-cleanup_denoised (R-RETENTION-1): official
+    # FORMAL execution retains deliverables, so the token is then OMITTED
+    # and run_one_iteration.py's store_true default (False) governs.
+    if [ "$CLEANUP_DENOISED" -eq 1 ]; then
+        APP_ARGS+=(--cleanup_denoised)
+    fi
     # Emit --seed_paths only when seeds are actually supplied. Omitting the flag
     # (empty SEED_PATHS) is a valid cold start; a bare --seed_paths with zero
     # values would be an argparse error by design (see requirement 2).
