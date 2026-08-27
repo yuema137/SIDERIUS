@@ -6,9 +6,10 @@
 #          are typed (D-ARCH-1, F-LAUNCH-1). Sourced by run_gold_campaign.sh
 #          and by every stage script under it; NEVER by the X9 launchers.
 #
-# Owns   : the frozen-value table (the thirteen chain-boundary values from
+# Owns   : the frozen-value table (the NINETEEN chain-boundary values from
 #          docs/campaign/official_campaign_decisions.yaml — D-BUD-2 horizon,
-#          D-BUD-6 epochs, D-BUD-7 trial portions, D-BUD-8 formal portions,
+#          D-BUD-3 round structure, D-BUD-4 attempt budgets, D-BUD-6 epochs,
+#          D-BUD-7 trial portions, D-BUD-8 formal portions,
 #          D-BUD-11/13 time budgets, P6-A skip delta, P6-B bypass delta),
 #          the frozen LLM ROUTING authority (D-LLM-1, F-LLM-WIRE-1),
 #          the OPERATOR-SUPPLIED required runtime-profile binding
@@ -38,7 +39,7 @@ GOLD_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GOLD_PROJECT_DIR="$(cd "${GOLD_LIB_DIR}/.." && pwd)"
 
 # ---------------------------------------------------------------------------
-# THE FROZEN-VALUE TABLE — the thirteen typed chain-boundary values.
+# THE FROZEN-VALUE TABLE — the NINETEEN typed chain-boundary values.
 #
 # ONE row per value; the argv builder DERIVES its tokens from these rows via
 # gold_frozen_value, and the dry-run prints them verbatim, so deleting or
@@ -78,6 +79,35 @@ GOLD_FROZEN_ROWS=(
     "formal_time_budget_minutes=120"
     "skip_formal_min_delta=-2.0"
     "bypass_formal_time_budget_min_delta=0.5"
+    # --- F-LAUNCH-1 / adversarial F-2 (release blockers, 2026-08-26) -------
+    # The six FROZEN EXPERIMENT_FIXED workflow budgets that rode agreeing
+    # _chain_common.sh defaults. max_rounds is the SEVENTH of F-LAUNCH-1's
+    # twelve and was the one still untyped (the row types ten by name and
+    # improves on max_epochs by splitting it); the five attempt budgets are
+    # D-BUD-4, which the header's decision list did not name either.
+    #
+    # WHY THEY WERE INVISIBLE, and the reason this row exists at all: the
+    # chain defaults EQUAL the frozen values, so the row's own recorded
+    # effective value reads "3 — matches frozen" and every check of
+    # EFFECTIVE VALUES comes back correct. An agreeing default is not a
+    # binding. It holds only until someone edits a default in a file that
+    # knows nothing about this campaign — and then the campaign silently
+    # runs a different round structure with every surface still green.
+    # That is precisely why F-LAUNCH-1 demanded TYPING rather than a value
+    # check, and why a test that only asserted the effective value could
+    # never have caught it.
+    #
+    # D-BUD-3 — the [trial, trial, formal] round structure. The formal
+    # round is the LAST of the three, never an additional fourth.
+    "max_rounds=3"
+    # D-BUD-4 — the attempt budgets, "gold_blind: exactly the same values".
+    # The decision also PROHIBITS a generic max_tuning_attempts abstraction,
+    # so these five stay five named rows.
+    "attempts_per_round=3"
+    "attempts_per_formal_round=5"
+    "max_fail_rounds=3"
+    "max_proposal_attempts=3"
+    "max_impl_attempts=3"
 )
 
 #: Stage-2 iteration count (D-ARCH-1/D-ARCH-2): a frozen-design retrain is
@@ -144,7 +174,7 @@ gold_frozen_value() {
 # verbatim from the table (one `key=value` line each, prefixed).
 gold_print_frozen_table() {
     local row
-    echo "[gold-campaign] FROZEN VALUES (typed at the shared boundary; decisions D-BUD-2/6/7/8, D-BUD-11/13, P6-A, P6-B):"
+    echo "[gold-campaign] FROZEN VALUES (typed at the shared boundary; decisions D-BUD-2/3/4/6/7/8, D-BUD-11/13, P6-A, P6-B):"
     for row in "${GOLD_FROZEN_ROWS[@]}"; do
         echo "[gold-campaign]   frozen ${row}"
     done
@@ -468,7 +498,9 @@ gold_frozen_chain_args() {
         formal_portion formal_train_portion formal_eval_portion \
         trial_max_epochs formal_max_epochs \
         trial_time_budget_minutes formal_time_budget_minutes \
-        skip_formal_min_delta bypass_formal_time_budget_min_delta; do
+        skip_formal_min_delta bypass_formal_time_budget_min_delta \
+        max_rounds attempts_per_round attempts_per_formal_round \
+        max_fail_rounds max_proposal_attempts max_impl_attempts; do
         v="$(gold_frozen_value "$key")" || return 1
         GOLD_FROZEN_CHAIN_ARGS+=("--${key}" "$v")
     done
@@ -796,6 +828,15 @@ GOLD_RESERVED_PASSTHROUGH=(
     --mode --seed_paths --start_iter
     --auto_resume --no_auto_resume --force_fresh
     --validation_fixed_candidate_plan
+    # F-LAUNCH-1 / adversarial F-2: the six FROZEN EXPERIMENT_FIXED
+    # workflow budgets typed above. Reserving them is what makes the
+    # typing a BINDING rather than a default that happens to be stated:
+    # parse_chain_args is last-wins and passthrough tokens are appended
+    # AFTER the frozen args, so an unreserved --max_rounds 5 would
+    # silently reshape the frozen [trial, trial, formal] structure of
+    # every band while gold_print_frozen_table still printed 3.
+    --max_rounds --attempts_per_round --attempts_per_formal_round
+    --max_fail_rounds --max_proposal_attempts --max_impl_attempts
 )
 
 # gold_refuse_reserved_passthrough TOKEN... — refuse any reserved token,

@@ -92,19 +92,39 @@
 #       (--data_scope band + --health_gate_files <band files>) on the
 #       child argv. It executes launch_prior_baseline_experiment.sh, which
 #       is not the campaign's launcher; SKIPPED under a gold arm.
-#   R7  X9 ARMS ONLY. arm argv-symmetry (#255 exposure determination — launch validity
-#       is CONDITIONED on it): both arms' dry-runs with otherwise
-#       identical arguments may differ ONLY in declared arm policy +
-#       derived naming; especially the lock-invisible population knobs
-#       (formal_portion / formal_train_portion / formal_eval_portion),
-#       --data_dir, band/scope, time budgets, VRAM budgets and the
-#       output-type surface must be IDENTICAL. Field-by-field diff on
-#       failure (campaign_arm_symmetry.py; both arms run from THIS
-#       checkout, so the SHA of R2 covers both). SKIPPED under a gold arm:
-#       the checker's arms ARE the X9 pair and it positively requires the
-#       lit-review split the campaign freezes OFF in both of its arms, so
-#       it cannot be repointed at the campaign without a redesign this
-#       script does not own.
+#   R7  X9 ARMS ONLY. arm symmetry (#255 exposure determination — launch validity
+#       is CONDITIONED on it), in THREE layers:
+#         argv  — both arms' dry-runs with otherwise identical arguments may
+#                 differ ONLY in declared arm policy + derived naming;
+#                 especially the lock-invisible population knobs
+#                 (formal_portion / formal_train_portion /
+#                 formal_eval_portion), --data_dir, band/scope, time
+#                 budgets, VRAM budgets and the output-type surface must be
+#                 IDENTICAL.
+#         surface (F-SCANG-4, release blocker) — the RENDERED PROMPT BYTES,
+#                 the ENVIRONMENT and the MACHINE-LOCAL STORES, captured by
+#                 campaign_arm_surface.py through the production renderers.
+#                 The first two layers are both argv, and the frozen row's
+#                 finding is that "every route that actually differs between
+#                 two pods — home-directory stores, environment variables,
+#                 rendered prompt BYTES — is outside what it can see".
+#                 Prompt bytes are compared in two states: the NEUTRAL render
+#                 (both arms at baseline_isolation=false) must be
+#                 byte-identical, since with the treatment held constant only
+#                 machine-local state can move it; the ARM render must differ
+#                 on the declared treatment surfaces.
+#       This arm's surface is PUBLISHED to
+#       {workspace-root}/.campaign_arm_surface_{arm}.json. When the sibling
+#       arm's published surface is already there — written by the OTHER POD —
+#       it is used, and the comparison is genuinely cross-pod. Otherwise the
+#       sibling is captured on this host and the row says so: a same-host
+#       comparison cannot speak for a second pod.
+#       Field-by-field diff on failure (campaign_arm_symmetry.py; both arms
+#       run from THIS checkout, so the SHA of R2 covers both). SKIPPED under
+#       a gold arm: the checker's arms ARE the X9 pair and it positively
+#       requires the lit-review split the campaign freezes OFF in both of its
+#       arms, so it cannot be repointed at the campaign without a redesign
+#       this script does not own.
 #   R8  cold-start preconditions (#260 checklist, gate_testing_standard.md):
 #       item 1 per-band workspaces absent/empty — resolved through
 #       preflight_band_workspace for the arm ACTUALLY under check, so a
@@ -153,6 +173,7 @@ PF_PROJECT_DIR="$(cd "${PF_SCRIPT_DIR}/.." && pwd)"
 PF_LAUNCHER="${PF_SCRIPT_DIR}/launch_prior_baseline_experiment.sh"
 PF_POSTURE="${PF_SCRIPT_DIR}/h100_posture.env"
 PF_SYMMETRY="${PF_SCRIPT_DIR}/campaign_arm_symmetry.py"
+PF_SURFACE="${PF_SCRIPT_DIR}/campaign_arm_surface.py"
 PF_SMOKE="${PF_SCRIPT_DIR}/campaign_llm_smoke.py"
 PF_PROBE="${PF_SCRIPT_DIR}/gpu_c_coresidency_probe.sh"
 
@@ -207,6 +228,54 @@ preflight_host_ram_check() {
 preflight_band_workspace() {
     local root="$1" arm="$2" band="$3"
     printf '%s\n' "${root%/}/${arm}_band${band}"
+}
+
+# The arm's baseline_isolation, READ from that arm's own resolved-config
+# print (F-SCANG-4). The launcher derives the flag from --arm; this script
+# must not carry a second arm->isolation table, because the surface capture
+# would then render the treatment this script believes in rather than the
+# one the run will apply. Prints "true"/"false"; returns 1 when the capture
+# carries no such field, so a silently-absent value cannot become "false".
+preflight_resolved_isolation() {
+    local capture="$1" value
+    value="$(grep -o '"baseline_isolation"[[:space:]]*:[[:space:]]*\(true\|false\)' "$capture" \
+        | head -1 | grep -o 'true\|false' || true)"
+    [ -n "$value" ] || return 1
+    printf '%s\n' "$value"
+}
+pf_resolved_isolation() {
+    local value
+    if ! value="$(preflight_resolved_isolation "$1")"; then
+        echo "ERROR: no baseline_isolation in the resolved-config capture: $1" >&2
+        return 1
+    fi
+    printf '%s\n' "$value"
+}
+
+# Which of the two resolved isolation values belongs to ARM. A named
+# function rather than an inline `[ ... ] && echo A || echo B`: this file
+# already records what a trailing AND-list cost this campaign (see the R6
+# loop note), and the arm->value selection is exactly the kind of thing a
+# test should be able to call.
+preflight_isolation_for_arm() {
+    local arm="$1" with_iso="$2" without_iso="$3"
+    case "$arm" in
+        with-prior-art)    printf '%s\n' "$with_iso" ;;
+        without-prior-art) printf '%s\n' "$without_iso" ;;
+        *) echo "ERROR: preflight_isolation_for_arm: unknown arm '$arm'" >&2; return 1 ;;
+    esac
+}
+pf_isolation_for_arm() { preflight_isolation_for_arm "$@"; }
+
+# Capture ONE arm's surface (rendered prompt bytes / environment /
+# machine-local stores) through the production renderers. PYTHONPATH-pinned
+# to this checkout for the same reason R2b exists: a surface rendered by
+# another clone's templates describes prompts this launch will not send.
+pf_capture_surface() {
+    local arm="$1" isolation="$2" out="$3"
+    (cd "$PF_PROJECT_DIR" && PYTHONPATH="${PF_PROJECT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
+        "$PF_PY" "$PF_SURFACE" --arm "$arm" --baseline-isolation "$isolation" \
+        --project-dir "$PF_PROJECT_DIR" --out "$out")
 }
 
 # --- row bookkeeping --------------------------------------------------------
@@ -556,9 +625,9 @@ pf_main() {
         done
     fi
 
-    # ---- R7: arm argv-symmetry (#255) --------------------------------------
+    # ---- R7: arm symmetry — argv + surface (#255, F-SCANG-4) ---------------
     if [ "$ARM_KIND" = "gold" ]; then
-        pf_skip "R7 arm argv-symmetry NOT APPLICABLE to arm $ARM — $(basename "$PF_SYMMETRY") compares the X9 pair (with-prior-art / without-prior-art) and positively requires their lit-review split, which the campaign freezes OFF in BOTH of its arms; the campaign's Gold<->Blind treatment symmetry is a separate blind-launch prerequisite, deliberately NOT served here"
+        pf_skip "R7 arm symmetry NOT APPLICABLE to arm $ARM — $(basename "$PF_SYMMETRY") compares the X9 pair (with-prior-art / without-prior-art) and positively requires their lit-review split, which the campaign freezes OFF in BOTH of its arms; the campaign's Gold<->Blind treatment symmetry is a separate blind-launch prerequisite, deliberately NOT served here — including its surface layer"
     else
         local OTHER_OUT="${SCRATCH}/dryrun_${OTHER_ARM}_band${SYMMETRY_BAND}.out"
         RC=0
@@ -571,12 +640,68 @@ pf_main() {
             if [ "$ARM" = "without-prior-art" ]; then
                 WITH_CAP="$OTHER_OUT"; WITHOUT_CAP="$ARM_CAPTURE"
             fi
-            if (cd "$PF_PROJECT_DIR" && PYTHONPATH="${PF_PROJECT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
-                    "$PF_PY" "$PF_SYMMETRY" --with-output "$WITH_CAP" --without-output "$WITHOUT_CAP" \
-                    --workspace-root "$WORKSPACE_ROOT" --band "$SYMMETRY_BAND"); then
-                pf_pass "R7 arm argv-symmetry holds (#255): arms differ only in declared policy + derived naming"
+            # F-SCANG-4 layer 3. Each arm's isolation flag is READ from that
+            # arm's own resolved-config print, never re-derived here: the
+            # launcher decides it from --arm, and a second table in this
+            # script would be free to drift from the one the run obeys.
+            #
+            # Every one of these resolutions is captured with `|| RC=$?`.
+            # A bare `X=$(fn)` under `set -e` ABORTS pf_main when fn returns
+            # non-zero, so an unparseable capture would kill the preflight
+            # mid-summary instead of failing one row — every later row, R8
+            # included, would silently never run.
+            local SURF_RC=0 WITH_ISO="" WITHOUT_ISO="" SELF_ISO="" OTHER_ISO=""
+            WITH_ISO="$(pf_resolved_isolation "$WITH_CAP")" || SURF_RC=$?
+            WITHOUT_ISO="$(pf_resolved_isolation "$WITHOUT_CAP")" || SURF_RC=$?
+            if [ "$SURF_RC" -eq 0 ]; then
+                SELF_ISO="$(pf_isolation_for_arm "$ARM" "$WITH_ISO" "$WITHOUT_ISO")" || SURF_RC=$?
+                OTHER_ISO="$(pf_isolation_for_arm "$OTHER_ARM" "$WITH_ISO" "$WITHOUT_ISO")" || SURF_RC=$?
+            fi
+            if [ "$SURF_RC" -eq 0 ]; then
+                pf_capture_surface "$ARM" "$SELF_ISO" "${SCRATCH}/surface_${ARM}.json" || SURF_RC=$?
+            fi
+            # PUBLISH into the shared campaign root. This is what makes the
+            # comparison CROSS-POD: the arm that preflights second reads the
+            # first pod's recorded surface instead of a sibling re-derived
+            # from its own machine, which would agree with itself by
+            # construction — the row's "one machine" objection.
+            local PUBLISHED_SELF="${WORKSPACE_ROOT%/}/.campaign_arm_surface_${ARM}.json"
+            local PUBLISHED_OTHER="${WORKSPACE_ROOT%/}/.campaign_arm_surface_${OTHER_ARM}.json"
+            local OTHER_SURFACE="" PROVENANCE="none"
+            if [ "$SURF_RC" -eq 0 ]; then
+                cp "${SCRATCH}/surface_${ARM}.json" "$PUBLISHED_SELF" 2>/dev/null \
+                    || pf_info "R7 could not publish this arm's surface to $PUBLISHED_SELF (the other pod will capture its own sibling locally)"
+                if [ -f "$PUBLISHED_OTHER" ]; then
+                    OTHER_SURFACE="$PUBLISHED_OTHER"
+                    PROVENANCE="published"
+                else
+                    OTHER_SURFACE="${SCRATCH}/surface_${OTHER_ARM}.json"
+                    PROVENANCE="local"
+                    pf_capture_surface "$OTHER_ARM" "$OTHER_ISO" "$OTHER_SURFACE" || SURF_RC=$?
+                fi
+            fi
+            # ONE verdict for the whole surface layer. Two pf_fail calls for
+            # one broken capture would double the failure count and read as
+            # two independent defects in the summary.
+            if [ "$SURF_RC" -ne 0 ]; then
+                pf_fail "R7 could not build the arm SURFACE layer (rendered prompt bytes / environment / machine-local stores) — see the [arm-surface] lines above; the argv layer alone cannot claim arm symmetry (F-SCANG-4)"
             else
-                pf_fail "R7 arm argv-symmetry VIOLATED (#255 — launch validity conditioned on this; see the field diff above)"
+                local WITH_SURF="${SCRATCH}/surface_${ARM}.json" WITHOUT_SURF="$OTHER_SURFACE"
+                if [ "$ARM" = "without-prior-art" ]; then
+                    WITH_SURF="$OTHER_SURFACE"; WITHOUT_SURF="${SCRATCH}/surface_${ARM}.json"
+                fi
+                if (cd "$PF_PROJECT_DIR" && PYTHONPATH="${PF_PROJECT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
+                        "$PF_PY" "$PF_SYMMETRY" --with-output "$WITH_CAP" --without-output "$WITHOUT_CAP" \
+                        --workspace-root "$WORKSPACE_ROOT" --band "$SYMMETRY_BAND" \
+                        --with-surface "$WITH_SURF" --without-surface "$WITHOUT_SURF" \
+                        --surface-provenance "$PROVENANCE"); then
+                    pf_pass "R7 arm symmetry holds (#255 argv + F-SCANG-4 surface, sibling provenance=$PROVENANCE): arms differ only in declared policy + derived naming, and their rendered prompt bytes, environment and machine-local stores agree"
+                else
+                    pf_fail "R7 arm symmetry VIOLATED (#255 / F-SCANG-4 — launch validity conditioned on this; see the field diff above)"
+                fi
+                if [ "$PROVENANCE" = "local" ]; then
+                    pf_info "R7 the ${OTHER_ARM} surface was captured on THIS host, not read from ${PUBLISHED_OTHER}: the environment and machine-local-store comparison is same-host and cannot speak for a second pod. Run this preflight on the other arm's pod to publish its surface, then re-run here for cross-pod coverage"
+                fi
             fi
         fi
     fi

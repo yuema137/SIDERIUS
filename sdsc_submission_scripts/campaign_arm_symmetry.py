@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Arm argv-symmetry check (#255 exposure determination — launch-blocking).
+"""Arm symmetry check (#255 exposure determination — launch-blocking).
 
 The two-arm prior-art experiment is valid only if the arms differ in
 NOTHING but the declared arm policy. The #255 exposure determination
@@ -21,6 +21,25 @@ arguments; this script parses each capture at two layers and diffs them:
    dir/scope, time budgets or VRAM budgets, so only the argv layer can
    prove them symmetric).
 
+F-SCANG-4 (release blocker) added the third layer, because the first two
+are both argv:
+
+3. the ARM SURFACE artifacts (``campaign_arm_surface.py``) — RENDERED
+   PROMPT BYTES, the ENVIRONMENT and the MACHINE-LOCAL STORES. The frozen
+   row's finding is that layers 1-2 compare "two HYPOTHETICAL COMMAND
+   LINES on ONE MACHINE, and every route that actually differs between two
+   pods — home-directory stores, environment variables, rendered prompt
+   BYTES — is outside what it can see". Layer 3 is REQUIRED, not optional:
+   a surface argument the preflight forgets to pass would restore an
+   argv-only gate wearing the name of a symmetry gate, which is exactly
+   what the row describes.
+
+   Prompt bytes are compared in two states. The NEUTRAL render (both arms
+   at ``baseline_isolation=False``) must be byte-identical — it holds the
+   treatment constant, so any difference there came from the machine. The
+   ARM render must differ on the declared treatment surfaces — two arms
+   that render identical prompts are mis-wired, not symmetric.
+
 Fields that may legitimately differ are the EXPLICIT allowlists below
 (#255: arm label, lit-review enable/config — the root-paper variant
 rides the lit-review config sha — and baseline isolation, plus the
@@ -37,7 +56,7 @@ chain flag). The check therefore asserts NEITHER argv carries an
 output-type token, so a future asymmetric injection fails here.
 
 Exit 0 = symmetric (report printed); exit 1 = violation (field-by-field
-diff printed); exit 2 = a capture could not be parsed.
+diff printed); exit 2 = a capture or surface could not be parsed.
 """
 
 from __future__ import annotations
@@ -89,6 +108,227 @@ FORBIDDEN_DIFF_SPOTLIGHT = (
 )
 
 ARMS = ("with-prior-art", "without-prior-art")
+
+# --- F-SCANG-4 layer 3: the declared surface-symmetry policy ---------------
+
+#: The artifact shape this checker knows how to read. A surface written by
+#: a different schema is refused (exit 2) rather than compared field-blind.
+SURFACE_SCHEMA = "campaign_arm_surface/v1"
+
+#: Prompt surfaces whose ARM render MUST differ between the arms. These are
+#: exactly the surfaces arXiv U3 (#260, ruling R6) makes isolation-sensitive:
+#: ``render_available_models`` swaps the header and drops the built-in branch,
+#: and ``load_stage_prompt`` substitutes neutral example literals for the
+#: shipped ``wavenet`` / ``5.57`` tokens — which reaches every stage template
+#: (comparison and causal carry the literals; the proposing stage embeds the
+#: models block). Stated POSITIVELY: a capture that does not contain all of
+#: these ids fails, so a renamed or dropped surface cannot quietly shrink the
+#: treatment the gate is able to see.
+PROMPT_SURFACES_MUST_DIFFER = frozenset(
+    {
+        "proposal.available_models_block",
+        "proposal.stage.comparison_stage.explore",
+        "proposal.stage.comparison_stage.exploit",
+        "proposal.stage.causal_reasoning_stage.explore",
+        "proposal.stage.causal_reasoning_stage.exploit",
+        "proposal.stage.proposing_stage.explore",
+        "proposal.stage.proposing_stage.exploit",
+    }
+)
+
+#: Environment variables that MAY differ between the two arms, each with the
+#: authority that makes it legitimate. EVERYTHING ELSE captured is
+#: arm-invariant and a difference FAILS: an unknown SIDERIUS_* export that
+#: differs between pods is precisely the failure class this layer exists for,
+#: so the default is fail-closed, not allow-by-omission.
+ENVIRONMENT_ARM_LOCAL = {
+    # The campaign assigns GPU A to one arm and GPU B to the other
+    # (campaign_preflight.sh header, h100_posture.env).
+    "CUDA_VISIBLE_DEVICES": "the campaign assigns one card per arm",
+    # {root}/{arm}_band{band} — arm-derived by construction.
+    "SIDERIUS_CHAIN_WORKSPACE": "the per-chain workspace is arm-derived",
+    # Preflight R1c requires a FRESH, campaign-owned root; a per-arm root is
+    # what keeps one arm's promoted capabilities out of the other's proposer.
+    # Its CONTENT symmetry is checked in machine_local_stores instead.
+    "SIDERIUS_GENERATED_LIBRARY_DIR": "per-arm root; content symmetry checked as a store",
+    # Per-device learned k-tables; R8 item6 RETAINs this store by design.
+    "SIDERIUS_CALIBRATION_DIR": "per-device calibration store (R8 item6 RETAIN)",
+    "SIDERIUS_LIVE_CALIBRATION_DIR": "per-device calibration store (R8 item6 RETAIN)",
+}
+
+#: Machine-local stores whose CONTENT must be identical across arms. All
+#: three reach a prompt: the generated library and the checkout capability
+#: state are rendered into ``available_models_block`` /
+#: ``available_losses_block``, and the root-paper cache feeds the WITH arm's
+#: expert context.
+STORE_SYMMETRY_REQUIRED = frozenset(
+    {"generated_library", "checkout_capability_state", "root_papers_cache"}
+)
+
+#: Recorded and printed, but NOT required symmetric — and this is a
+#: deliberate, narrow exemption, not an oversight. The calibration store
+#: holds per-device measured k-tables that two different cards SHOULD
+#: disagree about, and the cold-start checklist RETAINs it by design (R8
+#: item6). It reaches the watchdog, never a prompt.
+STORE_SYMMETRY_OBSERVED = frozenset({"calibration_store"})
+
+
+def _load_surface(path: str) -> dict:
+    with open(path, encoding="utf-8") as handle:
+        surface = json.load(handle)
+    if not isinstance(surface, dict):
+        raise ValueError(f"{path}: surface did not parse to an object")
+    schema = surface.get("schema")
+    if schema != SURFACE_SCHEMA:
+        raise ValueError(f"{path}: unknown surface schema {schema!r} (expected {SURFACE_SCHEMA!r})")
+    for section in ("arm", "prompt_bytes", "environment", "machine_local_stores"):
+        if section not in surface:
+            raise ValueError(f"{path}: surface is missing the {section!r} section")
+    return surface
+
+
+def check_prompt_bytes(surfaces: dict[str, dict]) -> list[str]:
+    """Layer 3a — RENDERED PROMPT BYTES, the route argv cannot express."""
+    problems: list[str] = []
+    prompts = {arm: surfaces[arm]["prompt_bytes"] for arm in ARMS}
+
+    ids = sorted(set(prompts[ARMS[0]]) | set(prompts[ARMS[1]]))
+    if not ids:
+        return ["prompt-bytes: the surfaces carry no rendered prompt at all — nothing was compared"]
+
+    missing = sorted(PROMPT_SURFACES_MUST_DIFFER - set(ids))
+    if missing:
+        problems.append(
+            f"prompt-bytes: declared treatment surface(s) absent from the capture: {missing} — "
+            "the gate cannot see the treatment it is supposed to verify"
+        )
+
+    for surface_id in ids:
+        a, b = prompts[ARMS[0]].get(surface_id), prompts[ARMS[1]].get(surface_id)
+        if a is None or b is None:
+            side = ARMS[0] if a is None else ARMS[1]
+            problems.append(f"prompt-bytes {surface_id}: absent from the {side} surface")
+            continue
+        # The NEUTRAL render holds the treatment constant, so a difference
+        # here is machine-local or environmental contamination reaching the
+        # model — the exact route the row says the gate cannot see.
+        if a["neutral"] != b["neutral"]:
+            problems.append(
+                f"prompt-bytes {surface_id}: the NEUTRAL render differs "
+                f"({ARMS[0]}={a['neutral']['sha256'][:12]}… {a['neutral']['bytes']}B, "
+                f"{ARMS[1]}={b['neutral']['sha256'][:12]}… {b['neutral']['bytes']}B) — "
+                "with the treatment held identical, only machine-local state can do this"
+            )
+        if surface_id in PROMPT_SURFACES_MUST_DIFFER and a["arm"] == b["arm"]:
+            problems.append(
+                f"prompt-bytes {surface_id}: IDENTICAL across arms "
+                f"({a['arm']['sha256'][:12]}…) but this surface carries the declared "
+                "treatment and MUST differ — the arms are mis-wired, not symmetric"
+            )
+    return problems
+
+
+def check_environment(surfaces: dict[str, dict]) -> list[str]:
+    """Layer 3b — the ENVIRONMENT, compared name by name, fail-closed."""
+    problems: list[str] = []
+    envs = {arm: surfaces[arm]["environment"] for arm in ARMS}
+    for name in sorted(set(envs[ARMS[0]]) | set(envs[ARMS[1]])):
+        if name in ENVIRONMENT_ARM_LOCAL:
+            continue
+        a = envs[ARMS[0]].get(name)
+        b = envs[ARMS[1]].get(name)
+        if a != b:
+            problems.append(
+                f"environment {name}: {ARMS[0]}={a!r} {ARMS[1]}={b!r} — "
+                "not a declared arm-local variable"
+            )
+    return problems
+
+
+def check_machine_local_stores(surfaces: dict[str, dict]) -> list[str]:
+    """Layer 3c — the MACHINE-LOCAL STORES, by content digest."""
+    problems: list[str] = []
+    stores = {arm: surfaces[arm]["machine_local_stores"] for arm in ARMS}
+    classified = STORE_SYMMETRY_REQUIRED | STORE_SYMMETRY_OBSERVED
+    seen = set(stores[ARMS[0]]) | set(stores[ARMS[1]])
+    unclassified = sorted(seen - classified)
+    if unclassified:
+        problems.append(
+            f"machine-local stores: {unclassified} are captured but not classified as "
+            "required-symmetric or observed — classify them before launching"
+        )
+    absent = sorted(classified - seen)
+    if absent:
+        problems.append(
+            f"machine-local stores: declared store(s) {absent} missing from the capture — "
+            "an unmeasured store is not a symmetric one"
+        )
+    for store_id in sorted(STORE_SYMMETRY_REQUIRED & seen):
+        a = stores[ARMS[0]].get(store_id, {})
+        b = stores[ARMS[1]].get(store_id, {})
+        for arm, entry in ((ARMS[0], a), (ARMS[1], b)):
+            if entry.get("error"):
+                problems.append(f"machine-local store {store_id} [{arm}]: {entry['error']}")
+        if a.get("error") or b.get("error"):
+            continue
+        if a.get("content_sha256") != b.get("content_sha256"):
+            problems.append(
+                f"machine-local store {store_id}: content differs "
+                f"({ARMS[0]}={a.get('content_sha256', '<absent>')!s:.12}… "
+                f"{a.get('entry_count')} entries, "
+                f"{ARMS[1]}={b.get('content_sha256', '<absent>')!s:.12}… "
+                f"{b.get('entry_count')} entries) — this store reaches the prompt surface"
+            )
+    return problems
+
+
+def check_surfaces(with_surface: dict, without_surface: dict) -> list[str]:
+    """Every layer-3 violation, as printable rows. Empty = symmetric."""
+    surfaces = {ARMS[0]: with_surface, ARMS[1]: without_surface}
+    problems: list[str] = []
+    for arm in ARMS:
+        declared = surfaces[arm].get("arm")
+        if declared != arm:
+            problems.append(
+                f"surface: the {arm} slot carries a surface labelled {declared!r} — "
+                "the two captures were paired wrongly"
+            )
+    if problems:
+        return problems
+    problems += check_prompt_bytes(surfaces)
+    problems += check_environment(surfaces)
+    problems += check_machine_local_stores(surfaces)
+    return problems
+
+
+def surface_rows(with_surface: dict, without_surface: dict) -> list[str]:
+    """The layer-3 report, printed even when symmetric (as the launch packet
+    wants it SEEN, not inferred from silence)."""
+    surfaces = {ARMS[0]: with_surface, ARMS[1]: without_surface}
+    rows: list[str] = []
+    prompts = {arm: surfaces[arm]["prompt_bytes"] for arm in ARMS}
+    for surface_id in sorted(set(prompts[ARMS[0]]) | set(prompts[ARMS[1]])):
+        a = prompts[ARMS[0]].get(surface_id, {})
+        b = prompts[ARMS[1]].get(surface_id, {})
+        neutral = "SYMMETRIC" if a.get("neutral") == b.get("neutral") else "DIFF"
+        arm_state = "differs" if a.get("arm") != b.get("arm") else "identical"
+        rows.append(f"  neutral={neutral:9s} arm={arm_state:9s} {surface_id}")
+    stores = {arm: surfaces[arm]["machine_local_stores"] for arm in ARMS}
+    for store_id in sorted(set(stores[ARMS[0]]) | set(stores[ARMS[1]])):
+        a = stores[ARMS[0]].get(store_id, {})
+        b = stores[ARMS[1]].get(store_id, {})
+        policy = "REQUIRED " if store_id in STORE_SYMMETRY_REQUIRED else "observed "
+        state = "SYMMETRIC" if a.get("content_sha256") == b.get("content_sha256") else "DIFF"
+        rows.append(
+            f"  {policy}{state:9s} store {store_id}: "
+            f"{a.get('entry_count')} / {b.get('entry_count')} entries"
+        )
+    envs = {arm: surfaces[arm]["environment"] for arm in ARMS}
+    names = sorted(set(envs[ARMS[0]]) | set(envs[ARMS[1]]))
+    rows.append(
+        f"  environment: {len(names)} captured name(s), {len(ENVIRONMENT_ARM_LOCAL)} declared arm-local"
+    )
+    return rows
 
 
 def extract_resolved_config(text: str) -> dict:
@@ -268,12 +508,43 @@ def main() -> int:
     )
     parser.add_argument("--workspace-root", required=True)
     parser.add_argument("--band", required=True)
+    # REQUIRED, not optional (F-SCANG-4). An optional third layer is one the
+    # caller can forget, and a forgotten layer 3 is an argv-only gate still
+    # printing "arm symmetry holds" — the exact claim the row says section 10
+    # cannot honestly make.
+    parser.add_argument(
+        "--with-surface",
+        required=True,
+        help="WITH-arm surface artifact (campaign_arm_surface.py --out)",
+    )
+    parser.add_argument(
+        "--without-surface",
+        required=True,
+        help="WITHOUT-arm surface artifact (campaign_arm_surface.py --out)",
+    )
+    parser.add_argument(
+        "--surface-provenance",
+        default="unstated",
+        help=(
+            "where the sibling surface came from: 'published' (another pod wrote it "
+            "into the shared campaign root) or 'local' (captured on this host). "
+            "Reported verbatim — a local-only comparison is weaker evidence and the "
+            "report must say so rather than let the reader assume cross-pod coverage."
+        ),
+    )
     args = parser.parse_args()
 
     with open(args.with_output, encoding="utf-8") as fh:
         with_text = fh.read()
     with open(args.without_output, encoding="utf-8") as fh:
         without_text = fh.read()
+
+    try:
+        with_surface = _load_surface(args.with_surface)
+        without_surface = _load_surface(args.without_surface)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"[arm-symmetry] cannot read an arm surface: {exc}", file=sys.stderr)
+        return 2
 
     try:
         problems = check(
@@ -283,19 +554,32 @@ def main() -> int:
             band=args.band,
         )
         rows = spotlight_rows(with_text, without_text)
-    except (ValueError, json.JSONDecodeError) as exc:
+        surface_problems = check_surfaces(with_surface, without_surface)
+        rows_surface = surface_rows(with_surface, without_surface)
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
         print(f"[arm-symmetry] cannot parse a dry-run capture: {exc}", file=sys.stderr)
         return 2
 
+    problems = problems + surface_problems
+
     print("[arm-symmetry] #255 population-knob spotlight (child argv):")
     for row in rows:
+        print(row)
+    print(
+        "[arm-symmetry] F-SCANG-4 surface layer "
+        f"(sibling surface provenance: {args.surface_provenance}):"
+    )
+    for row in rows_surface:
         print(row)
     if problems:
         print(f"[arm-symmetry] FAIL — {len(problems)} violation(s):", file=sys.stderr)
         for p in problems:
             print(f"  - {p}", file=sys.stderr)
         return 1
-    print("[arm-symmetry] PASS — arms differ only in declared arm policy + derived naming")
+    print(
+        "[arm-symmetry] PASS — arms differ only in declared arm policy + derived naming, "
+        "and their rendered prompt bytes, environment and machine-local stores agree"
+    )
     return 0
 
 

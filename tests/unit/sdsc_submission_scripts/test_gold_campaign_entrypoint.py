@@ -6,9 +6,9 @@ Each test names the defect ONLY it can catch:
   the three executables use the standard source-safe entry guard, so
   sourcing one for its functions can never launch a campaign (the
   2026-07-31 gate-runner incident class).
-* ``TestFrozenThirteenWitness`` — the effective-resolution witness: the
-  dry-run's fully-resolved per-band run_chain argv carries ALL THIRTEEN
-  frozen values TYPED (decisions D-BUD-2/6/7/8, D-BUD-11/13, P6-A, P6-B;
+* ``TestFrozenNineteenWitness`` — the effective-resolution witness: the
+  dry-run's fully-resolved per-band run_chain argv carries ALL NINETEEN
+  frozen values TYPED (decisions D-BUD-2/3/4/6/7/8, D-BUD-11/13, P6-A, P6-B;
   the D-BUD-6 row split ``max_epochs=1`` into ``trial_max_epochs=2`` /
   ``formal_max_epochs=1`` when the per-mode transport landed, 2026-08-26).
   The expected pairs are HARDCODED here — asserting values read back from
@@ -89,12 +89,15 @@ CHAIN_COMMON = SDSC / "_chain_common.sh"
 RUN_CHAIN = SDSC / "run_chain.sh"
 STATE_HELPER = SDSC / "gold_campaign_state.py"
 
-#: The canonical thirteen (decisions D-BUD-2 / D-BUD-6 / D-BUD-7 / D-BUD-8 /
-#: D-BUD-11/13 / P6-A / P6-B), HARDCODED on purpose — see module docstring.
-#: D-BUD-6 is the PAIR ``trial_max_epochs=2 / formal_max_epochs=1`` (the
-#: frozen trial/formal split; the retired mode-agnostic ``--max_epochs 1``
-#: stand-in is now a RESERVED passthrough, not an emitted value).
-CANONICAL_THIRTEEN = {
+#: The canonical nineteen (decisions D-BUD-2 / D-BUD-3 / D-BUD-4 / D-BUD-6 /
+#: D-BUD-7 / D-BUD-8 / D-BUD-11/13 / P6-A / P6-B), HARDCODED on purpose — see
+#: module docstring. D-BUD-6 is the PAIR ``trial_max_epochs=2 /
+#: formal_max_epochs=1`` (the frozen trial/formal split; the retired
+#: mode-agnostic ``--max_epochs 1`` stand-in is now a RESERVED passthrough,
+#: not an emitted value). The last six are F-LAUNCH-1 / adversarial F-2: they
+#: rode ``_chain_common.sh`` defaults that AGREE with the frozen values, so
+#: the gap was invisible to every check of effective values.
+CANONICAL_NINETEEN = {
     "--num_iterations": "20",
     "--trial_portion": "0.1",
     "--train_portion": "0.1",
@@ -108,10 +111,29 @@ CANONICAL_THIRTEEN = {
     "--formal_time_budget_minutes": "120",
     "--skip_formal_min_delta": "-2.0",
     "--bypass_formal_time_budget_min_delta": "0.5",
+    # D-BUD-3 — the [trial, trial, formal] round structure.
+    "--max_rounds": "3",
+    # D-BUD-4 — the attempt budgets ("gold_blind: exactly the same values").
+    "--attempts_per_round": "3",
+    "--attempts_per_formal_round": "5",
+    "--max_fail_rounds": "3",
+    "--max_proposal_attempts": "3",
+    "--max_impl_attempts": "3",
+}
+
+#: The six the F-LAUNCH-1 / F-2 commit added, named separately so a test can
+#: assert THEM rather than the whole table. Hardcoded for the same reason.
+BUDGETS_BOUND_BY_F_LAUNCH_1 = {
+    "--max_rounds": "3",
+    "--attempts_per_round": "3",
+    "--attempts_per_formal_round": "5",
+    "--max_fail_rounds": "3",
+    "--max_proposal_attempts": "3",
+    "--max_impl_attempts": "3",
 }
 
 #: The campaign's frozen LLM routing authority (D-LLM-1). HARDCODED here for
-#: the same reason the thirteen are: reading the path back out of the lib
+#: the same reason the nineteen are: reading the path back out of the lib
 #: would compare the declaration to itself.
 FROZEN_LLM_CONFIG_RELPATH = "llm_configs/openai_tiered_pro.json"
 FROZEN_LLM_CONFIG = REPO_ROOT / FROZEN_LLM_CONFIG_RELPATH
@@ -244,15 +266,15 @@ class TestSourceSafety:
         assert "source it" in proc.stderr
 
 
-class TestFrozenThirteenWitness:
-    def test_every_band_argv_carries_all_thirteen_typed(self, campaign_root):
+class TestFrozenNineteenWitness:
+    def test_every_band_argv_carries_all_nineteen_typed(self, campaign_root):
         proc = _stage1_dry(campaign_root)
         assert proc.returncode == 0, proc.stderr + proc.stdout
         argvs = _band_argvs(proc.stdout)
         assert sorted(argvs) == sorted(EXPECTED_GPU_MAP), proc.stdout
         for band, argv in argvs.items():
             pairs = _pairs(argv)
-            for flag, value in CANONICAL_THIRTEEN.items():
+            for flag, value in CANONICAL_NINETEEN.items():
                 assert pairs.get(flag) == value, (
                     f"band {band}: frozen value {flag} {value} missing or wrong "
                     f"(got {pairs.get(flag)!r})"
@@ -398,7 +420,7 @@ class TestFrozenTableMutation:
         assert "trial_time_budget_minutes" in proc.stderr
         assert "FROZEN TABLE MISSING VALUE" in proc.stderr
 
-    def test_lib_table_matches_the_canonical_thirteen_exactly(self):
+    def test_lib_table_matches_the_canonical_nineteen_exactly(self):
         """A silently EDITED value (30 -> 20) keeps the dry-run green, so
         the table itself is pinned against the hardcoded canon."""
         proc = _bash(
@@ -407,7 +429,7 @@ class TestFrozenTableMutation:
         )
         assert proc.returncode == 0, proc.stderr
         rows = {line.split("=")[0]: line.split("=", 1)[1] for line in proc.stdout.split()}
-        expected = {k.lstrip("-"): v for k, v in CANONICAL_THIRTEEN.items()}
+        expected = {k.lstrip("-"): v for k, v in CANONICAL_NINETEEN.items()}
         assert rows == expected
 
 
@@ -851,7 +873,7 @@ class TestStage2DryRun:
                 "--trial_max_epochs",
                 "--formal_max_epochs",
             ):
-                assert pairs[flag] == CANONICAL_THIRTEEN[flag], (unit, flag)
+                assert pairs[flag] == CANONICAL_NINETEEN[flag], (unit, flag)
             assert "--max_epochs" not in argv, unit
 
     def test_completed_unit_is_skipped(self, campaign_root, registry):
@@ -2140,7 +2162,7 @@ class TestPersistedFormalRecordShape:
 # ---------------------------------------------------------------------------
 
 #: The frozen deltas, HARDCODED. Reading them back from the lib would compare
-#: the table to itself and pass for any table (same rule as the thirteen).
+#: the table to itself and pass for any table (same rule as the nineteen).
 FROZEN_SKIP_DELTA = -2.0
 FROZEN_BYPASS_DELTA = 0.5
 GATE_SWITCH = "--enable_chain_incumbent_formal_gates"
@@ -2362,3 +2384,180 @@ class TestIncumbentFormalGateSwitch:
         proc = _stage1_dry(campaign_root, GATE_SWITCH)
         assert proc.returncode != 0
         assert GATE_SWITCH in proc.stderr
+
+
+def _chain_flags(band_argv: list[str]) -> list[str]:
+    """The run_chain.sh flags of a dry-run band line.
+
+    The printed line is ``CUDA_VISIBLE_DEVICES=N bash .../run_chain.sh
+    <flags...>``, so the prefix is dropped by locating the script token —
+    the same shape ``campaign_arm_symmetry.extract_child_argv`` uses.
+    """
+    for i, token in enumerate(band_argv):
+        if token.endswith("run_chain.sh"):
+            return band_argv[i + 1 :]
+    raise AssertionError(f"no run_chain.sh token in {band_argv[:4]}")
+
+
+class TestAnAgreeingDefaultIsNotABinding:
+    """F-LAUNCH-1 (seventh of the twelve) + adversarial F-2 — the six FROZEN
+    ``EXPERIMENT_FIXED`` workflow budgets that rode ``_chain_common.sh``
+    defaults.
+
+    Why this class exists and why it is not just another row in
+    ``CANONICAL_NINETEEN``: the chain defaults EQUAL the frozen values
+    (``MAX_ROUNDS=3``, ``ATTEMPTS_PER_ROUND=3``, …), so the decision row's
+    own recorded effective value reads ``3 — matches frozen`` and EVERY
+    check of an effective value comes back correct. The gap was invisible
+    to verification, which is exactly why F-LAUNCH-1 demanded TYPING rather
+    than a value check. These tests therefore assert the SOURCE of the
+    value, not the value.
+    """
+
+    def test_every_band_argv_types_all_six_budgets(self, campaign_root):
+        """The typing itself. Fails by naming whichever budget went back to
+        riding a default."""
+        proc = _stage1_dry(campaign_root)
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        argvs = _band_argvs(proc.stdout)
+        assert sorted(argvs) == sorted(EXPECTED_GPU_MAP), proc.stdout
+        for band, argv in argvs.items():
+            pairs = _pairs(argv)
+            for flag, value in BUDGETS_BOUND_BY_F_LAUNCH_1.items():
+                assert pairs.get(flag) == value, (
+                    f"band {band}: {flag} is not typed at the campaign boundary "
+                    f"(got {pairs.get(flag)!r}) — it rides a _chain_common.sh default"
+                )
+
+    def test_a_changed_chain_default_cannot_move_the_campaigns_values(
+        self, tmp_path, campaign_root
+    ):
+        """THE defect, driven end to end through both production layers.
+
+        Stage 1: the real entrypoint builds a band's run_chain argv.
+        Stage 2: that argv is parsed by a COPY of ``_chain_common.sh`` whose
+        defaults have been edited to 99 — someone changing a default in a
+        file that knows nothing about this campaign.
+
+        The resolved child argv must still carry the frozen values. Before
+        the six rows were typed it carried 99, and nothing on any surface
+        said so: ``gold_print_frozen_table`` prints only the table, and the
+        launch manifest records only what the entrypoint bound.
+        """
+        proc = _stage1_dry(campaign_root)
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        flags = _chain_flags(_band_argvs(proc.stdout)["0-3"])
+
+        mutated = tmp_path / "_chain_common.sh"
+        text = CHAIN_COMMON.read_text()
+        for default, replacement in (
+            ("\nMAX_ROUNDS=3 ", "\nMAX_ROUNDS=99 "),
+            ("\nATTEMPTS_PER_ROUND=3 ", "\nATTEMPTS_PER_ROUND=99 "),
+            ("\nATTEMPTS_PER_FORMAL_ROUND=5 ", "\nATTEMPTS_PER_FORMAL_ROUND=99 "),
+            ("\nMAX_FAIL_ROUNDS=3 ", "\nMAX_FAIL_ROUNDS=99 "),
+            ("\nMAX_PROPOSAL_ATTEMPTS=3 ", "\nMAX_PROPOSAL_ATTEMPTS=99 "),
+            ("\nMAX_IMPL_ATTEMPTS=3 ", "\nMAX_IMPL_ATTEMPTS=99 "),
+        ):
+            assert text.count(default) == 1, f"default spelling changed: {default!r}"
+            text = text.replace(default, replacement)
+        mutated.write_text(text)
+
+        quoted = " ".join(shlex.quote(f) for f in flags)
+        built = _bash(
+            "-c",
+            f"source '{mutated}'\nparse_chain_args {quoted}\n"
+            'build_app_args 1\nprintf "%s\\n" "${APP_ARGS[@]}"\n',
+        )
+        assert built.returncode == 0, built.stderr
+        child = _pairs(built.stdout.split("\n"))
+        for flag, value in BUDGETS_BOUND_BY_F_LAUNCH_1.items():
+            assert child.get(flag) == value, (
+                f"{flag} resolved to {child.get(flag)!r} from the edited chain "
+                "default — the campaign value is not bound, it merely agreed"
+            )
+
+    def test_the_same_probe_shows_99_when_the_rows_are_removed(self, tmp_path, campaign_root):
+        """Discrimination for the test above: with the six rows dropped from
+        a COPY of the table — the pre-fix state — the very same edited
+        default DOES reach the child argv. Without this, a probe that
+        silently stopped exercising the mutated default would still be
+        green."""
+        tree = tmp_path / "sdsc_submission_scripts"
+        tree.mkdir()
+        # A faithful synthetic checkout: the band script sources the lib,
+        # the lib's capability probe greps _chain_common.sh and
+        # run_one_iteration.py, and the boundary binds --llm_config from
+        # GOLD_PROJECT_DIR. A tree missing any of them refuses the launch
+        # for the wrong reason.
+        for src in (STAGE1_BAND, CHAIN_COMMON, RUN_CHAIN, SDSC / "run_one_iteration.py"):
+            shutil.copy2(src, tree / src.name)
+        _install_frozen_llm_config(tmp_path)
+        lib_text = LIB.read_text()
+        for key, value in (
+            ("max_rounds", "3"),
+            ("attempts_per_round", "3"),
+            ("attempts_per_formal_round", "5"),
+            ("max_fail_rounds", "3"),
+            ("max_proposal_attempts", "3"),
+            ("max_impl_attempts", "3"),
+        ):
+            row = f'    "{key}={value}"\n'
+            assert lib_text.count(row) == 1, row
+            lib_text = lib_text.replace(row, "")
+        # The builder loop must stop asking for them too, or the dry-run
+        # fails NAMING the key instead of reproducing the pre-fix argv.
+        loop = (
+            "        max_rounds attempts_per_round attempts_per_formal_round \\\n"
+            "        max_fail_rounds max_proposal_attempts max_impl_attempts; do"
+        )
+        assert lib_text.count(loop) == 1
+        lib_text = lib_text.replace(loop, "        ; do")
+        (tree / LIB.name).write_text(lib_text)
+
+        proc = _bash(
+            str(tree / STAGE1_BAND.name),
+            "--band",
+            "0-3",
+            "--workspace_root",
+            str(campaign_root["root"]),
+            "--gold_advice_file",
+            str(campaign_root["advice"]),
+            "--dry-run",
+        )
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        flags = _chain_flags(_band_argvs(proc.stdout)["0-3"])
+        assert "--max_rounds" not in flags, "the pre-fix table must type nothing here"
+
+        mutated = tmp_path / "_chain_common_pre_fix.sh"
+        text = CHAIN_COMMON.read_text().replace("\nMAX_ROUNDS=3 ", "\nMAX_ROUNDS=99 ")
+        mutated.write_text(text)
+        quoted = " ".join(shlex.quote(f) for f in flags)
+        built = _bash(
+            "-c",
+            f"source '{mutated}'\nparse_chain_args {quoted}\n"
+            'build_app_args 1\nprintf "%s\\n" "${APP_ARGS[@]}"\n',
+        )
+        assert built.returncode == 0, built.stderr
+        assert _pairs(built.stdout.split("\n")).get("--max_rounds") == "99"
+
+    @pytest.mark.parametrize("flag", sorted(BUDGETS_BOUND_BY_F_LAUNCH_1))
+    def test_each_budget_is_refused_as_passthrough(self, flag):
+        """Typing alone is not a binding either: parse_chain_args is
+        last-wins and passthrough tokens are appended AFTER the frozen args,
+        so an unreserved flag would override the value the frozen table just
+        printed. Fails by name for whichever budget lost its reservation."""
+        proc = _bash(
+            "-c",
+            f"source '{LIB}'; gold_refuse_reserved_passthrough {flag} && echo ALLOWED",
+        )
+        assert proc.returncode != 0, f"{flag} is accepted as passthrough"
+        assert "ALLOWED" not in proc.stdout
+        assert flag in proc.stderr
+
+    def test_the_frozen_table_prints_all_six(self, campaign_root):
+        """The operator-facing surface. A value bound but not printed is a
+        launch decision nobody can read off the dry-run."""
+        proc = _stage1_dry(campaign_root)
+        assert proc.returncode == 0, proc.stderr
+        for flag, value in BUDGETS_BOUND_BY_F_LAUNCH_1.items():
+            assert f"frozen {flag.lstrip('-')}={value}" in proc.stdout, flag

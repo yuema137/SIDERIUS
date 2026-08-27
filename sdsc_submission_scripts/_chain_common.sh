@@ -184,6 +184,40 @@ MAX_FAILED_ITERATIONS=3
 # cleaned formal winner leaves Stage-3 nothing to pool
 # (docs/campaign/stage_artifact_contract.md, retention clause).
 CLEANUP_DENOISED=1
+# --- F-SCANI-2 ENTRY CONDITION (release blocker, 2026-08-26) ---------------
+# "Initialise every consumed shell variable" is an ENTRY CONDITION of this
+# reused library (D-ARCH-2 reuse map: _chain_common.sh is REUSED_AS_IS by
+# the canonical campaign entrypoint), NOT a cleanup step performed by each
+# caller. Every variable build_app_args reads is assigned HERE, at source
+# time, BEFORE parse_chain_args runs — so the only route into the child
+# argv is a flag.
+#
+# These five were the exception. They were read as "${VAR:-}" and assigned
+# NOWHERE, so an exported value in a .bashrc or a tmux session that once
+# ran a validation posture reached APP_ARGS directly. That is not a
+# cosmetic hole: --validation_fixed_candidate_plan BYPASSES THE PROPOSER,
+# substituting one fixed candidate plan for the whole campaign, and
+# launch_prior_baseline_experiment.sh REFUSES that flag by name (:150-154)
+# — the environment route went around a refusal that was already written.
+#
+# The `:-` form is retained at the read sites on purpose: it is what makes
+# `set -u` adoption safe later, and it must never again be the reason a
+# missing default goes unnoticed. The census in
+# tests/unit/sdsc_submission_scripts/test_fscani2_chain_entry_condition.py
+# derives every name build_app_args reads and fails when one of them is
+# not assigned in this block.
+VALIDATION_FIXED_CANDIDATE_PLAN=""
+VALIDATION_MAX_PORTION=""
+VALIDATION_MAX_TRAIN_SAMPLES=""
+VALIDATION_MAX_SAMPLES=""
+VALIDATION_MAX_PHASE_SECONDS=""
+# The DECLARED environment inputs of this library: the complete list of
+# names it may legitimately read from the environment. CHAIN_STOP_FILE is
+# a documented operator override (docs/running_chain_test.md, the stop-file
+# table row) with its own regression test, so it is declared here rather
+# than initialised away. Anything NOT on this list and NOT assigned above
+# is an injection route, and the census names it.
+CHAIN_DECLARED_ENV_INPUTS=(CHAIN_STOP_FILE)
 
 # --- Unified-orchestrator (run_chain.sh) defaults ---
 # MODE picks the execution backend: lilab (foreground subprocess) or

@@ -147,6 +147,11 @@ while [[ $# -gt 0 ]]; do
         --ml_lit_review_enabled|--no-ml_lit_review_enabled|--experiment_arm|--baseline_isolation)
             echo "ERROR: $1 is decided by --arm and cannot be passed through" >&2
             exit 1 ;;
+        # F-SCANI-2: this refusal closes the ARGV route only. The ENVIRONMENT
+        # route (an exported VALIDATION_FIXED_CANDIDATE_PLAN reaching
+        # _chain_common.sh's build_app_args) is closed by that library's entry
+        # condition, which initialises every variable it consumes before
+        # parsing. Do not weaken either half: the flag bypasses the proposer.
         --validation_fixed_candidate_plan)
             echo "ERROR: $1 is decided by --fixed-candidate and cannot be passed through" >&2
             echo "  (one spelling per mode on this launcher: --fixed-candidate PLAN.json" >&2

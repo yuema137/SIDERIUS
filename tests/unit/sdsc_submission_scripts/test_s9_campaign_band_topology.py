@@ -53,6 +53,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.sdsc_submission_scripts.test_fscang4_arm_surface_symmetry import (
+    make_surface as _make_surface,
+)
+
 _REPO = Path(__file__).resolve().parents[3]
 _SDSC = _REPO / "sdsc_submission_scripts"
 _LAUNCHER = _SDSC / "launch_prior_baseline_experiment.sh"
@@ -489,10 +493,24 @@ def _capture(arm: str, root: str = "/persist/camp", band: str = "0-3", **argv_ov
 
 
 def _run_symmetry(tmp_path: Path, with_text: str, without_text: str) -> subprocess.CompletedProcess:
+    """Drive the checker over the argv captures.
+
+    F-SCANG-4 made the SURFACE layer a required argument, so this harness
+    supplies a symmetric pair of surfaces: these cases are about the ARGV
+    layer, and a surface asymmetry here would confuse which layer turned a
+    case red. ``make_surface`` is imported rather than re-written so the
+    artifact shape has ONE definition — the surface layer's own tests live
+    in ``test_fscang4_arm_surface_symmetry.py``.
+    """
     w = tmp_path / "with.out"
     wo = tmp_path / "without.out"
     w.write_text(with_text)
     wo.write_text(without_text)
+    surfaces = {}
+    for arm in ("with-prior-art", "without-prior-art"):
+        path = tmp_path / f"surface_{arm}.json"
+        path.write_text(json.dumps(_make_surface(arm)))
+        surfaces[arm] = str(path)
     return subprocess.run(
         [
             sys.executable,
@@ -505,6 +523,10 @@ def _run_symmetry(tmp_path: Path, with_text: str, without_text: str) -> subproce
             "/persist/camp",
             "--band",
             "0-3",
+            "--with-surface",
+            surfaces["with-prior-art"],
+            "--without-surface",
+            surfaces["without-prior-art"],
         ],
         capture_output=True,
         text=True,

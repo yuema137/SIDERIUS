@@ -38,7 +38,7 @@
 #       --gold_advice_file ADVICE.json [--dry-run] [...]
 #
 # Frozen bindings (see _gold_campaign_lib.sh for the table + decisions):
-#   * the thirteen chain-boundary values, typed, never defaulted;
+#   * the nineteen chain-boundary values, typed, never defaulted;
 #   * --llm_config llm_configs/openai_tiered_pro.json, resolved absolute and
 #     emitted on EVERY stage-1 band and stage-2 unit argv (D-LLM-1); an
 #     unavailable file REFUSES the launch, because omitting the flag does
