@@ -108,6 +108,51 @@ influence nothing.
 If you find yourself wishing a secondary influenced selection, what you actually
 want is a different primary metric.
 
+## Step 5b — Declare observables (optional)
+
+A secondary metric is scored from your **deliverable**, after the run has
+produced one. An **observable** watches the training itself. Declare one when
+the question is "what was happening while this model trained", not "how good is
+the result".
+
+There are two kinds, and the difference is a **type**, not a label:
+
+| section | base class | runs | produces |
+|---|---|---|---|
+| `dynamic_observables:` | `DynamicObservable` | during training, once per epoch, on the validation pass that already runs | one value per epoch |
+| `static_observables:` | `StaticObservable` | once, after the final optimizer step | one value |
+
+```python
+from execute_tools.observables import DynamicObservable
+
+class ValidationAccuracy(DynamicObservable):
+    def reset(self):  self.hits = self.seen = 0
+    def update(self, output, target):
+        self.hits += int((output.argmax(1) == target).sum()); self.seen += target.numel()
+    def value(self): return self.hits / self.seen
+```
+
+```yaml
+dynamic_observables:
+  - name: validation_accuracy
+    implementation: {file: ./plugins/_my_observables.py, symbol: ValidationAccuracy}
+```
+
+Three things worth knowing before you write one:
+
+- **The section must match the type.** Listing a `StaticObservable` under
+  `dynamic_observables:` is refused at composition — the section says *when* the
+  arithmetic runs, and the class is what actually decides.
+- **`update` must not mutate anything.** It runs inside the transactional
+  validation pass, which certifies that training state is left exactly as found.
+- **Failure is an absence.** An observable that raises or returns a non-finite
+  value is dropped and the training attempt still succeeds. Declaring one is
+  never riskier than not declaring one.
+
+Observables are shown in the run report and are hidden from the agents. Like
+secondaries, they influence nothing — and unlike a secondary, they may not be
+turned into a budget or selection signal at all.
+
 ## Step 6 — Declare health behaviour
 
 Start from the generic checks: `sample_dispersion_floor` for continuous outputs,

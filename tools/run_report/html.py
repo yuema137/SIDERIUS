@@ -228,6 +228,46 @@ def _secondary_table(attempt: AttemptView) -> str:
     )
 
 
+def _observable_table(attempt: AttemptView) -> str:
+    """`R-OBS-1` level 5 — the declared observables this attempt produced.
+
+    Renders NOTHING when the run declared none, which keeps every existing
+    report byte-identical. The two acquisitions are one table with an
+    explicit column rather than two tables: a reader's question is "what did
+    this attempt observe", and the answer is more useful undivided — while
+    the column keeps WHEN each value was taken on the page, because a
+    per-epoch series and a single post-training reading are not the same kind
+    of evidence.
+    """
+    objective = attempt.objective
+    dynamic = {} if objective is None else objective.observations
+    if not dynamic and not attempt.static_observations:
+        return ""
+    rows = "".join(
+        "<tr>"
+        f"<td><code>{_esc(name)}</code></td>"
+        "<td>dynamic</td>"
+        f"<td>{len(series)} epoch(s)</td>"
+        f'<td class="num">{_num(series[-1]) if series else ""}</td>'
+        "</tr>"
+        for name, series in sorted(dynamic.items())
+    ) + "".join(
+        "<tr>"
+        f"<td><code>{_esc(name)}</code></td>"
+        "<td>static</td>"
+        "<td>after training</td>"
+        f'<td class="num">{_num(value)}</td>'
+        "</tr>"
+        for name, value in sorted(attempt.static_observations.items())
+    )
+    return (
+        '<h3>Observables <span class="note">— task-declared and observational; '
+        "never ranked, never a budget signal</span></h3>"
+        "<table><tr><th>name</th><th>acquisition</th><th>cadence</th>"
+        f"<th>latest value</th></tr>{rows}</table>"
+    )
+
+
 def _run_section(run: RunView, figures: list[str]) -> str:
     metric_line = (
         f'<p class="note">Primary metric: <code>{_esc(run.metric.metric_id)}</code> — '
@@ -279,6 +319,7 @@ def _run_section(run: RunView, figures: list[str]) -> str:
     details = "".join(
         f"<h3>Attempt <code>{_esc(a.exp_id)}</code></h3>"
         f"{_objective_summary(a)}{_health_table(a)}{_secondary_table(a)}"
+        f"{_observable_table(a)}"
         for a in run.attempts
     )
     return (

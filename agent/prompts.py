@@ -932,6 +932,16 @@ _PLANNER_HIDDEN_RECORD_KEYS = frozenset(
         "secondary_metric_results",
         "secondary_metric_refusals",
         "secondary_metric_errors",
+        # `R-OBS-1` — declared STATIC observations, for the same reason as the
+        # secondaries above and one more: an observable is DIAGNOSTIC by
+        # construction (`D-BUD-16` forbids it becoming a budget or selection
+        # mechanism), so putting one in front of the planner is precisely the
+        # vote it must never get. Adding the key HERE is what keeps the
+        # planner's rendered bytes unchanged for a run that declares
+        # observables — a non-declaring run writes no key at all, so its
+        # prompt is byte-identical either way. Whether the planner should ever
+        # see observables is a separate decision with its own Gate.
+        "static_observations",
     }
 )
 

@@ -109,6 +109,8 @@ _MANIFEST_KEYS = frozenset(
         "model_plugins",
         "loss_plugins",
         "objective",
+        "dynamic_observables",
+        "static_observables",
     }
 )
 
@@ -278,6 +280,24 @@ class RunTaskComposition:
     it did before P2b, and so this carrier's existing nine fields keep their
     positions. Secondaries are OBSERVATIONAL: nothing in this tuple may ever
     become an operand of an ordering expression.
+    """
+
+    observables: Any = None
+    """The run's DECLARED observable metrics, or ``None``.
+
+    `R-OBS-1`. A ``RunObservables`` — the observables module's own validated
+    carrier — holding the dynamic and static families in manifest order.
+    Resolved HERE so a broken declaration fails the run at startup rather
+    than mid-training, and so its plugin digests reach the semantic
+    fingerprint; EXECUTED in the training child, which re-composes the same
+    declaration from the transported manifest through this same authority.
+
+    ``None`` is the un-declared state. Typed ``Any`` for the same reason
+    ``deliverable_naming`` is: this carrier holds what another module's
+    contract produced and never becomes a second authority for it.
+
+    Observables are OBSERVATIONAL: nothing reachable through this field may
+    ever become an operand of an ordering expression (`D-BUD-16`).
     """
 
     def __post_init__(self) -> None:
@@ -1087,6 +1107,156 @@ def _compose_secondary_metrics(
     return tuple(metrics), declarations, plugins, declaration_paths
 
 
+def _compose_observables(raw: dict[str, Any], manifest_dir: str):
+    """The OPTIONAL ``dynamic_observables:`` / ``static_observables:`` lists.
+
+    `R-OBS-1` levels 1 and 2. Each entry is ``{name, implementation}``, where
+    ``implementation`` is the SAME ``{file|module, symbol}`` envelope every
+    other family uses — so an out-of-tree observable is loaded by path, its
+    content digest joins the semantic fingerprint, and a fourth task needs
+    zero framework edits.
+
+    **The section a task writes an implementation under is CHECKED against
+    the implementation's TYPE.** A :class:`~execute_tools.observables.
+    StaticObservable` listed under ``dynamic_observables:`` is refused. This
+    is what makes the dynamic/static distinction a TYPE rather than a
+    convention: the framework never reads an acquisition string, it asks
+    :func:`~execute_tools.observables.acquisition_of` what the object IS, and
+    refuses when that disagrees with where the task put it. A declaration
+    cannot lie about when its arithmetic runs.
+
+    An absent section and an empty list are the same state — a task with no
+    observables of that acquisition — and compose byte-identically to a
+    manifest written before this family existed.
+
+    Returns ``(RunObservables, declarations, plugins, declaration_names)``,
+    where ``declarations`` is the fingerprint payload in manifest order
+    (manifest order is SEMANTIC, so nothing here sorts).
+
+    Raises:
+        TaskCompositionError: a section is not a list, an entry is not a
+            mapping, an entry declares an unknown key, a name is missing,
+            empty, or repeated across BOTH sections, an implementation cannot
+            be loaded or constructed, or an implementation's type disagrees
+            with the section that declared it.
+    """
+    from execute_tools.observables import (
+        DeclaredDynamicObservable,
+        DeclaredStaticObservable,
+        DynamicObservable,
+        ObservableError,
+        RunObservables,
+        StaticObservable,
+        acquisition_of,
+    )
+
+    # The keys ONE observable entry may declare. Refused by name, like every
+    # other section: a misspelled ``implementaton:`` would otherwise leave the
+    # entry with no implementation and the composition would report a missing
+    # key rather than the typo that caused it.
+    #
+    # Deliberately a LOCAL rather than a module constant. This module is
+    # imported by script-style children, and `test_step12_pr12d_d0_baselines`
+    # budgets its module-level statements at 9 precisely to stop import-time
+    # execution accreting there. This resolver is the only consumer, so the
+    # declaration belongs inside it — that removes the module-level execution
+    # rather than merely renumbering it.
+    entry_keys = frozenset({"name", "implementation"})
+
+    # `Any` for the DECLARED-wrapper class, not `type`: the two wrappers are
+    # constructed with keyword arguments below, and a bare `type` carries no
+    # constructor signature for a checker to verify against.
+    expected: dict[str, tuple[type, Any, str]] = {
+        "dynamic_observables": (DynamicObservable, DeclaredDynamicObservable, "dynamic"),
+        "static_observables": (StaticObservable, DeclaredStaticObservable, "static"),
+    }
+    resolved: dict[str, list[Any]] = {"dynamic_observables": [], "static_observables": []}
+    declarations: list[dict[str, Any]] = []
+    plugins: list[ResolvedPluginRef] = []
+    # Names are the keys every downstream carrier joins on — the per-epoch
+    # series in `TrainingHistory.observations`, the record's static mapping,
+    # the report's rows. They must be unique across BOTH sections, not merely
+    # within one: a dynamic and a static observable sharing a name would make
+    # "which one is this" unanswerable at exactly the sites that display them.
+    seen: dict[str, str] = {}
+
+    for section_key, (base, declared_cls, acquisition) in expected.items():
+        section = raw.get(section_key)
+        if section is None:
+            continue
+        if not isinstance(section, list):
+            raise TaskCompositionError(
+                f"section {section_key!r} must be a LIST of {{name, implementation}} "
+                f"entries; got {type(section).__name__}. Order is semantic, which a "
+                "mapping cannot express."
+            )
+        for index, entry in enumerate(section):
+            where = f"{section_key}[{index}]"
+            if not isinstance(entry, dict):
+                raise TaskCompositionError(
+                    f"{where} must be a mapping declaring 'name' and "
+                    f"'implementation'; got {type(entry).__name__}."
+                )
+            _refuse_unknown_section_keys(entry, entry_keys, where)
+            name = _require(entry, "name", where)
+            implementation = entry.get("implementation")
+            if not isinstance(implementation, dict):
+                raise TaskCompositionError(
+                    f"{where} requires an 'implementation' mapping naming the "
+                    f"{base.__name__} to instantiate; got {implementation!r}."
+                )
+            if name in seen:
+                raise TaskCompositionError(
+                    f"{where} declares observable name {name!r}, already declared by "
+                    f"{seen[name]}. Observable names are the keys every downstream "
+                    "carrier joins on — the per-epoch series, the record's static "
+                    "mapping and the report's rows — so a duplicate would make "
+                    "'which one is this' unanswerable, across the two sections as "
+                    "much as within one."
+                )
+            factory, plugin_ref = _load_symbol(
+                implementation, manifest_dir, f"{where}.implementation"
+            )
+            try:
+                instance = factory()
+            except Exception as exc:
+                raise TaskCompositionError(
+                    f"{where}.implementation could not be instantiated: "
+                    f"{type(exc).__name__}: {exc}. An observable implementation is "
+                    "constructed with no arguments — its identity comes from the "
+                    "declaration's 'name', not from its constructor."
+                ) from exc
+            try:
+                actual = acquisition_of(instance)
+            except ObservableError as exc:
+                raise TaskCompositionError(
+                    f"{where}.implementation resolved to "
+                    f"{type(instance).__name__}, which is not a usable observable: "
+                    f"{exc}"
+                ) from exc
+            if actual != acquisition:
+                raise TaskCompositionError(
+                    f"{where} declares observable {name!r} under "
+                    f"{section_key!r}, but {type(instance).__name__} is a "
+                    f"{actual.upper()} observable. The section says WHEN the "
+                    "arithmetic runs — during training, or once from the trained "
+                    "model afterwards — and the implementation's type is what "
+                    "actually decides that. A declaration may not disagree with "
+                    "the object it names."
+                )
+            seen[name] = where
+            resolved[section_key].append(declared_cls(name=name, implementation=instance))
+            declarations.append({"acquisition": acquisition, "name": name})
+            if plugin_ref is not None:
+                plugins.append(plugin_ref)
+
+    observables = RunObservables(
+        dynamic=tuple(resolved["dynamic_observables"]),
+        static=tuple(resolved["static_observables"]),
+    )
+    return observables, declarations, plugins, [d["name"] for d in declarations]
+
+
 def _compose_model_plugins(raw: dict[str, Any], manifest_dir: str):
     """The OPTIONAL ``model_plugins`` section → a run-scoped plugin binding.
 
@@ -1610,6 +1780,7 @@ def compute_semantic_fingerprint(
     implementor_blocks: Any = None,
     task_data_path_config: dict[str, Any] | None = None,
     task_data_path_content_identity: str | None = None,
+    observable_declarations: list[dict[str, Any]] | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -1706,6 +1877,16 @@ def compute_semantic_fingerprint(
     # consequence as PR-12a's `proposal_blocks:` precedent.
     if task_data_path_content_identity is not None:
         payload["task_data_path_content_identity"] = task_data_path_content_identity
+    # `R-OBS-1` — a declared observable is semantic: it decides what the run
+    # MEASURES about itself and what its record and report carry, so two runs
+    # observing different quantities are not the same run. The entries carry
+    # the acquisition alongside the name because moving an observable between
+    # the two sections changes WHEN its arithmetic executes — a real semantic
+    # difference that a name-only payload would hide. ADDITIVE WHEN NON-EMPTY,
+    # on the same precedent as the six keys above, so every existing composed
+    # manifest's fingerprint is byte-unchanged and its resume still validates.
+    if observable_declarations:
+        payload["observable_declarations"] = observable_declarations
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
 
@@ -1757,6 +1938,33 @@ def compose_deliverable_naming_from_manifest(manifest_path: str):
     """
     resolved_manifest = os.path.abspath(manifest_path)
     return _compose_deliverable_naming(_read_manifest(resolved_manifest), resolved_manifest)
+
+
+def compose_observables_from_manifest(manifest_path: str):
+    """The run's DECLARED observables, composed from its manifest. `R-OBS-1`.
+
+    The child-process counterpart of the observable half of
+    :func:`compose_run_task_bindings`, and deliberately **only** that half —
+    the sibling of :func:`compose_metric_from_manifest` and
+    :func:`compose_deliverable_naming_from_manifest`, reading the same
+    transported manifest through the same authority the parent used.
+
+    This is what lets an OUT-OF-TREE observable execute inside the training
+    subprocess: the parent already emits ``--task_manifest`` to all three
+    children (Step 12 / PR-12bc C3), so nothing new crosses the process
+    boundary — the child composes the declaration rather than receiving
+    objects it could not deserialize.
+
+    A manifest declaring none yields an empty
+    :class:`~execute_tools.observables.RunObservables`, which every consumer
+    treats exactly as it treats the absence of the feature.
+    """
+    resolved_manifest = os.path.abspath(manifest_path)
+    manifest_dir = os.path.dirname(resolved_manifest)
+    observables, _declarations, _plugins, _names = _compose_observables(
+        _read_manifest(resolved_manifest), manifest_dir
+    )
+    return observables
 
 
 def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
@@ -2038,6 +2246,23 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
     for _index, _path in enumerate(secondary_declaration_paths):
         source_paths[f"secondary_metric_declaration[{_index}]"] = _path
 
+    # `R-OBS-1` — the OPTIONAL observable families. Resolved at the composition
+    # edge so a broken declaration fails the RUN rather than an attempt, and so
+    # an out-of-tree observable plugin's content digest joins the SAME `plugins`
+    # set the fingerprint already hashes. A manifest declaring none composes
+    # byte-identically to its pre-R-OBS-1 self.
+    #
+    # No `source_paths` entry: unlike a metric, an observable declares no
+    # separate declaration FILE — its name is inline in the manifest and its
+    # implementation's absolute path is already recorded on the plugin ref.
+    (
+        observables,
+        observable_declarations,
+        observable_plugins,
+        _observable_names,
+    ) = _compose_observables(raw, manifest_dir)
+    plugins.extend(observable_plugins)
+
     # Step 12 / PR-12d, seam P — the OPTIONAL model-plugin declaration. Its
     # resolved identities join the SAME `plugins` set the fingerprint already
     # hashes, so editing a pack plugin moves the run's identity and fails a
@@ -2173,6 +2398,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         implementor_blocks=implementor_blocks,
         task_data_path_config=task_data_path_config,
         task_data_path_content_identity=impl_content_identity,
+        observable_declarations=observable_declarations,
     )
 
     return RunTaskComposition(
@@ -2196,6 +2422,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         model_plugins=model_plugin_binding,
         loss_plugins=loss_plugin_roots or None,
         objective=composed_objective,
+        observables=observables or None,
     )
 
 

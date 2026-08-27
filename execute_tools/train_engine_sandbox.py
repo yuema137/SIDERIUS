@@ -48,6 +48,10 @@ from execute_tools.model_input_dtype import (
     apply_contract_cardinality,
     resolve_input_dtype,
 )
+from execute_tools.observables import (
+    active_observation_session,
+    child_observables_binding,
+)
 from execute_tools.scope_artifact import load_transported_scope
 
 # D14-1 C2b/C3: TIDMADEpochDataset's owner is now execute_tools/tidmad_data_path.py
@@ -71,6 +75,7 @@ from execute_tools.task_data_path import (
 from execute_tools.tidmad_data_path import TIDMADEpochDataset as TIDMADEpochDataset
 from execute_tools.tidmad_data_path import TidmadScope
 from execute_tools.training_history import (
+    STATIC_OBSERVATIONS_KEY,
     TRAINING_HISTORY_KEY,
     TrainingHistory,
     objective_config_fingerprint,
@@ -708,6 +713,7 @@ def _validation_pass(
     batch_size: int,
     verifier: Any = None,
     on_verified: Any = None,
+    observables: Any = None,
 ) -> tuple[float, int, float]:
     """One R3 observation: the run-resolved objective on the validation scope.
 
@@ -743,6 +749,20 @@ def _validation_pass(
             was absent from the deadline. The training phase never had this bug
             because it completes its verification INSIDE its batch loop; this
             now follows the same pattern.
+        observables: `R-OBS-1` level 3 — an optional
+            ``DynamicObservableEpoch``. This pass is the only place in the
+            engine holding a model OUTPUT beside its TARGET on data the model
+            was not trained on, which is why the dynamic family is fed here.
+            Feeding is observation only: the accumulator swallows every
+            implementation error, runs inside the same ``eval()`` /
+            ``no_grad()`` / ``fork_rng`` envelope, and any criterion mutation
+            it caused would still be caught by the state check below — so R3
+            is bit-identical with and without it.
+
+            The epoch LIFECYCLE deliberately stays with the CALLER, which
+            calls ``start_epoch()`` before this pass and ``finish_epoch()``
+            after. This function's only added responsibility is feeding the
+            batches it already has, which is the one part only it can do.
 
     Returns:
         ``(r3_value, materialized_rows, seconds)``.
@@ -791,10 +811,17 @@ def _validation_pass(
 
                 input_seq = input_batch.to(device).to(input_dtype)
                 target_seq = target_batch.to(device).to(dtype=target_dtype)
-                loss = criterion(model(input_seq), target_seq)
+                # Hoisted out of the `criterion(...)` call so the DECLARED
+                # observables can see the same tensor the objective saw. The
+                # forward pass is unchanged: one call, same inputs, same
+                # order.
+                output_seq = model(input_seq)
+                loss = criterion(output_seq, target_seq)
                 n_batch = int(input_batch.shape[0])
                 weighted_sum += float(loss.item()) * n_batch
                 n_total += n_batch
+                if observables is not None:
+                    observables.observe(output_seq, target_seq)
 
                 if verifier is not None:
                     if use_cuda_sync:
@@ -837,6 +864,7 @@ def _build_training_history(
     validation_samples: int | None,
     validation_seconds: list[float] | None,
     validation_requested_samples_before_limit: int | None = None,
+    observations: dict[str, list[float]] | None = None,
 ) -> TrainingHistory:
     """Assemble the additive ``training_history`` payload (design §3.5).
 
@@ -844,8 +872,24 @@ def _build_training_history(
     FIELDS accept the storage image of a non-finite epoch (``None``); this
     producer itself emits plain floats. ``Sequence`` (covariant) rather than
     ``list`` (invariant) so a ``list[float]`` accumulator still passes.
+
+    ``observations`` is `R-OBS-1` level 4's dynamic leg. A series is carried
+    only when it has ONE value per completed epoch: an observable that failed
+    in some epoch and not others produced a SHORTER series, and a short series
+    cannot be aligned to an epoch axis — the missing point is not at a known
+    index. Such a series is DROPPED whole rather than padded, because a padded
+    point would be a fabricated observation, and the schema's own
+    length invariant would otherwise refuse the entire payload and cost the
+    run its history. Defaulted to ``None`` so every existing caller — the
+    legacy single-file path included — emits ``{}`` exactly as before.
     """
     comparability, reason = stamp_comparability(loss_cfg)
+    epochs_completed = len(train_objective)
+    aligned = {
+        name: list(series)
+        for name, series in (observations or {}).items()
+        if len(series) == epochs_completed
+    }
     return TrainingHistory(
         objective_kind=loss_cfg.loss_type,
         objective_config_fingerprint=objective_config_fingerprint(loss_cfg),
@@ -853,8 +897,9 @@ def _build_training_history(
         comparability=comparability,
         comparability_reason=reason,
         epochs_planned=epochs_planned,
-        epochs_completed=len(train_objective),
+        epochs_completed=epochs_completed,
         train_objective=list(train_objective),
+        observations=aligned,
         validation_objective=None if validation_objective is None else list(validation_objective),
         validation_requested_samples=validation_requested_samples,
         validation_samples=validation_samples,
@@ -1354,6 +1399,13 @@ def run_experiment_streaming(
     #: 07c C6 — the NATURAL scope, before `validation_max_samples` bound it.
     #: `None` when no ceiling is configured, which is every production run.
     validation_rows_before_limit: int | None = None
+    # `R-OBS-1` level 3 — read from the RUN-SCOPED BINDING, not a parameter.
+    # This function's argument list is frozen by an executable structural
+    # guard, and a guard whose purpose is to stop it acquiring another
+    # responsibility must not be satisfied by handing it one more argument.
+    # Every call below is unconditional and a no-op for a run that declared
+    # nothing, which is every run that exists today.
+    observation = active_observation_session()
     # D14-2 C5b — one declaration authority per leg, refused crosswise.
     if eval_sample_set is not None and validation_requested_rows is not None:
         raise ValueError(
@@ -1748,6 +1800,7 @@ def run_experiment_streaming(
         if task_eval_scope is not None:
             assert validation_history is not None and validation_seconds is not None
             assert validation_requested_rows is not None
+            observation.start_epoch()
             r3, n_val, val_secs = _validation_pass(
                 model=model,
                 criterion=criterion,
@@ -1761,7 +1814,9 @@ def run_experiment_streaming(
                 batch_size=train_cfg.batch_size,
                 verifier=validation_verifier,
                 on_verified=_finish_validation_verification,
+                observables=observation,
             )
+            observation.finish_epoch()
             validation_history.append(float(r3))
             validation_seconds.append(float(val_secs))
             validation_seconds_total += val_secs
@@ -1832,6 +1887,12 @@ def run_experiment_streaming(
             device_index=_device,
         )
 
+    # `R-OBS-1` level 3, the STATIC family: after the final optimizer step and
+    # BEFORE the model is serialized, so what is observed is the model this
+    # attempt actually produced. Never raises — a failed observation is an
+    # absence, not a failed training attempt.
+    observation.finalize(model)
+
     # Result summary — the three legacy keys FIRST and byte-identical to the
     # pre-07a form (values and presence; `final_loss` stays the LAST TRAINING
     # observation, OD-S7-3); the additive Step-07a `training_history` payload
@@ -1849,8 +1910,15 @@ def run_experiment_streaming(
             validation_samples=validation_materialized_rows,
             validation_requested_samples_before_limit=validation_rows_before_limit,
             validation_seconds=validation_seconds,
+            observations=observation.dynamic_series(),
         ).model_dump(),
     }
+    # `R-OBS-1` level 4, static leg. `static_summary` returns an EMPTY mapping
+    # unless the run declared static observables AND at least one produced a
+    # value, so a run that declares none emits the same four-key summary it
+    # emitted before this family — the `secondary_metrics` record precedent,
+    # one layer up, expressed as an update rather than an `if`.
+    summary.update(observation.static_summary(STATIC_OBSERVATIONS_KEY))
 
     save_path = os.path.join(
         sandbox_dirs["models"], f"model_{model_cfg.model_type}_{exp_id}_agent.pth"
@@ -2269,7 +2337,7 @@ def main():
             )
         else:
             binding_cm = contextlib.nullcontext()
-        with binding_cm:
+        with binding_cm, child_observables_binding(args.task_manifest):
             # Step 12 / PR-12bc B6 — the child side of the SCOPE transport, and
             # the close of the pairing gap. Before this the binding crossed and
             # the scope did not, so the engine fell into its regime-A branch and

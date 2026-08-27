@@ -1294,6 +1294,13 @@ def build_attempt_record(
         ]
     if secondary_metric_errors:
         final_record["secondary_metric_errors"] = dict(secondary_metric_errors)
+    # `R-OBS-1` level 4, static leg — the same conditional-key rule as the
+    # three secondaries above, for the same reason: a run that declared no
+    # static observable writes NO key, so its persisted record is byte-
+    # identical to the one it wrote before this family existed. The DYNAMIC
+    # leg needs nothing here — it already rides `training_history`.
+    if training_results.static_observations:
+        final_record["static_observations"] = dict(training_results.static_observations)
     # Phase J — surface pre-flight time-estimator context to the
     # planner via the next round's experiment_history. Only added
     # when the gate actually ran (chosen_time_budget was set);

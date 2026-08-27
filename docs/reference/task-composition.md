@@ -25,7 +25,7 @@ Two properties worth knowing before you start:
 There is **no `version` field**. (Recorded as a known gap — see
 [DOC-F3](../audit/documentation_gap_audit.md#12-findings-recorded-deliberately-not-fixed-here).)
 
-## The thirteen sections
+## The fifteen sections
 
 | section | required | what it declares | absence means |
 |---|:---:|---|---|
@@ -42,6 +42,8 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `loss_plugins` | — | the pack's loss-plugin root | nothing bound; legacy loss discovery only |
 | `objective` | — | the task's **authoritative** training objective (overrides the planner) | no override; the planner's choice governs |
 | `deliverable` | — | an indexed deliverable filename template | see below — a task that names its own artifacts is **refused** an indexed template, never handed TIDMAD's |
+| `dynamic_observables` | — | quantities observed DURING training, once per epoch | the run observes none: `training_history.observations` stays `{}` |
+| `static_observables` | — | quantities read off the TRAINED model after training | the run observes none: no record key, no rendered bytes |
 
 ### Why `task_health` is required but may say "none"
 
@@ -158,6 +160,17 @@ deliverable:                                   # only if the task names artifact
   prefix: my_task_output
   extension: npz
   index_width: 4
+
+dynamic_observables:                           # optional; ORDER IS SEMANTIC
+  - name: validation_accuracy                  # the key the series is stored under
+    implementation:
+      file: ./plugins/my_observables.py
+      symbol: ValidationAccuracy               # a DynamicObservable subclass
+static_observables:                            # optional; ORDER IS SEMANTIC
+  - name: trained_weight_norm
+    implementation:
+      file: ./plugins/my_observables.py
+      symbol: TrainedWeightNorm                # a StaticObservable subclass
 ```
 
 Notes:
@@ -165,6 +178,26 @@ Notes:
 - `secondary_metrics` **order is semantic** — it participates in the composition
   fingerprint and the record stamp. Duplicate ids, or a secondary whose id
   collides with the primary's, are refused.
+- `dynamic_observables` / `static_observables` are the two **observable**
+  families (`R-OBS-1`, `D-BUD-16`). The split is a **type**, not a naming
+  convention: an implementation subclasses either
+  `execute_tools.observables.DynamicObservable` (`reset` / `update` / `value`
+  — fed the per-epoch validation pass, producing one value per epoch) or
+  `StaticObservable` (`compute` — called once, with the trained model). The
+  composition **refuses** a manifest that lists one under the other's section,
+  so a declaration cannot misstate when its arithmetic runs.
+- Observable **names must be unique across BOTH sections** — they are the keys
+  the persisted series, the record mapping and the report table all join on.
+- Observables are **observational**. They are hidden from the planner, never
+  ranked against the primary metric, and never a budget or selection signal.
+- Observables reach the training subprocess through the manifest the parent
+  already transports (`--task_manifest`); the child composes them through this
+  same authority. Nothing new crosses the process boundary — an observable is
+  a live object with per-epoch state, which no argv could carry.
+- A declared observable that raises or returns a non-finite value is an
+  **absence**, never a sentinel: its value is dropped and the training attempt
+  succeeds. A dynamic series that is shorter than the epoch axis (an observable
+  that failed in some epochs only) is dropped whole rather than padded.
 - A metric implementation must be an `EvaluationMetric` and may not rewrite the
   `id` declared in its declaration file.
 - `deliverable` is `extra="forbid"`: a misspelled key is refused rather than
@@ -231,7 +264,7 @@ un-composed path with byte-identical child argv.
 ## Worked example
 
 `configs/task_composition/tidmad.yaml` is the shipped reference manifest. It
-declares eight of the thirteen sections — no `secondary_metrics` (TIDMAD has
+declares eight of the fifteen sections — no `secondary_metrics` (TIDMAD has
 none), no `deliverable` (it *is* the shipped indexed default — resolution
 state 3 above), no `model_plugins`/`loss_plugins` (TIDMAD's models are the
 built-ins plus run-generated plugins) and no `objective` (the planner chooses).

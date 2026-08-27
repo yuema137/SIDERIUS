@@ -105,6 +105,7 @@
   "traceback_summary": null,
   "train_portion": null,
   "training_diagnosis": null,
+  "static_observations": {},
   "training_history": null,
   "training_psd_segments": null,
   "trial_portion": null,

@@ -66,6 +66,23 @@ LEGACY_TRAINING_RESULT_KEYS: tuple[str, ...] = ("final_loss", "loss_history", "m
 #: The additive results key carrying the dumped :class:`TrainingHistory`.
 TRAINING_HISTORY_KEY = "training_history"
 
+#: `R-OBS-1` — the additive results key carrying the run's STATIC observations
+#: (``{name: float}``), written by the trainer ONLY when the task declared
+#: static observables and at least one produced a value.
+#:
+#: A sibling of :data:`TRAINING_HISTORY_KEY` rather than a field on
+#: :class:`TrainingHistory`, deliberately. A new schema field would appear in
+#: every ``model_dump()``, so every future record's persisted JSON would gain
+#: ``"static_observations": {}`` — a byte change to every artifact of every
+#: run, to carry a value only a declaring task has. The conditional sibling
+#: key is the shape ``secondary_metric_results`` already uses one layer up,
+#: and it keeps a non-declaring run's payload byte-identical.
+#:
+#: The DYNAMIC family needs no such key: it lands in
+#: :attr:`TrainingHistory.observations`, which has existed (and been empty)
+#: all along.
+STATIC_OBSERVATIONS_KEY = "static_observations"
+
 #: The ONE epoch estimator formula R2 and R3 both use — the sample-count-
 #: weighted mean of the criterion's batch scalar. R2 (``np.mean`` over
 #: ``drop_last=True`` equal-size batches) IS this estimator with equal
@@ -365,6 +382,19 @@ class TrainingResults(BaseModel):
     legacy_payload: dict[str, Any]
     history: TrainingHistory | None
     history_state: Literal["present", "absent"]
+    static_observations: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "`R-OBS-1` — the run's STATIC observations, read off the trained "
+            "model once after the final optimizer step. Empty for every run "
+            "that declared none, which is every run today; the record writer "
+            "then emits no key at all and the persisted artifact is "
+            "byte-identical to its pre-R-OBS-1 self.\n\n"
+            "Carried here rather than on ``TrainingHistory`` because a schema "
+            "field would materialize in every history dump. See "
+            "``STATIC_OBSERVATIONS_KEY``."
+        ),
+    )
 
     def history_payload(self) -> dict[str, Any] | None:
         """The record-facing dump of the history (``None`` when absent)."""
@@ -444,4 +474,32 @@ def interpret_training_results(raw: object, *, expected_validation: bool) -> Tra
         legacy_payload=legacy_payload,
         history=history,
         history_state="present" if history is not None else "absent",
+        static_observations=_read_static_observations(raw),
     )
+
+
+def _read_static_observations(raw: Mapping) -> dict[str, float]:
+    """`R-OBS-1` — the trainer's optional static-observation payload.
+
+    A MALFORMED payload is dropped, not raised on. The rule the whole family
+    follows is that an observation which cannot be produced is an ABSENCE:
+    letting a broken diagnostic value turn a successful training attempt into
+    a contract failure would invert that, and would make declaring an
+    observable riskier than not declaring one. The two SCIENTIFIC payloads —
+    the legacy keys and ``training_history`` — keep their fail-closed
+    treatment above, which is the distinction that matters.
+    """
+    payload = raw.get(STATIC_OBSERVATIONS_KEY)
+    if not isinstance(payload, Mapping):
+        return {}
+    values: dict[str, float] = {}
+    for name, value in payload.items():
+        if (
+            isinstance(name, str)
+            and not isinstance(value, bool)
+            and isinstance(value, (int, float))
+        ):
+            observed = float(value)
+            if math.isfinite(observed):
+                values[name] = observed
+    return values

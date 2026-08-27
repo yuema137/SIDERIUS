@@ -2972,7 +2972,7 @@ decisions:
 
   - decision_id: R-OBS-1
     parameter: generic task-declarable dynamic/static observable metrics
-    status: PENDING_IMPLEMENTATION
+    status: IMPLEMENTED
     blocking_v0_1_0: true
     control_class: EXPERIMENT_FIXED
     operator_ruling: >-
@@ -3000,9 +3000,58 @@ decisions:
       observations carrier. The nearest working precedent is secondary_metrics:
       — declarable, typed, produced, persisted, consumed — which is the shape a
       dynamic_observables: / static_observables: pair should follow.
+    closed_2026_08_27:
+      how_each_level_is_met:
+        level_1: >-
+          `dynamic_observables:` / `static_observables:` joined _MANIFEST_KEYS
+          (13 -> 15), OPTIONAL on the secondary_metrics precedent. The
+          closed-allowlist REFUSAL is preserved, not relaxed.
+        level_2: >-
+          execute_tools/observables.py declares two abstract bases with DISJOINT
+          abstract method sets; acquisition_of() DERIVES the label from
+          isinstance, and composition REFUSES a section that disagrees with the
+          implementation's type. No acquisition string is ever stored.
+        level_3: >-
+          The trainer feeds dynamic observables the per-epoch validation pass
+          that already runs, and calls static observables once from the TRAINED
+          model. The child composes them from the transported --task_manifest
+          through the same authority the parent used.
+        level_4: >-
+          Dynamic rides TrainingHistory.observations; static is a conditional
+          record key (ExperimentRecord.static_observations), written only when
+          non-empty.
+        level_5: >-
+          run_report projects both onto ObjectiveHistory.observations and
+          AttemptView.static_observations; the HTML report renders them and
+          report.json carries them verbatim.
+      evidence_rule_honoured: >-
+        The level-3 witnesses drive run_experiment_streaming on the two-family
+        CPU fixture. No test in the producer suite constructs a TrainingHistory,
+        and the two hand-authored L1 fixtures are cited nowhere as evidence.
+      byte_identity_when_undeclared: >-
+        All four shipped manifests compose to the SAME semantic fingerprints
+        they did at 3995400b (recorded as literals in the C1 witness); the
+        trainer's results JSON and the per-attempt record file are unchanged.
+        ONE declared envelope delta — `all_records[*].static_observations: {}`
+        in the aggregated run output — of the same additive-serialization class
+        P2b froze, declared in the Step-09.5a oracle's delta log.
+      scope_boundary_declared: >-
+        A static observable reads the TRAINED MODEL, not the deliverable.
+        Deliverable-derived static evaluation keeps its single existing owner
+        (secondary_metrics / evaluate_declared_secondaries), which this row's
+        own audit grades FULLY_IMPLEMENTED. D-BUD-16's "model/data" is closed
+        here on its MODEL leg.
+      not_claimed:
+        - the legacy single-file training path (run_experiment) is untouched and
+          runs no observables
+        - StubSandbox / pseudo mode fabricates no observations
+        - no shipped task declares an observable yet; the families are the
+          capability, not a TIDMAD science change
+        - observables are hidden from every LLM-facing render; whether the
+          planner or interpreter should ever see them is a separate decision
     owner: release lane, routed through the Supervisor
     dependencies: []
-    last_updated: 2026-08-26
+    last_updated: 2026-08-27
 
   # ============================================================== #
   # DECISION AREA 6 — BUDGET                                       #
@@ -3348,7 +3397,7 @@ decisions:
 
   - decision_id: D-BUD-16
     parameter: observable metrics — Part 6 cross-reference
-    status: PENDING_IMPLEMENTATION
+    status: IMPLEMENTED
     blocking_v0_1_0: true
     control_class: EXPERIMENT_FIXED
     frozen_value:
@@ -3357,9 +3406,16 @@ decisions:
         dynamic: may execute DURING training
         static: execute from the trained model/data AFTER training
       note: current train/validation loss history alone is insufficient
+    closed_2026_08_27: >-
+      Closed WITH R-OBS-1, as its satellite. The prohibition needed no code (no
+      observable is a budget mechanism: none reaches an ordering expression, and
+      all are hidden from the planner). The dynamic/static compute semantics ARE
+      R-OBS-1 level 2 and are now a TYPE — dynamic executes DURING training on
+      the validation pass that already runs, static executes once from the
+      trained model AFTER training.
     cross_reference: R-OBS-1
     dependencies: [R-OBS-1]
-    last_updated: 2026-08-26
+    last_updated: 2026-08-27
 
   # ---- Part 6 items deliberately NOT frozen --------------------------------
 

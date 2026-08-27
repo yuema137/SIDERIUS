@@ -415,6 +415,22 @@ class ExperimentRecord(BaseModel):
             "gated on comparability). None wherever training_history is None."
         ),
     )
+    static_observations: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "`R-OBS-1` — the run's DECLARED STATIC observables, read off the "
+            "TRAINED model once after the final optimizer step, keyed by the "
+            "name the task's manifest declared. Empty for every run that "
+            "declares none, and then the record writer emits no key at all.\n\n"
+            "Its DYNAMIC sibling is not here: a per-epoch series belongs on "
+            "`training_history.observations`, beside the R2/R3 series it is "
+            "aligned to, and putting a second copy here would create two "
+            "carriers for one family.\n\n"
+            "OBSERVATIONAL, always. Nothing in this mapping may become an "
+            "operand of an ordering expression — not ranking, not champion "
+            "selection, not a skip/bypass threshold (`D-BUD-16`)."
+        ),
+    )
 
     # --- Scoring results ---
     denoising_score: float | None = Field(

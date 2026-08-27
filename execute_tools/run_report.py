@@ -247,6 +247,19 @@ class ObjectiveHistory(BaseModel):
             "configured — an absence, never False."
         ),
     )
+    observations: dict[str, list[float]] = Field(
+        default_factory=dict,
+        description=(
+            "`R-OBS-1` level 5 — the run's DECLARED DYNAMIC observables, one "
+            "value per completed epoch, keyed by the name the task declared. "
+            "Carried on the SAME projection as R2/R3 because it shares their "
+            "epoch axis exactly: `TrainingHistory` guarantees every series here "
+            "is `epochs_completed` long, so a view can plot them together "
+            "without re-deriving an alignment.\n\n"
+            "Empty for every run that declares none. OBSERVATIONAL: a view may "
+            "display these, never rank by them."
+        ),
+    )
 
     @classmethod
     def from_history(cls, history: TrainingHistory) -> ObjectiveHistory:
@@ -269,6 +282,7 @@ class ObjectiveHistory(BaseModel):
             validation_requested_samples=requested,
             validation_requested_samples_before_limit=before,
             validation_was_limited=limited,
+            observations={name: list(s) for name, s in history.observations.items()},
         )
 
 
@@ -431,6 +445,16 @@ class AttemptView(BaseModel):
     diagnosis: DiagnosisView | None = None
     health_gates: list[HealthGateView] = Field(default_factory=list)
     secondaries: list[SecondaryView] = Field(default_factory=list)
+    static_observations: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "`R-OBS-1` level 5 — the attempt's DECLARED STATIC observations, "
+            "read off its trained model. Empty for every run that declares "
+            "none. Kept beside `objective` rather than inside it: a static "
+            "observation has no epoch axis, and giving it one would be the "
+            "first step toward a fabricated series."
+        ),
+    )
 
 
 class RunHeadline(BaseModel):
@@ -988,6 +1012,7 @@ def project_attempt(
         diagnosis=diagnosis,
         health_gates=[HealthGateView.from_persisted(g) for g in record.health_gate_results],
         secondaries=_project_secondaries(record, declared_secondaries),
+        static_observations=dict(record.static_observations),
     )
 
 

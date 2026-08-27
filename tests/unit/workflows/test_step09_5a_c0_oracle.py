@@ -21,6 +21,30 @@ Declared deltas to the golden (never a re-baseline to make a test green):
   so that no omission machinery gets built for cosmetic parity. Every value in
   the delta is the empty state, and nothing pre-existing moved.
 
+* **`R-OBS-1` (observable metrics, 2026-08)** — each record gained
+  `static_observations`. Measured before the golden was touched, and the
+  report is quoted rather than paraphrased:
+
+      .results[0].all_records[0].static_observations: ADDED ({})
+
+  — **exactly one ADDED path, the empty state, zero changed, zero removed.**
+  The golden was edited SURGICALLY (one key inserted after
+  `training_diagnosis`), never regenerated, so nothing else could move under
+  cover of the re-baseline.
+
+  This is the SAME additive-serialization class P2b declared above, and the
+  distinction it draws is the one that matters here: the per-attempt RECORD
+  file is byte-identical for a run that declares no observable — `records.py`
+  writes the key only when non-empty — and so is the trainer's results JSON
+  and the composition fingerprint. What moves is the aggregated
+  `HyperparamTuningOutput` envelope, whose `model_dump()` carries no exclude
+  flags, so a defaulted field serializes. P2b froze SEMANTIC emptiness rather
+  than persisted-JSON byte identity for exactly this path, explicitly so that
+  no omission machinery gets built for cosmetic parity.
+
+  The DYNAMIC family adds nothing here at all: it rides
+  `training_history.observations`, which has been present and empty since 07a.
+
 * **Step 10 / P3 C1** — the proposer's run input gained
   `interpretation_evidence`: the typed projection of the interpretation the
   protocol now builds through `build_proposer_evidence`, so that production and

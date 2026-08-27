@@ -217,9 +217,10 @@ def test_a_collapsed_formal_record_renders_only_the_policy_adjusted_score():
     assert "metric_result" not in rendered
 
 
-def test_the_hidden_key_set_is_exactly_the_step06_step07a_and_step10_payloads():
+def test_the_hidden_key_set_is_exactly_the_step06_step07a_step10_and_robs1_payloads():
     """A guard on scope: Step 06's two metric keys, Step 07a's two
-    training-evidence keys, and Step 10 / P2b's three secondary-metric keys —
+    training-evidence keys, Step 10 / P2b's three secondary-metric keys, and
+    `R-OBS-1`'s `static_observations` —
     07a HIDES, 07b RENDERS selected facts, Step 09 INTERPRETS, P2b transports.
     Widening it (hiding other record data from the planner) or narrowing it
     (leaking a payload) is a byte change owned by those steps, not a tidy-up —
@@ -230,6 +231,15 @@ def test_the_hidden_key_set_is_exactly_the_step06_step07a_and_step10_payloads():
     prompt_byte` below is the load-bearing half of this pin: the three keys are
     written onto a record only when a run DECLARED secondaries, TIDMAD declares
     none, and a record without them takes `_planner_visible`'s identity branch.
+
+    `R-OBS-1` widens it by exactly one key on the same terms and for a stronger
+    reason: an observable is DIAGNOSTIC by construction — `D-BUD-16` forbids it
+    becoming a budget or selection mechanism — so putting one in front of the
+    planner is precisely the vote it must never get. Byte-neutral on every
+    existing prompt by the same argument: `records.py` writes the key only when
+    a run declared a static observable, and no shipped manifest declares one.
+    Its DYNAMIC sibling needs no entry, because it rides `training_history`,
+    which this set has hidden since 07a.
     """
     assert _PLANNER_HIDDEN_RECORD_KEYS == frozenset(
         {
@@ -240,6 +250,7 @@ def test_the_hidden_key_set_is_exactly_the_step06_step07a_and_step10_payloads():
             "secondary_metric_results",
             "secondary_metric_refusals",
             "secondary_metric_errors",
+            "static_observations",
         }
     )
 

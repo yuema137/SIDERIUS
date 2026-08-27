@@ -46,12 +46,22 @@ _PRESENT = "<present>"
 # ---------------------------------------------------------------------------
 # REC-1 — ordered full field lists (Type 3). Hardcoded expectations,
 # captured at clean tree; NEVER read back from the schema under test.
+#
+# Declared delta, `R-OBS-1` (2026-08-27): 63 -> 64. `static_observations`
+# was inserted after `training_diagnosis`, the position `model_fields`
+# reports for it. Measured before the list was touched: EXACTLY ONE ADDED
+# NAME, zero moved, zero removed — and the same one key, `{}`, in each of
+# the two REC-2 projection goldens, inserted surgically rather than
+# re-captured. The record WRITER emits no key at all for a run that
+# declares no static observable, so a non-declaring run's persisted record
+# file is byte-identical; what these baselines see is the SCHEMA default
+# materializing through `model_dump()`.
 # NOTE: the duplicate `file_vector` declaration (design §13.8) is
 # byte-identical and keeps first-declaration position — this list cannot
 # detect it; the known-defect register is the guard.
 # ---------------------------------------------------------------------------
 
-EXPERIMENT_RECORD_FIELDS_63 = [
+EXPERIMENT_RECORD_FIELDS_64 = [
     "record_type",
     "exp_id",
     "status",
@@ -79,6 +89,7 @@ EXPERIMENT_RECORD_FIELDS_63 = [
     # position unchanged.
     "training_history",
     "training_diagnosis",
+    "static_observations",
     "denoising_score",
     "file_vector",
     "score_table",
@@ -203,7 +214,7 @@ def pseudo_run(tmp_path_factory):
 
 class TestREC1FieldLists:
     def test_experiment_record_ordered_fields(self):
-        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_63
+        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_64
 
     def test_output_and_interpretation_field_counts_and_heads(self):
         """REC-3 schema part: HyperparamTuningOutput and

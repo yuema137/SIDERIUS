@@ -412,6 +412,7 @@
     "validation_state": "present",
     "validation_trend": "decreasing"
   },
+  "static_observations": {},
   "training_history": {
     "cadence": "per_epoch",
     "comparability": "established",

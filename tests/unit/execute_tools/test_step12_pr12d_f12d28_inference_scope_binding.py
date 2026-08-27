@@ -23,7 +23,7 @@ this is the mirror — the scope crossed, and the binding did not.
 called `load_transported_scope`, which delegates to whichever implementation
 is **ACTIVE**. With nothing bound, that is the registered TIDMAD one, which
 refused the composed payload by name. The training child had this right all
-along (`train_engine_sandbox.py:2138` loads inside `with binding_cm:`), so
+along — its `main` deserializes the scope inside that binding — so
 the asymmetry — not the concept — was the defect.
 
 Each test names a defect only it can catch.
@@ -150,12 +150,61 @@ class TestTheTrainingChildAlreadyHadThisRight:
     'simplify' training back to the broken shape."""
 
     def test_training_loads_its_scope_inside_the_binding(self):
+        """The scope is deserialized INSIDE the binding — asserted structurally.
+
+        This located its subject by the literal text ``"with binding_cm:"``
+        and then compared character offsets. Both halves were wrong, and the
+        first one broke the moment a second context manager joined that
+        statement (`R-OBS-1`'s observables binding), which does not touch the
+        property at all:
+
+        * the ANCHOR could vanish while the property held, and a locator that
+          returns ``-1`` reports "cannot see my subject" as "property
+          violated" — the two are different failures and only one is a bug;
+        * ``bind_at < load_at`` is TEXT ORDER, which is strictly weaker than
+          enclosure. A ``load_transported_scope`` call placed AFTER the
+          with-block closed would satisfy it — and that is exactly the defect
+          this file exists to prevent, one child over.
+
+        Walking the tree fixes both: it finds the ``with`` whose items include
+        ``binding_cm`` however many siblings it has, and asserts the call is
+        in its BODY.
+        """
+        import ast
         import inspect
+        import textwrap
 
         from execute_tools import train_engine_sandbox
 
-        source = inspect.getsource(train_engine_sandbox.main)
-        bind_at = source.find("with binding_cm:")
-        load_at = source.find("load_transported_scope(")
-        assert bind_at != -1 and load_at != -1
-        assert bind_at < load_at
+        tree = ast.parse(textwrap.dedent(inspect.getsource(train_engine_sandbox.main)))
+        enclosing = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.With)
+            and any(ast.unparse(item.context_expr) == "binding_cm" for item in node.items)
+        ]
+        assert len(enclosing) == 1, (
+            f"expected exactly one `with binding_cm ...` in the training child's "
+            f"main(), found {len(enclosing)}"
+        )
+        inside = [
+            call
+            for stmt in enclosing[0].body
+            for call in ast.walk(stmt)
+            if isinstance(call, ast.Call)
+            and getattr(call.func, "id", None) == "load_transported_scope"
+        ]
+        assert inside, (
+            "the training child must deserialize its transported scope INSIDE "
+            "the task-data-path binding — resolving a data path into a local "
+            "does not make it the ACTIVE implementation, which is what "
+            "load_transported_scope delegates to"
+        )
+        # Nothing loads a scope outside it either, which text order could not say.
+        all_loads = [
+            call
+            for call in ast.walk(tree)
+            if isinstance(call, ast.Call)
+            and getattr(call.func, "id", None) == "load_transported_scope"
+        ]
+        assert len(all_loads) == len(inside)
