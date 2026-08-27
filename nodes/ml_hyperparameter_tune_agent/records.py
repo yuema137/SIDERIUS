@@ -104,6 +104,29 @@ def _may_advise_resource_reduction(status: dict) -> bool:
 HOST_RAM_OOM_STATUS = "oom_host_ram"
 
 
+def _validation_time_s(training_results: TrainingResults | None) -> float | None:
+    """The validation seconds folded inside ``train_time_s``, or ``None``.
+
+    F-SCANE-3. ``train_engine_sandbox`` has always summed
+    ``validation_seconds`` per epoch and subtracted it from the training
+    ACTUAL, but the split reached only the calibration store: no LLM-facing
+    surface carried it, and ``training_history`` — where it lives — is
+    planner-hidden. This lifts the SUM out of that container so the record's
+    ``timing`` block, which the planner does read, carries the term.
+
+    ``None`` rather than ``0.0`` when the producer recorded no split. The two
+    are different facts: "this attempt ran no validation pass / predates the
+    field" versus "the pass took no measurable time", and collapsing them
+    would let a legacy record read as a zero-cost validation.
+    """
+    if training_results is None:
+        return None
+    history = training_results.history
+    if history is None or history.validation_seconds is None:
+        return None
+    return round(sum(history.validation_seconds), 1)
+
+
 def is_execution_failure(status: dict) -> bool:
     """Did a GPU phase's subprocess FAIL? (Step 11 C2, F-11-1.)
 
@@ -1263,6 +1286,13 @@ def build_attempt_record(
         "eval_psd_segments": eval_psd_segments,
         "timing": {
             "train_time_s": train_time,
+            # F-SCANE-3 — the validation term, lifted out of the container the
+            # planner is not allowed to see. `train_time_s` is unchanged (the
+            # budget is measured against the whole subprocess), but the split
+            # the subprocess already computes now travels beside it instead of
+            # reaching only the calibration store. `None` where the producer
+            # recorded no split, never 0.0 — see `validation_seconds_total`.
+            "validation_time_s": _validation_time_s(training_results),
             "inference_time_s": inference_time,
             "scoring_time_s": scoring_time,
         },

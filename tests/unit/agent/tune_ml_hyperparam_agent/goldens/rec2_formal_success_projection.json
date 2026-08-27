@@ -384,7 +384,8 @@
   "timing": {
     "inference_time_s": "<present>",
     "scoring_time_s": "<present>",
-    "train_time_s": "<present>"
+    "train_time_s": "<present>",
+    "validation_time_s": "<present>"
   },
   "traceback_summary": null,
   "train_portion": null,
@@ -405,6 +406,7 @@
     "train_validation_gap_final": 0.07879999999999998,
     "train_validation_gap_final_rel": 0.1212307692307692,
     "truncated": false,
+    "validation_degradation_verdict": "observed",
     "validation_degraded_after_best": false,
     "validation_first": 1.68,
     "validation_last": 0.65,

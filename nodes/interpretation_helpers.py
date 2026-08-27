@@ -372,9 +372,29 @@ def generate_discoveries(
         infer_s = timing.get("inference_time_s") or 0
         total_s = train_s + infer_s
         if total_s >= slow_threshold_s:
+            # F-SCANE-3 — this block's own header calls the number an
+            # ARCHITECTURAL resource cost and its remedy is "reduce the
+            # model", so it is the same failure class as the planner's timing
+            # block: `train_time_s` is the whole subprocess and includes the
+            # 07a validation pass, which does not shrink with the model. The
+            # split is stated when the record carries it; a record with no
+            # split renders byte-identically to before.
+            # An INCOHERENT split (negative, or larger than the whole) is
+            # refused for the same reason the planner's block refuses it:
+            # production cannot produce one, so it means two different
+            # clocks, and a negative architecture cost is worse than silence.
+            val_s = timing.get("validation_time_s")
+            train_part = (
+                f"train={train_s / 60:.1f}"
+                if val_s is None or val_s < 0 or val_s > train_s
+                else (
+                    f"train={train_s / 60:.1f} incl. validation {val_s / 60:.1f}, "
+                    f"architecture {(train_s - val_s) / 60:.1f}"
+                )
+            )
             desc = (
                 f"{model_type}: {total_s / 60:.1f} min/experiment "
-                f"(train={train_s / 60:.1f}, infer={infer_s / 60:.1f} min). "
+                f"({train_part}, infer={infer_s / 60:.1f} min). "
                 # Step 09b C4: this sentence used to name a TIDMAD data-prep
                 # hyperparameter as the remedy, from framework code that
                 # reaches the synthesis prompt and the carried vocabulary.

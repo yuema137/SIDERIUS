@@ -305,6 +305,13 @@ class DiagnosisView(BaseModel):
     train_trend: str | None
     validation_trend: str | None
     best_validation_epoch: int | None
+    #: F-SCANE-2 — carried BESIDE `validation_degraded_after_best`, because a
+    #: `None` alone does not say WHY. `insufficient_history` (a one-epoch
+    #: validation curve — every formal round under the frozen
+    #: `formal_max_epochs = 1`) reads very differently from
+    #: `not_applicable` (the run had no validation curve at all), and both
+    #: read differently from an `observed` `False`.
+    validation_degradation_verdict: Literal["observed", "insufficient_history", "not_applicable"]
     validation_degraded_after_best: bool | None
     train_validation_gap_final: float | None
     summary_line: str
@@ -322,6 +329,7 @@ class DiagnosisView(BaseModel):
             train_trend=diagnosis.train_trend,
             validation_trend=diagnosis.validation_trend,
             best_validation_epoch=diagnosis.best_validation_epoch,
+            validation_degradation_verdict=diagnosis.validation_degradation_verdict,
             validation_degraded_after_best=diagnosis.validation_degraded_after_best,
             train_validation_gap_final=diagnosis.train_validation_gap_final,
             summary_line=render_training_dynamics_line(diagnosis, objective_kind),

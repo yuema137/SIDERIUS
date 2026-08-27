@@ -4,6 +4,7 @@ Raw best score       : None (health=unknown)
 Best valid score     : None
 Worst denoising score: 1.25
 Formal round score   : 1.25
+Best valid formal    : NONE — this model produced no HealthGate-valid formal result; every score above is from a trial round, a health-invalid record, or both.
 Best model params    : 120,000
 Trial portion (best) : 0.05
 

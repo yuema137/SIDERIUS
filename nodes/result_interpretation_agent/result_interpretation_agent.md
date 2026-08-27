@@ -76,6 +76,50 @@ The prediction track record never pools `legacy_v1` with
 `metric_order_signsafe_v2` and never renders one population's fraction over
 the other's denominator; both N's count the comparable outcomes only.
 
+### F-SCANE-4 — the honest per-model headline is rendered, and its absence is named
+
+Every per-model headline the LLM used to see is mixed on one axis or the
+other: `Raw best score` and `Best valid score` may come from a TRIAL round,
+`Formal round score` may come from a health-INVALID record.
+`ModelRunSummary.best_valid_formal_score` is the only one that is BOTH
+HealthGate-valid and formal, and it had no production consumer past its own
+construction in `evidence.py`. `_build_per_model_prompt` now renders it:
+
+```text
+Best valid formal    : <score>
+Best valid formal    : NONE — this model produced no HealthGate-valid formal
+                       result; every score above is from a trial round, a
+                       health-invalid record, or both.
+```
+
+The absence is NAMED rather than omitted, deliberately: a model can have a
+`Formal round score` and still have no VALID formal result, and omitting the
+line leaves that number standing unqualified as the model's authoritative
+headline — the shape of the defect, not a tidier prompt.
+
+`ModelRunSummary.formal_file_vector` — declared "Definitive per-file
+performance" — had no consumer of ANY kind while the MIXED `best_file_vector`
+did. `formal_score_table` (its enriched twin) is rendered where one exists;
+where it does not, which is every COMPOSED run since the enriched table is
+built from TIDMAD reference science a composed run deliberately omits
+(F-12e-UX-7), the raw vector now renders under
+`### Per-sample performance (formal round — definitive, no enriched table)`.
+
+**Two things F-SCANE-4 deliberately did NOT change**, so a later reader does
+not mistake either for an oversight:
+
+* `prediction._PER_SAMPLE_KEY` still resolves per-sample prediction forms
+  from the MIXED best score table. Repointing it would change which value the
+  prediction pool is scored against — a scientific change needing a new
+  `prediction_evaluation_semantics` id and an operator decision.
+* the `_stats` knowledge cache still carries only the mixed pair
+  (`formal_score`, `best_file_vector`), so a model that goes QUIET loses its
+  valid-formal headline. Writing the honest pair into `_stats` today would add
+  a second field that is persisted and read by nothing — the exact defect this
+  row records. Closing it properly means carrying a per-model valid-formal
+  aggregate through `precompute_evidence` into the CROSS-MODEL synthesis
+  block, beside `per_model_formal`.
+
 ## Position in the pipeline
 
 - **Node type**: **standalone-capable** — `nodes/result_interpretation_agent/result_interpretation_agent.py` exposes a CLI `main()` that reads a tuning agent's `run_output_{run_name}.json` from disk, builds the `InterpretationInput` itself, runs the two-phase pipeline, and writes `interpretation_{run_name}.json` back to the same workspace.
@@ -140,7 +184,7 @@ the other's denominator; both N's count the comparable outcomes only.
 | `per_model_training_segments` | `dict[str, int] \| None` | `model_type` → training PSD segments used in the best experiment. |
 | `runtime_vocab` | `list[VocabEntry]` | Updated vocabulary: seed + candidates + discoveries from all iterations. Compressed memory the next iteration reads. |
 | `prediction_evaluation` | `dict[str, Any] \| None` | Evaluation of the previous proposal's `FalsifiablePrediction`. Outcome is SOTA-based: confirmed = beat SOTA, partial = within a tolerance band, refuted = below the band. |
-| `new_discoveries` | `list[VocabEntry]` | New `kind="discovery"` entries from this round's evaluation. Empirical findings expressed as sentences, added to `runtime_vocab`. |
+| `new_discoveries` | `list[VocabEntry]` | New `kind="discovery"` entries from this round's evaluation. Empirical findings expressed as sentences, added to `runtime_vocab`. **F-SCANE-3** — the `timing_{model}_slow` discovery calls its figure an *architectural* resource cost and recommends reducing the model, so when the record carries `timing.validation_time_s` it now states the split (`train=X incl. validation V, architecture X−V`). A record with no split, or an incoherent one (validation > train, which production cannot produce), renders its pre-F-SCANE-3 bytes. |
 | `vocab_changes` | `list[str]` | Human-readable log of vocabulary promotion events made this iteration. |
 | `vocab_diversity_ratio` | `float \| None` | Fraction of feature/capability vocab entries still in candidate tier (range `[0, 1]`). Low values signal vocabulary stagnation. |
 | `cumulative_information_gain` | `float` | Running total of `information_gain` across all iterations. Increases when a bold prediction is confirmed. |
@@ -308,6 +352,41 @@ default set).
 Nothing is deleted. The excluded results are retained in `InterpretationOutput.scientific_aggregation` (`included` / `excluded` / `excluded_count` / `all_excluded` / `no_records` / `exclusion_reason_counts`), written at BOTH the healthy and the degraded assembly so an interpreter LLM failure cannot lose the provenance. Render it with `AggregationScope.provenance_lines()`.
 
 The exclusion is derived and rendered **deterministically, never by the model** (design §4.7): a model may simply omit it, and exclusion text placed inside a prompt can steer the interpretation it then writes. `all_excluded` is explicit because an empty aggregate alone reads identically to a campaign that found nothing — the opposite conclusion.
+
+### F-SCANE-1 — the exclusion is told, and it does not delete a warning
+
+Two repairs, both required by the frozen `F-SCANE-1` row.
+
+**The conclusion reaches a human.** `run()` prints
+`AggregationScope.provenance_lines()` to stdout — one `    [scientific
+aggregation] …` line each — immediately after `precompute_evidence()` and
+therefore **before any LLM call**, so an interpreter failure cannot swallow it.
+Until this call the renderer named directly above had ZERO production callers:
+14 of 15 real digests concluded *"EVERY result was excluded — this campaign
+produced no scientifically authoritative result"* and nobody was told. It is
+PRINTED and not prompted, because §4.7 keeps the exclusion narrative
+deterministic and out of the model's reach.
+
+**A withheld formal score is a NAMED ABSENCE in the synthesis prompt.** The
+authority filter EMPTIES `per_model_formal` when every formal result is
+non-authoritative, and the synthesis renderer gates its
+`Formal score: …  (best_score above may be from a trial round)` caveat on that
+dict being non-empty — so the run whose formal evidence was entirely unusable
+was exactly the run that presented a trial-mixed best score with the warning
+REMOVED. `precompute_evidence()` now captures
+`per_model_formal_excluded` (`model_type` → typed exclusion reason) **BEFORE**
+the filter runs and `_build_synthesis_prompt` renders, per affected model:
+
+```text
+Formal score: WITHHELD — this model's formal result was excluded from the
+scientific aggregate (<reason>); the best_score above may be from a trial
+round and is NOT a scientifically authoritative result.
+```
+
+Only models that HAD a formal score appear there: a model that never produced
+one is an absence, not a withholding, and reporting it as withheld would be a
+second fabrication. A fully authoritative run renders no such line and its
+prompt bytes are unchanged.
 
 ## Fail-closed metric contract (Step 09a)
 

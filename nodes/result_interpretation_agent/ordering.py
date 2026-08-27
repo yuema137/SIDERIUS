@@ -59,6 +59,16 @@ class PrecomputedEvidence:
     per_model_raw_best_health_validity: dict[str, str]
     per_model_worst: dict[str, float | None]
     per_model_formal: dict[str, float | None]
+    #: F-SCANE-1 — model_type → typed exclusion reason, for the models that
+    #: HAD a formal score and lost it to the authority filter below. Without
+    #: it the exclusion is a SILENCE in the synthesis prompt: the caveat that
+    #: warns "best_score above may be from a trial round" is gated on a
+    #: non-empty ``per_model_formal``, so the run whose formal evidence is
+    #: unusable is exactly the run that renders the trial-mixed best with the
+    #: warning removed. Only models whose formal score was actually withheld
+    #: appear here — a model that never had one is an absence, not a
+    #: withholding, and must not be reported as one.
+    per_model_formal_excluded: dict[str, str]
     per_model_best_config: dict[str, dict | None]
     overall_best_score: float | None
     overall_best_valid_score: float | None
@@ -235,6 +245,16 @@ def precompute_evidence(
     # rule for anything missing the authority contract.
     aggregation_scope = partition_for_aggregation(summaries)
     _authoritative = set(aggregation_scope.included)
+    # F-SCANE-1 — captured BEFORE the filter, and only for models that
+    # actually had a formal score to lose. Order is load-bearing: computed
+    # after the filter, `per_model_formal` no longer knows which entries it
+    # dropped, which is precisely how the exclusion became a silence.
+    _exclusion_reasons = {item.record_id: item.reason for item in aggregation_scope.excluded}
+    per_model_formal_excluded = {
+        mt: _exclusion_reasons[mt]
+        for mt, score in per_model_formal.items()
+        if score is not None and mt in _exclusion_reasons
+    }
     per_model_formal = {mt: score for mt, score in per_model_formal.items() if mt in _authoritative}
 
     return PrecomputedEvidence(
@@ -243,6 +263,7 @@ def precompute_evidence(
         per_model_raw_best_health_validity=per_model_raw_best_health_validity,
         per_model_worst=per_model_worst,
         per_model_formal=per_model_formal,
+        per_model_formal_excluded=per_model_formal_excluded,
         per_model_best_config=per_model_best_config,
         overall_best_score=overall_best_score,
         overall_best_valid_score=overall_best_valid_score,

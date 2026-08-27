@@ -124,8 +124,46 @@ def _sha(text: str) -> str:
 #: ``kwargs_sha256``, and the call count/order/labels/methods. The shape
 #: tuple below is UNCHANGED and was deliberately not touched.
 #: Re-recorded from three fresh interpreter processes, as the original was.
+#:
+#: ---------------------------------------------------------------------------
+#: DECLARED DELTA 2 (F-SCANE-3): ``5984c438…`` -> ``a11efea7…``, and the shape
+#: tuple DOES move this time — call index 3, ``tuner.planner`` user bytes
+#: ``36499 -> 36531``. Exactly +32 bytes, and they are ONE LINE of serialized
+#: record JSON::
+#:
+#:         "timing": {
+#:           "train_time_s": 0.0,
+#:     +     "validation_time_s": 1.0,
+#:           "inference_time_s": 0.0,
+#:           "scoring_time_s": 0.0
+#:         },
+#:
+#: WHY THIS MOVE IS CORRECT RATHER THAN A PARITY BREAK: `train_time_s` is the
+#: WHOLE training subprocess and INCLUDES the 07a validation pass. The planner
+#: is shown that number and instructed "if the last run exceeded it, reduce
+#: model complexity", so before this key existed a candidate could be shrunk
+#: for time spent VALIDATING it — the term it is asked to attribute to
+#: architecture was not on any surface it can read (`validation_seconds` lives
+#: inside `training_history`, which `_PLANNER_HIDDEN_RECORD_KEYS` drops).
+#: Holding the old bytes would keep the planner reasoning about a conflated
+#: figure; byte-identity here would buy a FALSE invariant, exactly as in
+#: DECLARED DELTA 1 above.
+#:
+#: ATTRIBUTION IS A COUNTERFACTUAL, NOT AN INFERENCE. The two legacy captures
+#: were taken from a PRISTINE `6d062304` worktree and from this branch and
+#: diffed as TEXT, not as hashes: the single added line above is the entire
+#: difference. Planner calls 0 and 1 (no successful record in history yet),
+#: BOTH reflector prompts, every SYSTEM prompt and every ``kwargs_sha256`` are
+#: byte-identical. The `### ⏱  LAST EXPERIMENT TIMING:` PROSE block did NOT
+#: move either: this fixture's record carries `train_time_s=0.0` beside
+#: `validation_time_s=1.0` (pseudo training is instantaneous while the
+#: validation seconds are canned from a different clock), which is an
+#: INCOHERENT split, and the renderer refuses to state a split it cannot
+#: believe rather than printing a negative architecture cost.
+#: Re-recorded from three fresh interpreter processes, as the original was;
+#: all three agreed on ``a11efea7…``.
 LEGACY_TUNER_PROMPT_MANIFEST_SHA = (
-    "5984c4387f5ca09babb70eae3b327b7a698b88a0e1b10f8139accd33f3f2dd4b"
+    "a11efea7da379aae0a18887e1f7b33e54f826a4efd51d69c141d92fe5208486b"
 )
 
 #: The per-call shape, recorded beside the digest so a mismatch localizes to a
@@ -134,7 +172,7 @@ LEGACY_TUNER_PROMPT_SHAPE: tuple[tuple[str, int, int], ...] = (
     ("tuner.planner", 14152, 16858),
     ("tuner.planner", 14152, 19162),
     ("tuner.reflector", 9677, 3523),
-    ("tuner.planner", 18252, 36499),
+    ("tuner.planner", 18252, 36531),
     ("tuner.reflector", 9677, 3945),
 )
 

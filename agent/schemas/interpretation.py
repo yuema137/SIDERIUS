@@ -497,8 +497,12 @@ class ModelRunSummary(BaseModel):
     best_timing: dict[str, Any] | None = Field(
         default=None,
         description="Timing dict from the best experiment: "
-        "train_time_s, inference_time_s, scoring_time_s. "
-        "Used to generate timing discoveries and warn the planner.",
+        "train_time_s, validation_time_s, inference_time_s, scoring_time_s. "
+        "Used to generate timing discoveries and warn the planner. "
+        "F-SCANE-3 — `train_time_s` is the WHOLE training subprocess and "
+        "INCLUDES the validation pass; `validation_time_s` is that term, "
+        "so the architecture's own cost is the difference. `None` where "
+        "the producer recorded no split, never 0.0.",
     )
 
     # --- Data volume context ---

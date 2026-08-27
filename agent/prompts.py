@@ -1297,11 +1297,46 @@ def get_planner_user_prompt(
         infer_s = t.get("inference_time_s") or 0
         total_s = train_s + infer_s
         seg = last.get("params", {}).get("model_config", {}).get("segmentation_size")
+        # F-SCANE-3 — the planner is told to attribute `train` to architecture
+        # and to "reduce model complexity" when it is too high. `train_time_s`
+        # is the WHOLE subprocess and includes the 07a validation pass, which
+        # is a fixed cost of the eval scope and does not shrink with the model,
+        # so without the split a candidate can be shrunk for time spent
+        # validating it. `validation_time_s` is `None` on a producer that
+        # recorded no split (legacy records, attempts with no validation pass)
+        # and those prompts stay byte-identical: an absent split must not be
+        # rendered as a zero one.
+        #
+        # The split is also refused when it is INCOHERENT — negative, or
+        # larger than the whole it is part of. In production it cannot be
+        # (the validation pass runs inside the timed subprocess), so a
+        # violation means the two numbers came from different clocks: a
+        # pseudo/stub record, a hand-edited artifact. Rendering
+        # "architecture cost -1.0 min" at an LLM would be worse than
+        # rendering nothing.
+        val_s = t.get("validation_time_s")
+        if val_s is None or val_s < 0 or val_s > train_s:
+            train_line = f"train={train_s / 60:.1f} min"
+            attribution_note = ""
+        else:
+            train_line = (
+                f"train={train_s / 60:.1f} min "
+                f"(validation {val_s / 60:.1f} min of that; "
+                f"architecture cost {(train_s - val_s) / 60:.1f} min)"
+            )
+            attribution_note = (
+                "Validation time is a fixed cost of the evaluation pass, not an "
+                "architecture cost: it does not shrink when the model shrinks. "
+                "Attribute only the architecture cost to your design.\n"
+            )
         slow_warning = (
             f"\n### ⏱  LAST EXPERIMENT TIMING:\n"
-            f"train={train_s / 60:.1f} min, inference={infer_s / 60:.1f} min, "
-            f"total={total_s / 60:.1f} min" + (f" (segmentation_size={seg})" if seg else "") + ".\n"
-            "The time budget is a HARD UPPER LIMIT, not a target. If the last "
+            f"{train_line}, inference={infer_s / 60:.1f} min, "
+            f"total={total_s / 60:.1f} min"
+            + (f" (segmentation_size={seg})" if seg else "")
+            + ".\n"
+            + attribution_note
+            + "The time budget is a HARD UPPER LIMIT, not a target. If the last "
             "run exceeded it, reduce model complexity. If it was well under, "
             "do NOT scale up just because there is headroom — smaller "
             "experiments are equally valid as long as they test the hypothesis.\n"

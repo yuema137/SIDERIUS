@@ -512,6 +512,27 @@ def _build_per_model_prompt(
     if summary.formal_score is not None:
         lines.append(f"Formal round score   : {summary.formal_score}")
 
+    # F-SCANE-4 — the ONE per-model headline that is BOTH HealthGate-valid AND
+    # formal. Every other number above is mixed on one axis or the other:
+    # `Raw best` and `Best valid` may come from a trial round, `Formal round
+    # score` may come from a health-INVALID record. Before this line
+    # `ModelRunSummary.best_valid_formal_score` had no production consumer past
+    # its own construction, so the honest headline was persisted and rendered
+    # nowhere while the mixed ones were rendered to the model.
+    #
+    # The ABSENCE is rendered too, and deliberately: "this model produced no
+    # HealthGate-valid formal result" is the fact that matters most when it
+    # holds, and omitting the line lets the mixed numbers above stand
+    # unqualified — which is the shape of the defect, not a tidier prompt.
+    if summary.best_valid_formal_score is not None:
+        lines.append(f"Best valid formal    : {summary.best_valid_formal_score}")
+    else:
+        lines.append(
+            "Best valid formal    : NONE — this model produced no "
+            "HealthGate-valid formal result; every score above is from a "
+            "trial round, a health-invalid record, or both."
+        )
+
     # Model efficiency
     if summary.best_model_params is not None:
         lines.append(f"Best model params    : {summary.best_model_params:,}")
@@ -573,6 +594,20 @@ def _build_per_model_prompt(
             "",
             "### Per-file performance (formal round — definitive)",
             summary.formal_score_table.rendered_markdown,
+        ]
+    elif summary.formal_file_vector is not None:
+        # F-SCANE-4 — `formal_file_vector` is declared "Definitive per-file
+        # performance" and had NO consumer of any kind, while the MIXED
+        # `best_file_vector` was consumed. Its enriched twin above covers the
+        # case where one exists; the enriched table is built from TIDMAD
+        # reference science that a COMPOSED run deliberately omits
+        # (F-12e-UX-7), so on those runs the definitive per-sample evidence
+        # existed on the summary and reached nothing at all. Rendered as the
+        # raw vector, and only where the richer view is genuinely absent.
+        lines += [
+            "",
+            "### Per-sample performance (formal round — definitive, no enriched table)",
+            json.dumps(summary.formal_file_vector),
         ]
 
     # Score trajectory with per-round trial portions and model params
@@ -775,6 +810,7 @@ def _build_synthesis_prompt(
     human_advice: str | None = None,
     runtime_vocab: list | None = None,
     per_model_formal: dict[str, float | None] | None = None,
+    per_model_formal_excluded: dict[str, str] | None = None,
     vocab_diversity_ratio: float | None = None,
     cumulative_information_gain: float | None = None,
     compressed_model_types: set[str] | None = None,
@@ -798,6 +834,7 @@ def _build_synthesis_prompt(
     """
     per_model_best_valid = per_model_best_valid or {}
     per_model_raw_best_health_validity = per_model_raw_best_health_validity or {}
+    per_model_formal_excluded = per_model_formal_excluded or {}
     compressed_model_types = compressed_model_types or set()
 
     lines = [
@@ -837,12 +874,25 @@ def _build_synthesis_prompt(
             f"Best valid : {per_model_best_valid.get(model_type)}",
             f"Worst score: {per_model_worst.get(model_type)}",
         ]
+        # F-SCANE-1. Two distinct facts, and the second used to be a silence.
+        # The authority filter EMPTIES `per_model_formal` when every formal
+        # result is non-authoritative, so gating the caveat on that dict alone
+        # removed the "may be from a trial round" warning in exactly the runs
+        # whose formal evidence was unusable. A withheld formal score is now a
+        # NAMED ABSENCE carrying its typed reason, never an omission.
         if per_model_formal:
             formal = per_model_formal.get(model_type)
             if formal is not None and formal != per_model_best.get(model_type):
                 lines.append(
                     f"Formal score: {formal}  (best_score above may be from a trial round)"
                 )
+        if model_type in per_model_formal_excluded:
+            lines.append(
+                f"Formal score: WITHHELD — this model's formal result was excluded from "
+                f"the scientific aggregate ({per_model_formal_excluded[model_type]}); "
+                f"the best_score above may be from a trial round and is NOT a "
+                f"scientifically authoritative result."
+            )
         if per_model_params and model_type in per_model_params:
             lines.append(f"Parameters : {per_model_params[model_type]:,}")
         if per_model_training_segments and model_type in per_model_training_segments:

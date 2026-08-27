@@ -72,6 +72,10 @@ _TIDMAD_EXPECTED = {
     "validation_last": 2.62,
     "validation_min": 2.55,
     "best_validation_epoch": 3,
+    # F-SCANE-2 — 5 epochs, so the degradation IS observable and the three
+    # fields below carry measurements. A one-epoch history would carry
+    # "insufficient_history" and three Nones.
+    "validation_degradation_verdict": "observed",
     "final_vs_best_validation_degradation": 0.07,
     "final_vs_best_validation_degradation_rel": 0.07 / 2.62,
     "validation_degraded_after_best": True,

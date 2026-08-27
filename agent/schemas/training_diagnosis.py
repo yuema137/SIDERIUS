@@ -15,6 +15,14 @@ Step 07 PR 07a (design §3.6; genericity contract Seam 5; parent §8.2 item 3).
 * Cross-curve fields (the gap) are ``None`` unless the history's
   ``comparability == "established"`` (§3.3) — a ``sum``-reduced or custom
   objective is recorded, not compared.
+* **A fact the curve cannot support is a NAMED ABSENCE, never a number**
+  (F-SCANE-2, operator ruling 2026-08-26). The final-vs-best validation
+  degradation needs two epochs to mean anything; at one it degenerates to
+  ``x − x``. ``validation_degradation_verdict`` says which of
+  ``observed`` / ``insufficient_history`` / ``not_applicable`` holds, and the
+  three degradation fields are populated only under ``observed``. The frozen
+  campaign runs ``formal_max_epochs = 1``, so every formal round takes the
+  ``insufficient_history`` branch.
 * Symmetric scale-free relative change (§0.5 item 6, no zero-reference
   pathology)::
 
@@ -39,6 +47,19 @@ FLAT_REL_TOL = 1e-2
 DiagnosisState = Literal["ok", "absent", "invalid"]
 ValidationState = Literal["present", "absent"]
 Trend = Literal["decreasing", "increasing", "flat", "single_point"]
+
+#: F-SCANE-2 (operator ruling 2026-08-26): whether the final-vs-best
+#: validation degradation was OBSERVED, or could not be — as a NAMED value
+#: rather than a number that reads like one.
+#:
+#: * ``observed`` — R3 has >= 2 epochs; the three degradation fields carry
+#:   real measurements.
+#: * ``insufficient_history`` — R3 exists but has ONE epoch, so there is no
+#:   "after best" to measure. At the campaign's frozen ``formal_max_epochs=1``
+#:   this is EVERY formal round.
+#: * ``not_applicable`` — no usable validation curve at all (``state`` is
+#:   ``absent``/``invalid``, or ``validation_state == "absent"``).
+DegradationVerdict = Literal["observed", "insufficient_history", "not_applicable"]
 
 
 def symmetric_relative_change(a: float, b: float) -> float:
@@ -118,17 +139,41 @@ class TrainingDiagnosis(BaseModel):
     validation_min: float | None = None
     best_validation_epoch: int | None = Field(default=None, description="argmin R3, 0-based.")
 
+    validation_degradation_verdict: DegradationVerdict = Field(
+        default="not_applicable",
+        description=(
+            "F-SCANE-2 — whether the three degradation fields below are a "
+            "MEASUREMENT or a NAMED ABSENCE. `observed` and only `observed` "
+            "means they carry numbers; `insufficient_history` (a one-epoch "
+            "R3) and `not_applicable` (no usable R3) mean they are None. "
+            "Read this BEFORE reading them: a 0.0 degradation and a False "
+            "'did not degrade' at one epoch are arithmetic, not evidence of "
+            "no degradation, and that is exactly what the operator ruling "
+            "forbids the diagnosis from emitting."
+        ),
+    )
     final_vs_best_validation_degradation: float | None = Field(
-        default=None, description="validation_last − validation_min (≥ 0)."
+        default=None,
+        description=(
+            "validation_last − validation_min (≥ 0). None unless "
+            "`validation_degradation_verdict == 'observed'`."
+        ),
     )
     final_vs_best_validation_degradation_rel: float | None = Field(
-        default=None, description="r(validation_min, validation_last)."
+        default=None,
+        description=(
+            "r(validation_min, validation_last). None unless "
+            "`validation_degradation_verdict == 'observed'`."
+        ),
     )
     validation_degraded_after_best: bool | None = Field(
         default=None,
         description=(
             "r(validation_min, validation_last) > flat_rel_tol AND validation_last > validation_min "
-            "— the calibration-free shape fact; NOT an overfitting label."
+            "— the calibration-free shape fact; NOT an overfitting label. None "
+            "unless `validation_degradation_verdict == 'observed'`: a `False` "
+            "the curve could not have produced is a fabricated finding, not a "
+            "conservative default."
         ),
     )
 
@@ -206,21 +251,39 @@ def derive_training_diagnosis(
     }
     if r3 is not None:
         best = min(range(len(r3)), key=lambda i: r3[i])
-        degradation_rel = symmetric_relative_change(r3[best], r3[-1])
         fields.update(
             {
                 "validation_first": r3[0],
                 "validation_last": r3[-1],
                 "validation_min": r3[best],
                 "best_validation_epoch": best,
-                "final_vs_best_validation_degradation": r3[-1] - r3[best],
-                "final_vs_best_validation_degradation_rel": degradation_rel,
-                "validation_degraded_after_best": bool(
-                    degradation_rel > flat_rel_tol and r3[-1] > r3[best]
-                ),
                 "validation_trend": _trend(r3, flat_rel_tol),
             }
         )
+        # F-SCANE-2 (operator ruling 2026-08-26). Degradation is "how much
+        # worse the LAST epoch is than the BEST one" — a question that needs
+        # at least two epochs to have an answer. At one epoch the arithmetic
+        # still runs and yields `0.0` and `False`, and those read as "measured
+        # no degradation" on the record and in the operator report. They are
+        # not a measurement; they are the identity `x − x`. The verdict names
+        # the absence and the three fields stay None, so nothing downstream
+        # can mistake an unobservable curve for a well-behaved one.
+        # `validation_trend` is NOT gated: `single_point` already says this
+        # honestly, which the ruling states explicitly.
+        if len(r3) >= 2:
+            degradation_rel = symmetric_relative_change(r3[best], r3[-1])
+            fields.update(
+                {
+                    "validation_degradation_verdict": "observed",
+                    "final_vs_best_validation_degradation": r3[-1] - r3[best],
+                    "final_vs_best_validation_degradation_rel": degradation_rel,
+                    "validation_degraded_after_best": bool(
+                        degradation_rel > flat_rel_tol and r3[-1] > r3[best]
+                    ),
+                }
+            )
+        else:
+            fields["validation_degradation_verdict"] = "insufficient_history"
         if history.comparability == "established":
             fields.update(
                 {

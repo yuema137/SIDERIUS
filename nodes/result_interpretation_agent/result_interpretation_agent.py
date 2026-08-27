@@ -339,6 +339,7 @@ class ResultInterpretationAgent:
         per_model_raw_best_health_validity = evidence.per_model_raw_best_health_validity
         per_model_worst = evidence.per_model_worst
         per_model_formal = evidence.per_model_formal
+        per_model_formal_excluded = evidence.per_model_formal_excluded
         # `evidence.per_model_best_config` is deliberately NOT unpacked: the
         # pre-C1b `run()` built that dict in three places and read it in none
         # (verified at a325f33b). The boundary still computes and exposes it —
@@ -352,6 +353,19 @@ class ResultInterpretationAgent:
         total_experiments = evidence.total_experiments
         per_model_summary_input = evidence.per_model_summary_input
         aggregation_scope = evidence.aggregation_scope
+
+        # F-SCANE-1 — the exclusion provenance reaches a HUMAN.
+        # `InterpretationOutput.scientific_aggregation`'s own field
+        # description names `AggregationScope.provenance_lines()` as its
+        # renderer, and until this call that renderer had ZERO production
+        # callers: 14 of 15 real digests concluded "EVERY result was excluded
+        # — this campaign produced no scientifically authoritative result"
+        # and the conclusion reached nobody. Printed HERE, before the LLM
+        # block, so an interpreter failure cannot swallow it, and printed
+        # rather than prompted because §4.7 keeps the exclusion narrative
+        # deterministic and out of the model's reach.
+        for _provenance_line in aggregation_scope.provenance_lines():
+            print(f"    [scientific aggregation] {_provenance_line}")
 
         # --- Step 09a C6: per-model evidence projection ---
         # Deterministic reads of persisted record fields, computed BEFORE the
@@ -748,6 +762,11 @@ class ResultInterpretationAgent:
                     human_advice=inp.human_advice,
                     runtime_vocab=list(inp.runtime_vocab) if inp.runtime_vocab else None,
                     per_model_formal=per_model_formal or None,
+                    # F-SCANE-1 — passed UNCONDITIONALLY (not `or None`): the
+                    # whole defect is that an emptied container silently
+                    # cancels a warning, and this dict is empty exactly when
+                    # there is nothing to say.
+                    per_model_formal_excluded=per_model_formal_excluded,
                     vocab_diversity_ratio=prior_vocab_diversity_ratio,
                     cumulative_information_gain=prior_cumulative_info_gain,
                     compressed_model_types=compressed_set,

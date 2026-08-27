@@ -19,6 +19,7 @@
     "validation_last": 0.04429657037059466,
     "validation_min": 0.04429657037059466,
     "best_validation_epoch": 1,
+    "validation_degradation_verdict": "observed",
     "final_vs_best_validation_degradation": 0.0,
     "final_vs_best_validation_degradation_rel": 0.0,
     "validation_degraded_after_best": false,

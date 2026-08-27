@@ -584,6 +584,15 @@ def render_training_dynamics_line(diagnosis: Any, objective_kind: str | None = N
         best = diagnosis.best_validation_epoch
         best_note = f"; best ep {best}" if best is not None else ""
         degradation = diagnosis.final_vs_best_validation_degradation
+        # F-SCANE-2. This suppression used to be an ACCIDENT: at one epoch the
+        # derivation produced a literal `0.0`, which is falsy, so the LLM
+        # happened never to see a fabricated "+0.0 after best". The record and
+        # the operator report had no such accident protecting them. Since the
+        # ruling landed the value is `None` under
+        # `validation_degradation_verdict != "observed"`, so the same falsy
+        # test now expresses the intended rule and these bytes are unchanged
+        # in BOTH cases (a genuine observed 0.0 still renders nothing, exactly
+        # as before).
         deg_note = f", +{_fmt(degradation)} after best" if degradation else ""
         parts.append(
             f"val {_fmt(diagnosis.validation_first)}->{_fmt(diagnosis.validation_last)} "

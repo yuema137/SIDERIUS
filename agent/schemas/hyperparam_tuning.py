@@ -142,7 +142,30 @@ def serialize_expert_advice(advice: ExpertAdviceInput) -> str:
 
 
 class ExperimentTiming(BaseModel):
-    train_time_s: float
+    train_time_s: float = Field(
+        description=(
+            "Wall time of the WHOLE training subprocess, admission to exit. It "
+            "INCLUDES the 07a validation pass — the budget is measured against "
+            "this number, so it must not be narrowed. Read it beside "
+            "`validation_time_s` (F-SCANE-3): the architecture's own cost is "
+            "`train_time_s - validation_time_s`."
+        )
+    )
+    validation_time_s: float | None = Field(
+        default=None,
+        description=(
+            "F-SCANE-3 — the seconds of `train_time_s` spent in the 07a "
+            "validation pass, summed over epochs from "
+            "`training_history.validation_seconds`. The subprocess has always "
+            "computed this split (`train_engine_sandbox` subtracts it from the "
+            "training ACTUAL) but it reached only the calibration store, so no "
+            "LLM could see the term it was being asked to attribute to "
+            "architecture and a candidate could be shrunk for time spent "
+            "validating it. `None` means the producer recorded no validation "
+            "split — a legacy record, a failure record, or an attempt with no "
+            "validation pass — NOT that the pass took zero seconds."
+        ),
+    )
     inference_time_s: float
     scoring_time_s: float
 
