@@ -233,9 +233,10 @@ def peek_and_aggregate(
     if aggregation not in VALID_AGGREGATION_MODES:
         raise ValueError(
             f"unknown aggregation mode {aggregation!r}; valid modes: "
-            f"{sorted(VALID_AGGREGATION_MODES)}. Aggregation is framework "
-            f"policy (health_policy.<disposition>.check_config in "
-            f"configs/health_checks.yaml) — failing closed rather than "
+            f"{sorted(VALID_AGGREGATION_MODES)}. Aggregation comes either "
+            f"from the task roster entry's parameters or, when the entry "
+            f"declares none, from health_policy.<disposition>.check_config "
+            f"in configs/health_checks.yaml — failing closed rather than "
             f"peeking under a rule the runtime does not implement."
         )
     if channel is None:

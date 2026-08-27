@@ -17,12 +17,22 @@ Defects only this file catches:
   (``_multi_file_peek._apply_aggregation`` via ``peek_and_aggregate``). A
   test with separate fixtures per mode cannot show the SAME evidence
   flipping the verdict.
+* **The framework value being unreachable per gate** (F-SCAND-2) — the flip
+  above is one number governing every blocking gate of every task. The row
+  records the cost: ``amplitude_collapse_blocking`` could not be made strict
+  without making all three strict. ``TestATaskDeclaresItsOwnAggregation``
+  below owns the capability that closes it, on the same production
+  materialization, and owns the other half too — that a roster declaring
+  NOTHING still resolves to the frozen value, byte for byte.
 
 How each test fails when the behaviour breaks: revert the YAML flip and
 ``test_shipped_policy_composes_all_pass_into_every_blocking_gate`` reports
 the offending gate id; make ``all_pass`` tolerate one degraded file and
 ``test_one_passing_file_among_failures_splits_the_two_modes`` fails its
-``passed is False`` arm.
+``passed is False`` arm; restore the unconditional
+``check_config.update(policy.check_config)`` in ``compose_gate`` and
+``test_one_gate_declares_a_different_aggregation_than_its_siblings``
+reports the declared value replaced by the framework's.
 """
 
 from __future__ import annotations
@@ -35,7 +45,10 @@ import pytest
 import yaml
 
 from execute_tools.health_checks import _plugin_binding
-from execute_tools.health_checks._composition import DEFAULT_DISPOSITION_POLICY
+from execute_tools.health_checks._composition import (
+    DEFAULT_DISPOSITION_POLICY,
+    HealthBindingState,
+)
 from execute_tools.health_checks._multi_file_peek import peek_and_aggregate
 from execute_tools.health_checks.config import (
     clear_health_gates_config_cache,
@@ -180,3 +193,165 @@ class TestFlipReachesEveryBlockingGate:
             assert policy.on_fail.value == declared["on_fail"], disposition
 
         assert DEFAULT_DISPOSITION_POLICY["blocking"].check_config == {"aggregation": "all_pass"}
+
+
+class TestATaskDeclaresItsOwnAggregation:
+    """F-SCAND-2 — the strictness of a gate is task science, per gate.
+
+    The row's stated parameter is that blocking-gate aggregation is "not
+    task-declarable at all", and its ``worse_than_recorded`` clause names
+    the concrete harm: one framework value governs every blocking gate of
+    every task, so ``amplitude_collapse_blocking`` cannot be made strict
+    without making all three strict. These tests drive the SAME production
+    materialization the tests above use — ``materialize_effective_config``,
+    the function that writes the run's pinned
+    ``health_checks_effective.yaml`` — never ``compose_gate`` in isolation,
+    because a witness that stops at the helper cannot show the value
+    surviving the artifact the run actually reads.
+    """
+
+    def _task_health(self, tmp_path: Path, amplitude_aggregation: str | None) -> str:
+        """Three blocking gates; only the amplitude gate may declare a mode.
+
+        Deliberately the row's own example. The other two entries declare
+        nothing, so one file exercises both halves of the contract at once.
+        """
+        amplitude: dict[str, object] = {"collapse_threshold": 0.95, "peek_samples": 1000}
+        if amplitude_aggregation is not None:
+            amplitude["aggregation"] = amplitude_aggregation
+        document = {
+            "facts": {"encoding_family": "int8_symbol_stream", "symbol_cardinality": 256},
+            "value_scale": {"unit": "mV", "units_per_sample": 0.3125},
+            "health_peek_files": [3, 10, 17],
+            "roster": [
+                {
+                    "gate_id": "output_diversity_blocking",
+                    "check": "output_diversity",
+                    "disposition": "blocking",
+                    "parameters": {"min_unique_int8_values": 25, "peek_samples": 1000},
+                    "uses_health_peek_files": True,
+                },
+                {
+                    "gate_id": "output_std_blocking",
+                    "check": "output_std",
+                    "disposition": "blocking",
+                    "parameters": {"min_std_mv": 1.0, "peek_samples": 1000},
+                    "uses_health_peek_files": True,
+                },
+                {
+                    "gate_id": "amplitude_collapse_blocking",
+                    "check": "amplitude_collapse",
+                    "disposition": "blocking",
+                    "parameters": amplitude,
+                    "uses_health_peek_files": True,
+                },
+            ],
+        }
+        path = tmp_path / "task_health.yaml"
+        path.write_text(yaml.safe_dump(document, sort_keys=True))
+        return str(path)
+
+    def _aggregations(self, tmp_path: Path, binding: str) -> dict[str, str]:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        effective, _ = materialize_effective_config(None, None, str(workspace), None, binding)
+        gates = yaml.safe_load(Path(effective).read_text())["health_gates"]
+        return {g["id"]: g["checks"][0]["config"]["aggregation"] for g in gates}
+
+    def test_one_gate_declares_a_different_aggregation_than_its_siblings(self, tmp_path):
+        """The capability the row asks for, stated as the row states it.
+
+        ``amplitude_collapse_blocking`` declares ``any_pass`` while the two
+        silent siblings keep the framework's ``all_pass``. Restore the
+        unconditional ``check_config.update(policy.check_config)`` in
+        ``compose_gate`` and the amplitude entry reads ``all_pass`` here —
+        the framework value having overwritten the task's declaration.
+        """
+        binding = self._task_health(tmp_path, "any_pass")
+
+        assert self._aggregations(tmp_path, binding) == {
+            "output_diversity_blocking": "all_pass",
+            "output_std_blocking": "all_pass",
+            "amplitude_collapse_blocking": "any_pass",
+        }
+
+    def test_the_same_roster_declaring_nothing_gets_the_framework_value(self, tmp_path):
+        """The other half: the override is an override, not a new default.
+
+        Identical roster, the one declaration removed. Every gate resolves
+        to the frozen ``all_pass``. Without this, a bug that dropped the
+        framework injection entirely would still pass the test above.
+        """
+        binding = self._task_health(tmp_path, None)
+
+        assert self._aggregations(tmp_path, binding) == {
+            "output_diversity_blocking": "all_pass",
+            "output_std_blocking": "all_pass",
+            "amplitude_collapse_blocking": "all_pass",
+        }
+
+    def test_a_declared_mode_reaches_every_disposition_not_just_blocking(self, tmp_path):
+        """Declarability is a property of the key, not of the gate role.
+
+        A recording gate gets no ``aggregation`` from framework policy at
+        all (asserted above), so this is the case where the task's value is
+        the ONLY source. A ``compose_gate`` that honoured declarations by
+        special-casing the blocking policy dict would pass every other test
+        here and fail this one.
+        """
+        document = {
+            "roster": [
+                {
+                    "gate_id": "per_file_output_std_recording",
+                    "check": "per_file_output_std",
+                    "disposition": "recording",
+                    "parameters": {"peek_samples": 1000, "aggregation": "median"},
+                }
+            ]
+        }
+        path = tmp_path / "recording_health.yaml"
+        path.write_text(yaml.safe_dump(document, sort_keys=True))
+
+        assert self._aggregations(tmp_path, str(path)) == {
+            "per_file_output_std_recording": "median"
+        }
+
+
+class TestTheUndeclaredCaseIsByteIdentical:
+    """F-SCAND-2's non-negotiable: silence must cost nothing.
+
+    The declarability change touches ``compose_gate``, which every run's
+    pinned artifact flows through. The shipped TIDMAD roster declares no
+    ``aggregation``, so its effective config — the whole body, not a
+    sampled key — must be the same bytes it was before. The digests below
+    were recorded from a pristine checkout of master ``3995400b`` and are
+    hardcoded, never read back from the code under test.
+
+    When one of these legitimately moves — a framework policy edit, a
+    TIDMAD threshold retune — the digest is re-recorded IN THE SAME COMMIT
+    as the change that moved it, with the reason stated. A silent update is
+    how a workspace-immutable artifact drifts under live runs.
+    """
+
+    #: sha256 of the canonical YAML body (header excluded), the value the
+    #: run-invariants lock pins as ``health_config_sha256``.
+    LEGACY_OMITTED_BODY_SHA256 = "8949578d87a2efd3ae3ba62cd2f1a007b015d6d2244bd25aa7ca388cc7a36052"
+    EXPLICIT_TIDMAD_BODY_SHA256 = "fbd75910496310d4280c1074331e92ab65a9c616a973f6081af64fcfceecf1ea"
+
+    @pytest.mark.parametrize(
+        ("binding", "expected_sha"),
+        [
+            (HealthBindingState.LEGACY_OMITTED, LEGACY_OMITTED_BODY_SHA256),
+            (
+                str(REPO_ROOT / "configs" / "task_health" / "tidmad.yaml"),
+                EXPLICIT_TIDMAD_BODY_SHA256,
+            ),
+        ],
+        ids=["legacy_omitted", "explicit_tidmad"],
+    )
+    def test_the_shipped_roster_pins_the_same_body_digest(self, tmp_path, binding, expected_sha):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        _, sha = materialize_effective_config(None, None, str(workspace), None, binding)
+
+        assert sha == expected_sha

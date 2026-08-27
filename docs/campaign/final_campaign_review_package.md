@@ -895,15 +895,20 @@ resolution: `SKIP_ITER > SKIP_TO_FORMAL > INVALIDATE_ROUND > CONTINUE`.
 
 **Two departures:**
 
-- **`all_pass` vs shipped `any_pass` (row 54).** All three TIDMAD blocking gates
-  resolve to `any_pass` from **one** framework value
+- **`all_pass` vs shipped `any_pass` (row 54).** ~~All three TIDMAD blocking
+  gates resolve to `any_pass` from **one** framework value
   (`configs/health_checks.yaml:37`). It is **not task-declarable at all** —
-  `aggregation` is in `FRAMEWORK_OWNED_PARAMETER_KEYS`
-  (`_task_health_config.py:92-103`) and a roster entry writing it is **rejected
-  with `ValueError`** (`:335-344`). One gate cannot be made strict without
-  making all three strict. The task config already flags the leniency itself
-  (`configs/task_health/tidmad.yaml:73-76`) and defers it to *"post-V17
-  empirical validation"* — **that deferral is now due.**
+  `aggregation` is in `FRAMEWORK_OWNED_PARAMETER_KEYS` and a roster entry
+  writing it is **rejected with `ValueError`**. One gate cannot be made strict
+  without making all three strict.~~ **Both halves are now closed, and they
+  were two separate things.** The VALUE flipped to `all_pass` in `f8ef0276`
+  (#335). The DECLARABILITY closed under `F-SCAND-2`: `aggregation` moved out
+  of `FRAMEWORK_OWNED_PARAMETER_KEYS` into `TASK_DECLARABLE_POLICY_KEYS`, so a
+  roster entry declares it per gate and keeps its value while the framework
+  value remains the default for entries that stay silent — which is every gate
+  the shipped TIDMAD roster declares, so the campaign's `all_pass` is
+  unmoved. The task config's own deferral
+  (`configs/task_health/tidmad.yaml:73-76`) is discharged.
 - **Gates are nested inside one of three scoring routes (`F-SCAND-3`).**
   `execution.py` has exactly two top-level scoring branches, `:1105`
   `ANCHOR_NORMALIZED` and the `else` at `:1320`; the gate block is `:1237`,
@@ -1045,7 +1050,7 @@ space."*
 | `lr` when omitted | `5e-4` (paper spec) | **`1e-4`** — `F-SCANA-1`, a 5× silent departure |
 | iteration horizon | 20 | launcher passes 10 |
 | scoring metric | frozen | frozen ✓ |
-| health thresholds | task-declared | `aggregation` **not declarable at all** — `F-SCAND-2` |
+| health thresholds | task-declared | task-declared ✓ — `aggregation` declarable per gate since `F-SCAND-2`; framework value is the default |
 
 > **The `lr` row is the one to dwell on.** `TrainConfig` is the Pydantic gate
 > that exists so raw LLM output cannot reach execution unvalidated. It validates

@@ -15,8 +15,18 @@
 # (Step-08 parent §6a.4).
 #
 # A task selects a `disposition` key per gate; the framework answers with
-# the block below. There is exactly one definition of each field, so a task
-# and the framework cannot disagree and no precedence rule is needed.
+# the block below. There is exactly one definition of each operational
+# field, so a task and the framework cannot disagree about what a gate DOES
+# and no precedence rule is needed for those.
+#
+# ONE key below is different: `check_config.aggregation` is a DEFAULT, not
+# an injection (F-SCAND-2). A roster entry may declare its own
+# `aggregation` and keeps it; an entry that declares nothing gets the value
+# here. Aggregation says how a gate turns per-file evidence into one
+# verdict — the strictness of the measurement, which is task science — and
+# while it was framework-only, this single number governed every blocking
+# gate of every task, so no task could tighten one gate on its own.
+# Everything else in this file remains unconditional.
 #
 # The observe-mode sibling (`health_checks_baseline_observe_mode.yaml`) is
 # now a two-line difference rather than a duplicated six-gate roster: it
@@ -40,6 +50,11 @@ health_policy:
                                       # gate. Supersedes M9's any_pass and
                                       # discharges the post-V17 validation
                                       # deferral (m9 execution plan §9 Q1).
+                                      # The DEFAULT for blocking gates that
+                                      # declare no aggregation of their own —
+                                      # which is every gate the shipped TIDMAD
+                                      # roster declares, so this value is what
+                                      # the campaign runs on, unchanged.
 
   recording:
     # Measures and records only; never invalidates anything. The measured

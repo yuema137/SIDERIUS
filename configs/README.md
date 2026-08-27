@@ -25,7 +25,7 @@ a health failure *does* — which no task file can express).
 | `task_config.yaml` (+ `.example`) | TIDMAD's `task_description` + `forward_contract` (legacy un-composed runs read it directly) | task-config loader |
 | `task_health/tidmad.yaml` | TIDMAD's task-owned health family: roster, thresholds, peek files, value scale, prose | `execute_tools/health_checks/_task_health_config.py` via composition |
 | `task_proposal/` · `task_implementor/` · `task_interpretation/` | TIDMAD's task-science prompt blocks | the three task-blocks adapters |
-| `health_checks.yaml` | **framework policy only**: per-disposition gate role, cadence, short-circuit, `on_pass`/`on_fail`, aggregation | `execute_tools/health_checks/config.py` |
+| `health_checks.yaml` | **framework policy only**: per-disposition gate role, cadence, short-circuit, `on_pass`/`on_fail`, and the default `aggregation` | `execute_tools/health_checks/config.py` |
 | `health_checks_baseline_observe_mode.yaml` | same policy with blocking failures downgraded to observation (differs only in `blocking.on_fail`) | selected via `--healthgate_mode observe_only` |
 | `lit_review_config.yaml` | literature-review budget, root papers, rubric | the literature-review node |
 | `v17_pregate_threshold_review.json` | a frozen point-in-time review artifact | nothing at runtime |
@@ -47,7 +47,15 @@ pair.
   identity — no roster, no thresholds, no science prose — and must never
   grow a `tidmad:`/`pets:`/`<task>:` branch. Thresholds live in the *task's*
   health config; a roster entry stating a framework key (`on_fail`,
-  `aggregation`, …) is refused at parse time.
+  `gate_role`, `short_circuit`, …) is refused at parse time.
+- **`aggregation` is the one declarable policy key** (F-SCAND-2). A roster
+  entry may set it per gate — `any_pass`, `all_pass`, `max`, `min`, `mean`,
+  `median` — and an unimplemented mode is refused at parse time, not at gate
+  evaluation. The framework's `health_policy.<disposition>.check_config`
+  value is the **default** for entries that stay silent, so a task may
+  tighten one gate without touching the others. Everything else in
+  `check_config` is injected unconditionally. See
+  `TASK_DECLARABLE_POLICY_KEYS`.
 - **In-repo task files are reference packaging.** An external task supplies
   its own manifest and declaration files anywhere on disk; nothing requires
   a file to be added under `configs/` to run a new task.
@@ -86,6 +94,7 @@ detected at startup.
 | unknown manifest key | misspelled section — refused, never ignored |
 | `task_health` declaring both `none: true` and `config:` | contradictory — a task has a family or explicitly has none |
 | roster `parameters` carrying a framework-owned key | the ownership split working (see `FRAMEWORK_OWNED_PARAMETER_KEYS`) |
+| roster `parameters` carrying an unimplemented `aggregation` | the one declarable policy key, checked against the runtime vocabulary at parse time |
 | resume after editing a composed-in file | the pinned digest moved — new semantics, new workspace |
 
 ## Files normally edited

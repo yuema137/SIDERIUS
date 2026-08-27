@@ -21,9 +21,9 @@ other's concern:
   check each runs, the thresholds, the peek files, the physical value
   scale, the plugin refs, and the scientific `reason` prose.
 - **The framework** owns what a failure *does*: gate role, cadence,
-  short-circuit, `on_pass`/`on_fail`, severity, aggregation. Your one
-  policy-facing choice per gate is its **`disposition`** — `blocking` or
-  `recording` — and everything operational is derived from that word.
+  short-circuit, `on_pass`/`on_fail`, severity. Your one policy-facing
+  choice per gate is its **`disposition`** — `blocking` or `recording` —
+  and everything operational is derived from that word.
 
 The split is structural, not conventional. A roster entry that tries to
 state a framework key is refused at parse time:
@@ -31,9 +31,33 @@ state a framework key is refused at parse time:
 ```
 parameters ['on_fail', …] are framework policy, not task parameters. A task
 selects a disposition and the framework derives gate role, actions,
-short-circuit, severity, cadence and aggregation from it. Declare the peek
-set once as health_peek_files and opt in with uses_health_peek_files=true.
+short-circuit, severity and cadence from it. Declare the peek set once as
+health_peek_files and opt in with uses_health_peek_files=true. The one
+declarable policy key is 'aggregation'.
 ```
+
+### The one exception: `aggregation`
+
+A gate that peeks several files needs a rule for turning those per-file
+verdicts into one gate verdict, and that rule is the strictness of *your*
+measurement, not framework policy. So a roster entry may declare it:
+
+```yaml
+  - gate_id: my_strict_gate
+    check: my_check
+    disposition: blocking
+    parameters:
+      my_threshold: 0.95
+      aggregation: all_pass    # every peeked file must clear the threshold
+```
+
+Valid modes are `any_pass`, `all_pass`, `max`, `min`, `mean` and `median`;
+anything else is refused at parse time rather than surfacing later as a
+check error. Declare nothing and you inherit the framework's default for
+your disposition (`all_pass` for `blocking` today), which is what every
+shipped roster does. The point of the exception is per-gate control: you
+can make one gate strict without making every other gate strict, which was
+impossible while the value was framework-only.
 
 At startup the two compose into one pinned
 `{workspace}/health_checks_effective.yaml`, sha256-recorded by the
@@ -199,8 +223,10 @@ roster:
       deliverable — the preserved D14 collapse sat at 369/370.
 ```
 
-Note what is *absent*: no `on_fail`, no cadence, no aggregation — the task
-cannot state them. And note the threshold style worth imitating: a
+Note what is *absent*: no `on_fail`, no cadence, no severity — the task
+cannot state them. `aggregation` is absent too, but by choice rather than
+by refusal: neither gate peeks multiple files, so both take the framework
+default. And note the threshold style worth imitating: a
 *fraction* bound rather than `distinct == 1`, because the real failure mode
 is near-constant, not constant.
 

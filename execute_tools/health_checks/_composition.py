@@ -20,13 +20,22 @@ KEY; the framework derives every operational consequence from it::
                   short_circuit=false,     on_pass=continue,
                   on_fail=continue
 
-A task cannot state any of those, so the conflicting-copies failure mode is
-structurally impossible rather than resolved by a precedence rule. The two
-shapes are not an invention: read verbatim at master ``a226495b``, the six
-shipped gates have exactly these two policy shapes and nothing else. (One
-VALUE inside the blocking shape has since moved by operator decision: the
-C2 flip, 2026-08-26, set ``aggregation`` from ``any_pass`` to ``all_pass``;
-the field set is unchanged.)
+A task cannot state any of the OPERATIONAL fields, so the conflicting-copies
+failure mode is structurally impossible rather than resolved by a precedence
+rule. The two shapes are not an invention: read verbatim at master
+``a226495b``, the six shipped gates have exactly these two policy shapes and
+nothing else. (One VALUE inside the blocking shape has since moved by
+operator decision: the C2 flip, 2026-08-26, set ``aggregation`` from
+``any_pass`` to ``all_pass``; the field set is unchanged.)
+
+``aggregation`` is the single exception, and it is an exception to the
+OWNERSHIP, not to the rule against unresolved precedence (F-SCAND-2). It is
+not derived from the disposition — it is how a gate turns per-file evidence
+into one verdict, which is the strictness of the measurement and therefore
+task science. The framework value above is its DEFAULT: a roster entry that
+declares ``aggregation`` keeps its own, an entry that stays silent gets this
+one, and that sentence is the complete precedence rule. See
+``TASK_DECLARABLE_POLICY_KEYS``.
 
 **Three binding states, never two** (§3.10). "The caller did not mention a
 task binding" and "the caller states there is no task binding" are different
@@ -54,6 +63,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from execute_tools.health_checks._plugin_binding import ResolvedHealthPlugin
 from execute_tools.health_checks._task_health_config import (
+    TASK_DECLARABLE_POLICY_KEYS,
     HealthDisposition,
     HealthRosterEntry,
     TaskHealthConfig,
@@ -147,11 +157,13 @@ class DispositionPolicy(BaseModel):
         default_factory=dict,
         description=(
             "Per-check policy keys the framework injects into every gate of "
-            "this disposition. ``aggregation`` lives here: 08a deliberately "
-            "excluded it from task thresholds, and every shipped blocking "
-            "gate carries ``all_pass`` (the C2 flip, operator-frozen "
-            "2026-08-26; ``any_pass`` before) while no recording gate "
-            "carries it."
+            "this disposition. ``aggregation`` lives here: every shipped "
+            "blocking gate carries ``all_pass`` (the C2 flip, "
+            "operator-frozen 2026-08-26; ``any_pass`` before) while no "
+            "recording gate carries it. Since F-SCAND-2 the value is a "
+            "DEFAULT for that one key — a roster entry declaring "
+            "``aggregation`` keeps its own, and every entry that stays "
+            "silent still gets this. Every other key here is unconditional."
         ),
     )
 
@@ -256,7 +268,10 @@ def compose_gate(
             move the recording gates from every file onto a small triplet,
             which is a policy change rather than an ownership change.
         policy_table: the framework's disposition policy; the built-in
-            default when the framework config declares none.
+            default when the framework config declares none. Its
+            ``check_config`` is unconditional except for the keys in
+            ``TASK_DECLARABLE_POLICY_KEYS``, where it is the default the
+            entry may override.
         injected_parameters: the declaration-driven fact parameters for this
             entry's check, per the frozen ``INJECTABLE_AXIS_PARAMETERS``
             table. See :func:`injected_parameters_for`.
@@ -288,7 +303,18 @@ def compose_gate(
             f"declaration instead of the parameter."
         )
     check_config: dict[str, Any] = dict(entry.parameters)
-    check_config.update(policy.check_config)
+    # Framework policy fills every key the entry did not declare. For the
+    # keys in TASK_DECLARABLE_POLICY_KEYS an authored value WINS — that is
+    # the whole precedence rule, and F-SCAND-2 is why it exists: while the
+    # framework's value was unconditional, one number governed every
+    # blocking gate of every task and no roster could tighten one gate
+    # alone. Every other policy key stays unconditional, so the operator's
+    # observe-mode lever over what a failure DOES is untouched. An entry
+    # that declares nothing composes byte-identically to before.
+    declared_policy = TASK_DECLARABLE_POLICY_KEYS & entry.parameters.keys()
+    check_config.update(
+        {key: value for key, value in policy.check_config.items() if key not in declared_policy}
+    )
     if entry.uses_health_peek_files:
         check_config["peek_file_indices"] = list(health_peek_files)
     if injected_parameters:

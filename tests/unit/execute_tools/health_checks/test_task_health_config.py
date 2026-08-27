@@ -13,9 +13,13 @@ can reach on its own:
   positive-negative pair below is the executable statement that parsing and
   resolution are different questions with different answers.
 * **A task restating framework policy** — a document that accepts
-  ``on_fail`` or ``aggregation`` inside ``parameters`` creates a second copy
-  of an operational field and therefore a precedence rule to get wrong. The
-  rejection is what makes §3.7's single-source ownership structural.
+  ``on_fail`` inside ``parameters`` creates a second copy of an operational
+  field and therefore a precedence rule to get wrong. The rejection is what
+  makes §3.7's single-source ownership structural. ``aggregation`` was in
+  that set until F-SCAND-2 and is now the one declarable exception; the
+  tests below were UPGRADED rather than deleted, and they now own the
+  opposite defect — the exception silently widening to a second key, or the
+  declaration being accepted at authoring and then ignored at composition.
 * **The value unit drifting from the value factor** — 08a left
   ``value_scale_unit`` absent precisely because the millivolt NUMBER was a
   check-local literal owned by nothing. A document that lets the axis be
@@ -39,6 +43,7 @@ from pydantic import ValidationError
 
 from execute_tools.health_checks._task_health_config import (
     FRAMEWORK_OWNED_PARAMETER_KEYS,
+    TASK_DECLARABLE_POLICY_KEYS,
     HealthDisposition,
     HealthPluginRef,
     HealthProviderBinding,
@@ -362,11 +367,21 @@ class TestTheTaskCannotStateFrameworkPolicy:
     def test_the_refused_set_is_exactly_the_operational_fields(self):
         """Pins the CONCEPT, not the field list.
 
-        Every key here is either a ``GateConfig`` field the framework derives
-        from the disposition, or a per-check policy key 08a already excluded
-        from task thresholds. If someone adds a task-owned parameter to this
-        set, task ownership silently shrinks; if someone removes an
-        operational one, two copies of it come back.
+        Every key here is a ``GateConfig`` field the framework derives from
+        the disposition — the operator's lever over what a gate DOES, which
+        ``health_checks_baseline_observe_mode.yaml`` exercises by changing
+        ``on_fail`` for every gate at once. If someone adds a task-owned
+        parameter to this set, task ownership silently shrinks; if someone
+        removes an operational one, two copies of it come back and observe
+        mode stops being enforceable.
+
+        UPGRADED at F-SCAND-2 (deliberately, not weakened): ``aggregation``
+        left this set. It is the one key here that was never derived from
+        the disposition — it decides how per-file evidence becomes one
+        verdict, which is the strictness of the measurement and therefore
+        task science. Its refusal is replaced by
+        ``test_the_declarable_set_is_exactly_aggregation`` below plus a
+        vocabulary check, so the key is not merely un-guarded now.
         """
         assert FRAMEWORK_OWNED_PARAMETER_KEYS == {
             "gate_role",
@@ -375,9 +390,81 @@ class TestTheTaskCannotStateFrameworkPolicy:
             "short_circuit",
             "severity",
             "after_round",
-            "aggregation",
             "peek_file_indices",
         }
+
+    def test_the_declarable_set_is_exactly_aggregation(self):
+        """The exception must not widen by accident (F-SCAND-2).
+
+        ``TASK_DECLARABLE_POLICY_KEYS`` is an escape from framework
+        ownership, so its SIZE is the invariant: adding a second key here
+        hands a task an operational field with no review, which is the
+        failure this whole ownership split exists to prevent. Hardcoded,
+        never read back from the constant.
+        """
+        assert TASK_DECLARABLE_POLICY_KEYS == {"aggregation"}
+
+    def test_no_key_is_both_refused_and_declarable(self):
+        """A key in both sets is a contradiction, not a precedence.
+
+        It would be rejected at authoring and honoured at composition — two
+        authorities disagreeing about whether the value can exist at all.
+        Neither set's own test can see this; only their intersection can.
+        """
+        assert not (FRAMEWORK_OWNED_PARAMETER_KEYS & TASK_DECLARABLE_POLICY_KEYS)
+
+    def test_a_declared_aggregation_is_accepted(self):
+        """The F-SCAND-2 capability at the authoring boundary.
+
+        Fails with a ``ValidationError`` naming "framework policy" the
+        moment ``aggregation`` is put back into
+        ``FRAMEWORK_OWNED_PARAMETER_KEYS``.
+        """
+        entry = HealthRosterEntry(
+            gate_id="amplitude_collapse_blocking",
+            check="amplitude_collapse",
+            disposition=HealthDisposition.BLOCKING,
+            parameters={"collapse_threshold": 0.95, "aggregation": "any_pass"},
+        )
+
+        assert entry.parameters == {"collapse_threshold": 0.95, "aggregation": "any_pass"}
+
+    @pytest.mark.parametrize("mode", ["any_pass", "all_pass", "max", "min", "mean", "median"])
+    def test_every_implemented_mode_is_declarable(self, mode):
+        """A task may reach the whole runtime vocabulary, not a sub-slice.
+
+        Hardcoded rather than imported from ``VALID_AGGREGATION_MODES``: a
+        validator that read the same constant the production code reads
+        would pass for any vocabulary, including an empty one.
+        """
+        entry = HealthRosterEntry(
+            gate_id="g",
+            check="c",
+            disposition=HealthDisposition.RECORDING,
+            parameters={"aggregation": mode},
+        )
+
+        assert entry.parameters["aggregation"] == mode
+
+    @pytest.mark.parametrize("bad", ["all_passs", "ALL_PASS", "strict", "", 3])
+    def test_an_unimplemented_aggregation_is_refused_at_authoring(self, bad):
+        """A typo must never reach the pinned artifact (§3.1, §3.2).
+
+        Without this, ``all_passs`` parses, composes into
+        ``health_checks_effective.yaml``, and first surfaces at gate
+        evaluation as a check ERROR — a configuration mistake wearing a
+        Health verdict's clothes. Delete the validator and every case here
+        constructs successfully.
+        """
+        with pytest.raises(ValidationError) as excinfo:
+            HealthRosterEntry(
+                gate_id="g",
+                check="c",
+                disposition=HealthDisposition.BLOCKING,
+                parameters={"aggregation": bad},
+            )
+
+        assert "is not a rule this runtime implements" in str(excinfo.value)
 
     def test_task_thresholds_and_task_parameters_are_accepted(self):
         """The counterpart: what the task DOES own passes through untouched.

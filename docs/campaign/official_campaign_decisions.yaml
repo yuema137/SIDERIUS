@@ -5678,7 +5678,7 @@ decisions:
   - decision_id: F-SCAND-2
     parameter: blocking-gate aggregation is not task-declarable at all
     concept: row 54 confirmed, and worse than recorded
-    status: PENDING_IMPLEMENTATION
+    status: IMPLEMENTED
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
     finding: >-
@@ -5713,8 +5713,73 @@ decisions:
       the checkout, and load_health_gates_config returns a file already carrying
       health_gates untouched - so a hand-edited effective config WOULD override.
       Must be read from the launched workspace.
+    discharge: >-
+      The DECLARABILITY is closed, which is what this row asked for - not the
+      value flip, which f8ef0276 (#335) already landed and which this row's
+      parameter line never asked about. aggregation is out of
+      FRAMEWORK_OWNED_PARAMETER_KEYS and into the new
+      TASK_DECLARABLE_POLICY_KEYS; a roster entry may declare it per gate and
+      keeps its value, because compose_gate now applies framework check_config
+      only to keys the entry did not declare. The row's harm clause is gone -
+      amplitude_collapse_blocking can be made strict while its two siblings
+      stay lenient, which is the exact case the production witness
+      TestATaskDeclaresItsOwnAggregation asserts through
+      materialize_effective_config. An unimplemented mode is refused at
+      authoring (Phase A) rather than surfacing later as a check ERROR.
+    what_was_deliberately_not_changed: >-
+      _DEFAULT_AGGREGATION = "any_pass" in each check and the
+      DEFAULT_DISPOSITION_POLICY duplicate at _composition.py are UNTOUCHED.
+      Both are fallbacks for configs that carry no framework policy at all;
+      changing either would move behaviour for a task that declares nothing,
+      which the no-declaration invariant forbids. The other seven keys in
+      FRAMEWORK_OWNED_PARAMETER_KEYS stay unconditional - they are the
+      operator lever health_checks_baseline_observe_mode.yaml exercises, and a
+      task able to state on_fail would make observe mode unenforceable.
+    no_declaration_is_byte_identical: >-
+      Measured against a pristine worktree of master 3995400b, not asserted.
+      Effective-config body sha256 unchanged for both binding states -
+      legacy_omitted 8949578d87a2efd3ae3ba62cd2f1a007b015d6d2244bd25aa7ca388cc7a36052
+      (4648 bytes) and explicit tidmad
+      fbd75910496310d4280c1074331e92ab65a9c616a973f6081af64fcfceecf1ea (4642
+      bytes), whole body diffed, not sampled. Composition semantic_fingerprint
+      unchanged for all four shipped manifests (tidmad 9b497798, pets 3ab1128a,
+      davis 396e767d, quickstart 1330d399). Both digests are pinned as tests.
+    configs_task_health_tidmad_yaml_was_not_touched: >-
+      Deliberate, and a constraint worth knowing. workflows/task_composition.py
+      _digest_file hashes the file RAW, so a comment-only edit to
+      configs/task_health/tidmad.yaml moves task_health_content_sha256 and
+      therefore the composition fingerprint, failing every existing composed
+      workspace's resume. Its header comment consequently still says the file
+      cannot state aggregation, which is now inaccurate. The trade was taken
+      knowingly: a false sentence in a shipped config was preferred over
+      breaking every existing composed workspace's resume, because the false
+      sentence misleads the next author while the fingerprint move would
+      silently refuse real runs already in flight.
+    open_must_false_header_in_shipped_config:
+      status: OPEN_MUST
+      defect: >-
+        configs/task_health/tidmad.yaml's header states that the file cannot
+        state gate role, cadence, short-circuit, actions and aggregation. The
+        aggregation half of that sentence is FALSE as of this row's discharge.
+        This is a real defect in a shipped config, not a cosmetic one - it is
+        the class this release has been chasing, and it is managed only
+        because it is recorded here with its reason.
+      why_not_fixed_here: >-
+        Any byte change to that file moves task_composition_fingerprint
+        (workflows/task_composition.py::_digest_file hashes it raw, confirmed
+        empirically, not assumed) and fails every existing composed
+        workspace's resume.
+      carrier: >-
+        MUST ride the next change that legitimately moves the TIDMAD health
+        fingerprint. Most likely carrier is the R-OBS-1 lane, which is adding
+        a manifest declaration surface and will move fingerprints by
+        construction. If no such change lands before the tag, it lands as its
+        own deliberate, separately-recorded fingerprint move - that precedent
+        already exists on this project. It must NOT be done as an incidental
+        edit.
+      ruled_by: supervisor, 2026-08-27
     dependencies: [D-SCORE-3]
-    last_updated: 2026-08-26
+    last_updated: 2026-08-27
 
   - decision_id: F-SCAND-3
     parameter: health gates are nested inside one of three scoring routes

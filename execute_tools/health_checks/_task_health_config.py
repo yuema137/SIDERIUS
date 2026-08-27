@@ -35,10 +35,22 @@ downgraded to a Health verdict (§3.2).
 
 **Single-source ownership, made structural** (§3.7). A task selects a
 :class:`HealthDisposition` KEY; it cannot state ``gate_role``, ``on_pass``,
-``on_fail``, ``short_circuit``, severity, cadence or aggregation at all.
-There is therefore no second copy of an operational field to contradict the
+``on_fail``, ``short_circuit``, severity or cadence at all. There is
+therefore no second copy of an *operational* field to contradict the
 framework's, and no precedence rule to get wrong — the failure mode is
 structurally impossible rather than resolved.
+
+**``aggregation`` is the one declarable exception** (F-SCAND-2). It was
+excluded alongside the operational fields, but not for their reason:
+nothing derives it from the disposition. It says how a gate combines
+per-file evidence into one verdict — the strictness of a *measurement*,
+which is task science, and which the shipped TIDMAD roster's own prose
+argues about at length. Framework ownership had a concrete cost, recorded
+on the row: one value governed every blocking gate of every task, so
+``amplitude_collapse_blocking`` could not be made strict without making all
+three strict. A task may now declare it per roster entry; see
+:data:`TASK_DECLARABLE_POLICY_KEYS` for the precedence, which is stated
+once and is not a guess. Declaring nothing is unchanged in every byte.
 
 This document is task-owned TRUTH, so it has exactly one consumption path:
 the binding/composition seam. C1 landed it inert with a guard asserting
@@ -56,6 +68,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from execute_tools.health_checks._multi_file_peek import VALID_AGGREGATION_MODES
 from execute_tools.health_checks.schemas import TaskHealthFacts
 
 
@@ -97,21 +110,51 @@ FRAMEWORK_OWNED_PARAMETER_KEYS: frozenset[str] = frozenset(
         "short_circuit",
         "severity",
         "after_round",
-        "aggregation",
         "peek_file_indices",
     }
 )
 """Keys a task may never write into a roster entry's ``parameters``.
 
 The first six are framework operational policy derived from the disposition
-(§3.7); ``aggregation`` is gate policy that 08a already excluded from task
-thresholds. ``peek_file_indices`` is excluded for a different reason: the
-task DOES own its peek set, but it owns it ONCE, as
+(§3.7). They are the operator's lever, not the task's: the shipped
+``health_checks_baseline_observe_mode.yaml`` exists precisely to change
+``on_fail`` for every gate at once, and a task able to state it would make
+observe mode unenforceable. ``peek_file_indices`` is excluded for a
+different reason: the task DOES own its peek set, but it owns it ONCE, as
 :attr:`TaskHealthConfig.health_peek_files`, opted into per entry — a literal
 list restated inside three entries would be three copies of one fact.
 
 Rejecting these at authoring time is what makes §3.7's "exactly one
-definition of each field" executable rather than aspirational."""
+definition of each field" executable rather than aspirational.
+
+``aggregation`` used to sit in this set and no longer does; see
+:data:`TASK_DECLARABLE_POLICY_KEYS`. The two sets must stay disjoint — a key
+in both would be refused here and honoured at composition — which
+``test_no_key_is_both_refused_and_declarable`` enforces."""
+
+
+TASK_DECLARABLE_POLICY_KEYS: frozenset[str] = frozenset({"aggregation"})
+"""Check-config policy keys a task MAY declare, overriding the framework's.
+
+Everything else the framework injects per disposition is unconditional. For
+a key in this set the framework's value is a **default**: it is applied to
+every roster entry that stays silent, and an entry that declares the key
+keeps its own. That is the whole precedence rule, it lives here, and it is
+the only one — the failure mode §3.7 forbids is two authorities with no
+stated winner, not two authorities at all.
+
+Why ``aggregation`` qualifies and the other seven do not: it is not derived
+from the disposition and it is not an operator lever over what a failure
+DOES. It decides how per-file evidence becomes one verdict, which is the
+strictness of the measurement itself — task science, and the thing TIDMAD's
+own roster prose has been arguing about since M9. F-SCAND-2 records the cost
+of getting this wrong: one framework value governed every blocking gate of
+every task, so a task could not tighten one gate without tightening all of
+them.
+
+Growing this set is a framework decision requiring a task that forces it,
+exactly like growing :class:`HealthDisposition` — it is not a general
+escape hatch from framework policy."""
 
 
 def _require_identifier(value: str, field: str) -> str:
@@ -292,7 +335,10 @@ class HealthRosterEntry(BaseModel):
             "Task-owned check configuration — thresholds (08a's "
             "``threshold_parameter_names``) and task parameters the check "
             "reads, such as ``peek_samples``. Framework-policy keys are "
-            "rejected: see FRAMEWORK_OWNED_PARAMETER_KEYS."
+            "rejected: see FRAMEWORK_OWNED_PARAMETER_KEYS. The single "
+            "declarable policy key is ``aggregation`` "
+            "(TASK_DECLARABLE_POLICY_KEYS); declaring it overrides the "
+            "framework default for THIS gate only."
         ),
     )
     uses_health_peek_files: bool = Field(
@@ -337,10 +383,39 @@ class HealthRosterEntry(BaseModel):
             raise ValueError(
                 f"parameters {offenders} are framework policy, not task "
                 f"parameters. A task selects a disposition and the framework "
-                f"derives gate role, actions, short-circuit, severity, "
-                f"cadence and aggregation from it. Declare the peek set once "
-                f"as health_peek_files and opt in with "
-                f"uses_health_peek_files=true."
+                f"derives gate role, actions, short-circuit, severity and "
+                f"cadence from it. Declare the peek set once as "
+                f"health_peek_files and opt in with "
+                f"uses_health_peek_files=true. The one declarable policy key "
+                f"is 'aggregation'."
+            )
+        return value
+
+    @field_validator("parameters")
+    @classmethod
+    def _declared_aggregation_is_an_implemented_mode(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """A declared ``aggregation`` must name a rule the runtime implements.
+
+        Phase A owns closed framework vocabularies — this is the same check
+        as "valid disposition names", applied to the one policy key a task
+        may now write. Without it a typo (``all_passs``) would parse, compose
+        into the pinned artifact, and only surface at gate-evaluation time as
+        a check ERROR: a configuration mistake wearing a Health verdict's
+        clothes, which §3.2 forbids.
+
+        Deliberately NOT a ``Literal`` on a typed field: ``parameters`` is an
+        open task-owned mapping and must stay one, so the vocabulary is
+        enforced on the value rather than on the field.
+        """
+        declared = value.get("aggregation")
+        if declared is None:
+            return value
+        if declared not in VALID_AGGREGATION_MODES:
+            raise ValueError(
+                f"aggregation {declared!r} is not a rule this runtime "
+                f"implements; valid modes: {sorted(VALID_AGGREGATION_MODES)}. "
+                f"A task may declare aggregation, but only from the "
+                f"framework's vocabulary."
             )
         return value
 
