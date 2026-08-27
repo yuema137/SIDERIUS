@@ -65,6 +65,7 @@ from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from core.iteration_manifest import verify_iteration_manifest
+from core.record_role import RecordRoleError, formal_evidence_of
 from core.resume import ResumeError, validate_workspace_layout
 
 _RUN_ITER_RE = re.compile(r"^iteration_(\d+)$")
@@ -78,6 +79,13 @@ class IterationReport:
     Same shape for both layouts so :func:`render_table` is layout-agnostic.
     ``model_subdir`` and ``run_output_path`` are only populated by the
     legacy run-layout walk; chain-layout reports leave them ``None``.
+
+    ``best_score`` is the tuner's MIXED best — ``top_record`` over all
+    records, trial and formal — and is rendered under a column that says so.
+    ``formal_best_score`` is the authoritative one (F-SCANB-3): it is
+    ``None`` for an iteration that ran only trial rounds, which is exactly
+    the state the single mixed column used to conceal. Defaulted, so the
+    dozen non-COMMITTED constructions below are unchanged.
     """
 
     iter_idx: int
@@ -88,11 +96,32 @@ class IterationReport:
     model_type: str | None
     best_score: float | None
     detail: str
+    formal_best_score: float | None = None
 
 
 # ---------------------------------------------------------------------------
 # Legacy run-layout walk (unchanged behaviour)
 # ---------------------------------------------------------------------------
+
+
+def _formal_evidence_detail(parsed: HyperparamTuningOutput) -> str:
+    """The formal-evidence fragment of a report's ``detail`` (F-SCANB-3).
+
+    Degrades rather than raises. The role authority refuses an anomalous
+    ``is_trial`` / ``trial_portion`` shape LOUDLY because a silent choice
+    there could silently move a campaign winner — but that refusal belongs
+    to the winner scanner (``gold_campaign_state``), which runs right after
+    this walk and fails closed with the record named. This walk is chain
+    bookkeeping: it must not turn a reporting call into an uncaught crash
+    that PRE-EMPTS that refusal and downgrades a named rc-2 into rc 1.
+
+    The anomaly is stated in the row instead of being swallowed.
+    """
+    try:
+        evidence = formal_evidence_of(parsed)
+    except RecordRoleError as exc:
+        return f"formal_success=? anomalous_role_shape ({exc})"
+    return f"formal_success={evidence.formal_success_count}/{evidence.record_count}"
 
 
 def _find_workspace_root(run_dir: Path, run_name: str) -> Path:
@@ -198,7 +227,11 @@ def inspect_iteration(iter_dir: Path, run_name: str) -> IterationReport:
         status="COMMITTED",
         model_type=parsed.model_type,
         best_score=parsed.best_denoising_score,
-        detail=f"status={parsed.status} rounds={parsed.completed_rounds}",
+        detail=(
+            f"status={parsed.status} rounds={parsed.completed_rounds} "
+            f"{_formal_evidence_detail(parsed)}"
+        ),
+        formal_best_score=parsed.best_formal_denoising_score,
     )
 
 
@@ -377,7 +410,11 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
         status="COMMITTED",
         model_type=parsed.model_type,
         best_score=parsed.best_denoising_score,
-        detail=f"status={parsed.status} rounds={parsed.completed_rounds}",
+        detail=(
+            f"status={parsed.status} rounds={parsed.completed_rounds} "
+            f"{_formal_evidence_detail(parsed)}"
+        ),
+        formal_best_score=parsed.best_formal_denoising_score,
     )
 
 
@@ -407,19 +444,26 @@ def find_iter_gap(reports: list[IterationReport]) -> int | None:
 def render_table(reports: list[IterationReport]) -> str:
     """Render the summary table. Plain text, fixed-width columns.
 
-    Same columns for both layouts (Iter, Model, Status, Best Score,
-    Detail). Chain-layout reports populate Model + Best Score from the
-    parsed run_output, identical to the legacy walk.
+    Same columns for both layouts (Iter, Model, Status, Mixed Best, Formal
+    Best, Detail). Chain-layout reports populate them from the parsed
+    run_output, identical to the legacy walk.
+
+    F-SCANB-3 — the two score columns are separate on purpose. A single
+    "Best Score" column carrying ``best_denoising_score`` renders a TRIAL
+    score whenever an iteration ran no formal round, which is what every
+    v20 attempt-3 iteration did; the operator had no way to see it. "Formal
+    Best" is the authoritative number and shows "—" precisely then.
     """
     if not reports:
         return "(no iterations found)"
-    header = ("Iter", "Model", "Status", "Best Score", "Detail")
+    header = ("Iter", "Model", "Status", "Mixed Best", "Formal Best", "Detail")
     rows = [header] + [
         (
             f"{r.iter_idx:03d}",
             r.model_type or "—",
             r.status,
             f"{r.best_score:.6f}" if r.best_score is not None else "—",
+            f"{r.formal_best_score:.6f}" if r.formal_best_score is not None else "—",
             r.detail,
         )
         for r in reports

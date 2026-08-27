@@ -45,12 +45,14 @@ Pins, per workspace:
 
 - the resolved data scope,
 - whether health gates are enabled,
-- the sha256 of the effective health configuration.
+- the sha256 of the effective health configuration,
+- the formal evaluation fraction (`formal_eval_portion`).
 
 A resume, seed or reuse with any of these different **fails at startup**.
 
-This exists because **aggregate scalars are only comparable within one scope and
-one health configuration.** A workspace that silently accepted a changed value
+This exists because **aggregate scalars are only comparable within one scope,
+one evaluation fraction and one health configuration.** A workspace that
+silently accepted a changed value
 would produce numbers incomparable with its own history, and nothing downstream
 could tell.
 

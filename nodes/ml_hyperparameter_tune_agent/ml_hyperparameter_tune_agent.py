@@ -144,6 +144,7 @@ from nodes.ml_hyperparameter_tune_agent.records import (
     _PHASE_FAILURE_TEXT,
     _STATUS_FOR_REASON,
     INFRASTRUCTURE_FAILURE_STATUS,
+    LLM_PROVIDER_FAILURE_REASON,
     RESOURCE_ADMISSION_REASONS,
     RESOURCE_ADMISSION_STATUS,
     _attach_runtime_evidence,
@@ -162,6 +163,7 @@ from nodes.ml_hyperparameter_tune_agent.records import (
     _resume_progress,
     _validate_history_and_lock,
     build_attempt_record,
+    classify_attempt_failure_disposition,
     finalize_run_output,
 )
 from nodes.ml_hyperparameter_tune_agent.runtime import (
@@ -228,6 +230,9 @@ _runtime = _import_module("nodes.ml_hyperparameter_tune_agent.runtime")
 # operator 2026-08-16; enforced by tests/unit/nodes/test_node_public_boundary.py).
 __all__ = [
     "INFRASTRUCTURE_FAILURE_STATUS",
+    # F-SCANF-2 — the LLM/provider infrastructure reason, public beside the
+    # status vocabulary it resolves through.
+    "LLM_PROVIDER_FAILURE_REASON",
     "PARTIAL_CAMPAIGN_EXIT_CODE",
     "PREFLIGHT_CONSUMER_ACTIONS",
     "PREPHASE_MEASUREMENT_DEADLINE_SECONDS",
@@ -548,6 +553,9 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
         lit_review_enabled=agent_input.lit_review_enabled,
         lit_review_config_sha256=agent_input.lit_review_config_sha256,
         baseline_isolation=agent_input.baseline_isolation,
+        # F-SCANF-1 — the formal round's evaluation FRACTION, CANONICAL, so
+        # it is threaded explicitly here rather than read ambiently.
+        formal_eval_portion=agent_input.formal_eval_portion,
     )
 
 
@@ -1632,11 +1640,20 @@ class HyperparamTuningAgent:
                     traceback.print_exc()
                     failure_reason = str(e)
                     failure_type = _classify_attempt_failure(e, stage.name)
+                    # F-SCANF-2 — WHOSE failure this is. A provider outage
+                    # used to be recorded as `status="error"` with the budget
+                    # consumed and a narrative telling the next planner not to
+                    # repeat "the failing configuration", so an API timeout
+                    # reached the model as a verdict on the candidate. The
+                    # decision is a typed boundary in `records` rather than a
+                    # branch here: `run()` sits at pyright's complexity
+                    # ceiling, and this handler must stay a substitution.
+                    disposition = classify_attempt_failure_disposition(e, failure_type=failure_type)
                     traceback_summary = traceback.format_exc()[-4000:]
                     failure_record = {
                         "record_type": "attempt_failure",
                         "exp_id": exp_id,
-                        "status": "error",
+                        "status": disposition.status,
                         "model_type": model_type,
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "file_index": file_index,
@@ -1649,17 +1666,14 @@ class HyperparamTuningAgent:
                         "proposed_config": record_params,
                         "traceback_summary": traceback_summary,
                         "counts_toward_completed_rounds": False,
-                        "counts_toward_attempt_budget": True,
+                        "counts_toward_attempt_budget": (disposition.counts_toward_attempt_budget),
                         "memory": {
                             "expert_advice_followed": expert_advice_str,
                             "hypothesis": hypothesis,
-                            "conclusion": f"Attempt failed during {stage.name}: {failure_reason}",
-                            "discovery": (
-                                f"{failure_type} in {stage.name}; proposed_config={record_params}"
-                            ),
-                            "memory_update": (
-                                "Do not repeat the failing configuration unchanged. "
-                                f"Correct the {stage.name} failure before retrying."
+                            **disposition.memory_narrative(
+                                failure_stage=stage.name,
+                                failure_reason=failure_reason,
+                                record_params=record_params,
                             ),
                             "round_index": round_index,
                             "attempt_in_round": attempt_in_round,

@@ -374,6 +374,35 @@ class TestArgparseSurface:
 # ===========================================================================
 
 
+_UNSET = object()
+
+
+def _formal_success_records(score):
+    """One FORMAL success record, built through the model (F-SCANB-3).
+
+    Real ``ExperimentRecord`` instances, so ``model_dump()`` materialises
+    ``is_trial: False`` exactly as the persisted artifact does. A stub that
+    hand-built dicts would let the role rule be tested against a shape
+    production never writes — the #316 B2 hazard.
+    """
+    if score is None:
+        return []
+    from agent.schemas.hyperparam_tuning import ExperimentMemory, ExperimentRecord
+
+    return [
+        ExperimentRecord(
+            exp_id="stub_formal",
+            status="success",
+            model_type="wavenet",
+            timestamp="2026-08-27T00:00:00Z",
+            params={},
+            denoising_score=score,
+            is_trial=False,
+            memory=ExperimentMemory(expert_advice_followed="n/a", hypothesis="n/a", round_index=1),
+        )
+    ]
+
+
 class _StubResult:
     """Minimal HyperparamTuningOutput-shaped object for write_manifest."""
 
@@ -385,9 +414,19 @@ class _StubResult:
         formal_reference_score=None,
         resolved_skip_formal_threshold=None,
         resolved_bypass_formal_threshold=None,
+        formal_score=_UNSET,
+        all_records=None,
     ):
         self.model_type = model_type
         self.best_denoising_score = score
+        # F-SCANB-3 — production's tuning output carries the FORMAL best and
+        # the records it was derived from, and the manifest's headline score
+        # is now read from them. A stub without either modelled an iteration
+        # that cannot exist. Default: this stub's round WAS formal.
+        self.best_formal_denoising_score = score if formal_score is _UNSET else formal_score
+        self.all_records = (
+            _formal_success_records(score) if all_records is None else list(all_records)
+        )
         self.completed_rounds = 3
         self.health_checks_config = health_checks_config
         self.formal_reference_score = formal_reference_score

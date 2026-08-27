@@ -1855,6 +1855,10 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
         # edit it exists to catch.
         advice_sha256=launch.advice_sha256,
         advice_path=launch.advice_path,
+        # F-SCANF-1 — the formal round's evaluation FRACTION, from the SAME
+        # launch config the tuner child receives it from, so the chain lock
+        # and the tuner sub-workspace lock cannot disagree.
+        formal_eval_portion=launch.formal_eval_portion,
     )
 
 

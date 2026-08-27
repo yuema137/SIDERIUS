@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any, ClassVar, TypedDict, cast
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import APIError, OpenAI
 from openai.types.chat import ChatCompletionMessageFunctionToolCall
 from pydantic import ValidationError
 
@@ -123,6 +123,24 @@ class _ProviderConfig(TypedDict):
 #: it: a provider whose own key env IS this one cannot be handed a foreign
 #: credential by that fallback.
 _SDK_FALLBACK_KEY_ENV = "OPENAI_API_KEY"
+
+#: The LLM PROVIDER TRANSPORT failure surface, declared ONCE, here, by the
+#: module that owns the transport (F-SCANF-2).
+#:
+#: Every provider this bridge speaks to is reached through the same
+#: OpenAI-compatible client — ``_KNOWN_PROVIDERS`` below maps each to a
+#: ``base_url``, and ``_call_with_retry`` is the single boundary all of them
+#: cross. ``openai.APIError`` is the single root of everything that boundary
+#: can raise: connection failures, timeouts and HTTP-status failures alike.
+#: ``_call_with_retry`` re-raises the SDK exception UNWRAPPED once its bounded
+#: budget is exhausted (and immediately for a non-retryable status), and
+#: neither ``plan`` nor ``reflect`` catches it, so this is exactly what a
+#: consumer sees.
+#:
+#: Exported as TYPES rather than as a list of names so an ``isinstance`` check
+#: covers every present and future subclass, and so no consumer has to
+#: re-derive the provider surface from a string match on a class name.
+LLM_PROVIDER_TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (APIError,)
 
 _KNOWN_PROVIDERS: dict[str, _ProviderConfig] = {
     "openai": {

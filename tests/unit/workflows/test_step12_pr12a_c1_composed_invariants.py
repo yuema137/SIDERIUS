@@ -114,6 +114,12 @@ def _preflight_args(workspace: str) -> argparse.Namespace:
         advice=None,
         human_advice_file=None,
         advice_sha256=None,
+        # F-SCANF-1 — the formal evaluation fraction, parser default verbatim
+        # (`run_one_iteration.build_parser`: `--formal_eval_portion`,
+        # `default=1.0`). Present here because the real namespace always
+        # carries it: reading it defensively in production would let this
+        # fixture certify a namespace argparse never produces.
+        formal_eval_portion=1.0,
     )
 
 

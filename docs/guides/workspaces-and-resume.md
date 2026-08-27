@@ -137,7 +137,9 @@ At startup a run writes (or validates against)
 - whether health gates are enabled,
 - the sha256 of the effective health configuration,
 - the sha256 of the **advice artifact** the run consumed, when it consumed one
-  (`advice_sha256`, from `--advice` / `--human_advice_file`).
+  (`advice_sha256`, from `--advice` / `--human_advice_file`),
+- the **formal evaluation fraction** (`formal_eval_portion`, from
+  `--formal_eval_portion`).
 
 Any resume, seed or reuse with one of these different fails at startup with a
 message naming the mismatch. That failure is the guard working — see
@@ -162,6 +164,25 @@ advice is optional where the fields above are not:
 The last row is deliberate. "Nothing recorded" is not "nothing was consumed", so
 an existing workspace cannot be adopted into an advice-bound campaign: its
 treatment cannot be reconstructed. Start a new workspace.
+
+The **formal evaluation fraction** is pinned for the reason the data scope is:
+an aggregate score is only comparable within one evaluation scope, so two
+iterations that scored different fractions of the data are not one experiment.
+It was recorded long before it was compared, and "recorded" folded them into
+one incumbent with no refusal. Its legacy table has one row that differs from
+advice's, because the value is never absent at launch — every run resolves a
+real fraction, and the default is the full scope:
+
+| workspace lock | this run | outcome |
+|---|---|---|
+| no fraction recorded | the full scope (`1.0`, the default) | resumes — every workspace that predates the pin |
+| `0.1` | `0.1` | resumes |
+| `0.1` | any other fraction | refuses |
+| no fraction recorded | a declared fraction such as `0.1` | **refuses** |
+
+The last row is the same deliberate call as advice's: a workspace written
+before the pin carries no record of the fraction it evaluated, so a run that
+declares one cannot be shown comparable to it. Start a new workspace.
 
 The digest is always computed from the bytes the run actually read. A launcher
 may additionally declare `--advice_sha256`; that value is *certified* against

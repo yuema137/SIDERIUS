@@ -259,6 +259,42 @@ class RunInvariants(BaseModel):
     # byte-identical.
     advice_sha256: str | None = None
     advice_path: str | None = None
+    # F-SCANF-1 (D-FAIL-7 known_gap G4) — the FRACTION of the eval scope a
+    # FORMAL round scores over. It was recorded as per-file-best provenance
+    # (`execute_tools/per_file_best.py`, "from run_config; null for legacy")
+    # and existed as a CLI argument, but was not a declared invariant at all
+    # — neither `_CANONICAL` nor `_PROVENANCE` — so two iterations whose
+    # formal evaluation covered different fractions of the data folded into
+    # one incumbent with no refusal. Recorded was not enforced, and D-FAIL-7
+    # lists "train / eval portions" among the values a resume must verify.
+    #
+    # CANONICAL: aggregate scalars are only comparable within one evaluation
+    # scope, exactly as `resolved_data_scope` above is only comparable within
+    # one file subset.
+    #
+    # WHY THE DEFAULT IS 1.0 AND NOT `None`. The five rows this produces:
+    #
+    #     stored absent + current 1.0  -> COMPATIBLE (legacy regime)
+    #     stored absent + current 0.1  -> REFUSE
+    #     stored 0.1    + current 0.1  -> COMPATIBLE
+    #     stored 0.1    + current 1.0  -> REFUSE
+    #     stored 0.1    + current 0.5  -> REFUSE
+    #
+    # Every entry point resolves a real float (the CLI default is 1.0), so an
+    # OPTIONAL `str | None`-shaped declaration in the `advice_sha256` mould
+    # would put a real value opposite every legacy lock's `None` and refuse
+    # EVERY pre-existing workspace's resume. Defaulting to the framework's own
+    # 1.0 instead confines the refusal to workspaces whose current run declares
+    # a NON-DEFAULT portion — precisely the ones whose comparability the lock
+    # cannot otherwise establish. The residual, accepted deliberately: a legacy
+    # lock cannot distinguish "ran at 1.0" from "predates the field", so a
+    # legacy workspace resumed at 1.0 is admitted. Making that distinguishable
+    # needs a conditional-comparison surface, which the `advice_sha256` block
+    # above forbids by name (R-11-6).
+    #
+    # Omitted from the serialized lock at 1.0 (see `write_run_invariants`), so
+    # every legacy and every full-eval lock file stays byte-identical.
+    formal_eval_portion: float = 1.0
     created_at: str | None = None
     # Step 11 C3 (R-11-6) — the per-role subprocess memory ceilings this
     # run executed under, plus their provenance. RECORDED, never compared.
@@ -342,6 +378,11 @@ class RunInvariants(BaseModel):
         # actually received. Optional, so `None` vs `None` keeps every
         # no-advice workspace resumable (see the field's declaration).
         "advice_sha256",
+        # F-SCANF-1 — the formal round's evaluation FRACTION. Aggregate
+        # scalars are only comparable within one evaluation scope; this is
+        # `resolved_data_scope`'s sibling one axis over (see the field's
+        # declaration for the five-row table and the legacy-lock consequence).
+        "formal_eval_portion",
     )
 
     #: Fields RECORDED for audit and never compared (Step 11 C3, R-11-6).
@@ -607,6 +648,14 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
         payload.pop("advice_sha256", None)
     if payload.get("advice_path") is None:
         payload.pop("advice_path", None)
+    # F-SCANF-1 — same rule for the formal eval fraction, and here too the
+    # omission is load-bearing rather than cosmetic: it makes "this run scored
+    # the whole eval scope" and "this lock predates the pin" the SAME stored
+    # value, which is what confines the new refusal to workspaces that declare
+    # a NON-DEFAULT portion (the field's declaration states the five rows and
+    # the residual this accepts).
+    if payload.get("formal_eval_portion") == 1.0:
+        payload.pop("formal_eval_portion", None)
     fd, tmp_path = tempfile.mkstemp(dir=workspace, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
@@ -750,6 +799,13 @@ class LockLaunchIdentity(BaseModel):
     #: byte-identical lock.
     advice_sha256: str | None = None
     advice_path: str | None = None
+    #: F-SCANF-1 — the FORMAL round's evaluation fraction. It rides the
+    #: carrier for the reason the carrier exists: one origin (the launch
+    #: argument), one destination (the lock). CANONICAL, so every entry point
+    #: that participates threads it explicitly — a compared value must never
+    #: arrive ambiently. The default is the framework's own full-eval value,
+    #: so a caller that omits it gets a byte-identical lock.
+    formal_eval_portion: float = 1.0
 
 
 #: The unlabelled default — module-level so call sites can splat a shared
@@ -903,6 +959,8 @@ def build_run_invariants(
             # that follows the edit it exists to catch is not a pin).
             advice_sha256=_launch_identity.advice_sha256,
             advice_path=_launch_identity.advice_path,
+            # F-SCANF-1 — CANONICAL, threaded explicitly like the six above.
+            formal_eval_portion=_launch_identity.formal_eval_portion,
             # Step 11 C3 (R-11-6) — stamped at the SAME shared builder, for
             # the same reason C9d is: every entry point then records the
             # ceilings its children actually ran under. Provenance, never

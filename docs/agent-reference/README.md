@@ -68,7 +68,7 @@ Each node owns one stage. Its `.md` is the contract.
 | [`ml_model_proposal_agent`](../../nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) | propose an architecture and an explicit prediction | ✅ | `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py:2352` |
 | [`ml_model_implementor`](../../nodes/ml_model_implementor/ml_model_implementor.md) | write the model plugin (and optional loss plugin) | ✅ | `nodes/ml_model_implementor/ml_model_implementor.py:2362` |
 | [`ml_code_validator_agent`](../../nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ | `nodes/ml_code_validator_agent/ml_code_validator_agent.py:896` |
-| [`ml_hyperparameter_tune_agent`](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1750` (parser and input builder in `cli.py`) |
+| [`ml_hyperparameter_tune_agent`](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1764` (parser and input builder in `cli.py`) |
 
 All six nodes are standalone-capable — each exposes an `argparse` `main()`
 behind `if __name__ == "__main__":` at the line cited

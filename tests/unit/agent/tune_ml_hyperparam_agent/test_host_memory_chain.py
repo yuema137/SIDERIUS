@@ -45,6 +45,7 @@ from agent.skills.evaluate_vram_skill.isolated_probe import (
 )
 from agent.skills.evaluate_vram_skill.preflight_adapter import adapt_result
 from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
+from nodes.ml_hyperparameter_tune_agent.records import classify_attempt_failure_disposition
 
 MIB = 1024**2
 
@@ -162,6 +163,16 @@ class TestHowTheAttemptIsAccounted:
     honest about what is being checked -- that the ONE place these records
     are built sets both flags -- without pretending an end-to-end run
     happened.
+
+    F-SCANF-2 UPGRADE. `counts_toward_attempt_budget` is no longer a literal
+    in that dict: it is read from `classify_attempt_failure_disposition`,
+    because an LLM/provider outage must NOT spend scientific opportunity
+    while a host-memory refusal still must. Reading the source literal can no
+    longer express the property, and would have gone green for the wrong
+    reason if it could -- the value production computes is now the whole
+    question. So the budget claim is asserted through that authority, for the
+    exception class THIS module is about; the round claim, still a literal,
+    keeps reading the dict.
     """
 
     @staticmethod
@@ -186,10 +197,23 @@ class TestHowTheAttemptIsAccounted:
                 }
         raise AssertionError("no attempt_failure record literal found in the tuner")
 
-    def test_a_blocked_preflight_consumes_an_attempt(self):
+    def test_a_blocked_preflight_consumes_an_attempt(self, adapted):
         """Otherwise a machine that stays busy could refuse forever inside
-        one round without ever exhausting the budget."""
-        assert self._attempt_failure_record_flags()["counts_toward_attempt_budget"] is True
+        one round without ever exhausting the budget.
+
+        Driven through the exception the host-memory chain actually raises,
+        and through the authority the loop actually asks — so a future
+        classifier change that quietly exempted this failure class would
+        fail here rather than pass on an unread literal.
+        """
+        with pytest.raises(InconclusivePreflight) as exc:
+            tuner._raise_if_preflight_blocks(adapted)
+
+        disposition = classify_attempt_failure_disposition(
+            exc.value, failure_type=tuner._classify_attempt_failure(exc.value, None)
+        )
+        assert disposition.counts_toward_attempt_budget is True
+        assert disposition.status == "error"
 
     def test_it_does_not_complete_a_scientific_round(self):
         """Nothing was measured, so nothing was learned. Counting it would

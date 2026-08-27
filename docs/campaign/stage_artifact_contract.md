@@ -35,6 +35,26 @@ prepare_iteration_dir`, `:805` — "Create `{workspace}/iter_{N:03d}`"):
       configs/ data/ ...                            # TidmadSandbox.dirs
 ```
 
+**Manifest scientific posture** (F-SCANB-3, additive; the three-value
+`status` vocabulary above is UNCHANGED). `status` is the CHAIN-CONTROL token
+— it answers "may the next iteration chain off this artifact?", which
+`core/resume.py`, Stage 3 and `scripts/inspect_run_state.py` all branch on,
+and a trial-only iteration still produces a consumable `run_output` and a
+restorable plugin. It never answered "did a formal round run?", and until
+this fix nothing did: `best_score` was `best_denoising_score`, the top
+record over ALL records with trial and formal mixed, so every v20 attempt-3
+manifest read `status: "completed"` with a TRIAL score as the headline. The
+manifest now carries, on EVERY branch:
+
+| key | meaning |
+|---|---|
+| `best_score` | the FORMAL best (`best_formal_denoising_score`); `null` when no formal round produced one |
+| `raw_best_score` | the mixed top score, unchanged, under the name that says what it is |
+| `formal_evidence` | `{record_count, formal_record_count, formal_success_count, has_formal_evidence}`, counted by the ONE role authority `core/record_role.is_formal_role` — the same rule this section's winner table states |
+
+`scripts/inspect_run_state.py` renders the two scores as separate columns
+("Mixed Best" / "Formal Best") and states `formal_success=K/N` per row.
+
 **FROZEN deliverable naming**: filenames resolve EXCLUSIVELY through the
 run's `DeliverableNaming` authority (`execute_tools/deliverable_spec.py`;
 construction helper `records._build_denoised_filename`). The shipped TIDMAD

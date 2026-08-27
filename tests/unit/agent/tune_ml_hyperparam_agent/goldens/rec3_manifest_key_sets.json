@@ -2,7 +2,8 @@
   "_captured_at": {
     "commit": "e9c9e91e3d53181b5e36429174438e4eca06d2a1",
     "note": "captured at clean tree (Step-00 0C capture); design \u00a717 rule 4",
-    "updated": "arXiv-readiness S2 / U5 (#258): every branch gains the manifest_sha256 self-digest stamped by core.iteration_manifest.publish_iteration_manifest; deliberate golden update, no other key moved"
+    "updated": "arXiv-readiness S2 / U5 (#258): every branch gains the manifest_sha256 self-digest stamped by core.iteration_manifest.publish_iteration_manifest; deliberate golden update, no other key moved",
+    "updated_f_scanb3": "F-SCANB-3: every branch gains `formal_evidence` \u2014 the typed count of the iteration's FORMAL records, stamped beside the status like health_feedback_policy / fixed_candidate_provenance / preflight_execution_mode. Deliberate golden update; no other key moved, and no key was removed (`best_score` keeps its name and changes only its SOURCE, from the mixed top record to the formal one)."
   },
   "completed": {
     "status": "completed",
@@ -16,6 +17,7 @@
       "completed_rounds",
       "fixed_candidate_provenance",
       "formal_comparison_reference_source",
+      "formal_evidence",
       "formal_reference_score",
       "health_checks_config",
       "health_config_sha256",
@@ -42,6 +44,7 @@
     "keys": [
       "best_score",
       "fixed_candidate_provenance",
+      "formal_evidence",
       "health_feedback_policy",
       "healthgate_mode",
       "iteration_dir",
@@ -58,6 +61,7 @@
     "keys": [
       "best_score",
       "fixed_candidate_provenance",
+      "formal_evidence",
       "health_feedback_policy",
       "healthgate_mode",
       "iteration_dir",

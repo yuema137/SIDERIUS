@@ -15,7 +15,8 @@ existing verifiers:
       winner-field table of ``docs/campaign/stage_artifact_contract.md``
       section 1: ``status == "success"``, ``is_trial`` ABSENT or ``False``
       (the persisted record always carries the materialized default —
-      see ``_is_formal_role``; #316 B2),
+      see ``core.record_role.is_formal_role``, the ONE role authority this
+      scanner shares with the iteration manifest; #316 B2),
       HealthGate-valid under the WORKSPACE'S OWN pinned effective config
       (``pinned_workspace_gate_ids`` + ``classify_under_pinned_policy``,
       the ONE eligibility authority,
@@ -77,6 +78,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.record_role import RecordRoleError, is_formal_role  # noqa: E402
 from execute_tools.dataset_config import DataScope  # noqa: E402
 from execute_tools.deliverable_spec import default_deliverable_naming  # noqa: E402
 from execute_tools.evaluation_metric import (  # noqa: E402
@@ -112,67 +114,6 @@ def _load_inspect_run_state():
 
 class StateRefusal(RuntimeError):
     """A fail-closed persisted-state refusal (gap, tamper, missing spec)."""
-
-
-def _is_formal_role(rec: dict[str, Any], where: str) -> bool:
-    """True iff ``rec`` is a FORMAL record — ``is_trial`` absent OR ``False``.
-
-    The FROZEN contract rule (``docs/campaign/stage_artifact_contract.md``
-    section 1, "FORMAL round" row), as three cases:
-
-    ==================  ========
-    ``is_trial``        role
-    ==================  ========
-    ``True``            trial (excluded)
-    ``False``           FORMAL
-    key absent          FORMAL
-    ==================  ========
-
-    The superseded wording ("formal == ABSENCE of the ``is_trial`` key")
-    described the BUILDER's IN-MEMORY dicts, where the key is set only on
-    trial records. It does NOT describe the shape this scanner reads.
-    ``HyperparamTuningOutput.all_records: list[ExperimentRecord]``
-    re-validates every dict into the model, so ``model_dump()``
-    (``nodes/ml_hyperparameter_tune_agent/records.py``: ``:1041``
-    ``model_validate`` -> ``:1046`` ``model_dump`` -> ``:1052``
-    ``publish_json_atomically``) MATERIALIZES the field defaults
-    ``is_trial: False`` and ``trial_portion: None`` onto EVERY PERSISTED
-    formal record. Under the absence test every real formal record was
-    discarded, so this scanner's champion set was permanently empty — and
-    an empty champion set is silent, not loud: Stage 1 still exits 0 and
-    burns its whole horizon, and Stage 2 refuses all 16 units at
-    ``stage2-finalize``.
-
-    The falsy-tolerant test matches the two sibling readers that already
-    got this right — the ``BestTracks`` authority
-    (``nodes/ml_hyperparameter_tune_agent/policy.py``:
-    ``not r.get("is_trial", False)``) and Stage-3's ``_formal_role``
-    (``scripts/stage3/stage3_composed_best.py``, Q-S3-3).
-
-    A NON-BOOL ``is_trial``, or a non-``None`` ``trial_portion`` on a
-    record whose ``is_trial`` is not ``True``, is a shape production never
-    writes: refused LOUDLY rather than silently classified either way,
-    because a silent choice here could silently move the winner.
-
-    Raises:
-        StateRefusal: on an anomalous role shape (the refusal type this
-            module's callers already catch and turn into rc 2).
-    """
-    role = rec.get("is_trial")
-    if role is True:
-        return False
-    if role is not None and role is not False:
-        raise StateRefusal(
-            f"record {where} carries is_trial={role!r} — a non-bool role is a "
-            f"shape production never writes; refusing an anomalous role shape."
-        )
-    if rec.get("trial_portion") is not None:
-        raise StateRefusal(
-            f"record {where} is formal-shaped (is_trial={role!r}) but carries "
-            f"trial_portion={rec['trial_portion']!r} — a trial-only value "
-            f"(#316 B2); refusing."
-        )
-    return True
 
 
 class BandIncumbent(BaseModel):
@@ -270,8 +211,11 @@ def _scan_formal_candidates(
                     continue
                 # Contract section 1: formal == `is_trial` ABSENT or False.
                 # NOT "absence of the key" — the persisted record always
-                # carries the materialized default. See _is_formal_role.
-                if not _is_formal_role(rec, f"{ro_path} exp_id={rec.get('exp_id')!r}"):
+                # carries the materialized default. The rule lives in
+                # `core.record_role` because the iteration manifest asks the
+                # same question (F-SCANB-3); a second copy here is how the
+                # `"is_trial" in rec` variant survived (#316 B2).
+                if not is_formal_role(rec, f"{ro_path} exp_id={rec.get('exp_id')!r}"):
                     continue
                 score = rec.get("denoising_score")
                 if (
@@ -421,7 +365,10 @@ def cmd_band_state(args: argparse.Namespace) -> int:
     try:
         candidates, spec, counts = _scan_formal_candidates(workspace, iter_dirs, require_valid=True)
         winner = _pick_winner(candidates, spec)
-    except StateRefusal as exc:
+    # `RecordRoleError` is the shared role authority's own refusal; it is
+    # caught beside this module's because an anomalous role shape is the same
+    # fail-closed rc-2 outcome it always was.
+    except (StateRefusal, RecordRoleError) as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 2
 
@@ -577,7 +524,7 @@ def cmd_stage2_finalize(args: argparse.Namespace) -> int:
             workspace, iter_dirs, require_valid=False
         )
         winner = _pick_winner(candidates, spec)
-    except StateRefusal as exc:
+    except (StateRefusal, RecordRoleError) as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 2
     if winner is None:

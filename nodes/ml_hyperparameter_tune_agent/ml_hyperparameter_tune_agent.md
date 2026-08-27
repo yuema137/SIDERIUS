@@ -529,6 +529,35 @@ rejected as a misconfiguration rather than assumed):
 Headroom is a measured fact, not a posture — a trial run does not get to
 disbelieve arithmetic.
 
+**An LLM or provider failure is infrastructure too** (F-SCANF-2). The
+`skipped_infrastructure_failure` status and its reason vocabulary existed
+and were correct, but the map covered only admission reasons, so a provider
+outage reaching the planner or the reflector was recorded as an ordinary
+candidate failure — budget consumed, and a memory narrative telling the next
+planner "Do not repeat the failing configuration unchanged". An API timeout
+arrived at the model as a verdict on the candidate, which frozen `D-FAIL-1`
+/ `D-FAIL-5` forbid.
+
+The attempt handler now asks `records.classify_attempt_failure_disposition`
+for the record's posture. Anything that is not a declared provider transport
+failure keeps its previous posture exactly:
+
+| Record | LLM / provider transport failure | any other exception |
+|---|---|---|
+| `status` | `skipped_infrastructure_failure` | `error` |
+| `counts_toward_attempt_budget` | `False` | `True` |
+| `memory.reason_code` | `llm_provider_unavailable` | *(key absent)* |
+| `memory.memory_update` | "Do NOT change the configuration in response to this…" | "Do not repeat the failing configuration unchanged…" (unchanged wording) |
+
+The transport surface is declared by the module that owns it —
+`agent.llm_bridge.LLM_PROVIDER_TRANSPORT_ERRORS`, matched by `isinstance`
+so a provider-SDK subclass nobody enumerated still classifies correctly.
+
+**Scope**: this is the REPORTING half of "an infrastructure failure must not
+consume scientific opportunity". Whether such a failure should also be
+RETRIED into the same scientific opportunity is `D-FAIL-2`'s accounting
+half, which lives in the attempt loop's control flow and is unchanged here.
+
 **Accounting.** A refusal consumes the current attempt slot (planning,
 pre-flight and admission really ran, and not consuming it risks refusing
 forever while the device stays busy) but is **not** a candidate failure:

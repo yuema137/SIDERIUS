@@ -69,6 +69,7 @@ from core.iteration_manifest import (
     manifest_path,
     publish_iteration_manifest,
 )
+from core.record_role import formal_evidence_of
 from core.resume import ResumeError, restore_prior_state
 from core.run_invariants import (
     LockLaunchIdentity,
@@ -742,13 +743,26 @@ def write_manifest(
         # or returned no score (gate exhaustion or LLM-level dead-end).
         # Mark as no_records so the chain continues; resume will see the
         # null output_path and skip this iter cleanly.
+        #
+        # `score` is CHAINABILITY, not science: it is `top_record` over ALL
+        # records, trial and formal mixed (records.py), so it answers "is
+        # there an artifact for the next iteration to consume?" and nothing
+        # else. `status` keeps deriving from it because the manifest status
+        # vocabulary is FROZEN at completed|failed|no_records
+        # (docs/campaign/stage_artifact_contract.md section 1) and is the
+        # token core/resume.py, stage3 and the inspector branch on — a
+        # trial-only iteration DID produce a consumable run_output and a
+        # restorable plugin.
         score = tune_output.best_denoising_score
         manifest = {
             "status": "completed" if score is not None else "no_records",
             "iteration_dir": iter_dir,
             "output_path": output_path if score is not None else None,
             "model_name": model_name,
-            "best_score": score,
+            # The headline number is the FORMAL best — `None` when no formal
+            # round produced one. The mixed top score keeps its own key
+            # below, under the name that says what it is.
+            "best_score": getattr(tune_output, "best_formal_denoising_score", None),
             "raw_best_score": score,
             "best_valid_score": getattr(tune_output, "best_valid_denoising_score", None),
             "raw_best_formal_score": getattr(tune_output, "best_formal_denoising_score", None),
@@ -804,6 +818,20 @@ def write_manifest(
                 for chunk in iter(lambda: f.read(1 << 20), b""):
                     digest.update(chunk)
             manifest["run_output_sha256"] = digest.hexdigest()
+
+    # F-SCANB-3 — what this iteration produced SCIENTIFICALLY, beside the
+    # chainability status rather than inside it, computed by the shared role
+    # authority (`core.record_role`) over the persisted record shape. All ten
+    # v20 attempt-3 manifests read `status: completed` with a best_score
+    # between 0.479 and 10.708 while carrying ZERO formal records, so an
+    # operator — and every trajectory built from these manifests — read trial
+    # scores as the campaign's results while the status concealed that no
+    # formal round had ever run.
+    #
+    # Stamped on EVERY branch, like the three stamps below: a crashed or
+    # record-less iteration produced no formal evidence either, and an
+    # all-zero posture is the honest way to say so.
+    manifest["formal_evidence"] = formal_evidence_of(tune_output).model_dump()
 
     # V19 PR 3 (§3.9) — the chain's structured-health-feedback CONTROL
     # POLICY (flag + retention), stamped on EVERY manifest branch
@@ -2287,6 +2315,11 @@ def compute_expected_invariants(
             # advice-bound run (the V19 PR 2 rule, one field family over).
             advice_sha256=identity.advice_sha256,
             advice_path=identity.advice_path,
+            # F-SCANF-1 — the formal round's evaluation FRACTION, from the
+            # SAME namespace `WorkflowLaunchConfig` receives it from, so this
+            # pre-flight and `run_workflow`'s own lock for this workspace
+            # cannot contradict each other.
+            formal_eval_portion=args.formal_eval_portion,
         ),
     )
     return invariants
@@ -3242,7 +3275,12 @@ def main():
         print("=" * 60)
         print(f"  ITERATION {args.start_iteration} COMPLETE")
         print(f"  Model      : {manifest['model_name']}")
-        print(f"  Best score : {manifest['best_score']}")
+        # F-SCANB-3 — labelled for what it now is. This line used to read
+        # "Best score" over whichever score topped the MIXED pool, so a
+        # trial-only iteration announced a trial number under the word
+        # COMPLETE. It is the formal best, and `None` when no formal round
+        # produced one.
+        print(f"  Formal best: {manifest['best_score']}")
         print(f"  Output     : {manifest['output_path']}")
         print("=" * 60)
         sys.exit(0)

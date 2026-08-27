@@ -18,6 +18,9 @@ import os
 import time
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
+from agent.llm_bridge import LLM_PROVIDER_TRANSPORT_ERRORS
 from agent.schemas.hyperparam_tuning import (
     ExperimentRecord,
     HyperparamTuningOutput,
@@ -339,13 +342,141 @@ RESOURCE_ADMISSION_REASONS = (
     "measurement_unavailable",
     "policy_unavailable",
 )
+#: F-SCANF-2 — the LLM PROVIDER channel failed: an API/network/timeout error
+#: reaching the planner or the reflector. NOT an admission reason (it is
+#: deliberately absent from ``RESOURCE_ADMISSION_REASONS`` above, so
+#: ``_build_resource_admission_record`` still refuses it), but it resolves
+#: through the SAME reason -> status map, because "which statuses mean
+#: infrastructure" must have one answer.
+LLM_PROVIDER_FAILURE_REASON = "llm_provider_unavailable"
 #: reason_code -> top-level status. Only a genuine headroom verdict may
 #: claim a resource refusal; everything else is infrastructure.
 _STATUS_FOR_REASON = {
     "insufficient_headroom": RESOURCE_ADMISSION_STATUS,
     "measurement_unavailable": INFRASTRUCTURE_FAILURE_STATUS,
     "policy_unavailable": INFRASTRUCTURE_FAILURE_STATUS,
+    LLM_PROVIDER_FAILURE_REASON: INFRASTRUCTURE_FAILURE_STATUS,
 }
+
+
+class AttemptFailureDisposition(BaseModel):
+    """Whose failure a caught attempt exception is (F-SCANF-2).
+
+    ``INFRASTRUCTURE_FAILURE_STATUS`` and its reason vocabulary existed and
+    were correctly designed, but the map only covered resource-admission
+    reasons, and its only callers were the admission path. A grep of this
+    module for ``LLMError``, ``llm_error``, ``APIError`` or ``provider``
+    returned ZERO matches — so an LLM or provider outage was recorded with
+    ``status: "error"``, ``counts_toward_attempt_budget: True``, and a memory
+    narrative instructing the planner "Do not repeat the failing configuration
+    unchanged". A provider timeout reached the model as a verdict on the
+    candidate. That violates frozen ``D-FAIL-1``/``D-FAIL-5``: an
+    infrastructure failure must not consume scientific opportunity, and this
+    is the REPORTING half of that rule.
+
+    Scope, stated so it is not over-read: this decides the RECORD — its
+    status, its budget accounting and the narrative the next planner reads.
+    It does not change the attempt loop's control flow. Whether a provider
+    outage should also be RETRIED into the same scientific opportunity is
+    ``D-FAIL-2``'s accounting half, which lives in ``run()``'s retry
+    structure and is not settled here.
+
+    Attributes:
+        status: The record's top-level status.
+        failure_type: The typed classification, from the existing
+            ``_classify_attempt_failure`` authority — never re-derived here.
+        reason_code: The infrastructure reason, or ``None`` for a genuine
+            candidate failure.
+        counts_toward_attempt_budget: Whether this attempt spent scientific
+            opportunity.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    status: str
+    failure_type: str
+    reason_code: str | None
+    counts_toward_attempt_budget: bool
+
+    def memory_narrative(
+        self, *, failure_stage: str, failure_reason: str, record_params: dict
+    ) -> dict[str, str]:
+        """The conclusion / discovery / memory_update the next planner reads.
+
+        The candidate-failure wording is UNCHANGED, byte for byte: a real
+        code bug, schema violation or OOM must still teach exactly what it
+        taught before. Only the infrastructure branch is new, and it says
+        what the resource-admission builder's wording says one channel over —
+        that nothing about the candidate was established.
+
+        Returns the three keys in their existing order, so the record's
+        ``memory`` key order is unchanged; the infrastructure branch appends
+        ``reason_code``, mirroring where ``_build_skip_record`` places its
+        ``memory_extra``.
+        """
+        if self.reason_code is None:
+            return {
+                "conclusion": f"Attempt failed during {failure_stage}: {failure_reason}",
+                "discovery": (
+                    f"{self.failure_type} in {failure_stage}; proposed_config={record_params}"
+                ),
+                "memory_update": (
+                    "Do not repeat the failing configuration unchanged. "
+                    f"Correct the {failure_stage} failure before retrying."
+                ),
+            }
+        return {
+            "conclusion": (
+                f"Not started or not completed: the LLM PROVIDER call failed during "
+                f"{failure_stage} ({self.failure_type}: {failure_reason}). This is an "
+                f"infrastructure condition and says NOTHING about the candidate — it "
+                f"was never judged."
+            ),
+            "discovery": (
+                f"{self.failure_type} in {failure_stage} — a provider-channel failure, "
+                f"NOT evidence about proposed_config={record_params}."
+            ),
+            "memory_update": (
+                "Do NOT change the configuration in response to this. The provider "
+                "call failed; no scientific conclusion may be drawn from this attempt."
+            ),
+            "reason_code": self.reason_code,
+        }
+
+
+def classify_attempt_failure_disposition(
+    exc: BaseException, *, failure_type: str
+) -> AttemptFailureDisposition:
+    """Decide whether ``exc`` is the candidate's failure or the environment's.
+
+    ``failure_type`` is passed in rather than computed, because the
+    classifier that produces it lives in ``runtime``, which imports THIS
+    module — deriving it here would close the one-way module graph into a
+    cycle. The status vocabulary and the reason -> status map live here, so
+    the DISPOSITION does too.
+
+    Args:
+        exc: The exception the attempt loop caught.
+        failure_type: The existing ``_classify_attempt_failure`` verdict.
+
+    Returns:
+        The typed disposition. Anything that is not a declared provider
+        transport failure keeps the pre-existing candidate-failure posture
+        exactly: ``status="error"``, budget consumed.
+    """
+    if isinstance(exc, LLM_PROVIDER_TRANSPORT_ERRORS):
+        return AttemptFailureDisposition(
+            status=_STATUS_FOR_REASON[LLM_PROVIDER_FAILURE_REASON],
+            failure_type=failure_type,
+            reason_code=LLM_PROVIDER_FAILURE_REASON,
+            counts_toward_attempt_budget=False,
+        )
+    return AttemptFailureDisposition(
+        status="error",
+        failure_type=failure_type,
+        reason_code=None,
+        counts_toward_attempt_budget=True,
+    )
 
 
 def _build_skip_record(

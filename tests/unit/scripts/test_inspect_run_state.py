@@ -369,6 +369,94 @@ def test_chain_human_view_includes_model_and_best_score(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+class TestTheOperatorViewSeparatesFormalFromMixed:
+    """F-SCANB-3 — the operator's score column showed a TRIAL score.
+
+    ``best_denoising_score`` is ``top_record`` over ALL records, trial and
+    formal mixed, and it was the only score the table rendered. Every v20
+    attempt-3 iteration ran zero formal rounds, so the column an operator
+    reads as "the result" carried a trial number with nothing to mark it.
+
+    These drive the real ``main()`` over a real ``HyperparamTuningOutput``
+    whose ``all_records`` are validated ``ExperimentRecord`` models, so the
+    role rule is applied to the ``model_dump()`` shape production writes.
+    """
+
+    @staticmethod
+    def _write_iter(workspace: Path, iter_idx: int, *, formal: bool) -> None:
+        from agent.schemas.hyperparam_tuning import (
+            ExperimentMemory,
+            ExperimentRecord,
+            HyperparamTuningOutput,
+        )
+
+        run_name = f"iter_{iter_idx:03d}"
+        iter_dir = workspace / run_name
+        sub = iter_dir / "iteration_001" / "wavenet"
+        sub.mkdir(parents=True)
+        record = ExperimentRecord(
+            exp_id="e1",
+            status="success",
+            model_type="wavenet",
+            timestamp="2026-08-27T00:00:00Z",
+            params={},
+            denoising_score=7.5,
+            is_trial=not formal,
+            trial_portion=0.1 if not formal else None,
+            memory=ExperimentMemory(expert_advice_followed="n/a", hypothesis="n/a", round_index=1),
+        )
+        output = HyperparamTuningOutput(
+            run_name=run_name,
+            model_type="wavenet",
+            file_index=6,
+            status="completed",
+            completed_rounds=1,
+            total_attempts=1,
+            started_at="2026-08-27T00:00:00Z",
+            finished_at="2026-08-27T01:00:00Z",
+            best_denoising_score=7.5,
+            best_formal_denoising_score=7.5 if formal else None,
+            all_records=[record],
+        )
+        output_path = sub / f"run_output_{run_name}.json"
+        output_path.write_text(output.model_dump_json())
+        (iter_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "completed",
+                    "iteration_dir": str(iter_dir),
+                    "output_path": str(output_path),
+                    "model_name": "wavenet",
+                    "best_score": 7.5,
+                }
+            )
+        )
+
+    def test_a_trial_only_iteration_shows_no_formal_best(self, tmp_path: Path) -> None:
+        """FAILS by rendering 7.500000 as the only score when the fix is gone."""
+        self._write_iter(tmp_path, 1, formal=False)
+
+        rc, stdout, _ = _run_main(["--layout", "chain", "--workspace", str(tmp_path)])
+
+        assert rc == 0
+        assert "Formal Best" in stdout, "the authoritative column must exist"
+        assert "formal_success=0/1" in stdout, "the operator is told how many formal ran"
+        # The mixed score is still shown, under a column that names it.
+        assert "Mixed Best" in stdout
+        assert "7.500000" in stdout
+        # ...and exactly once: the formal cell is the em dash, not the score.
+        assert stdout.count("7.500000") == 1
+
+    def test_a_formal_iteration_shows_the_score_in_both_columns(self, tmp_path: Path) -> None:
+        self._write_iter(tmp_path, 1, formal=True)
+
+        rc, stdout, _ = _run_main(["--layout", "chain", "--workspace", str(tmp_path)])
+
+        assert rc == 0
+        assert "formal_success=1/1" in stdout
+        assert stdout.count("7.500000") == 2
+
+
 def test_chain_partial_below_committed_advances_past_max_committed(
     tmp_path: Path,
 ) -> None:

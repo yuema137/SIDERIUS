@@ -682,7 +682,23 @@ class TestCensusDLegacyLockKeySet:
         COMPATIBLE; A/B, A/absent and absent/A all REFUSE) and every
         no-advice workspace stays resumable. Its sibling ``advice_path`` is
         ``_PROVENANCE``, not here: path proves authority and reachability,
-        the observed digest proves treatment identity."""
+        the observed digest proves treatment identity.
+
+        DECLARED DELTA (F-SCANF-1, D-FAIL-7 known_gap G4; the census fired
+        again — working as designed): ``formal_eval_portion`` joined — the
+        FRACTION of the eval scope a FORMAL round scores over. It was
+        RECORDED as per-file-best provenance and existed as a CLI argument,
+        but was a declared invariant nowhere, so two iterations whose formal
+        evaluation covered different fractions of the data folded into one
+        incumbent with no refusal. Aggregate scalars are only comparable
+        within one evaluation scope, which is `resolved_data_scope`'s rule
+        one axis over. It is the first NUMERIC canonical field, and its
+        default is the framework's own full-eval 1.0 rather than a `None`
+        sentinel: every entry point resolves a real float, so an optional
+        declaration in the ``advice_sha256`` mould would refuse EVERY
+        pre-existing workspace's resume. Omitted-at-1.0 in the serialized
+        lock, so legacy and full-eval lock bytes are unchanged, and the new
+        refusal is confined to workspaces declaring a NON-DEFAULT portion."""
         from core.run_invariants import RunInvariants
 
         assert RunInvariants._CANONICAL == (
@@ -706,4 +722,6 @@ class TestCensusDLegacyLockKeySet:
             "baseline_isolation",
             # Gold campaign — the declared delta documented above.
             "advice_sha256",
+            # F-SCANF-1 — the declared delta documented above.
+            "formal_eval_portion",
         )
