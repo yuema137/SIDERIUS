@@ -97,13 +97,21 @@ class TestCoreDoesNotReachIntoAWorkflowsPRIVATE:
 
     def test_the_public_edge_is_recorded_not_banned(self):
         """Pins the observation the rule above deliberately allows, so a
-        future reader sees it was measured rather than missed."""
+        future reader sees it was measured rather than missed.
+
+        Deduped: the property is WHICH modules `core` reaches across the
+        layer edge, not how many function-local import statements name them.
+        D2 added a second read from `workflows.task_config` (the run's
+        declared output geometry, for `_validate_configs`) in its own method
+        beside the existing one in `_write_model_io_config`; that is the same
+        recorded edge, not a new one. A genuinely new module still reds here.
+        """
         public = [
             module
             for module in _import_sources(CORE / "sandbox_executor.py")
             if module.startswith("workflows")
         ]
-        assert sorted(public) == ["workflows.task_composition", "workflows.task_config"]
+        assert sorted(set(public)) == ["workflows.task_composition", "workflows.task_config"]
         assert _private_workflows_imports(CORE / "sandbox_executor.py") == []
 
     def test_resume_uses_the_public_registration_authority(self):

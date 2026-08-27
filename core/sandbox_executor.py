@@ -1211,7 +1211,23 @@ class TidmadSandbox:
 
         Plugin models bypass ExperimentConfig (which has hardcoded Literals for core
         model types) and are validated directly against their own config class.
+
+        **D2 — the run's declared output geometry is acquired ONCE, here, and
+        delivered to the shared loss-availability authority on BOTH branches.**
+        The authority cannot fetch it itself: it lives in ``ml_models``, and
+        ``workflows`` imports ``ml_models`` rather than the reverse. This
+        method is the only production site that constructs an
+        ``ExperimentConfig`` *and* the only one that validates a plugin
+        config, and it already holds the sanctioned public edge to
+        ``workflows.task_config`` — so supplying the fact from here is what
+        keeps "the rule governs the built-in branch too" a fact rather than a
+        hope. A2b's lesson, unchanged: a rule existing on one production
+        branch is never evidence that it governs the other.
         """
+        from workflows.task_config import run_bound_output_has_temporal_axis
+
+        output_has_temporal_axis = run_bound_output_has_temporal_axis()
+
         # Plugin model: validate against the plugin's own config class
         if model_type in PLUGIN_CONFIG_REGISTRY:
             try:
@@ -1237,6 +1253,7 @@ class TidmadSandbox:
                     get_output_type(model_type),
                     loss_cfg.loss_type,
                     model_type=model_type,
+                    output_has_temporal_axis=output_has_temporal_axis,
                 )
 
                 validated_l = loss_cfg.model_dump()
@@ -1270,6 +1287,10 @@ class TidmadSandbox:
                 "network_config": m_cfg,
                 "train_config": t_cfg,
                 "loss_config": l_cfg,
+                # D2 — the same fact the plugin branch above passes to the
+                # same authority, so the two branches cannot diverge on the
+                # geometry rule the way they once diverged on the semantic one.
+                "output_has_temporal_axis": output_has_temporal_axis,
             }
             exp_config = ExperimentConfig(**full_payload)
             return (

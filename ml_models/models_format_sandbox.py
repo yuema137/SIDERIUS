@@ -380,11 +380,32 @@ PLUGIN_CONFIG_REGISTRY: dict = {}
 # Output-contract / loss compatibility — THE single authority
 # ==========================================
 
-#: Losses that consume per-timestep class logits, [B, C, T].
+#: Losses that consume class logits — an output carrying a class alphabet.
 CLASSIFICATION_LOSSES: frozenset[str] = frozenset({"ce", "focal", "focal_cw"})
 
 #: Losses that consume a continuous waveform, [B, T].
 REGRESSION_LOSSES: frozenset[str] = frozenset({"smooth_l1"})
+
+#: **D2** — the subset of :data:`CLASSIFICATION_LOSSES` that additionally
+#: requires the class logits to be PER-TIMESTEP, i.e. ``[B, C, T]`` inputs
+#: paired with ``[B, T]`` targets.
+#:
+#: This used to be a prose comment on ``CLASSIFICATION_LOSSES`` above —
+#: *"Losses that consume per-timestep class logits, [B, C, T]"* — which
+#: nothing executed. ``FocalLoss1D`` / ``FocalLoss1DCW``
+#: (``ml_models/loss_models_sandbox.py``) one-hot the targets and then
+#: ``.permute(0, 2, 1)`` the result, so the ordinary classifier geometry a
+#: non-sequential task emits (``[B, C]`` logits, ``[B]`` targets) makes
+#: ``F.one_hot`` return a 2-D tensor and the permute raises
+#: ``RuntimeError`` — every time, inside the loss, three layers below the
+#: config that chose it. ``ce`` has no such requirement:
+#: ``nn.CrossEntropyLoss`` accepts ``[B, C]`` with ``[B]`` natively.
+#:
+#: The math is frozen (line-for-line identical to the TIDMAD paper's
+#: ``network.py``), so the correction is to the AVAILABILITY rule: a loss
+#: that only functions at one geometry must say so where availability is
+#: decided, not crash where it is used.
+PER_TIMESTEP_CLASSIFICATION_LOSSES: frozenset[str] = frozenset({"focal", "focal_cw"})
 
 
 class DtypeAdmissibility(BaseModel):
@@ -513,11 +534,60 @@ def output_semantic_from_legacy(output_type: str) -> OutputSemantic | None:
     return None
 
 
+def validate_loss_output_geometry(
+    loss_type: str,
+    *,
+    model_type: str,
+    output_has_temporal_axis: bool | None,
+) -> None:
+    """**D2 — the geometry half of the loss-availability rule, ONE copy.**
+
+    Semantic compatibility is necessary and not sufficient: a loss can be
+    legal for a categorical output and still be unable to RUN against it.
+    ``focal`` / ``focal_cw`` are the shipped case — see
+    :data:`PER_TIMESTEP_CLASSIFICATION_LOSSES`.
+
+    It is a named function rather than three lines inside
+    :func:`validate_semantic_loss_compatibility` because it has a consumer
+    that must ask this question and ONLY this question. The resource
+    pre-flight (``agent/skills/evaluate_vram_skill/wrapper.py``) instantiates
+    the candidate's loss and CALLS it, before any config-validation branch
+    runs, so it is the first place an unrunnable geometry can fail — but it
+    is not the config-validation authority, and making it re-decide SEMANTIC
+    legality would move where a classifier/``smooth_l1`` mismatch is
+    reported. Two questions, two entry points, one implementation of each.
+
+    Args:
+        loss_type: a ``LossConfig.loss_type`` value.
+        model_type: used only to build a readable error message.
+        output_has_temporal_axis: whether the run's DECLARED output tensor
+            carries a ``temporal`` axis. ``None`` means the task declares no
+            normalized Model-I/O contract, so there is no declared geometry
+            to rule on and nothing is refused — the pre-D2 behaviour, exactly.
+            It is deliberately not collapsed into ``False``: absence of a
+            declaration is not a declaration of absence.
+
+    Raises:
+        ValueError: the loss cannot run at the declared output geometry.
+    """
+    if loss_type in PER_TIMESTEP_CLASSIFICATION_LOSSES and output_has_temporal_axis is False:
+        raise ValueError(
+            f"Incompatible: '{loss_type}' consumes PER-TIMESTEP class logits "
+            f"([B, C, T] scores with [B, T] targets) — it one-hot encodes the "
+            f"targets and permutes a class axis into position 1 — but this run's "
+            f"declared output tensor carries no temporal axis, so that permute "
+            f"raises at the first training step. Use 'ce', which scores [B, C] "
+            f"logits against [B] targets natively. ('{model_type}' is not the "
+            f"problem: no model can make '{loss_type}' accept this geometry.)"
+        )
+
+
 def validate_semantic_loss_compatibility(
     semantic: OutputSemantic | None,
     loss_type: str,
     *,
     model_type: str,
+    output_has_temporal_axis: bool | None = None,
 ) -> None:
     """**THE** loss-availability rule, keyed on the canonical semantic (§8a).
 
@@ -526,20 +596,40 @@ def validate_semantic_loss_compatibility(
     implementation of the rule, and both entry points reach it.
 
     ``semantic is None`` means "no canonical output semantic" — legacy
-    ``hybrid`` or an unrecognised value — and every loss is permitted, which
-    is precisely the shipped behaviour.
+    ``hybrid`` or an unrecognised value — and every SEMANTIC verdict is
+    permissive there, which is precisely the shipped behaviour. (The two
+    semantic guards below are each keyed on a concrete ``OutputSemantic``
+    member, so ``None`` matches neither: the early return this replaced was
+    already redundant for them, and removing it is what lets the geometry
+    rule govern ``hybrid`` too. A loss that cannot run at the declared
+    geometry cannot run there for a ``hybrid`` model either.)
+
+    **D2 — the geometry rule.** Semantic compatibility is necessary and not
+    sufficient. ``focal`` / ``focal_cw`` additionally require the class
+    logits to be per-timestep; see
+    :data:`PER_TIMESTEP_CLASSIFICATION_LOSSES`. That requirement lived only
+    in a comment until this rule, so a task emitting the ordinary
+    classifier geometry (``[B, C]`` logits, ``[B]`` targets) was told by the
+    framework that ``focal`` was available and then crashed inside the
+    loss's ``permute``. It is refused here instead — at config validation,
+    naming the reason and the working alternative.
 
     Args:
         semantic: the canonical output semantic, or ``None``.
         loss_type: a ``LossConfig.loss_type`` value.
         model_type: used only to build a readable error message.
+        output_has_temporal_axis: whether the RUN'S declared output tensor
+            carries a ``temporal`` axis. ``None`` means the task declares no
+            normalized Model-I/O contract (the legacy prose-only Regime-A
+            form): there is no declared geometry to rule on, so the shipped
+            verdicts are preserved exactly. Supplied by the caller because
+            this layer cannot acquire it — ``ml_models`` does not import
+            ``workflows``, and inverting that edge is the dependency the
+            Model-I/O contract module is arranged to avoid.
 
     Raises:
         ValueError: if the pair is incompatible.
     """
-    if semantic is None:
-        return
-
     if loss_type in REGRESSION_LOSSES and semantic is OutputSemantic.CATEGORICAL:
         raise ValueError(
             f"Incompatible: '{model_type}' is a classifier (output [B, 256, T]) "
@@ -552,12 +642,21 @@ def validate_semantic_loss_compatibility(
             f"— use 'smooth_l1', not '{loss_type}'."
         )
 
+    # D2 — evaluated LAST, so a task whose output is continuous still gets
+    # the regressor advice above rather than being pointed at 'ce'.
+    validate_loss_output_geometry(
+        loss_type,
+        model_type=model_type,
+        output_has_temporal_axis=output_has_temporal_axis,
+    )
+
 
 def validate_output_loss_compatibility(
     output_type: str,
     loss_type: str,
     *,
     model_type: str,
+    output_has_temporal_axis: bool | None = None,
 ) -> None:
     """Raise ``ValueError`` if an output contract and a loss are incompatible.
 
@@ -597,6 +696,9 @@ def validate_output_loss_compatibility(
         output_type: ``"classifier"``, ``"regressor"`` or ``"hybrid"``.
         loss_type: a ``LossConfig.loss_type`` value.
         model_type: used only to build a readable error message.
+        output_has_temporal_axis: forwarded verbatim to the re-keyed rule —
+            see :func:`validate_semantic_loss_compatibility`. Defaulting to
+            ``None`` keeps every pre-D2 caller's verdict identical.
 
     Raises:
         ValueError: if the pair is incompatible.
@@ -611,6 +713,7 @@ def validate_output_loss_compatibility(
         output_semantic_from_legacy(output_type),
         loss_type,
         model_type=model_type,
+        output_has_temporal_axis=output_has_temporal_axis,
     )
 
 
@@ -777,6 +880,20 @@ class ExperimentConfig(BaseModel):
     train_config: TrainConfig
     loss_config: LossConfig
 
+    output_has_temporal_axis: bool | None = Field(
+        default=None,
+        description="**D2 — a CALLER-SUPPLIED fact, not an authored setting.** "
+        "Whether the run's declared Model-I/O output tensor carries a "
+        "``temporal`` axis, forwarded to the loss-availability authority so "
+        "the built-in branch is governed by the same geometry rule as the "
+        "plugin branch. It is supplied rather than looked up because this "
+        "module cannot reach the run binding: ``agent`` and ``workflows`` "
+        "import ``ml_models`` and not the reverse. ``None`` — the default, "
+        "and what every caller predating D2 gets — means the task declares "
+        "no normalized contract, so the shipped verdicts stand unchanged. "
+        "``SandboxExecutor._validate_configs`` is the only production writer.",
+    )
+
     @model_validator(mode="after")
     def validate_architecture_loss_match(self) -> ExperimentConfig:
         """
@@ -792,6 +909,10 @@ class ExperimentConfig(BaseModel):
 
         - Classifiers ([B, 256, T] output) use ce, focal, focal_cw.
         - Regressors ([B, T] output) use smooth_l1.
+        - focal / focal_cw additionally require a per-timestep output; a
+          classifier with no temporal axis ([B, C]) may use only ce. That
+          is the D2 geometry rule, carried by ``output_has_temporal_axis``
+          — see :data:`PER_TIMESTEP_CLASSIFICATION_LOSSES`.
 
         Output type is looked up from BUILTIN_OUTPUT_TYPES (built-in models)
         or PLUGIN_OUTPUT_TYPE_REGISTRY (agent-generated plugins). A model in
@@ -824,5 +945,6 @@ class ExperimentConfig(BaseModel):
             output_type,
             self.loss_config.loss_type,
             model_type=self.model_type,
+            output_has_temporal_axis=self.output_has_temporal_axis,
         )
         return self

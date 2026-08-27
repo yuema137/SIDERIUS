@@ -14,7 +14,7 @@ must leave it alone.
     L1   evaluation.py sampling-method literal     P4          C2
     D1   evaluation.py duplicated defaults         P4          C2
     T4   health_feedback.py _WORST_STAT_BY_METRIC  P4          C3'
-    L2   health_feedback.py `unit == "count"`      P4          C3'
+    L2   exactness not derived from declared unit  P4          C3'
     T5   health_feedback.py _RECORDING_KEY_METRICS HD-T5       NEVER (deferred)
     T6   prompts.py _COLLAPSE_ADVICE_BY_CHECK      HD-T6       NEVER (deferred)
 
@@ -27,6 +27,19 @@ session from quietly absorbing them and calling P4 "more complete".
 rows to False, C3' flips T4 and L2. Each flip is a deliberate, reviewable
 edit recorded in the design ledger — and because the surfaces are located by
 CONTENT rather than line number, the census does not rot when lines move.
+
+**L2's detector was rewritten (2026-08-27).** Located by content is not the
+same as located by BEHAVIOUR. L2's original detector matched an ``ast.Compare``
+whose comparator was the constant ``"count"``; C3' replaced that literal with
+``in _INTEGRAL_UNITS`` — an ``ast.Name`` comparator — in the same commit that
+flipped the row to ``False``. Behaviour unchanged, detector blind, row green:
+the row would have gone green for a cosmetic extraction that derived nothing.
+It now asserts the property through the production function (see
+``_l2_present``). The standing rule, which the other rows should be re-read
+against as they are next touched: **a residual census must assert over
+behaviour or over a named authority, never over a syntactic form of it** — and
+the cheap test is to mentally perform a semantics-preserving refactor and ask
+whether the row would flip.
 """
 
 from __future__ import annotations
@@ -111,6 +124,63 @@ def _string_literals(node: ast.AST) -> set[str]:
     }
 
 
+def _probe_exactness(metric_name: str, unit: str, value: float = 4.0) -> bool:
+    """Run the real derivation and report whether it called the value exact.
+
+    Drives ``_extract_discriminating_metrics`` through a persisted-shaped
+    result — a CEILING operator so the worst statistic is the maximum, and no
+    ``aggregate_statistics`` so the scalar branch publishes the value under the
+    declared metric name. Nothing about the shape is L2-specific; it is the
+    smallest input that reaches the exactness decision.
+    """
+    from agent.schemas.health_feedback import _extract_discriminating_metrics
+
+    _raw, exactness = _extract_discriminating_metrics(
+        {
+            "threshold": {"metric": metric_name, "operator": "<", "unit": unit},
+            "metrics": {metric_name: value},
+        }
+    )
+    return exactness[metric_name]
+
+
+def _l2_present() -> bool:
+    """Is exactness still decided by something other than the DECLARED unit?
+
+    **Why this is behavioural and not syntactic.** The original detector
+    matched ``ast.Compare`` with an ``ast.Constant`` comparator equal to
+    ``"count"``. C3' replaced the inline literal with ``in _INTEGRAL_UNITS``
+    — an ``ast.Name`` comparator — in the SAME commit that flipped this row to
+    ``False``. The detector therefore stopped being able to see the surface it
+    names, and would have gone green for a purely cosmetic extraction that did
+    no derivation at all. A row that certifies a live constraint closed is
+    worse than no row: it turns a known unknown into a positive claim.
+
+    This is a FOURTH census-blindness shape, distinct from the three already
+    catalogued (*names a symbol* · *matches a token exactly* · *omits the file
+    set*): **keys on an AST node type in a syntactic position**. The cheap test
+    that catches all four: mentally perform a semantics-preserving refactor —
+    extract the literal, invert the comparison, wrap it in a helper — and ask
+    whether the row would flip. If yes, the row is not evidence.
+
+    So the row now asserts the PROPERTY C3' claims, through the production
+    function:
+
+    * exactness must FOLLOW the declared unit — a cardinal unit and a scale
+      unit must not produce the same answer; and
+    * exactness must not be keyed on the evidence-metric NAME — which is the
+      surface the whole census exists to track.
+
+    Neither can be satisfied by moving a literal.
+    """
+    if _probe_exactness("alpha", "count") == _probe_exactness("alpha", "mV"):
+        return True
+    return any(
+        _probe_exactness("alpha", unit) != _probe_exactness("distinct_symbols", unit)
+        for unit in ("count", "mV")
+    )
+
+
 def _detect() -> dict[str, bool]:
     """Present/absent for each tracked surface, by content."""
     checks = _registered_check_names()
@@ -170,12 +240,9 @@ def _detect() -> dict[str, bool]:
     t4 = "_WORST_STAT_BY_METRIC" in feedback_names
     t5 = "_RECORDING_KEY_METRICS" in feedback_names
 
-    # L2 — a literal comparison against the "count" unit vocabulary.
-    l2 = any(
-        isinstance(n, ast.Compare)
-        and any(isinstance(c, ast.Constant) and c.value == "count" for c in n.comparators)
-        for n in ast.walk(feedback)
-    )
+    # L2 — exactness decided by anything other than the DECLARED unit.
+    # Asserted over BEHAVIOUR, never over a syntactic form. See _l2_present.
+    l2 = _l2_present()
 
     # T6 — the per-check advice table.
     t6 = "_COLLAPSE_ADVICE_BY_CHECK" in _assigned_names(prompts)
@@ -201,6 +268,44 @@ def _detect() -> dict[str, bool]:
 class TestResidualSurfaceCensus:
     def test_every_tracked_surface_matches_the_stage_marker(self):
         assert _detect() == EXPECTED_PRESENT
+
+    def test_the_l2_detector_can_see_the_surface_it_names(self, monkeypatch):
+        """Anti-vacuity, and the reason this row was rewritten.
+
+        The syntactic detector this replaced could not fail: after C3' moved
+        the literal into ``_INTEGRAL_UNITS`` there was no ``ast.Constant``
+        comparator left to match, so ``L2`` was green because the detector had
+        gone blind, not because the surface had gone. Emptying the vocabulary
+        makes exactness stop following the declared unit — the exact property
+        the row claims — and the detector must say so.
+        """
+        import agent.schemas.health_feedback as feedback_module
+
+        assert _l2_present() is False
+        monkeypatch.setattr(feedback_module, "_INTEGRAL_UNITS", frozenset())
+        assert _l2_present() is True, (
+            "the L2 detector cannot distinguish 'exactness derives from the "
+            "declared unit' from 'exactness derives from nothing' — it is "
+            "certifying a closure it cannot observe"
+        )
+
+    def test_the_l2_detector_would_see_a_name_keyed_exactness_rule(self, monkeypatch):
+        """The other half: a per-metric-NAME rule is the census's whole subject.
+
+        Planted through the production entry point rather than described, so
+        the detector is exercised against the shape it bans.
+        """
+        import agent.schemas.health_feedback as feedback_module
+
+        real = feedback_module._extract_discriminating_metrics
+
+        def name_keyed(result):
+            raw, _exactness = real(result)
+            name = (result.get("threshold") or {}).get("metric")
+            return raw, {name: name == "distinct_symbols"}
+
+        monkeypatch.setattr(feedback_module, "_extract_discriminating_metrics", name_keyed)
+        assert _l2_present() is True
 
     @pytest.mark.parametrize("surface_id, debt", sorted(DEFERRED.items()))
     def test_deferred_surfaces_are_not_absorbed_by_p4(self, surface_id, debt):

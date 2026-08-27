@@ -210,6 +210,82 @@ class TestFingerprint:
         name, value = next(iter(fp.metrics.items()))
         assert f"{fp.check_name}:{name}={bucket_value(value, exact=False)}" == fp.signature
 
+
+class TestADeclaredCountIsNotAValidatedCount:
+    """A declared UNIT drove a stored VALUE, and nothing validated the value.
+
+    ``_extract_discriminating_metrics`` rendered the worst observation as
+    ``int(value)`` whenever ``threshold.unit`` was in ``_INTEGRAL_UNITS``, so a
+    check declaring ``unit: count`` over a fractional metric stored 3.9 as 3 —
+    in ``CollapseFingerprint.metrics``, whose own schema says it "stores RAW
+    values (never bucketed) so signatures can be recomputed under a revised
+    bucketing rule from stored artifacts alone". Truncation destroys precisely
+    what that guarantee exists for.
+
+    The unit is an unconstrained string on both of its sources —
+    ``EvidenceUnit.literal`` (check-owned) and ``EvidenceUnit.config_key``
+    (resolved from the task's own composed config, e.g. a task declaring
+    ``value_scale.unit: count``) — so this is reachable by any task, in-tree or
+    external, without touching framework code.
+
+    Exactness now requires the declared cardinal unit AND a value that is one.
+
+    ============================================  ==============================
+    if this regresses                             which test reds
+    ============================================  ==============================
+    the raw store is truncated again              ``test_a_fractional_count_...``
+    two fractional counts collapse into one       ``test_two_fractional_counts_``
+    a genuine whole count stops rendering as int  ``test_a_whole_count_...``
+    a non-finite scalar crashes the fingerprint   ``test_a_non_finite_...``
+    ============================================  ==============================
+    """
+
+    METRIC = "n_unique_int8_values"
+
+    def _count_gate(self, worst):
+        return _gate(worst=worst, unit="count", metric=self.METRIC)
+
+    def test_a_fractional_count_keeps_its_digits(self):
+        fp = build_collapse_fingerprint([self._count_gate(3.9)], "invalidate_round")
+        assert fp.metrics == {self.METRIC: 3.9}, (
+            "the raw store was truncated to satisfy a declaration; 3.9 is not a count "
+            "and the fix is to stop claiming it is, not to round it off"
+        )
+
+    def test_a_fractional_count_is_not_rendered_as_a_cardinal(self):
+        """Exactness is a property of the value, not only of the declaration."""
+        fp = build_collapse_fingerprint([self._count_gate(3.9)], "invalidate_round")
+        assert fp.signature == f"output_diversity_blocking:{self.METRIC}=3.9"
+
+    def test_two_fractional_counts_do_not_collide(self):
+        """Under truncation both stored 3 and both signed `=3` — one collapse
+        mode where there were two."""
+        a = build_collapse_fingerprint([self._count_gate(3.1)], "invalidate_round")
+        b = build_collapse_fingerprint([self._count_gate(3.9)], "invalidate_round")
+        assert a.metrics != b.metrics
+        assert a.signature != b.signature
+
+    def test_a_whole_count_is_unchanged(self):
+        """Byte-parity for every real count. ``aggregate_statistics`` publishes
+        floats, so TIDMAD's counts arrive as ``1.0`` and must still persist as
+        the int ``1`` — the shipped rendering."""
+        fp = build_collapse_fingerprint([self._count_gate(1.0)], "invalidate_round")
+        assert fp.metrics == {self.METRIC: 1}
+        assert isinstance(fp.metrics[self.METRIC], int)
+        assert fp.signature == f"output_diversity_blocking:{self.METRIC}=1"
+
+    def test_a_non_finite_scalar_count_no_longer_crashes(self):
+        """``int(float('nan'))`` raises. ``aggregate_statistics`` filters
+        non-finite values; the SCALAR branch — added for task-owned checks with
+        no per-file dimension — does not, so a task-owned count-declared check
+        publishing NaN took the whole fingerprint build down with a
+        ``ValueError`` from inside a schema helper."""
+        gate = self._count_gate(1.0)
+        gate["metrics"] = {self.METRIC: float("nan")}
+        fp = build_collapse_fingerprint([gate], "invalidate_round")
+        assert fp is not None
+        assert fp.metrics[self.METRIC] != fp.metrics[self.METRIC]  # NaN, preserved raw
+
     def test_human_readable_never_in_equality(self):
         a = build_collapse_fingerprint([_gate(failure_reason="prose A")], None)
         b = build_collapse_fingerprint([_gate(failure_reason="prose B")], None)

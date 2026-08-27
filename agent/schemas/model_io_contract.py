@@ -282,6 +282,24 @@ class ModelIOContract(BaseModel):
         return OutputSemantic.CONTINUOUS
 
     @property
+    def output_has_temporal_axis(self) -> bool:
+        """Whether the output carries a ``temporal`` axis — **D2**.
+
+        The one geometry fact the loss-availability authority needs: a loss
+        that consumes PER-TIMESTEP class logits (``focal`` / ``focal_cw``)
+        cannot run against an output that has no timestep axis. Expressed
+        here, once, so the run-scoped accessor
+        (``workflows.task_config.run_bound_output_has_temporal_axis``) and
+        the resource pre-flight — which holds the contract directly — cannot
+        answer the same question two ways.
+
+        A ROLE question, never a rank question (§4d): asking *"which axis is
+        the temporal one"* is exactly what the role vocabulary exists for,
+        and branching on rank instead would be a §21 stop condition.
+        """
+        return self.output.axis_with_role(AxisRole.TEMPORAL) is not None
+
+    @property
     def legacy_output_type(self) -> str:
         """The legacy ``output_type`` word, as a **derived projection** (§8b).
 

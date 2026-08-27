@@ -372,6 +372,41 @@ def run_bound_model_io_contract(path: str | None = None) -> ModelIOContract | No
     return ForwardContract(**load_task_config(path)["forward_contract"]).model_io
 
 
+def run_bound_output_has_temporal_axis(path: str | None = None) -> bool | None:
+    """Whether THIS RUN's declared OUTPUT tensor carries a temporal axis.
+
+    **D2.** The one fact ``ml_models``' loss-availability authority needs in
+    order to refuse ``focal`` / ``focal_cw`` for a task whose output is not
+    per-timestep, rather than letting the pairing crash inside the loss's
+    ``permute``. It is expressed here, once, because
+    :func:`run_bound_model_io_contract` is the single acquisition point for
+    the run's contract and a caller re-deriving this from the contract at
+    each site would make "training and validation agree" a coincidence — the
+    same reason ``_write_model_io_config`` gives for not restating it.
+
+    The predicate itself belongs to the contract
+    (``ModelIOContract.output_has_temporal_axis``); what is added here is the
+    RUN BINDING around it, so the resource pre-flight — which already holds
+    the contract object — and this accessor cannot answer differently.
+
+    Args:
+        path: Optional override for the YAML location, forwarded verbatim to
+            :func:`run_bound_model_io_contract`. Production omits it.
+
+    Returns:
+        ``True`` / ``False`` when the task declares a normalized Model-I/O
+        contract; ``None`` when it does not. ``None`` is the legacy
+        prose-only form and means *"no declared geometry to rule on"* — the
+        authority then preserves its shipped verdicts exactly. It is
+        deliberately NOT collapsed into ``False``: absence of a declaration
+        is not a declaration of absence.
+    """
+    contract = run_bound_model_io_contract(path)
+    if contract is None:
+        return None
+    return contract.output_has_temporal_axis
+
+
 def get_task_description(config: dict[str, Any]) -> str:
     """Return the stripped ``task_description`` from a parsed config dict.
 

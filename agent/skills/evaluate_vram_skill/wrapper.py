@@ -312,6 +312,45 @@ def _class_index_target_tensor(
     return torch.zeros((batch_size, seg_size), dtype=torch.long)
 
 
+def _refuse_unrunnable_loss_geometry(
+    model_type: str,
+    loss_type: str,
+    model_io_contract: ModelIOContract | None,
+) -> None:
+    """Ask the shared geometry authority before probing — **D2**.
+
+    This module is the first place a real run instantiates the candidate's
+    loss and CALLS it, so it is the first place an unrunnable geometry can
+    fail. Before this, a task declaring ``[B, C]`` logits paired with
+    ``focal`` died in ``probe_activation_footprint`` on the loss's own
+    ``permute`` and surfaced as an opaque ``"VRAMEval runtime error"``; the
+    refusal waiting in ``SandboxExecutor._validate_configs`` was never
+    reached.
+
+    It asks the GEOMETRY question only. Deciding SEMANTIC legality here would
+    move where a classifier/``smooth_l1`` mismatch is reported — that pairing
+    probes fine today (``_build_probe_tensors`` shapes the target from the
+    declared output contract) and is refused, with its own advice, at config
+    validation. The pre-flight is not the config-validation authority; it
+    only has to not blow up on what it is about to execute.
+
+    ``model_io_contract is None`` — the legacy prose-only task — declares no
+    geometry, so nothing is refused and behaviour is exactly pre-D2.
+
+    Raises:
+        ValueError: the loss cannot run at the run's declared geometry.
+    """
+    from ml_models.models_format_sandbox import validate_loss_output_geometry
+
+    validate_loss_output_geometry(
+        loss_type,
+        model_type=model_type,
+        output_has_temporal_axis=(
+            None if model_io_contract is None else model_io_contract.output_has_temporal_axis
+        ),
+    )
+
+
 def _build_probe_tensors(
     batch_size: int,
     seg_size: int,
@@ -745,6 +784,14 @@ def run_skill(sandbox, **kwargs):
         )
 
         # 2. Instantiate model (schema validation happens here) ───────────
+        #
+        # D2 — the geometry authority's second consumer, and the one a real
+        # run reaches FIRST: admission runs before `execute_training`, and
+        # the probe below calls `loss_module(logits, target)`. Same shared
+        # function the config-validation branches call, so no verdict can
+        # differ between them; re-inlining the rule here is the defect V21
+        # PR A1 deleted.
+        _refuse_unrunnable_loss_geometry(model_type, loss_type, model_io_contract)
         try:
             model_for_train = _build_model(model_type, model_cfg, loss_type)
             loss_module = get_criterion(LossConfig(**loss_cfg))

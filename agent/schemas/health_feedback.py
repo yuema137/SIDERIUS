@@ -114,6 +114,13 @@ _FLOOR_OPERATORS: frozenset[str] = frozenset({">", ">="})
 _CEILING_OPERATORS: frozenset[str] = frozenset({"<", "<="})
 
 #: Units whose values are cardinal counts and therefore render exactly.
+#:
+#: The DECLARATION half of exactness. It is not the whole of it: membership
+#: here says a check's arithmetic is meant to yield cardinals, and
+#: ``_extract_discriminating_metrics`` additionally requires the observation
+#: to BE one before rendering it as an integer. A unit is an unconstrained
+#: string on both of its sources, so a declaration alone can never be allowed
+#: to change a stored number.
 _INTEGRAL_UNITS: frozenset[str] = frozenset({"count"})
 
 
@@ -427,7 +434,9 @@ def _extract_discriminating_metrics(
     check declared:
 
     * the worst-case direction, from ``threshold.operator``;
-    * exactness, from ``threshold.unit`` being a cardinal-count unit.
+    * exactness, from ``threshold.unit`` being a cardinal-count unit **and**
+      the observation actually being a cardinal — a declared unit is not a
+      validated property, and the raw value is never truncated to satisfy it.
 
     **Where the value lives depends on the check's shape, not its name.** A
     per-file check reports the worst observation ACROSS files, so it comes
@@ -462,7 +471,30 @@ def _extract_discriminating_metrics(
     if not isinstance(value, int | float) or isinstance(value, bool):
         return {}, {}
 
-    exact = threshold.get("unit") in _INTEGRAL_UNITS
+    # A DECLARED unit is not a validated property. ``count`` says the check's
+    # arithmetic yields cardinals; it does not MAKE a fractional observation
+    # into one, and `unit` is an unconstrained string on both of its sources
+    # (`EvidenceUnit.literal`, check-owned; `EvidenceUnit.config_key`, resolved
+    # from the task's own config), so any task can declare it over any value.
+    #
+    # This line used to be `int(value) if exact else float(value)`, which
+    # silently rendered a `count`-declared 3.9 as 3 — in `metrics`, whose own
+    # schema says it "stores RAW values (never bucketed) so signatures can be
+    # recomputed under a revised bucketing rule from stored artifacts alone".
+    # Truncation destroys exactly what that guarantee is for. (It also raised
+    # `ValueError: cannot convert float NaN to integer` on a non-finite scalar
+    # observation, which `aggregate_statistics` filters and the scalar branch
+    # above does not.)
+    #
+    # So exactness now requires BOTH halves — the declared cardinal unit and a
+    # value that actually is one — which makes the `int()` provably lossless
+    # and leaves `metrics` raw in every case. A genuine count is unaffected:
+    # `aggregate_statistics` publishes floats, so TIDMAD's counts arrive as
+    # `2.0` and still persist as `2`. A mis-declared fractional value keeps its
+    # digits and buckets as a float in the signature, which is the honest
+    # rendering — two different fractions must not collide under a claim of
+    # cardinality that the number itself refutes.
+    exact = threshold.get("unit") in _INTEGRAL_UNITS and float(value).is_integer()
     return {metric_name: int(value) if exact else float(value)}, {metric_name: exact}
 
 
