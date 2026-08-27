@@ -277,7 +277,7 @@ class TestFingerprintAdditivity:
     @pytest.mark.parametrize(
         "name,expected",
         [
-            ("tidmad", "9b497798a13a5cea3733f189b1dd69b5a61469fea4a63474d4b3e2906684486d"),
+            ("tidmad", "c0102089266b4c8c2ba53dcc5492e1063d5c4919f3ae4444fb5dae3b0cac8800"),
             ("pets", "3ab1128a3d5d425568b74642c9cd6857d16a5c64904c1befe3731ecfc11a2672"),
             ("davis", "396e767d5621390163e7ba0b16df401811379e758d7211e763eef50f5563ac43"),
             ("quickstart", "1330d3991a98c48b0f5a5f181ea4c838e7080bbe9029264097ea298074271921"),
@@ -290,6 +290,14 @@ class TestFingerprintAdditivity:
         these four runs' identities did not move, and only a literal recorded
         outside the code under test can say that. An unconditional fingerprint
         key turns all four red at once.
+
+        `tidmad` re-recorded 9b497798… -> c0102089… (false-header correction,
+        2026-08-27) — `configs/task_health/tidmad.yaml`'s header claimed the
+        file cannot state `aggregation`, which PR #357 made false, and
+        `_digest_file` hashes that document RAW. NOT R-OBS-1's family leaking:
+        the manifest still declares no observable, and the other three
+        literals are untouched, which is what separates "one task's document
+        was corrected" from "the machinery moved".
         """
         path = os.path.join(REPO_ROOT, "configs", "task_composition", f"{name}.yaml")
         assert compose_run_task_bindings(path).semantic_fingerprint == expected

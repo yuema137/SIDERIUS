@@ -5,9 +5,11 @@
 # Everything here is the TASK's: which gates exist, which checks they run,
 # where the scientific boundaries are, which files they watch, the physical
 # value scale, and why each gate exists. None of it is framework policy —
-# gate role, cadence, short-circuit, actions and aggregation are derived by
-# the framework from each entry's `disposition`, and this file cannot state
-# them (see execute_tools/health_checks/_task_health_config.py).
+# gate role, cadence, short-circuit and actions are derived by the framework
+# from each entry's `disposition`, and this file cannot state them (see
+# execute_tools/health_checks/_task_health_config.py). `aggregation` is the
+# one exception: since PR #357 it is in TASK_DECLARABLE_POLICY_KEYS, so the
+# framework's value is a DEFAULT and a roster entry MAY declare its own.
 #
 # It moved out of configs/health_checks.yaml unchanged. Every threshold,
 # gate id, check id, peek file and reason string below is byte-for-byte the

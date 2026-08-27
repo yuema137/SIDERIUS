@@ -5723,7 +5723,8 @@ decisions:
   - decision_id: F-SCAND-2
     parameter: blocking-gate aggregation is not task-declarable at all
     concept: row 54 confirmed, and worse than recorded
-    status: IMPLEMENTED
+    status: DISCHARGED
+    superseded_status: IMPLEMENTED
     control_class: EXPERIMENT_FIXED
     disposition: RELEASE_BLOCKER
     finding: >-
@@ -5800,8 +5801,49 @@ decisions:
       breaking every existing composed workspace's resume, because the false
       sentence misleads the next author while the fingerprint move would
       silently refuse real runs already in flight.
+    reconciled: >-
+      DISCHARGED 2026-08-27 by b0a04e04. The row's own body already recorded
+      the DECLARABILITY as closed by #357 and listed exactly one remaining
+      obligation - open_must_false_header_in_shipped_config, the false header
+      sentence that #357's discharge itself created. That marker is now
+      CLOSED, so nothing on this row is outstanding and the status flips from
+      IMPLEMENTED to DISCHARGED. No new finding, no re-litigation of the
+      value flip, and the two clauses this row deliberately left alone
+      (_DEFAULT_AGGREGATION in each check, DEFAULT_DISPOSITION_POLICY at
+      _composition.py) remain untouched.
     open_must_false_header_in_shipped_config:
-      status: OPEN_MUST
+      status: DISCHARGED
+      superseded_status: OPEN_MUST
+      reconciled: >-
+        CLOSED 2026-08-27 by b0a04e04, which corrected the sentence and took
+        the fingerprint move this marker's why_not_fixed_here clause named as
+        the reason for deferral. The header now says gate role, cadence,
+        short-circuit and actions are framework-derived and unstatable here,
+        and that `aggregation` is the one exception - in
+        TASK_DECLARABLE_POLICY_KEYS since #357, framework value a DEFAULT, a
+        roster entry MAY declare its own.
+
+        The carrier clause below anticipated two dispositions. The first did
+        not occur: R-OBS-1 landed (#359) keeping all four fingerprints
+        byte-identical by design, so it had no move to inherit and correctly
+        declined to manufacture one. The second is what happened - it lands
+        as its own deliberate, separately-recorded fingerprint move, NOT as
+        an incidental edit, which is what this clause required.
+
+        Measured against a pristine worktree of master d94f83af: tidmad
+        9b497798a13a5cea… -> c0102089266b4c8c…; pets 3ab1128a…, davis
+        396e767d… and quickstart 1330d399… byte-IDENTICAL. Only the task
+        whose document changed moved, which is the evidence that the
+        composition machinery did not.
+
+        Accepted consequence, stated plainly: any composed workspace created
+        before b0a04e04 fails its resume CLOSED. Precedent for taking that
+        acceptance deliberately is PR-12a (d6628a93 -> 9125bf58) and #335's
+        C2 flip (3fd178b5 -> 9b497798). Timing is the whole argument - the
+        only pre-existing composed workspaces are TestPod's exploratory ones,
+        NO Gold workspace exists because the campaign has not launched, and
+        after launch this correction would break a live campaign's resume.
+        Zero cost today, permanent cost tomorrow.
       defect: >-
         configs/task_health/tidmad.yaml's header states that the file cannot
         state gate role, cadence, short-circuit, actions and aggregation. The

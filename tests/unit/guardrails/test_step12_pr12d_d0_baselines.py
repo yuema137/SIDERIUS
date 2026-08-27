@@ -576,7 +576,13 @@ class TestInvertedGuardB10:
 #: Re-recorded at the C2 aggregation flip (operator-frozen 2026-08-26):
 #: 3fd178b5… -> 9b497798… — the task health document's aggregation prose
 #: moved with the any_pass -> all_pass policy flip.
-TIDMAD_COMPOSITION_FINGERPRINT = "9b497798a13a5cea3733f189b1dd69b5a61469fea4a63474d4b3e2906684486d"
+#: Re-recorded again (false-header correction, 2026-08-27): 9b497798… ->
+#: c0102089… — configs/task_health/tidmad.yaml's header claimed the file
+#: cannot state `aggregation`, which PR #357 made false. `_digest_file`
+#: hashes that document RAW, so the comment-only correction moves TIDMAD's
+#: composed identity. Deliberate: a composed workspace created before it
+#: fails its resume closed, and none exists outside TestPod.
+TIDMAD_COMPOSITION_FINGERPRINT = "c0102089266b4c8c2ba53dcc5492e1063d5c4919f3ae4444fb5dae3b0cac8800"
 
 #: Composed-only flags that must never appear on a legacy child's argv.
 FORBIDDEN_ON_LEGACY = (

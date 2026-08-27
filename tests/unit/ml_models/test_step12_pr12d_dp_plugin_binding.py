@@ -296,6 +296,14 @@ class TestManifestSection:
             for path in written:
                 path.unlink(missing_ok=True)
 
+    # The three TIDMAD fingerprint literals below were re-recorded
+    # 9b497798… -> c0102089… (false-header correction, 2026-08-27):
+    # configs/task_health/tidmad.yaml's header claimed the file cannot state
+    # `aggregation`, which PR #357 made false, and `_digest_file` hashes that
+    # document RAW. Seam P's semantics are unchanged — an absent or `none:`
+    # section still binds nothing and keeps whatever the shipped identity is,
+    # and a declared one still MOVES it.
+
     def test_an_absent_section_binds_nothing_and_keeps_the_fingerprint(self):
         from workflows.task_composition import compose_run_task_bindings
 
@@ -304,14 +312,14 @@ class TestManifestSection:
         )
         assert composition.model_plugins is None
         assert composition.semantic_fingerprint == (
-            "9b497798a13a5cea3733f189b1dd69b5a61469fea4a63474d4b3e2906684486d"
+            "c0102089266b4c8c2ba53dcc5492e1063d5c4919f3ae4444fb5dae3b0cac8800"
         )
 
     def test_an_explicit_none_binds_nothing_and_keeps_the_fingerprint(self, compose, tmp_path):
         composition = compose(tmp_path, "model_plugins:\n  none: true")
         assert composition.model_plugins is None
         assert composition.semantic_fingerprint == (
-            "9b497798a13a5cea3733f189b1dd69b5a61469fea4a63474d4b3e2906684486d"
+            "c0102089266b4c8c2ba53dcc5492e1063d5c4919f3ae4444fb5dae3b0cac8800"
         )
 
     def test_a_declared_section_resolves_through_the_production_path(self, compose, tmp_path):
@@ -331,7 +339,7 @@ class TestManifestSection:
         write_plugin(tmp_path / "plugins", "dp_fp_net", width=4)
         section = f"model_plugins:\n  dir: {tmp_path / 'plugins'}\n  require: [dp_fp_net]"
         first = compose(tmp_path, section).semantic_fingerprint
-        assert first != "9b497798a13a5cea3733f189b1dd69b5a61469fea4a63474d4b3e2906684486d"
+        assert first != "c0102089266b4c8c2ba53dcc5492e1063d5c4919f3ae4444fb5dae3b0cac8800"
         write_plugin(tmp_path / "plugins", "dp_fp_net", width=5)
         assert compose(tmp_path, section).semantic_fingerprint != first
 

@@ -74,8 +74,14 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 #: aggregation prose moved with the any_pass -> all_pass policy flip. Not the
 #: additive rule leaking either: no secondary appeared, and the other three
 #: tasks' literals are untouched.
+#: Re-recorded again (false-header correction, 2026-08-27): 9b497798… ->
+#: c0102089… — configs/task_health/tidmad.yaml's header claimed the file
+#: cannot state `aggregation`, which PR #357 made false. `_digest_file`
+#: hashes that document RAW, so the comment-only correction moves TIDMAD's
+#: composed identity. Deliberate: a composed workspace created before it
+#: fails its resume closed, and none exists outside TestPod.
 PRE_P2B_FINGERPRINTS = {
-    "tidmad": "9b497798a13a5cea3733f189b1dd69b5a61469fea4a63474d4b3e2906684486d",
+    "tidmad": "c0102089266b4c8c2ba53dcc5492e1063d5c4919f3ae4444fb5dae3b0cac8800",
     "fourth_task": "cef7656eb958202ed10a806c45de1a8dfa06b2a063b95488f0fcd9aa0d973507",
     "pets": "3ab1128a3d5d425568b74642c9cd6857d16a5c64904c1befe3731ecfc11a2672",
     "davis": "396e767d5621390163e7ba0b16df401811379e758d7211e763eef50f5563ac43",
