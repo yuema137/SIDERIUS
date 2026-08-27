@@ -300,7 +300,9 @@ validate.
   **1. Commit the semantic checkpoint BEFORE running the full suite.**
   `tests/unit/scripts/test_pr3_l2p_preflight.py::test_preflight_all_invariants`
   runs `git diff --name-only`
-  (`scripts/pr3_l2_calibration/preflight.py:287`) and fails when **any**
+  (`scripts/pr3_l2_calibration/preflight.py`, the `subprocess.run(["git",
+  "diff", "--name-only"], …)` call feeding the
+  `checks["no_production_file_modified"]` assignment) and fails when **any**
   uncommitted file outside `scripts/pr3_l2_calibration/`, `tests/`,
   `docs/`, `reports/` or `*.md` is modified — the PR3-L2 calibration
   protocol requires production untouched at launch. Run the full suite
@@ -579,8 +581,8 @@ Structural discrepancies known and NOT addressed by config alone:
   `for ifile` loop); SIDERIUS uses a single optimizer.
 
 The `FocalLoss1D` implementation itself
-(`ml_models/loss_models_sandbox.py:135-168`) is line-for-line identical to
-TIDMAD's `network.py:FocalLoss1D`.
+(`ml_models/loss_models_sandbox.py`, class `FocalLoss1D`) is line-for-line
+identical to TIDMAD's `network.py:FocalLoss1D`.
 
 ## Subsystem Invariants (Read Before Touching)
 
@@ -617,10 +619,14 @@ TIDMAD's `network.py:FocalLoss1D`.
   Training uses 40 GiB, scoring uses 24 GiB. The inference bump (commit
   `4acb5b5`) is required for full-scope baseline inference on RTX 5090 — CUDA
   static VA is ~18-20 GiB, plus ~7.4 GiB numpy peak per-file (four ~1.86 GiB
-  int8 arrays at `inference_single.py:325-331`), plus caching-allocator
+  int8 arrays — the `np.zeros((dim1, input_size), dtype=_storage_dtype)`
+  `denoised`/`injected` pairs in `execute_tools/inference_single.py`), plus
+  the transient `.flatten().astype(int8)` copies `create_abra_file` emits,
+  plus caching-allocator
   overhead. Do not lower this back to 40 without re-verifying full-scope
   baseline inference passes.
-- **Focal loss implementation** (`ml_models/loss_models_sandbox.py:135-168`)
+- **Focal loss implementation** (`ml_models/loss_models_sandbox.py`, class
+  `FocalLoss1D`)
   is line-for-line identical to TIDMAD's `network.py:FocalLoss1D`. If you
   change the loss math, verify against the paper implementation first.
 - **DataScope (partial-file runs) is enforced in layers — never by prompts.**
@@ -1358,8 +1364,23 @@ TIDMAD's `network.py:FocalLoss1D`.
   a fresh session — never from the conversation that produced this correction.
   See the Step-07 parent §17.1.
 
-- **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
-  system, RT1 → RT6 COMPLETE per
+- **Active line of work**: the **v0.1.0 release train** on `master` — release
+  candidate `v0.1.0-rc.2` (`2e4ce1ce`), with the campaign lanes tracked in
+  `docs/campaign/`.
+
+- **HISTORICAL — superseded, retained for provenance, NOT actionable.** The
+  four entries below were accurate around 2026-08-17 and are kept because this
+  project does not erase a superseded statement, it marks it. Since then both
+  branches they name have **merged and been deleted**:
+  `feat/rt1-fixed-step-overhead` and `feat/enable-partial-file-list` no longer
+  exist (`git rev-parse --verify` fails for both), and `d0aa0b6` was a commit
+  on the former — it is reachable from **zero** refs today
+  (`git for-each-ref --contains d0aa0b6` returns nothing), so a fresh clone
+  does not contain it. Treat no branch, SHA, "Pending" or "still pending" item
+  in these entries as work to be done.
+
+  - **Active branch** *(historical)*: `feat/rt1-fixed-step-overhead` —
+  runtime-control system, RT1 → RT6 COMPLETE per
   `docs/design/runtime_estimation_and_watchdog.md` (§0 tracker; §12
   per-stage evidence): exact workload resolvers, P/M/A data model,
   in-subprocess setup measurement + adaptive training/inference
@@ -1375,11 +1396,12 @@ TIDMAD's `network.py:FocalLoss1D`.
   Gate 2 (real training incl. the incident pathological case). A
   parallel session is committing scoring work on this branch
   (`d0aa0b6`, `cb8b857`, `82b40e9`).
-- **Previous feature**: `feat/enable-partial-file-list` — DataScope
-  DS1-DS8 complete; DS Gates 1 & 2 + PR still pending.
-- **Master CI**: red at `9e503ea` (PR #127 merged over a stale shell-parity
-  expectation); fixed by `a84203a` on this branch — lands with the PR.
-- **Open issues**: carry-forward #91, #93, #94, #95, #97, #100, plus the
+  - **Previous feature** *(historical)*: `feat/enable-partial-file-list` —
+  DataScope DS1-DS8 complete; DS Gates 1 & 2 + PR still pending.
+  - **Master CI** *(historical)*: red at `9e503ea` (PR #127 merged over a
+  stale shell-parity expectation); fixed by `a84203a` on this branch — lands
+  with the PR.
+  - **Open issues** *(historical)*: carry-forward #91, #93, #94, #95, #97, #100, plus the
   PR #101 follow-ups still open (#103, #105, #107, #110, #111, #113) and
   the DS8-filed issues (FU-1 peek-vs-eval-coverage latent bug, FU-7
   vocab-accumulation NoneType test defect — see the design doc's
