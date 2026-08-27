@@ -21,6 +21,19 @@
 #       typically the ephemeral container overlay, so pod loss would
 #       silently destroy the very artifacts H100 qualification produces.
 #       Converts R8's former RETAIN-by-design assumption into a check.
+#   R1c generated-capability library root DECLARED and on a PERSISTENT
+#       mount (F-GENLIB-WIRE-1; same fstype logic as R1/R1b). The root is
+#       resolved by CALLING the production authority
+#       (`core.generated_library.resolve_generated_library`) rather than
+#       re-deriving it here, so this check can never drift from what the
+#       run actually uses. It FAILS when the resolution reports
+#       source="default" — i.e. $SIDERIUS_GENERATED_LIBRARY_DIR was not
+#       exported — because the default ~/.siderius/generated_library is
+#       the ephemeral container overlay on a pod AND is shared across
+#       campaigns, so promoted capabilities from one campaign leak into
+#       the next arm's proposer surface. R8 cannot see this: it globs the
+#       CHECKOUT dir only and is blind to this root, which is exactly how
+#       the contamination went unnoticed.
 #   R2  authoritative code revision: `git rev-parse HEAD` printed
 #       (launch-packet row `repo_sha=`), compared against --revision
 #       (prefix >= 7 chars accepted); a DIRTY tree FAILS — commit first,
@@ -249,6 +262,47 @@ pf_main() {
         *)
             pf_pass "R1b calibration store $CAL_DIR on persistent '$CAL_FSTYPE' ($CAL_MOUNT_SRC)" ;;
     esac
+
+    # ---- R1c: generated-capability library root (F-GENLIB-WIRE-1) ----------
+    # Resolution is DELEGATED to the production authority, never re-derived:
+    # `resolve_generated_library` owns the two layers, the "~" expansion and
+    # the relative-path refusal, and a bash re-implementation would be a
+    # second authority free to drift from the one the run obeys. One call,
+    # tab-separated "<source>\t<root>"; a non-zero exit means the authority
+    # itself REFUSED the value (a relative override), which is a FAIL here
+    # rather than a silent fallback.
+    local GENLIB_RAW GENLIB_SOURCE GENLIB_ROOT
+    if GENLIB_RAW="$(cd "$PF_PROJECT_DIR" && PYTHONPATH="${PF_PROJECT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
+        "$PF_PY" -c 'from core.generated_library import resolve_generated_library as r; x = r(); print(x.source + "\t" + x.root)' \
+        2>/dev/null | tail -1)" && [ -n "$GENLIB_RAW" ]; then
+        GENLIB_SOURCE="${GENLIB_RAW%%$'\t'*}"
+        GENLIB_ROOT="${GENLIB_RAW#*$'\t'}"
+        if [ "$GENLIB_SOURCE" != "env" ]; then
+            pf_fail "R1c generated-capability library resolves to the DEFAULT root $GENLIB_ROOT — \$SIDERIUS_GENERATED_LIBRARY_DIR was not exported. On a pod that path is the ephemeral container overlay, and it is shared across campaigns: promoted models and losses from an earlier run become visible to this one's proposer. Export it to an absolute, persistent, campaign-owned, FRESH directory before launching"
+        else
+            local GENLIB_PROBE="$GENLIB_ROOT"
+            while [ ! -e "$GENLIB_PROBE" ] && [ "$GENLIB_PROBE" != "/" ]; do
+                GENLIB_PROBE="$(dirname "$GENLIB_PROBE")"
+            done
+            local GENLIB_FSTYPE=""
+            if command -v findmnt >/dev/null 2>&1; then
+                GENLIB_FSTYPE="$(findmnt -n -o FSTYPE --target "$GENLIB_PROBE" 2>/dev/null || true)"
+            fi
+            [ -z "$GENLIB_FSTYPE" ] && GENLIB_FSTYPE="$(df -PT "$GENLIB_PROBE" 2>/dev/null | awk 'NR==2 {print $2}')"
+            local GENLIB_MOUNT_SRC
+            GENLIB_MOUNT_SRC="$(df -P "$GENLIB_PROBE" 2>/dev/null | awk 'NR==2 {print $1 " on " $6}')"
+            case "$GENLIB_FSTYPE" in
+                tmpfs|ramfs|overlay)
+                    pf_fail "R1c generated-capability library $GENLIB_ROOT is on EPHEMERAL '$GENLIB_FSTYPE' ($GENLIB_MOUNT_SRC) — pod loss destroys every promoted capability and its index; export \$SIDERIUS_GENERATED_LIBRARY_DIR to a persistent mount" ;;
+                "")
+                    pf_fail "R1c could not determine the filesystem type of $GENLIB_ROOT (probe: $GENLIB_PROBE)" ;;
+                *)
+                    pf_pass "R1c generated-capability library $GENLIB_ROOT (source=env) on persistent '$GENLIB_FSTYPE' ($GENLIB_MOUNT_SRC)" ;;
+            esac
+        fi
+    else
+        pf_fail "R1c generated-capability library root could not be resolved — \$SIDERIUS_GENERATED_LIBRARY_DIR is set to a value core.generated_library REFUSES (a relative path resolves against the launch cwd and would write generated artifacts back into the checkout). Export an absolute path"
+    fi
 
     # ---- R2: authoritative revision ----------------------------------------
     local REPO_SHA DIRTY

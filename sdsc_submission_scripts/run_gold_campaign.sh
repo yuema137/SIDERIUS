@@ -27,6 +27,9 @@
 #       --gold_advice_file ADVICE.json \
 #       [--arm goldpod|blindpod] [--task_config PATH] \
 #       [--fcnet_reference_json PATH] [--only 0-3,4-9] \
+#       [--gold_required_runtime_profile_path ABS_PATH \
+#        --gold_required_runtime_profile KEY \
+#        --gold_required_runtime_profile_sha256 HEX] \
 #       [--stagger-seconds S] [--dry-run] [passthrough run_chain.sh flags...]
 #
 #   bash sdsc_submission_scripts/run_gold_campaign.sh \
@@ -45,6 +48,32 @@
 #   * the treatment boundary: --gold_advice_file -> --advice (goldpod only);
 #   * band->GPU map 0-3->0, 4-9->1, 10-14->2, 15-19->3 (single_resident);
 #   * R-RETENTION-1: --no-cleanup_denoised always; --cleanup_denoised refused.
+#
+# OPERATOR-SUPPLIED (not frozen) — the required runtime-profile binding
+# (F-PROFILE-WIRE-1):
+#   --gold_required_runtime_profile_path ABS_PATH (which artifact),
+#   --gold_required_runtime_profile KEY ('<gpu_slug>/<regime>') and
+#   --gold_required_runtime_profile_sha256 HEX (64 lowercase hex) together
+#   make every stage-1 band and stage-2 unit require that exact artifact:
+#   resolution is fail-closed and REFUSES on a wrong device/regime, a missing
+#   artifact, or a digest mismatch. The PATH is declared, never derived —
+#   with only a key and a digest the artifact was still LOCATED by ordinary
+#   discovery, so a file was consumed because the calibration directory
+#   happened to hold one of that name; a declared path is read and nothing
+#   else is consulted, and a missing declared artifact refuses even where
+#   discovery WOULD have certified. The VALUES are not frozen here because
+#   the measured artifact is post-tag qualification data — its sha256 cannot
+#   exist in tagged code, and editing a frozen constant on the pod would be
+#   the tagged-code change that must FAIL M4 rather than be papered over.
+#   Supply all three flags or none: a partial declaration is REFUSED, and
+#   malformed values (a non-absolute path, a bad key shape, a short digest)
+#   are refused at this boundary before any band is forked. Undeclared is the
+#   legacy ladder (measured > shipped > uncalibrated) with byte-identical
+#   child argv, and is PRINTED as '(none - ...)' rather than left silent.
+#   Consumption is observable per chain: the resolved provenance reads
+#   'bound:<path>#sha256=<hex>', recording the digest OBSERVED from the bytes
+#   read rather than an echo of the declared one. The chain-level spellings
+#   (--required_runtime_profile[_path|_sha256]) are RESERVED passthrough.
 #
 # --dry-run prints the frozen table and every fully-resolved per-band (or
 # per-unit) run_chain argv without launching anything or writing any file.
@@ -73,6 +102,13 @@ gold_main() {
     local DESIGN_REGISTRY="" FCNET_REFERENCE_JSON="" ONLY="" STAGGER=60
     local DRY_RUN=0
     local PASSTHROUGH=()
+    # F-PROFILE-WIRE-1 — the operator-supplied runtime-profile declaration.
+    # Reset to empty HERE so the binding can only come from the command line:
+    # an ambient GOLD_REQUIRED_RUNTIME_PROFILE in the launching shell must
+    # never pin a campaign silently (the CUDA_VISIBLE_DEVICES hazard).
+    GOLD_REQUIRED_RUNTIME_PROFILE_PATH=""
+    GOLD_REQUIRED_RUNTIME_PROFILE=""
+    GOLD_REQUIRED_RUNTIME_PROFILE_SHA256=""
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -80,6 +116,9 @@ gold_main() {
             --stage)               STAGE="$2"; shift 2 ;;
             --arm)                 ARM="$2"; shift 2 ;;
             --gold_advice_file)    ADVICE_FILE="$2"; shift 2 ;;
+            --gold_required_runtime_profile_path) GOLD_REQUIRED_RUNTIME_PROFILE_PATH="$2"; shift 2 ;;
+            --gold_required_runtime_profile) GOLD_REQUIRED_RUNTIME_PROFILE="$2"; shift 2 ;;
+            --gold_required_runtime_profile_sha256) GOLD_REQUIRED_RUNTIME_PROFILE_SHA256="$2"; shift 2 ;;
             --task_config)         TASK_CONFIG="$2"; shift 2 ;;
             --design_registry)     DESIGN_REGISTRY="$2"; shift 2 ;;
             --fcnet_reference_json) FCNET_REFERENCE_JSON="$2"; shift 2 ;;
@@ -101,6 +140,15 @@ gold_main() {
     # (so this is not the binding), but refusing HERE means an unavailable
     # routing config never reaches the manifest write or the dispatch.
     gold_llm_config_args || return 1
+    # F-PROFILE-WIRE-1 fail-fast, same reasoning: each stage re-derives its
+    # own argv, but a half or malformed declaration must be refused before
+    # the manifest write and before any band is forked.
+    gold_required_profile_args || return 1
+    # F-GENLIB-WIRE-1: the campaign must have DECLARED where promoted
+    # capabilities live. Refused here, before the manifest write and before
+    # any band is forked, because an undeclared library silently accumulates
+    # into a root shared with every other campaign on the box.
+    gold_require_generated_library || return 1
     if [ -n "$FCNET_REFERENCE_JSON" ] && [ ! -f "$FCNET_REFERENCE_JSON" ]; then
         echo "ERROR: --fcnet_reference_json not found: $FCNET_REFERENCE_JSON" >&2
         return 1
@@ -149,6 +197,10 @@ gold_main() {
             echo "  \"llm_config\": \"${GOLD_LLM_CONFIG_ABS}\","
             echo "  \"llm_config_sha256\": \"${GOLD_LLM_CONFIG_SHA256}\","
             echo "  \"fcnet_reference_json\": $(if [ -n "$FCNET_REFERENCE_JSON" ]; then printf '"%s"' "$FCNET_REFERENCE_JSON"; else printf 'null'; fi),"
+            echo "  \"required_runtime_profile_path\": $(if [ -n "$GOLD_REQUIRED_RUNTIME_PROFILE_PATH" ]; then printf '"%s"' "$GOLD_REQUIRED_RUNTIME_PROFILE_PATH"; else printf 'null'; fi),"
+            echo "  \"required_runtime_profile\": $(if [ -n "$GOLD_REQUIRED_RUNTIME_PROFILE" ]; then printf '"%s"' "$GOLD_REQUIRED_RUNTIME_PROFILE"; else printf 'null'; fi),"
+            echo "  \"required_runtime_profile_sha256\": $(if [ -n "$GOLD_REQUIRED_RUNTIME_PROFILE_SHA256" ]; then printf '"%s"' "$GOLD_REQUIRED_RUNTIME_PROFILE_SHA256"; else printf 'null'; fi),"
+            echo "  \"generated_library_dir\": \"${GOLD_GENERATED_LIBRARY_DIR}\","
             echo "  \"frozen_values\": {"
             local row first=1
             for row in "${GOLD_FROZEN_ROWS[@]}"; do
@@ -172,6 +224,13 @@ gold_main() {
         --arm "$ARM"
     )
     [ -n "$ADVICE_FILE" ] && COMMON+=(--gold_advice_file "$ADVICE_FILE")
+    # F-PROFILE-WIRE-1: threaded to BOTH stages, like --gold_advice_file.
+    # gold_required_profile_args above already refused a half declaration, so
+    # these two are set together or not at all.
+    [ -n "$GOLD_REQUIRED_RUNTIME_PROFILE" ] && COMMON+=(
+        --gold_required_runtime_profile_path "$GOLD_REQUIRED_RUNTIME_PROFILE_PATH"
+        --gold_required_runtime_profile "$GOLD_REQUIRED_RUNTIME_PROFILE"
+        --gold_required_runtime_profile_sha256 "$GOLD_REQUIRED_RUNTIME_PROFILE_SHA256")
     [ "$DRY_RUN" -eq 1 ] && COMMON+=(--dry-run)
 
     case "$STAGE" in

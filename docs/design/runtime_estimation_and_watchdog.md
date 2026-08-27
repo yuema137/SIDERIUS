@@ -623,6 +623,34 @@ ONE authority — `core/runtime_control/watchdog_profile.py`:
   overrides its field. Resolution + provenance are logged to stderr and
   carried in the `--print_resolved_launch_config` JSON
   (`runtime_watchdog_provenance`).
+- **REQUIRED BINDING** (`--required_runtime_profile_path <abs>` plus
+  `--required_runtime_profile <gpu_slug>/<regime>` plus
+  `--required_runtime_profile_sha256 <64 hex>`, F-H100-WD-1-PRETAG,
+  declared through F-PROFILE-WIRE-1): a launch may DECLARE the artifact it
+  requires. PROFILE MODE then resolves through fail-closed certification
+  instead of the ladder — and **discovery is not consulted at all**: the
+  file read is the declared `artifact_path`, the discovered key must equal
+  the declared one, those bytes must hash to the declared digest (a single
+  read, so the bytes hashed are the bytes parsed), and the verified
+  artifact must carry the row; any miss REFUSES the launch rather than
+  falling back — including a missing declared artifact on a host where
+  discovery WOULD have certified. That the path is declared rather than
+  derived is the substance of the mechanism: while the artifact was located
+  by the ordinary discovery rule, a binding certified what was found but
+  never that the right file was consulted (`finding_1_invisible_default`).
+  All three flags or none: a partial declaration is refused, because
+  resolving it as undeclared would leave the requirement silently
+  unenforced. Provenance records the digest OBSERVED from the bytes read,
+  never an echo of the declared value.
+  Combining a binding with an explicit enablement flag also refuses —
+  OPERATOR MODE never consults the profile. Undeclared is byte-identical
+  to pre-#339, and consumption is observable in the provenance, which
+  reads `bound:<path>#sha256=<hex>` exactly when certification ran. The
+  Gold campaign path declares it via
+  `--gold_required_runtime_profile[_path|_sha256]` on `run_gold_campaign.sh`,
+  emitted to every stage-1 band and stage-2 unit from the one shared
+  builder; the value is operator-supplied at qualification time because a
+  measured overlay's digest cannot exist in tagged code.
 - **UNCALIBRATED is explicit, never borrowed**: an unknown pair resolves
   to `calibrated=false`, watchdog DISABLED, legacy floor 60.0 — exactly
   the pre-#261 bare-launch triple — and the stderr banner names the state

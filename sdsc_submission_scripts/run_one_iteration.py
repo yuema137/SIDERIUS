@@ -78,6 +78,8 @@ from core.run_invariants import (
 )
 from core.runtime_control.watchdog_profile import (
     ExecutionRegime,
+    RequiredProfileBinding,
+    RequiredProfileBindingError,
     ResolvedWatchdogSettings,
     resolve_watchdog_launch_settings,
 )
@@ -1545,6 +1547,47 @@ def build_parser() -> argparse.ArgumentParser:
         "explicit --runtime_watchdog/--no-runtime_watchdog flag is passed.",
     )
     parser.add_argument(
+        "--required_runtime_profile_path",
+        type=str,
+        default=None,
+        help="F-H100-WD-1-PRETAG — the ABSOLUTE path of the profile artifact "
+        "this launch requires. Part of the declaration and never derived: "
+        "while the artifact was located by the ordinary discovery rule "
+        "($SIDERIUS_CALIBRATION_DIR/runtime_profiles_<gpu_slug>.json), a "
+        "binding certified WHAT was found but not that the right file was "
+        "consulted — an overlay was used because the directory happened to "
+        "hold it. When declared, resolution reads THIS file and never "
+        "consults discovery. Must be paired with --required_runtime_profile "
+        "and --required_runtime_profile_sha256; a relative path is refused, "
+        "because the consuming subprocess has a different working directory.",
+    )
+    parser.add_argument(
+        "--required_runtime_profile",
+        type=str,
+        default=None,
+        help="F-H100-WD-1-PRETAG — DECLARE the runtime profile this launch "
+        "REQUIRES, as '<gpu_slug>/<regime>' (e.g. "
+        "'nvidia_h100_80gb_hbm3/single'), exactly as recorded in a prior "
+        "qualification run's provenance. Must be paired with "
+        "--required_runtime_profile_sha256. When declared, profile "
+        "resolution is FAIL-CLOSED: the discovered device/regime must match, "
+        "the measured overlay must hash to the declared digest, and it must "
+        "carry that row — any miss REFUSES the launch instead of falling "
+        "back to the shipped or uncalibrated profile. Omit both flags to "
+        "keep the legacy ladder (measured > shipped > uncalibrated).",
+    )
+    parser.add_argument(
+        "--required_runtime_profile_sha256",
+        type=str,
+        default=None,
+        help="F-H100-WD-1-PRETAG — the 64-char lowercase-hex sha256 of the "
+        "measured-overlay FILE certified for this run (e.g. `sha256sum "
+        "$SIDERIUS_CALIBRATION_DIR/runtime_profiles_<slug>.json`). Must be "
+        "paired with --required_runtime_profile. The digest is computed over "
+        "the exact bytes parsed, so the profile consumed is provably the one "
+        "that was qualified.",
+    )
+    parser.add_argument(
         "--data_dir",
         type=str,
         default=None,
@@ -1888,6 +1931,71 @@ def parse_allowed_output_types(raw: str | None) -> "tuple[OutputTypeName, ...] |
     return cast("tuple[OutputTypeName, ...]", parts)
 
 
+def build_required_profile_binding(
+    args: argparse.Namespace,
+) -> RequiredProfileBinding | None:
+    """F-H100-WD-1-PRETAG — turn the declaration flags into a typed binding.
+
+    The declaration is the TRIPLE ``(which artifact, which profile, which
+    exact bytes)``; no part means anything alone. A partial declaration is
+    therefore REFUSED rather than resolved as undeclared: silently ignoring
+    ``--required_runtime_profile`` because its digest was forgotten is
+    exactly the fail-open this mechanism exists to remove — the operator
+    would believe a requirement is in force while the legacy
+    measured > shipped > uncalibrated ladder quietly decides.
+
+    The PATH is part of the declaration and not derived, which is what
+    closes ``finding_1_invisible_default``: while the artifact was located
+    by the ordinary discovery rule, a binding certified what was found but
+    never that the right file was consulted.
+
+    Returns:
+        The validated binding, or ``None`` when NO flag was passed — in
+        which case resolution keeps the legacy ladder byte-identically.
+
+    Raises:
+        SystemExit: some but not all three flags were passed, or the
+            declared values are not a valid ``RequiredProfileBinding`` (a
+            relative artifact path, a bad key shape, or a digest that is not
+            64 lowercase hex characters).
+    """
+    from pydantic import ValidationError
+
+    declared = {
+        "--required_runtime_profile_path": args.required_runtime_profile_path,
+        "--required_runtime_profile": args.required_runtime_profile,
+        "--required_runtime_profile_sha256": args.required_runtime_profile_sha256,
+    }
+    supplied = sorted(flag for flag, value in declared.items() if value is not None)
+    if not supplied:
+        return None
+    if len(supplied) != len(declared):
+        missing = sorted(flag for flag, value in declared.items() if value is None)
+        raise SystemExit(
+            f"an incomplete required runtime-profile binding was declared: "
+            f"{', '.join(supplied)} passed without {', '.join(missing)}. The "
+            f"binding is the TRIPLE (artifact path, profile key, certified "
+            f"sha256) — a partial declaration is refused, never treated as "
+            f"undeclared, because that would leave the requirement silently "
+            f"unenforced."
+        )
+    try:
+        return RequiredProfileBinding(
+            artifact_path=args.required_runtime_profile_path,
+            profile_key=args.required_runtime_profile,
+            expected_sha256=args.required_runtime_profile_sha256,
+        )
+    except ValidationError as exc:
+        raise SystemExit(
+            f"invalid required runtime-profile declaration "
+            f"(--required_runtime_profile_path="
+            f"{args.required_runtime_profile_path!r}, "
+            f"--required_runtime_profile={args.required_runtime_profile!r}, "
+            f"--required_runtime_profile_sha256="
+            f"{args.required_runtime_profile_sha256!r}): {exc}"
+        ) from exc
+
+
 def resolve_watchdog_policy(args: argparse.Namespace) -> ResolvedWatchdogSettings:
     """arXiv #261 / Q-07c-6 — resolve the launch's watchdog policy ONCE.
 
@@ -1905,12 +2013,20 @@ def resolve_watchdog_policy(args: argparse.Namespace) -> ResolvedWatchdogSetting
     cached = getattr(args, "runtime_watchdog_policy", None)
     if cached is not None:
         return cached
-    resolved = resolve_watchdog_launch_settings(
-        cli_enabled=args.runtime_watchdog,
-        cli_safety_factor=args.runtime_watchdog_safety_factor,
-        cli_floor_seconds=args.runtime_watchdog_floor_seconds,
-        execution_regime=args.execution_regime,
-    )
+    required_binding = build_required_profile_binding(args)
+    try:
+        resolved = resolve_watchdog_launch_settings(
+            cli_enabled=args.runtime_watchdog,
+            cli_safety_factor=args.runtime_watchdog_safety_factor,
+            cli_floor_seconds=args.runtime_watchdog_floor_seconds,
+            execution_regime=args.execution_regime,
+            required_binding=required_binding,
+        )
+    except RequiredProfileBindingError as exc:
+        # The declared requirement could not be certified. Refuse the launch
+        # loudly, naming the flag that declared it — a REQUIRED binding never
+        # falls back to the shipped or uncalibrated profile.
+        raise SystemExit(f"--required_runtime_profile: {exc}") from exc
     args.runtime_watchdog = resolved.enabled
     args.runtime_watchdog_safety_factor = resolved.safety_factor
     args.runtime_watchdog_floor_seconds = resolved.floor_seconds
@@ -2197,6 +2313,14 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
         "runtime_watchdog_safety_factor": watchdog_policy.safety_factor,
         "runtime_watchdog_floor_seconds": watchdog_policy.floor_seconds,
         "runtime_watchdog_provenance": watchdog_policy.provenance,
+        # F-H100-WD-1-PRETAG — the DECLARED requirement, recorded whether or
+        # not it was made, so "no binding was declared" is an observable
+        # fact rather than an absent key. Whether the declaration was
+        # CONSUMED is read from runtime_watchdog_provenance above, which
+        # reads 'bound:<path>#sha256=<hex>' exactly when certification ran.
+        "required_runtime_profile_path": args.required_runtime_profile_path,
+        "required_runtime_profile": args.required_runtime_profile,
+        "required_runtime_profile_sha256": args.required_runtime_profile_sha256,
     }
     json.dump(resolved, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")

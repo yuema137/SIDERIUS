@@ -32,12 +32,19 @@ bound until it measures real values and writes the overlay.
 
 A THIRD state exists beside those two layers (**F-H100-WD-1-PRETAG**,
 operator-ruled Route B): a run may DECLARE a :class:`RequiredProfileBinding`
-— the ``<gpu_slug>/<regime>`` key it requires plus the sha256 of the
-measured-overlay file certified for it. A declared binding FAILS CLOSED:
-wrong hardware/regime, a missing or divergent overlay, or a verified
-overlay lacking the required row all raise
-:class:`RequiredProfileBindingError` instead of falling back — the run does
-not start. UNDECLARED (``required_binding=None``) keeps the legacy
+— the ABSOLUTE artifact path it requires, the ``<gpu_slug>/<regime>`` key,
+and the sha256 of the bytes certified for it. All three, because two of them
+are not enough: a key-and-digest binding still had to LOCATE the artifact,
+and it located it by the ordinary discovery rule, so an overlay was consumed
+because the calibration directory happened to hold a file of the expected
+name. With the path declared, the bound branch reads that file and no other
+— discovery is not consulted. A declared binding FAILS CLOSED: wrong
+hardware/regime, a missing or divergent artifact, or a verified artifact
+lacking the required row all raise :class:`RequiredProfileBindingError`
+instead of falling back — the run does not start. The effective artifact
+identity and the OBSERVED digest are stamped into the resolved profile's
+provenance, so a later reader sees what was actually read rather than what
+was asked for. UNDECLARED (``required_binding=None``) keeps the legacy
 fail-open-to-outer-budget behavior above byte-identical. The binding is the
 MECHANISM only; campaign values (H100 rows, measured numbers) are post-tag
 qualification data recorded in the overlay, never shipped here.
@@ -117,6 +124,17 @@ class RequiredProfileBinding(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    artifact_path: str = Field(
+        min_length=1,
+        description="ABSOLUTE path of the profile artifact this run requires. "
+        "REQUIRED, and the reason is the whole point of the binding: with "
+        "only a key and a digest, resolution still had to FIND the file, and "
+        "it found it by the ordinary discovery rule "
+        "(calibration_dir()/runtime_profiles_<gpu_slug>.json) — so an overlay "
+        "was consumed because the discovery path happened to contain it. "
+        "Declaring the path removes that inference: the bound branch reads "
+        "THIS file or refuses, and never consults discovery.",
+    )
     profile_key: str = Field(
         min_length=3,
         description="The declared profile identity, '<gpu_slug>/<regime>' "
@@ -132,6 +150,26 @@ class RequiredProfileBinding(BaseModel):
         "(single read, never re-opened), so the profile consumed is "
         "provably the one the operator qualified.",
     )
+
+    @field_validator("artifact_path")
+    @classmethod
+    def _artifact_path_is_absolute(cls, value: str) -> str:
+        """A relative artifact path is refused, never resolved.
+
+        The subprocess that consumes this binding does not share the
+        operator's working directory — ``run_chain.sh`` cd's to the project
+        dir before exec — so a relative path would name a DIFFERENT file
+        than the one certified, or no file at all. Refusing here means the
+        declaration cannot mean two things.
+        """
+        if not os.path.isabs(value):
+            raise ValueError(
+                f"artifact_path {value!r} is relative. The certified artifact "
+                f"must be named absolutely: the consuming subprocess runs with "
+                f"a different working directory, so a relative path would "
+                f"resolve elsewhere than where it was qualified."
+            )
+        return value
 
     @field_validator("profile_key")
     @classmethod
@@ -325,13 +363,21 @@ def resolve_runtime_profile(
     or borrowed number.
 
     With ``required_binding`` DECLARED the ladder is replaced by fail-closed
-    certification (**F-H100-WD-1-PRETAG**): the discovered
-    ``<gpu_slug>/<regime>`` key must equal the declared one, the measured
-    overlay must hash to the declared sha256 (single read — the exact bytes
-    parsed), and the verified overlay must carry the required row. Any miss
-    raises :class:`RequiredProfileBindingError`; there is no fall-through
-    to shipped or uncalibrated. ``required_binding=None`` keeps the ladder
-    above byte-identical.
+    certification (**F-H100-WD-1-PRETAG**), and **discovery is not consulted
+    at all**: the artifact is the binding's own absolute
+    ``artifact_path``, the discovered ``<gpu_slug>/<regime>`` key must equal
+    the declared one, those exact bytes must hash to the declared sha256
+    (single read — the bytes hashed are the bytes parsed), and the verified
+    artifact must carry the required row. Any miss raises
+    :class:`RequiredProfileBindingError`; there is no fall-through to the
+    measured overlay, to shipped, or to uncalibrated.
+
+    That the path is DECLARED rather than derived is the substance of the
+    mechanism, not a detail. While the artifact was located by the ordinary
+    discovery rule, a binding certified only *what* was found, never *that
+    the right file was consulted* — an overlay sitting in the calibration
+    directory was used because it was there. ``required_binding=None`` keeps
+    the ladder above byte-identical.
     """
     key = _profile_key(device_name, execution_regime)
 
@@ -343,7 +389,12 @@ def resolve_runtime_profile(
                 f"{key!r} (device={device_name!r}, regime={execution_regime!r}). "
                 f"Wrong hardware or regime is a refusal, not a fallback."
             )
-        path = _measured_overlay_path(device_name)
+        # THE DECLARED PATH, never discovery. `_measured_overlay_path` is
+        # deliberately NOT called here: consulting it would reintroduce the
+        # invisible default this binding exists to kill — an overlay
+        # consumed merely because the calibration directory happened to
+        # contain a file with the expected name.
+        path = required_binding.artifact_path
         profiles, digest = _load_bound_overlay(path, required_binding)
         if key not in profiles:
             raise RequiredProfileBindingError(
@@ -422,8 +473,8 @@ def resolve_watchdog_launch_settings(
     REQUIRED BINDING (``required_binding`` declared, **F-H100-WD-1-PRETAG**):
     PROFILE MODE resolves through the fail-closed certification in
     :func:`resolve_runtime_profile` — e.g. a formal campaign pinning the
-    overlay sha captured on its qualification host. Combining a binding
-    with an explicit
+    absolute artifact path AND the sha captured on its qualification host.
+    Combining a binding with an explicit
     enablement flag REFUSES loudly: OPERATOR MODE never consults the
     profile, so a declared REQUIRED binding would be silently unenforced —
     exactly the fail-open this mechanism removes. Field-level

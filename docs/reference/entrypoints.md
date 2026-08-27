@@ -60,8 +60,12 @@ Everything else is pass-through to the iteration: `--data_scope`,
 `--health_gate_enabled` / `--no-health_gate_enabled`, `--health_gate_files`,
 `--health_checks_config`, `--healthgate_mode`, `--max_rounds`, the epoch
 ceilings (`--max_epochs`, and the per-role `--trial_max_epochs` /
-`--formal_max_epochs` — D-BUD-6, forwarded only when typed), and the trial /
-formal time and VRAM budgets.
+`--formal_max_epochs` — D-BUD-6, forwarded only when typed), the required
+runtime-profile declaration (`--required_runtime_profile_path` /
+`--required_runtime_profile` / `--required_runtime_profile_sha256` —
+F-PROFILE-WIRE-1, forwarded only when
+typed, so an undeclared launch's child argv is byte-identical), and the
+trial / formal time and VRAM budgets.
 
 > The header comment inside `run_chain.sh` lists `--seed_paths` under "Required
 > flags". That comment is stale — `_chain_common.sh:403-406` documents the
@@ -96,10 +100,13 @@ Other flags that define a run:
 | `--trial_max_epochs` / `--formal_max_epochs` | `None` — per-role epoch ceilings (D-BUD-6; frozen campaign posture trial 2 / formal 1). Precedence per round role: per-mode value → `--max_epochs` → no clamp; must be >= 1, refused at parse otherwise |
 | `--max_proposal_attempts` | `3` |
 | `--llm_config` | `None` — **omitting it does not fail.** Empty forwards nothing (`_chain_common.sh:78`), and the runner then falls back to `WorkflowLLMConfig.uniform("gemini", --llm_model)` whose `--llm_model` default is `gemini-3.1-pro-preview` (`run_one_iteration.py:943`), so every LLM role silently resolves to the deprecated all-Gemini default and the run still exits 0. Pass an explicit routing config on any run whose model matters; the Gold campaign path binds `llm_configs/openai_tiered_pro.json` for you and refuses to launch if it cannot (F-LLM-WIRE-1) |
+| `--required_runtime_profile_path` | `None`. The **ABSOLUTE** path of the profile artifact this launch requires. Part of the declaration and never derived — this is the clause that closes `finding_1_invisible_default`: while the artifact was located by the ordinary discovery rule (`$SIDERIUS_CALIBRATION_DIR/runtime_profiles_<gpu_slug>.json`), a binding certified *what was found* but never *that the right file was consulted*, so an overlay was used because the directory happened to hold a file of that name. When declared, resolution reads THIS file and never consults discovery — a missing declared artifact REFUSES even when discovery would have certified successfully. A relative path is refused at declaration, because the consuming subprocess runs with a different working directory (`run_chain.sh` cd's before exec) |
+| `--required_runtime_profile` | `None` (undeclared → the legacy ladder: measured overlay > shipped > uncalibrated). Declares the runtime profile this launch REQUIRES, as `<gpu_slug>/<regime>` (e.g. `nvidia_h100_80gb_hbm3/single`), copied from a qualification run's recorded provenance. Must be declared together with `--required_runtime_profile_path` and `--required_runtime_profile_sha256`; any proper subset is refused, because half a binding is NO binding and resolving it as undeclared would leave the requirement silently unenforced. When declared, resolution is FAIL-CLOSED: a discovered device/regime that differs, a missing overlay, a digest mismatch, or a verified overlay lacking the row all REFUSE the launch instead of falling back (F-PROFILE-WIRE-1, mechanism F-H100-WD-1-PRETAG). Combining it with an explicit `--runtime_watchdog`/`--no-runtime_watchdog` also refuses — OPERATOR MODE never consults the profile, so the requirement would be unenforced |
+| `--required_runtime_profile_sha256` | `None`. The 64-char lowercase-hex sha256 of the DECLARED artifact's bytes, certified for this run (`sha256sum "${SIDERIUS_CALIBRATION_DIR:-$HOME/.siderius}/runtime_profiles_<gpu_slug>.json"`). Hashed over the exact bytes parsed — a single read, never re-opened — so the profile consumed is provably the one that was qualified. Consumption is observable: `runtime_watchdog_provenance` reads `bound:<path>#sha256=<hex>` exactly when certification ran, and the digest it records is the one OBSERVED from the bytes read — never an echo of the declared value |
 | `--experiment_arm` | `None` (unlabelled; an empty string is refused). Opaque label pinned in the lock and stamped on records / outputs / manifests (arXiv U1) |
 | `--ml_lit_review_enabled` / `--no-ml_lit_review_enabled` | `None` → the YAML's `enabled` decides (shipped: `false`). The resolved flag and the config's sha256 are pinned in the lock; an enabled but unreadable config refuses the launch |
 | `--baseline_isolation` | off. Excludes the bundled baselines from the LLM-facing surface: bundled descriptions refused, prompt examples neutralised, built-in proposals refused by name (arXiv U3). Pinned in the lock |
-| `--print_resolved_launch_config` | off. Print the resolved launch configuration (arm, lit-review topology + config sha256, isolation, composition, workspace, advice file, declared posture) as ONE JSON object and exit 0 with no side effects |
+| `--print_resolved_launch_config` | off. Print the resolved launch configuration (arm, lit-review topology + config sha256, isolation, composition, workspace, advice file, declared posture) as ONE JSON object and exit 0 with no side effects. Includes `required_runtime_profile_path` / `required_runtime_profile` / `required_runtime_profile_sha256` — recorded as `null` when undeclared, so "no profile was pinned" is an observable fact rather than an absent key |
 
 ### `launch_prior_baseline_experiment.sh` — the two-arm experiment
 

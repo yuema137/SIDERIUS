@@ -872,6 +872,258 @@ class TestStage2DryRun:
 
 
 # ---------------------------------------------------------------------------
+# F-PROFILE-WIRE-1 — the required runtime-profile declaration on the Gold path.
+#
+# The value is OPERATOR-SUPPLIED rather than frozen in the lib, because the
+# measured H100 overlay is post-tag qualification data: its sha256 cannot
+# exist in tagged code, and filling a frozen constant on the pod at M4 would
+# be a tagged-code change — the outcome the operator ruled must FAIL M4
+# rather than be papered over. The campaign therefore freezes the MECHANISM
+# and its OBSERVABILITY; qualification supplies the VALUE.
+#
+# So the witnesses here are the two the design owes: the launcher ACCEPTS and
+# FORWARDS a supplied declaration (to both stages, from the one shared
+# builder), and its ABSENCE is explicit rather than silent.
+# ---------------------------------------------------------------------------
+
+#: A syntactically valid declaration. HARDCODED — nothing in the lib declares
+#: a profile key, so there is no source to read it back from, and at M4 the
+#: real values come from the qualification run's provenance.
+#: An ABSOLUTE artifact path. HARDCODED and deliberately not a real file:
+#: the launcher must TRANSPORT the declaration, and certification (which
+#: does need the bytes) belongs to the resolver's own tests.
+DECLARED_PROFILE_PATH = "/persistent/qualification/runtime_profiles_h100.json"
+DECLARED_PROFILE_KEY = "nvidia_h100_80gb_hbm3/single"
+DECLARED_PROFILE_SHA = "c" * 64
+
+
+def _stage2_unit_argvs(stdout: str) -> dict[str, list[str]]:
+    """Parse the stage-2 dry-run's ``unit <U> gpu=<G> run_chain argv:`` blocks."""
+    argvs: dict[str, list[str]] = {}
+    lines = stdout.splitlines()
+    for i, line in enumerate(lines):
+        if "run_chain argv:" in line and "[gold-stage2]" in line:
+            unit = line.split("unit")[1].split("gpu")[0].strip()
+            argvs[unit] = shlex.split(lines[i + 1])
+    return argvs
+
+
+class TestRequiredRuntimeProfileDeclaration:
+    @pytest.fixture
+    def registry(self, tmp_path: Path) -> Path:
+        reg = tmp_path / "designs"
+        reg.mkdir()
+        for design in ("wavenetA", "punetB", "rnnC", "fnoD"):
+            (reg / f"{design}.json").write_text("{}\n")
+        return reg
+
+    def _stage2_dry(self, campaign_root, registry, *extra):
+        return _bash(
+            str(ENTRYPOINT),
+            "--workspace_root",
+            str(campaign_root["root"]),
+            "--stage",
+            "2",
+            "--design_registry",
+            str(registry),
+            "--gold_advice_file",
+            str(campaign_root["advice"]),
+            "--dry-run",
+            *extra,
+        )
+
+    def test_a_supplied_declaration_reaches_every_stage1_band_argv(self, campaign_root):
+        """(d) The defect only this catches: the entrypoint accepting the
+        declaration and then not forwarding it — the M4 operator would supply
+        the binding, see it echoed by the launcher, and still get bands whose
+        chain argv carries nothing. Fails by: any band's argv missing either
+        token, or the four bands disagreeing."""
+        proc = _stage1_dry(
+            campaign_root,
+            "--gold_required_runtime_profile_path",
+            DECLARED_PROFILE_PATH,
+            "--gold_required_runtime_profile",
+            DECLARED_PROFILE_KEY,
+            "--gold_required_runtime_profile_sha256",
+            DECLARED_PROFILE_SHA,
+        )
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        argvs = _band_argvs(proc.stdout)
+        assert len(argvs) == 4, argvs.keys()
+        for band, argv in argvs.items():
+            pairs = _pairs(argv)
+            assert pairs["--required_runtime_profile_path"] == DECLARED_PROFILE_PATH, band
+            assert pairs["--required_runtime_profile"] == DECLARED_PROFILE_KEY, band
+            assert pairs["--required_runtime_profile_sha256"] == DECLARED_PROFILE_SHA, band
+            # R-RETENTION-1 is unchanged: --no-cleanup_denoised still
+            # terminates the FROZEN block, so the new tokens were inserted
+            # before it rather than displacing it. (Retention itself is
+            # owned by TestRetention; this only pins that we did not move
+            # it — the band/arm args legitimately follow the frozen block.)
+            assert "--no-cleanup_denoised" in argv, band
+            assert argv.index("--no-cleanup_denoised") > argv.index(
+                "--required_runtime_profile_sha256"
+            ), band
+
+    def test_a_supplied_declaration_reaches_every_stage2_unit_argv(self, campaign_root, registry):
+        """(d) The defect only this catches: the declaration reaching stage 1
+        but not stage 2 — the two stages build argv in separate scripts, so
+        one binder feeding both is an assumption, not a guarantee. A stage-2
+        unit certifying a different profile than the band it retrains would
+        silently break the retrain's comparability. Fails by: any of the 16
+        units missing the tokens."""
+        proc = self._stage2_dry(
+            campaign_root,
+            registry,
+            "--gold_required_runtime_profile_path",
+            DECLARED_PROFILE_PATH,
+            "--gold_required_runtime_profile",
+            DECLARED_PROFILE_KEY,
+            "--gold_required_runtime_profile_sha256",
+            DECLARED_PROFILE_SHA,
+        )
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        argvs = _stage2_unit_argvs(proc.stdout)
+        assert len(argvs) == 16, argvs.keys()
+        for unit, argv in argvs.items():
+            pairs = _pairs(argv)
+            assert pairs["--required_runtime_profile_path"] == DECLARED_PROFILE_PATH, unit
+            assert pairs["--required_runtime_profile"] == DECLARED_PROFILE_KEY, unit
+            assert pairs["--required_runtime_profile_sha256"] == DECLARED_PROFILE_SHA, unit
+
+    def test_b_absence_is_printed_explicitly_and_emits_no_token(self, campaign_root):
+        """(d) The defect only this catches: an undeclared campaign being
+        SILENT about it. Two distinct properties, and both matter.
+
+        Byte-identity: a pre-M4 launch must emit no new token, or every
+        existing campaign's child argv changes.
+
+        Explicitness: the dry-run must still SAY that no profile is pinned.
+        An absent line is indistinguishable from a feature that is not
+        wired — which is precisely how F-PROFILE-WIRE-1 survived. Fails by:
+        a token appearing, or the '(none' row disappearing."""
+        proc = _stage1_dry(campaign_root)
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        for argv in _band_argvs(proc.stdout).values():
+            assert "--required_runtime_profile_path" not in argv
+            assert "--required_runtime_profile" not in argv
+            assert "--required_runtime_profile_sha256" not in argv
+        assert "supplied required_runtime_profile=(none" in proc.stdout, (
+            "an undeclared binding must be stated, not omitted"
+        )
+
+    def test_b_a_declared_campaign_says_so_in_the_dry_run_row(self, campaign_root):
+        """(d) The defect only this catches: the launcher forwarding a
+        declaration it never displays, so an M4 operator cannot confirm from
+        the dry run WHICH overlay the campaign will require. Fails by: the
+        key or digest missing from the printed row."""
+        proc = _stage1_dry(
+            campaign_root,
+            "--gold_required_runtime_profile_path",
+            DECLARED_PROFILE_PATH,
+            "--gold_required_runtime_profile",
+            DECLARED_PROFILE_KEY,
+            "--gold_required_runtime_profile_sha256",
+            DECLARED_PROFILE_SHA,
+        )
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        row = [
+            line
+            for line in proc.stdout.splitlines()
+            if "supplied required_runtime_profile=" in line
+        ]
+        assert row, proc.stdout
+        assert DECLARED_PROFILE_KEY in row[0]
+        assert DECLARED_PROFILE_SHA in row[0]
+        assert DECLARED_PROFILE_PATH in row[0]
+
+    @pytest.mark.parametrize(
+        ("extra", "expected"),
+        [
+            # A PARTIAL declaration is NO declaration: the chain would fall
+            # back to the legacy ladder while the operator believed a pin was
+            # in force. Refused at the boundary, before any band is forked.
+            ((("--gold_required_runtime_profile", DECLARED_PROFILE_KEY),), "INCOMPLETE"),
+            (
+                (("--gold_required_runtime_profile_sha256", DECLARED_PROFILE_SHA),),
+                "INCOMPLETE",
+            ),
+            (
+                (("--gold_required_runtime_profile_path", DECLARED_PROFILE_PATH),),
+                "INCOMPLETE",
+            ),
+            # (key, sha256) with NO path — the shape that shipped before the
+            # artifact path was required, and the one an operator following
+            # stale notes would most plausibly type. It must now refuse.
+            (
+                (
+                    ("--gold_required_runtime_profile", DECLARED_PROFILE_KEY),
+                    ("--gold_required_runtime_profile_sha256", DECLARED_PROFILE_SHA),
+                ),
+                "INCOMPLETE",
+            ),
+            # Shape errors caught here rather than in 4 forked children.
+            (
+                (
+                    ("--gold_required_runtime_profile_path", DECLARED_PROFILE_PATH),
+                    ("--gold_required_runtime_profile", "h100"),
+                    ("--gold_required_runtime_profile_sha256", DECLARED_PROFILE_SHA),
+                ),
+                "is not '<gpu_slug>/<regime>'",
+            ),
+            (
+                (
+                    ("--gold_required_runtime_profile_path", DECLARED_PROFILE_PATH),
+                    ("--gold_required_runtime_profile", DECLARED_PROFILE_KEY),
+                    ("--gold_required_runtime_profile_sha256", "deadbeef"),
+                ),
+                "is not 64 lowercase",
+            ),
+            # A RELATIVE artifact path would resolve against the child's cwd
+            # (run_chain cd's before exec), naming a different file than the
+            # one qualified.
+            (
+                (
+                    ("--gold_required_runtime_profile_path", "qual/profiles.json"),
+                    ("--gold_required_runtime_profile", DECLARED_PROFILE_KEY),
+                    ("--gold_required_runtime_profile_sha256", DECLARED_PROFILE_SHA),
+                ),
+                "is not ABSOLUTE",
+            ),
+        ],
+    )
+    def test_c_malformed_or_half_declarations_refuse_before_launching(
+        self, campaign_root, extra, expected
+    ):
+        """(d) The defect only this catches: a typo'd declaration being
+        discovered by the CHILD. The stage scripts fork one background chain
+        per band, so a digest typo found downstream has already launched the
+        fleet. Fails by: a non-zero-free run, or a refusal that does not say
+        which half is wrong."""
+        flat = [tok for pair in extra for tok in pair]
+        proc = _stage1_dry(campaign_root, *flat)
+        assert proc.returncode != 0, proc.stdout
+        assert expected in proc.stderr, proc.stderr
+
+    def test_d_the_chain_level_spelling_is_a_reserved_passthrough(self, campaign_root):
+        """(d) The defect only this catches: an operator passing the CHAIN
+        spelling through. Passthrough tokens are appended AFTER the frozen
+        args and the chain parser is last-wins, so it would rebind the
+        requirement to something the dry-run row and the launch manifest do
+        not name — a pinned profile the manifest misreports is worse than no
+        pin. Fails by: the token being accepted."""
+        for flag in (
+            "--required_runtime_profile",
+            "--required_runtime_profile_sha256",
+            "--required_runtime_profile_path",
+        ):
+            proc = _stage1_dry(campaign_root, flag, "whatever")
+            assert proc.returncode != 0, flag
+            assert flag in proc.stderr, flag
+            assert "GOLD_RESERVED_PASSTHROUGH" in proc.stderr, flag
+
+
+# ---------------------------------------------------------------------------
 # State-helper fixtures (synthetic band workspaces)
 # ---------------------------------------------------------------------------
 

@@ -11,6 +11,8 @@
 #          D-BUD-6 epochs, D-BUD-7 trial portions, D-BUD-8 formal portions,
 #          D-BUD-11/13 time budgets, P6-A skip delta, P6-B bypass delta),
 #          the frozen LLM ROUTING authority (D-LLM-1, F-LLM-WIRE-1),
+#          the OPERATOR-SUPPLIED required runtime-profile binding
+#          (F-PROFILE-WIRE-1 — mechanism frozen here, value supplied at M4),
 #          the band vocabulary + band->files + band->GPU maps
 #          (EXCLUSIVE_SINGLE_BAND, operator hardware disposition 2026-08-26),
 #          the campaign arm vocabulary (D-NAME-1: goldpod / blindpod;
@@ -149,6 +151,19 @@ gold_print_frozen_table() {
     echo "[gold-campaign]   frozen stage2_num_iterations=${GOLD_STAGE2_NUM_ITERATIONS} (D-ARCH-2 fixed-candidate pin)"
     echo "[gold-campaign]   frozen fcnet_stop_margin=${GOLD_FCNET_STOP_MARGIN} (evaluable only with a per-band reference; A2-FCNET)"
     echo "[gold-campaign]   frozen llm_config=${GOLD_LLM_CONFIG_RELPATH} (D-LLM-1; resolved absolute at bind, REFUSES if absent)"
+    # F-PROFILE-WIRE-1: ALWAYS printed, declared or not — an undeclared
+    # runtime-profile binding is a launch decision an operator must be able
+    # to SEE, not an absent line they have to know to look for.
+    if [ -n "${GOLD_REQUIRED_RUNTIME_PROFILE:-}" ]; then
+        echo "[gold-campaign]   supplied required_runtime_profile=${GOLD_REQUIRED_RUNTIME_PROFILE} sha256=${GOLD_REQUIRED_RUNTIME_PROFILE_SHA256:-(unset)} artifact=${GOLD_REQUIRED_RUNTIME_PROFILE_PATH:-(unset)} (F-PROFILE-WIRE-1; fail-closed, declared artifact only, no discovery)"
+    else
+        echo "[gold-campaign]   supplied required_runtime_profile=(none — legacy ladder: measured > shipped > uncalibrated; declare at M4 with --gold_required_runtime_profile[_sha256])"
+    fi
+    # F-GENLIB-WIRE-1: the launch REFUSES when this is unset, so by the time
+    # the table prints it is always a declared value. Printed so the operator
+    # can confirm WHICH root this campaign's promoted capabilities land in —
+    # the properties of that root are checked by campaign_preflight R1c.
+    echo "[gold-campaign]   supplied generated_library=${GOLD_GENERATED_LIBRARY_DIR:-(unset — launch refused)} (F-GENLIB-WIRE-1; \$SIDERIUS_GENERATED_LIBRARY_DIR, validated by preflight R1c)"
 }
 
 # gold_bypass_ceiling_args — sets GOLD_BYPASS_CEILING_ARGS.
@@ -200,6 +215,121 @@ gold_llm_config_args() {
     GOLD_LLM_CONFIG_ARGS=(--llm_config "$abs")
 }
 
+# gold_required_profile_args — sets GOLD_REQUIRED_PROFILE_ARGS from the
+# OPERATOR-SUPPLIED runtime-profile declaration (F-PROFILE-WIRE-1).
+#
+# WHY THIS VALUE IS SUPPLIED AND NOT FROZEN, unlike every other authority in
+# this file. A required binding is the pair (profile key, sha256 of the
+# MEASURED overlay). That overlay is produced by GoldPod qualification (M4)
+# — it is post-tag measurement data, so its digest cannot exist in tagged
+# code. Freezing an empty constant here and filling it on the pod would make
+# M4 require an edit to TAGGED code, which is precisely the outcome the
+# operator's ruling says must fail M4 rather than be papered over. So the
+# campaign freezes the MECHANISM and its OBSERVABILITY; qualification
+# supplies the VALUE, through --gold_required_runtime_profile[_sha256] on
+# the entrypoint, threaded down exactly like --gold_advice_file.
+#
+# Absent == undeclared == the legacy ladder (measured > shipped >
+# uncalibrated), and NO token reaches the child argv — so a pre-M4 campaign
+# launch is byte-identical to today. Absence is nonetheless PRINTED by
+# gold_print_frozen_table and RECORDED in the launch manifest, so
+# "no binding was declared" is an observed fact rather than a silence.
+#
+# A HALF declaration refuses here, at the boundary, rather than in the child:
+# the stage scripts fork one background chain per band, so a digest typo
+# discovered downstream would already have launched the fleet.
+gold_required_profile_args() {
+    local path="${GOLD_REQUIRED_RUNTIME_PROFILE_PATH:-}"
+    local key="${GOLD_REQUIRED_RUNTIME_PROFILE:-}"
+    local sha="${GOLD_REQUIRED_RUNTIME_PROFILE_SHA256:-}"
+    GOLD_REQUIRED_PROFILE_ARGS=()
+    if [ -z "$path" ] && [ -z "$key" ] && [ -z "$sha" ]; then
+        return 0
+    fi
+    if [ -z "$path" ] || [ -z "$key" ] || [ -z "$sha" ]; then
+        echo "ERROR: an INCOMPLETE required runtime-profile declaration was supplied, so" >&2
+        echo "  this launch is REFUSED (F-PROFILE-WIRE-1):" >&2
+        echo "    --gold_required_runtime_profile_path   = ${path:-(unset)}" >&2
+        echo "    --gold_required_runtime_profile        = ${key:-(unset)}" >&2
+        echo "    --gold_required_runtime_profile_sha256 = ${sha:-(unset)}" >&2
+        echo "  The binding is the TRIPLE (artifact path, profile key, certified sha256);" >&2
+        echo "  part of it is not a weaker requirement, it is NO requirement — the chain" >&2
+        echo "  would fall back to the measured>shipped>uncalibrated ladder while the" >&2
+        echo "  operator believed a profile was pinned. Supply all three or none." >&2
+        return 1
+    fi
+    if [[ "$path" != /* ]]; then
+        echo "ERROR: --gold_required_runtime_profile_path '${path}' is not ABSOLUTE" >&2
+        echo "  (F-PROFILE-WIRE-1). run_chain.sh cd's to the project dir before exec, so" >&2
+        echo "  a relative artifact path would name a different file than the one" >&2
+        echo "  qualified — or none at all." >&2
+        return 1
+    fi
+    if [[ "$key" != */* ]]; then
+        echo "ERROR: --gold_required_runtime_profile '${key}' is not '<gpu_slug>/<regime>'" >&2
+        echo "  (F-PROFILE-WIRE-1). Copy the key from the qualification run's recorded" >&2
+        echo "  provenance, e.g. nvidia_h100_80gb_hbm3/single." >&2
+        return 1
+    fi
+    if [[ ! "$sha" =~ ^[0-9a-f]{64}$ ]]; then
+        echo "ERROR: --gold_required_runtime_profile_sha256 '${sha}' is not 64 lowercase" >&2
+        echo "  hex characters (F-PROFILE-WIRE-1). Take it from the measured overlay:" >&2
+        echo "    sha256sum \"\${SIDERIUS_CALIBRATION_DIR:-\$HOME/.siderius}/runtime_profiles_<slug>.json\"" >&2
+        return 1
+    fi
+    GOLD_REQUIRED_PROFILE_ARGS=(
+        --required_runtime_profile_path "$path"
+        --required_runtime_profile "$key"
+        --required_runtime_profile_sha256 "$sha"
+    )
+}
+
+# gold_require_generated_library — REFUSE a campaign launch that has not
+# DECLARED where promoted capabilities live (F-GENLIB-WIRE-1).
+#
+# This asserts that the DECISION was made; it does not dictate the value, and
+# nothing machine-specific enters tracked code. The operator exports
+# SIDERIUS_GENERATED_LIBRARY_DIR (the SIDERIUS_CALIBRATION_DIR shape), the
+# campaign_preflight R1c row validates the resolved root's PROPERTIES through
+# the production authority, and this function puts the requirement ON the
+# launch path by construction — which a preflight-only guard cannot do,
+# because preflight is a separate invocation an operator can skip.
+#
+# The anti-silence witness, same as --llm_config: leaving it unset does NOT
+# fail. The library silently resolves to the DEFAULT
+# ~/.siderius/generated_library, which on a pod is the ephemeral container
+# overlay AND is shared across campaigns — so a previous run's promoted
+# models and losses appear in this run's proposer surface, the arms stop
+# being isolated, and the run still exits 0. Refusing here is the point:
+# every launch this rejects is one that would have accumulated into a root
+# nobody declared.
+#
+# Note this necessarily tests that the variable was EXPORTED, not merely
+# assigned: the entrypoint is exec'd, so a plain shell assignment never
+# reaches it — and would equally never reach the chain's Python children.
+gold_require_generated_library() {
+    local raw="${SIDERIUS_GENERATED_LIBRARY_DIR:-}"
+    # Mirror the authority's `.strip()`: whitespace is not a declaration.
+    raw="$(printf '%s' "$raw" | tr -d '[:space:]')"
+    if [ -z "$raw" ]; then
+        echo "ERROR: SIDERIUS_GENERATED_LIBRARY_DIR is not exported, so this campaign" >&2
+        echo "  launch is REFUSED (F-GENLIB-WIRE-1)." >&2
+        echo "  It must name an ABSOLUTE, PERSISTENT, CAMPAIGN-OWNED and FRESH directory" >&2
+        echo "  for promoted models, losses and the capability index. This launcher does" >&2
+        echo "  not choose it for you: the correct path is a property of the machine and" >&2
+        echo "  of which campaign this is, so it must be a recorded operator decision." >&2
+        echo "  Leaving it unset does NOT fail — the library resolves to the DEFAULT" >&2
+        echo "  ~/.siderius/generated_library, which on a pod is the ephemeral container" >&2
+        echo "  overlay AND is shared across campaigns, so an earlier run's promoted" >&2
+        echo "  capabilities enter this run's proposer surface and the run still exits 0." >&2
+        echo "  Export it (a plain shell assignment is not enough — the chain's children" >&2
+        echo "  read the ENVIRONMENT), then re-run campaign_preflight.sh: its R1c row" >&2
+        echo "  validates the resolved root through core.generated_library itself." >&2
+        return 1
+    fi
+    GOLD_GENERATED_LIBRARY_DIR="${SIDERIUS_GENERATED_LIBRARY_DIR}"
+}
+
 # gold_frozen_chain_args STAGE — sets GOLD_FROZEN_CHAIN_ARGS: the typed
 # run_chain.sh tokens for every frozen value, plus retention.
 #
@@ -238,6 +368,12 @@ gold_frozen_chain_args() {
     # stage-2 unit can never run on a different model than a stage-1 band.
     gold_llm_config_args || return 1
     GOLD_FROZEN_CHAIN_ARGS+=("${GOLD_LLM_CONFIG_ARGS[@]}")
+    # F-PROFILE-WIRE-1: bound HERE, in the ONE builder both stages consume,
+    # so a stage-2 unit can never resolve a different runtime profile than
+    # the stage-1 band it retrains. Empty when undeclared — the guarded
+    # expansion keeps the undeclared child argv byte-identical.
+    gold_required_profile_args || return 1
+    GOLD_FROZEN_CHAIN_ARGS+=(${GOLD_REQUIRED_PROFILE_ARGS[@]+"${GOLD_REQUIRED_PROFILE_ARGS[@]}"})
     GOLD_FROZEN_CHAIN_ARGS+=(--no-cleanup_denoised)
 }
 
@@ -399,6 +535,13 @@ gold_arm_args() {
 #: campaign's pinned routing — the same defect one layer down. --llm_model is
 #: reserved for the reason --max_epochs is: no second model authority may
 #: reach the child argv, even one the config already shadows.
+#:
+#: --required_runtime_profile / --required_runtime_profile_sha256
+#: (F-PROFILE-WIRE-1): same last-wins hazard. The declaration enters through
+#: the entrypoint's --gold_required_runtime_profile[_sha256], which the
+#: dry-run row and the launch manifest RECORD; a passed-through chain-level
+#: spelling would rebind the requirement to something no recorded surface
+#: names — a pinned profile that the manifest misreports is worse than none.
 GOLD_RESERVED_PASSTHROUGH=(
     --cleanup_denoised
     --num_iterations --trial_portion --train_portion --eval_portion
@@ -408,6 +551,8 @@ GOLD_RESERVED_PASSTHROUGH=(
     --skip_formal_min_delta --bypass_formal_time_budget_min_delta
     --bypass_formal_time_budget_minutes
     --llm_config --llm_model
+    --required_runtime_profile --required_runtime_profile_sha256
+    --required_runtime_profile_path
     --experiment_arm --ml_lit_review_enabled --no-ml_lit_review_enabled
     --advice --human_advice_file
     --data_scope --health_gate_files --band --workspace --run_name

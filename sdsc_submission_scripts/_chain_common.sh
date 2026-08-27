@@ -76,6 +76,14 @@ BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA=0.0
 BYPASS_FORMAL_TIME_BUDGET_MINUTES=""             # Lane F3: empty == omit == no bypass ceiling extension
 LLM_MODEL="gemini-3.1-pro-preview"  # §3.2: matches run_one_iteration.py default
 LLM_CONFIG=""
+# F-PROFILE-WIRE-1 — the DECLARED required runtime profile. Both empty ==
+# omitted == the legacy measured > shipped > uncalibrated ladder, and no new
+# token reaches the child argv. Declared, they make profile resolution
+# fail-closed: wrong device/regime, a missing overlay, a digest mismatch or a
+# verified overlay lacking the row all REFUSE the launch.
+REQUIRED_RUNTIME_PROFILE_PATH=""    # ABSOLUTE artifact path; empty == undeclared
+REQUIRED_RUNTIME_PROFILE=""         # '<gpu_slug>/<regime>'; empty == undeclared
+REQUIRED_RUNTIME_PROFILE_SHA256=""  # 64 hex chars of the certified artifact
 HEALTH_CHECKS_CONFIG=""             # optional; empty preserves tuner's shipped default
 # Step 10 / P5+P6 W1 — the operator's only way to launch a COMPOSED run.
 # Empty == omitted == Python None == the legacy un-composed run, whose child
@@ -341,6 +349,9 @@ parse_chain_args() {
         --advice)                 ADVICE="$2"; shift 2 ;;
         --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
         --llm_config)             LLM_CONFIG="$2"; shift 2 ;;
+        --required_runtime_profile_path) REQUIRED_RUNTIME_PROFILE_PATH="$2"; shift 2 ;;
+        --required_runtime_profile) REQUIRED_RUNTIME_PROFILE="$2"; shift 2 ;;
+        --required_runtime_profile_sha256) REQUIRED_RUNTIME_PROFILE_SHA256="$2"; shift 2 ;;
         --health_checks_config)   HEALTH_CHECKS_CONFIG="$2"; shift 2 ;;
         --task_composition)       TASK_COMPOSITION="$2"; shift 2 ;;
         --data_scope)             DATA_SCOPE="$2"; shift 2 ;;
@@ -558,6 +569,18 @@ build_app_args() {
     if [ -n "$LLM_CONFIG" ]; then
         APP_ARGS+=(--llm_config "$LLM_CONFIG")
     fi
+    # F-PROFILE-WIRE-1 — forwarded only when declared, so an undeclared
+    # launch emits no new token and its child argv is byte-identical to
+    # pre-#345. run_one_iteration.py refuses a half declaration by name.
+    if [ -n "$REQUIRED_RUNTIME_PROFILE_PATH" ]; then
+        APP_ARGS+=(--required_runtime_profile_path "$REQUIRED_RUNTIME_PROFILE_PATH")
+    fi
+    if [ -n "$REQUIRED_RUNTIME_PROFILE" ]; then
+        APP_ARGS+=(--required_runtime_profile "$REQUIRED_RUNTIME_PROFILE")
+    fi
+    if [ -n "$REQUIRED_RUNTIME_PROFILE_SHA256" ]; then
+        APP_ARGS+=(--required_runtime_profile_sha256 "$REQUIRED_RUNTIME_PROFILE_SHA256")
+    fi
     if [ -n "$HEALTH_CHECKS_CONFIG" ]; then
         APP_ARGS+=(--health_checks_config "$HEALTH_CHECKS_CONFIG")
     fi
@@ -741,6 +764,7 @@ print_chain_header() {
     fi
     echo "  HealthGate config: ${HEALTH_CHECKS_CONFIG:-(shipped default)}"
     echo "  Task composition : ${TASK_COMPOSITION:-(none — un-composed legacy run)}"
+    echo "  Required profile : ${REQUIRED_RUNTIME_PROFILE:-(none — measured > shipped > uncalibrated ladder)}${REQUIRED_RUNTIME_PROFILE:+ sha256=${REQUIRED_RUNTIME_PROFILE_SHA256:-(unset)} artifact=${REQUIRED_RUNTIME_PROFILE_PATH:-(unset)}}"
     echo "  Data scope       : ${DATA_SCOPE:-(complete dataset)}"
     echo "  HealthGate       : enabled=$HEALTH_GATE_ENABLED monitored=${HEALTH_GATE_FILES:-(YAML defaults)}"
     if [ -n "$MODE" ]; then

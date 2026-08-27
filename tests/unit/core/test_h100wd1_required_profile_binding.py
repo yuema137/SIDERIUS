@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 import core.runtime_control.watchdog_profile as watchdog_profile_module
 from agent.skills.evaluate_time_skill.calibration import gpu_slug
@@ -147,7 +148,9 @@ def test_declared_and_matching_binding_certifies_the_overlay_row(calib_dir):
     shipped/uncalibrated values leaking in, or provenance not being
     'bound:<path>#sha256=<hex>'."""
     overlay_path, sha = _write_overlay(calib_dir, RTX_5090, {KEY_5090_SINGLE: BOUND_ROW})
-    binding = RequiredProfileBinding(profile_key=KEY_5090_SINGLE, expected_sha256=sha)
+    binding = RequiredProfileBinding(
+        artifact_path=str(overlay_path), profile_key=KEY_5090_SINGLE, expected_sha256=sha
+    )
     profile = resolve_runtime_profile(RTX_5090, "single", required_binding=binding)
     assert profile.calibrated is True
     assert profile.watchdog_enabled is True
@@ -164,7 +167,10 @@ def test_declared_binding_with_missing_overlay_refuses_naming_the_path(calib_dir
     removes (shipped even HAS a 5090/single row it could borrow). Fails by:
     resolution returning any RuntimeProfile, or the refusal not naming the
     missing path and the declared identity."""
-    binding = RequiredProfileBinding(profile_key=KEY_5090_SINGLE, expected_sha256="0" * 64)
+    missing = calib_dir / f"runtime_profiles_{gpu_slug(RTX_5090)}.json"
+    binding = RequiredProfileBinding(
+        artifact_path=str(missing), profile_key=KEY_5090_SINGLE, expected_sha256="0" * 64
+    )
     with pytest.raises(RequiredProfileBindingError, match="does not exist") as excinfo:
         resolve_runtime_profile(RTX_5090, "single", required_binding=binding)
     message = str(excinfo.value)
@@ -181,7 +187,11 @@ def test_declared_binding_with_tampered_overlay_refuses_carrying_both_digests(ca
     the refusal not carrying BOTH digests (declared and actual) for the
     audit trail."""
     overlay_path, certified_sha = _write_overlay(calib_dir, RTX_5090, {KEY_5090_SINGLE: BOUND_ROW})
-    binding = RequiredProfileBinding(profile_key=KEY_5090_SINGLE, expected_sha256=certified_sha)
+    binding = RequiredProfileBinding(
+        artifact_path=str(overlay_path),
+        profile_key=KEY_5090_SINGLE,
+        expected_sha256=certified_sha,
+    )
     tampered = json.dumps({"profiles": {KEY_5090_SINGLE: {"watchdog_enabled": False}}}).encode(
         "utf-8"
     )
@@ -202,10 +212,12 @@ def test_verified_overlay_lacking_the_required_row_refuses_never_falls_through(c
     a fall-through would RETURN a shipped RuntimeProfile and pytest.raises
     would fail with DID NOT RAISE — that is the no-escape assertion. Fails
     by: any RuntimeProfile escaping, or anything but the named refusal."""
-    _, sha = _write_overlay(
+    overlay_path, sha = _write_overlay(
         calib_dir, RTX_5090, {"nvidia_geforce_rtx_5090/dual_coresident": BOUND_ROW}
     )
-    binding = RequiredProfileBinding(profile_key=KEY_5090_SINGLE, expected_sha256=sha)
+    binding = RequiredProfileBinding(
+        artifact_path=str(overlay_path), profile_key=KEY_5090_SINGLE, expected_sha256=sha
+    )
     with pytest.raises(RequiredProfileBindingError, match="does not carry"):
         resolve_runtime_profile(RTX_5090, "single", required_binding=binding)
 
@@ -219,7 +231,11 @@ def test_declared_key_mismatching_discovered_pair_refuses_naming_both(calib_dir)
     mismatch, not the missing file. Fails by: resolution proceeding, the
     refusal not naming BOTH keys, or the missing-file refusal firing
     first."""
-    binding = RequiredProfileBinding(profile_key=KEY_H100_QUAD, expected_sha256="0" * 64)
+    binding = RequiredProfileBinding(
+        artifact_path=str(calib_dir / "never_read.json"),
+        profile_key=KEY_H100_QUAD,
+        expected_sha256="0" * 64,
+    )
     with pytest.raises(RequiredProfileBindingError) as excinfo:
         resolve_runtime_profile(RTX_5090, "single", required_binding=binding)
     message = str(excinfo.value)
@@ -241,7 +257,11 @@ def test_binding_with_operator_enablement_flag_is_a_loud_contradiction(calib_dir
     removes, one layer up. Both flag polarities must refuse. Fails by:
     either polarity returning ResolvedWatchdogSettings ('cli' provenance)
     instead of raising."""
-    binding = RequiredProfileBinding(profile_key=KEY_5090_SINGLE, expected_sha256="0" * 64)
+    binding = RequiredProfileBinding(
+        artifact_path=str(calib_dir / "never_read.json"),
+        profile_key=KEY_5090_SINGLE,
+        expected_sha256="0" * 64,
+    )
     for flag in (True, False):
         with pytest.raises(RequiredProfileBindingError, match="OPERATOR MODE"):
             resolve_watchdog_launch_settings(
@@ -265,7 +285,9 @@ def test_profile_mode_with_binding_yields_bound_settings(calib_dir):
     by: shipped values/provenance appearing, profile_calibrated not True, or
     the field-level override being refused or ignored."""
     overlay_path, sha = _write_overlay(calib_dir, RTX_5090, {KEY_5090_SINGLE: BOUND_ROW})
-    binding = RequiredProfileBinding(profile_key=KEY_5090_SINGLE, expected_sha256=sha)
+    binding = RequiredProfileBinding(
+        artifact_path=str(overlay_path), profile_key=KEY_5090_SINGLE, expected_sha256=sha
+    )
 
     bound = resolve_watchdog_launch_settings(
         cli_enabled=None,
@@ -356,4 +378,213 @@ def test_bound_loader_structure_hashes_the_exact_bytes_it_parses():
     assert sha_args == loads_args, (
         f"json.loads must parse the SAME bytes object hashlib.sha256 hashed; "
         f"got sha256({sha_args[0]}) vs json.loads({loads_args[0]})"
+    )
+
+
+# ---------------------------------------------------------------------------
+# (i) DECLARED ARTIFACT PATH — the clause that kills finding_1_invisible_default
+#
+# Operator ruling (2026-08-26): the landed key+digest binding did NOT resolve
+# F-H100-WD-1-PRETAG, because the artifact was still LOCATED by ordinary
+# discovery. The binding certified WHAT was found, never that the right file
+# was consulted — so an overlay was used because the calibration directory
+# happened to contain a file of the expected name. The path is now part of
+# the declaration, and the bound branch must never consult discovery.
+# ---------------------------------------------------------------------------
+
+#: An artifact row deliberately distinct from BOUND_ROW *and* from the
+#: shipped 5090/single literals, so "which file was actually read" is
+#: answerable by VALUE and not only by provenance.
+DECLARED_ROW = {
+    "watchdog_enabled": True,
+    "watchdog_safety_factor": 1.75,
+    "watchdog_floor_seconds": 45.0,
+}
+
+
+def test_declared_artifact_is_read_instead_of_the_discovered_overlay(calib_dir, tmp_path):
+    """(i) The defect only this catches: resolution reading the DISCOVERED
+    overlay while a different artifact was declared. This is
+    finding_1_invisible_default itself — with both files present and both
+    internally valid, only the declared one may be consumed.
+
+    The trap is armed on both sides: the discovery path holds a VALID,
+    correctly-keyed overlay carrying BOUND_ROW, so a resolver that consulted
+    discovery would find a usable file and would fail certification against
+    the declared digest — and a resolver that ignored the path entirely
+    would return 2.25/90.0.
+
+    Fails by: the returned values being BOUND_ROW's, provenance naming the
+    discovery path, or a refusal (which is what reading the wrong file
+    produces once the digests disagree)."""
+    discovered_path, discovered_sha = _write_overlay(
+        calib_dir, RTX_5090, {KEY_5090_SINGLE: BOUND_ROW}
+    )
+    qualification = tmp_path / "qualification"
+    qualification.mkdir()
+    declared_path, declared_sha = _write_overlay(
+        qualification, RTX_5090, {KEY_5090_SINGLE: DECLARED_ROW}
+    )
+    assert declared_path != discovered_path
+    assert declared_sha != discovered_sha
+
+    profile = resolve_runtime_profile(
+        RTX_5090,
+        "single",
+        required_binding=RequiredProfileBinding(
+            artifact_path=str(declared_path),
+            profile_key=KEY_5090_SINGLE,
+            expected_sha256=declared_sha,
+        ),
+    )
+    # Read from the DECLARED artifact, by value...
+    assert profile.watchdog_safety_factor == 1.75
+    assert profile.watchdog_floor_seconds == 45.0
+    # ...and the effective artifact identity plus the OBSERVED digest are
+    # what is persisted, so a later reader sees what was actually read.
+    assert profile.provenance == f"bound:{declared_path}#sha256={declared_sha}"
+    assert str(discovered_path) not in profile.provenance
+    assert discovered_sha not in profile.provenance
+
+
+def test_missing_declared_artifact_refuses_even_when_discovery_would_succeed(calib_dir):
+    """(i) The defect only this catches: falling back to discovery when the
+    DECLARED artifact is absent. The trap is fully armed — the discovery path
+    holds a valid overlay carrying the required row, and the binding declares
+    THAT FILE'S OWN digest, so a fallback would certify successfully and
+    return a RuntimeProfile. Only a resolver that refuses to look anywhere but
+    the declared path can raise here.
+
+    Fails by: any RuntimeProfile escaping (pytest.raises reports DID NOT
+    RAISE), which is exactly what a discovery fallback produces."""
+    _, discovered_sha = _write_overlay(calib_dir, RTX_5090, {KEY_5090_SINGLE: BOUND_ROW})
+    absent = calib_dir / "qualification" / "runtime_profiles_h100.json"
+    assert not absent.exists()
+
+    with pytest.raises(RequiredProfileBindingError, match="does not exist") as excinfo:
+        resolve_runtime_profile(
+            RTX_5090,
+            "single",
+            required_binding=RequiredProfileBinding(
+                artifact_path=str(absent),
+                profile_key=KEY_5090_SINGLE,
+                expected_sha256=discovered_sha,
+            ),
+        )
+    assert str(absent) in str(excinfo.value)
+
+
+def test_bound_resolution_never_consults_the_discovery_helper():
+    """(i) The defect only this catches: the bound branch calling
+    ``_measured_overlay_path`` again — for a "sensible default", a fallback,
+    or a diagnostic. Any such call re-opens the door finding_1 names, and the
+    behavioral tests above cannot see a call whose result is merely logged or
+    used only when the declared path is missing.
+
+    Structural assertion on the production AST (module path derived from the
+    imported module, never hardcoded). Fails by: the count of
+    ``_measured_overlay_path`` calls inside the ``required_binding`` branch
+    rising above zero."""
+    module_file = watchdog_profile_module.__file__
+    assert module_file is not None
+    tree = ast.parse(Path(module_file).read_text(encoding="utf-8"), filename=module_file)
+    resolver = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "resolve_runtime_profile"
+    )
+    bound_branch = next(
+        node
+        for node in resolver.body
+        if isinstance(node, ast.If)
+        and any(
+            isinstance(sub, ast.Name) and sub.id == "required_binding"
+            for sub in ast.walk(node.test)
+        )
+    )
+    discovery_calls = [
+        node
+        for node in ast.walk(bound_branch)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_measured_overlay_path"
+    ]
+    assert discovery_calls == [], (
+        "the bound branch must never consult discovery — that is finding_1_invisible_default"
+    )
+
+
+@pytest.mark.parametrize("relative", ["runtime_profiles.json", "qual/x.json", "./x.json"])
+def test_relative_artifact_path_is_refused_at_declaration(relative):
+    """(i) The defect only this catches: a relative artifact path being
+    accepted and later resolved against the CONSUMER's working directory.
+    ``run_chain.sh`` cd's to the project dir before exec, so the declaration
+    would name a different file than the one qualified — or none — and the
+    operator would never learn the two diverged.
+
+    Fails by: construction succeeding for a relative path."""
+    with pytest.raises(ValidationError):
+        RequiredProfileBinding(
+            artifact_path=relative,
+            profile_key=KEY_5090_SINGLE,
+            expected_sha256="0" * 64,
+        )
+
+
+def test_bound_provenance_records_the_OBSERVED_digest_not_the_declared_one():
+    """(i) The defect only this catches: provenance echoing
+    ``required_binding.expected_sha256`` instead of the digest computed from
+    the bytes actually read.
+
+    NO behavioural test can see this. Certification only succeeds when the
+    two are equal, so on every success path the echoed and observed values
+    are the same string — an echo is invisible until the day something makes
+    them differ, which is precisely the day the record needs to be true. The
+    point of the record is what was CONSUMED, not what was asked for.
+
+    Structural assertion on the production AST, the same technique the TOCTOU
+    witness above uses and for the same reason. Fails by: the provenance
+    f-string interpolating an ``expected_sha256`` attribute, or no longer
+    interpolating the loader's returned ``digest``."""
+    module_file = watchdog_profile_module.__file__
+    assert module_file is not None
+    tree = ast.parse(Path(module_file).read_text(encoding="utf-8"), filename=module_file)
+    resolver = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "resolve_runtime_profile"
+    )
+    bound_branch = next(
+        node
+        for node in resolver.body
+        if isinstance(node, ast.If)
+        and any(
+            isinstance(sub, ast.Name) and sub.id == "required_binding"
+            for sub in ast.walk(node.test)
+        )
+    )
+    provenance_values = [
+        kw.value
+        for call in ast.walk(bound_branch)
+        if isinstance(call, ast.Call)
+        for kw in call.keywords
+        if kw.arg == "provenance"
+    ]
+    assert len(provenance_values) == 1, "expected exactly one bound provenance stamp"
+    stamp = provenance_values[0]
+
+    interpolated = {node.id for node in ast.walk(stamp) if isinstance(node, ast.Name)}
+    assert "digest" in interpolated, (
+        "bound provenance must interpolate the digest COMPUTED from the bytes "
+        "read by _load_bound_overlay"
+    )
+    echoed = [
+        node
+        for node in ast.walk(stamp)
+        if isinstance(node, ast.Attribute) and node.attr == "expected_sha256"
+    ]
+    assert echoed == [], (
+        "bound provenance must record the OBSERVED digest, never echo "
+        "required_binding.expected_sha256 — the record answers 'what was "
+        "consumed', not 'what was requested'"
     )

@@ -31,6 +31,10 @@ source "${GOLD_SCRIPT_DIR}/_gold_campaign_lib.sh"
 stage1_main() {
     local WORKSPACE_ROOT="" ARM="goldpod" ADVICE_FILE="" FCNET_REFERENCE_JSON=""
     local ONLY="" STAGGER=60 DRY_RUN=0
+    # F-PROFILE-WIRE-1 — command-line only; never inherited from the shell.
+    GOLD_REQUIRED_RUNTIME_PROFILE_PATH=""
+    GOLD_REQUIRED_RUNTIME_PROFILE=""
+    GOLD_REQUIRED_RUNTIME_PROFILE_SHA256=""
     local PASSTHROUGH=()
 
     while [[ $# -gt 0 ]]; do
@@ -38,6 +42,9 @@ stage1_main() {
             --workspace_root|--workspace-root) WORKSPACE_ROOT="$2"; shift 2 ;;
             --arm)                  ARM="$2"; shift 2 ;;
             --gold_advice_file)     ADVICE_FILE="$2"; shift 2 ;;
+            --gold_required_runtime_profile_path) GOLD_REQUIRED_RUNTIME_PROFILE_PATH="$2"; shift 2 ;;
+            --gold_required_runtime_profile) GOLD_REQUIRED_RUNTIME_PROFILE="$2"; shift 2 ;;
+            --gold_required_runtime_profile_sha256) GOLD_REQUIRED_RUNTIME_PROFILE_SHA256="$2"; shift 2 ;;
             --fcnet_reference_json) FCNET_REFERENCE_JSON="$2"; shift 2 ;;
             --only)                 ONLY="$2"; shift 2 ;;
             --stagger-seconds|--stagger_seconds) STAGGER="$2"; shift 2 ;;
@@ -51,6 +58,11 @@ stage1_main() {
     # Validates the arm + advice pairing up-front (each band re-derives its
     # own argv from the same lib, so this is a fail-fast, not the binding).
     gold_arm_args "$ARM" "$ADVICE_FILE" || return 1
+    # F-GENLIB-WIRE-1: enforced in EVERY stage, not only the entrypoint —
+    # a stage script invoked directly must refuse the same undeclared
+    # library root, and this is what makes GOLD_GENERATED_LIBRARY_DIR
+    # populated for the dry-run row in this process.
+    gold_require_generated_library || return 1
     if ! [[ "$STAGGER" =~ ^[0-9]+$ ]]; then
         echo "ERROR: --stagger-seconds must be a non-negative integer, got '$STAGGER'" >&2
         return 1
@@ -77,6 +89,12 @@ stage1_main() {
         --arm "$ARM"
     )
     [ -n "$ADVICE_FILE" ] && BAND_ARGS_COMMON+=(--gold_advice_file "$ADVICE_FILE")
+    # F-PROFILE-WIRE-1 — forwarded to every band, so all four bands of a
+    # declared campaign certify the SAME overlay.
+    [ -n "$GOLD_REQUIRED_RUNTIME_PROFILE" ] && BAND_ARGS_COMMON+=(
+        --gold_required_runtime_profile_path "$GOLD_REQUIRED_RUNTIME_PROFILE_PATH"
+        --gold_required_runtime_profile "$GOLD_REQUIRED_RUNTIME_PROFILE"
+        --gold_required_runtime_profile_sha256 "$GOLD_REQUIRED_RUNTIME_PROFILE_SHA256")
     [ -n "$FCNET_REFERENCE_JSON" ] && BAND_ARGS_COMMON+=(--fcnet_reference_json "$FCNET_REFERENCE_JSON")
 
     if [ "$DRY_RUN" -eq 1 ]; then
