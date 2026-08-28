@@ -9,8 +9,9 @@ Each test names the defect ONLY it can catch:
 * ``TestFrozenNineteenWitness`` — the effective-resolution witness: the
   dry-run's fully-resolved per-band run_chain argv carries ALL NINETEEN
   frozen values TYPED (decisions D-BUD-2/3/4/6/7/8, D-BUD-11/13, P6-A, P6-B;
-  the D-BUD-6 row split ``max_epochs=1`` into ``trial_max_epochs=2`` /
-  ``formal_max_epochs=1`` when the per-mode transport landed, 2026-08-26).
+  the D-BUD-6 row split ``max_epochs=1`` into ``trial_max_epochs`` /
+  ``formal_max_epochs`` when the per-mode transport landed, 2026-08-26; the
+  TRIAL value was lowered 2 -> 1 by operator ruling 2026-08-27).
   The expected pairs are HARDCODED here — asserting values read back from
   the lib would compare the table to itself and pass for any table. This
   is the defect class F-LAUNCH-1 closes: a chain default silently standing
@@ -91,8 +92,10 @@ STATE_HELPER = SDSC / "gold_campaign_state.py"
 
 #: The canonical nineteen (decisions D-BUD-2 / D-BUD-3 / D-BUD-4 / D-BUD-6 /
 #: D-BUD-7 / D-BUD-8 / D-BUD-11/13 / P6-A / P6-B), HARDCODED on purpose — see
-#: module docstring. D-BUD-6 is the PAIR ``trial_max_epochs=2 /
-#: formal_max_epochs=1`` (the frozen trial/formal split; the retired
+#: module docstring. D-BUD-6 is the PAIR ``trial_max_epochs / formal_max_epochs``
+#: (the frozen trial/formal split, both 1 since the operator lowered the TRIAL
+#: value 2 -> 1 on 2026-08-27 to make the in-search trial a fast viability
+#: screen; the per-mode split mechanism is unchanged); the retired
 #: mode-agnostic ``--max_epochs 1`` stand-in is now a RESERVED passthrough,
 #: not an emitted value). The last six are F-LAUNCH-1 / adversarial F-2: they
 #: rode ``_chain_common.sh`` defaults that AGREE with the frozen values, so
@@ -105,7 +108,7 @@ CANONICAL_NINETEEN = {
     "--formal_portion": "1.0",
     "--formal_train_portion": "0.1",
     "--formal_eval_portion": "0.1",
-    "--trial_max_epochs": "2",
+    "--trial_max_epochs": "1",
     "--formal_max_epochs": "1",
     "--trial_time_budget_minutes": "30",
     "--formal_time_budget_minutes": "120",
@@ -431,6 +434,66 @@ class TestFrozenTableMutation:
         rows = {line.split("=")[0]: line.split("=", 1)[1] for line in proc.stdout.split()}
         expected = {k.lstrip("-"): v for k, v in CANONICAL_NINETEEN.items()}
         assert rows == expected
+
+
+class TestCampaignPolicyExternalizationSeam:
+    """v0.1.2 / issue #379 — the two campaign-policy values a campaign may
+    supply WITHOUT a software release.
+
+    Both halves matter and are asserted separately:
+
+    * UNSET must be byte-identical to the shipped defaults, so a launch that
+      exports nothing behaves exactly as v0.1.1 did;
+    * SET must actually reach the value the builders emit — the defect this
+      seam repairs is that ``GOLD_BYPASS_FORMAL_TIME_BUDGET_MINUTES`` was a
+      BARE assignment, so sourcing the lib silently overwrote any exported
+      value and no external override could work.
+
+    Only these two values are externalized. The rest of ``GOLD_FROZEN_ROWS``
+    is deliberately untouched; broader migration is issue #379's post-launch
+    scope, not this patch's.
+    """
+
+    def _row(self, env_prefix: str, key: str) -> str:
+        proc = _bash(
+            "-c",
+            f"{env_prefix} source '{LIB}'; "  # env_prefix is an `export X=Y;` statement
+            f'printf "%s\\n" "${{GOLD_FROZEN_ROWS[@]}}"',
+        )
+        assert proc.returncode == 0, proc.stderr
+        for line in proc.stdout.split():
+            if line.startswith(f"{key}="):
+                return line.split("=", 1)[1]
+        raise AssertionError(f"{key} not found in GOLD_FROZEN_ROWS")
+
+    def _bypass(self, env_prefix: str) -> str:
+        proc = _bash(
+            "-c",
+            f"{env_prefix} source '{LIB}'; "  # env_prefix is an `export X=Y;` statement
+            f'printf "%s\\n" "$GOLD_BYPASS_FORMAL_TIME_BUDGET_MINUTES"',
+        )
+        assert proc.returncode == 0, proc.stderr
+        return proc.stdout.strip()
+
+    def test_unset_preserves_the_shipped_defaults(self):
+        assert self._row("", "formal_time_budget_minutes") == "120"
+        assert self._bypass("") == "200"
+
+    def test_campaign_env_supplies_the_formal_time_budget(self):
+        assert (
+            self._row("export GOLD_FORMAL_TIME_BUDGET_MINUTES=180;", "formal_time_budget_minutes")
+            == "180"
+        )
+
+    def test_campaign_env_supplies_the_bypass_threshold(self):
+        assert self._bypass("export GOLD_BYPASS_FORMAL_TIME_BUDGET_MINUTES=240;") == "240"
+
+    def test_trial_epoch_is_the_operator_lowered_value(self):
+        """2 -> 1, operator ruling 2026-08-27. Pinned to a literal rather
+        than read back from the lib, which would compare the table to
+        itself and pass for any value."""
+        assert self._row("", "trial_max_epochs") == "1"
+        assert self._row("", "formal_max_epochs") == "1"
 
 
 class TestFrozenLlmRouting:

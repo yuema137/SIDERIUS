@@ -52,7 +52,16 @@ GOLD_PROJECT_DIR="$(cd "${GOLD_LIB_DIR}/.." && pwd)"
 # maximum, not a target; a band may stop earlier only under the FCNet+2
 # rule once A2-FCNET supplies a per-band reference).
 #
-# trial_max_epochs=2 / formal_max_epochs=1 — the D-BUD-6 frozen split,
+# trial_max_epochs=1 / formal_max_epochs=1 — the D-BUD-6 per-mode split.
+# The TRIAL value was 2 and was lowered to 1 by operator ruling 2026-08-27:
+# the trial/child stage inside the 20-iteration search is a fast viability
+# SCREEN, and spending two epochs before deciding whether a candidate
+# deserves further execution is not worth the wall clock. This changes the
+# cheap in-search trial stage ONLY; the separate post-search direct-training
+# / reporting procedure is not driven by this row and is unaffected. The
+# per-mode SPLIT MECHANISM is unchanged — the two rows stay independent and
+# both remain emitted, so a future trial/formal divergence needs no rework.
+# Original D-BUD-6 split,
 # emitted since the chain grew the per-mode transport
 # (run_one_iteration.py --trial_max_epochs / --formal_max_epochs; the tuner
 # clamps at the plan boundary keyed on the round's is_trial authority).
@@ -73,10 +82,16 @@ GOLD_FROZEN_ROWS=(
     "formal_portion=1.0"
     "formal_train_portion=0.1"
     "formal_eval_portion=0.1"
-    "trial_max_epochs=2"
+    "trial_max_epochs=1"
     "formal_max_epochs=1"
     "trial_time_budget_minutes=30"
-    "formal_time_budget_minutes=120"
+    # EXTERNALIZATION SEAM (operator ruling 2026-08-27, issue #379). The
+    # DEFAULT is unchanged at 120, so a launch that exports nothing is
+    # byte-identical to v0.1.1. The campaign supplies its own value from
+    # siderius_campaign_env.sh instead of requiring a release to change a
+    # campaign number. The dry-run frozen table prints the EFFECTIVE value
+    # verbatim, so an externally supplied budget stays observable.
+    "formal_time_budget_minutes=${GOLD_FORMAL_TIME_BUDGET_MINUTES:-120}"
     "skip_formal_min_delta=-2.0"
     "bypass_formal_time_budget_min_delta=0.5"
     # --- F-LAUNCH-1 / adversarial F-2 (release blockers, 2026-08-26) -------
@@ -119,7 +134,14 @@ GOLD_STAGE2_NUM_ITERATIONS=1
 #: Bypass-ceiling interface (frozen contract; the IMPLEMENTATION lands in a
 #: parallel lane). Emitted only when the chain actually parses the flag —
 #: see gold_bypass_ceiling_args.
-GOLD_BYPASS_FORMAL_TIME_BUDGET_MINUTES=200
+#:
+#: EXTERNALIZATION SEAM (operator ruling 2026-08-27, issue #379). Same shape
+#: and same reason as formal_time_budget_minutes above: the DEFAULT stays
+#: 200, so an unset launch is byte-identical to v0.1.1, while the campaign
+#: can supply its own threshold without a software release. Note this was a
+#: BARE assignment before, which silently overwrote any exported value at
+#: source time — the reason no external override worked.
+GOLD_BYPASS_FORMAL_TIME_BUDGET_MINUTES="${GOLD_BYPASS_FORMAL_TIME_BUDGET_MINUTES:-200}"
 
 #: THE FROZEN LLM ROUTING AUTHORITY (D-LLM-1; defect F-LLM-WIRE-1).
 #:
