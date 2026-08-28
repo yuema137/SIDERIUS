@@ -41,7 +41,7 @@ new plan barely moves the score.
 | use only some of the data | `--data_scope 4-9` (+ in-scope `--health_gate_files`) |
 | stop health gates blocking | `--healthgate_mode observe_only` |
 | turn the health subsystem off | `--no-health_gate_enabled` |
-| inject human guidance | `--human_advice_file` |
+| inject human guidance | `--human_advice_file` (closed key set — see `advice/README.md`) |
 
 Time budgets matter more than they look. Without them, a badly chosen data
 portion from the planner can produce multi-hour rounds.

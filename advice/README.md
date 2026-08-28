@@ -46,8 +46,11 @@ JSON with **multiple top-level keys**, one per agent in the 5-agent chain
 }
 ```
 
-Missing keys default to empty string — partial files are supported
-(e.g. `chain_v2_proposer_advice.json` ships only `propose` + `implement`).
+Partial files are supported and remain fully legal — an omitted key simply
+means "no advice for that agent" (e.g. `chain_v2_proposer_advice.json` ships
+only `propose` + `implement`, and `tidmad_collapse_advice.json` ships only
+`tune`). What is NOT legal is a key that is *present* and carries nothing;
+see "The key set is closed" below.
 
 Current contents:
 
@@ -122,5 +125,43 @@ Passed with `--advice <path>` (which takes precedence over
 
 The CLI flag is `--human_advice_file` (chain workflows) or
 `--human_advice_file` (single-agent runs of `scripts/run_comparison.py`).
-The file's structure is validated by the receiving agent's input schema —
-keys that don't match an expected agent name are silently ignored.
+
+### The key set is closed
+
+`sdsc_submission_scripts/run_one_iteration.py::load_advice_artifact` refuses
+an advice artifact that could not inject anything (F-SCHED-5). The recognised
+top-level keys are exactly:
+
+```
+interpret · propose · implement · validate · tune · mindset
+```
+
+Each takes a string, or a list of lines that is joined with newlines. The
+loader REFUSES, naming what was wrong:
+
+| artifact | verdict |
+|---|---|
+| `{"propse": "..."}` | refused — unrecognised key (a probable misspelling) |
+| `{"propose": ""}` | refused — present but injects nothing |
+| `{"propose": []}` | refused — empty after the line-join |
+| `{"propose": ["", ""]}` | refused — joins to `"\n"`, which is truthy but unreadable |
+| `{"propose": {"a": 1}}` | refused — advice must be text |
+| `{}` | refused — no recognised key at all |
+| `{"propose": "..."}` | **accepted** — sparse advice is legal |
+
+To carry a note the agents must never read, prefix its key with `_`, which
+declares it deliberately inert (`gate2_smoke_advice.json` uses `_meta` to
+record why that artifact exists). This is an explicit opt-out; an
+unrecognised key *without* it is treated as the typo it almost always is.
+
+**Why this is a refusal and not a warning.** The artifact's sha256 is pinned
+into the run-invariants lock as the run's treatment identity, distributed to
+every band and certified by each. A misspelled or empty artifact still hashes,
+still certifies, and still gets recorded — producing a run whose provenance
+says advice artifact X was used while every agent received nothing derived
+from it. Certification answers *which bytes*; it cannot answer whether those
+bytes reached a prompt.
+
+Note that `scripts/run_comparison.py` has its own, separate
+`--human_advice_file` reader which requires a `tune` key. The two loaders are
+not unified.

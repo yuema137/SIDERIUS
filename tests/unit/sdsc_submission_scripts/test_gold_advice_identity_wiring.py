@@ -32,6 +32,10 @@ What only these tests catch:
 * ``TestChildRefusals`` — missing artifact, unparseable artifact, and a
   declared digest that does not match: each refuses the launch rather than
   running an untreated arm under a treated label.
+* ``TestConsumabilityRefusals`` (F-SCHED-5) — the artifact is the one the
+  launcher bound AND it can inject. Every test above certifies WHICH bytes
+  were read; none of them asks whether those bytes reach a prompt, and the
+  binding mechanism working perfectly is what hides the difference.
 """
 
 from __future__ import annotations
@@ -412,6 +416,209 @@ class TestChildRefusals:
         bad.write_text("{not json")
         with pytest.raises(roi.AdviceArtifactError, match="not valid JSON"):
             roi.normalize_args(_args(["--advice", str(bad)]))
+
+    def test_a_run_without_advice_is_unchanged(self, tmp_path):
+        """The differential at the child: no advice declared, nothing
+        pinned, no refusal, and the advice fields resolve exactly as they
+        did before the feature."""
+        args = roi.normalize_args(_args())
+        identity = roi.resolve_launch_identity(args)
+        assert identity.advice_sha256 is None
+        assert identity.advice_path is None
+        assert args.human_advice_propose is None
+        assert args.human_advice_mindset is None
+
+
+# ---------------------------------------------------------------------------
+# The child's refusals — CONSUMABILITY (F-SCHED-5)
+# ---------------------------------------------------------------------------
+
+
+class TestConsumabilityRefusals:
+    """Certifying WHICH bytes were read says nothing about whether those
+    bytes reach a prompt, and the binding mechanism is what hides the gap:
+    a misspelled or empty artifact parses, hashes, is distributed to all
+    four bands, is certified by each against the parent-pinned digest, and
+    is pinned into the run-invariants lock — injecting nothing. Every test
+    above stays green through that, because none of them asks the question.
+    """
+
+    def test_an_artifact_that_can_inject_nothing_refuses(self, tmp_path):
+        """F-SCHED-5, the headline case: a JSON object whose every key is a
+        MISSPELLING loads, hashes, is distributed to all four bands, is
+        certified by each against the parent-pinned digest and is pinned into
+        the run-invariants lock — while injecting nothing. Provenance then
+        records that this artifact was the run's treatment, and every agent
+        received nothing derived from it.
+
+        HOW THIS FAILS: delete ``_validate_advice_consumability``'s call from
+        the loader and this artifact loads clean. Nothing else in this
+        module fires, because every other test here certifies WHICH bytes
+        were read and this artifact's bytes are exactly the declared ones —
+        the certification is not wrong, it is answering a different
+        question."""
+        path, sha = _advice(tmp_path, body={"implemnt": "IMPLEMENT, misspelled", "propse": "P"})
+        with pytest.raises(roi.AdviceArtifactError) as excinfo:
+            roi.normalize_args(_args(["--advice", str(path), "--advice_sha256", sha]))
+        message = str(excinfo.value)
+        assert "no agent reads" in message
+        # The operator must be told WHICH keys, or the refusal is a puzzle.
+        assert "'implemnt'" in message and "'propse'" in message
+
+    def test_an_artifact_with_no_recognised_key_at_all_refuses(self, tmp_path):
+        """The vacuous treatment in its purest form — an empty object, and an
+        object carrying only a deliberately-inert annotation block. Both
+        would pin a real digest and inject nothing.
+
+        HOW THIS FAILS: implement the misspelling refusal alone. ``{}`` has
+        no unrecognised key to catch, so it sails through a check written
+        only against typos and the campaign's independent variable is set to
+        nothing by an artifact that is not even malformed."""
+        for body in ({}, {"_meta": {"purpose": "notes only"}}):
+            path, _sha = _advice(tmp_path, body=body)
+            with pytest.raises(roi.AdviceArtifactError, match="no recognised advice key"):
+                roi.normalize_args(_args(["--advice", str(path)]))
+
+    def test_a_declared_key_that_renders_empty_refuses(self, tmp_path):
+        """The PARTIAL disappearance, which the whole-artifact non-vacuity
+        rule cannot see: ``propose`` carries content, so "something arrives"
+        is satisfied, while ``tune`` and ``implement`` are present in the
+        artifact and absent from every prompt. The operator wrote three
+        declarations and the run consumes one.
+
+        The ``["", ""]`` case is the one a truthiness test cannot see at
+        all: it joins to ``"\\n"``, which is TRUTHY, so ``or None`` keeps it
+        and injects a bare newline as the treatment for that agent.
+        Emptiness must be judged on the STRIPPED rendered text.
+
+        HOW THIS FAILS: check only that SOME recognised key resolves
+        non-empty (the pre-launch validator's rule 6) and this artifact
+        passes. ``advice.get(key) or None`` drops the empty string silently,
+        and keeps the whitespace-only line-list while it means nothing."""
+        path, _sha = _advice(
+            tmp_path,
+            body={"propose": "REAL", "tune": "", "implement": ["", ""], "validate": []},
+        )
+        with pytest.raises(roi.AdviceArtifactError) as excinfo:
+            roi.normalize_args(_args(["--advice", str(path)]))
+        message = str(excinfo.value)
+        assert "empty content" in message
+        for key in ("'tune'", "'implement'", "'validate'"):
+            assert key in message, f"{key} was declared, injects nothing, and was not named"
+
+    def test_sparse_advice_stays_legal(self, tmp_path):
+        """The over-refusal guard, and the boundary of this repair. The
+        consumer reads every key independently and its own comment names
+        TWO accepted shapes (4-key and 5-key); no campaign authority
+        requires all six. An artifact carrying only ``propose`` — or only
+        ``tune``, the shape ``advice/workflow/tidmad_collapse_advice.json``
+        ships — is a legal treatment and must remain one.
+
+        HOW THIS FAILS: implement the non-vacuity rule as "every recognised
+        key must be present". Every refusal test above stays green, the
+        corpus test goes red for a different reason, and a legitimate sparse
+        treatment becomes a launch refusal — an integrity repair turned into
+        a scientific-treatment change."""
+        for index, (key, value) in enumerate([("propose", "P"), ("tune", "T"), ("mindset", "M")]):
+            path, sha = _advice(tmp_path, name=f"sparse_{index}.json", body={key: value})
+            args = roi.normalize_args(_args(["--advice", str(path), "--advice_sha256", sha]))
+            assert getattr(args, f"human_advice_{key}") == value
+
+    def test_a_recognised_key_that_is_not_text_refuses(self, tmp_path):
+        """Advice is text an agent reads. A mapping reaches a prompt as a
+        repr; a list holding a non-string reaches ``normalize_args``'s
+        unguarded ``"\\n".join`` and raises a bare ``TypeError`` naming
+        neither the file nor the key.
+
+        HOW THIS FAILS: validate emptiness only. ``{"propose": {"a": 1}}``
+        is truthy, so it passes an emptiness test and injects a Python repr
+        of a dict as the campaign's treatment."""
+        for body in ({"propose": {"a": 1}}, {"propose": ["ok", 7]}):
+            path, _sha = _advice(tmp_path, body=body)
+            with pytest.raises(roi.AdviceArtifactError, match="neither a string nor a list"):
+                roi.normalize_args(_args(["--advice", str(path)]))
+
+    def test_a_good_artifact_keeps_its_identity_and_still_injects(self, tmp_path):
+        """The other direction, and the one that makes the refusals safe to
+        ship: a valid artifact loads, renders its line-lists, reaches
+        ``args.human_advice_*`` and pins the SAME digest it pinned before
+        the refusals existed. The fix must not move the identity of a good
+        artifact — every band certifies against a launcher-computed value,
+        so a loader that perturbed the digest would refuse the whole fleet.
+
+        HOW THIS FAILS: any refusal written too broadly (rejecting the
+        ``_``-prefixed annotation block that ``gate2_smoke_advice.json``
+        ships, or the list-of-lines form every ``advice/workflow`` artifact
+        uses) turns a shipped artifact into a launch refusal."""
+        body = {
+            "_meta": {"purpose": "inert annotation, the gate2_smoke_advice.json convention"},
+            "propose": ["line one", "line two"],
+            "mindset": "MIND",
+        }
+        path, sha = _advice(tmp_path, body=body)
+        args = roi.normalize_args(_args(["--advice", str(path), "--advice_sha256", sha]))
+        identity = roi.resolve_launch_identity(args)
+        # Identity: the digest is the file's, unchanged by validation.
+        assert identity.advice_sha256 == hashlib.sha256(path.read_bytes()).hexdigest() == sha
+        # Injection: the treatment actually reaches the agents.
+        assert args.human_advice_propose == "line one\nline two"
+        assert args.human_advice_mindset == "MIND"
+
+    def test_every_committed_advice_artifact_still_loads(self):
+        """The corpus, as the blast radius of the refusals. Each of these is
+        an operator-authored artifact a Gate or a campaign may launch with,
+        and a refusal written one notch too broad turns a shipped file into
+        a launch failure discovered at fork time.
+
+        HOW THIS FAILS: drop the ``_``-prefixed inert-key exemption and
+        ``advice/workflow/gate2_smoke_advice.json`` (whose ``_meta`` block
+        records why that artifact exists) refuses. No other test in the
+        repository loads that file — which is how its ``_meta`` key survived
+        unnoticed since 2026-07."""
+        artifacts = sorted((_REPO / "advice").rglob("*.json"))
+        assert artifacts, "no committed advice artifacts found; the corpus guard is vacuous"
+        refused = {}
+        for artifact in artifacts:
+            try:
+                loaded = roi.load_advice_artifact(str(artifact))
+            except roi.AdviceArtifactError as exc:
+                refused[artifact.name] = str(exc)
+                continue
+            # The digest is the file's own bytes, unmoved by validation.
+            assert loaded.sha256 == hashlib.sha256(artifact.read_bytes()).hexdigest()
+        assert not refused, f"committed advice artifacts refused by the loader: {refused}"
+
+    def test_the_loader_and_the_consumer_share_one_rendering_rule(self, tmp_path):
+        """The loader decides a key "carries content"; ``normalize_args``
+        produces that content. Two spellings of one rule is how a key the
+        loader accepted gets dropped anyway — the exact failure being fixed,
+        reintroduced one layer down.
+
+        HOW THIS FAILS: re-inline ``"\\n".join(v) if isinstance(v, list)``
+        in ``normalize_args``. Behaviour agrees today, so no other test
+        moves; it diverges the moment either rule is edited alone."""
+        tree = _roi_tree()
+        joins = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "join"
+            and isinstance(node.func.value, ast.Constant)
+            and node.func.value.value == "\n"
+        ]
+        assert len(joins) == 1, (
+            f"the advice line-list join must have exactly one authority "
+            f"(render_advice_value); found joins at {joins}"
+        )
+        renderer = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "render_advice_value"
+        )
+        assert renderer.lineno < joins[0] < renderer.end_lineno, (
+            "the one newline join must live inside render_advice_value"
+        )
 
     def test_a_run_without_advice_is_unchanged(self, tmp_path):
         """The differential at the child: no advice declared, nothing
