@@ -118,7 +118,9 @@ def test_proposer_cannot_reject_on_static_evidence():
 
 def test_watchdog_deadline_requires_measurement_backed_evidence():
     source = _source("core/sandbox_executor.py")
-    assert 'c["prediction"].get("source") in MEASUREMENT_BACKED_SOURCES' in source, (
+    assert "def has_measured_prediction" in source
+    assert 'prediction.get("source") in MEASUREMENT_BACKED_SOURCES' in source
+    assert "if has_measured_prediction(c)" in source, (
         "the watchdog deadline must be derived only from measurement-backed "
         "component predictions (§7.4 watchdog column)"
     )

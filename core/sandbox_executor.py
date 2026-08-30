@@ -378,7 +378,10 @@ def _ensure_dir(path: str) -> None:
 
 
 def _watchdog_deadline_provider(
-    policy: "RuntimeControlPolicy", rv_sidecar_path: str
+    policy: "RuntimeControlPolicy",
+    rv_sidecar_path: str,
+    *,
+    phase: str = "training",
 ) -> Callable[[], tuple[float | None, str]]:
     """§4 deadline: ``max(floor, min(operator_budget, verified × safety))``.
 
@@ -405,6 +408,13 @@ def _watchdog_deadline_provider(
     returned value is the whole wall-clock budget for the child, which is
     exactly what ``sum(predicted) * watchdog_factor`` already expresses.
 
+    A measured component may tighten an explicit operator budget only after
+    the current subprocess has complete evidence. Training requires its own
+    prediction and, when a validation component is declared, validation's
+    prediction as well. Inference requires its own prediction. This prevents
+    a cheap setup measurement from being mistaken for a complete subprocess
+    estimate while retaining the operator's hard bound.
+
     That is why 07c added the validation term WITHOUT touching the
     arithmetic below: a validation component with a measurement-backed
     prediction joins ``sum(predicted)`` and the total grows by the
@@ -429,7 +439,16 @@ def _watchdog_deadline_provider(
             candidates.append((policy.watchdog.max_phase_seconds, "validation_max_phase"))
         block = _read_runtime_observation_sidecar(rv_sidecar_path)
         if block:
-            components = (block.get("components") or {}).values()
+            component_map = block.get("components") or {}
+            components = component_map.values()
+
+            def has_measured_prediction(component: Mapping[str, Any]) -> bool:
+                prediction = component.get("prediction") or {}
+                return (
+                    prediction.get("predicted_seconds") is not None
+                    and prediction.get("source") in MEASUREMENT_BACKED_SOURCES
+                )
+
             # C8d: a deadline may only be derived from MEASUREMENT-BACKED
             # component predictions (§7.4 watchdog column: static evidence
             # is `never_used`, historical priors `never_used_alone`). Every
@@ -441,11 +460,17 @@ def _watchdog_deadline_provider(
             predicted = [
                 c["prediction"]["predicted_seconds"]
                 for c in components
-                if c.get("prediction") is not None
-                and c["prediction"].get("predicted_seconds") is not None
-                and c["prediction"].get("source") in MEASUREMENT_BACKED_SOURCES
+                if has_measured_prediction(c)
             ]
-            if predicted:
+            complete = has_measured_prediction(component_map.get(phase) or {})
+            if phase == "training" and "validation" in component_map:
+                validation = component_map["validation"]
+                workload = validation.get("workload") or {}
+                validation_required = workload.get("unit_count") != 0
+                complete = complete and (
+                    not validation_required or has_measured_prediction(validation)
+                )
+            if predicted and (policy.operator_budget_seconds is None or complete):
                 estimate = sum(predicted) * watchdog_factor
                 candidates.append((estimate, "verified_components"))
         if not candidates:
@@ -1594,7 +1619,9 @@ class TidmadSandbox:
                     env=env,
                     preexec_fn=preexec,
                     capture_stdout=not self.progress_bar,
-                    deadline_provider=_watchdog_deadline_provider(policy_obj, rv_sidecar_path),
+                    deadline_provider=_watchdog_deadline_provider(
+                        policy_obj, rv_sidecar_path, phase="training"
+                    ),
                     grace_seconds=policy_obj.watchdog.grace_seconds,
                     poll_seconds=policy_obj.watchdog.poll_seconds,
                     observer=_observer,
@@ -1945,7 +1972,9 @@ class TidmadSandbox:
                     env=env,
                     preexec_fn=preexec,
                     capture_stdout=not self.progress_bar,
-                    deadline_provider=_watchdog_deadline_provider(policy_obj, rv_sidecar_path),
+                    deadline_provider=_watchdog_deadline_provider(
+                        policy_obj, rv_sidecar_path, phase="inference"
+                    ),
                     grace_seconds=policy_obj.watchdog.grace_seconds,
                     poll_seconds=policy_obj.watchdog.poll_seconds,
                     observer=_observer,
