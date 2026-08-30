@@ -133,6 +133,10 @@ class TestDeadlineFormula:
 
         session = RuntimeVerificationSession(sidecar)
         session.complete_setup(storage_provenance={"expected_raw_bytes": 1})
+        payload = json.loads((tmp_path / "rv.json").read_text(encoding="utf-8"))
+        payload["components"]["training"] = payload["components"]["setup"]
+        payload["components"]["training"]["prediction"]["source"] = "real_training_verification"
+        (tmp_path / "rv.json").write_text(json.dumps(payload), encoding="utf-8")
         deadline, source = provider()
         assert source == "verified_components"
         # setup prediction ≈ its tiny actual; × safety 2.0, well below budget
@@ -170,6 +174,10 @@ class TestDeadlineFormula:
         sidecar = str(tmp_path / "rv.json")
         session = RuntimeVerificationSession(sidecar)
         session.complete_setup(storage_provenance={"expected_raw_bytes": 1})
+        payload = json.loads((tmp_path / "rv.json").read_text(encoding="utf-8"))
+        payload["components"]["training"] = payload["components"]["setup"]
+        payload["components"]["training"]["prediction"]["source"] = "real_training_verification"
+        (tmp_path / "rv.json").write_text(json.dumps(payload), encoding="utf-8")
         policy = RuntimeControlPolicy(
             operator_budget_seconds=10_000.0,
             watchdog=WatchdogConfig(enabled=True, floor_seconds=120.0),

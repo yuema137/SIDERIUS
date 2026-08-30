@@ -25,7 +25,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 CONSUMERS = [
     ("nodes/ml_model_proposal_agent/ml_model_proposal_agent.py", True),
     ("agent/skills/evaluate_time_skill/wrapper.py", True),
-    ("core/sandbox_executor.py", True),
+    ("core/sandbox_executor.py", False),
+    ("core/runtime_control/watchdog_deadline.py", True),
 ]
 
 POLICY_MARKERS = (
@@ -117,10 +118,10 @@ def test_proposer_cannot_reject_on_static_evidence():
 
 
 def test_watchdog_deadline_requires_measurement_backed_evidence():
-    source = _source("core/sandbox_executor.py")
+    source = _source("core/runtime_control/watchdog_deadline.py")
     assert "def has_measured_prediction" in source
     assert 'prediction.get("source") in MEASUREMENT_BACKED_SOURCES' in source
-    assert "if has_measured_prediction(c)" in source, (
+    assert "if has_measured_prediction(component)" in source, (
         "the watchdog deadline must be derived only from measurement-backed "
         "component predictions (§7.4 watchdog column)"
     )
