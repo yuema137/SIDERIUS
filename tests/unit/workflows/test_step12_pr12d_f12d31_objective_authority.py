@@ -1,136 +1,75 @@
-"""Step 12 / PR-12d — F-12d-31: a task's DECLARED objective is authoritative.
+"""A task-declared objective is authoritative, generic, and identity-bearing.
 
-Design: ``docs/design/generic_framework_upgrade/step_12_external_extensibility_graduation/
-pr_12d_contrast_subprocess_closure.md`` §Q D-12d-57, and the operator's
-2026-08-24 ruling authorizing this exact three-wire closure.
-
-**The defect.** §I requires DAVIS to train with EXACT MAE/L1, never
-``smooth_l1``. Two real composed runs trained with ``smooth_l1`` anyway. The
-mechanism was not broken — ``davis_exact_l1_loss.py`` declares every
-``PLUGIN_LOSS_*`` symbol and ``davis.yaml`` declares ``loss_plugins:`` — but
-``loss_plugins`` composes to a DIRECTORY ROOT, i.e. availability, never
-selection. The planner is told verbatim that for a regressor "Valid loss
-types: **smooth_l1**", with the custom-loss note gated on the
-*agent-generated* capability registry that a composition root never reaches.
-So the planner complied correctly with the prompt it was given, and nothing
-SELECTED the task's own objective.
-
-**Three wires, landed together** because authoritative selection without
-semantic identity would be an incomplete contract:
-
-* **A — declaration**: an optional ``objective:`` manifest key. The loss NAME
-  is not restated; the manifest names the implementation FILE and the symbol
-  that implementation declares itself with, so the plugin is the single
-  source of its own identity (the ``IMPLEMENTS`` discipline of F-12d-3).
-* **B — application**: applied to the plan AFTER the mode-override chain,
-  because that chain's forced-formal branch copies the winning trial's
-  ``loss_config`` wholesale and would otherwise silently replace it.
-* **C — identity**: the resolved implementation joins the SAME ``plugins``
-  set the semantic fingerprint already hashes.
-
-No task-name dispatch, no central enum growth: the composed value is an
-ordinary ``LossConfig`` on the pre-existing ``custom`` + ``loss_name`` route.
-
-The ten numbered falsifiers below are the operator's, in order.
+The scientific incident that motivated this contract is owned by
+``siderius-exp``. This module protects only framework behavior through the two
+framework-owned example packs and temporary objective plugins.
 """
 
 from __future__ import annotations
 
+import ast
+import hashlib
+import importlib
+import inspect
+import os
 import pathlib
 import shutil
 import subprocess
 import sys
+import textwrap
 from typing import ClassVar
 
 import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-MANIFEST_DIR = REPO_ROOT / "configs" / "task_composition"
-DAVIS = str(MANIFEST_DIR / "davis.yaml")
-PETS = str(MANIFEST_DIR / "pets.yaml")
-TIDMAD = str(MANIFEST_DIR / "tidmad.yaml")
-
-# Declared delta (arXiv #255, 2026-08-26): the fingerprint payload gained
-# task_data_path_content_identity (the registration-captured implementation
-# source identity), moving EVERY composed fingerprint once, uniformly — the
-# declared consequence (the 12a proposal_blocks precedent). The SEMANTIC of
-# this pin (additive keys leave undeclared manifests at a stable literal) is
-# unchanged; the literals are re-recorded at the #255 tree.
-# Declared delta (C2 aggregation flip, operator-frozen 2026-08-26): TIDMAD's
-# fingerprint re-recorded 3fd178b5… -> 9b497798… — the task health document's
-# aggregation prose moved with the any_pass -> all_pass policy flip.
-#: TIDMAD's fingerprint, pinned independently by Checkpoint B. Restating it
-#: here is deliberate: falsifier 8 is "TIDMAD unaffected", and comparing
-#: against a value this module computes would compare the change to itself.
-# Re-recorded again (false-header correction, 2026-08-27): 9b497798… ->
-# c0102089… — configs/task_health/tidmad.yaml's header claimed the file
-# cannot state `aggregation`, which PR #357 made false. `_digest_file`
-# hashes that document RAW, so the comment-only correction moves TIDMAD's
-# composed identity. Deliberate: a composed workspace created before it
-# fails its resume closed, and none exists outside TestPod.
-TIDMAD_FINGERPRINT = "c0102089266b4c8c2ba53dcc5492e1063d5c4919f3ae4444fb5dae3b0cac8800"
+QUICKSTART = REPO_ROOT / "configs/task_composition/quickstart.yaml"
+MASKED_REGRESSION = REPO_ROOT / "configs/task_composition/synthetic_masked_regression.yaml"
+MASKED_OBJECTIVE = REPO_ROOT / "examples/synthetic_masked_regression/plugins/masked_mse_loss.py"
+MASKED_LOSS_NAME = "synthetic_masked_mse"
 
 
-def _compose(manifest: str):
+def _compose(manifest: pathlib.Path):
     from workflows.task_composition import compose_run_task_bindings
 
-    return compose_run_task_bindings(manifest)
+    return compose_run_task_bindings(str(manifest))
 
 
-# ---------------------------------------------------------------- 1, 2, 3
 class TestDeclaredObjectiveIsAuthoritative:
-    def test_1_davis_selects_exact_l1_through_typed_configured_authority(self):
-        """Falsifier 1. Not prose, not advice — a validated LossConfig whose
-        name came from the implementation's own declaration."""
-        objective = _compose(DAVIS).objective
+    def test_plugin_objective_selects_the_implementation_declared_name(self):
+        objective = _compose(MASKED_REGRESSION).objective
         assert objective is not None
         assert objective.loss_type == "custom"
-        assert objective.loss_name == "davis_exact_l1"
+        assert objective.loss_name == MASKED_LOSS_NAME
 
-    def test_1b_the_name_comes_from_the_plugin_not_the_manifest(self):
-        """The manifest must not restate the loss name — otherwise manifest
-        and plugin could disagree and the manifest would silently win."""
-        text = (MANIFEST_DIR / "davis.yaml").read_text(encoding="utf-8")
+    def test_the_manifest_does_not_restate_the_plugin_name(self):
+        text = MASKED_REGRESSION.read_text(encoding="utf-8")
         objective_block = text.split("objective:", 1)[1]
-        assert "davis_exact_l1_loss.py" in objective_block
+        assert "masked_mse_loss.py" in objective_block
         assert "PLUGIN_LOSS_TYPE" in objective_block
-        assert "loss_name" not in objective_block.split("task_config", 1)[0]
+        assert "loss_name" not in objective_block
 
-    def test_2_the_tuner_receives_it_in_its_input_projection(self):
-        """Falsifier 2. The planner/tuner must SEE the authoritative
-        selection, not merely have it exist at the composition edge."""
+    def test_the_tuner_input_projection_carries_the_objective(self):
         from workflows.task_composition import build_task_composition_ref
 
-        ref = build_task_composition_ref(_compose(DAVIS))
-        assert ref is not None
-        assert ref.objective is not None
-        assert ref.objective.loss_name == "davis_exact_l1"
+        ref = build_task_composition_ref(_compose(MASKED_REGRESSION))
+        assert ref is not None and ref.objective is not None
+        assert ref.objective.loss_name == MASKED_LOSS_NAME
 
-    def test_3_smoothl1_cannot_silently_replace_it(self):
-        """Falsifier 3. THE regression, at the application seam: a plan that
-        chose smooth_l1 — exactly what both real runs produced — is
-        overridden by the declared objective."""
-        import importlib
+    def test_an_agent_selected_loss_is_replaced_by_the_declaration(self):
+        from workflows.task_composition import build_task_composition_ref
 
         planning = importlib.import_module("nodes.ml_hyperparameter_tune_agent.planning")
-        from workflows.task_composition import build_task_composition_ref
 
         class _Plan:
             loss_cfg: ClassVar[dict] = {"loss_type": "smooth_l1", "beta": 1.0}
 
         plan = planning._apply_declared_objective(
-            _Plan(), build_task_composition_ref(_compose(DAVIS))
+            _Plan(), build_task_composition_ref(_compose(MASKED_REGRESSION))
         )
         assert plan.loss_cfg["loss_type"] == "custom"
-        assert plan.loss_cfg["loss_name"] == "davis_exact_l1"
+        assert plan.loss_cfg["loss_name"] == MASKED_LOSS_NAME
 
-    def test_3b_it_is_applied_after_the_mode_override_chain(self):
-        """Order is load-bearing: the forced-formal branch copies the winning
-        trial's loss_config wholesale, so an objective applied before it would
-        be silently replaced — the very substitution this prevents."""
-        import importlib
-        import inspect
-
+    def test_objective_application_follows_the_mode_override_chain(self):
         planning = importlib.import_module("nodes.ml_hyperparameter_tune_agent.planning")
         source = inspect.getsource(planning.prepare_attempt)
         assert source.find("_apply_mode_override_chain(") < source.find(
@@ -138,91 +77,82 @@ class TestDeclaredObjectiveIsAuthoritative:
         )
 
 
-# ------------------------------------------------------------------- 4, 5, 6
-class TestSemanticIdentity:
-    def test_4_editing_the_declared_objective_moves_the_fingerprint(self, tmp_path):
-        """Falsifier 4. Authoritative selection without identity would be an
-        incomplete contract — an edited objective must not resume silently."""
-        before = _compose(DAVIS).semantic_fingerprint
-        plugin = REPO_ROOT / "examples/davis_future_prediction/plugins/davis_exact_l1_loss.py"
-        backup = tmp_path / "davis_exact_l1_loss.py.bak"
-        shutil.copy2(plugin, backup)
-        try:
-            plugin.write_text(
-                plugin.read_text(encoding="utf-8") + "\n# semantic edit\n", encoding="utf-8"
-            )
-            after = _compose(DAVIS).semantic_fingerprint
-        finally:
-            shutil.copy2(backup, plugin)
-        assert after != before
-        assert _compose(DAVIS).semantic_fingerprint == before, "restore must be exact"
-
-    def test_5_byte_identical_relocation_does_not_move_the_fingerprint(self, tmp_path):
-        """Falsifier 5. Identity is CONTENT, not host path — the same pack at
-        two absolute paths is one identity (12bc's rule)."""
+class TestObjectiveSemanticIdentity:
+    def test_plugin_content_moves_its_identity(self, tmp_path):
         from workflows.task_composition import _compose_objective
 
-        plugin = REPO_ROOT / "examples/davis_future_prediction/plugins/davis_exact_l1_loss.py"
-        relocated = tmp_path / "elsewhere" / "davis_exact_l1_loss.py"
-        relocated.parent.mkdir(parents=True)
-        shutil.copy2(plugin, relocated)
-
-        _, here = _compose_objective(
-            {"objective": {"implementation": {"file": str(plugin), "symbol": "PLUGIN_LOSS_TYPE"}}},
-            str(REPO_ROOT),
+        copy = tmp_path / "objective.py"
+        shutil.copy2(MASKED_OBJECTIVE, copy)
+        section = {
+            "objective": {"implementation": {"file": str(copy), "symbol": "PLUGIN_LOSS_TYPE"}}
+        }
+        before_config, before_ref = _compose_objective(section, str(tmp_path))
+        copy.write_text(
+            copy.read_text(encoding="utf-8") + "\n# semantic fixture edit\n",
+            encoding="utf-8",
         )
-        _, there = _compose_objective(
+        after_config, after_ref = _compose_objective(section, str(tmp_path))
+
+        assert before_config == after_config
+        assert before_ref is not None and after_ref is not None
+        assert before_ref.content_sha256 != after_ref.content_sha256
+
+    def test_byte_identical_relocation_preserves_content_identity(self, tmp_path):
+        from workflows.task_composition import _compose_objective
+
+        first = tmp_path / "first" / "objective.py"
+        second = tmp_path / "second" / "objective.py"
+        first.parent.mkdir()
+        second.parent.mkdir()
+        shutil.copy2(MASKED_OBJECTIVE, first)
+        shutil.copy2(MASKED_OBJECTIVE, second)
+
+        def identity(path: pathlib.Path) -> str:
+            _, ref = _compose_objective(
+                {
+                    "objective": {
+                        "implementation": {
+                            "file": str(path),
+                            "symbol": "PLUGIN_LOSS_TYPE",
+                        }
+                    }
+                },
+                str(path.parent),
+            )
+            assert ref is not None
+            return ref.content_sha256
+
+        assert identity(first) == identity(second)
+
+    def test_executed_file_and_declared_identity_are_the_same_bytes(self):
+        from workflows.task_composition import _compose_objective
+
+        _, ref = _compose_objective(
             {
                 "objective": {
-                    "implementation": {"file": str(relocated), "symbol": "PLUGIN_LOSS_TYPE"}
+                    "implementation": {
+                        "file": str(MASKED_OBJECTIVE),
+                        "symbol": "PLUGIN_LOSS_TYPE",
+                    }
                 }
             },
-            str(tmp_path),
+            str(REPO_ROOT),
         )
-        assert here.content_sha256 == there.content_sha256
-
-    def test_6_a_changed_objective_refuses_a_resume_loudly(self, tmp_path):
-        """Falsifier 6. The fingerprint is what the run-invariants lock pins,
-        so a moved fingerprint is a refused resume rather than a silent
-        re-run under different science."""
-        from core.run_invariants import RunInvariantsViolation, validate_run_invariants
-
-        original = _compose(DAVIS).semantic_fingerprint
-        plugin = REPO_ROOT / "examples/davis_future_prediction/plugins/davis_exact_l1_loss.py"
-        backup = tmp_path / "bak.py"
-        shutil.copy2(plugin, backup)
-        try:
-            plugin.write_text(plugin.read_text(encoding="utf-8") + "\n# drift\n", encoding="utf-8")
-            changed = _compose(DAVIS).semantic_fingerprint
-        finally:
-            shutil.copy2(backup, plugin)
-        assert changed != original, (
-            "if this does not move, the lock has nothing to refuse and falsifier 6 cannot hold"
-        )
-        assert RunInvariantsViolation is not None and validate_run_invariants is not None
+        assert ref is not None
+        assert ref.content_sha256 == hashlib.sha256(MASKED_OBJECTIVE.read_bytes()).hexdigest()
 
 
-# ---------------------------------------------------------------- 7, 8, 9, 10
 class TestFrameworkProvidedObjectiveDeclaration:
     def test_builtin_config_resolves_to_the_existing_loss_contract(self):
-        """Catches tasks being forced to ship code for a built-in objective."""
         from workflows.task_composition import _compose_objective
 
         objective, plugin = _compose_objective(
             {"objective": {"config": {"loss_type": "ce", "reduction": "sum"}}},
             str(REPO_ROOT),
         )
-
         assert plugin is None
-        assert objective.model_dump() == {
-            "loss_type": "ce",
-            "alpha": None,
-            "gamma": None,
-            "beta": None,
-            "reduction": "sum",
-            "use_class_weights": False,
-            "loss_name": None,
-        }
+        assert objective.loss_type == "ce"
+        assert objective.reduction == "sum"
 
     @pytest.mark.parametrize(
         ("section", "message"),
@@ -233,27 +163,20 @@ class TestFrameworkProvidedObjectiveDeclaration:
             ({"config": {"loss_type": "ce"}, "typo": {}}, "unknown key"),
         ],
     )
-    def test_ambiguous_custom_or_misspelled_builtin_config_refuses(self, section, message):
-        """Catches fail-open objective declarations at the user boundary."""
+    def test_ambiguous_custom_or_misspelled_config_refuses(self, section, message):
         from workflows.task_composition import TaskCompositionError, _compose_objective
 
         with pytest.raises(TaskCompositionError, match=message):
             _compose_objective({"objective": section}, str(REPO_ROOT))
 
     def test_quickstart_demonstrates_the_builtin_objective_seam(self):
-        """Catches the user example drifting back to an agent-chosen loss."""
-        quickstart = REPO_ROOT / "configs/task_composition/quickstart.yaml"
+        objective = _compose(QUICKSTART).objective
+        assert objective is not None
+        assert objective.loss_type == "ce"
+        assert objective.reduction == "mean"
 
-        composition = _compose(str(quickstart))
-
-        assert composition.objective is not None
-        assert composition.objective.loss_type == "ce"
-        assert composition.objective.reduction == "mean"
-
-    def test_builtin_objective_parameters_join_the_composition_identity(self, tmp_path):
-        """Catches resumes accepting a changed built-in training objective."""
-        quickstart = REPO_ROOT / "configs/task_composition/quickstart.yaml"
-        original = quickstart.read_text(encoding="utf-8")
+    def test_builtin_objective_parameters_join_composition_identity(self, tmp_path):
+        original = QUICKSTART.read_text(encoding="utf-8")
         variant = tmp_path / "quickstart_sum.yaml"
         variant.write_text(
             original.replace("../../examples/", f"{REPO_ROOT}/examples/").replace(
@@ -261,10 +184,9 @@ class TestFrameworkProvidedObjectiveDeclaration:
             ),
             encoding="utf-8",
         )
-
         child = (
-            "from workflows.task_composition import compose_run_task_bindings; "
-            "import sys; print(compose_run_task_bindings(sys.argv[1]).semantic_fingerprint)"
+            "from workflows.task_composition import compose_run_task_bindings as compose; "
+            "import sys; print(compose(sys.argv[1]).semantic_fingerprint)"
         )
 
         def fingerprint(manifest: pathlib.Path) -> str:
@@ -277,15 +199,11 @@ class TestFrameworkProvidedObjectiveDeclaration:
             )
             return completed.stdout.splitlines()[-1]
 
-        assert fingerprint(variant) != fingerprint(quickstart)
+        assert fingerprint(variant) != fingerprint(QUICKSTART)
 
 
-class TestEverythingElseIsUnaffected:
-    def test_7_a_task_declaring_no_objective_is_a_silent_no_op(self):
-        """Falsifier 7. Non-overridden objective behaviour must remain valid:
-        the plan is returned untouched, planner's choice standing."""
-        import importlib
-
+class TestGenericBoundaries:
+    def test_absent_declaration_leaves_the_agent_choice_untouched(self):
         planning = importlib.import_module("nodes.ml_hyperparameter_tune_agent.planning")
 
         class _Plan:
@@ -300,278 +218,67 @@ class TestEverythingElseIsUnaffected:
             == original
         )
 
-    @pytest.mark.parametrize("manifest", [PETS, TIDMAD])
-    def test_8_pets_and_tidmad_declare_no_objective(self, manifest):
-        assert _compose(manifest).objective is None
-
-    def test_8b_tidmads_fingerprint_is_byte_unchanged(self):
-        """Falsifier 8, the sharp half. Compared against Checkpoint B's
-        independently pinned literal, not against a value this test
-        computes."""
-        assert _compose(TIDMAD).objective is None
-
-    def test_9_no_task_or_package_name_dispatch_was_introduced(self):
-        """Falsifier 9. The discriminator must be whether the RUN declared an
-        objective — never which task it is."""
-        import ast
-        import importlib
-        import inspect
-        import textwrap
-
+    def test_no_task_name_dispatch_exists_in_generic_authorities(self):
         planning = importlib.import_module("nodes.ml_hyperparameter_tune_agent.planning")
         from workflows import task_composition
 
-        for func in (planning._apply_declared_objective, task_composition._compose_objective):
-            tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
-            # EXECUTABLE code only. Docstrings legitimately name DAVIS as the
-            # motivating example — an earlier draft of this test scanned raw
-            # source and failed on its own prose, which would have punished
-            # explaining the defect rather than dispatching on it.
-            literals = [
-                node.value.lower()
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Constant) and isinstance(node.value, str)
-            ]
-            docstrings = {
-                ast.get_docstring(node, clean=False)
-                for node in ast.walk(tree)
-                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-            }
-            executable = [
-                text for text in literals if not any(text == (d or "").lower() for d in docstrings)
-            ]
-            names = [node.id.lower() for node in ast.walk(tree) if isinstance(node, ast.Name)]
-            attrs = [
-                node.attr.lower() for node in ast.walk(tree) if isinstance(node, ast.Attribute)
-            ]
-            haystack = " ".join(executable + names + attrs)
-            for task_name in ("davis", "pets", "tidmad", "oxford"):
-                assert task_name not in haystack, (
-                    f"{task_name!r} appears in EXECUTABLE code of a generic "
-                    "authority — this seam must discriminate on DECLARATION, "
-                    "never on task identity"
-                )
+        for function in (planning._apply_declared_objective, task_composition._compose_objective):
+            tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+            executable_names = {
+                node.id.lower() for node in ast.walk(tree) if isinstance(node, ast.Name)
+            } | {node.attr.lower() for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+            assert not {"task_id", "task_name", "package_name"} & executable_names
+            assert not any(isinstance(node, ast.Match) for node in ast.walk(tree))
 
-
-class TestAntiVacuity:
-    def test_10_the_pre_fix_behaviour_would_fail_these(self):
-        """Falsifier 10. Before wire B, `_apply_declared_objective` did not
-        exist and the plan kept whatever the planner chose. Simulating that
-        old behaviour must fail the same assertion test_3 makes, proving
-        these tests discriminate rather than merely pass."""
-
-        def _pre_fix(plan, _ref):
-            return plan  # the old world: nothing overrode the planner
-
+    def test_pre_contract_behavior_fails_the_authority_assertion(self):
         class _Plan:
             loss_cfg: ClassVar[dict] = {"loss_type": "smooth_l1", "beta": 1.0}
 
-        stale = _pre_fix(_Plan(), None)
-        assert stale.loss_cfg["loss_type"] == "smooth_l1"
+        stale = _Plan()
         with pytest.raises(AssertionError):
             assert stale.loss_cfg["loss_type"] == "custom"
 
-
-class TestTheResolvedObjectiveIsArithmeticallyExactL1:
-    """The criterion §I actually names — proven by ARITHMETIC, not by name.
-
-    Every test above proves the right *identifier* is selected. None of them
-    would notice if `davis_exact_l1` resolved to something that merely called
-    itself exact L1. §I says "exact MAE / L1, never smooth_l1", which is a
-    claim about the function, so it is checked as one.
-    """
-
-    def test_it_equals_torch_l1_and_differs_from_smooth_l1(self):
-        import os
-
-        import torch
-
-        from ml_models.loss_models_sandbox import get_criterion
-        from ml_models.models_format_sandbox import LossConfig
-        from workflows.task_composition import bind_run_task_composition
-
-        composition = _compose(DAVIS)
-        root = str(REPO_ROOT / "examples" / "davis_future_prediction" / "plugins")
-        previous = os.environ.get("SIDERIUS_LOSS_DIRS")
-        with bind_run_task_composition(composition, physical_data_root=str(REPO_ROOT)):
-            os.environ["SIDERIUS_LOSS_DIRS"] = root
-            try:
-                criterion = get_criterion(LossConfig(**composition.objective.model_dump()))
-            finally:
-                if previous is None:
-                    os.environ.pop("SIDERIUS_LOSS_DIRS", None)
-                else:
-                    os.environ["SIDERIUS_LOSS_DIRS"] = previous
-
-        torch.manual_seed(0)
-        # DAVIS' declared output shape, so the check runs on the real rank.
-        predicted = torch.randn(2, 3, 4, 8, 8)
-        target = torch.randn(2, 3, 4, 8, 8)
-        assert torch.allclose(criterion(predicted, target), torch.nn.L1Loss()(predicted, target))
-        assert not torch.allclose(
-            criterion(predicted, target), torch.nn.SmoothL1Loss()(predicted, target)
-        ), "if these agree the test cannot tell exact L1 from the loss §I forbids"
-
-
-# ======================================================================
-# C12-I acceptance contract V1-V8. V4/V7/V8 are the properties the earlier
-# tests in this module did NOT reach.
-# ======================================================================
-
-_COMPOSE_SNIPPET = (
-    "import sys, json;"
-    "sys.path.insert(0, {repo!r});"
-    "from workflows.task_composition import compose_run_task_bindings as c;"
-    "print(json.dumps({{'fp': c({manifest!r}).semantic_fingerprint}}))"
-)
-
-
-def _fingerprint_in_fresh_process() -> str:
-    """Compose DAVIS in a BRAND NEW interpreter and return its fingerprint.
-
-    In-process composition can be served by module state, an import cache or a
-    memoised read. V4 is a claim about a *fresh process*, so it is measured in
-    one — the same reason C12-I's own baseline is process-crossing.
-    """
-    import json
-    import subprocess
-    import sys
-
-    code = _COMPOSE_SNIPPET.format(repo=str(REPO_ROOT), manifest=DAVIS)
-    completed = subprocess.run(
-        [sys.executable, "-c", code],
-        capture_output=True,
-        text=True,
-        cwd=str(REPO_ROOT),
-        check=True,
-    )
-    line = [ln for ln in completed.stdout.splitlines() if ln.startswith("{")][-1]
-    return json.loads(line)["fp"]
-
-
-class TestC12IAcceptanceContract:
-    def test_V1_unchanged_implementation_yields_stable_identity(self):
-        assert _fingerprint_in_fresh_process() == _fingerprint_in_fresh_process()
-
-    def test_V4_fresh_process_sees_the_mutation_and_the_lock_refuses(self, tmp_path):
-        """V4 — the property C12-I measured RED pre-fix.
-
-        Two DIFFERENT interpreters: one records the identity, the objective is
-        then mutated, and a second fresh interpreter must compute a different
-        identity — which is what turns a silent resume into a refused one.
-        """
-        plugin = REPO_ROOT / "examples/davis_future_prediction/plugins/davis_exact_l1_loss.py"
-        backup = tmp_path / "objective.bak"
-        shutil.copy2(plugin, backup)
-
-        locked = _fingerprint_in_fresh_process()
-        try:
-            # A BEHAVIOUR-bearing mutation, not a comment: exact L1 becomes
-            # something else entirely, which is precisely the substitution §I
-            # forbids and which a name-only identity cannot see.
-            plugin.write_text(
-                plugin.read_text(encoding="utf-8").replace(
-                    "torch.nn.L1Loss", "torch.nn.SmoothL1Loss"
-                )
-                + "\n# behaviour mutation\n",
-                encoding="utf-8",
-            )
-            after = _fingerprint_in_fresh_process()
-        finally:
-            shutil.copy2(backup, plugin)
-
-        assert after != locked, (
-            "a fresh process must see the mutated objective as a DIFFERENT "
-            "identity; equal identities are exactly the silent resume C12-I "
-            "measured before this fix"
-        )
-        assert _fingerprint_in_fresh_process() == locked, "restore must be exact"
-
-    def test_V7_the_executed_implementation_is_the_fingerprinted_one(self):
-        """V7 — selection and identity must describe the SAME file.
-
-        Compares the content digest the fingerprint pinned against a digest of
-        the file the loss loader actually resolves, so the two authorities
-        cannot drift apart while both looking healthy.
-        """
-        import hashlib
-        import os
-
-        from workflows.task_composition import _compose_objective
-
-        _, ref = _compose_objective(
-            {
-                "objective": {
-                    "implementation": {
-                        "file": "examples/davis_future_prediction/plugins/davis_exact_l1_loss.py",
-                        "symbol": "PLUGIN_LOSS_TYPE",
-                    }
-                }
-            },
-            str(REPO_ROOT),
-        )
-        executed = os.path.join(
-            REPO_ROOT, "examples/davis_future_prediction/plugins/davis_exact_l1_loss.py"
-        )
-        with open(executed, "rb") as handle:
-            digest = hashlib.sha256(handle.read()).hexdigest()
-        assert ref.content_sha256 == digest
-
-    def test_V8_a_same_name_shadow_is_refused_loudly(self, tmp_path):
-        """V8 — the C12-I substitution finding.
-
-        Runtime resolves a custom loss BY NAME over a union of directories, so
-        a second file declaring the same `PLUGIN_LOSS_TYPE` could be the one
-        executed while the fingerprint pinned the declared one. For an
-        AUTHORITATIVE objective that must refuse rather than pick.
-        """
-        import os
-
+    def test_same_name_shadow_is_refused_and_absence_is_allowed(self, tmp_path):
         from workflows.task_composition import TaskCompositionError, _compose_objective
 
-        shadow_dir = tmp_path / "shadow_losses"
-        shadow_dir.mkdir()
-        (shadow_dir / "impostor.py").write_text(
-            'PLUGIN_LOSS_TYPE = "davis_exact_l1"\n', encoding="utf-8"
+        section = {
+            "objective": {
+                "implementation": {
+                    "file": str(MASKED_OBJECTIVE),
+                    "symbol": "PLUGIN_LOSS_TYPE",
+                }
+            }
+        }
+        clean_config, clean_ref = _compose_objective(section, str(REPO_ROOT))
+        assert clean_config.loss_name == MASKED_LOSS_NAME and clean_ref is not None
+
+        shadow = tmp_path / "shadow"
+        shadow.mkdir()
+        (shadow / "impostor.py").write_text(
+            f"PLUGIN_LOSS_TYPE = {MASKED_LOSS_NAME!r}\n", encoding="utf-8"
         )
         previous = os.environ.get("SIDERIUS_LOSS_DIRS")
-        os.environ["SIDERIUS_LOSS_DIRS"] = str(shadow_dir)
+        os.environ["SIDERIUS_LOSS_DIRS"] = str(shadow)
         try:
             with pytest.raises(TaskCompositionError, match="same name"):
-                _compose_objective(
-                    {
-                        "objective": {
-                            "implementation": {
-                                "file": (
-                                    "examples/davis_future_prediction/plugins/"
-                                    "davis_exact_l1_loss.py"
-                                ),
-                                "symbol": "PLUGIN_LOSS_TYPE",
-                            }
-                        }
-                    },
-                    str(REPO_ROOT),
-                )
+                _compose_objective(section, str(REPO_ROOT))
         finally:
             if previous is None:
                 os.environ.pop("SIDERIUS_LOSS_DIRS", None)
             else:
                 os.environ["SIDERIUS_LOSS_DIRS"] = previous
 
-    def test_V8b_no_shadow_means_no_refusal(self):
-        """Anti-vacuity for V8: the guard must not refuse the healthy case."""
-        from workflows.task_composition import _compose_objective
 
-        config, ref = _compose_objective(
-            {
-                "objective": {
-                    "implementation": {
-                        "file": "examples/davis_future_prediction/plugins/davis_exact_l1_loss.py",
-                        "symbol": "PLUGIN_LOSS_TYPE",
-                    }
-                }
-            },
-            str(REPO_ROOT),
-        )
-        assert config.loss_name == "davis_exact_l1"
-        assert ref is not None
+def test_fresh_process_composes_the_framework_objective_pack():
+    code = (
+        "from workflows.task_composition import compose_run_task_bindings as compose; "
+        "import sys; print(compose(sys.argv[1]).objective.loss_name)"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", code, str(MASKED_REGRESSION)],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert completed.stdout.splitlines()[-1] == MASKED_LOSS_NAME

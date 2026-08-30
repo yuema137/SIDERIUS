@@ -18,9 +18,8 @@ regime-A fact derivation with the task's DECLARED facts
 two globals are cleared on their own lifecycle, independently of the config
 cache, so the early return made both outcomes depend on cache warmth:
 
-* a legacy TIDMAD resolution bound ``value_scale_unit="mV"`` and
-  ``symbol_cardinality=256`` in a cold process and ``None`` — the regime-A
-  fallback — in a warm one;
+* a declared task-facts family was present in a cold process and absent in a
+  warm one;
 * a run whose first health resolution bound nothing then let a SECOND,
   different task family bind past the run-scope guard, so a composed run
   succeeded warm and was refused cold.
@@ -43,9 +42,9 @@ early return (``if path is None and _CACHED_GATES is not None: return
 _CACHED_GATES``) and:
 ``test_a_warm_cache_binds_the_same_task_facts_as_a_cold_process`` fails with
 the warm process reporting ``task_facts=None`` against the cold process's
-declared TIDMAD facts;
+declared synthetic facts;
 ``test_a_warm_cache_cannot_smuggle_a_second_family_past_the_run_scope_guard``
-fails because the warm process returns ``outcome="ok"`` with Pets bound while
+fails because the warm process returns ``outcome="ok"`` with another family bound while
 the cold process raises ``HealthPluginRunScopeError``; and
 ``test_a_warm_cache_under_a_changed_binding_recomposes`` fails because the
 process reports ``rebound=False`` — the stale instance served under a binding
@@ -56,7 +55,7 @@ rather than as a symptom.
 underlying question deterministic: with no effective config to read
 (``health_gate_enabled=False``) the tuner's task-render step reached the
 binding-less loader BEFORE it resolved its own scientific gate set, so a
-composed run bound TIDMAD's family and was then refused its own.
+composed run bound the generic compatibility family and was then refused its own.
 ``test_the_tuners_first_health_resolution_binds_the_runs_own_family`` owns
 that, and its call site's reachability is owned by
 ``tests/unit/workflows/test_step12_pr12a_c7_prompt_science.py`` — which drives
@@ -77,36 +76,32 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
-#: Hand-written from ``configs/task_health/tidmad.yaml``, NOT read back from
-#: the loader under test.
-TIDMAD_DECLARED_FACTS = {
-    "encoding_family": "int8_symbol_stream",
-    "file_group_size": 20,
-    "sampling_frequency_hz": 10000000.0,
-    "symbol_cardinality": 256,
-    "value_scale_unit": "mV",
+PRIMARY_FACTS = {
+    "encoding_family": "continuous_scalar",
+    "file_group_size": None,
+    "sampling_frequency_hz": None,
+    "symbol_cardinality": None,
+    "value_scale_unit": None,
 }
-
-#: Hand-written from ``examples/oxford_iiit_pet/declared/task_health.yaml``.
-PETS_PLUGIN_REF = "../plugins/_pets_health_views.py"
+PRIMARY_GATES = ["spectro_dispersion_blocking"]
+ALTERNATE_GATES = ["alternate_dispersion_blocking"]
 
 _PROBE = r"""
 import json, sys
 REPO = sys.argv[1]
 import execute_tools.health_checks.config as cfg_mod
 assert cfg_mod.__file__.startswith(REPO), "WRONG CHECKOUT: " + cfg_mod.__file__
+cfg_mod.LEGACY_DEFAULT_TASK_HEALTH_CONFIG = sys.argv[3]
 from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks.candidate_eligibility import resolve_run_scientific_gate_ids
-from workflows.task_composition import compose_run_task_bindings
 assert _plugin_binding.__file__.startswith(REPO), "WRONG CHECKOUT"
 
-def binding(task):
-    return compose_run_task_bindings(
-        REPO + "/tests/fixtures/step10_p1/" + task + "/composition.yaml"
-    ).task_health_binding
+def binding(family):
+    return sys.argv[4 if family == "primary" else 5]
 
 def observe(out):
     facts = _plugin_binding.bound_task_facts()
@@ -135,12 +130,12 @@ try:
         out["gate_ids"] = [g.id for g in second.health_gates]
     elif scenario == "composed_cold":
         cfg_mod.load_health_gates_config()
-        out["gates"] = sorted(resolve_run_scientific_gate_ids(binding("pets")) or [])
+        out["gates"] = sorted(resolve_run_scientific_gate_ids(binding("alternate")) or [])
     elif scenario == "composed_warm":
         cfg_mod.load_health_gates_config()
         _plugin_binding.reset_run_scope()          # the run boundary; cache untouched
         cfg_mod.load_health_gates_config()         # warm hit — must still compose
-        out["gates"] = sorted(resolve_run_scientific_gate_ids(binding("pets")) or [])
+        out["gates"] = sorted(resolve_run_scientific_gate_ids(binding("alternate")) or [])
     elif scenario in ("tuner_composed", "tuner_uncomposed"):
         from types import SimpleNamespace
         from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
@@ -150,17 +145,17 @@ try:
         ref = (
             None
             if scenario == "tuner_uncomposed"
-            else SimpleNamespace(task_health_binding=binding("pets"))
+            else SimpleNamespace(task_health_binding=binding("primary"))
         )
         inp = SimpleNamespace(health_checks_config=None, task_composition_ref=ref)
         out["gate_ids"] = [g.id for g in _resolve_run_health_config(inp).health_gates]
         out["gates"] = sorted(_resolve_run_gate_ids(inp) or [])
     elif scenario == "guard_same_family":
-        resolve_run_scientific_gate_ids(binding("pets"))
-        out["gates"] = sorted(resolve_run_scientific_gate_ids(binding("pets")) or [])
+        resolve_run_scientific_gate_ids(binding("primary"))
+        out["gates"] = sorted(resolve_run_scientific_gate_ids(binding("primary")) or [])
     elif scenario == "guard_other_family":
-        resolve_run_scientific_gate_ids(binding("pets"))
-        out["gates"] = sorted(resolve_run_scientific_gate_ids(binding("davis")) or [])
+        resolve_run_scientific_gate_ids(binding("primary"))
+        out["gates"] = sorted(resolve_run_scientific_gate_ids(binding("alternate")) or [])
     else:
         raise SystemExit("unknown scenario " + scenario)
     out["outcome"] = "ok"
@@ -173,7 +168,7 @@ print("CP12_JSON " + json.dumps(out, sort_keys=True))
 """
 
 
-def _run(scenario: str) -> dict:
+def _run(scenario: str, health_configs: tuple[Path, Path]) -> dict:
     """Run one scenario in a genuinely separate interpreter.
 
     A monkeypatched global is not a cold process: the whole failure class is
@@ -183,7 +178,16 @@ def _run(scenario: str) -> dict:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(REPO_ROOT)
     proc = subprocess.run(
-        [sys.executable, "-c", _PROBE, str(REPO_ROOT), scenario],
+        [
+            sys.executable,
+            "-c",
+            _PROBE,
+            str(REPO_ROOT),
+            scenario,
+            str(health_configs[0]),
+            str(health_configs[0]),
+            str(health_configs[1]),
+        ],
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
@@ -199,7 +203,86 @@ def _run(scenario: str) -> dict:
 
 
 @pytest.fixture(scope="module")
-def observations() -> dict[str, dict]:
+def health_configs(tmp_path_factory) -> tuple[Path, Path]:
+    root = tmp_path_factory.mktemp("generic_health_families")
+    primary = root / "primary.yaml"
+    alternate = root / "alternate.yaml"
+    plugin_template = """\
+from typing import ClassVar
+
+from execute_tools.health_checks import (
+    HealthView,
+    all_registered_view_providers,
+    register_view_provider,
+)
+
+
+class SyntheticProvider:
+    provider_id: ClassVar[str] = {provider_id!r}
+    capabilities: ClassVar[frozenset[str]] = frozenset({{"continuous_samples"}})
+
+    def materialize(self, capability_key, ctx, config=None):
+        return HealthView(
+            capability_key=capability_key,
+            provider_id=self.provider_id,
+            payload=(1.0, 2.0),
+        )
+
+
+if SyntheticProvider.provider_id not in all_registered_view_providers():
+    register_view_provider(SyntheticProvider())
+"""
+    (root / "primary_plugin.py").write_text(
+        plugin_template.format(provider_id="fixture.primary"), encoding="utf-8"
+    )
+    (root / "alternate_plugin.py").write_text(
+        plugin_template.format(provider_id="fixture.alternate"), encoding="utf-8"
+    )
+    primary.write_text(
+        yaml.safe_dump(
+            {
+                "facts": PRIMARY_FACTS,
+                "plugins": [{"kind": "file", "ref": "primary_plugin.py"}],
+                "providers": [{"provider_id": "fixture.primary"}],
+                "roster": [
+                    {
+                        "gate_id": PRIMARY_GATES[0],
+                        "check": "sample_dispersion_floor",
+                        "disposition": "blocking",
+                        "parameters": {"min_std": 0.02},
+                        "reason": "Synthetic primary family for cache authority tests.",
+                    }
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    alternate.write_text(
+        yaml.safe_dump(
+            {
+                "facts": {"encoding_family": "continuous_vector"},
+                "plugins": [{"kind": "file", "ref": "alternate_plugin.py"}],
+                "providers": [{"provider_id": "fixture.alternate"}],
+                "roster": [
+                    {
+                        "gate_id": ALTERNATE_GATES[0],
+                        "check": "sample_dispersion_floor",
+                        "disposition": "blocking",
+                        "parameters": {"min_std": 0.03},
+                        "reason": "Synthetic alternate family for cache authority tests.",
+                    }
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    return primary, alternate
+
+
+@pytest.fixture(scope="module")
+def observations(health_configs) -> dict[str, dict]:
     scenarios = (
         "legacy_cold",
         "legacy_warm",
@@ -211,16 +294,15 @@ def observations() -> dict[str, dict]:
         "tuner_composed",
         "tuner_uncomposed",
     )
-    return {s: _run(s) for s in scenarios}
+    return {s: _run(s, health_configs) for s in scenarios}
 
 
 def test_a_warm_cache_binds_the_same_task_facts_as_a_cold_process(observations):
     """A warm cache must not downgrade the task's DECLARED facts to regime-A.
 
     Fails, when the early return is restored, with the warm process reporting
-    ``task_facts=None`` — no ``value_scale_unit``, so a millivolt threshold
-    would be evaluated against the derived fallback — while the cold process
-    reports TIDMAD's declared facts.
+    ``task_facts=None`` while the cold process reports the declared synthetic
+    facts.
     """
     cold = observations["legacy_cold"]
     warm = observations["legacy_warm"]
@@ -229,8 +311,8 @@ def test_a_warm_cache_binds_the_same_task_facts_as_a_cold_process(observations):
     assert warm["outcome"] == "ok", warm
 
     # Hardcoded, not read back from the loader under test.
-    assert cold["task_facts"] == TIDMAD_DECLARED_FACTS
-    assert warm["task_facts"] == TIDMAD_DECLARED_FACTS
+    assert cold["task_facts"] == PRIMARY_FACTS
+    assert warm["task_facts"] == PRIMARY_FACTS
 
     # ...and the full resolution is identical, not merely the facts.
     assert warm["gate_ids"] == cold["gate_ids"]
@@ -250,7 +332,7 @@ def test_a_warm_cache_under_a_changed_binding_recomposes(observations):
     warm call returns the instance composed under the *previous* binding and
     establishes no binding at all, so the process is left with
     ``bound_task_facts() is None`` while holding a config that only a bound
-    TIDMAD resolution could have produced.
+    primary-family resolution could have produced.
 
     ``repeat_is_memo_hit`` is the anti-vacuity half, and it is what makes
     this a REFINEMENT rather than the removal of the cache: a key that
@@ -268,17 +350,8 @@ def test_a_warm_cache_under_a_changed_binding_recomposes(observations):
     assert obs["rebound"] is True, obs
     assert obs["recomposed_new_instance"] is True, obs
 
-    # ...and the recomposed authority is the real one, hand-written from
-    # configs/task_health/tidmad.yaml, not read back from the loader.
-    assert obs["task_facts"] == TIDMAD_DECLARED_FACTS
-    assert obs["gate_ids"] == [
-        "output_diversity_blocking",
-        "output_std_blocking",
-        "amplitude_collapse_blocking",
-        "pearson_dispersion_recording",
-        "spectral_peak_ratio_recording",
-        "per_file_output_std_recording",
-    ]
+    assert obs["task_facts"] == PRIMARY_FACTS
+    assert obs["gate_ids"] == PRIMARY_GATES
 
     # Anti-vacuity: an unchanged binding is still served from the memo.
     assert obs["repeat_is_memo_hit"] is True, obs
@@ -353,7 +426,7 @@ def test_a_warm_cache_cannot_smuggle_a_second_family_past_the_run_scope_guard(ob
     first bind happened must be a fact about the run, never about the cache.
 
     Fails, when the early return is restored, with the warm process reporting
-    ``outcome="ok"`` and Pets' gate set while the cold process raises
+    ``outcome="ok"`` and the alternate gate set while the cold process raises
     ``HealthPluginRunScopeError``: the same declaration, two different
     authorities, decided by nothing the operator can see.
     """
@@ -380,44 +453,29 @@ def test_the_tuners_first_health_resolution_binds_the_runs_own_family(observatio
     while building its task render, before it resolves its own scientific gate
     set, and it reaches the binding-less loader whenever the run materialized
     no effective config (``health_gate_enabled=False``). Composing
-    ``LEGACY_OMITTED`` there bound TIDMAD's family into a composed run, which
+    ``LEGACY_OMITTED`` there bound the compatibility family into a composed run, which
     then had its OWN family refused moments later.
 
     Fails, when that site goes back to ``load_health_gates_config(...)``, with
-    ``tuner_composed`` reporting TIDMAD's roster and then raising
+    ``tuner_composed`` reporting the compatibility roster and then raising
     ``HealthPluginRunScopeError`` from ``_resolve_run_gate_ids`` — the same
     refusal a real cold composed run gets today.
 
     ``tuner_uncomposed`` is the parity half: a run with no composition must
-    still resolve exactly the shipped legacy roster and facts.
+    still resolve exactly the configured compatibility roster and facts.
     """
     composed = observations["tuner_composed"]
     legacy = observations["tuner_uncomposed"]
 
     assert composed["outcome"] == "ok", composed
-    # Hand-written from examples/oxford_iiit_pet/declared/task_health.yaml.
-    assert composed["gate_ids"] == [
-        "pets_distinct_symbols_blocking",
-        "pets_dominant_fraction_blocking",
-    ]
-    assert composed["gates"] == [
-        "pets_distinct_symbols_blocking",
-        "pets_dominant_fraction_blocking",
-    ]
-    assert [p["configured_ref"] for p in composed["plugins"]] == [PETS_PLUGIN_REF]
+    assert composed["gate_ids"] == PRIMARY_GATES
+    assert composed["gates"] == PRIMARY_GATES
+    assert [plugin["configured_ref"] for plugin in composed["plugins"]] == ["primary_plugin.py"]
 
     assert legacy["outcome"] == "ok", legacy
-    # Hand-written from configs/task_health/tidmad.yaml.
-    assert legacy["gate_ids"] == [
-        "output_diversity_blocking",
-        "output_std_blocking",
-        "amplitude_collapse_blocking",
-        "pearson_dispersion_recording",
-        "spectral_peak_ratio_recording",
-        "per_file_output_std_recording",
-    ]
-    assert legacy["task_facts"] == TIDMAD_DECLARED_FACTS
-    assert legacy["plugins"] == []
+    assert legacy["gate_ids"] == PRIMARY_GATES
+    assert legacy["task_facts"] == PRIMARY_FACTS
+    assert [plugin["configured_ref"] for plugin in legacy["plugins"]] == ["primary_plugin.py"]
 
 
 def test_the_run_scope_guard_stays_discriminative(observations):
@@ -434,12 +492,8 @@ def test_the_run_scope_guard_stays_discriminative(observations):
     other = observations["guard_other_family"]
 
     assert same["outcome"] == "ok", same
-    # Hand-written from examples/oxford_iiit_pet/declared/task_health.yaml.
-    assert same["gates"] == [
-        "pets_distinct_symbols_blocking",
-        "pets_dominant_fraction_blocking",
-    ]
-    assert [p["configured_ref"] for p in same["plugins"]] == [PETS_PLUGIN_REF]
+    assert same["gates"] == PRIMARY_GATES
+    assert [plugin["configured_ref"] for plugin in same["plugins"]] == ["primary_plugin.py"]
 
     assert other["outcome"] == "raised", other
     assert other["exc_type"] == "HealthPluginRunScopeError"
