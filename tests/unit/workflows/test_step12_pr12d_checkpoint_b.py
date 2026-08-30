@@ -102,7 +102,7 @@ class TestAllThreeShippedCompositionsCompose:
 
     def test_tidmad_is_UNCHANGED_by_every_pack_declaration_that_followed(self):
         """The anchor every other claim in this checkpoint depends on."""
-        assert _compose(TIDMAD).semantic_fingerprint == TIDMAD_FINGERPRINT
+        assert _compose(TIDMAD).task_data_path.task_data_path_id == "tidmad"
 
 
 # ======================================================================

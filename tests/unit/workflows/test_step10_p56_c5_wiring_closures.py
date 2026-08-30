@@ -149,36 +149,25 @@ class TestW2ShippedManifest:
 
 class TestW3ChildBootstrap:
     @pytest.mark.parametrize("child", CHILDREN)
-    def test_every_child_bootstraps_all_three_in_tree_data_paths(self, child):
+    def test_every_child_uses_manifest_resolution_and_an_explicit_legacy_adapter(self, child):
         source = (REPO_ROOT / child).read_text(encoding="utf-8")
-        assert "import execute_tools.tidmad_data_path" in source or (
-            "from execute_tools.tidmad_data_path import" in source
-        )
-        assert "import execute_tools.pets_data_path" in source
-        assert "import execute_tools.davis_data_path" in source
+        assert "resolve_child_task_data_path" in source
+        assert "task_manifest" in source
+        assert "bootstrap_legacy_tidmad_data_path" in source
 
     @pytest.mark.parametrize(
         "child_module",
         ["execute_tools.train_engine_sandbox", "execute_tools.inference_single"],
     )
-    def test_importing_a_child_registers_all_three_ids(self, child_module):
-        """The RUNTIME half — a source census alone would pass on an import
-        that registered nothing.
-
-        ``denoising_score_single`` is deliberately absent from this
-        parametrization: it calls ``parser.parse_args()`` at MODULE level
-        (:116), so it is a script rather than an importable module and cannot
-        be exercised this way. Its bootstrap is covered by the source census
-        above and by the Gate's real scoring subprocess.
-        """
+    def test_importing_a_child_does_not_mutate_the_task_registry(self, child_module):
+        """Real task implementations are loaded from transported manifests."""
         import importlib
 
-        importlib.import_module(child_module)
         from execute_tools.task_data_path import registered_task_data_path_ids
 
-        assert {"tidmad", "oxford_iiit_pet", "davis_future_prediction"} <= set(
-            registered_task_data_path_ids()
-        )
+        before = registered_task_data_path_ids()
+        importlib.reload(importlib.import_module(child_module))
+        assert registered_task_data_path_ids() == before
 
     def test_an_unknown_id_still_fails_closed(self):
         """W3 widened the built-ins; it must NOT have introduced a fallback."""
@@ -473,7 +462,7 @@ class TestW7PreflightAndWorkflowAgree:
         would leave it with nothing to pass."""
         runner_path = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
         source = runner_path.read_text(encoding="utf-8")
-        compose_at = source.index("run_composition = (")
+        compose_at = source.index("preflight_composition = compose_run_task_bindings(")
         preflight_at = source.index("expected_invariants = compute_expected_invariants(")
         assert compose_at < preflight_at, (
             "the composition must be resolved BEFORE the invariants pre-flight"

@@ -28,7 +28,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent.schemas.health_feedback import CollapseFingerprintHistoryEntry
+from agent.schemas.health_feedback import CollapseFingerprintHistoryEntry, TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
     HyperparamTuningOutput,
@@ -237,11 +237,15 @@ class RestoredState:
     accumulated_key_findings: list[str] = field(default_factory=list)
     accumulated_physical_rejections: list[PhysicalRejection] = field(default_factory=list)
     accumulated_gate_exhaustions: list[GateExhaustionInfo] = field(default_factory=list)
+    accumulated_negative_feedback: list[
+        tuple[GateExhaustionInfo | None, TrialValidityFeedback | None]
+    ] = field(default_factory=list)
     previous_proposal_data: dict | None = None
     model_knowledge_cache: dict[str, dict] = field(default_factory=dict)
     collapse_fingerprint_history: dict[str, list[CollapseFingerprintHistoryEntry]] = field(
         default_factory=dict
     )
+
     #: Step 09a C5 — the interpreter's prediction state (four digest fields in
     #: one typed carrier). Exactly ONE new restored field, by the ruling's
     #: scope: no other restored value, no restore-precedence change, and no
@@ -270,6 +274,60 @@ class RestoredState:
     chain_best_valid_formal_provenance: dict[str, Any] | None = None
     chain_best_trial_score: float | None = None
     chain_best_trial_provenance: dict[str, Any] | None = None
+
+
+NegativeFeedback = tuple[GateExhaustionInfo | None, TrialValidityFeedback | None]
+
+
+def _append_negative_feedback(
+    state: RestoredState,
+    gate_exhaustion: GateExhaustionInfo | None,
+    trial_feedback: TrialValidityFeedback | None,
+) -> None:
+    """Append one bounded negative-evidence pair when either fact exists."""
+    if gate_exhaustion is not None or trial_feedback is not None:
+        state.accumulated_negative_feedback.append((gate_exhaustion, trial_feedback))
+
+
+def _restore_no_records_feedback(
+    raw_feedback: object,
+    *,
+    iter_idx: int,
+    state: RestoredState,
+) -> None:
+    """Validate and restore the bounded evidence from a no-records iteration."""
+    if not isinstance(raw_feedback, dict):
+        raise ResumeError(f"iter {iter_idx:03d}: no_records negative_feedback must be an object")
+    unknown = sorted(set(raw_feedback) - {"gate_exhaustion", "trial_validity_feedback"})
+    if unknown:
+        raise ResumeError(
+            f"iter {iter_idx:03d}: no_records negative_feedback has unknown field(s): {unknown}"
+        )
+    try:
+        gate_exhaustion = (
+            GateExhaustionInfo.model_validate(raw_feedback["gate_exhaustion"])
+            if raw_feedback.get("gate_exhaustion") is not None
+            else None
+        )
+        trial_feedback = (
+            TrialValidityFeedback.model_validate(raw_feedback["trial_validity_feedback"])
+            if raw_feedback.get("trial_validity_feedback") is not None
+            else None
+        )
+    except Exception as exc:
+        raise ResumeError(
+            f"iter {iter_idx:03d}: no_records negative_feedback failed validation: {exc}"
+        ) from exc
+    if gate_exhaustion is not None:
+        state.accumulated_gate_exhaustions.append(gate_exhaustion)
+    _append_negative_feedback(state, gate_exhaustion, trial_feedback)
+
+
+def _trim_negative_feedback(state: RestoredState) -> None:
+    """Apply the same bounded history window used for gate exhaustion."""
+    state.accumulated_negative_feedback = state.accumulated_negative_feedback[
+        -_MAX_ACCUMULATED_GATE_EXHAUSTIONS:
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1414,10 +1472,10 @@ def restore_prior_state(
 
     Raises:
         ResumeError: workspace state cannot be safely chained off — missing
-            workspace dir, missing manifest, malformed JSON, status !=
-            ``"completed"``, missing run_output file, or run_output
-            validation failure. The shell driver should surface this error
-            and refuse to launch.
+            workspace dir, missing manifest, malformed JSON, unsupported
+            status, invalid no-records feedback, missing run_output file, or
+            run_output validation failure. The shell driver should surface
+            this error and refuse to launch.
 
     Side effects:
         Calls :func:`register_model_in_memory` for each prior iter, which
@@ -1471,15 +1529,24 @@ def restore_prior_state(
             _verify_manifest_or_stop(
                 manifest, iter_idx=iter_idx, manifest_path=manifest_path, output_path=None
             )
+            # Issue #396 — no scientific incumbent does not mean no
+            # scientific evidence.  New manifests may carry the same bounded,
+            # already-validated negative summaries produced by the tuner.
+            # Validate them again at this process boundary before transport;
+            # never parse a run output, restore a plugin, append a source path,
+            # or mark the iteration committed on this branch.
+            raw_feedback = manifest.get("negative_feedback")
+            if raw_feedback is not None:
+                _restore_no_records_feedback(raw_feedback, iter_idx=iter_idx, state=state)
             # Iter ran cleanly but produced no usable model (gate exhaustion
             # or all-rounds-failed). Skip output absorption + plugin
             # restoration entirely. Not appended to committed_iters because
-            # there is nothing to commit; downstream code that reads
-            # memory_history reconstructs the skip context from the
-            # workspace's per-iter logs, not from the in-process state.
+            # there is no scientific result to commit. Negative feedback, when
+            # present, was restored above through its dedicated typed channel.
             print(
                 f"[resume] iter {iter_idx:03d}: no_records — skipping "
                 f"output absorption, no plugin to restore"
+                + ("; restored negative feedback" if raw_feedback is not None else "")
             )
             continue
         output_path = manifest["output_path"]
@@ -1584,6 +1651,7 @@ def restore_prior_state(
             state.accumulated_physical_rejections.extend(parsed.physical_rejections)
         if parsed.gate_exhaustion is not None:
             state.accumulated_gate_exhaustions.append(parsed.gate_exhaustion)
+        _append_negative_feedback(state, parsed.gate_exhaustion, parsed.trial_validity_feedback)
 
         # V19 PR 1 §3.3 — chain-incumbent fold, commit-time validity only.
         # FORMAL: committed-fields fast path (with summary-vs-source
@@ -1654,6 +1722,7 @@ def restore_prior_state(
         state.accumulated_gate_exhaustions = state.accumulated_gate_exhaustions[
             -_MAX_ACCUMULATED_GATE_EXHAUSTIONS:
         ]
+    _trim_negative_feedback(state)
 
     # Cross-iter knowledge carry-over. Without this, every chain iter's
     # interp node sees only the static seed (empirically: 5 iters × 21
@@ -1732,12 +1801,18 @@ def restore_prior_state(
             f"[resume] proposal carry-over: latest proposal restored "
             f"({n_candidates} proposed_vocab_candidates)"
         )
-    if state.accumulated_physical_rejections or state.accumulated_gate_exhaustions:
+    if (
+        state.accumulated_physical_rejections
+        or state.accumulated_gate_exhaustions
+        or state.accumulated_negative_feedback
+    ):
         print(
             f"[resume] negative-feedback carry-over: "
             f"{len(state.accumulated_physical_rejections)} physical rejection(s), "
             f"{len(state.accumulated_gate_exhaustions)} gate-exhaustion summar"
-            f"{'y' if len(state.accumulated_gate_exhaustions) == 1 else 'ies'}"
+            f"{'y' if len(state.accumulated_gate_exhaustions) == 1 else 'ies'}, "
+            f"{sum(item[1] is not None for item in state.accumulated_negative_feedback)} "
+            f"trial-validity summary(ies)"
         )
 
     # V19 PR 1 — incumbent carry-over audit lines (design §3.3).

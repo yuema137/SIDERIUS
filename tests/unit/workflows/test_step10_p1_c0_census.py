@@ -91,20 +91,19 @@ class TestCensusAFiveDefaultMechanisms:
     P1 preserves and Step 12 later removes."""
 
     def test_default_1_task_data_path_resolves_the_compatibility_id_when_unbound(self):
-        """Registration is an IMPORT side-effect of the implementation module
-        (``tidmad_data_path.py`` ends in ``register_task_data_path(...)``), and
-        the compatibility id is what an absent binding resolves to. Both halves
-        are the mechanism: a composition registers its own plugin the same way,
-        so the fact that no central table is consulted is the property."""
-        import execute_tools.tidmad_data_path  # registers on import
+        """The explicit legacy bootstrap preserves the compatibility path.
+
+        Real-task imports are registry-neutral so they cannot shadow a
+        transported external implementation in a composed child.
+        """
         from execute_tools.task_data_path import (
             TIDMAD_COMPATIBILITY_ID,
+            bootstrap_legacy_tidmad_data_path,
             registered_task_data_path_ids,
-            resolve_task_data_path,
         )
 
+        impl = bootstrap_legacy_tidmad_data_path()
         assert TIDMAD_COMPATIBILITY_ID in registered_task_data_path_ids()
-        impl = resolve_task_data_path(None)
         assert impl.task_data_path_id == TIDMAD_COMPATIBILITY_ID
 
     def test_default_2_dataset_profile_falls_back_to_the_shipped_tidmad_profile(self):
@@ -364,8 +363,14 @@ class TestCensusBTransportEmissionSites:
             #   B7  the tuner's trial-anchoring resolution — the task names
             #       its own anchor artifact instead of the tuner inlining
             #       TIDMAD's filename. Same presence-first rule.
+            #   F2  the run binding carries the task codec to round-boundary
+            #       Health without re-resolving it per candidate.
+            #   #389 probe-data projection — the isolated resource worker
+            #       must receive the active task's semantic inference-batch
+            #       maximum instead of selecting from memory evidence alone.
             "nodes/ml_hyperparameter_tune_agent/scope_acquisition.py": 1,
-            "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py": 1,
+            "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py": 2,
+            "nodes/ml_hyperparameter_tune_agent/probe_data.py": 1,
         }, f"an unexpected parent-side resolve appeared; found {resolves}"
 
     def test_the_workflow_itself_resolves_no_task_data_path(self):

@@ -1,0 +1,11 @@
+{
+  "aggregation": "mean_band_spread",
+  "direction": "higher",
+  "id": "band_spread",
+  "references": [],
+  "scoreability": {
+    "contract_id": "deliverable_presence"
+  },
+  "transform": null,
+  "transform_params": {}
+}

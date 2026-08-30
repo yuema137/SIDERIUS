@@ -125,6 +125,20 @@ def test_respects_custom_candidate_order(monkeypatch):
     assert got == 128
 
 
+def test_task_semantic_ceiling_limits_the_resource_feasible_batch(monkeypatch):
+    """A memory-feasible batch must not exceed the task's collation ceiling."""
+    _install_probe(monkeypatch, lambda B: (0, 0))
+
+    got = resolve_inference_batch(
+        _NoOp(),
+        segmentation_size=1000,
+        cap_bytes=10 * 1024**3,
+        max_batch_size=1,
+    )
+
+    assert got == 1
+
+
 def test_empty_candidate_list_raises(monkeypatch):
     _install_probe(monkeypatch, lambda B: (0, 0))
     with pytest.raises(ValueError, match="candidate_batches must be non-empty"):

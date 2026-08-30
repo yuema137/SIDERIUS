@@ -200,9 +200,11 @@ def _resolve_loss_dirs() -> list[str]:
     """
     # Lazy import (module-bottom registries import nothing from core, and the
     # loader must stay importable in trimmed contexts exactly as before).
-    from core.generated_library import generated_losses_dir
+    from core.generated_library import generated_library_is_workspace_bound, generated_losses_dir
 
-    library_dirs = [generated_losses_dir(), LOSSES_DIR]
+    library_dirs = [generated_losses_dir()]
+    if not generated_library_is_workspace_bound():
+        library_dirs.append(LOSSES_DIR)
     env = os.environ.get(_LOSS_DIRS_ENV_VAR, "").strip()
     if env:
         env_dirs = [p for p in env.split(os.pathsep) if p.strip()]

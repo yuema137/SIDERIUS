@@ -31,6 +31,7 @@ from datetime import UTC, datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
 from pydantic import BaseModel, ValidationError
 
 from agent.skills.evaluate_vram_skill import wrapper
@@ -247,6 +248,36 @@ def test_feasible_path_returns_the_declared_shape():
     # Phase K's `inference_batch_uncalibrated` is obsolete under the
     # probe-driven resolver; its reappearance would mean a merge leak.
     assert "inference_batch_uncalibrated" not in out
+    assert out["status"] == "success"
+
+
+def test_task_owned_probe_pair_reaches_the_training_loss_without_zero_substitution():
+    """Regression: semantic targets must survive the resource boundary.
+
+    Replacing either tensor with ``_build_probe_tensors`` recreates the
+    all-zero target that custom masked losses correctly refuse.
+    """
+    task_input = torch.tensor([[[1.0, 7.0]]])
+    task_target = torch.tensor([[[1.0, 1.0, 0.0]]])
+    with (
+        _Patches() as patches,
+        patch.object(
+            wrapper,
+            "_build_probe_tensors",
+            side_effect=AssertionError("task-owned samples were discarded"),
+        ),
+    ):
+        out = wrapper.run_skill(
+            sandbox=None,
+            hardware_context=_gpu_ctx(),
+            probe_input_sample=task_input,
+            probe_target_sample=task_target,
+            **_run_kwargs(),
+        )
+
+    training_call = patches.probe.call_args_list[0]
+    assert torch.equal(training_call.kwargs["input_sample"], task_input.to(torch.int32))
+    assert torch.equal(training_call.kwargs["target_sample"], task_target.to(torch.long))
     assert out["status"] == "success"
     assert out["feasible"] is True
     # The killer slot is populated only when the wrapper REFUSED the config.

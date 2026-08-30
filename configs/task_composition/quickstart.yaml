@@ -47,6 +47,15 @@ metric:
     file: ../../examples/quickstart/plugins/_quickstart_metrics.py
     symbol: QuickstartAccuracyMetric
 
+# A framework-provided objective needs config only. Tasks with objective
+# implementations that SIDERIUS does not provide use the sibling
+# `objective.implementation` plugin form instead (see the synthetic masked
+# regression example). Both resolve to the same validated LossConfig boundary.
+objective:
+  config:
+    loss_type: ce
+    reduction: mean
+
 # A NAMED absence, not an omission: saying nothing at all would be the
 # LEGACY_OMITTED state that resolves TIDMAD's Health family.
 task_health:

@@ -40,6 +40,7 @@ the child inferring anything.
 | task scope | artifact path + sha256 digest (`--task_scope_ref` / `--task_scope_digest`) | at **all three** spawn sites, **only when armed** — `task_scope_argv` returns `[]` for an absent scope |
 | declared plugin roots | env union into `SIDERIUS_PLUGIN_DIRS` / `SIDERIUS_LOSS_DIRS` (`core/subprocess_env.py`) | a child spawn may **add** to the declared set, never drop it |
 | declared metric | the scoring child re-composes it from the transported manifest | **no fallback** — a failed composition terminates the subprocess |
+| task inference batch ceiling | optional `TaskInferenceBatching` capability projected through `TaskProbeDataSpec` | resource selection and generic inference both enforce the same task-semantic maximum |
 
 **Transport is emitted only when bound**, so a legacy un-composed run's child
 argv is byte-identical to what it always was.

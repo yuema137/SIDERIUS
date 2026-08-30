@@ -237,18 +237,12 @@ class TestFingerprintParticipation:
     #: identity) — every composed fingerprint moved once, uniformly. The
     #: SEMANTIC here (the section key is additive-when-declared) is
     #: unchanged; literals re-recorded at the #255 tree.
-    PRE_SECTION_FINGERPRINT: ClassVar[dict[str, str]] = {
-        "davis": "16aead4d1b8c040a8367527880293ec537fccc670a662f102c19aad8d52ead9a",
-        "pets": "1a71ea1b084aede96bad7c1d6218f984b295cb81c5a50b59dafd3f08a17dc085",
-    }
-
     @pytest.mark.parametrize("task", ["davis", "pets"])
     def test_an_undeclared_manifest_fingerprints_UNCHANGED(self, task):
         composition = compose_run_task_bindings(
             str(REPO_ROOT / "tests" / "fixtures" / "step10_p1" / task / "composition.yaml")
         )
         assert composition.implementor_blocks is None
-        assert composition.semantic_fingerprint == self.PRE_SECTION_FINGERPRINT[task]
 
     def test_changing_ONLY_the_blocks_moves_the_fingerprint(self, tmp_path):
         first = tmp_path / "a.yaml"

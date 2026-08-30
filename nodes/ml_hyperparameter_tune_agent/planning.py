@@ -19,10 +19,13 @@ import os
 from typing import Any
 
 from agent.schemas.hyperparam_tuning import (
+    EpochCapResolution,
     ExperimentPlan,
+    TaskCompositionRef,
     TrialConfig,
 )
 from agent.schemas.ordering import resolve_ordering
+from agent.schemas.parameter_rules import ParameterRuleError, apply_parameter_rules
 from execute_tools.health_checks.candidate_eligibility import (
     is_valid_candidate,
 )
@@ -85,6 +88,42 @@ def _apply_declared_objective(plan: Any, composition_ref: Any) -> Any:
         )
     plan.loss_cfg = effective
     return plan
+
+
+def _apply_effective_parameter_rules(
+    plan: ExperimentPlan,
+    *,
+    composition_ref: TaskCompositionRef | None,
+    epoch_cap: EpochCapResolution,
+) -> ExperimentPlan:
+    """Apply task rules without bypassing other effective-plan authorities.
+
+    This boundary owns the interaction between parameter rules, a declared
+    objective, and the independent epoch safety ceiling. It does not choose an
+    objective or an epoch cap; both arrive already resolved by their existing
+    authorities.
+    """
+    task_rules = composition_ref.parameter_rules if composition_ref is not None else None
+    if (
+        composition_ref is not None
+        and composition_ref.objective is not None
+        and task_rules is not None
+        and any(
+            path == "loss_config" or path.startswith("loss_config.") for path in task_rules.rules
+        )
+    ):
+        raise ParameterRuleError(
+            "parameter_rules must not constrain loss_config when the task declares "
+            "an authoritative objective; the objective is the sole owner of loss semantics"
+        )
+
+    effective = apply_parameter_rules(plan, task_rules=task_rules)
+    if epoch_cap.cap is not None and effective.train_cfg.get("epochs", 1) > epoch_cap.cap:
+        raise ParameterRuleError(
+            "parameter_rules resolved train_config.epochs above the active "
+            f"{epoch_cap.source or 'max_epochs'} ceiling {epoch_cap.cap}"
+        )
+    return effective
 
 
 def _normalize_strategies_for_scope(
@@ -337,7 +376,10 @@ def prepare_attempt(
     _records_with_table: list[dict] = [
         r
         for r in memory_history
-        if is_valid_candidate(r)
+        if is_valid_candidate(
+            r,
+            required_gate_ids=bindings.run_scientific_gate_ids,
+        )
         and isinstance(r.get("score_table"), dict)
         and r["score_table"].get("rendered_markdown")
     ]
@@ -472,6 +514,13 @@ def prepare_attempt(
     epoch_cap = agent_input.resolve_epoch_cap(is_trial=plan.is_trial)
     _apply_epoch_bound(plan.train_cfg, epoch_cap.cap, source=epoch_cap.source or "max_epochs")
     resolution.record(plan, "max_epochs_bound")
+
+    plan = _apply_effective_parameter_rules(
+        plan,
+        composition_ref=agent_input.task_composition_ref,
+        epoch_cap=epoch_cap,
+    )
+    resolution.record(plan, "parameter_rules")
 
     # Build and validate TrialConfig from plan + overrides
     if plan.is_trial:

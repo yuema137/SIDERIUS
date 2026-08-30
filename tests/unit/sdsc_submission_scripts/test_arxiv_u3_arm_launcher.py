@@ -19,7 +19,8 @@ What only these tests catch:
 * ``TestChainCommonForwarding`` — the three-state lit-review forwarding:
   unset forwards NOTHING (legacy argv byte-identical), explicit negative
   forwards ``--no-ml_lit_review_enabled`` (the OFF arm recorded
-  positively), positive forwards the positive token; and
+  positively), positive forwards the positive token, a task-owned config path
+  is transported unchanged; and
   ``--baseline_isolation`` forwards only when requested.
 * ``TestPrintResolvedLaunchConfig`` — the print mode emits ONE JSON object,
   exits 0, and creates NOTHING (no workspace dir); an unresolvable
@@ -304,6 +305,11 @@ class TestChainCommonForwarding:
         lines = _app_args("--ml_lit_review_enabled")
         assert "--ml_lit_review_enabled" in lines
         assert "--no-ml_lit_review_enabled" not in lines
+
+    def test_task_owned_lit_review_config_is_forwarded_verbatim(self):
+        lines = _app_args("--ml_lit_review_config /task/config/lit-review.yaml")
+        flag_index = lines.index("--ml_lit_review_config")
+        assert lines[flag_index + 1] == "/task/config/lit-review.yaml"
 
     def test_baseline_isolation_is_forwarded_when_requested(self):
         assert "--baseline_isolation" in _app_args("--baseline_isolation")

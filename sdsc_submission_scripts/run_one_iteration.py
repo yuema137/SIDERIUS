@@ -73,6 +73,7 @@ from core.record_role import formal_evidence_of
 from core.resume import ResumeError, restore_prior_state
 from core.run_invariants import (
     LockLaunchIdentity,
+    RunHealthMaterialization,
     RunInvariants,
     RunInvariantsViolation,
     build_run_invariants,
@@ -86,6 +87,7 @@ from core.runtime_control.watchdog_profile import (
 )
 from execute_tools.data_paths import DatasetDirectoryUnavailable, resolve_dataset_dir
 from execute_tools.dataset_config import DataScope, resolve_dataset_profile
+from execute_tools.health_checks._composition import HealthBindingState
 from execute_tools.health_checks.launch_policy import (
     FormalLaunchPolicyError,
     validate_formal_launch,
@@ -847,7 +849,8 @@ def write_manifest(
       * ``"no_records"`` — workflow ran cleanly but every tuner round
         failed/was skipped (gate exhaustion, all-rounds returned None
         score). The chain MUST keep going so the next iter's LLM can see
-        the skips and adapt. Resume: skip this iter, no plugin to restore.
+        the bounded negative feedback and adapt. Resume: transport only that
+        feedback; skip the invalid artifact and restore no plugin or incumbent.
       * ``"failed"`` — workflow itself crashed (Python exception, seed-
         resolution error, restore_prior_state error). The chain halts.
         Set via ``crashed=True``.
@@ -990,6 +993,23 @@ def write_manifest(
     # auditable. Policy only: per-round gate evidence lives in the
     # records and the interpretation digest — never duplicated here.
     manifest["health_feedback_policy"] = health_feedback_policy
+
+    # Issue #396 — a scientifically invalid iteration still has evidence.
+    #
+    # ``no_records`` deliberately names no consumable model artifact: resume
+    # must not restore its plugin, score, or incumbent.  A validated tuner
+    # output can nevertheless carry the bounded summaries that explain why
+    # no candidate was usable.  Persist those summaries on the write-once,
+    # self-digested manifest so the next process can learn from the failure
+    # without treating the invalid run output as a successful handoff.
+    if manifest["status"] == "no_records" and tune_output is not None:
+        negative_feedback = {
+            field: value.model_dump(mode="json")
+            for field in ("gate_exhaustion", "trial_validity_feedback")
+            if (value := getattr(tune_output, field, None)) is not None
+        }
+        if negative_feedback:
+            manifest["negative_feedback"] = negative_feedback
 
     # V20 FU-D-11 — WHICH candidate plan this iteration ran, when the
     # proposer was bypassed. Stamped on EVERY branch, like the policy above:
@@ -1808,9 +1828,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--min_formal_batch_size",
         type=int,
-        default=4,
+        default=0,
         help="§5 guardrail: skip FORMAL rounds planned below this batch "
-        "size (V18 pathology; trial exempt). 0 disables. Default 4.",
+        "size (V18 pathology; trial exempt). 0 disables. Default 0; "
+        "task and campaign launchers may opt in explicitly.",
     )
     parser.add_argument(
         "--allow_extreme_steps",
@@ -2457,8 +2478,11 @@ def compute_expected_invariants(
         # W7 — EVERY composition-derived invariant `run_workflow` passes, so
         # the pre-flight and the workflow agree on both the materialized
         # document AND the workspace lock.
-        task_health_binding=(
-            run_composition.task_health_binding if run_composition is not None else None
+        health_materialization=RunHealthMaterialization(
+            task_health_binding=(
+                run_composition.task_health_binding if run_composition is not None else None
+            ),
+            dataset_partition_count=run_partitions,
         ),
         task_composition_fingerprint=(
             run_composition.semantic_fingerprint if run_composition is not None else None
@@ -2692,6 +2716,26 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
 
 def main():
     args = normalize_args(build_parser().parse_args())
+    # Generated-capability identity participates in the run-invariants lock,
+    # so bind it before composition preflight, resume validation, or any
+    # other operation that can build those invariants.
+    from core.generated_library import bind_generated_library_to_workspace
+
+    bind_generated_library_to_workspace(args.workspace)
+
+    # Resolve a valid composition before launch-policy validation so the
+    # policy reads this run's task-owned Health declaration rather than
+    # binding the legacy default first. Preserve the established malformed-
+    # composition path below: its error is still recorded after the iteration
+    # directory is prepared, so deterministic failures still contribute to
+    # the consecutive-failure brake.
+    preflight_composition = None
+    preflight_composition_error: Exception | None = None
+    if args.task_composition:
+        try:
+            preflight_composition = compose_run_task_bindings(args.task_composition)
+        except Exception as exc:
+            preflight_composition_error = exc
 
     # --- V20 PR D (D-C1b): formal-launch policy refusal ----------------
     # THE FIRST thing done with the parsed arguments, and deliberately
@@ -2715,6 +2759,11 @@ def main():
             gates_enabled=args.enable_chain_incumbent_formal_gates,
             skip_formal_min_delta=args.skip_formal_min_delta,
             bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
+            task_health_binding=(
+                preflight_composition.task_health_binding
+                if preflight_composition is not None
+                else HealthBindingState.LEGACY_OMITTED
+            ),
         )
     except FormalLaunchPolicyError as exc:
         print(f"[run_one_iteration] FORMAL LAUNCH REFUSED: {exc}", file=sys.stderr)
@@ -3030,9 +3079,9 @@ def main():
     # failure streak, and the chain would keep launching iterations that
     # cannot possibly succeed.
     try:
-        run_composition = (
-            compose_run_task_bindings(args.task_composition) if args.task_composition else None
-        )
+        if preflight_composition_error is not None:
+            raise preflight_composition_error
+        run_composition = preflight_composition
     except Exception as e:
         print(f"FAIL: could not resolve --task_composition {args.task_composition!r}: {e}")
         write_manifest(

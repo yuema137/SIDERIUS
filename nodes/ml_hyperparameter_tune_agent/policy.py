@@ -192,7 +192,12 @@ def _validate_penalty_for_direction(agent_input: Any, order: MetricOrder) -> Non
     )
 
 
-def _best_trial_winner(memory_history: list, *, order: MetricOrder) -> dict | None:
+def _best_trial_winner(
+    memory_history: list,
+    *,
+    order: MetricOrder,
+    required_gate_ids: frozenset[str] | None = None,
+) -> dict | None:
     """Best-scoring HealthGate-valid trial from ``memory_history``.
 
     "Best" is the bound golden metric's own notion (Step 07 PR 07b): the
@@ -225,7 +230,11 @@ def _best_trial_winner(memory_history: list, *, order: MetricOrder) -> dict | No
     ``sandbox.score_vector`` is gone — health checks now run tuner-side
     per ``docs/design/pluggable_health_checks.md`` §14 Option A.
     """
-    candidates = [r for r in memory_history if is_valid_candidate(r) and r.get("is_trial") is True]
+    candidates = [
+        r
+        for r in memory_history
+        if is_valid_candidate(r, required_gate_ids=required_gate_ids) and r.get("is_trial") is True
+    ]
     if not candidates:
         return None
     return order.best(candidates, key=_score_of)

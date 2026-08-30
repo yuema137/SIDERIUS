@@ -296,9 +296,11 @@ def live_loss_metadata(registry) -> list:
     Duck-typed test metadata without ``file_path`` remains accepted for
     backward compatibility; production ``CapabilityMetadata`` always has it.
     """
-    from core.generated_library import generated_losses_dir
+    from core.generated_library import generated_library_is_workspace_bound, generated_losses_dir
 
-    global_loss_dirs = {os.path.abspath(generated_losses_dir()), _GLOBAL_LOSS_DIR}
+    global_loss_dirs = {os.path.abspath(generated_losses_dir())}
+    if not generated_library_is_workspace_bound():
+        global_loss_dirs.add(_GLOBAL_LOSS_DIR)
     live = []
     for meta in registry.list(capability_type="loss"):
         file_path = getattr(meta, "file_path", None)

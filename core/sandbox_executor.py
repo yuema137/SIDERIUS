@@ -47,7 +47,7 @@ from core.recorders import MongoRecorder as MongoRecorder
 from core.runtime_control.launch_argv import has_scope_to_launch_from, runtime_control_argv
 from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES, RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
-from execute_tools.data_paths import TIDMAD_DATA_DIR, resolve_physical_data_root
+from execute_tools.data_paths import legacy_tidmad_data_dir, resolve_physical_data_root
 from execute_tools.dataset_config import (
     DataScope,
     ScopeViolationError,
@@ -88,7 +88,7 @@ from ml_models.plugin_loader import UnknownOutputContractError
 
 
 def _tidmad_data_dir() -> str:
-    return TIDMAD_DATA_DIR
+    return legacy_tidmad_data_dir()
 
 
 # ---------------------------------------------------------------------------

@@ -33,7 +33,8 @@ from execute_tools.davis_data_path import DavisClip, DavisTaskDataPath
 from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks.config import read_effective_config_body_sha
 from execute_tools.health_checks.registry import _PROVIDER_REGISTRY, _REGISTRY
-from execute_tools.task_data_path import DeliverableWriteRequest
+from execute_tools.pets_data_path import PetsTaskDataPath
+from execute_tools.task_data_path import DeliverableWriteRequest, EvaluationReadRequest
 from scripts._gate2_health_stage import run_health_stage
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -67,6 +68,19 @@ PRE_C5_EVIDENCE_KEYS = {
 }
 
 
+def _pets_payload(tmp_path: Path) -> object:
+    deliverable = tmp_path / "predictions_pets_reference_cnn_t_e1.csv"
+    deliverable.write_bytes(PETS_FIXTURE.read_bytes())
+    return PetsTaskDataPath().read_evaluation_payload(
+        EvaluationReadRequest(
+            deliverable_dir=str(tmp_path),
+            exp_id="e1",
+            run_name="t",
+            model_type="pets_reference_cnn",
+        )
+    )
+
+
 @pytest.fixture(autouse=True)
 def _isolated_registries_and_run_scope():
     registry_snapshot = dict(_REGISTRY)
@@ -88,6 +102,7 @@ class TestExplicitBindingThreadedEndToEnd:
             workspace=tmp_path,
             task_health_binding=PETS_BINDING,
             deliverable_path=PETS_FIXTURE,
+            evaluation_payload=_pets_payload(tmp_path),
             model_name="pets_reference_cnn",
             run_name="t",
         )
@@ -106,6 +121,7 @@ class TestExplicitBindingThreadedEndToEnd:
                 workspace=tmp_path,
                 task_health_binding=tmp_path / "absent" / "task_health.yaml",
                 deliverable_path=PETS_FIXTURE,
+                evaluation_payload={},
                 model_name="m",
                 run_name="t",
             )
@@ -120,6 +136,7 @@ class TestEverySelectedGateIsPersisted:
             workspace=tmp_path,
             task_health_binding=PETS_BINDING,
             deliverable_path=PETS_FIXTURE,
+            evaluation_payload=_pets_payload(tmp_path),
             model_name="pets_reference_cnn",
             run_name="t",
         )
@@ -159,6 +176,7 @@ class TestEverySelectedGateIsPersisted:
             workspace=tmp_path,
             task_health_binding=PETS_BINDING,
             deliverable_path=PETS_FIXTURE,
+            evaluation_payload=_pets_payload(tmp_path),
             model_name="pets_reference_cnn",
             run_name="t",
         )
@@ -188,6 +206,14 @@ class TestTheStageIsTaskAgnostic:
             workspace=tmp_path,
             task_health_binding=DAVIS_BINDING,
             deliverable_path=deliverable,
+            evaluation_payload=DavisTaskDataPath().read_evaluation_payload(
+                EvaluationReadRequest(
+                    deliverable_dir=str(deliverable_dir),
+                    exp_id="e1",
+                    run_name="t",
+                    model_type="davis_reference_predictor",
+                )
+            ),
             model_name="davis_reference_predictor",
             run_name="t",
         )

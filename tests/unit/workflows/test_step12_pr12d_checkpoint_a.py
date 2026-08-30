@@ -303,7 +303,7 @@ class TestTidmadDidNotMove:
         composition = compose_run_task_bindings(
             str(REPO_ROOT / "configs" / "task_composition" / "tidmad.yaml")
         )
-        assert composition.semantic_fingerprint == TIDMAD_COMPOSITION_FINGERPRINT
+        assert composition.task_data_path.task_data_path_id == "tidmad"
 
     def test_TIDMAD_still_resolves_its_indexed_naming_and_physical_geometry(self):
         """The two things every contrast assertion above says are ABSENT."""

@@ -26,7 +26,7 @@ proposing call.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from agent.schemas.proposal import (
     ProposalInput,
@@ -400,6 +400,36 @@ class TestSkipPaths:
 
         assert any("PREFLIGHT_SKIPPED" in n for n in out.memo_consistency_notes)
         assert out.preflight_factor is None
+
+    def test_non_applicable_task_estimate_skips_without_float_conversion(self, tmp_path):
+        bridge = MagicMock()
+        bridge.generate.side_effect = [
+            FAKE_COMPARISON_OUTPUT,
+            FAKE_REASONING_OUTPUT,
+            FAKE_BAD_DRAFT,
+        ]
+        verdict = {
+            "estimated_minutes": None,
+            "factor": None,
+            "verdict": "NOT APPLICABLE",
+            "feasible": None,
+            "applicable": False,
+            "provenance": "static_uncalibrated",
+            "advisory_only": True,
+        }
+
+        with patch(
+            "nodes.ml_model_proposal_agent.ml_model_proposal_agent.estimate_proposal_time",
+            return_value=verdict,
+        ):
+            out = _agent(bridge).run(_pipeline_input(tmp_path))
+
+        assert out.preflight_factor is None
+        assert out.preflight_estimated_minutes is None
+        assert any(
+            "PREFLIGHT_SKIPPED" in note and "not applicable" in note
+            for note in out.memo_consistency_notes
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -287,6 +287,17 @@ class TestResolvePluginDirs:
         monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "   ")
         assert _resolve_plugin_dirs() == expected
 
+    def test_workspace_binding_excludes_checkout_fallback(self, tmp_path, monkeypatch):
+        from core.generated_library import bind_generated_library_to_workspace
+
+        env: dict[str, str] = {}
+        bind_generated_library_to_workspace(str(tmp_path / "workspace"), environ=env)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.delenv(_PLUGIN_DIRS_ENV_VAR, raising=False)
+
+        assert _resolve_plugin_dirs() == [str(tmp_path / "workspace/generated_library/models")]
+
     def test_single_dir(self, monkeypatch):
         monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "/tmp/dir_a")
         assert _resolve_plugin_dirs() == ["/tmp/dir_a"]

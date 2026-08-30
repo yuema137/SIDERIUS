@@ -98,6 +98,43 @@ class TestWhenItFires:
         assert _build([]) is None
         assert _build([{"exp_id": "f", "status": "success", "is_trial": False}]) is None
 
+    def test_run_scoped_gate_ids_are_used_without_default_resolution(self, monkeypatch):
+        """A composed task must not reload the process-default Health config.
+
+        This fails on the real DAVIS incident path if the feedback producer
+        omits the already-resolved run-scoped gate set.
+        """
+        from execute_tools.health_checks import candidate_eligibility
+
+        monkeypatch.setattr(
+            candidate_eligibility,
+            "required_blocking_gate_ids",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("default reloaded")),
+        )
+        record = {
+            "exp_id": "custom-task-collapse",
+            "status": "failed_mode_collapse",
+            "is_trial": True,
+            "health_gate_enabled": True,
+            "health_gate_results": [
+                {
+                    "gate_name": "custom_task_gate",
+                    "execution_status": "passed",
+                    "check_passed": False,
+                    "would_invalidate_under_production_policy": True,
+                    "failure_reason": "collapsed",
+                    "key_metrics": {},
+                }
+            ],
+        }
+        result = _build_trial_validity_feedback(
+            [record],
+            formal_skipped_for_no_valid_winner=True,
+            healthgate_mode="blocking",
+            required_gate_ids=frozenset({"custom_task_gate"}),
+        )
+        assert result.invalid_count == 1
+
 
 class TestTheDistinctionsSurvive:
     def test_execution_failure_is_not_gate_invalidity(self):
@@ -111,6 +148,17 @@ class TestTheDistinctionsSurvive:
         assert result.invalid_count == 1
         statuses = {o.exp_id: o.status for o in result.outcomes}
         assert statuses == {"crashed": "error_training", "collapsed": "success"}
+
+    def test_durable_collapse_status_remains_gate_invalidity(self):
+        """The persisted collapse status means execution reached HealthGate.
+
+        This fails if status is classified before the run-scoped Health
+        verdict, which would tell the next proposer that training crashed.
+        """
+        collapsed = _trial("collapsed", status="failed_mode_collapse", passed=False)
+        result = _build([collapsed])
+        assert result.invalid_count == 1
+        assert result.execution_failure_count == 0
 
     def test_validity_unknown_is_not_invalidity(self):
         """Gates that could not judge are not gates that rejected."""

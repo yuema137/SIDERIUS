@@ -405,9 +405,10 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     # --- RT6: runtime-control operator surface (design §4/§5) ---
-    # The CLI carries the §5 PROVISIONAL operational defaults (150k / 4);
-    # the schema defaults stay None so programmatic callers keep pre-RT5
-    # behavior. Pass 0 to disable a numeric guardrail.
+    # The step ceiling remains an operational default.  The Formal-only batch
+    # floor is opt-in: Trial success is executable evidence, so a generic
+    # launcher must not silently reject the same batch size in Formal.
+    # Pass 0 to disable a numeric guardrail.
     parser.add_argument(
         "--max_steps_per_attempt",
         type=int,
@@ -419,10 +420,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--min_formal_batch_size",
         type=int,
-        default=4,
+        default=0,
         help="§5 guardrail: skip FORMAL rounds planned below this batch size "
         "(the V18 launch-overhead pathology; trial rounds exempt). 0 "
-        "disables. Default 4 (provisional §5 value).",
+        "disables. Default 0 (disabled); set an explicit task/campaign value "
+        "only when its execution contract requires one.",
     )
     parser.add_argument(
         "--allow_extreme_steps",

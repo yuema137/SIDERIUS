@@ -128,6 +128,48 @@ def _write(result_path: str, payload: dict) -> None:
     tmp.replace(target)
 
 
+def _task_probe_batch(raw: dict[str, Any], batch_size: int) -> tuple[Any, Any]:
+    """Materialize one full batch through the run's existing task contract."""
+    from torch.utils.data import DataLoader
+
+    from agent.skills.evaluate_vram_skill.isolated_probe import TaskProbeDataSpec
+    from execute_tools.task_data_path import resolve_task_scope_capability
+    from workflows.task_composition import (
+        bind_run_task_composition,
+        compose_run_task_bindings,
+    )
+
+    ref = TaskProbeDataSpec.model_validate(raw)
+    composition = compose_run_task_bindings(ref.manifest_path)
+    if composition.semantic_fingerprint != ref.semantic_fingerprint:
+        raise ValueError(
+            "task probe composition fingerprint mismatch: "
+            f"expected {ref.semantic_fingerprint}, resolved "
+            f"{composition.semantic_fingerprint}"
+        )
+    with bind_run_task_composition(composition, physical_data_root=ref.sampling.data_dir):
+        capability = resolve_task_scope_capability(composition.task_data_path)
+        scope = capability.deserialize_scope(ref.training_scope_payload)
+        dataset = composition.task_data_path.training_dataset(scope, ref.sampling)
+        try:
+            input_sample, target_sample = next(
+                iter(
+                    DataLoader(
+                        dataset,
+                        batch_size=batch_size,
+                        shuffle=False,
+                        drop_last=True,
+                    )
+                )
+            )
+        except StopIteration as exc:
+            raise ValueError(
+                "the task-owned training scope cannot produce one full VRAM "
+                f"probe batch of size {batch_size}"
+            ) from exc
+    return input_sample, target_sample
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if len(args) != 1:
@@ -214,6 +256,15 @@ def main(argv: list[str] | None = None) -> int:
         from agent.skills.evaluate_vram_skill.wrapper import run_skill
 
         print(f"[worker] pre-flight for {spec['model_type']}", flush=True)
+        probe_input_sample = None
+        probe_target_sample = None
+        if spec.get("task_probe_data") is not None and (
+            hardware is None or hardware.device_available
+        ):
+            probe_input_sample, probe_target_sample = _task_probe_batch(
+                spec["task_probe_data"],
+                int((spec.get("train_config") or {}).get("batch_size", 1)),
+            )
         outcome = run_skill(
             None,
             model_type=spec["model_type"],
@@ -234,6 +285,11 @@ def main(argv: list[str] | None = None) -> int:
             # rather than running silently. Widening the shared wrapper
             # type to a Protocol belongs to FU-A-3.
             hardware_context=cast("Any", hardware),
+            probe_input_sample=probe_input_sample,
+            probe_target_sample=probe_target_sample,
+            max_inference_batch_size=(
+                (spec.get("task_probe_data") or {}).get("max_inference_batch_size")
+            ),
         )
     except BaseException as exc:
         from agent.skills.evaluate_vram_skill.probe_budgets import (

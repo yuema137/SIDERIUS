@@ -190,6 +190,7 @@ def _build_trial_validity_feedback(
     *,
     formal_skipped_for_no_valid_winner: bool,
     healthgate_mode: str | None,
+    required_gate_ids: frozenset[str] | None = None,
 ) -> TrialValidityFeedback | None:
     """Report an iteration whose trials produced no valid candidate.
 
@@ -228,7 +229,7 @@ def _build_trial_validity_feedback(
     trials = [r for r in records if r.get("is_trial") is True]
     if not trials:
         return None  # no trial stage at all is a different fact, not this one
-    if any(is_valid_candidate(r) for r in trials):
+    if any(is_valid_candidate(r, required_gate_ids=required_gate_ids) for r in trials):
         return None  # a valid winner exists; nothing to report
 
     outcomes: list[InvalidTrialOutcome] = []
@@ -238,9 +239,15 @@ def _build_trial_validity_feedback(
     for record in trials:
         exp_id = record.get("exp_id")
         status = str(record.get("status", "unknown"))
-        validity = classify_candidate_health(record)
+        validity = classify_candidate_health(record, required_gate_ids=required_gate_ids)
 
-        if status != "success":
+        if status == "failed_mode_collapse" and validity is CandidateHealthValidity.INVALID:
+            # Health-invalid records use ``failed_mode_collapse`` as their
+            # durable status.  They executed and were scientifically judged;
+            # classifying them as execution failures would erase that fact
+            # from the next proposer's feedback.
+            invalid += 1
+        elif status != "success":
             # The evidence is ABSENT, not negative: nothing was scored, so
             # no gate could have judged it.
             execution_failures += 1

@@ -50,7 +50,12 @@ PR-12d source): `TaskDataPath`/`TaskScopeCapability`
 model-plugin convention. The metric's calling vocabulary
 (`evaluation_payload`/`task_scope`/`data_dir`) is the landed composed
 scoring-child convention (`_pets_metrics.py`); the deliverable codec uses
-the landed naming keyword (`input_identity`).
+the landed naming keyword (`input_identity`). The module-level naming adapter
+used by generic inference reporting and the class-level adapter used by the
+task writer delegate to one private naming authority. The deterministic
+production-handoff witness exercises generic inference, persistence, decoding,
+and the composed metric together and pins its external score to `37/64 =
+0.578125`; it does not rewrite or upgrade the historical live-run evidence.
 
 ## Tutorial outputs
 

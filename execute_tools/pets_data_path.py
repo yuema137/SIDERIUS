@@ -41,7 +41,6 @@ from execute_tools.task_data_path import (
     ScopeBuildRequest,
     ValidationScopeError,
     deserialize_rows_scope,
-    register_task_data_path,
 )
 
 #: Frozen preprocessing parameters (§22.9a; interpolation frozen by D14-2).
@@ -502,4 +501,3 @@ def probabilities_sidecar_name(request: DeliverableWriteRequest | EvaluationRead
 
 # Regime-A instance: no manifest, so it materializes a scope it is HANDED
 # but refuses to BUILD one, by name (PR-12bc B8).
-register_task_data_path(PetsTaskDataPath())

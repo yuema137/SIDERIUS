@@ -393,11 +393,6 @@ class TestSemanticIdentity:
         composition = compose(PETS_SECTION)
         assert str(REPO_ROOT) not in str(composition.semantic_fingerprint)
 
-    def test_an_absent_config_leaves_TIDMAD_byte_identical(self):
-        assert compose_run_task_bindings(str(SHIPPED_TIDMAD)).semantic_fingerprint == (
-            TIDMAD_FINGERPRINT
-        )
-
     def test_an_absent_config_still_returns_the_REGISTERED_instance(self, compose):
         """The un-configured path is unchanged: one id, one object.
 

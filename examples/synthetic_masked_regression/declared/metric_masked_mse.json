@@ -1,0 +1,9 @@
+{
+  "aggregation": "mean_squared_error_over_valid_rows",
+  "direction": "lower",
+  "id": "masked_mse",
+  "references": [],
+  "scoreability": {"contract_id": "deliverable_presence"},
+  "transform": null,
+  "transform_params": {}
+}

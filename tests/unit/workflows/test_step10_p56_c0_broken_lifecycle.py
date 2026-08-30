@@ -101,8 +101,9 @@ class TestResumeHalfIsMissing:
         """WAS: ``FIELD not in names`` and ``len(names) == 15``."""
         names = {f.name for f in dataclass_fields(RestoredState)}
         assert FIELD in names
-        # 15 at C0 -> 16 at C1. Exactly ONE new transport field.
-        assert len(names) == 16
+        # 15 at C0 -> 16 at C1; issue #396 adds the typed no-records feedback
+        # carrier without changing this confirmation field's ownership.
+        assert len(names) == 17
 
     def test_a_fifth_projection_now_produces_the_value(self):
         """WAS: exactly four projections, none for this key."""

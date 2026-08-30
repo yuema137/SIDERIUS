@@ -97,6 +97,27 @@ def shard_filename(shard: int) -> str:
     return _SHARD_TEMPLATE.format(index=shard)
 
 
+def _deliverable_name(*, model_type: str, run_name: str, exp_id: str) -> str:
+    """The task's one naming authority, shared by both public call shapes."""
+    from execute_tools.deliverable_spec import resolve_deliverable_naming
+
+    return resolve_deliverable_naming().name(
+        model_type=model_type,
+        run_name=run_name,
+        exp_id=exp_id,
+        input_identity=0,
+    )
+
+
+def deliverable_name(request: DeliverableWriteRequest | EvaluationReadRequest) -> str:
+    """Module-level naming adapter consumed by generic inference reporting."""
+    return _deliverable_name(
+        model_type=request.model_type,
+        run_name=request.run_name,
+        exp_id=request.exp_id,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Seeded generator — the dataset IS this function plus the seed
 # ---------------------------------------------------------------------------
@@ -334,11 +355,7 @@ class QuickstartTaskDataPath:
         the pre-12d ``file_index`` compat fallback was removed by the pack's
         post-12d checklist, README §7 step 4).
         """
-        from execute_tools.deliverable_spec import resolve_deliverable_naming
-
-        return resolve_deliverable_naming().name(
-            model_type=model_type, run_name=run_name, exp_id=exp_id, input_identity=0
-        )
+        return _deliverable_name(model_type=model_type, run_name=run_name, exp_id=exp_id)
 
     @staticmethod
     def _predicted_class_index(prediction: object) -> int:

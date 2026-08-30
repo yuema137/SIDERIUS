@@ -9,9 +9,9 @@ count. Both emitters were placed, for training only, INSIDE
 ``sandbox_executor.execute_training``'s ``if sample_set is not None:`` block —
 coupling the COMPOSED transport to the presence of a LEGACY TIDMAD SampleSet.
 
-A composed contrast round has ``sample_set=None`` **by construction**:
+A composed task without legacy physical geometry has ``sample_set=None`` **by construction**:
 ``planning.py`` builds one only when the run's profile
-``declares_physical_geometry``, which is false for Pets and DAVIS. So the
+``declares_physical_geometry``. So the
 training child received **no scope at all**, fell into its own legacy branch,
 and hit ``tidmad_topology(dataset_profile)`` — which fails closed for a task
 that declares no TIDMAD topology.
@@ -31,34 +31,28 @@ Each test names a defect only it can catch.
 
 from __future__ import annotations
 
-import tempfile
+import sys
+from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 import core.sandbox_executor as se
 
-PETS_MANIFEST = "configs/task_composition/pets.yaml"
-PETS_DATA = "/home/klz/Data/OXFORD_IIIT_PET/images"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SYNTHETIC_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "synthetic_masked_regression.yaml"
 
 
 def _composed_scopes_and_sandbox():
-    """Build REAL composed Pets scopes and a sandbox, or skip.
+    """Build real composed scopes from the minimal regression pack.
 
-    Uses the shipped manifest and the real pack, not a fixture: the defect is
-    that a task with no physical geometry is transported differently, and a
-    fabricated TIDMAD-shaped fixture would have geometry and hide it.
+    The defect is that a task with no legacy physical geometry was transported
+    differently. The minimal pack declares its own non-TIDMAD scope and keeps
+    that distinguishing input without requiring private data.
     """
-    import os
-
-    if not os.path.isdir(PETS_DATA):
-        pytest.skip(f"Pets data root not present on this machine: {PETS_DATA}")
-
     from execute_tools.task_data_path import ScopeBuildRequest, active_task_data_path
     from nodes.ml_hyperparameter_tune_agent.scope_acquisition import AttemptScopes
     from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
-    composition = compose_run_task_bindings(PETS_MANIFEST)
+    composition = compose_run_task_bindings(str(SYNTHETIC_MANIFEST))
     return (
         composition,
         AttemptScopes,
@@ -68,7 +62,7 @@ def _composed_scopes_and_sandbox():
     )
 
 
-def _training_argv(*, sample_set, with_scopes: bool) -> list[str]:
+def _training_argv(*, sample_set, with_scopes: bool, data_root: Path) -> list[str]:
     """Capture the argv `execute_training` would launch, without launching.
 
     Patches ``_run_observed_subprocess`` — the symbol BOTH launch branches
@@ -91,7 +85,10 @@ def _training_argv(*, sample_set, with_scopes: bool) -> list[str]:
         captured["cmd"] = cmd
         raise SystemExit("argv captured")
 
-    with bind_run_task_composition(composition, physical_data_root=PETS_DATA):
+    data_root.mkdir(parents=True, exist_ok=True)
+    task_module = sys.modules[type(composition.task_data_path).__module__]
+    task_module.write_data_dir(data_root)
+    with bind_run_task_composition(composition, physical_data_root=str(data_root)):
         scopes = AttemptScopes()
         if with_scopes:
             tdp = active_task_data_path()
@@ -105,7 +102,7 @@ def _training_argv(*, sample_set, with_scopes: bool) -> list[str]:
         sandbox = se.TidmadSandbox(
             metadata_source="local",
             run_name="probe",
-            workspace=tempfile.mkdtemp(),
+            workspace=str(data_root.parent / "workspace"),
             file_index=6,
         )
         with patch.object(se, "_run_observed_subprocess", side_effect=_stop):
@@ -113,15 +110,19 @@ def _training_argv(*, sample_set, with_scopes: bool) -> list[str]:
                 sandbox.execute_training(
                     exp_id="e1",
                     run_name="probe",
-                    model_type="pets_reference_cnn",
-                    m_cfg={"model_type": "pets_reference_cnn", "segmentation_size": 144},
+                    model_type="masked_reference_mlp",
+                    m_cfg={
+                        "model_type": "masked_reference_mlp",
+                        "segmentation_size": 3,
+                        "hidden_dim": 8,
+                    },
                     t_cfg={
                         "epochs": 1,
                         "batch_size": 4,
                         "lr": 1e-4,
                         "optimizer_type": "adamw",
                     },
-                    l_cfg={"loss_type": "ce"},
+                    l_cfg={"loss_type": "custom", "loss_name": "synthetic_masked_mse"},
                     sample_set=sample_set,
                     task_scopes=scopes,
                 )
@@ -133,29 +134,33 @@ def _training_argv(*, sample_set, with_scopes: bool) -> list[str]:
 class TestComposedScopeReachesTheTrainingChildWithoutASampleSet:
     """THE regression, and the exact shape a composed contrast round has."""
 
-    def test_scope_refs_are_emitted_when_sample_set_is_none(self):
-        argv = _training_argv(sample_set=None, with_scopes=True)
+    def test_scope_refs_are_emitted_when_sample_set_is_none(self, tmp_path):
+        argv = _training_argv(sample_set=None, with_scopes=True, data_root=tmp_path / "data")
         assert "--task_scope_ref" in argv
         assert "--task_eval_scope_ref" in argv
 
-    def test_validation_row_count_is_emitted_when_sample_set_is_none(self):
+    def test_validation_row_count_is_emitted_when_sample_set_is_none(self, tmp_path):
         """Seam C (B9): the explicit-eval-scope leg requires this and nothing
         in production emitted it for a scope-only round."""
-        assert "--validation_requested_rows" in _training_argv(sample_set=None, with_scopes=True)
+        assert "--validation_requested_rows" in _training_argv(
+            sample_set=None, with_scopes=True, data_root=tmp_path / "data"
+        )
 
-    def test_the_legacy_sample_set_flag_is_correctly_absent(self):
+    def test_the_legacy_sample_set_flag_is_correctly_absent(self, tmp_path):
         """Proves the transport is genuinely decoupled: the composed round
         gets its scope WITHOUT acquiring a legacy SampleSet it has no
         geometry to build."""
-        assert "--sample_set_json" not in _training_argv(sample_set=None, with_scopes=True)
+        assert "--sample_set_json" not in _training_argv(
+            sample_set=None, with_scopes=True, data_root=tmp_path / "data"
+        )
 
 
 class TestUncomposedArgvIsUnchanged:
-    def test_no_scope_flags_when_nothing_is_composed(self):
+    def test_no_scope_flags_when_nothing_is_composed(self, tmp_path):
         """The hoist must be a no-op for an un-composed run — both emitters
         return [] for absent scopes, which is what makes this a hoist rather
         than a new branch. If this fails, every legacy TIDMAD argv changed."""
-        argv = _training_argv(sample_set=None, with_scopes=False)
+        argv = _training_argv(sample_set=None, with_scopes=False, data_root=tmp_path / "data")
         assert "--task_scope_ref" not in argv
         assert "--task_eval_scope_ref" not in argv
         assert "--validation_requested_rows" not in argv

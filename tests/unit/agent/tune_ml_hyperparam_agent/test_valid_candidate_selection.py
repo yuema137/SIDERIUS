@@ -79,6 +79,28 @@ def test_no_valid_trial_returns_none() -> None:
     assert _best_trial_winner([_trial("collapsed", 9.0, healthy=False)], order=HIGHER_ORDER) is None
 
 
+def test_trial_winner_uses_the_run_scoped_health_roster() -> None:
+    """A composed run must not re-resolve the legacy default Health family."""
+    record = _trial("task_owned_health", 0.25)
+    record["health_gate_results"] = [
+        {
+            "gate_name": "task_owned_blocking",
+            "execution_status": "passed",
+            "check_passed": True,
+            "would_invalidate_under_production_policy": False,
+            "resolved_action": "continue",
+        }
+    ]
+
+    winner = _best_trial_winner(
+        [record],
+        order=HIGHER_ORDER,
+        required_gate_ids=frozenset({"task_owned_blocking"}),
+    )
+
+    assert winner is record
+
+
 def _skip(records, *, threshold, gates_enabled=True, order=HIGHER_ORDER) -> bool:
     """Records → winner → gate, exactly as the tuner sequences it (D-C3).
 

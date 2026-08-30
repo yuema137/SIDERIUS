@@ -27,6 +27,7 @@ regression asserts both readers agree on the same bytes.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -79,12 +80,21 @@ class DavisSampleViews:
         ctx: HealthCheckContext,
         config: dict[str, Any] | None = None,
     ) -> HealthView:
-        path = ctx.get_denoised_path(0)
-        if path is None:
-            raise FileNotFoundError(
-                "no produced-artifact path in the health context (denoised slot 0 is empty)"
+        payload = ctx.load_evaluation_payload()
+        if not isinstance(payload, Mapping):
+            raise TypeError(
+                "DAVIS evaluation payload must map clip ids to prediction arrays; "
+                f"got {type(payload).__name__}."
             )
-        samples = project_full_sample_stream(Path(path))
+        arrays = {str(key): np.asarray(value) for key, value in payload.items()}
+        shapes = {value.shape for value in arrays.values()}
+        if len(shapes) > 1:
+            raise ValueError(f"DAVIS evaluation payload carries unequal shapes {sorted(shapes)}.")
+        samples = (
+            np.concatenate([arrays[key].ravel() for key in sorted(arrays)])
+            if arrays
+            else np.array([], dtype=np.float32)
+        )
         return HealthView(
             capability_key=capability_key,
             provider_id=self.provider_id,

@@ -24,18 +24,23 @@ task scope  ->  TaskDataPath.validation_dataset(scope, params)   [FROZEN method]
 
 **Reuse before invention, discharged explicitly (§D.C's proof obligation).**
 No new capability family was added. The iteration uses ``validation_dataset``
-and ``write_deliverable`` — two of the four FROZEN ``TaskDataPath`` methods —
-and the only contract addition is an OPTIONAL ``task_scope`` field on the
-existing ``DeliverableWriteRequest``, whose own docstring already anticipates
-"additions during C4 are recorded in the child ledger".
+and ``write_deliverable`` — two of the four FROZEN ``TaskDataPath`` methods.
+The existing ``DeliverableWriteRequest`` carries the opaque ``task_scope`` and
+an optional run-bound source context. The latter lets a source-aware task
+rematerialize its own validation values without retaining an entire dataset in
+framework memory or teaching the framework task vocabulary.
 
-**Why the scope rides the write request.** ``write_deliverable`` needs to pair
+**Why the scope and source context ride the write request.**
+``write_deliverable`` needs to pair
 each output with the identity of the sample that produced it — an
 ``image_id`` for Pets, a ``(sequence, start_frame)`` clip for DAVIS. That
 pairing is TASK vocabulary: the framework must not learn that a Pets scope has
 ``.rows`` whose members have ``.image_id``. So the framework supplies the two
 things it legitimately owns — the scope it iterated, and the outputs IN THAT
-ORDER — and the task pairs them in its own file.
+ORDER — and the task pairs them in its own file. If the deliverable also needs
+source- or supervision-associated values, the task uses the supplied physical
+data root to invoke its same ``validation_dataset`` method and checks the
+declared sample count before pairing.
 
 **TIDMAD does not come through here.** Its SampleSet loop, ``validation_file_name``,
 HDF5 channel reads and PSD slicing survive unchanged in ``inference_single.py``
@@ -46,16 +51,18 @@ and this module deliberately cannot express them.
 from __future__ import annotations
 
 import time
-from typing import Any
+from collections.abc import Sized
 
 import torch
 from pydantic import BaseModel, ConfigDict, Field
 from torch.utils.data import DataLoader
 
 from execute_tools.task_data_path import (
+    DeliverableSourceContext,
     DeliverableWriteRequest,
     EvalMaterializationParams,
     TaskDataPath,
+    resolve_max_inference_batch_size,
     task_declared_deliverable_name,
 )
 
@@ -108,15 +115,27 @@ def run_generic_inference(
         unit never pads, truncates or reorders.
     """
     started = time.perf_counter()
+    task_batch_ceiling = resolve_max_inference_batch_size(data_path)
+    if task_batch_ceiling is not None and batch_size > task_batch_ceiling:
+        raise ValueError(
+            f"inference batch {batch_size} exceeds the task-declared maximum "
+            f"of {task_batch_ceiling}"
+        )
     dataset = data_path.validation_dataset(task_scope, EvalMaterializationParams(data_dir=data_dir))
+    if not isinstance(dataset, Sized):
+        raise TypeError("validation_dataset must return a sized, map-style dataset")
+    dataset_size = len(dataset)
     # `shuffle=False` and `drop_last=False` are LOAD-BEARING, not defaults:
     # the outputs are handed back positionally, so any reordering or dropped
     # tail would silently mis-pair every sample with somebody else's identity.
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=False)
 
-    outputs: list[Any] = []
+    produced = 0
     batches = 0
-    with torch.no_grad():
+
+    def _prediction_stream():
+        """Yield detached predictions without retaining the complete scope."""
+        nonlocal batches, produced
         for batch in loader:
             # `validation_dataset` yields (model_input, supervision_target);
             # inference consumes the input and ignores the target, which is
@@ -125,14 +144,30 @@ def run_generic_inference(
             inputs = inputs.to(device)
             if input_dtype is not None:
                 inputs = inputs.to(input_dtype)
-            predictions = model(inputs)
-            outputs.extend(prediction.detach().cpu() for prediction in predictions)
+            with torch.no_grad():
+                predictions = model(inputs)
             batches += 1
+            for prediction in predictions:
+                produced += 1
+                yield prediction.detach().cpu()
 
-    request = write_request.model_copy(update={"task_scope": task_scope})
-    data_path.write_deliverable(outputs, request)
+    request = write_request.model_copy(
+        update={
+            "task_scope": task_scope,
+            "source_context": DeliverableSourceContext(
+                data_dir=data_dir,
+                sample_count=dataset_size,
+            ),
+        }
+    )
+    data_path.write_deliverable(_prediction_stream(), request)
+    if produced != dataset_size:
+        raise RuntimeError(
+            f"task deliverable writer consumed {produced} predictions, "
+            f"but the evaluation scope materialized {dataset_size} samples"
+        )
     return GenericInferenceOutcome(
-        samples=len(outputs),
+        samples=produced,
         batches=batches,
         inference_seconds=time.perf_counter() - started,
         deliverable_name=task_declared_deliverable_name(data_path, request),

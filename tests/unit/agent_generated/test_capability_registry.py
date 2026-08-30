@@ -478,6 +478,23 @@ class TestGeneratedLibraryDefaultAndLegacyFallback:
         reg = CapabilityRegistry()
         assert reg.list() == []
 
+    def test_workspace_binding_never_reads_checkout_fallback(
+        self, tmp_path, monkeypatch, legacy_index
+    ):
+        import json as _json
+
+        from core.generated_library import bind_generated_library_to_workspace
+
+        legacy_index.write_text(_json.dumps([self._row("legacy_loss")]))
+        env: dict[str, str] = {}
+        bind_generated_library_to_workspace(str(tmp_path / "workspace"), environ=env)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+
+        reg = CapabilityRegistry()
+        assert reg.list() == []
+        assert reg.index_path.startswith(str(tmp_path / "workspace"))
+
     def test_explicit_index_path_never_falls_back(self, tmp_path, monkeypatch, legacy_index):
         """Defect caught: the legacy fallback leaking into EXPLICIT-path
         construction — a tmp_path test registry would silently read whatever

@@ -154,10 +154,15 @@ def test_a_mention_is_not_a_declaration(tmp_path):
 
 def test_the_census_actually_found_the_shipped_exemplars():
     """A census whose file set is empty passes vacuously. Pin that it sees
-    all three packs — the shape of census blindness that has bitten this
+    every current minimal pack — the shape of census blindness that has bitten this
     repository before."""
     names = {p.parent.parent.name for p in PLUGINS}
-    assert names == {"quickstart", "oxford_iiit_pet", "davis_future_prediction"}, names
+    assert names == {
+        "quickstart",
+        "oxford_iiit_pet",
+        "davis_future_prediction",
+        "synthetic_masked_regression",
+    }, names
 
 
 @pytest.mark.parametrize("path", PLUGINS, ids=lambda p: p.parent.parent.name)

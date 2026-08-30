@@ -248,7 +248,7 @@ class TestThePerModelLockRecordsTheComposition:
         valid for the profile; the property under test — chain and per-model
         agree — is task-independent.
         """
-        from core.run_invariants import build_run_invariants
+        from core.run_invariants import RunHealthMaterialization, build_run_invariants
 
         composition = compose_run_task_bindings(str(FIXTURES / "tidmad" / "composition.yaml"))
         ref = build_task_composition_ref(composition)
@@ -263,7 +263,9 @@ class TestThePerModelLockRecordsTheComposition:
                 health_gate_files=None,
                 health_checks_config=None,
                 workspace=str(chain_workspace),
-                task_health_binding=composition.task_health_binding,
+                health_materialization=RunHealthMaterialization(
+                    task_health_binding=composition.task_health_binding,
+                ),
                 task_composition_fingerprint=composition.semantic_fingerprint,
             )
             _out, _bridge, _sandbox, workspace = run_bounded_pseudo_iteration(

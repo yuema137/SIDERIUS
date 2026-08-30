@@ -38,6 +38,7 @@ from agent.schemas.hyperparam_tuning import (
 from core.hardware_context import get_or_create
 from core.run_invariants import (
     LockLaunchIdentity,
+    RunHealthMaterialization,
     build_run_invariants,
     load_run_invariants,
     validate_run_invariants,
@@ -71,6 +72,7 @@ from execute_tools.task_data_path import (
     TaskDataPathResolutionError,
     declares_trial_anchoring,
     require_bound_task_data_path,
+    resolve_bound_task_data_path,
 )
 from nodes.ml_hyperparameter_tune_agent.cli import (
     PARTIAL_CAMPAIGN_EXIT_CODE,
@@ -845,10 +847,12 @@ class HyperparamTuningAgent:
                 if agent_input.task_composition_ref is not None
                 else None
             ),
-            task_health_binding=(
-                agent_input.task_composition_ref.task_health_binding
-                if agent_input.task_composition_ref is not None
-                else None
+            health_materialization=RunHealthMaterialization(
+                task_health_binding=(
+                    agent_input.task_composition_ref.task_health_binding
+                    if agent_input.task_composition_ref is not None
+                    else None
+                )
             ),
             # arXiv U1 (#253 / #254) — run-identity pass-through (locked +
             # stamped, never consumed), same contract as the PR 3 block.
@@ -1322,6 +1326,11 @@ class HyperparamTuningAgent:
             run_secondary_metrics=run_secondary_metrics,
             run_order=run_order,
             run_scientific_gate_ids=_resolve_run_gate_ids(agent_input),
+            run_task_data_path=(
+                resolve_bound_task_data_path()
+                if agent_input.task_composition_ref is not None
+                else None
+            ),
             run_task_render=run_task_render,
             run_name=run_name,
             workspace=workspace,
@@ -1384,7 +1393,11 @@ class HyperparamTuningAgent:
             # Three independent `_best_trial_winner` calls would agree only
             # because the history does not change between them — a
             # coincidence, not a guarantee.
-            formal_trial_winner = _best_trial_winner(sandbox.get_summary() or [], order=run_order)
+            formal_trial_winner = _best_trial_winner(
+                sandbox.get_summary() or [],
+                order=run_order,
+                required_gate_ids=run_bindings.run_scientific_gate_ids,
+            )
             if (
                 is_formal_round
                 and agent_input.force_formal_round
@@ -1782,6 +1795,9 @@ def main() -> int:
 
     parser = build_parser()
     args = parser.parse_args()
+    from core.generated_library import bind_generated_library_to_workspace
+
+    bind_generated_library_to_workspace(args.workspace)
     run_composition = (
         compose_run_task_bindings(args.task_composition) if args.task_composition else None
     )

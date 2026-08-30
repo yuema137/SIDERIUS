@@ -1,6 +1,6 @@
-"""Gold campaign — the workspace lock pins the ADVICE TREATMENT identity.
+"""The workspace lock pins the run's advice-content identity.
 
-The defect: the campaign's independent variable was not pinned. The arm
+The defect: the run's treatment input was not pinned. The arm
 LABEL (``experiment_arm``) was canonical; what that arm actually received
 was recorded nowhere, so a resume — or a second band — could consume
 different advice and no surface refused.
@@ -12,7 +12,7 @@ What only these tests catch:
   ``write_run_invariants`` / ``validate_run_invariants`` pair. The rows are
   separate cases because they fail separately: a mechanism that compares
   only when the STORED side participates passes rows 1-3 and silently
-  admits row 5, which is precisely how an advice-bound campaign would
+  admits row 5, which is precisely how an advice-bound run would
   inherit a workspace whose treatment nobody can reconstruct.
 * ``TestLegacyLockIsRead``/``TestFreshLockPersists`` — creation and
   comparison are different concerns; each is asserted through the surface
@@ -53,8 +53,8 @@ from core.run_invariants import (  # noqa: E402
 #: schema to itself.
 ADVICE_A = hashlib.sha256(b'{"propose": "treatment A"}').hexdigest()
 ADVICE_B = hashlib.sha256(b'{"propose": "treatment B"}').hexdigest()
-PATH_A = "/campaign/advice/gold_advice_v1.json"
-PATH_B = "/campaign/advice/gold_advice_v2.json"
+PATH_A = "/run/advice/advice_v1.json"
+PATH_B = "/run/advice/advice_v2.json"
 
 
 def _invariants(**overrides) -> RunInvariants:
@@ -107,7 +107,7 @@ class TestResumeMatrix:
 
         HOW THIS FAILS: pin anything host-dependent alongside the digest —
         a timestamp, a working directory, an inode — and a legitimate
-        resume of the campaign's own workspace refuses.
+        resume of the run's own workspace refuses.
         """
         assert _resume(tmp_path, _pinned(ADVICE_A, PATH_A), _pinned(ADVICE_A, PATH_A)) == (
             "COMPATIBLE"
@@ -151,7 +151,7 @@ class TestResumeMatrix:
         """stored absent + current A -> REFUSE.
 
         Not symmetry for its own sake (operator): this is the case that
-        would otherwise let a Gold campaign quietly inherit a workspace
+        would otherwise let an advice-bound run quietly inherit a workspace
         whose treatment nobody can reconstruct — the stored ``absent`` means
         *nothing was recorded*, never *nothing was consumed*. HOW THIS
         FAILS: implement the conditional comparison as "compare only when
@@ -196,7 +196,7 @@ class TestFreshLockPersists:
         """A FRESH workspace launched with advice A is allowed and must
         persist A. HOW THIS FAILS: resolve the pin anywhere downstream of
         the lock write, or omit it from the payload unconditionally, and
-        the campaign's own workspaces record nothing to compare on the next
+        the run's own workspaces record nothing to compare on the next
         iteration — the defect would survive the fix."""
         path = write_run_invariants(str(tmp_path), _pinned(ADVICE_A, PATH_A))
         payload = json.loads(Path(path).read_text())
@@ -236,7 +236,7 @@ class TestThePairIsTheDeclaration:
     @pytest.mark.parametrize(
         "bad",
         [
-            f"{ADVICE_A}  /campaign/advice/gold.json",  # raw `sha256sum` output
+            f"{ADVICE_A}  /run/advice/advice.json",  # raw `sha256sum` output
             ADVICE_A.upper(),
             ADVICE_A[:63],
             "not-a-digest",
@@ -256,7 +256,7 @@ class TestThePairIsTheDeclaration:
         dir). HOW THIS FAILS: record argv verbatim instead of resolving it
         and the lock names a different file for each reader."""
         with pytest.raises(ValueError, match="relative"):
-            _pinned(ADVICE_A, "advice/gold.json")
+            _pinned(ADVICE_A, "advice/run.json")
 
 
 class TestByteParity:

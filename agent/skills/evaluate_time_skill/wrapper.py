@@ -287,6 +287,7 @@ def _measure_ms_per_step(
     data_dir: str,
     sample_set: dict,
     profile: DatasetProfile,
+    task_scope: object | None = None,
     n_warmup_batches: int = 3,
     n_timed_batches: int = 7,
 ) -> tuple[float | None, dict]:
@@ -376,7 +377,6 @@ def _measure_ms_per_step(
             EpochSamplingParams,
             resolve_bound_task_data_path,
         )
-        from execute_tools.tidmad_data_path import TidmadScope
         from ml_models.loss_models_sandbox import (
             get_criterion,
         )
@@ -418,9 +418,30 @@ def _measure_ms_per_step(
         n_psd_needed = min(n_psd_needed, 5, len(first_psds))
         mini_sample_set = {first_key: first_psds[:n_psd_needed]}
 
+        if task_scope is None:
+            from execute_tools.tidmad_data_path import TidmadScope
+
+            measurement_scope = TidmadScope(
+                sample_set=mini_sample_set,
+                seg_size=seg_size,
+                profile=profile,
+            )
+        else:
+            # The attempt already owns a task-built scope. Reconstructing a
+            # same-named in-tree class here breaks an external binding even
+            # when the serialized semantics are identical (#392). The
+            # existing max_samples carrier bounds materialization without
+            # inspecting or rewriting the task's opaque scope.
+            measurement_scope = task_scope
+
         dataset = resolve_bound_task_data_path().training_dataset(
-            TidmadScope(sample_set=mini_sample_set, seg_size=seg_size, profile=profile),
-            EpochSamplingParams(data_dir=data_dir, epoch_seed=0, train_portion=1.0),
+            measurement_scope,
+            EpochSamplingParams(
+                data_dir=data_dir,
+                epoch_seed=0,
+                train_portion=1.0,
+                max_samples=required_segs,
+            ),
         )
         dataset_size = len(cast("Sized", dataset))
         if dataset_size < required_segs:
@@ -784,6 +805,7 @@ def run_skill(sandbox, **kwargs) -> dict:
                 f"observation store (key hit, warm-up skipped)."
             )
         elif data_dir:
+            task_scopes = kwargs.get("task_scopes")
             measured, warmup_breakdown = _measure_ms_per_step(
                 model_type=model_type,
                 model_config=model_config,
@@ -792,6 +814,7 @@ def run_skill(sandbox, **kwargs) -> dict:
                 data_dir=data_dir,
                 sample_set=sample_set,
                 profile=profile,
+                task_scope=getattr(task_scopes, "training", None),
             )
 
         training = _training_est.estimate_wall_time_seconds(

@@ -51,6 +51,8 @@ from execute_tools.health_checks import (
     evaluate_and_persist_health_gates,
     get_gates_for_position,
 )
+from execute_tools.health_checks._composition import TaskHealthBinding
+from execute_tools.task_data_path import EvaluationReadRequest
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
     project_attempt_topology_facts,
 )
@@ -114,6 +116,37 @@ def build_target_path_fn(sandbox: Any, run_profile: Any) -> Any:
     return _target_fn
 
 
+def build_evaluation_payload_fn(
+    *,
+    task_data_path: Any,
+    deliverable_dir: str,
+    exp_id: str,
+    run_name: str,
+    model_type: str,
+) -> Any:
+    """Build the lazy Health reader over the task's existing codec.
+
+    The framework owns when the read happens and the identity of the current
+    attempt. The task owns artifact naming, storage layout, and decoding through
+    ``TaskDataPath.read_evaluation_payload``. Keeping those responsibilities on
+    opposite sides of this callback prevents a Health plugin from depending on
+    an indexed-filename convention belonging to another task.
+    """
+    if task_data_path is None:
+        return None
+    request = EvaluationReadRequest(
+        deliverable_dir=deliverable_dir,
+        exp_id=exp_id,
+        run_name=run_name,
+        model_type=model_type,
+    )
+
+    def _load() -> object:
+        return task_data_path.read_evaluation_payload(request)
+
+    return _load
+
+
 class RoundHealthOutcome(BaseModel):
     """What the round's HealthGates decided, and whether they ran at all."""
 
@@ -147,6 +180,7 @@ def evaluate_round_health(
     round_index: int,
     config_path: str | None,
     production_config_path: str,
+    task_health_binding: TaskHealthBinding | None = None,
     healthgate_mode: str | None,
     result_authority: str | None,
     model_name: str,
@@ -154,6 +188,7 @@ def evaluate_round_health(
     exp_id: str,
     models_dir: str | None,
     denoised_filename_fn: Any,
+    evaluation_payload_fn: Any = None,
     target_path_fn: Any,
     file_vector: list[Any],
     denoising_score: Any,
@@ -177,6 +212,8 @@ def evaluate_round_health(
             exactly as the pre-extraction call site did.
         production_config_path: the framework policy file the engine compares
             against.
+        task_health_binding: the composed run's task-owned Health binding, or
+            None for the legacy un-composed path.
         healthgate_mode: declared enforcement posture, stamped onto results.
         result_authority: declared scientific authority, stamped onto results.
         model_name: model type, for the check context and checkpoint filename.
@@ -184,6 +221,9 @@ def evaluate_round_health(
         exp_id: the attempt id, for the checkpoint filename.
         models_dir: the sandbox's models directory, or None when it has none.
         denoised_filename_fn: resolves a deliverable path per input identity.
+        evaluation_payload_fn: lazily decodes the round's deliverable through
+            the task-owned ``TaskDataPath`` codec. Payload-backed providers
+            use this instead of reconstructing artifact names.
         target_path_fn: resolves a RAW validation-file path; only checks that
             compare against the raw signal call it, and it declines by name
             when the task declares no physical geometry.
@@ -223,6 +263,7 @@ def evaluate_round_health(
         run_name=run_name,
         round_index=round_index,
         denoised_filename_fn=denoised_filename_fn,
+        evaluation_payload_fn=evaluation_payload_fn,
         target_path_fn=target_path_fn,
         checkpoint_path=checkpoint_path,
         file_vector=file_vector,
@@ -233,6 +274,7 @@ def evaluate_round_health(
         ctx,
         config_path=config_path,
         production_config_path=production_config_path,
+        task_health_binding=task_health_binding,
         gate_ids=gate_ids,
         # D-C7b: the run's declaration travels onto every gate result, so an
         # external reader never has to infer the posture from a gate id's

@@ -45,6 +45,7 @@ def run_health_stage(
     workspace: str | Path,
     task_health_binding: str | Path,
     deliverable_path: str | Path,
+    evaluation_payload: object,
     model_name: str,
     run_name: str,
 ) -> dict[str, Any]:
@@ -58,6 +59,8 @@ def run_health_stage(
         deliverable_path: the fresh deliverable this run just wrote; the
             pack's provider reads it through the context's
             produced-artifact slot.
+        evaluation_payload: the same deliverable decoded by the task-owned
+            evaluation codec.
         model_name: the run's model identity (context metadata).
         run_name: the run's name (context metadata).
 
@@ -94,6 +97,7 @@ def run_health_stage(
         run_name=run_name,
         round_index=1,
         denoised_paths={0: str(deliverable_path)},
+        evaluation_payload_fn=lambda: evaluation_payload,
     )
 
     gates_evidence: list[dict[str, Any]] = []

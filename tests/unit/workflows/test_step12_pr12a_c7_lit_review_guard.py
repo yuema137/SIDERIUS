@@ -1,19 +1,14 @@
-"""Step 12 / PR-12a — C7 (D-12a-7): the literature-review fail-closed guard.
+"""The composed literature-review configuration boundary.
 
 Design:
 ``docs/design/generic_framework_upgrade/step_12_external_extensibility_graduation/
 pr_12a_composed_path_closure.md`` §5 C7 / D-12a-7; parent §0.1-B item 8
 (Q-12-3, RATIFIED 2026-08-22).
 
-The ruling, and what it deliberately does NOT claim: literature review is
-opt-in and OFF at all three layers, so it is not a load-bearing node of the
-normal composed chain — and Step 12's external-task graduation therefore does
-not claim literature-review support. Full genericization is NAMED
-post-roadmap debt.
-
-What it DOES require: a composed run that EXPLICITLY enables the still-TIDMAD
-path must fail closed **before any LLM or GPU spend**, rather than quietly
-injecting another task's literature framing into its proposals.
+The node and proposer-channel handoff are generic, but the shipped default
+YAML contains TIDMAD-owned papers and confidence criteria. A composed run may
+enable the node only when it supplies a non-default task-owned YAML. Selecting
+the shipped default still fails before any LLM or GPU spend.
 
 WHY THE GUARD IS AT STARTUP AND NOT AT THE CALL SITE: the lit-review node runs
 inside the iteration loop, after interpretation. Refusing there would burn a
@@ -54,7 +49,7 @@ def _isolated_run_scope():
         _plugin_binding.reset_run_scope()
 
 
-class TestAComposedRunRefusesTheLegacyLitReviewPath:
+class TestAComposedRunRefusesTheShippedLitReviewConfig:
     def test_it_raises_a_NAMED_error(self, tmp_path):
         composition = compose_run_task_bindings(str(FIXTURES / "pets" / "composition.yaml"))
 
@@ -79,7 +74,7 @@ class TestAComposedRunRefusesTheLegacyLitReviewPath:
         # A refusal must say what to do about it and what its status is —
         # otherwise the operator learns only that something is forbidden.
         assert "--ml_lit_review_enabled" in message
-        assert "Q-12-3" in message
+        assert "--ml_lit_review_config" in message
 
     def test_it_refuses_BEFORE_any_node_is_constructed(self, tmp_path, monkeypatch):
         """The whole point of guarding at startup. If any node were built —
@@ -172,7 +167,7 @@ class TestEveryOtherCombinationIsUNAFFECTED:
 
 
 class TestTheGuardIsANamedAuthority:
-    """The decision lives in `refuse_legacy_lit_review_on_composed_run`, not
+    """The decision lives in `refuse_shipped_lit_review_config_on_composed_run`, not
     inline in `run_workflow`.
 
     Written inline it turned the §12.1 sibling-shape tripwire RED (+1 If,
@@ -183,26 +178,31 @@ class TestTheGuardIsANamedAuthority:
     """
 
     @pytest.mark.parametrize(
-        ("composed", "enabled", "refuses"),
+        ("composed", "enabled", "config_path", "refuses"),
         [
-            (object(), True, True),
-            (object(), False, False),
-            (None, True, False),
-            (None, False, False),
+            (object(), True, "configs/lit_review_config.yaml", True),
+            (object(), True, "/task/owned/lit_review.yaml", False),
+            (object(), False, "configs/lit_review_config.yaml", False),
+            (None, True, "configs/lit_review_config.yaml", False),
+            (None, False, "configs/lit_review_config.yaml", False),
         ],
     )
-    def test_the_refusal_truth_table(self, composed, enabled, refuses):
-        from workflows.model_exploration import refuse_legacy_lit_review_on_composed_run
+    def test_the_refusal_truth_table(self, composed, enabled, config_path, refuses):
+        from workflows.model_exploration import refuse_shipped_lit_review_config_on_composed_run
 
         if refuses:
             with pytest.raises(ValueError, match="literature review is enabled"):
-                refuse_legacy_lit_review_on_composed_run(
-                    task_composition=composed, lit_review_enabled=enabled
+                refuse_shipped_lit_review_config_on_composed_run(
+                    task_composition=composed,
+                    lit_review_enabled=enabled,
+                    lit_review_config_path=config_path,
                 )
         else:
             assert (
-                refuse_legacy_lit_review_on_composed_run(
-                    task_composition=composed, lit_review_enabled=enabled
+                refuse_shipped_lit_review_config_on_composed_run(
+                    task_composition=composed,
+                    lit_review_enabled=enabled,
+                    lit_review_config_path=config_path,
                 )
                 is None
             )
@@ -213,7 +213,7 @@ class TestTheGuardIsANamedAuthority:
         from workflows import model_exploration
 
         source = inspect.getsource(model_exploration.run_workflow)
-        assert "refuse_legacy_lit_review_on_composed_run(" in source
+        assert "refuse_shipped_lit_review_config_on_composed_run(" in source
 
     def test_it_names_no_task(self):
         """C-P56-1: the discriminator is composition PRESENCE, never a task
@@ -225,13 +225,15 @@ class TestTheGuardIsANamedAuthority:
         import inspect
         import textwrap
 
-        from workflows.model_exploration import refuse_legacy_lit_review_on_composed_run
+        from workflows.model_exploration import refuse_shipped_lit_review_config_on_composed_run
 
         function = next(
             node
             for node in ast.walk(
                 ast.parse(
-                    textwrap.dedent(inspect.getsource(refuse_legacy_lit_review_on_composed_run))
+                    textwrap.dedent(
+                        inspect.getsource(refuse_shipped_lit_review_config_on_composed_run)
+                    )
                 )
             )
             if isinstance(node, ast.FunctionDef)
@@ -241,5 +243,6 @@ class TestTheGuardIsANamedAuthority:
         rendered = ast.dump(guard.test)
         assert "task_composition" in rendered
         assert "lit_review_enabled" in rendered
+        assert "lit_review_config_path" not in rendered
         for forbidden in ("tidmad", "TIDMAD", "denoising", "pets", "davis"):
             assert forbidden not in rendered

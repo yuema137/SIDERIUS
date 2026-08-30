@@ -1,0 +1,35 @@
+{
+  "qualified_at": "2026-08-29",
+  "repository_sha": "1acfe3bb5b2a62b6a8ab8d6b9c82c967d841c8b3",
+  "composition_fingerprint": "a85d3023f534f38e568d06eb0fe6c1fa0fb909870c380ce879f4f552a3b30dc9",
+  "hardware": {
+    "device_name": "NVIDIA H100 80GB HBM3",
+    "device_uuid": "GPU-8c96cde6-e54b-6413-4a14-c9125500102d",
+    "total_memory_bytes": 85017493504,
+    "cuda_runtime_version": "12.8",
+    "torch_version": "2.10.0+cu128",
+    "driver_version": "580.126.09"
+  },
+  "candidate": {
+    "model_type": "masked_reference_mlp",
+    "parameter_count": 41,
+    "batch_size": 8,
+    "input_shape": [8, 3],
+    "supervision_shape": [8, 2],
+    "loss_name": "synthetic_masked_mse"
+  },
+  "measurement": {
+    "estimated_gb": 0.229,
+    "admitted_control": {
+      "operator_cap_gb": 1.0,
+      "outcome": "COMPLETED_MEASUREMENT",
+      "feasible": true
+    },
+    "refused_control": {
+      "operator_cap_gb": 0.001,
+      "outcome": "MEASURED_PEAK_ABOVE_VRAM_CAP",
+      "feasible": false
+    }
+  },
+  "scope": "Bounded TestPod production-preflight qualification. Both controls used the same candidate, task-valid batch, loss, hardware, repository SHA, and composition fingerprint; only the operator VRAM cap changed."
+}

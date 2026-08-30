@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tools.ci import preflight as pf
+from tools.ci import provenance
 from tools.ci.provenance import SCHEMA_VERSION, build_manifest, safe_env_names
 
 REPO = Path(__file__).resolve().parents[4]
@@ -63,15 +65,42 @@ class TestManifestFacts:
         m = build_manifest(REPO, mode="bulk", declared_shards=1, declared_threads=1)
         assert "inter-op" in m.profile.unpinned_residual
 
-    def test_it_records_config_and_resource_presence(self):
+    def test_it_records_config_and_resource_presence(self, monkeypatch, tmp_path: Path):
         """These are the two axes that made 43 tests differ silently (CP-8).
 
         Fails as: a run records neither, and a future parity mismatch is again
-        unattributable after the fact.
+        unattributable after the fact. Generic injected declarations keep this
+        provenance contract independent of whichever scientific resources a
+        particular deployment tracks.
         """
-        m = build_manifest(REPO, mode="bulk", declared_shards=1, declared_threads=1)
-        assert set(m.config_presence) >= {"tidmad_data_config.yaml", ".env"}
-        assert set(m.resource_presence) >= {"legacy_tidmad_root", "pets_images", "davis_frames"}
+        (tmp_path / "local_runtime.yaml").write_text("enabled: true\n", encoding="utf-8")
+        available = tmp_path / "generic_dataset"
+        available.mkdir()
+        monkeypatch.setattr(
+            provenance,
+            "MACHINE_CONFIG_FILES",
+            ("local_runtime.yaml", "missing_runtime.yaml"),
+        )
+        monkeypatch.setattr(
+            provenance,
+            "DECLARED_RESOURCES",
+            (
+                pf.ExternalResource(name="generic_dataset", default_path=available),
+                pf.ExternalResource(
+                    name="optional_reference", default_path=tmp_path / "missing_reference"
+                ),
+            ),
+        )
+
+        m = build_manifest(tmp_path, mode="bulk", declared_shards=1, declared_threads=1)
+        assert m.config_presence == {
+            "local_runtime.yaml": True,
+            "missing_runtime.yaml": False,
+        }
+        assert m.resource_presence == {
+            "generic_dataset": "available",
+            "optional_reference": "absent",
+        }
 
     def test_untracked_files_are_counted_not_treated_as_dirty(self):
         """Pollution stays observable without failing a run.

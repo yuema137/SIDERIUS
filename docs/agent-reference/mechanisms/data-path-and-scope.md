@@ -41,18 +41,34 @@ Two obligations that are easy to violate:
 - `write_deliverable` / `read_evaluation_payload` are codecs. No scoring, no
   aggregation, no filtering.
 
+Generic inference passes unpaired predictions in deterministic
+`validation_dataset` index order. Its `DeliverableWriteRequest` includes the
+opaque task scope and an optional typed `DeliverableSourceContext` containing
+the run's physical data root, output sample count, and fixed ordering contract.
+A task whose deliverable needs source- or supervision-associated values may
+rematerialise its own validation dataset through that context and must refuse a
+count mismatch. Prediction-only tasks ignore the optional context. The
+framework does not retain task tensors, inspect sample fields, or add another
+data-path method.
+
 ## Optional sibling capabilities
 
 | capability | methods | detected by |
 |---|---|---|
 | `TaskScopeCapability` | `build_training_scope`, `build_eval_scope`, `serialize_scope`, `deserialize_scope` | duck-typed callability against `_SCOPE_CAPABILITY_METHODS`; missing ⇒ fails closed **by name** |
 | `TaskTrialAnchoring` | `trial_anchor_path` | `declares_trial_anchoring` TypeGuard |
+| `TaskInferenceBatching` | `max_inference_batch_size` | `declares_inference_batching` TypeGuard; malformed or non-positive values fail closed |
 
 `build_training_scope` and `build_eval_scope` are **separate methods**, not one
 method with a `leg` argument — the leg is not a parameter, it is a different
 question.
 
 `serialize_scope` **must be canonical**: the framework digests its output.
+
+`max_inference_batch_size` is a semantic collation ceiling, not a resource
+estimate. The VRAM probe chooses only from batches at or below it, and generic
+inference verifies the same ceiling before materializing a dataset. Tasks that
+omit the capability retain resource-derived inference batching unchanged.
 
 ## `DatasetProfile`
 
@@ -109,6 +125,19 @@ that "eval scope absent" is distinguishable from "eval scope empty".
 
 The framework never parses the payload. It is the task's vocabulary.
 
+## Physical data-root resolution
+
+A composed run binds its explicit physical data root at run scope and
+transports that value to execution children. Importing generic composition or
+workflow modules performs no task selection and therefore must not read
+`tidmad_data_config.yaml`.
+
+The two historical module attributes, `TIDMAD_DATA_DIR` and
+`SIDERIUS_DATA_DIR`, remain available for un-composed legacy callers. Their
+configuration is resolved lazily on first value access, preserving the prior
+real-file/template precedence, warning, and missing-config refusal. An explicit
+composed data root never falls through to that legacy task configuration.
+
 ## Registration
 
 `register_task_data_path` uses a two-phase lifecycle rule: same id + same content
@@ -130,6 +159,7 @@ registration* and the child verifies it *before consuming*.
 | scope artifact reaching the **inference** child | ✅ PR-12d |
 | scope artifact reaching the **scoring** child | ✅ PR-12d |
 | generic (non-TIDMAD) inference iteration | ✅ PR-12d — a supplied scope ⇒ the child iterates the task's own evaluation scope |
+| prediction-aligned deliverable source context | ✅ issue #385 repair — additive request context; four-method contract unchanged |
 
 On landed master the emitter is `task_scope_argv`
 (`execute_tools/scope_artifact.py:252`), called at **all three** spawn sites in

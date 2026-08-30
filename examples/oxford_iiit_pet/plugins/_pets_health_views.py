@@ -21,6 +21,7 @@ leave one silently accepting a different artifact than the other.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -74,12 +75,13 @@ class PetsPredictionViews:
         ctx: HealthCheckContext,
         config: dict[str, Any] | None = None,
     ) -> HealthView:
-        path = ctx.get_denoised_path(0)
-        if path is None:
-            raise FileNotFoundError(
-                "no produced-artifact path in the health context (denoised slot 0 is empty)"
+        payload = ctx.load_evaluation_payload()
+        if not isinstance(payload, Mapping):
+            raise TypeError(
+                "Pets evaluation payload must map image ids to predicted class indices; "
+                f"got {type(payload).__name__}."
             )
-        by_image = project_predictions(Path(path))
+        by_image = {str(key): int(value) for key, value in payload.items()}
         # Sorted by image_id for a deterministic stream; the checks compute
         # order-invariant statistics, so determinism is for evidence
         # reproducibility, not arithmetic.

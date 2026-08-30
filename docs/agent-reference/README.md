@@ -65,10 +65,10 @@ Each node owns one stage. Its `.md` is the contract.
 |---|---|:---:|---|
 | [`result_interpretation_agent`](../../nodes/result_interpretation_agent/result_interpretation_agent.md) | synthesise evidence across records; state what it supports | ✅ | `nodes/result_interpretation_agent/result_interpretation_agent.py:1297` |
 | [`ml_literature_review`](../../nodes/ml_literature_review/ml_literature_review.md) | surface papers as soft priors (optional stage) | ✅ | `nodes/ml_literature_review/ml_literature_review.py:1055` (upstream record read from disk by naming convention — #303) |
-| [`ml_model_proposal_agent`](../../nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) | propose an architecture and an explicit prediction | ✅ | `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py:2352` |
+| [`ml_model_proposal_agent`](../../nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) | propose an architecture and an explicit prediction | ✅ | `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py:2358` |
 | [`ml_model_implementor`](../../nodes/ml_model_implementor/ml_model_implementor.md) | write the model plugin (and optional loss plugin) | ✅ | `nodes/ml_model_implementor/ml_model_implementor.py:2362` |
 | [`ml_code_validator_agent`](../../nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ | `nodes/ml_code_validator_agent/ml_code_validator_agent.py:896` |
-| [`ml_hyperparameter_tune_agent`](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1764` (parser and input builder in `cli.py`) |
+| [`ml_hyperparameter_tune_agent`](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1777` (parser and input builder in `cli.py`) |
 
 All six nodes are standalone-capable — each exposes an `argparse` `main()`
 behind `if __name__ == "__main__":` at the line cited

@@ -288,6 +288,7 @@ def main() -> int:
         workspace=workspace,
         task_health_binding=TASK_HEALTH_BINDING,
         deliverable_path=deliverable,
+        evaluation_payload=read_back,
         model_name=MODEL_TYPE,
         run_name="d14p",
     )

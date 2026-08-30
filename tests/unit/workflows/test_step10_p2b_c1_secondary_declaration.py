@@ -5,23 +5,23 @@ pr_10_p2b_secondary_metric_transport.md`` §4.1, §6 C1.
 
 The defects only this module catches
 ------------------------------------
-1. **A secondary silently inheriting the primary's direction.** DAVIS declares
-   ``psnr`` (higher) and ``mae`` (lower) beside a ``mse`` primary that is
-   lower-is-better. Every other layer reads the direction off the carrier, so
-   if composition resolved it wrongly, every downstream renderer would confidently
-   report the wrong metric as improving. Asserted as hand-written literals.
-2. **Fingerprint churn breaking existing composed resumes.** The secondary
+Scientific secondary-metric roster, direction, order and provenance parity now
+belongs to the external consumer witness in
+``siderius-exp/tests/test_secondary_metric_parity.py``. This infrastructure
+module retains only generic composition behavior:
+
+1. **Fingerprint churn breaking existing composed resumes.** The secondary
    payload key is additive WHEN NON-EMPTY. A key that were always present would
    move the fingerprint of every composed run that exists today. Pinned against
    a sha captured BEFORE the production change, not recomputed on both sides of
    one run.
-3. **Re-implemented fail-closed branches.** ``_compose_secondary_metrics`` must
+2. **Re-implemented fail-closed branches.** ``_compose_secondary_metrics`` must
    CALL ``_compose_metric`` rather than copy it; a copy would drift. Proven by
    driving an inherited branch (a missing ``implementation``) through a
    secondary entry and requiring the inherited message.
-4. **The two rules a single metric cannot violate**: an id declared twice, and
+3. **The two rules a single metric cannot violate**: an id declared twice, and
    an id that is already the primary's.
-5. **A binding that does not unwind.** A ContextVar left set would leak one
+4. **A binding that does not unwind.** A ContextVar left set would leak one
    run's declared family into the next run in the same process.
 """
 
@@ -59,32 +59,8 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 #: legitimately changes a fingerprint and the literal is then updated with the
 #: reason recorded. A change caused by P2b's own machinery on a manifest that
 #: declares NO secondary is a defect in the additive rule.
-#: **`tidmad` updated by Step 12 / PR-12a C8, with the reason recorded** — the
-#: case this docstring's second paragraph names verbatim. TIDMAD's shipped
-#: manifest (which the fixture mirrors, W2) now DECLARES `proposal_blocks:` and
-#: `implementor_blocks:`, two real new sources, so its identity legitimately
-#: moved `d6628a93…` -> `5836cb0a…`, and again -> `9125bf58…` when C7-5
-#: closed the Pr2/Pr3 residues in that same declaration. This is NOT P2b's
-#: additive rule leaking:
-#: the manifest still declares no secondary, and `fourth_task` — which declares
-#: neither new section — is UNCHANGED at its P2b literal, which is what
-#: separates "a declaration was added" from "the machinery moved".
-#: **`tidmad` re-recorded at the C2 aggregation flip (operator-frozen
-#: 2026-08-26)** — 3fd178b5… -> 9b497798…: the task health document's
-#: aggregation prose moved with the any_pass -> all_pass policy flip. Not the
-#: additive rule leaking either: no secondary appeared, and the other three
-#: tasks' literals are untouched.
-#: Re-recorded again (false-header correction, 2026-08-27): 9b497798… ->
-#: c0102089… — configs/task_health/tidmad.yaml's header claimed the file
-#: cannot state `aggregation`, which PR #357 made false. `_digest_file`
-#: hashes that document RAW, so the comment-only correction moves TIDMAD's
-#: composed identity. Deliberate: a composed workspace created before it
-#: fails its resume closed, and none exists outside TestPod.
 PRE_P2B_FINGERPRINTS = {
-    "tidmad": "c0102089266b4c8c2ba53dcc5492e1063d5c4919f3ae4444fb5dae3b0cac8800",
     "fourth_task": "cef7656eb958202ed10a806c45de1a8dfa06b2a063b95488f0fcd9aa0d973507",
-    "pets": "3ab1128a3d5d425568b74642c9cd6857d16a5c64904c1befe3731ecfc11a2672",
-    "davis": "396e767d5621390163e7ba0b16df401811379e758d7211e763eef50f5563ac43",
 }
 
 
@@ -96,14 +72,9 @@ def _compose(task: str):
     return compose_run_task_bindings(_manifest(task))
 
 
-def _copy_pack(task: str, tmp_path: Path) -> Path:
-    """A writable copy of a fixture task, refs to `examples/` made absolute.
-
-    The fixture manifests reach out of the tree with `../../../../`; copying
-    only the task directory would break those refs, so they are rewritten to
-    absolute paths — which the loader accepts (`_resolve_path`) and which the
-    fingerprint deliberately does not see (Q-P1-2).
-    """
+def _copy_pack(tmp_path: Path) -> Path:
+    """Create a writable synthetic task package under ``tmp_path``."""
+    task = "fourth_task"
     destination = tmp_path / task
     shutil.copytree(FIXTURES / task, destination)
     manifest = destination / "composition.yaml"
@@ -114,12 +85,6 @@ def _copy_pack(task: str, tmp_path: Path) -> Path:
             value = section.get(key)
             if isinstance(value, str) and value.startswith(".."):
                 section[key] = str((FIXTURES / task / value).resolve())
-        # Step 12 / PR-12d D4c: `implementation.file` is now an out-of-tree ref
-        # too. The pack-local metric implementations live under `examples/`, so
-        # a secondary bound by `file:` reaches out with the same `../../../../`
-        # the declarations always did — and it needs the same treatment. This
-        # helper covering only two of the three ref shapes is why six tests
-        # resolved a plugin path against `/tmp`.
         implementation = section.get("implementation")
         if isinstance(implementation, dict):
             ref = implementation.get("file")
@@ -136,58 +101,36 @@ def _copy_pack(task: str, tmp_path: Path) -> Path:
     return manifest
 
 
-# ---------------------------------------------------------------------------
-# 1. Declaration — what each task composes to
-# ---------------------------------------------------------------------------
-
-
-class TestTheDeclaredSet:
-    def test_tidmad_declares_none_and_that_is_a_first_class_state(self):
-        assert _compose("tidmad").secondary_metrics == ()
-
-    def test_pets_declares_exactly_macro_f1(self):
-        """`log_loss` stays D16 / Step-06-owned (Q-10-4 = A) and must NOT be
-        activated by P2b — an extra entry here would silently widen the
-        scientific claim of every Pets run."""
-        secondaries = _compose("pets").secondary_metrics
-        assert [(m.spec.id, m.spec.direction) for m in secondaries] == [("macro_f1", "higher")]
-
-    def test_davis_carries_two_OPPOSING_directions_neither_of_them_the_primary_s(self):
-        """The discriminating case, as literals.
-
-        `psnr` is higher-is-better, `mae` is lower, and the primary `mse` is
-        lower. A carrier that inherited the primary's direction would report
-        psnr backwards; one that inherited a single per-run secondary direction
-        would report mae backwards. Only per-entry resolution passes.
-        """
-        composition = _compose("davis")
-        assert composition.metric.spec.direction == "lower"
-        assert [(m.spec.id, m.spec.direction) for m in composition.secondary_metrics] == [
-            ("psnr", "higher"),
-            ("mae", "lower"),
-        ]
-
-    def test_manifest_order_is_preserved_not_sorted(self):
-        """Order is semantic: it is what the output stamp and the interpreter's
-        absence rows are keyed on. Sorted order would put `mae` first."""
-        ids = [m.spec.id for m in _compose("davis").secondary_metrics]
-        assert ids == ["psnr", "mae"] != sorted(ids)
-
-    def test_every_declaration_path_reaches_provenance(self):
-        paths = _compose("davis").provenance.source_paths
-        declared = [v for k, v in paths.items() if k.startswith("secondary_metric_declaration")]
-        assert len(declared) == 2
-        assert all(Path(p).is_file() for p in declared)
+def _secondary_manifest(tmp_path: Path, *, count: int = 2) -> Path:
+    """Copy the synthetic pack and declare one or two observational metrics."""
+    manifest = _copy_pack(tmp_path)
+    raw = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    declarations = (
+        ("metric_band_bias.json", "BandBiasMetric"),
+        ("metric_band_spread.json", "BandSpreadMetric"),
+    )
+    raw["secondary_metrics"] = [
+        {
+            "declaration": f"declared/{declaration}",
+            "implementation": {
+                "file": "plugins/secondary_metrics.py",
+                "symbol": symbol,
+            },
+        }
+        for declaration, symbol in declarations[:count]
+    ]
+    manifest.write_text(yaml.safe_dump(raw, sort_keys=True), encoding="utf-8")
+    return manifest
 
 
 # ---------------------------------------------------------------------------
-# 2. The constraints — every one fails the COMPOSITION, so the run never starts
+# 1. The constraints — every one fails the COMPOSITION, so the run never starts
 # ---------------------------------------------------------------------------
 
 
 class TestTheFailClosedBranches:
-    def _mutate(self, tmp_path: Path, task: str, mutate) -> str:
-        manifest = _copy_pack(task, tmp_path)
+    def _mutate(self, tmp_path: Path, mutate, *, with_secondaries: bool = True) -> str:
+        manifest = _secondary_manifest(tmp_path) if with_secondaries else _copy_pack(tmp_path)
         raw = yaml.safe_load(manifest.read_text(encoding="utf-8"))
         mutate(raw)
         manifest.write_text(yaml.safe_dump(raw, sort_keys=True), encoding="utf-8")
@@ -197,8 +140,8 @@ class TestTheFailClosedBranches:
         def mutate(raw):
             raw["secondary_metrics"].append(raw["secondary_metrics"][0])
 
-        with pytest.raises(TaskCompositionError, match="'psnr'"):
-            compose_run_task_bindings(self._mutate(tmp_path, "davis", mutate))
+        with pytest.raises(TaskCompositionError, match="'band_bias'"):
+            compose_run_task_bindings(self._mutate(tmp_path, mutate))
 
     def test_a_secondary_that_is_the_primary_is_refused_by_id(self, tmp_path):
         def mutate(raw):
@@ -210,21 +153,21 @@ class TestTheFailClosedBranches:
             )
 
         with pytest.raises(TaskCompositionError, match="PRIMARY"):
-            compose_run_task_bindings(self._mutate(tmp_path, "davis", mutate))
+            compose_run_task_bindings(self._mutate(tmp_path, mutate))
 
     def test_a_mapping_where_a_list_belongs_names_the_shape(self, tmp_path):
         def mutate(raw):
-            raw["secondary_metrics"] = {"psnr": {}}
+            raw["secondary_metrics"] = {"band_bias": {}}
 
         with pytest.raises(TaskCompositionError, match="must be a LIST"):
-            compose_run_task_bindings(self._mutate(tmp_path, "davis", mutate))
+            compose_run_task_bindings(self._mutate(tmp_path, mutate))
 
     def test_a_non_mapping_entry_is_refused(self, tmp_path):
         def mutate(raw):
-            raw["secondary_metrics"] = ["metric_psnr.json"]
+            raw["secondary_metrics"] = ["metric_band_bias.json"]
 
         with pytest.raises(TaskCompositionError, match=r"secondary_metrics\[0\] must be a mapping"):
-            compose_run_task_bindings(self._mutate(tmp_path, "davis", mutate))
+            compose_run_task_bindings(self._mutate(tmp_path, mutate))
 
     def test_an_inherited_branch_fires_with_the_SECONDARY_s_role_named(self, tmp_path):
         """Proof of REUSE, not reimplementation.
@@ -244,12 +187,12 @@ class TestTheFailClosedBranches:
             TaskCompositionError,
             match=r"secondary_metrics\[1\] requires an 'implementation' mapping",
         ):
-            compose_run_task_bindings(self._mutate(tmp_path, "davis", mutate))
+            compose_run_task_bindings(self._mutate(tmp_path, mutate))
 
     def test_an_unimportable_secondary_implementation_fails_the_run_closed(self, tmp_path):
         def mutate(raw):
             # REPLACE the implementation, never add a key to it. Since D4c the
-            # DAVIS secondaries bind by `file:`, so setting `module` alongside
+            # Synthetic secondaries bind by `file:`, so setting `module` alongside
             # it would trip the exactly-ONE-of check first and this test would
             # pass on the wrong refusal.
             raw["secondary_metrics"][0]["implementation"] = {
@@ -258,7 +201,7 @@ class TestTheFailClosedBranches:
             }
 
         with pytest.raises(TaskCompositionError, match="could not be imported"):
-            compose_run_task_bindings(self._mutate(tmp_path, "davis", mutate))
+            compose_run_task_bindings(self._mutate(tmp_path, mutate))
 
     def test_the_primary_s_own_messages_are_unchanged(self, tmp_path):
         """The `where` parameter defaults to "metric", so adding it moved no
@@ -270,23 +213,23 @@ class TestTheFailClosedBranches:
         with pytest.raises(
             TaskCompositionError, match=r"^metric requires an 'implementation' mapping"
         ):
-            compose_run_task_bindings(self._mutate(tmp_path, "tidmad", mutate))
+            compose_run_task_bindings(self._mutate(tmp_path, mutate, with_secondaries=False))
 
     def test_an_unknown_manifest_key_is_still_refused(self, tmp_path):
         def mutate(raw):
             raw["secondary_metric"] = []  # a plausible misspelling
 
         with pytest.raises(TaskCompositionError, match="unknown key"):
-            compose_run_task_bindings(self._mutate(tmp_path, "tidmad", mutate))
+            compose_run_task_bindings(self._mutate(tmp_path, mutate, with_secondaries=False))
 
 
 # ---------------------------------------------------------------------------
-# 3. The fingerprint — additive WHEN NON-EMPTY (delta D3)
+# 2. The fingerprint — additive WHEN NON-EMPTY (delta D3)
 # ---------------------------------------------------------------------------
 
 
 class TestTheFingerprintRule:
-    @pytest.mark.parametrize("task", ["tidmad", "fourth_task"])
+    @pytest.mark.parametrize("task", ["fourth_task"])
     def test_a_zero_secondary_manifest_hashes_to_its_PRE_P2B_value(self, task):
         """The whole point of the additive-when-non-empty rule.
 
@@ -299,12 +242,12 @@ class TestTheFingerprintRule:
             "fails its resume for a reason with no scientific content."
         )
 
-    @pytest.mark.parametrize("task", ["pets", "davis"])
-    def test_declaring_a_secondary_DOES_change_the_fingerprint(self, task):
-        assert _compose(task).semantic_fingerprint != PRE_P2B_FINGERPRINTS[task]
+    def test_declaring_a_secondary_DOES_change_the_fingerprint(self, tmp_path):
+        declared = compose_run_task_bindings(str(_secondary_manifest(tmp_path, count=1)))
+        assert declared.semantic_fingerprint != PRE_P2B_FINGERPRINTS["fourth_task"]
 
     def test_an_explicitly_empty_list_equals_the_section_being_absent(self, tmp_path):
-        manifest = _copy_pack("tidmad", tmp_path)
+        manifest = _copy_pack(tmp_path)
         without = compose_run_task_bindings(str(manifest))
         raw = yaml.safe_load(manifest.read_text(encoding="utf-8"))
         raw["secondary_metrics"] = []
@@ -316,24 +259,24 @@ class TestTheFingerprintRule:
     def test_reordering_two_secondaries_changes_the_fingerprint(self, tmp_path):
         """Manifest order is SEMANTIC — it is the declared set the output
         stamps — so a reordered manifest is a different declaration."""
-        manifest = _copy_pack("davis", tmp_path)
+        manifest = _secondary_manifest(tmp_path)
         first = compose_run_task_bindings(str(manifest))
         raw = yaml.safe_load(manifest.read_text(encoding="utf-8"))
         raw["secondary_metrics"].reverse()
         manifest.write_text(yaml.safe_dump(raw, sort_keys=True), encoding="utf-8")
         second = compose_run_task_bindings(str(manifest))
         assert first.semantic_fingerprint != second.semantic_fingerprint
-        assert [m.spec.id for m in second.secondary_metrics] == ["mae", "psnr"]
+        assert [m.spec.id for m in second.secondary_metrics] == ["band_spread", "band_bias"]
 
     def test_the_same_declared_family_at_two_paths_yields_ONE_fingerprint(self, tmp_path):
         """Q-P1-2 held: a relocated task package is the same science."""
-        a = compose_run_task_bindings(str(_copy_pack("davis", tmp_path / "a")))
-        b = compose_run_task_bindings(str(_copy_pack("davis", tmp_path / "b")))
+        a = compose_run_task_bindings(str(_secondary_manifest(tmp_path / "a")))
+        b = compose_run_task_bindings(str(_secondary_manifest(tmp_path / "b")))
         assert a.semantic_fingerprint == b.semantic_fingerprint
 
 
 # ---------------------------------------------------------------------------
-# 4. Binding — run-scoped, and it unwinds
+# 3. Binding — run-scoped, and it unwinds
 # ---------------------------------------------------------------------------
 
 
@@ -341,18 +284,19 @@ class TestTheRunScopedBinding:
     def test_unbound_resolves_to_the_empty_tuple(self):
         assert resolve_bound_run_secondary_metrics() == ()
 
-    def test_the_composition_binding_activates_the_declared_family(self):
-        composition = _compose("davis")
+    def test_the_composition_binding_activates_the_declared_family(self, tmp_path):
+        composition = compose_run_task_bindings(str(_secondary_manifest(tmp_path)))
         assert resolve_bound_run_secondary_metrics() == ()
         with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             bound = resolve_bound_run_secondary_metrics()
-            assert [m.spec.id for m in bound] == ["psnr", "mae"]
+            assert [m.spec.id for m in bound] == ["band_bias", "band_spread"]
             assert bound == composition.secondary_metrics
         assert resolve_bound_run_secondary_metrics() == ()
 
-    def test_a_zero_secondary_composition_binds_the_empty_tuple(self):
+    def test_a_zero_secondary_composition_binds_the_empty_tuple(self, tmp_path):
         with bind_run_task_composition(
-            _compose("tidmad"), physical_data_root=COMPOSED_TEST_DATA_ROOT
+            compose_run_task_bindings(str(_copy_pack(tmp_path))),
+            physical_data_root=COMPOSED_TEST_DATA_ROOT,
         ):
             assert resolve_bound_run_secondary_metrics() == ()
 
@@ -361,16 +305,20 @@ class TestTheRunScopedBinding:
             assert composition is None
             assert resolve_bound_run_secondary_metrics() == ()
 
-    def test_nested_runs_do_not_leak_into_each_other(self):
-        outer, inner = _compose("davis"), _compose("pets")
+    def test_nested_runs_do_not_leak_into_each_other(self, tmp_path):
+        outer = compose_run_task_bindings(str(_secondary_manifest(tmp_path / "outer")))
+        inner = compose_run_task_bindings(str(_secondary_manifest(tmp_path / "inner", count=1)))
         with bind_run_task_composition(outer, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             with bind_run_task_composition(inner, physical_data_root=COMPOSED_TEST_DATA_ROOT):
-                assert [m.spec.id for m in resolve_bound_run_secondary_metrics()] == ["macro_f1"]
-            assert [m.spec.id for m in resolve_bound_run_secondary_metrics()] == ["psnr", "mae"]
+                assert [m.spec.id for m in resolve_bound_run_secondary_metrics()] == ["band_bias"]
+            assert [m.spec.id for m in resolve_bound_run_secondary_metrics()] == [
+                "band_bias",
+                "band_spread",
+            ]
         assert resolve_bound_run_secondary_metrics() == ()
 
-    def test_the_binding_unwinds_on_an_exception(self):
-        composition = _compose("davis")
+    def test_the_binding_unwinds_on_an_exception(self, tmp_path):
+        composition = compose_run_task_bindings(str(_secondary_manifest(tmp_path)))
         with (
             pytest.raises(RuntimeError, match="forced"),
             bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT),
@@ -378,11 +326,11 @@ class TestTheRunScopedBinding:
             raise RuntimeError("forced")
         assert resolve_bound_run_secondary_metrics() == ()
 
-    def test_verify_refuses_a_composition_whose_secondaries_are_not_active(self):
+    def test_verify_refuses_a_composition_whose_secondaries_are_not_active(self, tmp_path):
         """A half-composed run that stamped a declared family it never
         evaluated would project the WHOLE family as a named absence — silent,
         and indistinguishable from a task that declared nothing."""
-        composition = _compose("davis")
+        composition = compose_run_task_bindings(str(_secondary_manifest(tmp_path)))
         with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             verify_composition_is_bound(composition)  # the healthy case
             with bind_run_secondary_metrics(()):
@@ -391,7 +339,7 @@ class TestTheRunScopedBinding:
 
 
 # ---------------------------------------------------------------------------
-# 5. Ownership — one binder, in one module (the C1 half of the Q097 inversion)
+# 4. Ownership — one binder, in one module (the C1 half of the Q097 inversion)
 # ---------------------------------------------------------------------------
 
 

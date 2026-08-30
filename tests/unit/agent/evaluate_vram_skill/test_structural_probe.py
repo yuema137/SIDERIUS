@@ -154,6 +154,19 @@ def test_probe_autograd_tape_captures_nonzero_bytes_for_training_graph():
     assert report.total_saved_bytes > 0
 
 
+def test_probe_autograd_tape_counts_sparse_coo_component_storage():
+    """A graph task may save a sparse adjacency tensor for backward."""
+    indices = torch.tensor([[0, 1, 1], [2, 0, 2]])
+    values = torch.tensor([3.0, 4.0, 5.0], requires_grad=True)
+    adjacency = torch.sparse_coo_tensor(indices, values, (2, 3)).coalesce()
+    dense = torch.randn(3, 2, requires_grad=True)
+
+    report = probe_autograd_tape(lambda: torch.sparse.mm(adjacency, dense).sum())
+
+    sparse_floor = indices.numel() * indices.element_size() + values.numel() * values.element_size()
+    assert report.total_saved_bytes >= sparse_floor
+
+
 def test_probe_autograd_tape_dedup_across_views_of_same_storage():
     """Storage-ptr dedup is the headline requirement. Build a graph that
     re-uses the same storage via a view, and assert the walker counts it

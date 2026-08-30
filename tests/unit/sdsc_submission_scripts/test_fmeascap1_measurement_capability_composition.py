@@ -278,7 +278,7 @@ class TestComposedRunsCarryTheirOwnMeasurementIdentity:
         fix never intended to move.
 
         This also pins the legacy call's ZERO-argument form. An un-composed run
-        resolves against the import-time ``TIDMAD_DATA_DIR`` and NOT against
+        resolves against the lazy legacy TIDMAD data authority and NOT against
         ``--data_dir``; that is a real asymmetry, but correcting it is a
         different change with a different blast radius, and this witness fails
         if this PR quietly makes it.
@@ -290,7 +290,7 @@ class TestComposedRunsCarryTheirOwnMeasurementIdentity:
         anchor_root.mkdir()
         elsewhere.mkdir()
         monkeypatch.setattr(
-            "execute_tools.data_paths.TIDMAD_DATA_DIR", str(anchor_root), raising=True
+            "execute_tools.data_paths.legacy_tidmad_data_dir", lambda: str(anchor_root)
         )
 
         capability = _capability_reaching_the_workflow(
@@ -309,7 +309,7 @@ class TestComposedRunsCarryTheirOwnMeasurementIdentity:
             "invisible to every run that composes nothing"
         )
         assert capability.dataset_root == str(anchor_root), (
-            "the un-composed path stopped using the import-time constant"
+            "the un-composed path stopped using the legacy data authority"
         )
 
 

@@ -232,24 +232,31 @@ class TestComposedHealthConfigHandoff:
     """
 
     @staticmethod
-    def _handed_config(task: str, tmp_path: Path) -> tuple[str, dict]:
+    def _handoff(task: str, tmp_path: Path):
         from tests.unit.workflows.test_step10_p56_c6_three_task_closure import drive
 
         seen = drive(task, tmp_path)
-        handed = seen["tune_in"][0].health_checks_config
-        assert handed, f"{task}: the workflow handed the tuner no Health config at all"
-        return handed, yaml.safe_load(Path(handed).read_text(encoding="utf-8"))
+        chain_effective = Path(seen["workspace"]) / "health_checks_effective.yaml"
+        return (
+            seen,
+            seen["tune_in"][0],
+            yaml.safe_load(chain_effective.read_text(encoding="utf-8")),
+        )
 
-    def test_the_tuner_is_handed_the_chain_effective_config(self, tmp_path):
-        handed, document = self._handed_config("pets", tmp_path)
-        assert Path(handed).name == "health_checks_effective.yaml"
-        assert Path(handed).exists()
+    def test_the_tuner_is_handed_the_original_source_and_task_binding(self, tmp_path):
+        seen, tune_input, document = self._handoff("pets", tmp_path)
+        assert tune_input.health_checks_config is None
+        assert tune_input.task_composition_ref is not None
+        assert (
+            tune_input.task_composition_ref.task_health_binding
+            == seen["composition"].task_health_binding
+        )
         assert document["task_health_binding"] == "explicit"
 
     def test_the_handed_roster_is_the_TASKS_family(self, tmp_path):
         """The decisive assertion. TIDMAD's gate ids must be absent and the
         task's own must be present — not merely 'some roster is present'."""
-        _handed, document = self._handed_config("pets", tmp_path)
+        _seen, _tune_input, document = self._handoff("pets", tmp_path)
         gate_ids = {gate["id"] for gate in document["health_gates"]}
         assert gate_ids == {"pets_distinct_symbols_blocking", "pets_dominant_fraction_blocking"}
         assert not gate_ids & {
@@ -258,22 +265,18 @@ class TestComposedHealthConfigHandoff:
             "amplitude_collapse_blocking",
         }
 
-    def test_re_materializing_the_handed_value_keeps_the_tasks_roster(self, tmp_path):
-        """The tuner materializes AGAIN from whatever it is handed. That second
-        pass must be a roster no-op — otherwise the hand-off buys nothing.
+    def test_tuner_materialization_matches_the_chain_hash_and_roster(self, tmp_path):
+        """The same original source plus binding must produce identical identity.
 
-        It is deliberately NOT asserted to be a body-sha no-op: 08b restamps
-        the binding markers and the tuner still passes no binding, so its
-        document says ``legacy_default``. Closing that is C2's, with the
-        projection. Asserting sha equality here would fail for a reason C1 is
-        not allowed to fix, and asserting nothing would let the roster silently
-        revert.
+        HOW IT FAILS: forwarding the chain's effective file drops its resolved
+        plugin marker, so the per-model hash differs and iteration two refuses
+        the first iteration's records as incomparable.
         """
         from execute_tools.health_checks.config import materialize_effective_config
         from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
         from workflows.task_composition import bind_run_task_composition
 
-        handed, chain_document = self._handed_config("pets", tmp_path)
+        seen, tune_input, chain_document = self._handoff("pets", tmp_path)
         model_workspace = tmp_path / "per_model"
         model_workspace.mkdir()
 
@@ -281,17 +284,25 @@ class TestComposedHealthConfigHandoff:
         # asks `resolve_dataset_profile()` how many files a FULL scope has, so
         # an unbound call would judge Pets' complete 370-row scope
         # against TIDMAD's 20 and call it partial.
-        composition = compose_run_task_bindings(str(FIXTURES / "pets" / "composition.yaml"))
+        composition = seen["composition"]
         with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
-            path, _sha = materialize_effective_config(
-                handed, None, str(model_workspace), resolved_scope=list(range(370))
+            path, tuner_sha = materialize_effective_config(
+                tune_input.health_checks_config,
+                None,
+                str(model_workspace),
+                resolved_scope=list(range(composition.dataset_profile.partition_count)),
+                task_health_binding=tune_input.task_composition_ref.task_health_binding,
             )
         per_model = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        chain_lock = json.loads(
+            (Path(seen["workspace"]) / "run_invariants_lock.json").read_text(encoding="utf-8")
+        )
 
         assert [g["id"] for g in per_model["health_gates"]] == [
             g["id"] for g in chain_document["health_gates"]
         ]
-        assert per_model["task_health_binding"] == "legacy_default"  # C2 closes this
+        assert per_model["resolved_plugins"] == chain_document["resolved_plugins"]
+        assert tuner_sha == chain_lock["health_config_sha256"]
 
     def test_an_un_composed_run_is_handed_the_raw_operator_value(self, workflow_env):
         """LEGACY PARITY, and the reason the swap is keyed on composition
@@ -323,13 +334,13 @@ class TestComposedHealthConfigHandoff:
                 object(),
                 "/ws/health_checks_effective.yaml",
                 None,
-                "/ws/health_checks_effective.yaml",
+                None,
             ),
             (
                 object(),
                 "/ws/health_checks_effective.yaml",
                 "/op.yaml",
-                "/ws/health_checks_effective.yaml",
+                "/op.yaml",
             ),
             (object(), None, "/op.yaml", "/op.yaml"),  # composed, gates OFF
             (None, "/ws/health_checks_effective.yaml", None, None),  # LEGACY, gates ON
@@ -338,9 +349,12 @@ class TestComposedHealthConfigHandoff:
         ],
     )
     def test_the_resolution_truth_table(self, composed, effective, operator, expected):
-        """The extracted authority, exhaustively. The fourth row is the one
-        that matters most: a LEGACY run with gates ON keeps ``None``, which is
-        what stops a persisted provenance field from moving."""
+        """An effective artifact is never reused as another materialization's source.
+
+        The first two rows catch the 2026-08-30 DAVIS failure: forwarding the
+        chain's effective file dropped resolved-plugin provenance in the tuner,
+        changed the Health hash, and made iteration two refuse iteration one.
+        """
         from workflows.model_exploration import resolve_tuner_health_config_source
 
         assert (
@@ -376,7 +390,7 @@ class TestComposedHealthConfigHandoff:
         statements = function.body[1:] if ast.get_docstring(function) else function.body
         executable = "\n".join(ast.unparse(node) for node in statements)
         assert "tidmad" not in executable.lower()
-        assert "task_composition is None" in executable
+        assert "return operator_config" in executable
 
         workflow = inspect.getsource(model_exploration.run_workflow)
         assert "health_checks_config=resolve_tuner_health_config_source(" in workflow

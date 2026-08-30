@@ -1067,6 +1067,7 @@ def finalize_run_output(
         all_records,
         formal_skipped_for_no_valid_winner=_skipped_formal_for_no_valid_winner,
         healthgate_mode=agent_input.healthgate_mode,
+        required_gate_ids=bindings.run_scientific_gate_ids,
     )
     if trial_validity_feedback is not None:
         print(

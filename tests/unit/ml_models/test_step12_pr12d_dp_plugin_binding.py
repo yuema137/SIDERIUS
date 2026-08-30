@@ -53,6 +53,7 @@ import sys
 import textwrap
 
 import pytest
+import yaml
 
 from core.subprocess_env import PLUGIN_DIRS_ENV_VAR, subprocess_env
 from ml_models.plugin_binding import (
@@ -67,6 +68,8 @@ from ml_models.plugin_binding import (
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+QUICKSTART_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
+DECLARED_NAMING_TASK = REPO_ROOT / "tests" / "fixtures" / "fcov8_declared_naming_task.py"
 
 #: A minimal but REAL model plugin: the four `PLUGIN_*` symbols the loader
 #: requires, a Pydantic config and an `nn.Module` the child can instantiate.
@@ -252,27 +255,37 @@ class TestDeclaredModelPlugins:
 
 
 def _manifest(tmp_path: pathlib.Path, model_plugins_yaml: str) -> pathlib.Path:
-    """A TIDMAD-shaped manifest with a substituted ``model_plugins`` section.
+    """A task-neutral composition with a substituted ``model_plugins`` section.
 
-    Built from the SHIPPED manifest so the test exercises the production
-    composition path rather than a hand-rolled minimal one (L4: a test that
-    constructs the mechanism directly certifies something production does
-    not use).
+    Built from the shipped quickstart manifest so the test exercises the
+    production composition path rather than constructing the binding
+    mechanism directly. Pack refs become checkout-absolute because the
+    variant lives under ``tmp_path``. The task data path is the generic
+    declared-naming fixture, giving this test its own registration identity
+    instead of borrowing any scientific task.
     """
-    shipped = (REPO_ROOT / "configs" / "task_composition" / "tidmad.yaml").read_text(
-        encoding="utf-8"
-    )
-    rewritten = []
-    for line in shipped.splitlines():
-        if line.startswith(("  ", "#")) or not line.strip():
-            rewritten.append(line)
-            continue
-        rewritten.append(line)
-    body = "\n".join(rewritten)
-    # Refs in the shipped manifest are relative to ITS directory, so the
-    # rewritten copy is written back into that same directory.
-    target = REPO_ROOT / "configs" / "task_composition" / f"_dp_tmp_{tmp_path.name}.yaml"
-    target.write_text(f"{body}\n\n{model_plugins_yaml}\n", encoding="utf-8")
+    payload = yaml.safe_load(QUICKSTART_MANIFEST.read_text(encoding="utf-8"))
+
+    def resolve_refs(value):
+        if isinstance(value, dict):
+            return {key: resolve_refs(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [resolve_refs(item) for item in value]
+        if isinstance(value, str) and value.startswith("../../examples/"):
+            return str((QUICKSTART_MANIFEST.parent / value).resolve())
+        return value
+
+    payload = resolve_refs(payload)
+    payload["task_data_path"] = {
+        "file": str(DECLARED_NAMING_TASK),
+        "symbol": "DeclaredNamingTaskDataPath",
+        "id": "fcov8_declared_naming_task",
+    }
+    payload.pop("model_plugins", None)
+    if model_plugins_yaml.strip():
+        payload.update(yaml.safe_load(model_plugins_yaml))
+    target = tmp_path / "composition.yaml"
+    target.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     return target
 
 
@@ -281,46 +294,25 @@ class TestManifestSection:
 
     @pytest.fixture
     def compose(self):
+        from execute_tools.task_registration_scope import run_registration_scope
         from workflows.task_composition import compose_run_task_bindings
-
-        written: list[pathlib.Path] = []
 
         def _compose(tmp_path: pathlib.Path, section: str):
             path = _manifest(tmp_path, section)
-            written.append(path)
-            return compose_run_task_bindings(str(path))
+            with run_registration_scope():
+                return compose_run_task_bindings(str(path))
 
-        try:
-            yield _compose
-        finally:
-            for path in written:
-                path.unlink(missing_ok=True)
+        yield _compose
 
-    # The three TIDMAD fingerprint literals below were re-recorded
-    # 9b497798… -> c0102089… (false-header correction, 2026-08-27):
-    # configs/task_health/tidmad.yaml's header claimed the file cannot state
-    # `aggregation`, which PR #357 made false, and `_digest_file` hashes that
-    # document RAW. Seam P's semantics are unchanged — an absent or `none:`
-    # section still binds nothing and keeps whatever the shipped identity is,
-    # and a declared one still MOVES it.
-
-    def test_an_absent_section_binds_nothing_and_keeps_the_fingerprint(self):
-        from workflows.task_composition import compose_run_task_bindings
-
-        composition = compose_run_task_bindings(
-            str(REPO_ROOT / "configs" / "task_composition" / "tidmad.yaml")
-        )
+    def test_an_absent_section_binds_nothing(self, compose, tmp_path):
+        composition = compose(tmp_path, "")
         assert composition.model_plugins is None
-        assert composition.semantic_fingerprint == (
-            "c0102089266b4c8c2ba53dcc5492e1063d5c4919f3ae4444fb5dae3b0cac8800"
-        )
 
     def test_an_explicit_none_binds_nothing_and_keeps_the_fingerprint(self, compose, tmp_path):
+        absent = compose(tmp_path, "")
         composition = compose(tmp_path, "model_plugins:\n  none: true")
         assert composition.model_plugins is None
-        assert composition.semantic_fingerprint == (
-            "c0102089266b4c8c2ba53dcc5492e1063d5c4919f3ae4444fb5dae3b0cac8800"
-        )
+        assert composition.semantic_fingerprint == absent.semantic_fingerprint
 
     def test_a_declared_section_resolves_through_the_production_path(self, compose, tmp_path):
         write_plugin(tmp_path / "plugins", "dp_manifest_net")
@@ -336,10 +328,11 @@ class TestManifestSection:
         """The plugin's CONTENT digest joins the composition identity, so an
         edited pack plugin fails a resume closed rather than silently running
         different code under an unchanged declaration."""
+        baseline = compose(tmp_path, "").semantic_fingerprint
         write_plugin(tmp_path / "plugins", "dp_fp_net", width=4)
         section = f"model_plugins:\n  dir: {tmp_path / 'plugins'}\n  require: [dp_fp_net]"
         first = compose(tmp_path, section).semantic_fingerprint
-        assert first != "c0102089266b4c8c2ba53dcc5492e1063d5c4919f3ae4444fb5dae3b0cac8800"
+        assert first != baseline
         write_plugin(tmp_path / "plugins", "dp_fp_net", width=5)
         assert compose(tmp_path, section).semantic_fingerprint != first
 

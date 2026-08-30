@@ -18,9 +18,11 @@ startup (``preload_global_models`` / ``preload_global_losses``), so two
 collaborators sharing a checkout contaminated each other's runs and a
 "fresh workspace" was not fresh.
 
-This module resolves the ONE durable, NON-checkout library root those
-families now write to and read first. Resolution — exactly two layers, and
-no third (the ``core/execution_calibration.py`` idiom)::
+Supported workflow and standalone-node entry points bind this library to
+``{workspace}/generated_library`` before constructing any consumer. The
+environment variable below is the subprocess transport for that binding.
+Low-level callers that bypass those entry points retain the historical
+two-layer resolution during migration::
 
     SIDERIUS_GENERATED_LIBRARY_DIR   (absolute path; ``~`` expanded)
         ->
@@ -46,14 +48,16 @@ consumer keeps its shape::
     {root}/losses/                  promoted loss plugins
     {root}/_capability_index.json   the capability index
 
-**Legacy checkout artifacts stay READABLE.** Each consumer keeps its
+**Legacy checkout artifacts stay READABLE only for unbound low-level
+callers.** Each consumer keeps its
 checkout-level location as a lower-priority read fallback (the constants
 ``ml_models.plugin_loader.AGENT_GENERATED_DIR``,
 ``agent_generated._loss_loader.LOSSES_DIR``,
-``agent_generated._registry._LEGACY_CHECKOUT_INDEX_PATH``, …), so a
-checkout that accumulated promotions before this migration keeps resolving
-them. No production path WRITES to the checkout root any more — continued
-repository-root writes are deliberately not preserved for compatibility.
+``agent_generated._registry._LEGACY_CHECKOUT_INDEX_PATH``, …). A supported
+workspace-bound execution excludes these fallbacks, so a fresh workspace
+cannot absorb checkout history. No production path WRITES to the checkout
+root — continued repository-root writes are deliberately not preserved for
+compatibility.
 
 Resolution happens at CALL time (no import-time cache), matching
 ``calibration_dir()`` — a test that sets the env var, and an operator who
@@ -68,7 +72,7 @@ different host layout, exactly the ``execution_calibration`` precedent.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -76,6 +80,12 @@ from pydantic import BaseModel, ConfigDict, Field
 #: The env override. Named once — every consumer resolves through this
 #: module, never by reading the variable itself.
 GENERATED_LIBRARY_ENV_VAR = "SIDERIUS_GENERATED_LIBRARY_DIR"
+
+#: Workspace-relative directory used by workflow and standalone-node entry
+#: points. The environment variable remains the subprocess transport, but the
+#: configured workspace is the authority that chooses its value.
+_WORKSPACE_LIBRARY_BASENAME = "generated_library"
+_CHAIN_WORKSPACE_ENV_VAR = "SIDERIUS_CHAIN_WORKSPACE"
 
 #: Default root, relative to the user's home: ``~/.siderius/generated_library``.
 #: Nested under the same ``~/.siderius`` home the time-calibration store
@@ -160,6 +170,36 @@ def resolve_generated_library(
 def generated_library_root(*, environ: Mapping[str, str] | None = None) -> str:
     """The resolved library root path (see :func:`resolve_generated_library`)."""
     return resolve_generated_library(environ=environ).root
+
+
+def bind_generated_library_to_workspace(
+    workspace: str,
+    *,
+    environ: MutableMapping[str, str] | None = None,
+) -> str:
+    """Bind generated-capability discovery and writes to ``workspace``.
+
+    Full workflow entry points call this before constructing a registry or
+    resolving run invariants. Descendant subprocesses inherit the existing
+    environment transport, while the path itself is deterministically derived
+    from the user-configured workspace.
+    """
+    env = os.environ if environ is None else environ
+    root = os.path.abspath(os.path.join(workspace, _WORKSPACE_LIBRARY_BASENAME))
+    env[GENERATED_LIBRARY_ENV_VAR] = root
+    env[_CHAIN_WORKSPACE_ENV_VAR] = os.path.abspath(workspace)
+    return root
+
+
+def generated_library_is_workspace_bound(*, environ: Mapping[str, str] | None = None) -> bool:
+    """Whether a workflow entry point bound discovery to its workspace."""
+    env = os.environ if environ is None else environ
+    workspace = (env.get(_CHAIN_WORKSPACE_ENV_VAR) or "").strip()
+    root = (env.get(GENERATED_LIBRARY_ENV_VAR) or "").strip()
+    if not workspace or not root:
+        return False
+    expected = os.path.abspath(os.path.join(workspace, _WORKSPACE_LIBRARY_BASENAME))
+    return os.path.abspath(os.path.expanduser(root)) == expected
 
 
 def generated_models_dir(*, environ: Mapping[str, str] | None = None) -> str:

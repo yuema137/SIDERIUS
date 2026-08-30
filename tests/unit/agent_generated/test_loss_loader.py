@@ -213,6 +213,17 @@ class TestEnvVarResolution:
         dirs = _resolve_loss_dirs()
         assert dirs == [str(target), library_losses, _loss_loader.LOSSES_DIR]
 
+    def test_workspace_binding_excludes_checkout_fallback(self, tmp_path, monkeypatch):
+        from core.generated_library import bind_generated_library_to_workspace
+
+        env: dict[str, str] = {}
+        bind_generated_library_to_workspace(str(tmp_path / "workspace"), environ=env)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.delenv("SIDERIUS_LOSS_DIRS", raising=False)
+
+        assert _resolve_loss_dirs() == [str(tmp_path / "workspace/generated_library/losses")]
+
     def test_env_var_unset_falls_back_to_library_dirs(
         self, monkeypatch: pytest.MonkeyPatch, library_losses: str
     ):

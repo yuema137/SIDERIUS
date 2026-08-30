@@ -72,6 +72,7 @@ campaigns are largely historical.
 | [`genericity_contract.md`](genericity_contract.md) | the genericity seams |
 | [`tidmad_coupling_ledger.md`](tidmad_coupling_ledger.md) | where TIDMAD assumptions lived |
 | [`pruning_test_rule.md`](pruning_test_rule.md) | the test-ownership rules |
+| [`framework_experiment_repository_separation.md`](framework_experiment_repository_separation.md) | active design and work ledger for separating generic framework infrastructure from real tasks and campaigns |
 
 ### Task-specific analysis
 

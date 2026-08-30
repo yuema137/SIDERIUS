@@ -594,7 +594,12 @@ def apply_monitored_files(config: HealthChecksConfig, files: list[int]) -> Healt
     )
 
 
-def validate_health_scope(config: HealthChecksConfig, resolved_scope: list[int]) -> None:
+def validate_health_scope(
+    config: HealthChecksConfig,
+    resolved_scope: list[int],
+    *,
+    dataset_partition_count: int | None = None,
+) -> None:
     """Startup invariant: every file-accessing check stays inside the scope.
 
     Covers ALL checks, not only blocking ones. A check WITHOUT an explicit
@@ -606,9 +611,16 @@ def validate_health_scope(config: HealthChecksConfig, resolved_scope: list[int])
 
     Raises:
         ValueError: Listing every offending gate/check with remediation.
+
+    ``dataset_partition_count`` is the resolved run topology when composition
+    has not yet been activated. Omitting it preserves the bound/legacy lookup.
     """
     scope_set = set(resolved_scope)
-    num_files = resolve_dataset_profile().partition_count
+    num_files = (
+        dataset_partition_count
+        if dataset_partition_count is not None
+        else resolve_dataset_profile().partition_count
+    )
     scope_is_full = scope_set == set(range(num_files))
     problems: list[str] = []
     for gate in config.health_gates:
@@ -777,6 +789,7 @@ def materialize_effective_config(
     workspace: str,
     resolved_scope: list[int] | None = None,
     task_health_binding: TaskHealthBinding = HealthBindingState.LEGACY_OMITTED,
+    dataset_partition_count: int | None = None,
 ) -> tuple[str, str]:
     """Materialize the run's effective HealthGate config to the workspace.
 
@@ -801,6 +814,9 @@ def materialize_effective_config(
 
     Returns:
         (effective_config_path, body_sha256)
+
+    ``dataset_partition_count`` lets a composed preflight validate completeness
+    against the already-resolved task instead of consulting an unbound default.
     """
     cfg, _task_config, resolved_plugins = load_composed_health_config(
         source_path, task_health_binding
@@ -808,7 +824,11 @@ def materialize_effective_config(
     if files is not None:
         cfg = apply_monitored_files(cfg, files)
     if resolved_scope is not None:
-        validate_health_scope(cfg, resolved_scope)
+        validate_health_scope(
+            cfg,
+            resolved_scope,
+            dataset_partition_count=dataset_partition_count,
+        )
 
     # State A adds no keys, so its document is the pre-08b one exactly.
     document = {

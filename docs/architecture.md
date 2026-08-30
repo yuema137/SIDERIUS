@@ -539,8 +539,8 @@ advisor and does not exist yet.
 Agent-generated models (`ml_model_implementor` outputs) are written into
 per-attempt workspace directories and, once validated, *promoted* into the
 resolved **generated-capability library**
-(`$SIDERIUS_GENERATED_LIBRARY_DIR` else `~/.siderius/generated_library` —
-`core/generated_library.py`; arXiv P1) under `models/` as `.py` files. Each
+(`{workspace}/generated_library` for supported workflow and standalone-node
+entry points; `core/generated_library.py`) under `models/` as `.py` files. Each
 plugin must define:
 
 - `PLUGIN_MODEL_TYPE: str` — unique model type key

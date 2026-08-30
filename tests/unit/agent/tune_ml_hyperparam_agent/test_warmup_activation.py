@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from execute_tools.dataset_config import TIDMAD_PROFILE
+from execute_tools.task_data_path import bind_task_data_path
 
 
 def test_warmup_skipped_when_data_dir_is_none():
@@ -161,3 +162,38 @@ def test_warmup_path_entered_with_valid_data_dir(tmp_path, capsys):
     # Without a real dataset the measurement cannot complete; the point of
     # this test is WHERE it stopped, not that it produced a number.
     assert ms is None
+
+
+def test_composed_warmup_materializes_the_task_owned_scope(monkeypatch, tmp_path):
+    """Catch the external TIDMAD scope identity failure from issue #392."""
+    import torch
+
+    from agent.skills.evaluate_time_skill.wrapper import _measure_ms_per_step
+
+    external_scope = object()
+    observed = []
+
+    class ExternalDataPath:
+        task_data_path_id = "external_warmup_test"
+
+        def training_dataset(self, scope, params):
+            observed.append((scope, params.max_samples))
+            return [(torch.tensor([0]), torch.tensor([0]))]
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    with bind_task_data_path(ExternalDataPath()):
+        measured, _breakdown = _measure_ms_per_step(
+            model_type="unregistered_warmup_model",
+            model_config={"segmentation_size": 1000},
+            train_config={"batch_size": 1, "epochs": 1},
+            loss_config={},
+            data_dir=str(tmp_path),
+            sample_set={"0": [0]},
+            profile=TIDMAD_PROFILE,
+            task_scope=external_scope,
+            n_warmup_batches=0,
+            n_timed_batches=1,
+        )
+
+    assert measured is None
+    assert observed == [(external_scope, 1)]

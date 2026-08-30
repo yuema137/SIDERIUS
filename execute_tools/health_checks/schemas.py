@@ -248,6 +248,17 @@ class HealthCheckContext(BaseModel):
         ),
         exclude=True,
     )
+    evaluation_payload_fn: Callable[[], object] | None = Field(
+        default=None,
+        description=(
+            "Optional lazy reader for the task-owned evaluation payload. "
+            "The framework wires this to TaskDataPath.read_evaluation_payload "
+            "after inference; view providers use it instead of reconstructing "
+            "a task's artifact filename or storage layout. Excluded from JSON "
+            "serialisation because the context never crosses a process boundary."
+        ),
+        exclude=True,
+    )
     target_path_fn: Callable[[int], str] | None = Field(
         default=None,
         description=(
@@ -311,6 +322,22 @@ class HealthCheckContext(BaseModel):
         if self.denoised_filename_fn is not None:
             return self.denoised_filename_fn(file_index)
         return None
+
+    def load_evaluation_payload(self) -> object:
+        """Decode this round's deliverable through the task-owned codec.
+
+        Raises:
+            RuntimeError: no task-owned payload reader was supplied. A view
+                provider that advertises a payload-backed capability cannot
+                silently fall back to an unrelated filename convention.
+        """
+        if self.evaluation_payload_fn is None:
+            raise RuntimeError(
+                "this health context has no task-owned evaluation payload reader; "
+                "the run must wire TaskDataPath.read_evaluation_payload before a "
+                "payload-backed view can materialize"
+            )
+        return self.evaluation_payload_fn()
 
     def get_target_path(self, file_index: int) -> str | None:
         """Resolve the target-signal HDF5 filename for one file_index.

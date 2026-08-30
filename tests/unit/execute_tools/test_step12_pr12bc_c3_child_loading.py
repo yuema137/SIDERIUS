@@ -33,25 +33,16 @@ from __future__ import annotations
 import ast
 import os
 import pathlib
+import subprocess
+import sys
 import textwrap
 
 import pytest
 
-# The built-ins' bootstrap, performed at COLLECTION time — deliberately, and
-# not for tidiness. These modules register their implementations as an import
-# side effect. A FIRST import that happens inside a test whose fixture has
-# replaced `_REGISTRY` registers into the temporary dict, which is discarded on
-# teardown — and the module is now in `sys.modules`, so it never registers
-# again. Every later test in the process then sees a registry missing `tidmad`,
-# and the failure surfaces in an unrelated module.
-#
-# Found exactly that way: C1 imported `tidmad_data_path` inside a test body,
-# and `test_step10_p1_c3_transport.py` failed three modules later. Collection
-# is the one moment guaranteed to precede every test.
-import execute_tools.davis_data_path
-import execute_tools.pets_data_path
+# Import the former built-ins at collection time so the regression below can
+# reload the exact production modules. Importing real-task modules must now be
+# registry-neutral: composed children resolve from their transported manifest.
 import execute_tools.task_data_path as tdp
-import execute_tools.tidmad_data_path
 from execute_tools.task_data_path import (
     TaskDataPathResolutionError,
     content_identity,
@@ -116,6 +107,37 @@ def _builtin(id_: str = "c3_builtin", *, cls_name: str = "Builtin"):
     ):
         ns[method] = lambda self, *a, **k: None
     return type(cls_name, (), ns)()
+
+
+class TestRealTaskImportsAreRegistryNeutral:
+    def test_importing_real_task_modules_does_not_shadow_a_composed_child(self):
+        """Catches the separated-TIDMAD incident from 2026-08-29.
+
+        The parent pinned an external ``tidmad`` implementation, but child
+        imports registered the byte-identical in-tree class first. The module
+        identity then differed and the child refused before training. If any
+        of these imports registers again, the external manifest can be
+        shadowed before child resolution.
+        """
+        code = """
+import execute_tools.davis_data_path
+import execute_tools.pets_data_path
+import execute_tools.tidmad_data_path
+from execute_tools.task_data_path import registered_task_data_path_ids
+print(registered_task_data_path_ids())
+"""
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(REPO_ROOT)
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip().splitlines()[-1] == "[]"
 
 
 # ======================================================================

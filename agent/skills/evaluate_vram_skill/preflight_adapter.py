@@ -43,6 +43,7 @@ from agent.skills.evaluate_vram_skill.isolated_probe import (
     HardwareSnapshot,
     IsolatedProbeSpec,
     PreflightOutcome,
+    TaskProbeDataSpec,
     default_worker_memory_limit_bytes,
     run_isolated_preflight,
 )
@@ -226,6 +227,7 @@ def run_production_preflight(
     loss_dir: str | None,
     deadline_seconds: float = 900.0,
     model_io_contract: ModelIOContract | None = None,
+    task_probe_data: TaskProbeDataSpec | None = None,
 ) -> dict[str, Any]:
     """Run one candidate's pre-flight in a child and return the legacy dict.
 
@@ -249,6 +251,11 @@ def run_production_preflight(
     resolved here. An explicit ``None`` means "this caller genuinely has no
     run-scoped directory" and reproduces the legacy global-dir behaviour;
     it is a statement, not an omission.
+
+    ``task_probe_data`` is present only for a composed attempt with a
+    task-owned training scope. The isolated worker verifies and materializes
+    it through the existing task-data contract; this parent never constructs
+    the candidate model or transfers a large tensor over JSON.
     """
     snapshot = build_hardware_snapshot(hardware_context)
     workdir = Path(workspace) / "preflight_workers"
@@ -265,6 +272,7 @@ def run_production_preflight(
         model_io_contract=model_io_contract,
         plugin_dir=plugin_dir,
         loss_dir=loss_dir,
+        task_probe_data=task_probe_data,
     )
     # No try/except around this call: a worker failure is already a typed
     # PROBE_INFRASTRUCTURE_FAILURE, and catching it to retry in-process is

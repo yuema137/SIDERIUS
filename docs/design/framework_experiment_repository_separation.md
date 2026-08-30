@@ -1,0 +1,817 @@
+# Framework and Experiment Repository Separation
+
+**Status:** ACTIVE DESIGN AND WORK LEDGER
+**Decision date:** 2026-08-29
+**Implementation status:** In progress
+**Repositories:** `SIDERIUS` (framework) and proposed private `siderius-exp` (experiments)
+
+## 1. Purpose
+
+SIDERIUS must be usable as a task-generic scientific machine-learning framework without carrying the private operational state of any particular scientific campaign. At the same time, the framework repository must remain independently executable and must prove its end-to-end contracts through lightweight examples.
+
+This document defines the boundary between:
+
+1. the reusable SIDERIUS infrastructure;
+2. minimal examples that specify and test that infrastructure; and
+3. real task packages, campaigns, deployments, and scientific results maintained in a separate private experiment repository.
+
+It is also the work ledger for the separation. Design intent recorded here is not evidence that a migration has landed. Current capability must always be verified from source, tests, git ancestry, and published repository state.
+
+## 2. Governing decision
+
+The repository boundary is:
+
+~~~text
+SIDERIUS
+  generic framework
+  public task and plugin contracts
+  lightweight minimal examples
+  deterministic and pseudo end-to-end evidence
+
+siderius-exp
+  real scientific task packages
+  campaign protocols and frozen treatments
+  deployment and scheduler configuration
+  experiment records, reports, and provenance
+  exact dependency on a qualified SIDERIUS revision
+~~~
+
+`siderius-exp` is a consumer of SIDERIUS. It may use only supported caller-facing contracts. It must not depend on undeclared internal module layout, ambient files in a SIDERIUS checkout, or machine-specific paths hidden inside framework code.
+
+Separation is not permission to replace task coupling with a new monolith.
+Implementation slices must preserve responsibility-oriented modules, avoid
+adding branches or persistence duties to already oversized functions, and use
+the smallest existing seam that owns the behavior. A function growing toward
+hundreds of lines or a file growing toward thousands is a design-review signal,
+not an acceptable default. When a new responsibility cannot be explained and
+tested independently, split the responsibility before extending it; do not add
+an umbrella manager merely to make migration paths shorter.
+
+## 3. What remains in SIDERIUS
+
+SIDERIUS owns mechanisms whose meaning is independent of a particular scientific task or campaign:
+
+- node input and output schemas;
+- protocols and composition contracts;
+- task-manifest parsing and validation;
+- generic plugin interfaces and loading;
+- training, inference, scoring, Health, and resource-admission infrastructure;
+- persistence, provenance, resume, and comparability mechanisms;
+- generic command-line and programmatic entry points;
+- framework documentation;
+- synthetic fixtures and minimal examples required to prove the framework contracts;
+- tests for generic behavior, extension boundaries, portability, and fail-closed behavior.
+
+Framework tests must not freeze or assert the declarations, fingerprints,
+scientific policy, or runtime behavior of TIDMAD, Pets, DAVIS, Cancer Gene
+Identification, or any future real task. Those assertions belong to
+`siderius-exp`. Infrastructure tests use synthetic contracts; the only named
+pack they may exercise directly is the framework-owned Quickstart example.
+
+Framework code must not name a real task, dataset, campaign arm, pod, treatment, scientific baseline, or deployment. Compatibility adapters that predate this separation require an explicit migration or retirement decision; they do not become generic merely because they already exist.
+
+## 4. Minimal-example requirement
+
+SIDERIUS must retain a small collection of lightweight examples. They are executable specifications of the framework, not scientific experiments.
+
+No single example must cover the whole system. The example set, taken together, must cover the complete supported lifecycle:
+
+~~~text
+declare
+  -> interpret
+  -> optional literature review
+  -> propose
+  -> implement
+  -> validate
+  -> tune and train
+  -> infer
+  -> check scoreability
+  -> score
+  -> evaluate Health
+  -> record resource admission and provenance
+~~~
+
+The set must collectively exercise materially different contract shapes, including where supported:
+
+- regression and classification;
+- higher-is-better and lower-is-better metrics;
+- at least one custom model, loss, metric, or Health plugin;
+- a semantic target whose validity requires more than shape and dtype;
+- declared data splits with executable non-overlap evidence;
+- resource measurement and admission;
+- standalone node invocation and composed execution.
+
+Every minimal example must be:
+
+- small enough for routine CPU execution;
+- deterministic where the contract permits;
+- independent of private datasets, credentials, and machine-specific paths;
+- runnable from the current checkout;
+- suitable for pseudo or deterministic LLM execution in ordinary CI;
+- explicit when a real API or GPU path is optional;
+- free of scientific-performance claims;
+- bounded so it cannot grow into a campaign or benchmark suite.
+
+Real task assets must not be retained merely to make framework tests convenient. When a framework regression requires a particular semantic shape, the main repository should use the smallest synthetic fixture that preserves that behavior.
+
+The minimal examples are part of the framework repository rather than a
+separate package or repository. They must remain isolated from production
+framework modules: production code does not import an example, and each
+example uses the same public contracts available to an external consumer.
+Tests may exercise Quickstart directly; other minimal contracts should use
+synthetic fixtures selected for the failure class under test.
+
+## 5. What moves to `siderius-exp`
+
+The private experiment repository owns anything whose meaning or operation belongs to a real scientific task, comparison, or deployment:
+
+- TIDMAD, Pets, DAVIS, Cancer Gene Identification, and future real task packages;
+- task-specific manifests, plugins, metrics, Health declarations, and scientific context;
+- dataset acquisition instructions and data-location configuration;
+- Gold and other formal campaign launchers;
+- campaign arms, bands, iteration schedules, and frozen treatments;
+- literature-review ON/OFF ablations;
+- advice artifacts and prior-baseline context;
+- task-specific budgets and resource allocations;
+- pod, cluster, cloud, scheduler, and storage configuration;
+- scientific baselines, checkpoints, scores, reports, and result tables;
+- operator decisions and campaign ledgers;
+- monitoring and experiment-control utilities;
+- private reproduction receipts and provenance.
+
+The experiment repository may contain task-specific code. That code must enter SIDERIUS through declared extension surfaces rather than through framework modifications.
+
+## 6. Dependency and reproducibility contract
+
+Every experiment lineage must pin an exact qualified SIDERIUS tag or commit SHA. A floating dependency on a branch such as `master` or `main` is insufficient for a scientific run.
+
+Each run must record at least:
+
+- SIDERIUS repository URL and exact commit SHA;
+- `siderius-exp` commit SHA;
+- resolved task-composition identity;
+- hashes of task plugins, advice, and campaign configuration;
+- environment and dependency lock identity;
+- dataset identity without embedding private data in either repository;
+- executable argv and resolved runtime budgets.
+
+The preferred dependency direction is one-way:
+
+~~~text
+siderius-exp -> SIDERIUS
+SIDERIUS     -X-> siderius-exp
+~~~
+
+SIDERIUS CI must not clone or inspect `siderius-exp`. Experiment qualification may install a pinned SIDERIUS revision and run additional integration or hardware checks.
+
+### Runtime artifact ownership
+
+The SIDERIUS checkout is immutable during ordinary execution. A run receives
+one explicitly configured workspace, and every artifact created or mutated by
+that run must live below that workspace. This includes generated models,
+losses, tests, modules, skills, staged executable plugins, capability indexes,
+run-local calibration, caches, records, provenance, and resume state.
+
+Task packages remain read-only source inputs. A user-authored plugin may live
+in `siderius-exp` or another external package, but the executable content used
+by a run must be content-pinned and staged into the workspace. Datasets may
+remain in external read-only storage; their resolved identity and provenance
+are recorded rather than copying the data. Credentials remain external
+secrets and are never copied into a workspace.
+
+No run may implicitly absorb generated capabilities from another workspace,
+the framework checkout, or a per-user home directory. Cross-run reuse is an
+explicit export/import operation, not an ambient preload. Therefore the
+checkout-level `agent_generated/` tree and the default
+`~/.siderius/generated_library` are migration sources, not acceptable final
+runtime authorities. Framework code currently stored under `agent_generated/`
+must move to an ordinary package before the legacy tree is deleted.
+
+The executable acceptance boundary is:
+
+~~~text
+read-only SIDERIUS checkout
+  + read-only external task package
+  + writable configured workspace
+  -> generate, validate, train, score, persist and resume successfully
+  -> no checkout or home-directory mutation
+  -> no capability visibility across fresh workspaces
+~~~
+
+## 7. Boundary tests
+
+The separation is successful only if it is executable rather than conventional.
+
+Required evidence:
+
+1. SIDERIUS installs and its minimal-example suite runs without `siderius-exp`.
+2. `siderius-exp` installs against an exact SIDERIUS revision without copying or patching framework source.
+3. A fresh external checkout can declare and execute a real task solely through supported contracts.
+4. Repository scans reject experiment identifiers, deployment paths, and campaign-only assets from framework production code.
+5. Minimal examples collectively traverse the supported lifecycle.
+6. Experiment qualification records both repository SHAs and the resolved task identity.
+7. A task that requires a new generic capability produces a focused SIDERIUS issue and framework change; the task must not work around the missing capability by importing private internals.
+
+## 8. Initial migration inventory
+
+The following current SIDERIUS surfaces require classification before movement. This is an initial inventory, not an authorization to delete files.
+
+| Surface | Initial classification | Intended destination |
+|---|---|---|
+| `docs/campaign/**` | campaign decisions, evidence, and scientific protocol | `siderius-exp` |
+| `sdsc_submission_scripts/gold_task/**` | real task package | `siderius-exp` |
+| Gold campaign launch and stage scripts | campaign orchestration | `siderius-exp` |
+| Gold campaign tests | experiment qualification | `siderius-exp` |
+| generic chain and node entry points | reusable infrastructure | SIDERIUS |
+| task-composition schemas and loaders | reusable infrastructure | SIDERIUS |
+| real task examples and plugins | scientific consumers | `siderius-exp` |
+| small synthetic task fixtures | executable framework specifications | SIDERIUS |
+| historical task-specific design records | requires archival decision | pending classification |
+
+The Phase-A ownership groups are:
+
+| Group | Current representative paths | Action before removal |
+|---|---|---|
+| Gold campaign protocol and evidence | `docs/campaign/**`, `sdsc_submission_scripts/_gold_campaign_lib.sh`, `run_gold_campaign.sh`, `stage1_*`, `stage2_*` | copy the complete `v0.1.5` lineage into `siderius-exp`; preserve hashes and launch semantics |
+| Gold task package | `sdsc_submission_scripts/gold_task/**` on the `v0.1.4`/`v0.1.5` lineage | bind from `siderius-exp` against a pinned SIDERIUS revision |
+| Real example packs | `examples/tidmad/**`, `examples/oxford_iiit_pet/**`, `examples/davis_future_prediction/**` | move to `siderius-exp`; replace framework evidence before deletion |
+| Real task manifests | `configs/task_composition/{tidmad,pets,davis}.yaml` and their task-owned config families | move with their packages and make paths experiment-repository-relative |
+| Real task executable paths | `execute_tools/{tidmad,pets,davis}_data_path.py` | move behind existing task declaration and plugin loading; remove built-in bootstrap imports |
+| Real task acquisition and execution helpers | task-specific modules under `tools/example_packs/**` and task-named Gate scripts | move; retain only generic tooling in SIDERIUS |
+| Scientific references and analysis | `reference_data/**` and task-specific analysis/scoring scripts | move with provenance; do not treat them as framework defaults |
+| Generic framework entry points | `run_chain.sh`, `run_one_iteration.py`, generic training/inference/scoring engines | retain; remove task bootstrap and defaults without changing their generic contracts |
+| Framework contract tests | schema, registry, composition, fail-closed, subprocess-transport tests | retain and convert real-task fixtures to minimal synthetic fixtures where necessary |
+| Experiment qualification tests | Gold arm, band, treatment, campaign identity, and scientific-policy tests | move to `siderius-exp` |
+| Minimal example | `examples/quickstart/**` and `configs/task_composition/quickstart.yaml` | retain and mature; add only the smallest complementary synthetic example if the coverage matrix requires it |
+
+Files must be classified by responsibility, not by directory name. A campaign directory may contain a genuinely generic mechanism, and an apparently generic directory may contain task assumptions. Migration must trace imports, CLI ownership, tests, packaging, and runtime data flow before moving anything.
+
+### Phase-A baseline audit — 2026-08-29
+
+The separation branch is based on `origin/master` at `ed61f961`. The published `v0.1.4` release is a separate descendant lineage, and the unpublished local `campaign/v0.1.5-gold-repair` branch adds two further Gold-only commits. Migration must therefore treat the lineages differently:
+
+- framework cleanup starts from `origin/master`;
+- the complete experiment-asset source is the `v0.1.5` Gold lineage, which contains the `v0.1.4` additions;
+- no Gold-only commit is merged wholesale into the framework cleanup branch.
+
+The first dependency census found that the boundary is deeper than top-level manifests and campaign documentation:
+
+- training, inference, and scoring entry points directly import the TIDMAD, Pets, and DAVIS data-path modules;
+- `pyproject.toml` currently justifies a framework dependency on Pillow through the Pets and DAVIS built-in paths;
+- 53 tests directly reference a real-task data path, manifest, or example pack;
+- Gold-specific surfaces include campaign documentation, launchers, stage scripts, and campaign qualification tests;
+- the existing synthetic `quickstart` pack is the leading candidate to remain, but its current L2 maturity does not yet cover the complete lifecycle;
+- Pets and DAVIS currently carry important cross-task genericity evidence, so they cannot be removed until equivalent minimal synthetic evidence exists.
+
+This audit changes migration sequencing but not scope: direct task imports must be removed through the supported declared loading boundary, and regression value must be preserved through synthetic examples before real-task assets leave SIDERIUS.
+
+## 9. Release consequence
+
+The published `v0.1.4` release contains Gold-specific campaign assets. It remains an immutable historical release and must not be rewritten.
+
+The current local `campaign/v0.1.5-gold-repair` lineage contains two Gold-specific changes:
+
+- Trial/Formal batch-parity configuration for Gold;
+- a fresh `v015` Gold campaign identity.
+
+As of this decision, that lineage has no published `v0.1.5` tag or GitHub release. Gold-specific release work must pause while the repository boundary is established. Those changes belong with the Gold campaign in `siderius-exp` unless analysis identifies a separately justified generic framework defect.
+
+The next SIDERIUS release must not be qualified by silently bundling a specific campaign. Version choice and compatibility policy will be decided after the migration surface is known.
+
+## 10. Migration plan
+
+### Execution principle
+
+The migration changes repository ownership, not scientific treatment or framework behavior. Each step must prefer copying before deletion, existing extension contracts before new abstractions, and delta validation before broad validation. Refactoring unrelated code, redesigning orchestration, changing task semantics, or introducing a new packaging layer is outside scope.
+
+The active priority is restoration and clarification, not polish. SIDERIUS must
+carry the smallest generic mechanism required by currently supported execution;
+an anticipated extension does not justify infrastructure until a real supported
+consumer needs it. A repair is successful only when the previously working path
+still works, the responsibility boundary is clearer, and the caller-facing
+configuration or failure message is at least as understandable as before.
+Cosmetic refinement and speculative extensibility must not displace executable
+parity, external-consumer qualification, or removal of confirmed task coupling.
+
+New defects discovered by external task use must be filed in SIDERIUS when the failed responsibility belongs to a generic contract. The experiment repository may preserve a reproduction but must not carry a task-specific workaround for a framework defect.
+
+### Progress estimate and milestone map
+
+**Estimated overall completion: approximately 50%.** This is a planning
+estimate, not acceptance evidence. It measures completion of the separation,
+replacement evidence, external execution, and release qualification together;
+it does not attempt to measure whether the framework could be improved
+indefinitely. A milestone is complete only when its exit evidence is recorded
+in this ledger.
+
+| Milestone | Rough progress | Completion boundary | Current evidence or remaining gap |
+|---|---:|---|---|
+| M1. Repository boundary and consumer foundation | 90% | The ownership rule is frozen; `siderius-exp` exists; real tasks and Gold source assets are preserved with provenance and repository-local paths. | Repositories and initial imports exist. The first direct-asset test audit classifies all 38 executable references; the broader source/provenance census remains open. |
+| M2. Known generic blocker closure | 98% | Every currently reproduced external-consumer defect is fixed generically, has a focused regression, and passes its external witness. This means no **known material blocker**, not a claim that infrastructure is bug-free forever. | Issues #383--#387, #389--#393, #395, and #396 are repaired and externally accepted. The setup-only watchdog defect in #388 remains open; merge-candidate qualification remains in M7. |
+| M3. Minimal framework examples cover the supported lifecycle | 98% | Small CPU/offline examples collectively cover declaration through provenance, including semantic targets, metric direction, scoreability, Health, and resource admission. | Quickstart's deterministic scored handoff passes and now demonstrates framework-provided objective selection. Synthetic masked regression covers a task-owned objective, task-owned Health through the evaluation codec, task-valid probe data, matched H100 admission/refusal, bounded production training over semantic supervision, literature-review ON/OFF topology, deterministic production-workflow traversal, record-level primary-only selection, checkout-portable resume/refusal, and standalone typed node invocation. Eight assigned generic-contract tests plus the corrected observable-declaration module now use only generic fixtures; three fixture replacements remain in the original audited cohort. |
+| M4. Physical framework/experiment separation | 34% | SIDERIUS packages no real task, campaign, pod, deployment, or scientific-result asset; a read-only checkout plus one configured workspace supports the full lifecycle without ambient generated-capability state; all supported framework behavior remains covered by minimal examples and TIDMAD behavior parity. | Cancer and TIDMAD have explicit-checkout launchers; TIDMAD literature framing is task-owned. Import-time real-task registration no longer shadows an external child. A bounded separated TIDMAD chain now covers two complete iterations, measured warmup, Trial/Formal training, streamed inference, task persistence, scoring, Health, and attempt persistence. Real-task secondary-metric roster/direction/order parity now runs from `siderius-exp`; the infra declaration module now uses only a synthetic external-task fixture for zero/one/two-secondary, refusal, identity, relocation, nested-binding, and unwind behavior. Observable declaration and fingerprint additivity use only Quickstart and synthetic plugins. Standalone implementor outputs, the capability index, promoted models/losses, preload, source/description lookup, and proposer loss inventory now resolve below the configured workspace for supported entry points; explicit per-attempt workflow paths remain unchanged. Workspace-bound execution excludes home and checkout generated-capability fallbacks. Unbound low-level compatibility and movement of other task-specific defaults, tests, source copies, and campaign assets remain pending. |
+| M5. TestPod external-task qualification | 75% | Pets, DAVIS, and Cancer Gene Identification each complete a bounded end-to-end run from `siderius-exp` against one exact SIDERIUS revision, with valid scoring and best-score-versus-iteration evidence. | At SIDERIUS `0e092302` / `siderius-exp` `83f9957`, fresh DAVIS acceptance completed two Trial/Formal iterations and improved Formal MSE from `0.029764309801557073` to `0.016089017514105866`, proving lower-is-better trajectory and incumbent restoration under one Health identity. Earlier exact-revision runs completed two Pets iterations with correct scientific invalidation and two Cancer iterations with best mean AUPRC `0.385523263398698`. A synchronized final matrix and merge-candidate qualification remain. |
+| M6. Gold workflow portability and dry-run qualification | 10% | The Gold workflow runs from `siderius-exp`, uses the same qualified framework execution core, preserves four-band Stage 1 and Stage-2 refusal, and starts from a fresh campaign identity without inheriting invalidated state. | Gold source assets are preserved, but the launcher still assumes repository co-location and has not passed the separated dry-run qualification. |
+| M7. Integrated qualification and release | 0% | One final SIDERIUS merge-candidate passes canonical automatic CI; `siderius-exp` records both repository SHAs; release contents satisfy the boundary scan. | Intentionally deferred until M2--M6 produce the required evidence. |
+
+Percentages are deliberately coarse and may move non-linearly. Finding a new
+generic blocker can add work to M2 without invalidating completed evidence;
+discovering an optional improvement does not reopen a milestone unless it is a
+material correctness, portability, or supported-contract defect.
+
+### Shared infrastructure and campaign-specific orchestration
+
+GoldPod, TestPod, and different scientific tasks must use the same SIDERIUS
+execution mechanisms wherever their responsibilities are the same:
+
+~~~text
+siderius-exp task declaration and campaign policy
+  -> SIDERIUS composition and typed contracts
+  -> shared training, inference, scoring, Health, resource, and provenance core
+~~~
+
+Their differences belong above that shared core:
+
+| Concern | TestPod exploratory tasks | Gold campaign |
+|---|---|---|
+| task package and scientific metric | task-specific declarations in `siderius-exp` | frozen TIDMAD declarations in `siderius-exp` |
+| search policy and budget | exploratory and task-sized | operator-approved frozen treatment and production budgets |
+| literature review | controlled ON/OFF ablations are allowed | ON and frozen |
+| Stage 1 topology | task-specific exploratory runs | four independent bands |
+| result selection | task-specific best-score-versus-iteration evidence | per-band Stage-1 selection and later portfolio construction |
+| Stage 2 | not applicable unless a task declares its own campaign | explicit operator authorization required; currently unauthorized |
+| execution machinery | shared SIDERIUS core | the same shared SIDERIUS core |
+
+Gold may own a unique orchestration workflow, but it must not fork training,
+inference, scoring, Health, resource admission, or provenance mechanisms. A
+Gold-only execution mechanism is a boundary defect unless an explicit frozen
+requirement cannot be represented through the supported framework contracts.
+
+### TIDMAD behavior-preservation track
+
+Repository separation must not change TIDMAD scientific or campaign behavior.
+The comparison authority is the frozen pre-separation TIDMAD/Gold lineage
+recorded in this ledger, evaluated against the separated
+`siderius-exp -> SIDERIUS` composition with the same declared inputs. A
+separation change is not allowed to reinterpret a mismatch as an improvement;
+any unexplained semantic delta stops removal or release qualification.
+
+The following values require parity wherever the applicable frozen evidence
+can exercise them:
+
+- resolved task composition, model I/O contract, objective, primary metric,
+  metric direction, secondary metrics, scoreability contract, and Health
+  semantics;
+- training and evaluation scope identities, sample order, target semantics,
+  epoch and data-portion limits, Trial/Formal configuration, and candidate
+  model/loss configuration;
+- inference ordering, deliverable naming and content, scoring inputs, per-file
+  values, aggregate score, Health routing, and persisted scientific records;
+- declared resource budgets, admission policy, watchdog policy, and execution
+  argv after normalizing only checkout-specific absolute paths;
+- Gold literature review ON, four independent Stage-1 bands, per-band
+  selection, fresh campaign identity, no inheritance from invalidated runs,
+  and Stage-2 refusal without explicit operator authorization.
+
+Not every quantity can or should be byte-identical. Absolute repository paths,
+plugin locations, repository SHAs, timestamps, measured wall time, hardware
+identity, and other provenance facts are expected to describe the new
+environment. They may differ only in their owned fields and must not alter the
+scientific treatment or execution decision. Randomized behavior is compared
+under the same seed and declared scope; hardware-dependent measurements are
+checked for policy and provenance correctness rather than false numeric
+identity across devices.
+
+Parity is enforced incrementally:
+
+1. copy each TIDMAD or Gold asset with a content hash before deleting its
+   framework copy;
+2. classify every intentional portability edit separately from semantic code;
+3. run a bounded old-versus-separated witness for the touched behavior before
+   removing the old path;
+4. compare resolved executable artifacts, not design prose or historical
+   memory;
+5. retain the old artifact and stop the migration step when a mismatch is
+   unexplained;
+6. before release, run one integrated TIDMAD dry-run and the smallest bounded
+   execution needed to cover data loading, training, inference, deliverable
+   writing, scoring, Health, and persistence through the separated boundary.
+
+The bounded parity execution is engineering qualification, not a new Gold
+campaign and not Stage 2. It must not resume, mutate, or inherit from any
+invalidated campaign workspace.
+
+### Phase A — inventory and freeze
+
+- [x] Freeze the repository-separation principle.
+- [x] Record the minimal-example requirement.
+- [x] Record the current `v0.1.5` publication state.
+- [ ] Produce a path-by-path ownership inventory.
+- [ ] Identify imports and tests that cross the proposed boundary.
+- [x] Define the minimal-example coverage matrix.
+
+Validation:
+
+- repository ownership inventory accounts for every proposed moved path;
+- import and entry-point census identifies each cross-boundary dependency;
+- no production files move or change behavior in this phase;
+- `git diff --check` and document-link checks pass for the ledger update.
+
+### Phase B — establish the consumer repository
+
+- [x] Create the private `siderius-exp` repository.
+- [x] Define its initial package, environment, and exact-SHA dependency layout.
+- [ ] Copy task and campaign assets without deleting the source copies yet. Gold campaign source imported; real task packages remain.
+- [ ] Preserve provenance for every moved artifact. Gold import complete; later batches remain.
+- [ ] Prove one real task runs against an unmodified pinned SIDERIUS checkout.
+
+Validation:
+
+- a clean `siderius-exp` checkout installs an exact SIDERIUS SHA;
+- campaign and task dry-runs resolve all paths from the experiment checkout or explicit configuration;
+- no experiment file is imported by SIDERIUS;
+- copied artifacts retain content hashes or have an explicit, reviewed portability change;
+- no source asset is deleted from SIDERIUS until the copied consumer path is demonstrated.
+
+### Phase B.5 — repair generic blockers exposed by consumers
+
+- [x] Reproduce SIDERIUS #383 from `siderius-exp` through public contracts.
+- [x] Repair #383 in SIDERIUS without a task-name branch.
+- [x] Reproduce SIDERIUS #384 from `siderius-exp` through public contracts.
+- [x] Repair #384 in SIDERIUS without a task-name or loss-name branch.
+- [x] Reproduce SIDERIUS #385 from `siderius-exp` through public contracts.
+- [x] Repair #385 at the generic inference-to-deliverable boundary without a task-name or deliverable-format branch.
+- [x] Reproduce SIDERIUS #386 while composing external non-TIDMAD tasks.
+- [x] Repair #386 so generic workflow import resolves no task-specific data configuration.
+- [x] Repair #387 so an absent optional preflight time estimate remains a declared absence rather than reaching `float(None)`.
+- [ ] Repair #388 so setup-only watchdog evidence cannot shorten a valid task run to the minimum deadline.
+- [x] Repair #389 so task-owned variable-shape inference limits constrain both admission selection and execution.
+- [x] Repair #390 so the normal chain launcher forwards a task-owned literature-review config.
+- [x] Repair #393 so generic inference cannot write a summary dictionary to the legacy per-file timing sidecar.
+- [x] Re-run the external #393 witness through persisted attempt construction without repeating an unchanged failed run.
+- [ ] Pin `siderius-exp` to the qualified SIDERIUS repair revision.
+
+Validation:
+
+- each issue has one focused framework regression naming the exact defect;
+- existing fail-closed behavior remains covered;
+- targeted subsystem tests and relevant static checks pass in SIDERIUS;
+- the external consumer reproduction passes without patching SIDERIUS or weakening task validation;
+- unaffected lightweight framework probes retain their prior result;
+- no full CI is run manually when the final SIDERIUS PR workflow will provide the same evidence.
+
+The known issues are repaired after the consumer boundary exists but before source assets are removed from SIDERIUS. This ordering makes `siderius-exp` the external acceptance witness while keeping each repair owned and reviewed in the framework repository.
+
+### Phase C — complete framework examples
+
+- [x] Select the smallest set of examples that collectively covers the lifecycle.
+- [ ] Replace real-task test dependencies with behavior-preserving synthetic fixtures.
+- [x] Add a coverage matrix that maps each lifecycle contract to at least one example.
+- [ ] Verify CPU, offline, and checkout-portable execution.
+
+#### Phase-C coverage audit — 2026-08-29
+
+The target is **two** minimal packs, not one pack per removed real task:
+
+1. mature the existing `quickstart` classification pack;
+2. add one tiny synthetic masked-regression pack for the materially different
+   contract shapes quickstart should not absorb.
+
+A third pack is not authorized by this plan unless the executable matrix finds
+a contract that cannot be represented honestly by those two. TIDMAD is not a
+minimal framework example; it remains a real task in `siderius-exp` and is
+protected by the separate behavior-preservation track above.
+
+Current evidence and gaps:
+
+| Capability | Current quickstart evidence | Required minimal owner | Gap before real-pack removal |
+|---|---|---|---|
+| task declaration and fail-closed composition | proven | quickstart | none |
+| model plugin loading and content identity | proven | quickstart | none |
+| task-owned train/eval scope construction and canonical serialization | proven | quickstart | none |
+| deterministic split non-overlap | train and evaluation shards are distinct | quickstart | promote the existing fact into the final matrix |
+| training dataset and scalar semantic class target | proven | quickstart | none |
+| classification and higher-is-better primary metric | proven | quickstart | none |
+| inference codec, declared naming, scoreability, and metric computation | deterministic production handoff proven with exact `37/64` score | quickstart | live agent-chain tuner record remains historical evidence, not a prerequisite for framework-example separation |
+| interpret -> propose -> implement -> validate | live bounded evidence exists | synthetic masked regression | deterministic typed substitutes traverse the production workflow in exact order; no live LLM execution is claimed |
+| tune and real CPU training | live bounded evidence exists | quickstart | retain a bounded deterministic component witness |
+| optional literature-review invocation | an explicit non-default config invokes the offline advisor substitute and passes its four channels to the proposer; OFF neither reads a missing config nor invokes the advisor | synthetic masked regression workflow exercise | none for the framework topology; live retrieval is optional external evidence |
+| explicit absence of task Health | proven as `EXPLICIT_NONE` | quickstart | retain; do not replace it with a Health roster |
+| continuous regression and lower-is-better ordering | composed and scored deterministically | synthetic masked regression | none for the core metric path |
+| custom objective with a semantic target beyond shape and dtype | masked MSE consumes `[truth, validity_mask]`; a `[B,1]` shape surrogate refuses; the production training engine completes one bounded CPU optimizer step and persists the model | synthetic masked regression | none |
+| task-owned Health plugin and continuous view | constant task artifact FAILS; varied task artifact PASSES through the declared blocking gate | synthetic masked regression | none |
+| secondary observational metric | composed masked MAE executes beside primary masked MSE; a conflicting MAE/MSE control proves persisted ranking selects only by masked MSE | synthetic masked regression | none |
+| prediction-aligned source/target deliverable context | real minimal codec rematerializes source and persists aligned prediction/target/mask rows | synthetic masked regression | none |
+| resource measurement and admission over a task-valid batch | isolated production worker materializes real `[B,3]` input plus semantic `[B,2]` target; matched H100 controls measured `0.229 GB`, admitted under `1.0 GB`, and refused under `0.001 GB` | synthetic masked regression | physical GPU evidence is recorded separately from ordinary CI; no remaining example gap |
+| persistence, run identity, and resume/comparability refusal | byte-identical copies at unrelated roots share a fingerprint and validate one workspace; a declared-plugin edit changes the fingerprint and refuses without rewriting the lock | synthetic masked regression | none for the composition-identity boundary |
+| standalone node invocation | the interpretation node accepts `InterpretationInput` and returns `InterpretationOutput` directly with no workflow state or LLM call on its deterministic cold-start path | synthetic masked regression | none for the public typed-call boundary |
+| complete supported composition | no scored quickstart chain | both packs collectively | deterministic production-workflow traversal plus real component execution are proven separately; live LLM execution remains outside ordinary CI |
+
+The planned synthetic regression task is deliberately small: fixed generated
+tabular or short-vector inputs, continuous outputs, an explicit supervision
+mask, a lower-is-better metric, and a few CPU batches. It must not imitate
+TIDMAD geometry, DAVIS video structure, a scientific dataset, or a campaign.
+Its purpose is to preserve framework contract diversity, not task realism.
+
+#### Real-task test disposition
+
+A lexical census currently finds 54 Python test files naming Oxford-IIIT Pets,
+49 naming DAVIS future prediction, and 262 naming TIDMAD. These counts are an
+inventory signal, not a deletion count: one file may mention a task only in
+historical prose, while another may own several non-equivalent behaviors.
+Each test is classified by the defect it catches before it moves:
+
+| Bucket | Destination | Rule |
+|---|---|---|
+| generic contract test using a real task as convenient input | SIDERIUS | replace only the fixture with quickstart or synthetic regression; preserve the original failure class |
+| real dataset acquisition, task declaration, plugin, metric, Health threshold, baseline, or scientific result | `siderius-exp` | move with task provenance and qualify against a pinned framework revision |
+| TIDMAD or Gold behavior required for migration parity | `siderius-exp` parity suite | compare frozen old and separated paths before deleting the old source |
+| historical guard whose landed generic invariant has another authority | archive or retire after review | removal requires naming the surviving authority; test count reduction alone is not a reason |
+
+The first direct-asset audit narrows the lexical census to 38 Python files that
+actually reference a shipped real-task manifest, task Health file, legacy
+machine-data config, Gold launcher, advice artifact, or baseline artifact.
+This is the migration queue, not an authorization to delete. Its reviewed
+disposition is:
+
+| Disposition | Count | Files | Required action before removal |
+|---|---:|---|---|
+| move with experiment/campaign ownership | 18 | `tests/helpers/{health_task_config,step09_5a_llm_parity_capture}.py`; `tests/unit/agent/tune_ml_hyperparam_agent/test_dbud6_mode_aware_epoch_caps.py`; the five shipped-task declaration/quickstart modules under `tests/unit/examples/`; the seven directly matched Gold/data launcher modules under `tests/unit/sdsc_submission_scripts/`; `tests/unit/workflows/{test_step00_task_config_baselines,test_step12_pr12a_c7_proposal_blocks,test_step12_pr12d_checkpoint_b}.py` | Copy to `siderius-exp`, make every path consumer-repository-local, and pass against one pinned SIDERIUS SHA. TIDMAD behavior tests additionally require old-versus-separated parity. |
+| keep in SIDERIUS after replacing the real fixture | 11 | `tests/unit/core/{test_fscanf1_formal_eval_portion_lock,test_advice_identity_lock}.py`; `tests/unit/execute_tools/health_checks/test_c12p_cp12_composition_cache_authority.py`; `tests/unit/execute_tools/test_step12_pr12d_f12d27_training_scope_transport.py`; `tests/unit/ml_models/test_step12_pr12d_dp_plugin_binding.py`; `tests/unit/tools/ci/{test_preflight,test_provenance}.py`; `tests/unit/workflows/{test_arxiv_286_neutral_start_census,test_step10_p2b_c1_secondary_declaration,test_step12_pr12d_d1_task_instance_config,test_step12_pr12d_f12d31_objective_authority}.py` | Preserve the named generic failure class while replacing task/campaign values with quickstart or synthetic-regression declarations. `test_step12_pr12d_f12d31_objective_authority.py` was initially blocked on the bounded production-training witness; that prerequisite is now satisfied, but its mixed generic and DAVIS-incident responsibilities must be split before replacement. |
+| split mixed framework and real-task responsibilities | 7 | `tests/conftest.py`; `tests/unit/execute_tools/health_checks/test_config_loader.py`; `tests/unit/execute_tools/test_step12_pr12d_d4a_scoring_restructure.py`; `tests/unit/guardrails/test_step12_pr12d_d0_baselines.py`; `tests/unit/workflows/{test_step10_p56_c0_three_task_baseline,test_step10_p56_c5_wiring_closures,test_step12_pr12d_checkpoint_a}.py` | Keep generic schema, routing, subprocess, and aggregation guards in SIDERIUS; move exact TIDMAD/Pets/DAVIS declarations and historical parity assertions. Run both halves together before deleting the original mixed module. |
+| lexical match only; no real-asset dependency | 1 | `tests/unit/tools/test_user_contract_docs_census.py` | Keep. The match is a deliberately forbidden documentation example, not an executable task binding. The observable-declaration module was incorrectly assigned here: it composed all shipped real-task manifests and has now been converted to Quickstart-only evidence. |
+
+The first eight fixture replacements are complete. `test_step12_pr12d_f12d27_training_scope_transport.py`
+now uses the synthetic masked-regression pack and generated temporary shards
+instead of a machine-specific Pets data root. Its original failure class is
+unchanged: composed training and evaluation scopes must reach the training
+child when no legacy `SampleSet` exists. `test_advice_identity_lock.py`, renamed
+from `test_gold_advice_identity_lock.py`, now uses task-neutral run/advice paths
+and terminology while preserving the original five-row content-identity
+comparability matrix. `test_fscanf1_formal_eval_portion_lock.py` now uses a
+task-neutral bounded qualification fraction rather than naming the Gold
+campaign; its compared-value, legacy-resume, persistence, and transport failure
+classes are unchanged. `test_arxiv_286_neutral_start_census.py` now uses the
+quickstart and a temporary declared-naming task variant as its positive,
+negative-control, and omitted-naming witnesses instead of composing the shipped
+TIDMAD and Pets assets. The census still searches for the exact anchor tokens,
+and all composition calls now unwind through the existing registration scope so
+the test cannot poison a later task registry.
+`test_step12_pr12d_dp_plugin_binding.py` now derives its production-composition
+witness from quickstart plus a generic declared-naming task-data-path fixture
+instead of copying the shipped TIDMAD manifest and pinning TIDMAD's scientific
+fingerprint. Omitted and explicit-none sections are compared counterfactually;
+declared plugin content must still move the fingerprint, and every malformed
+section keeps its named refusal. `test_provenance.py` now injects task-neutral
+machine-config and external-resource declarations and asserts their exact
+present/absent states instead of naming the current TIDMAD, Pets, and DAVIS
+deployment resources. Production preflight defaults remain unchanged; moving
+those defaults is a separate source-ownership step. `test_preflight.py` now
+exercises machine-config presence and tracked-template
+absence with task-neutral names. Its external-resource declaration guard keeps
+the generic non-empty/measured invariant without freezing the current task
+inventory or aggregate skip count. Production preflight defaults remain
+unchanged. The remaining three files in the "keep after replacement"
+cohort stay pending; the historical counts above remain the audit baseline
+rather than being rewritten after each completion.
+
+The 38-file queue is complete only for the explicit path families named above.
+The broader 680-file lexical set remains a later source-removal census because
+task names in prompts, comments, golden records, and legacy compatibility code
+may still require ownership decisions even when they do not load a real asset.
+No test moves merely because it appears in either count.
+
+The first implementation checkpoint will cover quickstart only: make its
+component evidence matrix explicit and close the deterministic composed
+scoring gap without changing its task semantics. The synthetic regression pack
+is the next checkpoint. Real-task files remain in SIDERIUS until both
+replacement evidence and the applicable parity witness pass.
+
+Validation:
+
+- the coverage matrix maps every supported lifecycle phase to at least one example;
+- each example passes independently on CPU with no network, API key, private data, or external repository;
+- the combined pseudo or deterministic suite traverses the complete lifecycle;
+- split-overlap checks, metric direction, scoreability, Health, and admission assertions fail when their owned behavior is deliberately broken;
+- optional real-API or GPU evidence is kept separate from ordinary CI.
+
+### Phase D — remove duplication from SIDERIUS
+
+- [ ] Move or retire campaign launchers and campaign-only tests.
+- [ ] Move real task packages and scientific documentation.
+- [ ] Remove task-specific imports and defaults from framework production code.
+- [ ] Preserve only explicitly approved historical records, with clear archive labeling.
+- [ ] Run targeted boundary and packaging validation.
+
+Validation:
+
+- SIDERIUS package build contains no real task, campaign, pod, or deployment asset;
+- source and packaging scans reject forbidden experiment identifiers and paths;
+- SIDERIUS minimal examples pass without `siderius-exp` present;
+- `siderius-exp` real-task dry-runs and selected bounded executions pass against the pinned SIDERIUS revision;
+- public imports used by `siderius-exp` are documented supported surfaces;
+- every removed TIDMAD/Gold surface has a recorded old-versus-separated parity witness, or a documented proof that it is provenance-only and execution-inert;
+- removal commits contain no unrelated behavior change.
+
+### Phase E — qualify and release
+
+- [ ] Qualify SIDERIUS independently through its minimal examples.
+- [ ] Qualify `siderius-exp` against an exact SIDERIUS revision.
+- [ ] Record both repository SHAs in experiment evidence.
+- [ ] Decide the next SIDERIUS version from the actual compatibility delta.
+- [ ] Publish only after the repository boundary is verified.
+
+Validation:
+
+- targeted evidence from Phases B--D is recorded in this ledger;
+- one canonical automatic SIDERIUS PR CI run passes on the final merge-candidate SHA;
+- `siderius-exp` qualification records both repository SHAs and resolved task identities;
+- Gold dry-run resolves the intended fresh campaign identity, Trial/Formal batch policy, frozen treatment, budgets, and Stage-2 refusal from `siderius-exp`;
+- no Gold workload is required to prove repository packaging, while any later scientific launch remains subject to its own hardware qualification;
+- release contents are inspected before tag and publication.
+
+## 11. Decision log
+
+| Date | Decision | Status |
+|---|---|---|
+| 2026-08-29 | Separate reusable infrastructure from real scientific tasks and campaigns using a private `siderius-exp` consumer repository. | FROZEN |
+| 2026-08-29 | Keep lightweight minimal examples in SIDERIUS; collectively they must cover the supported end-to-end lifecycle. | FROZEN |
+| 2026-08-29 | Minimal examples are executable framework specifications, not scientific benchmarks or campaigns. | FROZEN |
+| 2026-08-29 | `siderius-exp` depends on an exact qualified SIDERIUS tag or SHA; SIDERIUS never depends on `siderius-exp`. | FROZEN |
+| 2026-08-29 | GoldPod, TestPod, and all task packages share the same SIDERIUS execution core; campaign-specific topology and treatment remain in `siderius-exp`. | FROZEN |
+| 2026-08-29 | Repository separation may change ownership and explicit paths but must preserve frozen TIDMAD scientific and campaign behavior through incremental old-versus-separated parity evidence. | FROZEN |
+| 2026-08-29 | Two minimal packs are the default complete framework example set: mature quickstart plus one synthetic masked-regression contrast; a third requires an executable contract gap. | FROZEN |
+| 2026-08-29 | Do not publish the current Gold-specific `v0.1.5` lineage before the separation is reconciled. | ACTIVE HOLD |
+| 2026-08-29 | Gold is stopped. Current execution work is limited to TestPod; Gold portability remains a later separation milestone and no Gold workload may be resumed or launched during this hold. | ACTIVE HOLD |
+| 2026-08-29 | Generic deliverable writing carries an optional typed source context so a task can rematerialize prediction-aligned values through its own validation data path. | IMPLEMENTED ON SEPARATION BRANCH |
+| 2026-08-29 | Active migration work prioritizes executable restoration and clearer caller boundaries over polish or speculative extension points; a repair must preserve the proven path and improve or retain the caller-facing failure/configuration surface. | FROZEN |
+| 2026-08-29 | Generic workflow import performs no task selection; legacy TIDMAD/SIDERIUS machine configuration resolves lazily on first legacy value access. | IMPLEMENTED ON SEPARATION BRANCH |
+| 2026-08-29 | Round-level production-policy comparison must resolve under the composed run's task-owned Health binding; repaired without weakening plugin isolation. | IMPLEMENTED ON SEPARATION BRANCH |
+| 2026-08-29 | A composed run's VRAM worker must obtain one semantic training batch through the existing task-data contract; shape-and-dtype synthesis remains only for legacy runs without a task-owned scope. | IMPLEMENTED ON SEPARATION BRANCH |
+| 2026-08-29 | A composed run may enable the existing literature-review node only with an explicit non-default config; the shipped TIDMAD-owned config remains refused before any node call. | IMPLEMENTED ON SEPARATION BRANCH |
+| 2026-08-29 | Real-task qualification may use a smaller set of complete task instances, but formal scientific comparison must use the comparator's complete dataset and evaluation protocol. Cancer qualification uses complete `cpdb` and `ltg`; its formal workflow retains all eight networks. | FROZEN |
+| 2026-08-29 | The framework transports generic sampling parameters through `TaskDataPath.training_dataset`; each task owns the meaning of its sampling units and may refuse unsupported fractional semantics. No universal sampler is introduced. | IMPLEMENTED ON SEPARATION BRANCH |
+| 2026-08-29 | A task selects a framework-provided objective through validated `objective.config`, or supplies new behavior through `objective.implementation`; exactly one form is allowed and both resolve to the existing `LossConfig` boundary. | IMPLEMENTED ON SEPARATION BRANCH |
+| 2026-08-29 | Health view providers consume the task-owned evaluation codec through a lazy context reader. They must not reconstruct artifact filenames or storage layouts owned by another task. | IMPLEMENTED ON SEPARATION BRANCH |
+| 2026-08-29 | A generic launch does not impose a Formal-only minimum batch size. A task or campaign may opt into an explicit floor, but Trial success is otherwise executable evidence for the same batch size in Formal. | IMPLEMENTED ON SEPARATION BRANCH |
+| 2026-08-29 | Output representation is an explicit experiment lock when scientific comparability requires one. Pets qualification locks `classifier`; DAVIS and Cancer qualification lock `regressor`; the generic framework retains its intentionally unconstrained compatibility mode. | IMPLEMENTED IN `siderius-exp` |
+
+## 12. Migration evidence ledger
+
+| Date | Repository | Commit or issue | Evidence and disposition |
+|---|---|---|---|
+| 2026-08-29 | `siderius-exp` | `108dea0` | Private consumer repository created with one-way SIDERIUS dependency, explicit directory ownership, exact `v0.1.4` commit pin, and migration provenance rules. |
+| 2026-08-29 | `siderius-exp` | `6a71218` | Gold campaign documents, task overlays, launchers, and state helpers imported byte-identically from SIDERIUS `624e1a93`; per-file SHA256 manifest recorded. Imported assets are explicitly not yet portable or launch-qualified. |
+| 2026-08-29 | `siderius-exp` | `4ec9177` | TIDMAD, Oxford-IIIT Pet, DAVIS future prediction, and Cancer Gene Identification task packages imported from their recorded source revisions; no framework source was deleted. |
+| 2026-08-29 | `siderius-exp` | `3b1dded` | Repository ignore rules narrowed to root data directories so task-owned data manifests remain versioned; the omitted TIDMAD runtime implementation was restored and added to the import hash record. |
+| 2026-08-29 | `siderius-exp` | `748824f` | Four real task manifests changed to package-local references and existing file-based loading; all four composed successfully against a clean checkout of pinned SIDERIUS `98610b8d`. No framework source change was needed. The unsuppressed TIDMAD import warning produced issue #386. |
+| 2026-08-29 | `siderius-exp` | `8845087` | External issue #383 witness preserved. It fails against pinned SIDERIUS `98610b8d` with the task-owned Pets plugin roster followed by a legacy empty-roster request, and passes against repair `f23c4e7f`. No dataset or training is involved. |
+| 2026-08-29 | `siderius-exp` | `0962876` | External issue #384 witness preserved with a temporary task-valid graph fixture. It fails against pinned SIDERIUS `98610b8d` before capacity evaluation because the synthesized zero target has no labeled rows, and passes through isolated resource measurement against repair `c6ce7640`. |
+| 2026-08-29 | SIDERIUS | `49f3f8be` | Separation design and work ledger established on `refactor/framework-exp-separation`. |
+| 2026-08-29 | SIDERIUS | #383 | Composed task Health binding was lost during round evaluation; reproduced externally and repaired by `f23c4e7f`. |
+| 2026-08-29 | SIDERIUS | #384 | VRAM admission probes could not construct task-valid semantic targets; reproduced externally and repaired by `c6ce7640`. |
+| 2026-08-29 | SIDERIUS | #385 | Generic inference dropped the physical source needed by some valid scientific deliverables; reproduced externally and repaired by `26c1cbd8`. |
+| 2026-08-29 | `siderius-exp` | `8b197d5` | External issue #385 witness preserved with a temporary source-aware task. It fails against pinned SIDERIUS `98610b8d` because the writer receives no physical source, and passes against `26c1cbd8` with prediction/target order preserved. |
+| 2026-08-29 | SIDERIUS | #386 | Generic workflow import selected and read legacy TIDMAD machine configuration before task composition; reproduced externally and repaired by `e26718db`. |
+| 2026-08-29 | SIDERIUS | #387 | The proposer preflight converted an explicitly absent optional estimate with `float(None)`; repaired by `52e3e8e0` without inventing a fallback estimate. |
+| 2026-08-29 | SIDERIUS | #388 | Setup-only watchdog evidence can collapse a valid task deadline to the 120-second minimum. Qualification disables the watchdog while the generic repair remains open. |
+| 2026-08-29 | SIDERIUS | #389 | Generic inference selected a batch without consulting task-owned variable-shape constraints, then attempted to stack complete graphs with different record counts; repaired by `60fffb1e`. |
+| 2026-08-29 | SIDERIUS | #390 | The chain launcher exposed literature-review topology flags but rejected the iteration runner's existing task-owned config flag; repaired by `384cc9e8`. |
+| 2026-08-29 | SIDERIUS | #391 | Composed generic inference eagerly retained every raw prediction before task persistence. A 5,000-sample TIDMAD classification scope could approach 80 GiB of host memory and was killed before writing. Repaired by `a4e63655` using the existing iterable writer contract. |
+| 2026-08-29 | SIDERIUS | #392 | The time warmup constructed `execute_tools.tidmad_data_path.TidmadScope` even when the active binding came from an external task plugin. Repaired by `d53ac914` using the attempt's existing task-owned scope and existing `max_samples` materialization bound. |
+| 2026-08-29 | SIDERIUS | #393 | Generic inference wrote its summary dictionary to the legacy per-file timing sidecar. Scoring and Health completed, but attempt persistence sliced the dictionary as a list and failed with `KeyError`. Repaired and externally accepted by `7476bf44`; the issue is closed. |
+| 2026-08-29 | `siderius-exp` | `9db069d` | External issue #386 witness preserved. It promotes the TIDMAD missing-config warning to an exception, fails against `98610b8d`, and composes Cancer Gene Identification successfully against `e26718db`. |
+| 2026-08-29 | SIDERIUS | `f23c4e7f` | Issue #383 repaired by carrying the existing task Health binding into round-level production-policy composition. The run-scope guard remains unchanged. Focused Health tests pass: 22 passed. |
+| 2026-08-29 | SIDERIUS | `c6ce7640` | Issue #384 repaired by transporting the resolved task manifest identity and serialized training scope to the existing isolated worker, which materializes one full batch through `TaskDataPath.training_dataset`. No task or loss name appears in framework logic; legacy synthetic probes and CPU-only behavior remain. Focused resource and node-boundary tests pass: 122 passed; Ruff and `git diff --check` pass. Local pyright was unavailable and remains assigned to final PR CI. |
+| 2026-08-29 | SIDERIUS | `26c1cbd8` | Issue #385 repaired by adding an optional typed source context to the existing deliverable-write request. Generic inference supplies the physical data root, sample count, and fixed validation-dataset ordering contract; tasks remain responsible for rematerialization and mismatch refusal. The frozen four-method data-path contract and prediction-only behavior remain unchanged. Focused compatibility tests pass: 76 passed; Ruff and `git diff --check` pass. |
+| 2026-08-29 | SIDERIUS | `e26718db` | Issue #386 repaired by deferring legacy TIDMAD/SIDERIUS machine-config resolution until a legacy value is actually requested. Generic workflow import and explicit composed-root refusal no longer consult task-specific configuration; historical constant imports and legacy warning/failure semantics remain. Focused tests pass: 100 passed; Ruff and `git diff --check` pass. |
+| 2026-08-29 | SIDERIUS | `52e3e8e0` | Issue #387 repaired at the optional-estimate boundary. The proposer preflight preserves `None` instead of converting it to a float; focused tests and static checks pass. |
+| 2026-08-29 | SIDERIUS | `60fffb1e` | Issue #389 repaired through an optional task-owned inference batching protocol. The isolated probe carries the declared maximum, the generic batch resolver selects only within it, and execution rechecks it before materialization. Focused validation passes: 61 tests, Ruff, and `git diff --check`. A two-network real-data checkpoint witness selected batch 1, emitted two batches, and reproduced mean validation AUPRC `0.2677163024212869`. |
+| 2026-08-29 | SIDERIUS | `384cc9e8` | Issue #390 repaired by transporting the iteration runner's existing `--ml_lit_review_config` flag through `_chain_common.sh`. Five focused chain-forwarding tests, shell syntax, external dry-run, and `git diff --check` pass. |
+| 2026-08-29 | `siderius-exp` | `6b30404` | The TIDMAD quickstart ran from the external package through literature review, proposal, implementation, seven validation checks, and tuner admission on an RTX 5090. Training refused before model execution because the child pre-imported SIDERIUS's built-in `tidmad` registration while the parent pinned the byte-identical external implementation; their content digests match, but their implementation module identities deliberately differ. This is direct evidence for M4's planned removal of built-in task bootstrap imports, not permission to weaken identity verification. |
+| 2026-08-29 | SIDERIUS | `5ccecd4f` | Real-task modules no longer mutate the task-data-path registry merely by import. Composed children resolve the transported manifest and verify its parent-pinned identity; explicitly uncomposed callers retain one bounded legacy TIDMAD bootstrap. Focused validation: 109 tests, external child-process identity witness, Ruff, and diff checks. |
+| 2026-08-29 | SIDERIUS | `a4e63655` | Issue #391 repaired without adding a capability family: generic inference enters the existing task writer before the first forward pass and yields detached predictions as they are produced. Writers that do not consume the declared sample count fail explicitly. Targeted generic, quickstart, and synthetic regressions: 57 passed; Ruff and diff checks pass. |
+| 2026-08-29 | SIDERIUS | `d53ac914` | Issue #392 repaired without a new scope adapter. Composed warmup uses the attempt's already-built task scope and bounds it through `EpochSamplingParams.max_samples`; uncomposed callers retain the legacy scope construction. Targeted validation: 50 passed, 3 skipped; Ruff and diff checks pass. A real external TIDMAD scope and generated model produced a two-batch median warmup of `48.1323 ms`. |
+| 2026-08-29 | SIDERIUS | `7476bf44` | Issue #393 repaired without a generic timing abstraction. Generic inference has no framework-owned file or PSD unit, so it emits the existing empty per-file measurement representation instead of an incompatible summary dictionary. Legacy per-file timing remains unchanged and record construction uses its existing absent-measurement fallback. Targeted validation: 104 passed; Ruff and diff checks pass. |
+| 2026-08-29 | `siderius-exp` | `7299c3e` qualification | A fresh external TIDMAD chain exercised the task-owned warmup repair through production: measured `47.12 ms` per step, trained 2,500 steps in 163 seconds, streamed 5,000 predictions in 157 batches and 54.93 seconds, wrote and scored four deliverables, and correctly invalidated constant-output collapse through Health. Attempt persistence then exposed #393. The unchanged retry was stopped, so the run remains diagnostic rather than authoritative. |
+| 2026-08-29 | `siderius-exp` | `06aaf4e` | Fresh external #393 acceptance completed measured warmup, 2,500 training steps in 124 seconds, 5,000 streamed predictions in 157 batches and 60.70 seconds, scoring, Health, and attempt persistence. The timing sidecar was `[]`, and the record persisted as `failed_mode_collapse`. Formal admission then exposed an experiment-launcher mismatch: the bounded quickstart left evaluation at the production 100% default, so even a 10,593-parameter model priced above 190 minutes. The experiment-only quickstart now pins `--formal_eval_portion 0.02`; shell syntax, source-authority checks, and the production dry-run resolve that value. No framework policy changed. |
+| 2026-08-29 | `siderius-exp` | `4f96461` | TIDMAD's task-owned writer now consumes streamed raw predictions, performs the same classification/regression decode and storage offset as the proven legacy path, and persists one file at a time. A package-local regression pins classification decode and injected-target alignment. The RTX 5090 delta witness reused the failed attempt's checkpoint and exact 5,000-sample scope at inference batch 32: 157 batches and four deliverables in 74.99 seconds, followed by finite anchor-normalized score `-10.509863893769241`. The stopped original chain remains non-authoritative. |
+| 2026-08-29 | SIDERIUS | `bebe1f0b` | Phase-C coverage audit selected a two-pack minimal set: mature quickstart plus one synthetic masked-regression contrast. The matrix assigns every supported lifecycle and contract-diversity requirement, records quickstart's scored-chain gap, and classifies real-task tests by responsibility before movement. No source asset was removed. |
+| 2026-08-29 | SIDERIUS | `92d25e00` | Quickstart's production generic-inference handoff now persists the task-declared artifact, decodes it through the task reader, and returns the composed metric's hand-computed `37/64 = 0.578125`. One task-owned naming authority serves both supported call shapes. Historical live-run records remain unchanged, and no TIDMAD or other real-task asset moved. |
+| 2026-08-29 | SIDERIUS | `f6786cef` | Added the synthetic masked-regression pack's core deterministic vertical slice: disjoint generated shards, continuous `[B,1]` output, semantic `[truth, mask]` supervision, source-aligned persistence, lower-is-better masked MSE, and observational masked MAE. Focused and adjacent CPU/offline checks pass; Health and resource admission remain the next checkpoint. |
+| 2026-08-29 | SIDERIUS | `0b28d6ae` | Added task-owned Health over valid predictions with fixed constant-FAIL and varied-PASS controls. The isolated resource worker now has example-owned evidence that a full batch preserves `[truth, mask]` supervision and that an oversized batch refuses explicitly. No GPU measurement is claimed. |
+| 2026-08-29 | SIDERIUS | `1acfe3bb` | The first H100 preflight exposed `PLUGIN_LOSS_REDUCTION = "mean_over_valid_elements"` as unsupported comparability metadata. The objective still computed correctly, but the loader treated its normalization as undeclared. The declaration now uses the supported `mean` vocabulary, with a focused loader/comparability regression. |
+| 2026-08-29 | SIDERIUS | `e1aa5e9b` | Fresh TestPod H100 production-preflight qualification at `1acfe3bb`: one 41-parameter candidate and task-valid `[8,3]` / `[8,2]` batch measured `0.229 GB`; the `1.0 GB` control admitted and the otherwise-identical `0.001 GB` control refused as `MEASURED_PEAK_ABOVE_VRAM_CAP`. Compact receipt and integrity test landed; full transient logs remain outside framework source. |
+| 2026-08-29 | SIDERIUS | `4f7e6760` | Closed the next minimal-example evidence checkpoint. The synthetic manifest traverses the production workflow in the exact interpret, propose, implement, validate, tune order using typed deterministic substitutes. A deliberately conflicting candidate pair proves persisted selection follows lower-is-better masked MSE even when observational masked MAE prefers the other candidate. Targeted adjacent regression: 78 passed; focused pack: 9 passed; Ruff and diff checks pass. |
+| 2026-08-29 | SIDERIUS | `db5c3ba4` | Added checkout-portable persistence and standalone-node evidence. Two byte-identical synthetic-package copies at unrelated roots derive one fingerprint and validate one workspace lock; editing the declared metric plugin moves the fingerprint, refuses resume, and leaves the lock byte-identical. The interpretation node runs directly through its typed public contract with no workflow state and no LLM call on cold start. The combined run exposed and repaired test-only Health registry leakage without weakening production run-scope refusal. Targeted adjacent regression: 54 passed, 1 skipped; Ruff and diff checks pass. |
+| 2026-08-29 | SIDERIUS | `6106a151` | Audited the 38 Python files that directly reference a shipped real-task or Gold asset: 18 move with experiment ownership, 11 retain their generic failure class after fixture replacement, 7 require responsibility-level splitting, and 2 are non-executable lexical matches. The audit names every cohort and explicitly blocks DAVIS objective-authority removal until the synthetic task reaches the production training engine. No source or test was removed. |
+| 2026-08-29 | SIDERIUS | `dab6c116` | Closed the two remaining minimal lifecycle evidence gaps. The production trainer completes one bounded CPU optimizer step over the synthetic task's real `[truth, mask]` supervision through its custom objective and persists the model. The production workflow now has both legacy and composed offline literature-review ON/OFF evidence: composed ON requires an explicit non-default config and passes advisor channels to the proposer, while OFF neither reads a missing path nor invokes the advisor. The shipped TIDMAD config remains refused on composed runs. Targeted validation: 28 passed; Ruff and diff checks pass. |
+| 2026-08-29 | SIDERIUS | `e463fddc` | Replaced the first machine-specific real-task framework fixture. The training-scope transport regression now generates the minimal synthetic pack's shards under `tmp_path` instead of requiring `/home/klz/...` Pets data, while preserving the decisive no-legacy-`SampleSet` subprocess shape. The first run correctly exposed that validation-row argv construction materializes the evaluation scope in the parent; generating the declared shards repaired the fixture without changing production code. Targeted transport validation: 45 passed; Ruff and diff checks pass. |
+| 2026-08-29 | SIDERIUS | `4dd303a4` | Generalized the advice-content workspace-lock test from Gold-labelled fake paths to task-neutral run/advice fixtures and renamed the module accordingly. The production invariant and all five comparability rows are unchanged: identical content resumes across paths, changed/added/removed advice refuses, and path remains provenance rather than canonical identity. Targeted lock validation: 46 passed; Ruff and diff checks pass. |
+| 2026-08-29 | `siderius-exp` | `a06da73` | Pinned SIDERIUS `8be2874d`, replaced the Cancer placeholder boundary witness with official HDF5 identity, split-disjointness, and task-data materialization checks, separated the two-network qualification and eight-network formal compositions, and made the quickstart consume an explicit SIDERIUS checkout. Both compositions and the resolved production dry-run pass. |
+| 2026-08-29 | SIDERIUS | `b107baec` | Added three narrow task-extension boundaries without a task-specific core branch: task-owned evaluation decoding for Health, validated selection of existing built-in objectives alongside the existing custom-objective plugin route, and documentation of the existing task-owned sampling contract. Quickstart demonstrates built-in categorical cross-entropy while synthetic masked regression demonstrates custom objective and Health behavior. Focused validation: 20 passed; Ruff and diff checks pass. Local pyright remains unavailable because the host Node runtime cannot parse the installed pyright bundle and remains assigned to final PR CI. |
+| 2026-08-29 | `siderius-exp` | `bd42822` | Pinned SIDERIUS `b107baec`; Pets now declares categorical cross-entropy and full-epoch sampling, while Pets and DAVIS Health providers decode their task-owned payloads instead of assuming indexed TIDMAD-style filenames. Six external startup and extension-boundary witnesses pass. This is interface evidence only; fresh two-iteration GPU qualification remains pending. |
+| 2026-08-29 | `siderius-exp` | `253a944` | Separated TIDMAD's bounded qualification entrypoint from Gold Stage 1 and Gold Stage 2 ownership. Qualification now resolves from `workflows/qualification/composition.yaml` and defaults to two chain iterations with one Trial plus one Formal round per iteration. Gold Stage 1 stores the calibrated D-HEALTH-1 treatment with `amplitude_collapse` as the sole blocking check; diversity and output standard deviation remain record-only. Gold Stage 2 has no executable launcher and remains unauthorized. The exact SIDERIUS `7476bf44` dry-run resolves both iterations and externally fixed Formal scope/evaluation. |
+| 2026-08-29 | `siderius-exp` | `23a6cc5` | Pets, DAVIS, and Cancer qualification entrypoints now require an explicit SIDERIUS checkout and resolve only experiment-repository compositions. Each defaults to two chain iterations and two tuner rounds with Trial/Formal batch parity, externally fixed Formal exposure, and task-sized VRAM limits. Exact-SHA dry-runs pass for all three real data roots. Composition loading confirms primary ordering is Pets `accuracy` higher, DAVIS `mse` lower, and Cancer `mean_auprc` higher. No additional GPU workload was launched while the TIDMAD witness was active. |
+| 2026-08-29 | `siderius-exp` | `7d776db`, `7846bbf` | Added and recorded a bounded non-LLM Cancer GPU witness. One complete `cpdb` graph trained and validated for one epoch on the `ligroup` RTX 5090 through the external task data path, model plugin, masked objective, CUDA trainer, checkpoint, and result writer; train loss was `0.702394`, validation loss `0.702044`, and the step took `25.62s`. A separate full-chain attempt stopped before proposal because `OPENAI_API_KEY` was absent and correctly produced no authoritative result. Inference, scoring, TestPod reproduction, and scientific performance remain unproven. |
+
+| 2026-08-29 | SIDERIUS / `siderius-exp` | external Pets qualification at `7476bf44` / `23a6cc5` | The fresh TestPod Pets chain refused both planned iterations before any GPU work. `load_task_health_plugins` first recorded an empty process-global plugin set and then refused the task-declared `_pets_health_views.py` set as a cross-run change. This is a framework lifecycle defect exposed by a task-owned Health plugin, not an H100 or experiment-budget failure. The failed workspace is non-authoritative and will be discarded after this evidence is recorded; the repair must preserve refusal after a genuinely non-empty plugin set has registered process-global checks. |
+| 2026-08-29 | `siderius-exp` | interrupted TIDMAD qualification at `7476bf44` / `253a944` | The bounded RTX 5090 chain reached iteration 1, tuner round 2, completed 2,500 training steps and streamed four inference deliverables before the operator requested a clean coordinated restart. It was interrupted during scoring. The workspace is non-authoritative and will be discarded; no result or campaign state will be inherited by the replacement run. |
+| 2026-08-29 | SIDERIUS / `siderius-exp` | external Pets qualification at `29d91556` / `23a6cc5` | The repaired launch crossed task-owned Health plugin binding, proving the preceding startup fix. Run-invariants then falsely classified Pets' complete `range(370)` qualification scope as partial because `validate_health_scope` consulted the not-yet-bound legacy 20-partition dataset profile instead of the composition's already-resolved `partition_count=370`. Both iterations were refused before LLM or GPU work. The repair threads the resolved partition count through the existing invariant-materialization path; it does not add a Pets override or weaken partial-scope refusal. |
+| 2026-08-29 | SIDERIUS / `siderius-exp` | H100 qualification at `b107baec` / `bd42822` | Three fresh external chains passed source authority, composition, runtime self-test, proposal, implementation, and validation. Pets executed Trial and Formal in iteration 1 and correctly invalidated one-class collapse. DAVIS completed a valid Trial with MSE `0.01661713817420464`, then the forced-Formal winner selector re-resolved the default Health family instead of consuming the run-scoped DAVIS roster and raised `HealthPluginRunScopeError`. Cancer repeatedly reached isolated resource preflight, where the autograd tape probe called dense storage access on a saved sparse tensor and raised `NotImplementedError: Cannot access storage of SparseTensorImpl`. All three chains exited; their workspaces are preserved as diagnostic evidence and no 5090 TIDMAD run was started. |
+| 2026-08-29 | SIDERIUS | `a5b144c2` | Repaired both H100 findings through existing authorities. `_best_trial_winner` now consumes `RunBindings.run_scientific_gate_ids`; the autograd tape probe counts COO and compressed sparse tensors through their physical index/value buffers. Composed task-data-path binding is limited to composed runs, preserving the legacy un-composed path. Targeted and adjacent validation: 113 passed; Ruff and diff checks pass. H100 delta evidence: the real persisted DAVIS Trial is selected under `davis_dispersion_blocking` at MSE `0.016617138174`, and a CUDA sparse COO graph reports three storages and 84 bytes without error. |
+| 2026-08-29 | `siderius-exp` | `aa73036` | Pinned the exact repaired SIDERIUS revision `a5b144c2`. No task treatment, workflow budget, dataset scope, or preserved diagnostic artifact changed. |
+| 2026-08-29 | SIDERIUS | `b67756ab` | Landed the behavior-authority repair described by the following qualification row. |
+| 2026-08-29 | `siderius-exp` | `0472a3e` | Pinned SIDERIUS `b67756ab` and made qualification output representation explicit: Pets permits only `classifier`; DAVIS and Cancer permit only `regressor`. Shell syntax and diff checks pass. |
+| 2026-08-29 | SIDERIUS / `siderius-exp` | H100 qualification at `a5b144c2` / `aa73036` | The synchronized restart exposed a second run-scope Health leak in `finalize_run_output`: trial-validity feedback re-resolved the process-default gate family instead of consuming `RunBindings.run_scientific_gate_ids`. DAVIS iteration 1 therefore failed after a valid Trial MSE of `0.016732`. Pets also proved that a persisted `failed_mode_collapse` record was misreported to the next proposer as an execution failure. Cancer reached iteration 2 before the synchronized batch was stopped. All artifacts remain diagnostic and no 5090 TIDMAD run was started. |
+| 2026-08-29 | SIDERIUS | pending behavior-authority repair | Trial-validity feedback now consumes the already-resolved run-scoped gate set and classifies `failed_mode_collapse` as scientific invalidity rather than execution failure. Chain resume preserves resource and Health feedback in chronological order so the next subprocess's proposer receives both. The generic chain and iteration parsers no longer inject `min_formal_batch_size=4`; the existing guard remains available as an explicit opt-in. Focused behavior validation passes: 333 tests; an additional 126 Formal-policy tests passed before an unrelated migrated TIDMAD fingerprint fixture assertion. Ruff, shell syntax, and diff checks pass. |
+| 2026-08-29 | SIDERIUS / `siderius-exp` | parameter-rule interface in progress | Added one typed, composition-owned dotted-path rule surface with `exact`, inclusive `range`, `allowed`, and registered deterministic `predicate` forms. Omission remains agent-controlled; rules execute after Formal inheritance, participate in the composition fingerprint, and appear in execution provenance. Task-declared objectives retain sole ownership of `loss_config`. Cancer qualification and formal compositions now lock `train_config.batch_size=1` through this interface. Focused schema, composition, and workflow regression checks pass; H100 relaunch remains intentionally blocked until the exact infra/experiment revisions are committed and synchronized. |
+| 2026-08-29 | SIDERIUS / `siderius-exp` | `4968d061` / `8e0bf16` | Parameter rules are committed and synchronized to the dedicated TestPod checkouts. Local focused validation passes 177 tests; TestPod passes 64 focused tests and resolves the external Cancer composition with the exact batch lock in its semantic fingerprint. The first v4 launch batch failed before LLM work because the dedicated checkout intentionally carried no `.env`; those workspaces remain startup diagnostics and are not resumed. Fresh v5 Pets, DAVIS, and Cancer chains source the existing TestPod environment without copying or printing secrets and are running in independent tmux sessions and new workspaces. No 5090 TIDMAD run has started. |
+| 2026-08-30 | SIDERIUS / `siderius-exp` | H100 qualification at `4968d061` / `8e0bf16` | The v5 batch exited without operator intervention. Pets completed two iterations; both candidates were scientifically invalidated by task-owned Health, so the infrastructure path passed but no incumbent was established. Cancer completed two iterations and recorded best mean AUPRC `0.385523263398698`. DAVIS completed iteration 1 with Trial MSE `0.013112756706556063`, then exposed two framework defects: planner score-table selection omitted the run-scoped scientific gate IDs, and the tuner re-materialized the chain's already-effective Health YAML, dropping resolved-plugin provenance and changing `health_config_sha256`. |
+| 2026-08-30 | SIDERIUS | `72be1d1c` | Planner history classification now consumes `RunBindings.run_scientific_gate_ids`. Chain and tuner Health materialization now start from the same original operator source plus the same task binding rather than treating an effective artifact as a new source. Focused Health, composition, planning, and restore validation passes: 31 passed, 1 skipped; Ruff and diff checks pass. Fresh external DAVIS acceptance remains required. |
+| 2026-08-30 | `siderius-exp` | `83f9957` | Cancer proposer and implementor prompt blocks now state that the workflow owns a fixed masked binary-cross-entropy objective and that no custom loss should be generated. This is a non-authoritative efficiency correction; deterministic objective ownership remains the scientific lock. All four external cold-start witnesses pass. The broader unified advice / generation-constraint / execution-lock declaration design is tracked in SIDERIUS issue #394. |
+| 2026-08-30 | SIDERIUS / `siderius-exp` | H100 DAVIS acceptance at `0e092302` / `83f9957` | A fresh two-iteration chain completed without Health identity refusal. Iteration 1 recorded Trial MSE `0.023089394119636064` and Formal MSE `0.029764309801557073`; iteration 2 restored the iteration-1 incumbent under the identical Health SHA-256, recorded Trial MSE `0.016087474146372772`, and recorded Formal MSE `0.016089017514105866`. Both manifests are `completed` with one successful Formal record. The Formal lower-is-better curve improved from `0.029764309801557073` to `0.016089017514105866`. Issue #395 carries this external evidence and is closed. The deterministic DAVIS exact-L1 objective correctly overrode an agent-generated `dense_rgb_mse` loss, while the unnecessary generated loss confirms the declaration-layer design gap tracked by #394. |
+| 2026-08-30 | SIDERIUS | issue #396 | The fresh two-iteration RTX 5090 TIDMAD qualification exposed a generic negative-feedback transport defect. Iteration 1 persisted four attempts and explicit Health/gate-exhaustion feedback, but because every executed candidate was scientifically invalid its manifest became `no_records` with `output_path=null`. Resume skipped output absorption, and iteration 2 reported a cold start instead of receiving the bounded failure evidence. The issue freezes the smallest repair boundary: preserve negative feedback without promoting an invalid model, manufacturing a score, weakening Health, or changing the manifest status vocabulary. |
+| 2026-08-30 | SIDERIUS / `siderius-exp` | RTX 5090 TIDMAD qualification at `0e092302` / `83f9957` | A fresh two-iteration chain completed from the separated qualification composition in 2 hours 44 minutes. Iteration 1 completed two tuner rounds and persisted four attempts, but every executed candidate failed the task-owned blocking Health checks for near-constant output; its manifest correctly reports `no_records` and no scientific incumbent. Iteration 2 proposed the 2,174,384-parameter `hybrid_spectral_tcn_compact`. Its Trial used batch 1, 20,000 optimizer steps, 80,000 validation samples, and 0.353 GiB allocator peak, then was scientifically invalidated for constant output. Its Formal used batch 16, 5,000 optimizer steps, 80,000 validation samples, 0.02 evaluation scope, and 4.846 GiB allocator / 5.312 GiB reserved peak under the 16 GiB envelope. Formal training took 810.13 seconds, validation 344.27 seconds, inference 563.3 seconds, and scoring 21.1 seconds. It passed every blocking Health check and produced the first valid qualification score, `-0.5314745777130531`. The negative value is a valid measured reference, not evidence of useful denoising or comparison with the production regression campaign. The run also proved that `min_formal_batch_size=1` did not block a valid Formal execution. |
+| 2026-08-30 | SIDERIUS | `e31da5c7` | A `no_records` manifest now carries only the already-validated, bounded `gate_exhaustion` and `trial_validity_feedback` objects when they exist. Resume verifies the write-once manifest, revalidates those objects at the subprocess boundary, and restores them only into the negative-feedback carrier. It still does not parse a run output, restore a plugin, add a source path, establish an incumbent, or change the manifest status. Focused local validation passes 163 tests; the two producer/consumer regressions and targeted Ruff checks pass locally, and the same regressions pass on H100. |
+| 2026-08-30 | SIDERIUS / `siderius-exp` | H100 Pets acceptance at `e31da5c7` / `83f9957` | A fresh external two-iteration chain completed in a new workspace. Both candidates were scientifically invalidated by task-owned categorical Health checks, so both manifests correctly remain `no_records` with `output_path=null` and no source paths. Iteration 1 persisted typed `trial_validity_feedback`; iteration-2 resume reported `restored negative feedback` and pre-seeded one cross-iteration negative-feedback summary for the proposer while restoring no model or plugin. This is the external acceptance for #396. It proves feedback continuity, not a valid Pets score. |
+| 2026-08-30 | SIDERIUS | neutral-start census fixture replacement | Replaced the shipped TIDMAD negative control and Pets omitted-naming witness in `test_arxiv_286_neutral_start_census.py` with temporary generic quickstart/declared-naming variants. The exact anchor-residue and omitted-declaration failure classes remain unchanged. Combined validation also exposed and repaired a test-scaffolding leak: every composition now uses the existing `run_registration_scope`, so this module cannot leave a task-data-path registration behind for later tests. The focused module passes 4 tests; related suites pass 38 tests together; quickstart and census pass in both file orders, 19 tests each; Ruff and diff checks pass. No production code or task behavior changed. |
+| 2026-08-30 | SIDERIUS | model-plugin composition fixture replacement | Replaced the TIDMAD manifest copy and frozen TIDMAD fingerprint in `test_step12_pr12d_dp_plugin_binding.py` with a quickstart-derived generic composition and the declared-naming task-data-path fixture. The test still drives `compose_run_task_bindings`, proves omitted/explicit-none equivalence, requires declared plugin resolution, proves plugin content changes semantic identity, and preserves all malformed-section refusals. The focused module passes 45 tests; the related quickstart, declared-naming, and plugin-binding suites pass 79 tests in both file orders; Ruff and diff checks pass. No production code, scientific declaration, or task behavior changed. |
+| 2026-08-30 | SIDERIUS | provenance fixture replacement | Replaced hardcoded TIDMAD/Pets/DAVIS resource names in `test_provenance.py` with injected generic config and resource declarations. The test now proves exact present and absent states for both provenance axes while remaining independent of current deployment inventory. The focused module passes 6 tests; provenance and preflight pass 29 tests in both file orders; Ruff and diff checks pass. Production preflight declarations and behavior are unchanged. Review also classified the secondary-metric declaration module as mixed generic/scientific responsibility, so it remains pending until its parity assertions move rather than being flattened into a generic fixture. |
+| 2026-08-30 | SIDERIUS | preflight fixture replacement | Replaced the TIDMAD machine-config and tracked-template examples in `test_preflight.py` with generic local-runtime names. The resource-declaration test now protects the non-empty roster and positive measured skip counts without pinning task names or the current aggregate. The focused module passes 23 tests; preflight and provenance pass 29 tests in both file orders; Ruff and diff checks pass. No production code, function, module, or runtime default changed. The separation design now also records the operator's modularity boundary: migration must not grow monolithic functions/files or add umbrella managers in place of task coupling. |
+| 2026-08-30 | `siderius-exp` | `58acaeb` | Added a 116-line external secondary-metric parity module. Against an explicit SIDERIUS checkout, each real task composes in its own cold subprocess: TIDMAD declares no secondaries; Pets declares `macro_f1` higher then `log_loss` lower; DAVIS declares `psnr` higher then `mae` lower. Primary identities, declaration provenance, order, and source-checkout authority are also verified. The parity module and four-task startup witnesses pass 7 tests; Ruff and diff checks pass. This intentionally lands the experiment-owned half before shrinking the 423-line mixed infra module, so one change does not simultaneously move parity, redesign generic fixtures, and delete historical locks. |
+| 2026-08-30 | SIDERIUS | secondary-metric parity ownership split | Removed the five experiment-owned roster, direction, order, and provenance assertions from the mixed infrastructure module after the external witness landed. The generic fail-closed, additive fingerprint, run-scoped binding, unwind, and single-owner tests remain. The redundant TIDMAD no-secondary fingerprint row was retired rather than re-recording a real-task implementation hash in infrastructure; the synthetic zero-secondary case preserves that failure class. A broader focused run exposed separate pending migration debt: stale real-task fingerprint locks, a stale shipped-manifest census, parameter-rule branching added directly to `prepare_attempt`, and one temporary legacy TIDMAD bootstrap increasing a module-level structural baseline. None was hidden by widening a baseline in this slice. |
+| 2026-08-30 | SIDERIUS | parameter-rule planning decomposition | Extracted the interaction between composition-owned parameter rules, the declared objective, and the independent epoch ceiling from `prepare_attempt` into one typed planning helper. The orchestrator still sequences the same authorities in the same order and records the same `parameter_rules` resolution step. Generic reachability tests now prove an exact lock reaches planning and that neither objective ownership nor the epoch safety ceiling can be bypassed. The focused parameter-rule, planning, and structural checks pass 46 tests; Ruff and diff checks pass. Local pyright remains unavailable because the installed Node runtime cannot parse the bundled pyright JavaScript, so exact-head static evidence remains assigned to PR CI. |
+| 2026-08-30 | SIDERIUS | observable fingerprint fixture correction | Corrected the audit classification of `test_robs1_c1_observable_declaration.py`: its real-task names were executable composition and fingerprint dependencies, not lexical examples. Removed the shipped real-task roster and three real-task fingerprint locks. The framework-owned Quickstart example now carries the undeclared-observable baseline, while synthetic observable plugins continue to prove type discrimination, manifest order, additive identity, content-digest identity, name uniqueness, and child resolution. The focused module passes 25 tests; both execution orders with the adjacent secondary-metric module pass 47 tests; external real-task parity passes 7 tests; Ruff and diff checks pass. No production code or task declaration changed. |
+| 2026-08-30 | SIDERIUS | secondary-metric fixture replacement | Replaced the remaining TIDMAD, Pets, and DAVIS composition fixtures in the generic secondary-metric module with one synthetic external-task package. Test-only declarations cover zero, one, and two secondaries with opposing directions; the original duplicate, primary-collision, malformed-entry, inherited-refusal, import-refusal, additive-identity, ordering, relocation, nested-binding, unwind, and active-binding failure classes remain. The first run exposed an absolute configured-reference error in the new fixture; package-relative declarations repaired portability without production changes. The focused module passes 21 tests, both execution orders with observable declaration pass 46 tests, external scientific parity passes 7 tests, and the changed files contain no real-task identifier. Ruff and diff checks pass. |
+| 2026-08-30 | SIDERIUS | composition-cache ownership classification | The cache-authority module is not an ordinary real-fixture replacement. Its generic half protects binding-aware memoization, recomposition after reset, run-scope discrimination, and tuner-first resolution; its other half freezes the built-in legacy TIDMAD default and exact Pets/DAVIS families. The generic half remains assigned to synthetic Health families. The legacy-default half must retire with the bounded legacy task bootstrap after external parity is recorded; it must not be copied into `siderius-exp` as a permanent framework contract or preserved through a new compatibility abstraction. No source or test changed in this classification step. |
+| 2026-08-30 | SIDERIUS | workspace-owned implementor defaults | Replaced the standalone implementor's checkout-relative `agent_generated/models`, `tests`, and `losses` defaults with one workspace-derived `generated/{run_name}` tree. Explicit directories remain authoritative, so the reference workflow's existing per-attempt isolation is byte-for-byte unchanged. Two-workspace and non-local-backend regressions prevent ambient fallback. Focused schema, protocol, and implementor validation passes 35 tests with 4 environment-dependent skips; Ruff and diff checks pass. The capability index and promotion library still resolve through ambient per-user state and are the next migration slice. |
+| 2026-08-30 | SIDERIUS | workspace-owned capability library | Supported workflow, chain, proposer, implementor, and tuner entry points now bind the existing generated-library transport to `{workspace}/generated_library` before any registry construction. Capability index writes, model/loss promotion, preload, source and description lookup, and proposer inventory share that root. Workspace-bound execution excludes the per-user library and checkout fallbacks; unbound low-level callers retain the legacy read path during migration. The workflow-level witness proves an unrelated operator library remains untouched, all four generated artifact families land below the workspace, run provenance records that root, and the checkout tree remains byte-identical. Adversarial review found the first chain binding was later than preflight invariant construction; moving it immediately after argument normalization makes preflight, resume, and workflow resolve one identity. Related infrastructure validation passes 286 tests plus 35 workflow/guardrail tests and 148 chain-runner tests; order-reversal isolation passes 107 tests in each order; four external task startups and real-task secondary parity pass 7 tests. |
+| 2026-08-30 | SIDERIUS | PR #397 local CI repair | Automatic PR CI was unable to start because GitHub reported an account billing/spending-limit failure, so the repository's exact local bulk harness became the executable fallback. Its first clean-head run found four shared failure classes: workspace environment leakage between tests, Health witnesses still constructing filename-only contexts after payload decoding became task-owned, historical real-task fingerprint locks conflicting with the separation boundary, and structural growth in orchestration/resume functions. The repair restores both generated-library environment variables after every test, passes task-decoded evaluation payloads through the Health context, retires redundant scientific fingerprint assertions while preserving generic additivity and semantic checks, extracts no-records feedback restoration/seeding into focused helpers, groups Health materialization inputs into one typed carrier, and keeps the Formal-only batch floor disabled consistently in shell and Python defaults. Focused reruns cover the complete original failure roster; Ruff, formatting, structural budgets, selector reachability, and documentation line guards pass. Final clean-head bulk and sensitive-lane results remain the merge boundary. |
+| 2026-08-30 | SIDERIUS | PR #397 final-bulk delta | The first post-repair clean-head bulk run completed all four shards and narrowed the result to four stale contract tests: one expected `run_workflow` to inline both negative-feedback fields after their typed extraction, while three still required every child import to register all in-tree real task implementations. The first test now proves the helper reads both fields and that the workflow calls the helper. The child contract now proves transported-manifest resolution plus the explicit uncomposed legacy adapter, and importable children are reloaded to prove they do not mutate the task registry. The focused delta passes 86 tests with one environment-independent skip; no production source changed in this delta. One final clean-head bulk rerun is still required before merge. |
+
+Qualification evidence matrix (latest complete run per task):
+
+| Task | Exact revisions (SIDERIUS / `siderius-exp`) | Two iterations | Formal execution | Scientific result | Direction / trajectory | Cross-iteration state | Qualification reading |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Oxford-IIIT Pet | `e31da5c7` / `83f9957` | yes | one attempted Formal per iteration; both correctly invalidated | no valid score | accuracy, higher; no valid curve | no incumbent or source restoration; typed negative feedback reached iteration 2 | fresh acceptance proves the #396 no-records feedback repair; candidates still failed task-owned Health |
+| Cancer Gene Identification | `4968d061` / `8e0bf16` | yes | one successful Formal per iteration | valid mean AUPRC | higher; `0.33353437961836196` to `0.385523263398698` | iteration 2 restored the verified iteration-1 incumbent | full separated Trial/Formal trajectory passed on the two-network qualification scope |
+| DAVIS future prediction | `0e092302` / `83f9957` | yes | one successful Formal per iteration | valid MSE | lower; `0.029764309801557073` to `0.016089017514105866` | iteration 2 restored the verified iteration-1 incumbent under the same Health SHA-256 | fresh acceptance proves the `72be1d1c` Health identity repair |
+| TIDMAD qualification | `0e092302` / `83f9957` | yes | iteration 1 had no successful Formal; iteration 2 had one successful Formal | valid score `-0.5314745777130531` in iteration 2 | higher; only one valid point, so no improvement curve | no valid iteration-1 incumbent; its negative feedback was lost, exposing #396 | infrastructure and Health behavior passed; scientific quality is not competitive evidence |
+
+The matrix is cumulative evidence, not a synchronized merge-candidate run:
+Cancer, DAVIS, TIDMAD, and Pets still use different exact SIDERIUS revisions.
+M7 therefore requires one synchronized final
+qualification after the remaining blockers are repaired.
+
+Current operational state:
+
+- no source experiment asset has been deleted from SIDERIUS;
+- Gold is operator-stopped; all H100 and RTX 5090 qualification chains have exited, and M6 remains deferred without being removed from the separation scope;
+- no Gold workload has been launched from `siderius-exp`;
+- the imported Gold launcher still assumes repository co-location and is not portable;
+- all four imported real task manifests pass composition-only external validation; Cancer additionally has distinct two-network qualification and complete eight-network formal compositions;
+- issue #383 has an external failing witness, a focused framework repair, and passing external acceptance evidence;
+- issue #384 has an external failing witness proving the failure precedes any capacity decision, a generic isolated-worker repair, and passing external acceptance evidence;
+- issue #385 has an external failing witness, a typed source-context repair, and passing compatibility evidence;
+- issue #386 has an external failing witness, lazy legacy-config repair, and passing workflow/data-root compatibility evidence;
+- issues #383--#387 and #389--#393 are repaired and closed with their
+  published commits and validation evidence. The setup-only watchdog defect
+  (#388) remains open and independently tracked;
+- issue #396 is repaired by `e31da5c7`, externally accepted by a fresh
+  two-iteration H100 Pets chain, and closed without promoting either invalid
+  candidate;
+- separated TIDMAD has a fresh uninterrupted two-iteration RTX 5090 chain with
+  measured warmup, Trial and Formal training, streamed inference, scoring,
+  Health, persistence, and one Health-valid Formal result;
+- Cancer's real NatureBench files are verified outside the repositories, and
+  its separated H100 chain completed two LLM-driven iterations with valid
+  inference, scoring, and mean-AUPRC selection;
+- the first eight safe generic-fixture replacements are complete: training-scope transport no longer depends on a private Pets installation, the advice-content lock no longer carries Gold-only fixture vocabulary, the Formal evaluation lock no longer names a Gold value, the neutral-start census no longer composes shipped TIDMAD or Pets assets, the model-plugin composition test no longer copies the TIDMAD manifest or scientific fingerprint, provenance now injects generic config/resource declarations, preflight no longer names task-specific machine configs or freezes the task resource total, and secondary-metric transport now uses zero/one/two-secondary synthetic declarations; all three remaining files in that audited cohort remain explicitly pending;
+- the two-pack minimal-example coverage matrix is frozen; quickstart's deterministic composed-scoring gap is closed, and synthetic masked regression now covers core scoring, task-owned Health, task-valid resource measurement, bounded production training over semantic supervision, offline literature-review ON/OFF topology, deterministic production-workflow traversal, record-level primary-only selection, checkout-portable resume/refusal, and standalone typed node invocation. The direct 38-file dependency audit is complete. The next checkpoint continues the safe generic-fixture cohort one responsibility at a time; no blocked or mixed file moves early. No real-task source removal begins before its assigned replacement evidence passes;
+- Gold launcher portability and final synchronized TestPod qualification remain
+  explicit later milestones;
+- H100 v5 completed two Pets iterations and two Cancer iterations. Fresh DAVIS
+  v6 acceptance completed two Trial/Formal iterations against `72be1d1c` and
+  proved incumbent restoration under an unchanged composed Health identity.
+  The completed Pets and Cancer evidence remains intact and was not replayed
+  merely for synchronization.
+- RTX 5090 TIDMAD qualification completed two iterations. The second
+  iteration produced one Health-valid Formal score after its Trial collapsed,
+  proving that scientific invalidation and infrastructure completion remain
+  separate. The first iteration also exposed the no-records negative-feedback
+  transport defect tracked by #396; no additional workload is running while
+  that defect remains open.
+
+## 13. Work-ledger rule
+
+Every migration PR or operational step governed by this design must update this document with:
+
+- the paths classified or moved;
+- the responsibility decision and rationale;
+- the commit or PR that landed the change;
+- the targeted evidence run;
+- any newly discovered coupling;
+- any amendment to the migration plan.
+
+Completed checkboxes without a commit, PR, or reproducible evidence reference are planning statements, not completion evidence.

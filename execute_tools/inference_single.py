@@ -11,21 +11,10 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-# Step 10 / P5+P6 W3 — the BUILT-INS' BOOTSTRAP, not the extension path.
-#
-# A composed run transports its data-path id to this child
-# (`--task_data_path_id`), and `resolve_task_data_path` fails closed on an id
-# the child's registry does not hold. Before this, every child imported ONLY
-# the TIDMAD implementation, so a transported `oxford_iiit_pet` or
-# `davis_future_prediction` id could not resolve here even though all three
-# implementations are in-tree production modules and the parent-side emitter
-# already existed. Side-effect imports: each module's tail self-registers.
-#
-# Out-of-tree plugin availability in children is deliberately NOT solved here
-# (Step 12 owns it) — this list is the built-ins' convenience bootstrap, the
-# same pattern `execute_tools/health_checks/__init__.py` documents.
-import execute_tools.davis_data_path
-import execute_tools.pets_data_path  # noqa: F401
+# D14-1 C3. The parent transports the resolved task id, implementation identity,
+# and manifest. Composed children load that exact implementation from the
+# manifest; real-task imports must not pre-register another implementation under
+# the same id. The uncomposed compatibility path is activated explicitly below.
 from agent.schemas.model_io_contract import load_model_io_contract
 from core.runtime_control.gpu_milestone_trace import tracer_from_environment
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
@@ -55,7 +44,7 @@ from execute_tools.scope_artifact import load_transported_scope
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
     bind_task_data_path,
-    resolve_task_data_path,
+    bootstrap_legacy_tidmad_data_path,
 )
 
 # D14-1 C4: the deliverable READER lives with the TIDMAD codec now; the alias
@@ -463,7 +452,13 @@ def _emit_generic_inference(args, data_path, model, task_eval_scope) -> None:
     )
     if args.timing_out_json:
         with open(args.timing_out_json, "w") as fh:
-            json.dump(outcome.model_dump(), fh)
+            # This sidecar's existing parent-facing contract is a list of
+            # task-specific per-file timing rows. Generic inference has no
+            # framework-owned notion of a file or PSD segment, so it has no
+            # honest row to emit. An empty list preserves the sidecar schema
+            # and routes record construction through the existing
+            # absent-measurement fallback.
+            json.dump([], fh)
 
 
 def _declared_deliverable_naming(manifest_path: str | None) -> DeliverableNaming | None:
@@ -628,7 +623,7 @@ def main():
             manifest_path=args.task_manifest,
         )
         if args.task_data_path_id is not None
-        else resolve_task_data_path(None)
+        else bootstrap_legacy_tidmad_data_path()
     )
 
     # V20 PR C2, validation only. ``None`` — and therefore completely

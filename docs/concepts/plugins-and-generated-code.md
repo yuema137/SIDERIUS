@@ -108,37 +108,34 @@ Two different lifetimes, two different places:
 run: the model code the agents wrote, exactly as it ran, restored
 automatically on resume.
 
-**Across runs** — promoted model/loss plugins and the capability index
+**Across iterations in one workspace** — promoted model/loss plugins and the capability index
 (`_capability_index.json`) live in the **generated-capability library**,
 resolved by `core/generated_library.py`:
 
 ```
-SIDERIUS_GENERATED_LIBRARY_DIR    absolute path; "~" expanded; empty = unset;
-                                  a non-empty RELATIVE path is refused loudly
-    else
-~/.siderius/generated_library     the per-user default
+{workspace}/generated_library
 ```
 
 Layout under the root: `models/`, `losses/`, `_capability_index.json`.
-Promotion writes here; startup preloads and the no-env-var scans read here
-first. **No production path writes into the repository checkout** — the
-checkout-level `agent_generated/` directory is a *read-only legacy
-fallback*, kept so a pre-migration checkout keeps resolving what it
-promoted. (The old behaviour, where every run mutated the checkout and two
-collaborators sharing one silently contaminated each other's runs, is the
-defect this design removed.)
+Workflow and standalone-node entry points derive this root from the configured
+workspace before constructing any capability registry. Promotion writes here;
+later iterations preload from here. They do not scan another workspace, the
+user's home library, or the checkout-level `agent_generated/` fallback.
+**No production path writes into or implicitly imports generated capabilities
+from the repository checkout.**
 
-The refusal of a relative override is deliberate: resolved against the
-current working directory, a relative path launched from inside the checkout
-would recreate exactly that checkout pollution. The error message says so
-and names the fix.
+`SIDERIUS_GENERATED_LIBRARY_DIR` remains the subprocess transport and a
+low-level compatibility override for callers that do not use a supported
+entry point. A relative override is refused because resolving it against the
+current working directory could recreate checkout pollution. Unbound legacy
+callers retain the historical per-user default and read-only checkout fallback
+during the migration; supported workspace-bound execution does not.
 
-Each run's invariants lock records which library root it resolved
+Each run's invariants lock records its workspace-derived library root
 (`generated_library: {root, source}`) — provenance, recorded and never
-compared, so the same science on a host with a different library location
-resumes legally. Two workspaces under one user share the library by
-default; point `SIDERIUS_GENERATED_LIBRARY_DIR` at per-project roots for
-isolated candidate pools.
+compared. Two workspaces under one user therefore have isolated candidate
+pools by default, while iterations in one workspace retain validated
+capabilities for resume and reuse.
 
 ## What refuses, and why
 

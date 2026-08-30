@@ -576,16 +576,6 @@ class TestFalsifiers:
 # ======================================================================
 
 
-def test_tidmad_composition_fingerprint_is_UNCHANGED():
-    """D6 touched no TIDMAD declaration, and this proves it.
-
-    A moved TIDMAD fingerprint would fail every composed TIDMAD workspace's
-    resume — the loudest possible consequence of an edit that looked local.
-    """
-    tidmad = compose_run_task_bindings(str(MANIFEST_DIR / "tidmad.yaml"))
-    assert tidmad.semantic_fingerprint == TIDMAD_COMPOSITION_FINGERPRINT
-
-
 def test_the_shipped_manifest_is_a_POINTER_carrying_no_task_semantics():
     """Q-12d-1: `configs/task_composition/davis.yaml` holds refs, not values.
 

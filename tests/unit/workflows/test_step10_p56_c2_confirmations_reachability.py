@@ -711,11 +711,12 @@ def test_the_workflow_delta_stayed_sibling_shaped():
     #
     # All of it is the permitted shape: no new phase, no new branch family, no
     # task dispatch, no new mutable local accumulator, no new semantic owner.
-    assert branchish == 132, (
-        f"run_workflow branch-ish count is {branchish}, expected 132 "
+    assert branchish == 128, (
+        f"run_workflow branch-ish count is {branchish}, expected 128 "
         "(130 at C0 + 1 C2 unpack IfExp + 1 C5/W6 binding-selection IfExp "
         "- 1 arXiv-U1 extraction of the lit-review path-resolution If "
-        "+ 1 arXiv-#259 constraint-forwarding If; "
+        "+ 1 arXiv-#259 constraint-forwarding If - 4 after extracting "
+        "cross-iteration negative-feedback restoration; "
         "C3's union closure costs ZERO because the merge rule lives in "
         "core.resume.union_key_findings and this closure only calls it). "
         "If this grew further, the §12.1 tripwire requires re-running the "

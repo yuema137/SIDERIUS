@@ -148,7 +148,12 @@ def _drive_admission(monkeypatch, payload: dict):
     monkeypatch.setattr(execution, "_check_and_record_guardrail_skip", lambda **kwargs: False)
 
     bindings = SimpleNamespace(
-        agent_input=SimpleNamespace(candidate_id=None, experiment_arm=None),
+        agent_input=SimpleNamespace(
+            candidate_id=None,
+            experiment_arm=None,
+            task_composition_ref=None,
+            validation_max_train_samples=None,
+        ),
         device_identity=None,
         expert_advice_str="",
         file_index=6,
@@ -185,7 +190,10 @@ def _drive_admission(monkeypatch, payload: dict):
         plan=SimpleNamespace(is_trial=True),
         record_params={},
         train_sample_set=None,
-        trial_config=SimpleNamespace(),
+        trial_config=SimpleNamespace(
+            train_base_seed=None,
+            train_portion=None,
+        ),
         task_scopes=None,
     )
     rejections: list[PhysicalRejection] = []

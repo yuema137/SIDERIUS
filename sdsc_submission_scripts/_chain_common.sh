@@ -127,7 +127,7 @@ FORMAL_VRAM_BUDGET_GB=""            # §3.2: empty == omit == Python None
 # Defaults synced to run_one_iteration.py (§5 provisional operational
 # values); 0 disables a numeric guardrail; booleans forwarded when 1.
 MAX_STEPS_PER_ATTEMPT=150000        # §3.2: matches Python default
-MIN_FORMAL_BATCH_SIZE=4             # §3.2: matches Python default
+MIN_FORMAL_BATCH_SIZE=0              # §3.2: matches disabled Python default
 ALLOW_EXTREME_STEPS=0
 RUNTIME_WATCHDOG=""                 # arXiv #261 tri-state: empty == omit == the (device, execution regime) runtime profile decides; 1 forwards --runtime_watchdog; 0 forwards --no-runtime_watchdog
 EXECUTION_REGIME=""                 # arXiv #261: empty == omit == Python default 'single'; the posture declares co-resident regimes
@@ -260,6 +260,9 @@ FORCE_FORMAL_ROUND=1
 # than inherited from a YAML default. Closes the same bash-wrapper gap as
 # --no-force_formal_round, originally surfaced during loss-inventory Gate 3.
 ML_LIT_REVIEW_ENABLED=""
+# Optional task-owned literature-review config. Empty preserves the child's
+# historical default; a supplied path is transported unchanged.
+ML_LIT_REVIEW_CONFIG=""
 # arXiv U1 (#254) — opaque experiment-arm label. Empty = unlabelled (the
 # legacy default); forwarded to run_one_iteration.py ONLY when set, so an
 # unlabelled chain's child argv is byte-identical to pre-U1.
@@ -435,6 +438,7 @@ parse_chain_args() {
         --no-force_formal_round)  FORCE_FORMAL_ROUND=0; shift ;;
         --ml_lit_review_enabled)     ML_LIT_REVIEW_ENABLED=1; shift ;;
         --no-ml_lit_review_enabled)  ML_LIT_REVIEW_ENABLED=0; shift ;;
+        --ml_lit_review_config)      ML_LIT_REVIEW_CONFIG="$2"; shift 2 ;;
         --experiment_arm)         EXPERIMENT_ARM="$2"; shift 2 ;;
         --baseline_isolation)     BASELINE_ISOLATION=1; shift ;;
         --allowed_output_types)   ALLOWED_OUTPUT_TYPES="$2"; shift 2 ;;
@@ -670,8 +674,9 @@ build_app_args() {
     if [ -n "$FORMAL_TIME_BUDGET_MINUTES" ]; then
         APP_ARGS+=(--formal_time_budget_minutes "$FORMAL_TIME_BUDGET_MINUTES")
     fi
-    # RT6 runtime-control surface: numeric flags always forwarded (they
-    # carry §5 operational defaults on both layers); booleans only when 1.
+    # RT6 runtime-control surface: numeric flags always cross explicitly.
+    # The Formal-only batch floor defaults to 0 (disabled), preserving
+    # Trial/Formal parity unless a task or campaign opts in.
     APP_ARGS+=(--max_steps_per_attempt "$MAX_STEPS_PER_ATTEMPT")
     APP_ARGS+=(--min_formal_batch_size "$MIN_FORMAL_BATCH_SIZE")
     APP_ARGS+=(--runtime_safety_factor "$RUNTIME_SAFETY_FACTOR")
@@ -743,6 +748,9 @@ build_app_args() {
         APP_ARGS+=(--ml_lit_review_enabled)
     elif [ "$ML_LIT_REVIEW_ENABLED" = "0" ]; then
         APP_ARGS+=(--no-ml_lit_review_enabled)
+    fi
+    if [ -n "$ML_LIT_REVIEW_CONFIG" ]; then
+        APP_ARGS+=(--ml_lit_review_config "$ML_LIT_REVIEW_CONFIG")
     fi
     # arXiv U1 — the arm label is forwarded only when set (unlabelled chains
     # reproduce pre-U1 argv byte-identically).

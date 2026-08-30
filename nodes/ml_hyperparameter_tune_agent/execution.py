@@ -74,6 +74,7 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
     _should_bypass_formal_time_budget,
     resolve_scoring_route,
 )
+from nodes.ml_hyperparameter_tune_agent.probe_data import build_task_probe_data
 from nodes.ml_hyperparameter_tune_agent.records import (
     _build_denoised_filename,
     _build_execution_failure_record,
@@ -83,6 +84,7 @@ from nodes.ml_hyperparameter_tune_agent.records import (
 )
 from nodes.ml_hyperparameter_tune_agent.round_health import (
     apply_round_health,
+    build_evaluation_payload_fn,
     build_target_path_fn,
 )
 from nodes.ml_hyperparameter_tune_agent.runtime import (
@@ -370,6 +372,14 @@ def run_admission_preflight(
         # legacy global plugin dir instead of this run's.
         plugin_dir=sandbox.plugin_dir,
         loss_dir=sandbox.loss_dir,
+        task_probe_data=build_task_probe_data(
+            task_composition_ref=agent_input.task_composition_ref,
+            task_scopes=prepared.task_scopes,
+            data_dir=time_data_dir,
+            epoch_seed=trial_config.train_base_seed,
+            train_portion=trial_config.train_portion,
+            max_samples=agent_input.validation_max_train_samples,
+        ),
     )
     if resource_check.get("status") == "error":
         raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
@@ -1388,6 +1398,11 @@ def run_inference_scoring_health(
             round_index=round_index,
             config_path=agent_input.health_checks_config,
             production_config_path=os.path.join(SIDERIUS_ROOT, "configs", "health_checks.yaml"),
+            task_health_binding=(
+                agent_input.task_composition_ref.task_health_binding
+                if agent_input.task_composition_ref is not None
+                else None
+            ),
             healthgate_mode=agent_input.healthgate_mode,
             result_authority=agent_input.result_authority,
             model_name=model_type,
@@ -1399,6 +1414,13 @@ def run_inference_scoring_health(
                 else None
             ),
             denoised_filename_fn=_denoised_fn,
+            evaluation_payload_fn=build_evaluation_payload_fn(
+                task_data_path=bindings.run_task_data_path,
+                deliverable_dir=sandbox.base_dir,
+                exp_id=exp_id,
+                run_name=run_name,
+                model_type=model_type,
+            ),
             target_path_fn=_target_fn,
             file_vector=file_vector,
             denoising_score=final_scalar,

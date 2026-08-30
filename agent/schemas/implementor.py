@@ -3,12 +3,13 @@
 Input and output schemas for ml_model_implementor.
 
 This node consumes a ProposalOutput and produces a validated plugin file
-and test file in agent_generated/. It does not register the plugin itself —
-that is verified by code_validator_agent.
+and test file below its configured workspace. It does not register the plugin
+itself — that is verified by code_validator_agent.
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -312,21 +313,23 @@ class ImplementorInput(BaseModel):
         "nodes quote — so their prompts cannot name different caps.",
     )
     plugin_dir: str = Field(
-        default="agent_generated/models",
+        default="",
         description="Directory where the model plugin file will be written. "
-        "This is a fixed output destination independent of storage.local.workspace.",
+        "An omitted value resolves below storage.local.workspace; an explicit "
+        "value is preserved for orchestrators that own a narrower attempt layout.",
     )
     test_dir: str = Field(
-        default="agent_generated/tests",
-        description="Directory where the test file will be written. "
-        "This is a fixed output destination independent of storage.local.workspace.",
+        default="",
+        description="Directory where the generated test file will be written. "
+        "An omitted value resolves below storage.local.workspace; an explicit "
+        "value is preserved for orchestrators that own a narrower attempt layout.",
     )
     loss_dir: str = Field(
-        default="agent_generated/losses",
+        default="",
         description="Directory where agent-generated loss plugin files will be "
         "written when ``custom_loss_spec`` is set. Mirrors ``plugin_dir`` for "
-        "model plugins. Independent of ``storage.local.workspace``; the workflow "
-        "overrides this with a per-run path so concurrent iterations do not "
+        "model plugins. An omitted value resolves below ``storage.local.workspace``; "
+        "the workflow overrides this with a per-attempt path so retries do not "
         "clobber each other's plugins. The executor resolves loss plugins from "
         "the directories listed in ``SIDERIUS_LOSS_DIRS`` (set by the sandbox "
         "executor), so writing to ``loss_dir`` is sufficient to make the new "
@@ -383,10 +386,41 @@ class ImplementorInput(BaseModel):
             local=LocalStorageConfig(workspace="./siderius_workspace", run_name="v1"),
         ),
         description="Where this node reads its inputs and writes its own output record "
-        "(e.g. implementor_output_{run_name}.json). "
-        "Note: plugin_dir and test_dir are separate — they are fixed "
-        "code output destinations, not part of the workspace.",
+        "(e.g. implementor_output_{run_name}.json). Omitted generated-code "
+        "destinations are derived from this local workspace.",
     )
+
+    @model_validator(mode="after")
+    def _resolve_generated_output_dirs(self):
+        """Keep default generated code inside the caller's local workspace.
+
+        The reference workflow supplies narrower per-attempt directories after
+        constructing this object, so explicit values remain untouched. A
+        standalone caller only needs to provide ``storage`` and receives an
+        isolated ``generated/{run_name}`` tree instead of mutating the checkout.
+        """
+        missing = not self.plugin_dir or not self.test_dir or not self.loss_dir
+        if not missing:
+            return self
+        if self.storage.backend != "local" or self.storage.local is None:
+            raise ValueError(
+                "plugin_dir, test_dir, and loss_dir must be explicit when "
+                "storage.backend is not local"
+            )
+        generated_root = os.path.abspath(
+            os.path.join(
+                self.storage.local.workspace,
+                "generated",
+                self.storage.local.run_name,
+            )
+        )
+        if not self.plugin_dir:
+            self.plugin_dir = os.path.join(generated_root, "models")
+        if not self.test_dir:
+            self.test_dir = os.path.join(generated_root, "tests")
+        if not self.loss_dir:
+            self.loss_dir = os.path.join(generated_root, "losses")
+        return self
 
 
 class ImplementorOutput(BaseModel):

@@ -137,8 +137,8 @@ class TestNoDualPath:
             (_REPO_ROOT / "execute_tools/inference_single.py").read_text(encoding="utf-8")
         )
         assert (
-            _count_calls(inference, "resolve_task_data_path")
-            + _count_calls(inference, "resolve_transported_task_data_path")
+            _count_calls(inference, "resolve_child_task_data_path")
+            + _count_calls(inference, "bootstrap_legacy_tidmad_data_path")
             >= 1
         )
         assert _count_calls(inference, "write_deliverable") >= 1
@@ -202,17 +202,16 @@ class TestTaskIdentityGuardrail:
         believe the area is covered. That is the F-P2b-4 shape: a census
         green for the wrong reason.
 
-        The built-ins' BOOTSTRAP is legitimate and deliberate (a subprocess
-        must register the built-in data paths before resolving one; the
-        `health_checks/__init__.py` precedent is the same). What must not
-        happen silently is a FOURTH built-in appearing, or one leaking onto a
-        surface that has no bootstrap role. So the set is pinned: adding one
-        is a visible, deliberate edit here.
+        Import-time real-task bootstrap is forbidden. The remaining TIDMAD
+        imports are explicit legacy codec/dataset dependencies and the one
+        bounded compatibility adapter; Pets and DAVIS reach children only
+        through transported manifests. The exact residue is pinned so adding
+        a task import or removing the final legacy dependency is deliberate.
         """
         expected = {
             "execute_tools/train_engine_sandbox.py",
             "execute_tools/inference_single.py",
-            "execute_tools/denoising_score_single.py",
+            "execute_tools/task_data_path.py",
         }
         found: dict[str, set[str]] = {}
         for rel in _DATA_PATH_SURFACE:
@@ -235,8 +234,6 @@ class TestTaskIdentityGuardrail:
             f"has no bootstrap role, or a bootstrap disappeared: {sorted(found)}"
         )
         for rel, names in found.items():
-            assert names == {
-                "execute_tools.davis_data_path",
-                "execute_tools.pets_data_path",
-                "execute_tools.tidmad_data_path",
-            }, f"{rel} bootstraps an unexpected built-in set: {sorted(names)}"
+            assert names == {"execute_tools.tidmad_data_path"}, (
+                f"{rel} imports an unexpected real task: {sorted(names)}"
+            )

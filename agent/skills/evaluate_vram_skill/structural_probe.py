@@ -189,11 +189,31 @@ def probe_autograd_tape(forward_callable: Callable[[], torch.Tensor]) -> Autogra
     """
     seen: dict[int, int] = {}
 
+    def record_storage(tensor: torch.Tensor) -> None:
+        """Record physical buffers for dense and supported sparse layouts."""
+        if tensor.layout == torch.strided:
+            storage = tensor.untyped_storage()
+            ptr = storage.data_ptr()
+            if ptr and ptr not in seen:
+                seen[ptr] = storage.nbytes()
+            return
+
+        if tensor.layout == torch.sparse_coo:
+            components = (tensor._indices(), tensor._values())
+        elif tensor.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            components = (tensor.crow_indices(), tensor.col_indices(), tensor.values())
+        elif tensor.layout in {torch.sparse_csc, torch.sparse_bsc}:
+            components = (tensor.ccol_indices(), tensor.row_indices(), tensor.values())
+        else:
+            raise NotImplementedError(
+                "probe_autograd_tape cannot account for tensor layout "
+                f"{tensor.layout}; add its physical component tensors explicitly"
+            )
+        for component in components:
+            record_storage(component)
+
     def pack_hook(t: torch.Tensor):
-        storage = t.untyped_storage()
-        ptr = storage.data_ptr()
-        if ptr and ptr not in seen:
-            seen[ptr] = storage.nbytes()
+        record_storage(t)
         return None
 
     def unpack_hook(_):

@@ -149,6 +149,24 @@ class TestValidateHealthScope:
         with pytest.raises(ValueError, match=r"\[3, 10\] outside the DataScope"):
             validate_health_scope(cfg, SCOPE_4_9)
 
+    def test_composed_full_scope_uses_its_explicit_partition_count(self):
+        """Catch preflight comparing an external task against legacy topology.
+
+        A 370-partition composed task is complete over ``range(370)`` even
+        when the not-yet-bound process default describes a 20-partition task.
+        Without the explicit count, recording checks are falsely classified
+        as full-dataset access under a partial scope and startup is refused.
+        """
+        external_full_scope = list(range(370))
+
+        with pytest.raises(ValueError, match="partial DataScope"):
+            validate_health_scope(_repo_config(), external_full_scope)
+        validate_health_scope(
+            _repo_config(),
+            external_full_scope,
+            dataset_partition_count=370,
+        )
+
 
 # ---------------------------------------------------------------------------
 # materialize_effective_config

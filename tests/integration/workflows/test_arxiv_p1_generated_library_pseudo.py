@@ -6,7 +6,7 @@ REAL ``_promote_loss_to_global`` + ``_promote_model_to_global``, REAL
 run-invariants lock):
 
   A. a fresh normal run writes the generated artifacts (promoted model .py,
-     promoted loss .py, capability index rows) under the RESOLVED
+     promoted loss .py, capability index rows) under the workspace-derived
      non-checkout library root;
   B. provenance records the resolved location — the startup log line and
      the lock's ``generated_library`` field;
@@ -296,10 +296,11 @@ def test_fresh_run_writes_the_library_not_the_checkout(tmp_path, monkeypatch, ca
     assert os.path.realpath(_cgl.__file__).startswith(os.path.realpath(_REPO_ROOT) + os.sep)
     assert os.path.realpath(_wme.__file__).startswith(os.path.realpath(_REPO_ROOT) + os.sep)
 
-    lib = tmp_path / "lib"
-    monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(lib))
+    operator_lib = tmp_path / "operator_lib"
+    monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(operator_lib))
     workspace = tmp_path / "ws"
     workspace.mkdir()
+    lib = workspace / "generated_library"
     gen_dir = tmp_path / "impl_out"
     gen_dir.mkdir()
 
@@ -345,6 +346,7 @@ def test_fresh_run_writes_the_library_not_the_checkout(tmp_path, monkeypatch, ca
 
     # --- Row B: startup log provenance names the resolved root. ---
     assert f"Generated library: {lib} (source: env)" in out
+    assert not operator_lib.exists()
 
     # --- Row A: all four artifact families landed under the resolved root. ---
     promoted_model = lib / "models" / f"{_GEN_MODEL_TYPE}.py"

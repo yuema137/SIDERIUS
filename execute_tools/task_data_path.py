@@ -322,6 +322,24 @@ class ScopeBuildRequest(BaseModel):
     )
 
 
+class DeliverableSourceContext(BaseModel):
+    """Run-bound source needed to reconstruct prediction-aligned task values.
+
+    Generic inference deliberately retains only model outputs. A task whose
+    deliverable also contains source- or supervision-derived values can use
+    this context to rematerialize ``validation_dataset`` through its own
+    implementation. The fixed ordering value states the positional contract;
+    ``sample_count`` lets the implementation refuse a changed or incomplete
+    rematerialization instead of silently zipping mismatched sequences.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    data_dir: str = Field(min_length=1)
+    sample_count: int = Field(ge=0)
+    ordering: Literal["validation_dataset_index_order"] = "validation_dataset_index_order"
+
+
 class DeliverableWriteRequest(BaseModel):
     """Where and under what identity ``write_deliverable`` persists.
 
@@ -351,6 +369,16 @@ class DeliverableWriteRequest(BaseModel):
             "means the caller already paired them, which is what every "
             "pre-12d producer does, so every existing construction is "
             "unchanged."
+        ),
+    )
+    source_context: DeliverableSourceContext | None = Field(
+        default=None,
+        description=(
+            "Run-bound physical source and positional contract for outputs "
+            "produced by generic inference. A task may rematerialize its own "
+            "validation dataset when its deliverable needs input- or target-"
+            "associated values. None preserves callers that already provide "
+            "fully paired outputs."
         ),
     )
 
@@ -472,6 +500,35 @@ _SCOPE_CAPABILITY_METHODS = (
     "serialize_scope",
     "deserialize_scope",
 )
+
+
+@runtime_checkable
+class TaskInferenceBatching(Protocol):
+    """OPTIONAL sibling capability: the task limits inference collation.
+
+    Resource feasibility cannot prove that independently materialized task
+    samples can be stacked. A task whose samples have variable shapes may
+    therefore declare the largest semantically valid inference batch.
+    """
+
+    def max_inference_batch_size(self) -> int:
+        """Return the inclusive task-semantic inference batch ceiling."""
+        ...
+
+
+def declares_inference_batching(impl: object) -> TypeGuard[TaskInferenceBatching]:
+    """Whether ``impl`` declares task-owned inference batching semantics."""
+    return callable(getattr(impl, "max_inference_batch_size", None))
+
+
+def resolve_max_inference_batch_size(impl: object) -> int | None:
+    """Return the declared positive ceiling, or ``None`` when undeclared."""
+    if not declares_inference_batching(impl):
+        return None
+    value = impl.max_inference_batch_size()
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"max_inference_batch_size() must return a positive int; got {value!r}.")
+    return value
 
 
 @runtime_checkable
@@ -810,6 +867,21 @@ def resolve_task_data_path(context: TaskBindingContext | None) -> TaskDataPath:
             "closed — they never fall back to the TIDMAD compatibility path."
         )
     return impl
+
+
+def bootstrap_legacy_tidmad_data_path() -> TaskDataPath:
+    """Register and return the bounded legacy TIDMAD compatibility path.
+
+    Real-task modules no longer register as an import side effect. Composed
+    runs must therefore resolve their implementation from their transported
+    manifest, while an explicitly un-composed application edge calls this
+    adapter to preserve the historical TIDMAD path.
+    """
+    from execute_tools.tidmad_data_path import TidmadTaskDataPath
+
+    if TIDMAD_COMPATIBILITY_ID not in _REGISTRY:
+        register_task_data_path(TidmadTaskDataPath())
+    return resolve_task_data_path(None)
 
 
 # ---------------------------------------------------------------------------

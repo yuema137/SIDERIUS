@@ -2,6 +2,8 @@
 Tests for agent/schemas/implementor.py
 """
 
+import os
+
 import pytest
 from pydantic import ValidationError
 
@@ -22,8 +24,10 @@ class TestImplementorInput:
             baseline_config={"model_config": {}, "train_config": {}, "loss_config": {}},
         )
         assert inp.model_name == "attn_unet"
-        assert inp.plugin_dir == "agent_generated/models"
-        assert inp.test_dir == "agent_generated/tests"
+        expected_root = os.path.abspath("siderius_workspace/generated/v1")
+        assert inp.plugin_dir == os.path.join(expected_root, "models")
+        assert inp.test_dir == os.path.join(expected_root, "tests")
+        assert inp.loss_dir == os.path.join(expected_root, "losses")
         assert inp.storage.backend == "local"
 
     def test_custom_plugin_and_test_dirs(self):
@@ -56,8 +60,7 @@ class TestImplementorInput:
             )
         assert "mathematical_definition" in str(exc.value)
 
-    def test_storage_independent_of_plugin_dir(self):
-        # plugin_dir and test_dir are separate from storage.local.workspace
+    def test_default_generated_dirs_follow_local_workspace(self):
         inp = ImplementorInput(
             model_name="x",
             model_description="x",
@@ -66,7 +69,44 @@ class TestImplementorInput:
             storage={"backend": "local", "local": {"workspace": "/runs", "run_name": "r1"}},
         )
         assert inp.storage.local.workspace == "/runs"
-        assert inp.plugin_dir == "agent_generated/models"  # unchanged
+        assert inp.plugin_dir == "/runs/generated/r1/models"
+        assert inp.test_dir == "/runs/generated/r1/tests"
+        assert inp.loss_dir == "/runs/generated/r1/losses"
+
+    def test_default_generated_dirs_do_not_cross_workspaces(self, tmp_path):
+        def make_input(workspace):
+            return ImplementorInput(
+                model_name="x",
+                model_description="x",
+                mathematical_definition="x",
+                baseline_config={},
+                storage={
+                    "backend": "local",
+                    "local": {"workspace": str(workspace), "run_name": "same_run"},
+                },
+            )
+
+        left = make_input(tmp_path / "left")
+        right = make_input(tmp_path / "right")
+
+        assert left.plugin_dir != right.plugin_dir
+        assert left.plugin_dir.startswith(str(tmp_path / "left"))
+        assert right.plugin_dir.startswith(str(tmp_path / "right"))
+
+    def test_non_local_storage_requires_explicit_generated_dirs(self):
+        with pytest.raises(ValidationError, match="must be explicit"):
+            ImplementorInput(
+                model_name="x",
+                model_description="x",
+                mathematical_definition="x",
+                baseline_config={},
+                storage={
+                    "backend": "postgres",
+                    "postgres": {
+                        "connection_string": "postgresql://example.invalid/db",
+                    },
+                },
+            )
 
 
 class TestImplementorOutput:
@@ -183,7 +223,7 @@ class TestImplementorInputL3:
 
     def test_loss_dir_default(self, base_input_kwargs):
         inp = ImplementorInput(**base_input_kwargs)
-        assert inp.loss_dir == "agent_generated/losses"
+        assert inp.loss_dir == os.path.abspath("siderius_workspace/generated/v1/losses")
 
     def test_loss_dir_override(self, base_input_kwargs):
         inp = ImplementorInput(**base_input_kwargs, loss_dir="/custom/losses")
@@ -203,7 +243,7 @@ class TestImplementorInputL3:
         produce a fully-valid ImplementorInput."""
         inp = ImplementorInput(**base_input_kwargs)
         # All new L3 fields must have their defaults.
-        assert inp.loss_dir == "agent_generated/losses"
+        assert inp.loss_dir == os.path.abspath("siderius_workspace/generated/v1/losses")
         assert inp.custom_loss_spec is None
 
 

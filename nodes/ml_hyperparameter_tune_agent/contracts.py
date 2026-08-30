@@ -219,6 +219,14 @@ class RunBindings:
     legacy default exactly as before.
     """
 
+    run_task_data_path: Any = None
+    """The run-bound task codec used by Health payload view providers.
+
+    This is an authority resolved at startup, not mutable attempt state. It is
+    carried explicitly so the round boundary never re-reads ambient binding
+    state or reconstructs a task's artifact layout.
+    """
+
     def __post_init__(self) -> None:
         offending = sorted(FORBIDDEN_BINDING_FIELDS & {f.name for f in fields(self)})
         if offending:

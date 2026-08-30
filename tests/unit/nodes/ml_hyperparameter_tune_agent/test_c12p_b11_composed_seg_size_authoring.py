@@ -260,6 +260,56 @@ def _prepare(impl, configs_dir):
         )
 
 
+def test_planner_history_uses_the_run_scientific_gate_set(tmp_path, monkeypatch):
+    """A composed run must not rebind the legacy Health family while planning.
+
+    This catches the H100 DAVIS qualification failure from 2026-08-30. After
+    one successful attempt, round-two planning classified the prior score
+    table without forwarding the run's resolved gate IDs. The zero-argument
+    fallback then tried to load the legacy Health plugins into a process that
+    had already bound DAVIS plugins, and every remaining attempt failed.
+
+    HOW IT FAILS: ``seen`` receives ``None`` instead of the run-owned gate set,
+    reproducing the cross-task plugin binding request before the next plan.
+    """
+    import importlib
+
+    planning = importlib.import_module("nodes.ml_hyperparameter_tune_agent.planning")
+
+    expected = frozenset({"davis_output_finite"})
+    seen: list[object] = []
+    bindings = _bindings(_composed_input(), tmp_path)
+    object.__setattr__(bindings, "run_scientific_gate_ids", expected)
+    object.__setattr__(
+        bindings.sandbox,
+        "get_summary",
+        lambda: [
+            {
+                "denoising_score": 0.25,
+                "score_table": {"rendered_markdown": "| score |\n| 0.25 |"},
+            }
+        ],
+    )
+
+    def _record_gate_ids(record, *, required_gate_ids=None):
+        seen.append(required_gate_ids)
+        return True
+
+    monkeypatch.setattr(planning, "is_valid_candidate", _record_gate_ids)
+    with bind_task_data_path(_ScopeRecorder()):
+        prepare_attempt(
+            bindings,
+            iteration=1,
+            attempt_in_round=1,
+            total_attempts=1,
+            attempts_this_round=1,
+            is_formal_round=False,
+            formal_trial_winner=None,
+        )
+
+    assert seen == [expected]
+
+
 class TestTheFrameworkNeverAuthorsTaskVocabulary:
     def test_an_omitted_segmentation_size_is_not_replaced_by_a_literal(self, tmp_path):
         """B11. The defect this alone catches: ``planning.py:447`` inventing a

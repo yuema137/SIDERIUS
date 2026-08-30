@@ -57,6 +57,7 @@ from core.runtime_control.process_group import (
     tree_rss_bytes,
 )
 from core.subprocess_env import subprocess_env
+from execute_tools.task_data_path import EpochSamplingParams
 
 #: Terminal dispositions. Each names WHAT was established, so that
 #: authority to reject a candidate — or to tell an agent to shrink it —
@@ -156,6 +157,18 @@ class HardwareSnapshot(BaseModel):
     cuda_visible_devices: str | None = None
 
 
+class TaskProbeDataSpec(BaseModel):
+    """Run-bound task data needed to materialize one training probe batch."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    manifest_path: str = Field(min_length=1)
+    semantic_fingerprint: str = Field(min_length=1)
+    training_scope_payload: str = Field(min_length=1)
+    sampling: EpochSamplingParams
+    max_inference_batch_size: int | None = Field(default=None, ge=1)
+
+
 class IsolatedProbeSpec(BaseModel):
     """Everything the worker needs. Deliberately small and JSON-only.
 
@@ -210,6 +223,10 @@ class IsolatedProbeSpec(BaseModel):
     #: silently. A spec written before this field existed still validates.
     plugin_dir: str | None = None
     loss_dir: str | None = None
+    #: A composed run's existing task-data contract, carried into the isolated
+    #: worker so the loss sees one task-valid training batch. ``None`` keeps
+    #: the legacy shape-and-dtype synthetic probe unchanged.
+    task_probe_data: TaskProbeDataSpec | None = None
 
     def effective_cap_gb(self) -> float | None:
         """The cap the worker must apply: the LOWER of the operator ceiling

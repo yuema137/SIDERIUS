@@ -1,8 +1,9 @@
 """
-Machine-specific data paths — loaded from tidmad_data_config.yaml.
+Legacy machine-specific data paths — loaded lazily from tidmad_data_config.yaml.
 
-All modules import from here instead of hardcoding paths.
-When migrating to a new server, update tidmad_data_config.yaml only.
+Legacy callers import from here instead of hardcoding paths. Generic composed
+runs bind an explicit physical data root and never resolve this task-specific
+configuration merely by importing their workflow.
 
 Usage:
     from execute_tools.data_paths import TIDMAD_DATA_DIR, SIDERIUS_DATA_DIR
@@ -13,6 +14,14 @@ import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from functools import lru_cache
+from typing import TYPE_CHECKING, NamedTuple
+
+if TYPE_CHECKING:
+    # Runtime access is provided lazily by __getattr__. These declarations
+    # preserve the historical typed import surface for static consumers.
+    TIDMAD_DATA_DIR: str
+    SIDERIUS_DATA_DIR: str
 
 # Find config file relative to project root. The real (gitignored) config is
 # ``tidmad_data_config.yaml``; the tracked template is
@@ -24,43 +33,78 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CONFIG_PATH = os.path.join(_PROJECT_ROOT, "tidmad_data_config.yaml")
 _EXAMPLE_CONFIG_PATH = os.path.join(_PROJECT_ROOT, "tidmad_data_config.example.yaml")
 
-if os.path.exists(_CONFIG_PATH):
-    _active_config_path = _CONFIG_PATH
-elif os.path.exists(_EXAMPLE_CONFIG_PATH):
-    warnings.warn(
-        f"tidmad_data_config.yaml not found at {_CONFIG_PATH}; "
-        f"falling back to template at {_EXAMPLE_CONFIG_PATH}. "
-        "Copy the template and update paths for this machine before running "
-        "anything that reads from TIDMAD_DATA_DIR or SIDERIUS_DATA_DIR.",
-        stacklevel=2,
+
+class _LegacyDataConfig(NamedTuple):
+    tidmad_data_dir: str
+    siderius_data_dir: str
+    source_path: str
+
+
+@lru_cache(maxsize=1)
+def _legacy_data_config() -> _LegacyDataConfig:
+    """Read the legacy TIDMAD machine config only when its value is used.
+
+    Importing generic composition and workflow modules must not select or read
+    a task-specific configuration. Legacy callers retain the same lookup,
+    warning, parsing, and failure behavior at first value access.
+    """
+    if os.path.exists(_CONFIG_PATH):
+        active_config_path = _CONFIG_PATH
+    elif os.path.exists(_EXAMPLE_CONFIG_PATH):
+        warnings.warn(
+            f"tidmad_data_config.yaml not found at {_CONFIG_PATH}; "
+            f"falling back to template at {_EXAMPLE_CONFIG_PATH}. "
+            "Copy the template and update paths for this machine before running "
+            "anything that reads from TIDMAD_DATA_DIR or SIDERIUS_DATA_DIR.",
+            stacklevel=2,
+        )
+        active_config_path = _EXAMPLE_CONFIG_PATH
+    else:
+        raise FileNotFoundError(
+            f"Data config not found at {_CONFIG_PATH} and no template available at "
+            f"{_EXAMPLE_CONFIG_PATH}. Restore tidmad_data_config.example.yaml or "
+            "create tidmad_data_config.yaml manually."
+        )
+
+    try:
+        import yaml
+
+        with open(active_config_path) as f:
+            config = yaml.safe_load(f)
+    except ImportError:
+        config = {}
+        with open(active_config_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                key, _, value = line.partition(":")
+                config[key.strip()] = value.strip()
+
+    return _LegacyDataConfig(
+        tidmad_data_dir=config["tidmad_data_dir"],
+        siderius_data_dir=config["siderius_data_dir"],
+        source_path=active_config_path,
     )
-    _active_config_path = _EXAMPLE_CONFIG_PATH
-else:
-    raise FileNotFoundError(
-        f"Data config not found at {_CONFIG_PATH} and no template available at "
-        f"{_EXAMPLE_CONFIG_PATH}. Restore tidmad_data_config.example.yaml or "
-        "create tidmad_data_config.yaml manually."
-    )
 
-# Use yaml if available, fall back to simple parsing
-try:
-    import yaml
 
-    with open(_active_config_path) as f:
-        _config = yaml.safe_load(f)
-except ImportError:
-    # Minimal YAML parsing for simple key: value files
-    _config = {}
-    with open(_active_config_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            key, _, value = line.partition(":")
-            _config[key.strip()] = value.strip()
+def legacy_tidmad_data_dir() -> str:
+    """The configured legacy TIDMAD data root, resolved on first use."""
+    return _legacy_data_config().tidmad_data_dir
 
-TIDMAD_DATA_DIR: str = _config["tidmad_data_dir"]
-SIDERIUS_DATA_DIR: str = _config["siderius_data_dir"]
+
+def legacy_siderius_data_dir() -> str:
+    """The configured legacy SIDERIUS output root, resolved on first use."""
+    return _legacy_data_config().siderius_data_dir
+
+
+def __getattr__(name: str) -> str:
+    """Preserve the two historical module constants without import-time I/O."""
+    if name == "TIDMAD_DATA_DIR":
+        return legacy_tidmad_data_dir()
+    if name == "SIDERIUS_DATA_DIR":
+        return legacy_siderius_data_dir()
+    raise AttributeError(name)
 
 
 class DatasetDirectoryUnavailable(RuntimeError):
@@ -115,7 +159,7 @@ def resolve_dataset_dir(explicit: str | None = None, *, purpose: str = "this run
             exist, and never substitutes a different one.
     """
     source = "--data_dir" if explicit else "tidmad_data_config.yaml (TIDMAD_DATA_DIR)"
-    candidate = explicit or TIDMAD_DATA_DIR
+    candidate = explicit or legacy_tidmad_data_dir()
 
     if not candidate:
         raise DatasetDirectoryUnavailable(
@@ -125,7 +169,7 @@ def resolve_dataset_dir(explicit: str | None = None, *, purpose: str = "this run
         )
     if not os.path.isdir(candidate):
         detail = ""
-        if _active_config_path == _EXAMPLE_CONFIG_PATH and not explicit:
+        if not explicit and _legacy_data_config().source_path == _EXAMPLE_CONFIG_PATH:
             detail = (
                 f" NOTE: {_CONFIG_PATH} does not exist, so the tracked TEMPLATE "
                 f"{_EXAMPLE_CONFIG_PATH} supplied this placeholder value. Copy the "
@@ -232,7 +276,7 @@ def resolve_physical_data_root() -> str:
     collection repo-wide.
     """
     bound = _ACTIVE_PHYSICAL_DATA_ROOT.get()
-    return bound if bound is not None else TIDMAD_DATA_DIR
+    return bound if bound is not None else legacy_tidmad_data_dir()
 
 
 # ── V20 PR C1 / C-C3b: the task-owned measurement capability ────────────────
@@ -269,5 +313,5 @@ def resolve_tidmad_measurement_capability(dataset_root: str | None = None):
         data_shape_class=(
             f"psd{TIDMAD.psd_segment_length}_seg{TIDMAD.segments_per_file}_files{TIDMAD.num_files}"
         ),
-        dataset_root=TIDMAD_DATA_DIR if dataset_root is None else dataset_root,
+        dataset_root=legacy_tidmad_data_dir() if dataset_root is None else dataset_root,
     )

@@ -33,6 +33,7 @@ from unittest.mock import patch
 
 import pytest
 
+from agent.schemas.health_feedback import TrialValidityFeedback
 from sdsc_submission_scripts import run_one_iteration as runner
 from tests.helpers.launcher_bindings import effective_workflow_kwargs
 
@@ -416,6 +417,8 @@ class _StubResult:
         resolved_bypass_formal_threshold=None,
         formal_score=_UNSET,
         all_records=None,
+        gate_exhaustion=None,
+        trial_validity_feedback=None,
     ):
         self.model_type = model_type
         self.best_denoising_score = score
@@ -432,6 +435,8 @@ class _StubResult:
         self.formal_reference_score = formal_reference_score
         self.resolved_skip_formal_threshold = resolved_skip_formal_threshold
         self.resolved_bypass_formal_threshold = resolved_bypass_formal_threshold
+        self.gate_exhaustion = gate_exhaustion
+        self.trial_validity_feedback = trial_validity_feedback
 
 
 #: An existing directory for the wiring harness's dataset preflight. The
@@ -963,6 +968,38 @@ class TestNoRecordsExit:
         assert manifest["status"] == "no_records"
         assert manifest["output_path"] is None
         assert manifest["best_score"] is None
+
+    def test_no_records_manifest_carries_typed_negative_feedback(self, tmp_path):
+        """Regression for #396: a Health-invalid tuner output has no
+        incumbent, but its bounded failure summary must cross the process
+        boundary to iteration 2.
+
+        This test fails if the producer again equates ``score=None`` with
+        ``no evidence`` and omits the manifest handoff.
+        """
+        feedback = TrialValidityFeedback(
+            trial_records_considered=1,
+            invalid_count=1,
+            unknown_validity_count=0,
+            execution_failure_count=0,
+            formal_skipped_for_no_valid_winner=False,
+            healthgate_mode="blocking",
+        )
+        results = [
+            _StubResult(
+                "c8_test_arch_a",
+                score=None,
+                trial_validity_feedback=feedback,
+            )
+        ]
+
+        manifest = runner.write_manifest(str(tmp_path), "iter_001", results)
+
+        assert manifest["status"] == "no_records"
+        assert manifest["output_path"] is None
+        assert manifest["negative_feedback"] == {
+            "trial_validity_feedback": feedback.model_dump(mode="json")
+        }
 
     def test_write_manifest_completed_path_unchanged(self, tmp_path):
         results = [_StubResult("c8_test_arch_a", score=0.71)]

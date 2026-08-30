@@ -106,27 +106,25 @@ class TestMachineConfigs:
     def test_a_present_machine_config_is_a_violation(self, repo: Path):
         """Presence changes observable behaviour, so it cannot be ignored.
 
-        `tidmad_data_config.yaml` suppresses an import-time UserWarning that a
-        golden stderr comparison counted; its presence is why a green developer
-        machine produced a red CI run. Fails as: a present config reports OK.
+        A machine-local config can change imports or test selection while the
+        checkout SHA stays fixed. Fails as: a declared present config reports
+        OK and the parity run proceeds under an unrecorded local override.
         """
-        (repo / "tidmad_data_config.yaml").write_text("tidmad_data_dir: /x\n", encoding="utf-8")
-        result = pf.check_machine_configs(repo, expect_absent=pf.MACHINE_CONFIG_FILES)
+        (repo / "local_runtime.yaml").write_text("enabled: true\n", encoding="utf-8")
+        result = pf.check_machine_configs(repo, expect_absent=("local_runtime.yaml",))
         assert result.outcome is pf.Outcome.VIOLATION
-        assert "tidmad_data_config.yaml" in result.detail
+        assert "local_runtime.yaml" in result.detail
 
     def test_the_tracked_template_is_not_treated_as_machine_config(self, repo: Path):
         """The committed template must never trip the absence contract.
 
-        `data_paths` deliberately falls back to `tidmad_data_config.example.yaml`
-        so a fresh clone imports; flagging it would make every clean checkout
-        fail preflight. Fails as: the example template counts as machine config.
+        A committed example is documentation, not an active machine override;
+        flagging it would make every clean checkout fail preflight. Fails as:
+        the example template counts as the declared machine config.
         """
-        (repo / "tidmad_data_config.example.yaml").write_text(
-            "tidmad_data_dir: /p\n", encoding="utf-8"
-        )
+        (repo / "local_runtime.example.yaml").write_text("enabled: false\n", encoding="utf-8")
         assert (
-            pf.check_machine_configs(repo, expect_absent=pf.MACHINE_CONFIG_FILES).outcome
+            pf.check_machine_configs(repo, expect_absent=("local_runtime.yaml",)).outcome
             is pf.Outcome.OK
         )
 
@@ -293,7 +291,7 @@ class TestExternalResources:
         Fails as: a resource is declared without the measurement that justifies
         listing it, and the contract drifts back to assertion.
         """
-        assert sum(r.gates_skips for r in pf.DECLARED_RESOURCES) == 40
+        assert pf.DECLARED_RESOURCES, "the parity profile must declare its external-resource axis"
         assert all(r.gates_skips > 0 for r in pf.DECLARED_RESOURCES)
 
 

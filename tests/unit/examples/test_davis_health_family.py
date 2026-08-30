@@ -95,10 +95,17 @@ def _isolated_registries_and_run_scope():
         _plugin_binding.reset_run_scope()
 
 
-def _ctx(deliverable: Path | None) -> HealthCheckContext:
+def _ctx(
+    deliverable: Path | None,
+    *,
+    identity: dict[str, str] = WRITE_IDENTITY,
+) -> HealthCheckContext:
     kwargs = {"model_name": "davis_reference_predictor", "run_name": "t", "round_index": 1}
     if deliverable is not None:
         kwargs["denoised_paths"] = {0: str(deliverable)}
+        kwargs["evaluation_payload_fn"] = lambda: DavisTaskDataPath().read_evaluation_payload(
+            EvaluationReadRequest(deliverable_dir=str(deliverable.parent), **identity)
+        )
     return HealthCheckContext(**kwargs)
 
 
@@ -299,7 +306,15 @@ class TestRealPreservedArtifact:
         from execute_tools.health_checks.registry import get_view_provider
 
         view = get_view_provider("davis.sample_views").materialize(
-            "continuous_samples", _ctx(REAL_NPZ)
+            "continuous_samples",
+            _ctx(
+                REAL_NPZ,
+                identity={
+                    "exp_id": "davis_gate2_001",
+                    "run_name": "d14d",
+                    "model_type": "davis_reference_predictor",
+                },
+            ),
         )
         samples = view.payload.samples
         assert samples.size == REAL_N_SAMPLES
@@ -309,7 +324,17 @@ class TestRealPreservedArtifact:
 
     def test_the_gate_passes_the_preserved_artifact_at_the_frozen_floor(self, monkeypatch):
         _compose(monkeypatch)
-        result = runner.evaluate_gate(DISPERSION_GATE, _ctx(REAL_NPZ))
+        result = runner.evaluate_gate(
+            DISPERSION_GATE,
+            _ctx(
+                REAL_NPZ,
+                identity={
+                    "exp_id": "davis_gate2_001",
+                    "run_name": "d14d",
+                    "model_type": "davis_reference_predictor",
+                },
+            ),
+        )
         (check_result,) = result.check_results
         assert check_result.verdict is CheckVerdict.PASSED
         assert check_result.metrics["dispersion"] == FROZEN_DISPERSION
@@ -323,7 +348,7 @@ class TestProviderErrorPaths:
         result = runner.evaluate_gate(DISPERSION_GATE, _ctx(tmp_path / "absent.npz"))
         (check_result,) = result.check_results
         assert check_result.verdict is CheckVerdict.ERROR
-        assert "view provider failed" in check_result.reason
+        assert check_result.metrics["n_samples"] == 0
 
     def test_a_corrupt_npz_is_an_ERROR_verdict(self, monkeypatch, tmp_path):
         _compose(monkeypatch)

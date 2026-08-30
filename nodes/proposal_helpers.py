@@ -192,13 +192,16 @@ def load_model_source(model_type: str) -> str | None:
 
     Returns the source code as a string, or None if not found.
     """
-    from core.generated_library import generated_models_dir
+    from core.generated_library import generated_library_is_workspace_bound, generated_models_dir
 
     # Try agent-generated plugin first (more specific).
     legacy_models_dir = os.path.join(_SIDERIUS_ROOT, "agent_generated", "models")
+    model_dirs = [generated_models_dir()]
+    if not generated_library_is_workspace_bound():
+        model_dirs.append(legacy_models_dir)
     plugin_candidates = [
         candidate
-        for models_dir in (generated_models_dir(), legacy_models_dir)
+        for models_dir in model_dirs
         for candidate in (
             os.path.join(models_dir, model_type, f"{model_type}.py"),
             os.path.join(models_dir, f"{model_type}.py"),

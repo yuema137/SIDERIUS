@@ -73,6 +73,7 @@ from typing import TYPE_CHECKING, Any, cast
 import yaml
 
 from agent.schemas.hyperparam_tuning import TaskCompositionRef
+from agent.schemas.parameter_rules import ParameterRules
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.interpretation import InterpretationTaskBlocks
@@ -109,6 +110,7 @@ _MANIFEST_KEYS = frozenset(
         "model_plugins",
         "loss_plugins",
         "objective",
+        "parameter_rules",
         "dynamic_observables",
         "static_observables",
     }
@@ -251,6 +253,13 @@ class RunTaskComposition:
     ``objective:`` section. ``None`` means the task states no authoritative
     objective and the planner's choice stands, which is every run that
     exists today.
+    """
+
+    parameter_rules: ParameterRules = field(default_factory=ParameterRules)
+    """The composition's typed effective-plan constraints.
+
+    An empty rule set leaves every parameter agent-controlled. Non-empty rules
+    are fingerprinted and enforced after all round-mode resolution.
     """
 
     """The run's DECLARED model plugins, resolved and pinned, or ``None``.
@@ -905,10 +914,9 @@ def _compose_task_data_path(
             # check above just proved the content matches — but it was built
             # with nothing, and this declaration asked for configured
             # semantics. Returning the bare object here is exactly the defect:
-            # every built-in registers at module import in all three children,
-            # so the registered instance ALWAYS exists first, and a composed
-            # Pets or DAVIS run would silently receive the one that cannot
-            # build a scope.
+            # an earlier explicit registration may have been built without this
+            # declaration's configuration. Returning that bare object would
+            # silently discard the task-owned scope-building semantics.
             return cast("TaskDataPath", resolved), plugin_ref, declared_config
         return (
             resolve_task_data_path(TaskBindingContext(task_data_path_id=declared)),
@@ -1479,9 +1487,16 @@ def _compose_objective(raw: dict[str, Any], manifest_dir: str):
     requires exact MAE/L1, so "the objective a task declares" has to be a
     typed authority, not a prompt suggestion an LLM may decline.
 
-    **The name is NOT restated here.** The manifest points at the
-    implementation and at the symbol that implementation uses to declare
-    itself::
+    A task using a framework-provided objective declares its validated config
+    directly::
+
+        objective:
+          config:
+            loss_type: ce
+            reduction: mean
+
+    A task with its own objective points at the implementation and at the
+    symbol that implementation uses to declare itself::
 
         objective:
           implementation:
@@ -1493,10 +1508,9 @@ def _compose_objective(raw: dict[str, Any], manifest_dir: str):
     and the manifest cannot disagree with it. Exactly the ``IMPLEMENTS``
     discipline F-12d-3 established for metrics, one family over.
 
-    **No new selection vocabulary.** The result is an ordinary validated
-    :class:`LossConfig` on the existing ``custom`` + ``loss_name`` route —
-    ``loss_type`` keeps its five members, nothing is added to a central enum,
-    and no task name appears anywhere.
+    Both forms produce the existing validated :class:`LossConfig`. ``config``
+    is restricted to built-ins; a custom objective must use ``implementation``
+    so executable code and semantic identity stay pinned together.
 
     Absent section ⇒ ``(None, None)``: no override, no fingerprint key, legacy
     byte-unchanged.
@@ -1511,13 +1525,48 @@ def _compose_objective(raw: dict[str, Any], manifest_dir: str):
         raise TaskCompositionError(
             f"section {where!r} must be a mapping; got {type(section).__name__}."
         )
+    _refuse_unknown_section_keys(section, frozenset({"none", "config", "implementation"}), where)
     if section.get("none") is True:
-        if "implementation" in section:
+        if "implementation" in section or "config" in section:
             raise TaskCompositionError(
-                f"{where} declares both 'none: true' and an 'implementation'. A task "
+                f"{where} declares both 'none: true' and an objective. A task "
                 "either declares an authoritative objective or explicitly declares none."
             )
         return None, None
+
+    has_config = "config" in section
+    has_implementation = "implementation" in section
+    if has_config == has_implementation:
+        raise TaskCompositionError(
+            f"{where} requires exactly one of 'config' (a framework-provided "
+            "objective) or 'implementation' (a task plugin)."
+        )
+
+    if has_config:
+        config = section["config"]
+        if not isinstance(config, dict):
+            raise TaskCompositionError(
+                f"{where}.config must be a mapping; got {type(config).__name__}."
+            )
+        from ml_models.models_format_sandbox import LossConfig
+
+        unknown = sorted(set(config) - set(LossConfig.model_fields))
+        if unknown:
+            raise TaskCompositionError(
+                f"{where}.config contains unknown LossConfig keys: {unknown}."
+            )
+        try:
+            loss_config = LossConfig.model_validate(config)
+        except Exception as exc:
+            raise TaskCompositionError(
+                f"{where}.config is not a valid LossConfig: {type(exc).__name__}: {exc}"
+            ) from exc
+        if loss_config.loss_type == "custom":
+            raise TaskCompositionError(
+                f"{where}.config cannot select a custom objective. Declare "
+                "objective.implementation so the task-owned code is pinned."
+            )
+        return loss_config, None
 
     implementation = section.get("implementation")
     if not isinstance(implementation, dict):
@@ -1582,6 +1631,7 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
         task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
         task_health_binding=task_composition.task_health_binding,
         objective=getattr(task_composition, "objective", None),
+        parameter_rules=getattr(task_composition, "parameter_rules", None),
     )
 
 
@@ -1781,6 +1831,8 @@ def compute_semantic_fingerprint(
     task_data_path_config: dict[str, Any] | None = None,
     task_data_path_content_identity: str | None = None,
     observable_declarations: list[dict[str, Any]] | None = None,
+    builtin_objective_declaration: dict[str, Any] | None = None,
+    parameter_rules: ParameterRules | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -1851,6 +1903,14 @@ def compute_semantic_fingerprint(
     # byte-unchanged.
     if implementor_blocks is not None:
         payload["implementor_blocks"] = implementor_blocks.model_dump(mode="json")
+    # A framework-provided objective has no plugin file whose content digest
+    # can carry its selected parameters. The validated declaration therefore
+    # joins identity directly. Additive only when this form is declared, so
+    # every manifest without it keeps its existing fingerprint.
+    if builtin_objective_declaration is not None:
+        payload["builtin_objective"] = builtin_objective_declaration
+    if parameter_rules is not None and parameter_rules.rules:
+        payload["parameter_rules"] = parameter_rules.model_dump(mode="json")["rules"]
     # Step 12 / PR-12d, seam A (ruling A1) — the task-instance CONFIG is
     # semantic: `manifest_path` decides which images a Pets run trains on and
     # `clips_path` which clips DAVIS uses, so two runs configured differently
@@ -2202,6 +2262,13 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
     manifest_dir = os.path.dirname(resolved_manifest)
     raw = _read_manifest(resolved_manifest)
 
+    try:
+        parameter_rules = ParameterRules.model_validate(raw.get("parameter_rules", {}))
+    except Exception as exc:
+        raise TaskCompositionError(
+            f"parameter_rules could not be validated: {type(exc).__name__}: {exc}"
+        ) from exc
+
     source_paths: dict[str, str] = {}
     plugins: list[ResolvedPluginRef] = []
 
@@ -2399,6 +2466,14 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         task_data_path_config=task_data_path_config,
         task_data_path_content_identity=impl_content_identity,
         observable_declarations=observable_declarations,
+        builtin_objective_declaration=(
+            composed_objective.model_dump(mode="json")
+            if isinstance(raw.get("objective"), dict)
+            and "config" in raw["objective"]
+            and composed_objective is not None
+            else None
+        ),
+        parameter_rules=parameter_rules,
     )
 
     return RunTaskComposition(
@@ -2422,6 +2497,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         model_plugins=model_plugin_binding,
         loss_plugins=loss_plugin_roots or None,
         objective=composed_objective,
+        parameter_rules=parameter_rules,
         observables=observables or None,
     )
 
@@ -2576,8 +2652,9 @@ def bind_run_task_composition(
     materialisation both happen before iteration 1 and both read the run's
     profile.
 
-    ``None`` is a no-op that yields ``None``: an un-composed run enters no
-    context, sets no ContextVar and behaves exactly as it did before P1.
+    ``None`` activates only the bounded legacy TIDMAD compatibility adapter,
+    then yields ``None`` without setting a ContextVar. Real-task modules do
+    not register merely because a composed child imported them.
 
     Every binding is token-reset through :class:`~contextlib.ExitStack`, so
     all of them unwind in reverse order on the way out — including on an
@@ -2592,6 +2669,9 @@ def bind_run_task_composition(
     to arrive, which is the ambiguity this whole milestone removes.
     """
     if composition is None:
+        from execute_tools.task_data_path import bootstrap_legacy_tidmad_data_path
+
+        bootstrap_legacy_tidmad_data_path()
         yield None
         return
 

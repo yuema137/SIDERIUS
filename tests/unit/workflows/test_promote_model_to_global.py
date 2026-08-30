@@ -117,6 +117,45 @@ def _register_pre_promotion(name, workspace_path, tmp_registry, math_def="x"):
 
 
 class TestPromoteModelToGlobal:
+    def test_workspace_binding_ignores_same_named_checkout_plugin(self, tmp_path, monkeypatch):
+        from agent_generated import _registry as registry_module
+        from core.generated_library import bind_generated_library_to_workspace
+        from ml_models import plugin_loader
+        from workflows.model_exploration import _promote_model_to_global
+
+        workspace = tmp_path / "workspace"
+        legacy = tmp_path / "checkout" / "agent_generated" / "models"
+        legacy.mkdir(parents=True)
+        legacy_file = legacy / "promo_model_alpha.py"
+        legacy_file.write_text("# unrelated legacy bytes\n")
+        monkeypatch.setattr(plugin_loader, "AGENT_GENERATED_DIR", str(legacy))
+        monkeypatch.setattr(
+            registry_module,
+            "_LEGACY_CHECKOUT_INDEX_PATH",
+            str(tmp_path / "checkout" / "agent_generated" / "_capability_index.json"),
+        )
+        env: dict[str, str] = {}
+        bind_generated_library_to_workspace(str(workspace), environ=env)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+
+        source = workspace / "attempt" / "models" / "promo_model_alpha.py"
+        source.parent.mkdir(parents=True)
+        source.write_text(_MODEL_PLUGIN_SRC_ALPHA)
+        registry = _register_pre_promotion("promo_model_alpha", str(source), None)
+
+        _promote_model_to_global(
+            _FakeImplOutput(model_type="promo_model_alpha", model_file_path=str(source))
+        )
+
+        promoted = workspace / "generated_library" / "models" / "promo_model_alpha.py"
+        assert promoted.read_text() == _MODEL_PLUGIN_SRC_ALPHA
+        assert legacy_file.read_text() == "# unrelated legacy bytes\n"
+        assert registry.index_path == str(
+            workspace / "generated_library" / "_capability_index.json"
+        )
+        assert registry.list(capability_type="model")[0].file_path == str(promoted)
+
     def test_promotes_generated_plugin(self, tmp_path, global_models_dir, tmp_registry):
         """Happy path — source under workspace plugin_dir is copied to
         the global models dir and the registry entry's ``file_path`` is

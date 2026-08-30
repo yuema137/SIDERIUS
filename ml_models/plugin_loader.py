@@ -185,7 +185,7 @@ def _resolve_plugin_dirs() -> list[str]:
     ``plugin_binding.union_plugin_roots``, the ONE place root-set merging is
     expressed, so the loader and the transport cannot drift apart.
     """
-    from core.generated_library import generated_models_dir
+    from core.generated_library import generated_library_is_workspace_bound, generated_models_dir
     from ml_models.plugin_binding import active_run_model_plugin_roots, union_plugin_roots
 
     declared = active_run_model_plugin_roots()
@@ -194,6 +194,8 @@ def _resolve_plugin_dirs() -> list[str]:
         return list(union_plugin_roots(declared, env))
     if env:
         return [p for p in env.split(os.pathsep) if p.strip()]
+    if generated_library_is_workspace_bound():
+        return [generated_models_dir()]
     return [generated_models_dir(), AGENT_GENERATED_DIR]
 
 
@@ -439,11 +441,14 @@ def preload_global_models() -> list[str]:
         List of ``model_type`` strings successfully loaded. Empty list when
         neither directory exists or both are empty (first-run / fresh host).
     """
-    from core.generated_library import generated_models_dir
+    from core.generated_library import generated_library_is_workspace_bound, generated_models_dir
 
     loaded: list[str] = []
     seen_basenames: set[str] = set()
-    for models_dir in (generated_models_dir(), AGENT_GENERATED_DIR):
+    model_dirs = [generated_models_dir()]
+    if not generated_library_is_workspace_bound():
+        model_dirs.append(AGENT_GENERATED_DIR)
+    for models_dir in model_dirs:
         if not os.path.isdir(models_dir):
             continue
         for fname in sorted(os.listdir(models_dir)):

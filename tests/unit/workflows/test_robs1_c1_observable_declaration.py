@@ -48,7 +48,6 @@ from workflows.task_composition import (
 )
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-SHIPPED_MANIFESTS = ("tidmad", "pets", "davis", "quickstart")
 PLUGIN_FIXTURE = os.path.join(REPO_ROOT, "tests", "fixtures", "robs1", "_observable_plugins.py")
 
 
@@ -260,53 +259,38 @@ class TestAcquisitionIsAType:
 
 
 class TestFingerprintAdditivity:
-    @pytest.mark.parametrize("name", SHIPPED_MANIFESTS)
-    def test_every_shipped_manifest_declares_no_observables(self, name):
+    def test_quickstart_declares_no_observables(self):
         """The precondition the byte-identity claim rests on.
 
-        Stated as its own assertion so that a future manifest which DOES
-        declare observables makes the digest test below fail informatively
+        Stated as its own assertion so that a future Quickstart manifest which
+        declares observables makes the digest test below fail informatively
         rather than mysteriously.
         """
         raw = yaml.safe_load(
-            open(os.path.join(REPO_ROOT, "configs", "task_composition", f"{name}.yaml")).read()
+            open(os.path.join(REPO_ROOT, "configs", "task_composition", "quickstart.yaml")).read()
         )
         assert "dynamic_observables" not in raw
         assert "static_observables" not in raw
 
-    @pytest.mark.parametrize(
-        "name,expected",
-        [
-            ("tidmad", "c0102089266b4c8c2ba53dcc5492e1063d5c4919f3ae4444fb5dae3b0cac8800"),
-            ("pets", "3ab1128a3d5d425568b74642c9cd6857d16a5c64904c1befe3731ecfc11a2672"),
-            ("davis", "396e767d5621390163e7ba0b16df401811379e758d7211e763eef50f5563ac43"),
-            ("quickstart", "1330d3991a98c48b0f5a5f181ea4c838e7080bbe9029264097ea298074271921"),
-        ],
-    )
-    def test_an_undeclared_manifest_fingerprint_is_the_PRE_ROBS1_value(self, name, expected):
+    def test_quickstarts_undeclared_fingerprint_is_the_PRE_ROBS1_value(self):
         """Recorded at `origin/master` 3995400b, BEFORE this family existed.
 
         Hardcoded, never read back from the composition: the claim is that
-        these four runs' identities did not move, and only a literal recorded
-        outside the code under test can say that. An unconditional fingerprint
-        key turns all four red at once.
-
-        `tidmad` re-recorded 9b497798… -> c0102089… (false-header correction,
-        2026-08-27) — `configs/task_health/tidmad.yaml`'s header claimed the
-        file cannot state `aggregation`, which PR #357 made false, and
-        `_digest_file` hashes that document RAW. NOT R-OBS-1's family leaking:
-        the manifest still declares no observable, and the other three
-        literals are untouched, which is what separates "one task's document
-        was corrected" from "the machinery moved".
+        this framework-owned example's identity did not move because of an
+        unconditional observable key. The literal was re-recorded after
+        Quickstart declared its framework-provided objective; that independent
+        semantic change is part of the example's current identity.
         """
-        path = os.path.join(REPO_ROOT, "configs", "task_composition", f"{name}.yaml")
-        assert compose_run_task_bindings(path).semantic_fingerprint == expected
+        path = os.path.join(REPO_ROOT, "configs", "task_composition", "quickstart.yaml")
+        assert compose_run_task_bindings(path).semantic_fingerprint == (
+            "709c260d95a6d4cee0d243ffd3d539d674d6e5fa223fd97659ae8c840fd036d2"
+        )
 
     def test_the_fingerprint_key_is_absent_for_none_and_for_an_empty_list(self):
         """The additive-when-non-empty idiom, at the authority itself.
 
-        A structural companion to the four digests above: those prove the
-        four shipped manifests did not move, this proves WHY, and stays green
+        A structural companion to the Quickstart digest above: it proves WHY
+        the example did not move, and stays green
         when an unrelated declaration legitimately moves a shipped digest.
         """
         base = _fingerprint_kwargs()

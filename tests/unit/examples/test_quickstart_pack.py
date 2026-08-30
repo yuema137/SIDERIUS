@@ -575,6 +575,66 @@ def test_deliverable_codec_accepts_the_composed_childs_positional_outputs(
                 )
 
 
+def test_composed_generic_inference_persists_a_scoreable_metric_result(
+    bundle: dict[str, str], tmp_path: Path
+) -> None:
+    """Close the quickstart's deterministic composed-scoring gap.
+
+    Defect caught: component tests for the codec and metric both pass while
+    the production generic inference handoff fails to persist an artifact the
+    composed metric can score. A constant class-zero model gives a
+    hand-computed 37/64 accuracy on the pinned evaluation shard; reordering,
+    dropping samples, naming the wrong artifact, decoding another format, or
+    bypassing the declared metric makes this assertion fail.
+    """
+    import torch
+
+    from execute_tools.generic_inference import run_generic_inference
+
+    class ConstantZeroClassifier(torch.nn.Module):
+        def forward(self, inputs):
+            return torch.tensor([1.0, -1.0], dtype=inputs.dtype).repeat(len(inputs), 1)
+
+    with run_registration_scope():
+        composition = compose_run_task_bindings(str(SHIPPED_MANIFEST))
+        with bind_run_task_composition(composition, physical_data_root=bundle["data_dir"]):
+            impl = composition.task_data_path
+            eval_scope = impl.build_eval_scope(
+                ScopeBuildRequest(round_kind="formal", selection_strategy="snapshot", portion=1.0)
+            )
+            out_dir = tmp_path / "composed_scoring"
+            out_dir.mkdir()
+            identity = {
+                "exp_id": "exp2",
+                "run_name": "deterministic",
+                "model_type": "constant_zero_classifier",
+            }
+            outcome = run_generic_inference(
+                data_path=impl,
+                task_scope=eval_scope,
+                model=ConstantZeroClassifier(),
+                device=torch.device("cpu"),
+                data_dir=bundle["data_dir"],
+                batch_size=7,
+                write_request=DeliverableWriteRequest(output_dir=str(out_dir), **identity),
+            )
+            assert outcome.samples == 64
+            assert outcome.batches == 10
+            artifact = out_dir / outcome.deliverable_name
+            assert artifact.is_file()
+            payload = impl.read_evaluation_payload(
+                EvaluationReadRequest(deliverable_dir=str(out_dir), **identity)
+            )
+            result = composition.metric.evaluate(
+                {0: str(artifact)},
+                evaluation_payload=payload,
+                task_scope=eval_scope,
+                data_dir=bundle["data_dir"],
+            )
+            assert type(result).__name__ == "MetricResult"
+            assert result.scalar == 0.578125
+
+
 # ---------------------------------------------------------------------------
 # docs sync — the copied command is the tested command; HTML mirrors the ipynb
 # ---------------------------------------------------------------------------

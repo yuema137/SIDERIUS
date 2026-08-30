@@ -172,13 +172,14 @@ class TestTheEmitterUsesTheNonFallingBackAccessor:
         consumers; ``active_task_data_path`` must not, and is right for the
         question "is this run explicitly bound?".
         """
-        import execute_tools.tidmad_data_path  # registers the compatibility impl
         from execute_tools.task_data_path import (
             TIDMAD_COMPATIBILITY_ID,
             active_task_data_path,
+            bootstrap_legacy_tidmad_data_path,
             resolve_bound_task_data_path,
         )
 
+        bootstrap_legacy_tidmad_data_path()
         assert active_task_data_path() is None
         assert resolve_bound_task_data_path().task_data_path_id == TIDMAD_COMPATIBILITY_ID
 

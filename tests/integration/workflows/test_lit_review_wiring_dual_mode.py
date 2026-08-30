@@ -19,7 +19,10 @@ Run with:
 
 from __future__ import annotations
 
+import json
 import os
+from contextlib import nullcontext
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -45,8 +48,48 @@ from workflows.llm_config import (
 )
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 pytestmark = pytest.mark.dual_mode
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SYNTHETIC_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "synthetic_masked_regression.yaml"
+
+
+@pytest.fixture(autouse=True)
+def _restore_health_plugin_globals():
+    """Keep the legacy and composed parameter cells run-isolated."""
+    from execute_tools.health_checks import _plugin_binding
+    from execute_tools.health_checks.registry import _PROVIDER_REGISTRY, _REGISTRY
+
+    registry = dict(_REGISTRY)
+    providers = dict(_PROVIDER_REGISTRY)
+    _plugin_binding.reset_run_scope()
+    try:
+        yield
+    finally:
+        _REGISTRY.clear()
+        _REGISTRY.update(registry)
+        _PROVIDER_REGISTRY.clear()
+        _PROVIDER_REGISTRY.update(providers)
+        _plugin_binding.reset_run_scope()
+
+
+def _composition_context(composition, data_dir: str):
+    if composition is None:
+        return nullcontext()
+    Path(data_dir).mkdir(parents=True, exist_ok=True)
+    return bind_run_task_composition(composition, physical_data_root=data_dir)
+
+
+def _stamp_seed_metric(tmp_path: Path, composition) -> None:
+    """Make the shared legacy seed fixture honest for a composed run."""
+    if composition is None:
+        return
+    path = tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["metric_spec"] = composition.metric.spec.model_dump(mode="json")
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +196,8 @@ def _make_llm_config() -> WorkflowLLMConfig:
 # ---------------------------------------------------------------------------
 
 
-def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path):
+@pytest.mark.parametrize("composed", [False, True], ids=["legacy", "composed-pack"])
+def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path, composed):
     """End-to-end: with lit_review_enabled=True and a tmp YAML at a
     non-default path, the workflow opens THAT file (not the default),
     threads its root_papers into the LiteratureReviewInput, and the
@@ -162,10 +206,18 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path)
     operator_yaml = tmp_path / "operator_lit.yaml"
     operator_yaml.write_text(_OPERATOR_YAML_CONTENT, encoding="utf-8")
 
-    _write_tuning_output(tmp_path, "punet", run="v1", score=1.5)
     workspace = str(tmp_path / "workflow_output")
     data_dir = str(tmp_path / "data")
     run_name = "lit_review_enabled_test"
+    composition = compose_run_task_bindings(str(SYNTHETIC_MANIFEST)) if composed else None
+    _write_tuning_output(
+        tmp_path,
+        "punet",
+        run="v1",
+        score=1.5,
+        fingerprint=(composition.semantic_fingerprint if composition else None),
+    )
+    _stamp_seed_metric(tmp_path, composition)
 
     captured_lit_inputs: list = []
     captured_proposal_inputs: list = []
@@ -191,23 +243,26 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path)
         MockPropose.return_value.run.side_effect = _proposer_run
         MockImpl.return_value.run.return_value = _make_implementor_output()
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
-        MockTune.return_value.run.return_value = _make_tuning_output(
-            model_type="test_arch", score=1.6
-        )
+        tune_output = _make_tuning_output(model_type="test_arch", score=1.6)
+        if composition is not None:
+            tune_output.metric_spec = composition.metric.spec
+        MockTune.return_value.run.return_value = tune_output
 
-        run_workflow(
-            launch=WorkflowLaunchConfig(
-                data_dir=data_dir,
-                model_types=["punet"],
-                source_run_name="v1",
-                max_iterations=1,
-                lit_review_enabled=True,
-                lit_review_config_path=str(operator_yaml),
-            ),
-            workspace=workspace,
-            run_name=run_name,
-            llm_config=_make_llm_config(),
-        )
+        with _composition_context(composition, data_dir):
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=data_dir,
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    max_iterations=1,
+                    lit_review_enabled=True,
+                    lit_review_config_path=str(operator_yaml),
+                ),
+                workspace=workspace,
+                run_name=run_name,
+                llm_config=_make_llm_config(),
+                task_composition=composition,
+            )
 
     # --- Assertion 1: lit-review was invoked once, with the operator
     # YAML's root_papers driving its input (proves the operator-supplied
@@ -268,7 +323,8 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path)
 # ---------------------------------------------------------------------------
 
 
-def test_lit_review_disabled_tolerates_missing_yaml_path(tmp_path):
+@pytest.mark.parametrize("composed", [False, True], ids=["legacy", "composed-pack"])
+def test_lit_review_disabled_tolerates_missing_yaml_path(tmp_path, composed):
     """With lit_review_enabled=False, the workflow must NOT open
     lit_review_config_path even if it points at a non-existent file —
     the path is consulted only when actually used."""
@@ -277,10 +333,18 @@ def test_lit_review_disabled_tolerates_missing_yaml_path(tmp_path):
         "Test invariant — the path must NOT exist for this assertion to be meaningful."
     )
 
-    _write_tuning_output(tmp_path, "punet", run="v1", score=1.5)
     workspace = str(tmp_path / "workflow_output")
     data_dir = str(tmp_path / "data")
     run_name = "lit_review_disabled_test"
+    composition = compose_run_task_bindings(str(SYNTHETIC_MANIFEST)) if composed else None
+    _write_tuning_output(
+        tmp_path,
+        "punet",
+        run="v1",
+        score=1.5,
+        fingerprint=(composition.semantic_fingerprint if composition else None),
+    )
+    _stamp_seed_metric(tmp_path, composition)
 
     captured_lit_inputs: list = []
     captured_proposal_inputs: list = []
@@ -306,25 +370,28 @@ def test_lit_review_disabled_tolerates_missing_yaml_path(tmp_path):
         MockPropose.return_value.run.side_effect = _proposer_run
         MockImpl.return_value.run.return_value = _make_implementor_output()
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
-        MockTune.return_value.run.return_value = _make_tuning_output(
-            model_type="test_arch", score=1.6
-        )
+        tune_output = _make_tuning_output(model_type="test_arch", score=1.6)
+        if composition is not None:
+            tune_output.metric_spec = composition.metric.spec
+        MockTune.return_value.run.return_value = tune_output
 
         # No FileNotFoundError should be raised — the non-existent path
         # must never be opened when lit_review_enabled=False.
-        run_workflow(
-            launch=WorkflowLaunchConfig(
-                data_dir=data_dir,
-                model_types=["punet"],
-                source_run_name="v1",
-                max_iterations=1,
-                lit_review_enabled=False,
-                lit_review_config_path=non_existent_path,
-            ),
-            workspace=workspace,
-            run_name=run_name,
-            llm_config=_make_llm_config(),
-        )
+        with _composition_context(composition, data_dir):
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=data_dir,
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    max_iterations=1,
+                    lit_review_enabled=False,
+                    lit_review_config_path=non_existent_path,
+                ),
+                workspace=workspace,
+                run_name=run_name,
+                llm_config=_make_llm_config(),
+                task_composition=composition,
+            )
 
     # --- Assertion 1: MLLiteratureReviewAgent.run was NEVER called.
     assert len(captured_lit_inputs) == 0, (

@@ -19,8 +19,9 @@
 | `model_description` | `str` | Yes | — | Plain-English description of the architecture from the proposer. Injected into the reasoning prompt and written into the description.md file. |
 | `mathematical_definition` | `str` | Yes | — | Precise layer-by-layer spec from the proposer. The LLM uses this to write `__init__` and `forward`. |
 | `baseline_config` | `dict[str, Any]` | Yes | — | Safe starting configuration from the proposer. Used to derive sensible default values for the Pydantic config fields AND for the Phase B.2a baseline-schema-compatibility check (instantiate `PLUGIN_CONFIG_CLASS` with `baseline_config.model_config` to catch implementor-invented constraints). |
-| `plugin_dir` | `str` | No | `"agent_generated/models"` | Directory where the model plugin file is written. **Fixed output destination independent of `storage.local.workspace`** — agent-generated plugins live in a single common pool so `MODEL_REGISTRY` can pick them up at runtime. |
-| `test_dir` | `str` | No | `"agent_generated/tests"` | Directory where the test file is written. **Fixed output destination independent of `storage.local.workspace`**. |
+| `plugin_dir` | `str` | No | `{workspace}/generated/{run_name}/models` | Directory where the model plugin file is written. An explicit value is preserved; the reference workflow supplies a narrower per-attempt directory. |
+| `test_dir` | `str` | No | `{workspace}/generated/{run_name}/tests` | Directory where the generated test file is written. An explicit value is preserved; the reference workflow supplies a narrower per-attempt directory. |
+| `loss_dir` | `str` | No | `{workspace}/generated/{run_name}/losses` | Directory where a generated custom-loss plugin is written. An explicit value is preserved; the reference workflow supplies a narrower per-attempt directory. |
 | `max_retries` | `int` | No | `2` | Maximum self-correction attempts after the initial code commit. On each retry the LLM receives the validation error and its previous code via `IMPLEMENTOR_REPAIR_PROMPT`. |
 | `reference_code` | `dict[str, str]` | No | `{}` | Source code of referenced ancestor models, keyed by `model_type`. Loaded automatically from `inherited_components`. The implementor uses this as inline context so it can faithfully carry over claimed components. |
 | `expert_advice` | `str \| ExpertAdvice` | No | `""` | Structured guidance from upstream agents or orchestrators. Accepts a plain string or a structured `ExpertAdvice` object. |
@@ -63,10 +64,10 @@
     --model_id gemini-3.1-pro-preview
 ```
 
-The CLI reads `{workspace}/proposal_{run_name}.json` (the upstream proposal agent's output), builds a minimal `ImplementorInput` (no `reference_code`, no `expert_advice`, default `plugin_dir` / `test_dir`), runs the agent, and writes:
-- `agent_generated/models/{model_name}.py` (the plugin)
-- `agent_generated/models/{model_name}/description.md` (the description)
-- `agent_generated/tests/test_{model_name}.py` (the test)
+The CLI reads `{workspace}/proposal_{run_name}.json` (the upstream proposal agent's output), builds a minimal `ImplementorInput` (no `reference_code`, no `expert_advice`, workspace-derived generated-code directories), runs the agent, and writes:
+- `{workspace}/generated/{run_name}/models/{model_name}.py` (the plugin)
+- `{workspace}/generated/{run_name}/models/{model_name}/description.md` (the description)
+- `{workspace}/generated/{run_name}/tests/test_{model_name}.py` (the test)
 
 **Limitations of standalone CLI use**:
 
@@ -123,14 +124,14 @@ The constructor accepts `bridge_factory` (test injection — defaults to `LLMBri
 
 ## Storage outputs
 
-This node writes **four files**, on two different paths:
+This node writes **four files** below the configured workspace by default:
 
-- **Plugin file** (independent of workspace): `{inp.plugin_dir}/{inp.model_name}.py` — runnable PyTorch plugin assembled from `PLUGIN_TEMPLATE` with LLM-generated sections substituted in. Defines `PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`, `PLUGIN_OUTPUT_TYPE`. Default location: `agent_generated/models/{model_name}.py`.
-- **Description file** (independent of workspace): `{inp.plugin_dir}/{inp.model_name}/description.md` — markdown description carried over from `model_description` + a code block with the `baseline_config`. Read by `result_interpretation_agent` to surface architecture knowledge in subsequent iterations. Default location: `agent_generated/models/{model_name}/description.md`.
-- **Test file** (independent of workspace): `{inp.test_dir}/test_{inp.model_name}.py` — pytest file assembled from `TEST_TEMPLATE`. Tests forward-pass shape, NaN-freeness, and config instantiation. The test file's `sys.path.insert(0, "../models")` line resolves at test runtime to `agent_generated/models/`, where the plugin lives. Default location: `agent_generated/tests/test_{model_name}.py`.
+- **Plugin file**: `{inp.plugin_dir}/{inp.model_name}.py` — runnable PyTorch plugin assembled from `PLUGIN_TEMPLATE` with LLM-generated sections substituted in. Defines `PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`, `PLUGIN_OUTPUT_TYPE`. Default location: `{workspace}/generated/{run_name}/models/{model_name}.py`.
+- **Description file**: `{inp.plugin_dir}/{inp.model_name}/description.md` — markdown description carried over from `model_description` + a code block with the `baseline_config`. Read by `result_interpretation_agent` to surface architecture knowledge in subsequent iterations.
+- **Test file**: `{inp.test_dir}/test_{inp.model_name}.py` — pytest file assembled from `TEST_TEMPLATE`. Tests forward-pass shape, NaN-freeness, and config instantiation.
 - **Output record JSON** (in the workspace): `{storage.local.workspace}/implementor_output_{run_name}.json` — the validated `ImplementorOutput` (file paths + config_fields + adjustments + passthrough description/spec). Audit log only; the downstream node receives data through the protocol in memory.
 
-The plugin + description + test paths are **deliberately independent of `storage.local.workspace`**: `MODEL_REGISTRY` scans `agent_generated/models/` at runtime via the plugin loader, so plugins from any workspace pool together. Test discovery follows the same convention.
+Explicit generated-code directories remain supported for orchestrators. The reference workflow uses this to place every implementation retry in its own attempt directory, still below the run workspace.
 
 ## Key behavioral notes
 

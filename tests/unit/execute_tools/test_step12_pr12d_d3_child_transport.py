@@ -54,7 +54,8 @@ import torch
 import torch.nn as nn
 
 from core.sandbox_executor import TidmadSandbox
-from execute_tools.generic_inference import run_generic_inference
+from execute_tools.generic_inference import GenericInferenceOutcome, run_generic_inference
+from execute_tools.inference_single import _emit_generic_inference
 from execute_tools.scope_artifact import (
     load_transported_scope,
     scope_digest,
@@ -66,7 +67,9 @@ from execute_tools.scope_artifact import (
     validation_rows_argv as _validation_rows_argv,
 )
 from execute_tools.task_data_path import (
+    DeliverableSourceContext,
     DeliverableWriteRequest,
+    EvalMaterializationParams,
     EvaluationReadRequest,
     ScopeBuildRequest,
     bind_task_data_path,
@@ -257,6 +260,99 @@ class TestTransportReachesTheInferenceChild:
 class TestGenericIterationContract:
     """Driven over REAL contrast scopes; bounded to a handful of samples."""
 
+    def test_generic_child_preserves_the_per_file_timing_sidecar_schema(
+        self, monkeypatch, tmp_path
+    ):
+        """Catch issue #393's post-score attempt-record crash.
+
+        The generic child wrote its summary dictionary to a path whose
+        established parent contract is a list of per-file timing rows. The
+        parent later sliced that dictionary as a list and raised ``KeyError``.
+        Generic inference cannot manufacture task-neutral file or PSD timing,
+        so it must emit the existing absent-measurement representation.
+        """
+        timing_path = tmp_path / "inference_timing.json"
+        outcome = GenericInferenceOutcome(
+            samples=4,
+            batches=2,
+            inference_seconds=0.5,
+            deliverable_name="predictions.csv",
+        )
+        monkeypatch.setattr(
+            "execute_tools.generic_inference.run_generic_inference",
+            lambda **_kwargs: outcome,
+        )
+        args = type(
+            "Args",
+            (),
+            {
+                "data_dir": str(tmp_path),
+                "inference_batch_size": 2,
+                "output_dir": str(tmp_path),
+                "exp_id": EXP_ID,
+                "run_name": RUN_NAME,
+                "denoising_model": "probe",
+                "timing_out_json": str(timing_path),
+            },
+        )()
+
+        _emit_generic_inference(args, object(), nn.Identity(), (1, 2, 3, 4))
+
+        assert json.loads(timing_path.read_text(encoding="utf-8")) == []
+
+    def test_task_persistence_consumes_predictions_as_they_are_produced(self, tmp_path):
+        """Catch the host-memory failure recorded in issue #391.
+
+        The separated TIDMAD run produced 5000 classification tensors of
+        approximately 16 MiB each. Eagerly collecting them before entering
+        ``write_deliverable`` approached 80 GiB. The writer must be entered
+        before the first forward pass so a task can transform and release each
+        prediction while consuming the declared iterable.
+        """
+
+        class CountingModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.forward_calls = 0
+
+            def forward(self, inputs):
+                self.forward_calls += 1
+                return inputs
+
+        model = CountingModel()
+
+        class StreamingDataPath:
+            task_data_path_id = "streaming_persistence_test"
+
+            def validation_dataset(self, scope, params):
+                return [(torch.tensor([float(value)]), torch.tensor(0.0)) for value in scope]
+
+            def write_deliverable(self, outputs, request):
+                assert model.forward_calls == 0, (
+                    "task persistence must start before inference materializes outputs"
+                )
+                self.written = [float(output.item()) for output in outputs]
+
+            def training_dataset(self, scope, params):
+                raise AssertionError("training is outside this inference test")
+
+            def read_evaluation_payload(self, request):
+                return self.written
+
+        data_path = StreamingDataPath()
+        outcome = run_generic_inference(
+            data_path=data_path,
+            task_scope=(1, 2, 3, 4),
+            model=model,
+            device=torch.device("cpu"),
+            data_dir=str(tmp_path),
+            batch_size=2,
+            write_request=_write_request(tmp_path),
+        )
+        assert data_path.written == [1.0, 2.0, 3.0, 4.0]
+        assert outcome.samples == 4
+        assert outcome.batches == 2
+
     def test_pets_iterates_and_writes_its_own_deliverable(self, pets, tmp_path):
         impl, scope, data_dir, model = pets
         outcome = run_generic_inference(
@@ -307,6 +403,38 @@ class TestGenericIterationContract:
         for array in payload.values():
             assert array.shape[1] == 4, "the 4 predicted future frames"
 
+    def test_task_batch_ceiling_refuses_an_unexecutable_inference_batch(self, tmp_path):
+        """Catch a resource-selected batch overriding task collation semantics."""
+
+        class VariableShapeDataPath:
+            task_data_path_id = "variable_shape_test"
+
+            def max_inference_batch_size(self):
+                return 1
+
+            def validation_dataset(self, scope, params):
+                raise AssertionError("the semantic batch must be refused before materialization")
+
+            def training_dataset(self, scope, params):
+                raise AssertionError("training is outside this inference test")
+
+            def write_deliverable(self, outputs, request):
+                raise AssertionError("no deliverable is written after refusal")
+
+            def read_evaluation_payload(self, request):
+                raise AssertionError("scoring is outside this inference test")
+
+        with pytest.raises(ValueError, match=r"inference batch 64.*maximum of 1"):
+            run_generic_inference(
+                data_path=VariableShapeDataPath(),
+                task_scope=("small", "large"),
+                model=torch.nn.Identity(),
+                device=torch.device("cpu"),
+                data_dir=str(tmp_path),
+                batch_size=64,
+                write_request=_write_request(tmp_path),
+            )
+
     def test_the_outputs_are_paired_POSITIONALLY_with_the_scope(self, pets, tmp_path):
         """The property that makes ``shuffle=False`` load-bearing.
 
@@ -319,6 +447,72 @@ class TestGenericIterationContract:
         reversed_scope = type(scope)(rows=tuple(reversed(scope.rows)))
         second = self._predictions(impl, reversed_scope, data_dir, model, tmp_path / "b")
         assert first == second, "each image's prediction must follow the image, not its position"
+
+    def test_the_write_request_can_rematerialize_prediction_aligned_targets(self, tmp_path):
+        """Catch dropping the physical source before task-owned writing.
+
+        The writer deliberately ignores scope identities and reconstructs the
+        auxiliary values from the run-bound source context. Removing that
+        context makes the writer fail; changing its count makes the explicit
+        alignment check fail instead of silently producing a corrupt file.
+        """
+
+        class SourceAwareDataPath:
+            task_data_path_id = "source_aware_test"
+
+            def validation_dataset(self, scope, params):
+                assert scope == (10.0, 20.0, 30.0)
+                assert params.data_dir == str(tmp_path / "data")
+                return [(torch.tensor([value]), torch.tensor(value + 1.0)) for value in scope]
+
+            def write_deliverable(self, outputs, request):
+                context = request.source_context
+                assert context is not None
+                materialized_outputs = list(outputs)
+                dataset = self.validation_dataset(
+                    request.task_scope,
+                    EvalMaterializationParams(data_dir=context.data_dir),
+                )
+                if (
+                    len(dataset) != context.sample_count
+                    or len(materialized_outputs) != context.sample_count
+                ):
+                    raise ValueError("deliverable source and prediction counts differ")
+                self.written = [
+                    (float(prediction.item()), float(target.item()))
+                    for prediction, (_model_input, target) in zip(
+                        materialized_outputs, dataset, strict=True
+                    )
+                ]
+
+            def training_dataset(self, scope, params):
+                raise AssertionError("training is outside this inference test")
+
+            def read_evaluation_payload(self, request):
+                return self.written
+
+        data_path = SourceAwareDataPath()
+        run_generic_inference(
+            data_path=data_path,
+            task_scope=(10.0, 20.0, 30.0),
+            model=torch.nn.Identity(),
+            device=torch.device("cpu"),
+            data_dir=str(tmp_path / "data"),
+            batch_size=2,
+            write_request=_write_request(tmp_path),
+        )
+        assert data_path.written == [(10.0, 11.0), (20.0, 21.0), (30.0, 31.0)]
+        mismatched = _write_request(tmp_path).model_copy(
+            update={
+                "task_scope": (10.0, 20.0, 30.0),
+                "source_context": DeliverableSourceContext(
+                    data_dir=str(tmp_path / "data"),
+                    sample_count=2,
+                ),
+            }
+        )
+        with pytest.raises(ValueError, match="source and prediction counts differ"):
+            data_path.write_deliverable([torch.tensor([10.0]), torch.tensor([20.0])], mismatched)
 
     def test_the_unit_adds_no_new_capability_family(self):
         """§D.C's proof obligation, discharged executably.

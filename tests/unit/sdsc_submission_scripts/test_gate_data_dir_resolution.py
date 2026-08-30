@@ -53,7 +53,7 @@ def test_the_machine_local_config_answers_when_no_override(tmp_path):
     """
     configured = tmp_path / "configured_dataset"
     configured.mkdir()
-    with patch("execute_tools.data_paths.TIDMAD_DATA_DIR", str(configured)):
+    with patch("execute_tools.data_paths.legacy_tidmad_data_dir", return_value=str(configured)):
         assert resolve_dataset_dir(None) == str(configured)
 
 
@@ -67,7 +67,7 @@ def test_an_explicit_override_wins(tmp_path):
     override = tmp_path / "override"
     configured.mkdir()
     override.mkdir()
-    with patch("execute_tools.data_paths.TIDMAD_DATA_DIR", str(configured)):
+    with patch("execute_tools.data_paths.legacy_tidmad_data_dir", return_value=str(configured)):
         assert resolve_dataset_dir(str(override)) == str(override)
 
 
@@ -77,7 +77,7 @@ def test_an_explicit_override_wins(tmp_path):
 
 
 def test_an_unset_authority_refuses(tmp_path):
-    with patch("execute_tools.data_paths.TIDMAD_DATA_DIR", ""):
+    with patch("execute_tools.data_paths.legacy_tidmad_data_dir", return_value=""):
         with pytest.raises(DatasetDirectoryUnavailable) as exc:
             resolve_dataset_dir(None, purpose="the gate")
     message = str(exc.value)
@@ -93,7 +93,7 @@ def test_a_nonexistent_directory_refuses_and_names_the_source(tmp_path):
     their override or the machine config is at fault.
     """
     missing = tmp_path / "not_created"
-    with patch("execute_tools.data_paths.TIDMAD_DATA_DIR", str(missing)):
+    with patch("execute_tools.data_paths.legacy_tidmad_data_dir", return_value=str(missing)):
         with pytest.raises(DatasetDirectoryUnavailable) as exc:
             resolve_dataset_dir(None)
     assert "tidmad_data_config.yaml" in str(exc.value)
@@ -122,8 +122,16 @@ def test_the_template_fallback_is_named_in_the_message(tmp_path):
 
     missing = tmp_path / "placeholder"
     with (
-        patch.object(dp, "TIDMAD_DATA_DIR", str(missing)),
-        patch.object(dp, "_active_config_path", dp._EXAMPLE_CONFIG_PATH),
+        patch.object(dp, "legacy_tidmad_data_dir", return_value=str(missing)),
+        patch.object(
+            dp,
+            "_legacy_data_config",
+            return_value=dp._LegacyDataConfig(
+                tidmad_data_dir=str(missing),
+                siderius_data_dir=str(tmp_path),
+                source_path=dp._EXAMPLE_CONFIG_PATH,
+            ),
+        ),
     ):
         with pytest.raises(DatasetDirectoryUnavailable) as exc:
             resolve_dataset_dir(None)
@@ -146,7 +154,7 @@ def test_it_never_substitutes_a_different_directory(tmp_path):
     good = tmp_path / "configured"
     good.mkdir()
     bad = tmp_path / "operator_typo"
-    with patch("execute_tools.data_paths.TIDMAD_DATA_DIR", str(good)):
+    with patch("execute_tools.data_paths.legacy_tidmad_data_dir", return_value=str(good)):
         with pytest.raises(DatasetDirectoryUnavailable):
             resolve_dataset_dir(str(bad))
 
@@ -200,7 +208,7 @@ class TestTheLaunchBoundary:
         from sdsc_submission_scripts import run_one_iteration as runner
 
         with (
-            patch("execute_tools.data_paths.TIDMAD_DATA_DIR", str(missing)),
+            patch("execute_tools.data_paths.legacy_tidmad_data_dir", return_value=str(missing)),
             patch.object(runner, "run_workflow") as spy,
         ):
             code = self._main(self._argv(tmp_path))
@@ -221,7 +229,10 @@ class TestTheLaunchBoundary:
         from sdsc_submission_scripts import run_one_iteration as runner
 
         with (
-            patch("execute_tools.data_paths.TIDMAD_DATA_DIR", str(configured)),
+            patch(
+                "execute_tools.data_paths.legacy_tidmad_data_dir",
+                return_value=str(configured),
+            ),
             # Stop the moment the value has been observed: everything after
             # run_workflow is manifest bookkeeping this test does not assert.
             patch.object(runner, "run_workflow", side_effect=SystemExit(0)) as spy,
@@ -239,7 +250,10 @@ class TestTheLaunchBoundary:
         from sdsc_submission_scripts import run_one_iteration as runner
 
         with (
-            patch("execute_tools.data_paths.TIDMAD_DATA_DIR", str(configured)),
+            patch(
+                "execute_tools.data_paths.legacy_tidmad_data_dir",
+                return_value=str(configured),
+            ),
             patch.object(runner, "run_workflow", side_effect=SystemExit(0)) as spy,
         ):
             self._main(self._argv(tmp_path, "--data_dir", str(override)))

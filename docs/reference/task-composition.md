@@ -151,10 +151,24 @@ model_plugins:                                 # optional
   require: [my_reference_model]                # model types this root MUST produce
 loss_plugins:                                  # optional
   dir: ./plugins                               # no `require` — losses resolve by name
-objective:                                     # optional — the task's authoritative loss
-  implementation:
-    file: ./plugins/my_exact_loss.py
-    symbol: PLUGIN_LOSS_TYPE                   # the plugin's own self-declared loss name
+objective:                                     # optional — exactly one form
+  config:                                      # framework-provided objective
+    loss_type: ce
+    reduction: mean
+# objective:                                   # task-owned objective instead
+#   implementation:
+#     file: ./plugins/my_exact_loss.py
+#     symbol: PLUGIN_LOSS_TYPE                 # plugin's self-declared loss name
+
+parameter_rules:                               # optional; omitted = agent-controlled
+  train_config.batch_size:
+    exact: 1
+  train_config.epochs:
+    range: {min: 1, max: 20}                   # inclusive; either bound may be omitted
+  model_config.hidden_dim:
+    allowed: [128, 256, 512]
+  model_config.num_layers:
+    predicate: odd_integer                     # registered deterministic predicate
 
 deliverable:                                   # only if the task names artifacts by index
   prefix: my_task_output
@@ -178,6 +192,17 @@ Notes:
 - `secondary_metrics` **order is semantic** — it participates in the composition
   fingerprint and the record stamp. Duplicate ids, or a secondary whose id
   collides with the primary's, are refused.
+- `parameter_rules` constrains leaves under `model_config`, `train_config`, or
+  `loss_config` through dotted paths. Each path declares exactly one of `exact`, `range`, `allowed`,
+  or `predicate`. `exact` supplies the executed leaf value even when the agent
+  omitted it; the other forms validate the agent's choice. Predicate names
+  must be registered with `register_parameter_predicate`; executable Python
+  expressions and raw lambdas are not accepted in YAML. The complete rule set
+  is part of the composition fingerprint, so changing it requires a fresh
+  comparable workspace. A declared objective remains the sole owner of
+  `loss_config`, and a parameter rule targeting that subtree is refused.
+  The independent epoch ceiling remains a safety authority: a rule that would
+  raise `train_config.epochs` above it is refused rather than weakening it.
 - `dynamic_observables` / `static_observables` are the two **observable**
   families (`R-OBS-1`, `D-BUD-16`). The split is a **type**, not a naming
   convention: an implementation subclasses either
@@ -203,7 +228,7 @@ Notes:
 - `deliverable` is `extra="forbid"`: a misspelled key is refused rather than
   falling back to a template.
 - An empty `task_description` is refused.
-- **An `objective:` file must export all three loss-plugin symbols** —
+- **An `objective.implementation` file must export all three loss-plugin symbols** —
   `PLUGIN_LOSS_TYPE`, `PLUGIN_LOSS_CONFIG_CLASS` and `PLUGIN_LOSS_CLASS` — even
   though the manifest names only the first. The section is checked against the
   same contract the loss registry enforces, so composition refuses at startup

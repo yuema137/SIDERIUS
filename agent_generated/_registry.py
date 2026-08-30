@@ -138,10 +138,17 @@ class CapabilityRegistry:
             # Lazy import: the registry stays importable with only pydantic
             # available, and the env read happens per construction so test
             # monkeypatching and operator exports both take effect.
-            from core.generated_library import capability_index_path
+            from core.generated_library import (
+                capability_index_path,
+                generated_library_is_workspace_bound,
+            )
 
             self._index_path = capability_index_path()
-            self._legacy_read_path = _LEGACY_CHECKOUT_INDEX_PATH
+            self._legacy_read_path = (
+                None
+                if generated_library_is_workspace_bound()
+                else _LEGACY_CHECKOUT_INDEX_PATH
+            )
 
     @property
     def index_path(self) -> str:

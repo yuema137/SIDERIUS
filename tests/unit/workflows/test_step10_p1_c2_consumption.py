@@ -441,6 +441,8 @@ class TestTaskHealthBindingPassThrough:
             health_gate_files=None,
             health_checks_config=None,
             workspace=str(tmp_path),
-            task_health_binding=composition.task_health_binding,
+            health_materialization=ri.RunHealthMaterialization(
+                task_health_binding=composition.task_health_binding,
+            ),
         )
         assert seen["task_health_binding"] == composition.task_health_binding

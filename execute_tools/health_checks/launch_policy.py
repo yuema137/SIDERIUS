@@ -53,8 +53,15 @@ from __future__ import annotations
 
 import math
 
-from execute_tools.health_checks.candidate_eligibility import resolve_scientific_gate_ids
-from execute_tools.health_checks.config import load_health_gates_config
+from execute_tools.health_checks._composition import HealthBindingState, TaskHealthBinding
+from execute_tools.health_checks.candidate_eligibility import (
+    resolve_run_scientific_gate_ids,
+    resolve_scientific_gate_ids,
+)
+from execute_tools.health_checks.config import (
+    load_composed_health_config,
+    load_health_gates_config,
+)
 from execute_tools.health_checks.schemas import BLOCKING_ACTIONS
 
 
@@ -69,14 +76,28 @@ class FormalLaunchPolicyError(ValueError):
     """
 
 
-def _enforcing_gate_ids(config_path: str | None) -> frozenset[str]:
+def _effective_config(
+    config_path: str | None,
+    task_health_binding: TaskHealthBinding,
+):
+    """Resolve the config governed by this launch without selecting a task."""
+    if config_path is not None or task_health_binding is HealthBindingState.LEGACY_OMITTED:
+        return load_health_gates_config(config_path)
+    config, _task_config, _plugins = load_composed_health_config(None, task_health_binding)
+    return config
+
+
+def _enforcing_gate_ids(
+    config_path: str | None,
+    task_health_binding: TaskHealthBinding,
+) -> frozenset[str]:
     """Gate ids whose failure actually invalidates, by configured action.
 
     This is the ENFORCEMENT question — deliberately action-derived, which
     is correct here and wrong for scientific membership. Keeping the two
     questions apart is the whole point of the role hotfix.
     """
-    config = load_health_gates_config(config_path)
+    config = _effective_config(config_path, task_health_binding)
     return frozenset(g.id for g in config.health_gates if g.on_fail.action in BLOCKING_ACTIONS)
 
 
@@ -88,6 +109,7 @@ def validate_formal_launch(
     gates_enabled: bool,
     skip_formal_min_delta: float,
     bypass_formal_time_budget_min_delta: float,
+    task_health_binding: TaskHealthBinding = HealthBindingState.LEGACY_OMITTED,
 ) -> None:
     """Refuse a formal launch whose declared policy cannot be honoured.
 
@@ -133,8 +155,12 @@ def validate_formal_launch(
         )
 
     # --- 4. the declaration must match the config it describes ---------
-    enforcing = _enforcing_gate_ids(health_checks_config)
-    scientific = resolve_scientific_gate_ids(health_checks_config)
+    enforcing = _enforcing_gate_ids(health_checks_config, task_health_binding)
+    scientific = (
+        resolve_scientific_gate_ids(health_checks_config)
+        if health_checks_config is not None
+        else resolve_run_scientific_gate_ids(task_health_binding)
+    )
 
     if healthgate_mode == "blocking":
         if scientific is None:

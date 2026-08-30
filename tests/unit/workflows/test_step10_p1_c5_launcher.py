@@ -120,7 +120,6 @@ class TestTheCarriedValuesStillReachTheirConsumers:
             "accumulated_key_findings",
             "model_knowledge_cache",
             "accumulated_physical_rejections",
-            "accumulated_gate_exhaustions",
             "previous_proposal_data",
             "chain_best_valid_formal_score",
             "collapse_fingerprint_history",
@@ -128,6 +127,29 @@ class TestTheCarriedValuesStillReachTheirConsumers:
             # Step 10 / P5+P6 C2.
             "vocab_link_confirmations",
         }, f"the unpacking reads {sorted(read_fields)}"
+
+        helper = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_restored_negative_feedback"
+        )
+        helper_fields = {
+            node.attr
+            for node in ast.walk(helper)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "restored_state"
+        }
+        assert helper_fields == {
+            "accumulated_negative_feedback",
+            "accumulated_gate_exhaustions",
+        }
+        assert any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_restored_negative_feedback"
+            for node in ast.walk(run_workflow)
+        )
 
     def test_cold_start_and_restored_nothing_stay_indistinguishable(self):
         """The three non-`ChainState` consumers all test TRUTHINESS, so the

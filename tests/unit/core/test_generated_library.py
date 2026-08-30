@@ -20,7 +20,9 @@ from core.generated_library import (
     GENERATED_LIBRARY_ENV_VAR,
     GeneratedLibraryResolution,
     MalformedGeneratedLibraryOverride,
+    bind_generated_library_to_workspace,
     capability_index_path,
+    generated_library_is_workspace_bound,
     generated_library_provenance,
     generated_library_root,
     generated_losses_dir,
@@ -34,6 +36,20 @@ _REPO_ROOT = os.path.dirname(
 
 
 class TestResolution:
+    def test_workspace_binding_owns_the_subprocess_transport(self, tmp_path):
+        env: dict[str, str] = {}
+
+        root = bind_generated_library_to_workspace(str(tmp_path / "workspace"), environ=env)
+
+        assert root == str(tmp_path / "workspace" / "generated_library")
+        assert resolve_generated_library(environ=env).root == root
+        assert generated_library_is_workspace_bound(environ=env)
+
+    def test_unrelated_explicit_root_is_not_workspace_bound(self, tmp_path):
+        env = {GENERATED_LIBRARY_ENV_VAR: str(tmp_path / "operator_library")}
+
+        assert not generated_library_is_workspace_bound(environ=env)
+
     def test_default_is_home_siderius_generated_library(self, monkeypatch):
         """Defect caught: the default root drifting back into the repository
         checkout (or to any cwd-relative location). The whole migration rests

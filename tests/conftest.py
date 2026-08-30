@@ -237,6 +237,21 @@ def _isolate_generated_library(tmp_path_factory):
             os.environ["SIDERIUS_GENERATED_LIBRARY_DIR"] = previous
 
 
+@pytest.fixture(autouse=True)
+def _restore_generated_library_binding_after_test():
+    """Prevent a workflow entry point from leaking its workspace to later tests."""
+    names = ("SIDERIUS_GENERATED_LIBRARY_DIR", "SIDERIUS_CHAIN_WORKSPACE")
+    previous = {name: os.environ.get(name) for name in names}
+    try:
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
 @pytest.fixture
 def synthetic_h5(tmp_path):
     """

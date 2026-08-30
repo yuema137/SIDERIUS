@@ -1,0 +1,48 @@
+task_data_path:
+  file: ../../examples/synthetic_masked_regression/plugins/_masked_task.py
+  symbol: SyntheticMaskedTaskDataPath
+  id: synthetic_masked_regression
+  config:
+    train_shards: [0, 1]
+    eval_shard: 2
+
+dataset_profile:
+  config: ../../examples/synthetic_masked_regression/declared/dataset_profile.json
+
+metric:
+  declaration: ../../examples/synthetic_masked_regression/declared/metric_masked_mse.json
+  implementation:
+    file: ../../examples/synthetic_masked_regression/plugins/_masked_metrics.py
+    symbol: MaskedMseMetric
+
+secondary_metrics:
+  - declaration: ../../examples/synthetic_masked_regression/declared/metric_masked_mae.json
+    implementation:
+      file: ../../examples/synthetic_masked_regression/plugins/_masked_metrics.py
+      symbol: MaskedMaeMetric
+
+task_health:
+  config: ../../examples/synthetic_masked_regression/declared/task_health.yaml
+
+interpretation_blocks:
+  none: true
+
+deliverable:
+  prefix: synthetic_masked_predictions
+  extension: ".json"
+  index_width: 4
+
+task_config:
+  config: ../../examples/synthetic_masked_regression/declared/task_config.yaml
+
+model_plugins:
+  dir: ../../examples/synthetic_masked_regression/plugins
+  require: [masked_reference_mlp]
+
+loss_plugins:
+  dir: ../../examples/synthetic_masked_regression/plugins
+
+objective:
+  implementation:
+    file: ../../examples/synthetic_masked_regression/plugins/masked_mse_loss.py
+    symbol: PLUGIN_LOSS_TYPE

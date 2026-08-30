@@ -147,15 +147,14 @@ class TestRT6CliMapping:
     shell-parity suite enforces the run_one_iteration ↔ shell side)."""
 
     def test_tuner_cli_operational_defaults_and_zero_disable(self):
-        # The chain-runner parser is the operational surface; it carries
-        # the §5 provisional values (the shell-parity suite pins the
-        # shell side; every layer maps 0 → None to disable).
+        # The generic parser keeps the step ceiling, but the Formal-only batch
+        # floor is opt-in so an executable Trial batch is not silently refused.
         from sdsc_submission_scripts.run_one_iteration import build_parser
 
         parser = build_parser()
         defaults = {a.dest: a.default for a in parser._actions if a.option_strings}
         assert defaults["max_steps_per_attempt"] == 150_000
-        assert defaults["min_formal_batch_size"] == 4
+        assert defaults["min_formal_batch_size"] == 0
         assert defaults["allow_extreme_steps"] is False
         # arXiv #261 (operator ruling 2026-08-25): the enablement flag is
         # TRI-STATE — None means "the (device, execution regime) runtime

@@ -179,11 +179,11 @@ def _resolve_child_data_path(args):
     Lifted verbatim from the agent-mode branch so the task-owned route and
     the TIDMAD agent route cannot drift into two resolutions.
     """
-    from execute_tools.task_data_path import resolve_task_data_path
+    from execute_tools.task_data_path import bootstrap_legacy_tidmad_data_path
     from workflows.task_composition import resolve_child_task_data_path
 
     if args.task_data_path_id is None:
-        return resolve_task_data_path(None)
+        return bootstrap_legacy_tidmad_data_path()
     return resolve_child_task_data_path(
         args.task_data_path_id,
         identity=args.task_data_path_identity,
@@ -478,24 +478,9 @@ def main(argv: list[str] | None = None) -> None:
     # Filename construction — through the Deliverable Contract (Step 06 C3)
     # ---------------------------------------------------------------------------
 
-    # D14-1 C4: side-effect import — module tail registers the TIDMAD
-    # implementation, which regime-A resolution (agent mode below) requires.
-    # Step 10 / P5+P6 W3 — the BUILT-INS' BOOTSTRAP, not the extension path.
-    #
-    # A composed run transports its data-path id to this child
-    # (`--task_data_path_id`), and `resolve_task_data_path` fails closed on an id
-    # the child's registry does not hold. Before this, every child imported ONLY
-    # the TIDMAD implementation, so a transported `oxford_iiit_pet` or
-    # `davis_future_prediction` id could not resolve here even though all three
-    # implementations are in-tree production modules and the parent-side emitter
-    # already existed. Side-effect imports: each module's tail self-registers.
-    #
-    # Out-of-tree plugin availability in children is deliberately NOT solved here
-    # (Step 12 owns it) — this list is the built-ins' convenience bootstrap, the
-    # same pattern `execute_tools/health_checks/__init__.py` documents.
-    import execute_tools.davis_data_path
-    import execute_tools.pets_data_path
-    import execute_tools.tidmad_data_path  # noqa: F401
+    # D14-1 C3/C4. A composed scoring child loads the exact implementation named
+    # by the transported manifest and verifies the parent-pinned identity. The
+    # uncomposed compatibility path is activated explicitly below.
     from execute_tools.deliverable_spec import derive_run_deliverable_spec
     from execute_tools.evaluation_metric import (
         NotScoreableResult,
@@ -593,7 +578,7 @@ def main(argv: list[str] | None = None) -> None:
         from execute_tools.dataset_config import bind_dataset_profile
         from execute_tools.task_data_path import (
             EvaluationReadRequest,
-            resolve_task_data_path,
+            bootstrap_legacy_tidmad_data_path,
         )
 
         # C3: one resolution authority across all three children. Scoring already
@@ -608,7 +593,7 @@ def main(argv: list[str] | None = None) -> None:
                 manifest_path=args.task_manifest,
             )
             if args.task_data_path_id is not None
-            else resolve_task_data_path(None)
+            else bootstrap_legacy_tidmad_data_path()
         )
         # F-COV-8 — THE SCAN. `read_evaluation_payload` re-derives its spec
         # inside the call (`tidmad_data_path.py:571`), so it reads the naming

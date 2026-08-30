@@ -48,6 +48,7 @@ from execute_tools.health_checks.schemas import (
 round_health = importlib.import_module("nodes.ml_hyperparameter_tune_agent.round_health")
 
 evaluate_round_health = round_health.evaluate_round_health
+build_evaluation_payload_fn = round_health.build_evaluation_payload_fn
 
 #: The orchestrator's round-boundary call. Stated ONCE: these guards anchor
 #: on a SYMBOL, so a rename silently un-anchors them unless the name has a
@@ -220,6 +221,18 @@ class TestTheGateCallIsReachableFromEveryScoringRoute:
         assert "evaluate_and_persist_health_gates" not in source
         assert source.count(f"{BOUNDARY_CALL}(") == 1
 
+    def test_production_wires_the_task_codec_into_the_round_context(self):
+        """Fails if only direct tests can read task-owned Health payloads.
+
+        The Pets incident existed because independently correct task codecs and
+        Health providers were never joined at the production round boundary.
+        """
+        source = EXECUTION_PY.read_text()
+
+        assert "evaluation_payload_fn=build_evaluation_payload_fn(" in source
+        assert "task_data_path=bindings.run_task_data_path" in source
+        assert "deliverable_dir=sandbox.base_dir" in source
+
 
 class TestTheBoundaryReportsWhetherGatesActuallyRan:
     """`[]` must stop meaning two different things.
@@ -261,6 +274,51 @@ class TestTheBoundaryReportsWhetherGatesActuallyRan:
         assert kwargs["healthgate_mode"] == "blocking"
         assert kwargs["result_authority"] == "scientific"
         assert outcome.is_degenerate is False
+
+    def test_task_owned_evaluation_payload_reaches_the_view_context(self, _engine):
+        """Catches Health providers falling back to indexed task filenames.
+
+        The production incident was an external single-file deliverable whose
+        provider called the legacy indexed-name resolver. This assertion fails
+        if the task codec callback is dropped before the Health engine.
+        """
+        recorder = _engine(passed=True)
+        expected = {"sample-a": 3}
+
+        _call(evaluation_payload_fn=lambda: expected)
+
+        ctx, _kwargs = recorder.calls[0]
+        assert ctx.load_evaluation_payload() == expected
+
+
+class TestTaskOwnedEvaluationPayloadReader:
+    def test_it_builds_the_exact_attempt_request_for_the_task_codec(self):
+        """Catches a Health read targeting a different round's deliverable."""
+
+        class _Codec:
+            def __init__(self):
+                self.requests = []
+
+            def read_evaluation_payload(self, request):
+                self.requests.append(request)
+                return {"decoded": True}
+
+        codec = _Codec()
+        reader = build_evaluation_payload_fn(
+            task_data_path=codec,
+            deliverable_dir="/tmp/current-attempt",
+            exp_id="candidate_iter_002_004",
+            run_name="iter_002",
+            model_type="candidate",
+        )
+
+        assert reader() == {"decoded": True}
+        assert codec.requests[0].model_dump() == {
+            "deliverable_dir": "/tmp/current-attempt",
+            "exp_id": "candidate_iter_002_004",
+            "run_name": "iter_002",
+            "model_type": "candidate",
+        }
 
     def test_a_pathological_round_fires_the_blocking_disposition(self, _engine):
         """WITNESS 2 — pathological output: the blocking disposition FIRES.

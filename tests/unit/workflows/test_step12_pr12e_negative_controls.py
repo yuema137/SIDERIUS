@@ -90,15 +90,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-# The built-ins' bootstrap, at COLLECTION time. A first import that happens
-# inside a test whose fixture replaced `_REGISTRY` registers into the
-# temporary dict, which is discarded on teardown — and the module is now in
-# `sys.modules`, so it never registers again (F-12bc-8). Collection is the one
-# moment guaranteed to precede every test.
-import execute_tools.davis_data_path
-import execute_tools.pets_data_path
 import execute_tools.task_data_path as tdp
-import execute_tools.tidmad_data_path
 from execute_tools.task_data_path import (
     TASK_DATA_PATH_IDENTITY_FLAG,
     TaskBindingContext,
@@ -130,13 +122,11 @@ FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "step10_p1" / "fourth_task"
 #: The modules whose import registers a shipped implementation — the
 #: built-ins' bootstrap, which Step 08b's sentence distinguishes from the
 #: extension path.
-_BUILTIN_MODULES = frozenset(
-    {
-        "execute_tools.tidmad_data_path",
-        "execute_tools.pets_data_path",
-        "execute_tools.davis_data_path",
-    }
-)
+_BUILTIN_MODULES = frozenset({"execute_tools.tidmad_data_path"})
+
+# Only the bounded uncomposed compatibility implementation is framework
+# bootstrap state now. Real task packages compose through their manifests.
+tdp.bootstrap_legacy_tidmad_data_path()
 
 
 def _builtin_ids() -> tuple[str, ...]:

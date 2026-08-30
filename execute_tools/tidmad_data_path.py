@@ -17,9 +17,10 @@ deliverable-spec naming/storage authorities and ``create_abra_file`` (imports,
 not copies); ``read_evaluation_payload`` resolves the persisted deliverables
 for the Step-06 handle and nothing more.
 
-REGISTRATION. Importing this module registers the implementation under
-``TIDMAD_COMPATIBILITY_ID`` (regime-A legacy resolution, child §4.2 row 1).
-Until C3/C4 rewire the production call sites the registration is inert.
+REGISTRATION. Importing this real-task module has no registry side effect.
+The bounded legacy application edge calls
+``bootstrap_legacy_tidmad_data_path``; composed runs load the implementation
+from their transported manifest.
 
 NOTE: no ``from __future__ import annotations`` here — under lazy annotations
 ruff (UP037) would force de-quoting an annotation INSIDE the verbatim-moved
@@ -60,7 +61,6 @@ from execute_tools.task_data_path import (
     EvaluationReadRequest,
     ScopeBuildRequest,
     ValidationScopeError,
-    register_task_data_path,
 )
 
 
@@ -586,6 +586,3 @@ class TidmadTaskDataPath:
                 continue
             payload[file_index] = os.path.join(request.deliverable_dir, entry)
         return payload
-
-
-register_task_data_path(TidmadTaskDataPath())

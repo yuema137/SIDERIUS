@@ -295,6 +295,12 @@ def _run_preflight_check(
     )
     output.preflight_estimated_minutes = verdict["estimated_minutes"]
     output.preflight_factor = verdict["factor"]
+    if verdict.get("applicable") is False:
+        output.memo_consistency_notes.append(
+            "PREFLIGHT_SKIPPED: the static wall-time formula is not applicable "
+            "to this task's declared topology."
+        )
+        return None
     factor = float(verdict["factor"])
 
     # C8b: the note is emitted on the SHARED policy's decision, not on a
@@ -2366,6 +2372,10 @@ def main():
     parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai"])
     parser.add_argument("--model_id", type=str, default="gemini-3.1-flash-lite-preview")
     args = parser.parse_args()
+
+    from core.generated_library import bind_generated_library_to_workspace
+
+    bind_generated_library_to_workspace(args.workspace)
 
     interp_path = os.path.join(args.workspace, f"interpretation_{args.run_name}.json")
     if not os.path.exists(interp_path):

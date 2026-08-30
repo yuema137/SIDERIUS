@@ -137,13 +137,18 @@ def get_model_description(model_type: str, *, baseline_isolation: bool = False) 
     Raises:
         FileNotFoundError: if no description.md is found for the model_type.
     """
-    from core.generated_library import generated_models_dir
+    from core.generated_library import generated_library_is_workspace_bound, generated_models_dir
 
     bundled = os.path.join(_ML_MODELS_DIR, model_type, "description.md")
+    legacy_candidates = (
+        []
+        if generated_library_is_workspace_bound()
+        else [os.path.join(_PLUGIN_DESCRIPTIONS_DIR, model_type, "description.md")]
+    )
     candidates = [
         *([] if baseline_isolation else [bundled]),
         os.path.join(generated_models_dir(), model_type, "description.md"),
-        os.path.join(_PLUGIN_DESCRIPTIONS_DIR, model_type, "description.md"),
+        *legacy_candidates,
         *_chain_workspace_candidates(model_type),
         *_declared_pack_candidates(model_type),
     ]

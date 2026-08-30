@@ -60,6 +60,15 @@ Two rules that are easy to get wrong:
 - **The write/read pair are codecs.** They do not score, do not aggregate, do not
   filter. Scoring is the metric's job.
 
+`EpochSamplingParams` is an execution request, not a universal sampling
+policy. The framework supplies fields such as `train_portion`, `epoch_seed`
+and `max_samples`; your `training_dataset` decides what those fields mean for
+your scientific units. A tabular task may select seeded rows, an image task may
+need label-stratified identities, and a video task may sample whole sequences.
+If your task has no defensible interpretation for a requested fraction, refuse
+it explicitly. Never let the framework infer scientific grouping from tensor
+shape or file order.
+
 If your data is not shaped like "N partitions of M uniform units", add the
 optional `TaskScopeCapability` sibling — `build_training_scope`,
 `build_eval_scope`, `serialize_scope`, `deserialize_scope`. Your serialisation
@@ -172,6 +181,13 @@ registration API, and it can live entirely outside the repository.
 Declare `task_health: {none: true}` if you genuinely have no health family.
 **Do not omit the section** — omission means TIDMAD's family.
 
+A Health view provider should decode the current artifact through
+`ctx.load_evaluation_payload()`. That callback reuses your
+`TaskDataPath.read_evaluation_payload` codec lazily after applicability has
+been decided. Do not reconstruct filenames or copy artifact parsing into the
+provider; doing so couples Health to one storage convention and lets the metric
+and Health readers drift apart.
+
 ## Step 7 — Decide who names the deliverables
 
 Two legitimate shapes, and the framework distinguishes them honestly:
@@ -257,9 +273,28 @@ environment **unions** the declared roots into `SIDERIUS_PLUGIN_DIRS` /
 run declared. (The environment variables still work on their own for
 un-composed runs.)
 
-If the task requires one specific training objective, also declare it —
-`objective:` names the loss plugin's own self-declaration symbol, and the
-resulting `LossConfig` overrides the planner's choice as a typed authority.
+If the task requires one specific training objective, also declare it. Select a
+framework-provided objective with validated config:
+
+```yaml
+objective:
+  config:
+    loss_type: ce
+    reduction: mean
+```
+
+For task-owned arithmetic, point at the plugin's self-declaration instead:
+
+```yaml
+objective:
+  implementation:
+    file: ./plugins/my_exact_loss.py
+    symbol: PLUGIN_LOSS_TYPE
+```
+
+Both forms produce the same typed `LossConfig` authority and override the
+planner. The config form cannot select `custom`; custom code must use the
+implementation form so its content joins the run identity.
 
 ## Step 10 — Launch
 

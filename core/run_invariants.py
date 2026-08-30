@@ -40,6 +40,7 @@ import contextlib
 import json
 import os
 import tempfile
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
@@ -813,6 +814,14 @@ class LockLaunchIdentity(BaseModel):
 UNLABELLED_LAUNCH_IDENTITY = LockLaunchIdentity()
 
 
+@dataclass(frozen=True, slots=True)
+class RunHealthMaterialization:
+    """Inputs needed only while materializing the run's Health config."""
+
+    task_health_binding: Any = None
+    dataset_partition_count: int | None = None
+
+
 def build_run_invariants(
     resolved_data_scope: list[int],
     health_gate_enabled: bool,
@@ -825,7 +834,7 @@ def build_run_invariants(
     health_feedback_history_window_iterations: int = 3,
     health_feedback_history_max_entries_per_model: int = 8,
     include_runtime_identities: bool = True,
-    task_health_binding: Any = None,
+    health_materialization: RunHealthMaterialization | None = None,
     task_composition_fingerprint: str | None = None,
     launch_identity: LockLaunchIdentity | None = None,
 ) -> tuple[RunInvariants, str | None]:
@@ -854,6 +863,8 @@ def build_run_invariants(
         health_checks_config: Operator-supplied HealthGate YAML path, or
             ``None`` for the shipped default.
         workspace: Directory receiving ``health_checks_effective.yaml``.
+        health_materialization: Task binding and already-resolved partition
+            count needed to compose and validate the effective Health config.
         ordering_override_strategy: The run's data-ordering override, or
             ``None`` for no override. Defaults keep every pre-PR2 call site
             producing an unchanged, no-override lock.
@@ -896,14 +907,18 @@ def build_run_invariants(
         # what resolves `LEGACY_OMITTED`, so a legacy run materializes the
         # byte-identical effective config it always did — the call shape is
         # the branch, and there is no task name on either side of it.
+        health_inputs = health_materialization or RunHealthMaterialization()
         health_kwargs = (
-            {} if task_health_binding is None else {"task_health_binding": task_health_binding}
+            {}
+            if health_inputs.task_health_binding is None
+            else {"task_health_binding": health_inputs.task_health_binding}
         )
         effective_path, sha = materialize_effective_config(
             health_checks_config,
             health_gate_files,
             workspace,
             resolved_scope=resolved_data_scope,
+            dataset_partition_count=health_inputs.dataset_partition_count,
             **health_kwargs,
         )
     else:

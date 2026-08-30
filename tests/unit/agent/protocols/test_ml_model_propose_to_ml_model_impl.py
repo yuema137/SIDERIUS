@@ -16,6 +16,8 @@ Tests cover:
     - Raises NotImplementedError
 """
 
+import os
+
 import pytest
 
 from agent.schemas.hyperparam_tuning import ExpertAdvice
@@ -98,10 +100,11 @@ class TestLocalFullSpec:
         assert result.storage.local.workspace == "/tmp/proto_test"
         assert result.storage.local.run_name == "r1"
 
-        # plugin_dir / test_dir / loss_dir fall back to ImplementorInput schema defaults.
-        assert result.plugin_dir == "agent_generated/models"
-        assert result.test_dir == "agent_generated/tests"
-        assert result.loss_dir == "agent_generated/losses"
+        # Generated outputs follow the storage workspace by default.
+        expected_root = "/tmp/proto_test/generated/r1"
+        assert result.plugin_dir == os.path.join(expected_root, "models")
+        assert result.test_dir == os.path.join(expected_root, "tests")
+        assert result.loss_dir == os.path.join(expected_root, "losses")
 
     def test_custom_loss_spec_none_forwards_as_none(self, proposal_output, storage):
         """The fixture proposal_output has no custom_loss_spec (defaults to

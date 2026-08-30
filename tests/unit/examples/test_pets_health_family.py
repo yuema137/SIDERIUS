@@ -93,6 +93,14 @@ def _ctx(deliverable: Path | None) -> HealthCheckContext:
     kwargs = {"model_name": "pets_reference_cnn", "run_name": "r", "round_index": 1}
     if deliverable is not None:
         kwargs["denoised_paths"] = {0: str(deliverable)}
+        kwargs["evaluation_payload_fn"] = lambda: PetsTaskDataPath().read_evaluation_payload(
+            EvaluationReadRequest(
+                deliverable_dir=str(deliverable.parent),
+                exp_id="pets_gate2_001",
+                run_name="d14p",
+                model_type="pets_reference_cnn",
+            )
+        )
     return HealthCheckContext(**kwargs)
 
 
@@ -125,9 +133,13 @@ class TestStateCChainOnTheRealCollapse:
         assert task_config is not None and task_config.facts.symbol_cardinality == 37
         assert [p.configured_ref for p in plugins] == ["../plugins/_pets_health_views.py"]
 
-    def test_both_blocking_gates_fail_on_the_fixture_with_the_evidence_values(self, monkeypatch):
+    def test_both_blocking_gates_fail_on_the_fixture_with_the_evidence_values(
+        self, monkeypatch, tmp_path
+    ):
         _compose(monkeypatch)
-        ctx = _ctx(FIXTURE)
+        deliverable = tmp_path / PRODUCTION_NAME
+        shutil.copyfile(FIXTURE, deliverable)
+        ctx = _ctx(deliverable)
 
         distinct = runner.evaluate_gate(DISTINCT_GATE, ctx)
         (distinct_result,) = distinct.check_results

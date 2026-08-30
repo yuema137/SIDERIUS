@@ -1,0 +1,13 @@
+{
+  "partition_count": 3,
+  "topology": {
+    "modality": "synthetic_tabular",
+    "partition_unit": "shard",
+    "feature_dim": 3,
+    "rows_per_shard": 24,
+    "roles": {"train_shards": [0, 1], "evaluation_shard": 2},
+    "generator": {"seed": 20260829, "authority": "plugins/_masked_task.py::generate_shard"}
+  },
+  "anchor_selection_files": [0],
+  "health_peek_files": [2]
+}

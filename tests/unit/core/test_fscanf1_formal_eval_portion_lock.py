@@ -49,7 +49,7 @@ from core.run_invariants import (
     write_run_invariants,
 )
 
-GOLD_PORTION = 0.1  # the Gold campaign's frozen value (_gold_campaign_lib.sh)
+BOUNDED_PORTION = 0.1  # any non-default qualification fraction exercises the lock
 
 
 def _invariants(portion: float) -> RunInvariants:
@@ -75,7 +75,7 @@ class TestTheEvalFractionIsCompared:
         comparison, and the lock now says so.
         """
         workspace = str(tmp_path / "ws")
-        assert ensure_run_invariants(workspace, _invariants(GOLD_PORTION)) == "created"
+        assert ensure_run_invariants(workspace, _invariants(BOUNDED_PORTION)) == "created"
 
         with pytest.raises(RunInvariantsViolation) as exc:
             validate_run_invariants(workspace, _invariants(0.5))
@@ -86,9 +86,9 @@ class TestTheEvalFractionIsCompared:
     def test_the_same_fraction_resumes(self, tmp_path: Path) -> None:
         """The refusal is about DIVERGENCE, never about the field existing."""
         workspace = str(tmp_path / "ws")
-        ensure_run_invariants(workspace, _invariants(GOLD_PORTION))
+        ensure_run_invariants(workspace, _invariants(BOUNDED_PORTION))
 
-        assert ensure_run_invariants(workspace, _invariants(GOLD_PORTION)) == "validated"
+        assert ensure_run_invariants(workspace, _invariants(BOUNDED_PORTION)) == "validated"
 
     def test_it_is_compared_not_merely_recorded(self) -> None:
         """The declared partition, asserted as the concept it encodes."""
@@ -134,7 +134,7 @@ class TestTheLegacyWorkspaceConsequence:
         self._write_legacy_lock(workspace)
 
         with pytest.raises(RunInvariantsViolation, match="formal_eval_portion"):
-            validate_run_invariants(str(workspace), _invariants(GOLD_PORTION))
+            validate_run_invariants(str(workspace), _invariants(BOUNDED_PORTION))
 
 
 class TestLegacyAndFullEvalLockBytesAreUnchanged:
@@ -148,10 +148,10 @@ class TestLegacyAndFullEvalLockBytesAreUnchanged:
 
     def test_a_declared_fraction_writes_the_key(self, tmp_path: Path) -> None:
         """The omission must not swallow the value it exists to pin."""
-        path = write_run_invariants(str(tmp_path / "ws"), _invariants(GOLD_PORTION))
+        path = write_run_invariants(str(tmp_path / "ws"), _invariants(BOUNDED_PORTION))
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
 
-        assert payload["formal_eval_portion"] == GOLD_PORTION
+        assert payload["formal_eval_portion"] == BOUNDED_PORTION
 
 
 class TestEveryParticipatingEntryPointThreadsIt:

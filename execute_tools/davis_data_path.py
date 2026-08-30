@@ -47,7 +47,6 @@ from execute_tools.task_data_path import (
     ScopeBuildRequest,
     ValidationScopeError,
     deserialize_rows_scope,
-    register_task_data_path,
 )
 
 #: Frozen geometry (§22.9a; resize rule frozen by D14-3).
@@ -484,4 +483,3 @@ def truth_windows(data_dir: str | Path, clips: Sequence[DavisClip]) -> dict[str,
 
 # Regime-A instance: no manifest, so it materializes a scope it is HANDED
 # but refuses to BUILD one, by name (PR-12bc B8).
-register_task_data_path(DavisTaskDataPath())

@@ -27,6 +27,8 @@ actually invalidate anything".
 
 from __future__ import annotations
 
+import textwrap
+
 import pytest
 
 from execute_tools.health_checks.launch_policy import (
@@ -70,6 +72,81 @@ class TestTheLegalCombinationsLaunch:
             result_authority="diagnostic",
             health_checks_config=OBSERVE,
         )
+
+    def test_task_owned_plugin_policy_is_resolved_before_the_legacy_default(
+        self, tmp_path, preserved_registry
+    ):
+        """Catch composed startup binding an empty legacy plugin set first.
+
+        The external Pets chain failed before GPU work when launch-policy
+        validation resolved the legacy Health family and the run preflight
+        subsequently tried to bind the task-owned plugin family.
+        """
+        from execute_tools.health_checks import _plugin_binding
+
+        plugin = tmp_path / "external_health.py"
+        plugin.write_text(
+            textwrap.dedent(
+                """
+                from typing import Any, ClassVar
+
+                from execute_tools.health_checks import register
+                from execute_tools.health_checks.schemas import (
+                    CheckInputDeclaration,
+                    HealthCheckContext,
+                    HealthCheckResult,
+                )
+
+
+                class ExternalLaunchCheck:
+                    name: ClassVar[str] = "external_launch_check"
+                    declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
+                        consumes_view="external.launch_view",
+                    )
+
+                    def run(
+                        self,
+                        ctx: HealthCheckContext,
+                        config: dict[str, Any] | None = None,
+                    ) -> HealthCheckResult:
+                        return HealthCheckResult(
+                            check_name=self.name,
+                            passed=True,
+                            reason="external launch policy fixture",
+                        )
+
+
+                register(ExternalLaunchCheck())
+                """
+            ),
+            encoding="utf-8",
+        )
+        task_health = tmp_path / "task_health.yaml"
+        task_health.write_text(
+            textwrap.dedent(
+                """
+                facts:
+                  encoding_family: external_fixture
+                plugins:
+                  - kind: file
+                    ref: external_health.py
+                roster:
+                  - gate_id: external_launch_blocking
+                    check: external_launch_check
+                    disposition: blocking
+                    reason: External launch-policy fixture.
+                """
+            ),
+            encoding="utf-8",
+        )
+        _plugin_binding.reset_run_scope()
+        try:
+            _check(health_checks_config=None, task_health_binding=str(task_health))
+            assert [plugin.configured_ref for plugin in _plugin_binding.loaded_plugin_set()] == [
+                "external_health.py"
+            ]
+        finally:
+            _plugin_binding.reset_run_scope()
 
 
 class TestOmissionIsRefused:

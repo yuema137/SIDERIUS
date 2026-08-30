@@ -36,7 +36,10 @@ scientific claim rides on it.**
 (`train_shards`/`eval_shard` — plain values, so no `{ref: ...}` envelope is
 needed; the envelope exists for path-valued config, see `pets.yaml`),
 `model_plugins: {dir, require: [quickstart_reference_mlp]}`, health
-`none: true` (a NAMED absence), and the declared `deliverable:` naming.
+`none: true` (a NAMED absence), the declared `deliverable:` naming, and a
+framework-provided `ce` objective selected through `objective.config`. A task
+with its own objective uses `objective.implementation`; the synthetic masked
+regression example demonstrates that sibling route.
 
 ## 2. External data dependency
 
@@ -83,15 +86,15 @@ ladder passing a generated model through the contract-aware validator, the
 tuner leg with typed structured-failure records, REAL TRAINING on the
 pack's data inside the composed training child, the #258 recovery resume,
 and the P1 generated-library provenance (`{root, source: env}`, promotion
-outside the checkout). **No scored result exists yet**: the training
+outside the checkout). **No scored result exists in those historical live
+runs**: the training
 attempt's inference was refused by this pack's own pre-convention codec
-(fixed here since, with a regression test), and the remaining attempts
-were burned by a FLAGGED framework seam — the legacy focal-loss family is
-geometry-incompatible with a `[B,2]`-logit contract and is not
-contract-filtered for composed tasks — plus weak-certify-model
-architecture choices. Expect a fresh-model chain on this task to be
-budget-hungry until that seam lands. Start with `--dry-run` (prints every
-child command, no side effects).
+(fixed since, with a deterministic production-handoff regression test), and the remaining attempts
+were burned by an agent-selected focal loss that is incompatible with the
+declared `[B,2]` output plus weak-certify-model architecture choices. The
+current manifest now selects the framework-provided `ce` objective as a typed
+authority, so a fresh run cannot repeat that loss mismatch. Start with
+`--dry-run` (prints every child command, no side effects).
 
 ```bash
 WS="${SIDERIUS_QUICKSTART_WORKSPACE:-$HOME/siderius_quickstart_workspace}"
@@ -113,9 +116,9 @@ Notes pinned to source: a composed run **requires** `--data_dir`
 (`CompositionDataRootMissing` otherwise); omitting `--llm_config` silently
 resolves a deprecated all-Gemini default, so never launch without it;
 `--result_authority diagnostic` is the honest value for a workflow-mechanics
-demo; and composed runs currently fire **zero health gates** (the A1
-declared debt on the PR-12d ledger), so a passing run makes no
-health-enforcement claim.
+demo. This example explicitly declares `task_health: {none: true}`, so it
+intentionally fires zero gates and makes no health-enforcement claim; composed
+tasks that declare a Health family now execute it at every scored round.
 
 ## 5. Expected outputs
 
@@ -128,6 +131,12 @@ health-enforcement claim.
   (`quickstart_predictions_<model>_<run>_<exp>_0000.json`); metric outcomes
   `MetricResult 1.0` (oracle), `0.0` (all-wrong), and a structured
   `NotScoreableResult(completeness)` for a missing artifact.
+- **Now (deterministic test, real production handoff):** the generic inference
+  unit evaluates all 64 final-eval rows in 10 batches, the task writer persists
+  the declared artifact, the task reader decodes it, and the composed accuracy
+  metric returns the hand-computed `37/64 = 0.578125` for a constant class-zero
+  model. This closes the executable inference-to-scoring handoff; it does not
+  claim a live agent-generated tuner `metric_result`.
 - **From the live runs (witnessed 2026-08-25):** a chain workspace with
   `run_invariants_lock.json` carrying that run's composition fingerprint
   (`9645c218…`, pinning the three plugin content hashes; editing the codec
@@ -145,7 +154,8 @@ health-enforcement claim.
   checkpoint, the honest `no_records` manifests, and (on the recovery leg)
   the #258 replacement provenance. Still unwitnessed: a SCORED tuner
   record (`metric_result` for `accuracy`) and a persisted deliverable
-  under the declared naming — the §4 batch blocked both.
+  under the declared naming — the §4 batch blocked both. Those are historical
+  run facts, distinct from the deterministic handoff witness above.
 
 ## 6. The landed boundary (pinned by tests)
 
@@ -165,12 +175,20 @@ regresses the 2026-08-25 batch item A — the codec now accepts the composed
 inference child's positional outputs (seam C/B7) and still refuses a
 mis-paired length (mutation-proven against the live failure).
 
-Still true and worth knowing: composed runs fire zero health gates (A1
-debt), and **the quickstart live chain runs happened on 2026-08-25** —
+The deterministic production-handoff pin
+`test_composed_generic_inference_persists_a_scoreable_metric_result` catches a
+different defect class: independently working codec and metric components that
+fail when joined by generic inference. It asserts the declared filename exists
+and the composed metric returns the external expectation `37/64 = 0.578125`.
+
+Still true and worth knowing: this pack declares no Health family, and **the
+quickstart live chain runs happened on 2026-08-25** —
 bounded 1×1 arms: the implementor-test-template debt from the first arm is
 FIXED in the landed source (validation now passes generated models), REAL
-TRAINING was witnessed on the final arm, and the scoring leg remains
-unwitnessed behind the flagged focal-loss seam (§4).
+TRAINING was witnessed on the final arm. A deterministic composed
+inference-to-scoring handoff is now witnessed, while a live agent-chain scored
+tuner record remains unwitnessed; the current typed `ce` selection closes the
+specific focal-loss configuration gap but has not been rerun live yet.
 
 ## 7. After PR-12d lands (finalization checklist) — EXECUTED, all steps
 
@@ -198,8 +216,8 @@ Executed on the landed integration source (branch
    gone. Outcome, honestly: composition / lock / manifest / resume /
    validation-of-generated-models / REAL TRAINING / P1 library provenance
    all witnessed; a SCORED record and a persisted deliverable remain
-   unwitnessed (§4 batch: pack codec fixed here; focal-loss seam flagged,
-   framework-owned).
+   unwitnessed (§4 batch: the pack codec and typed built-in objective selection
+   are fixed in current source but have not been rerun live).
 6. ~~Re-sync `quickstart.html`; update `STATUS.md` maturity~~ — done.
 
 ## 8. Adapt to your own task
@@ -211,6 +229,13 @@ are exempt from the `examples/` governance; in-tree packs bind it from a
 shipped manifest), point every manifest section at your files, declare your
 model plugins with `require:`, compose (the fail-closed refusals are your
 checklist), launch bounded.
+
+Two extension boundaries are intentional. `training_dataset(scope, params)`
+owns the scientific meaning of `train_portion`; this quickstart implements a
+seeded row draw, while a grouped task may implement a different rule or refuse
+fractions. Health providers consume `ctx.load_evaluation_payload()` so the
+task's one codec owns artifact naming and decoding; they never rebuild a
+filename convention inside Health.
 
 **One place where copying this pack's shape is the wrong move.** This pack
 declares a `deliverable:` template in its manifest, so its `deliverable_name`

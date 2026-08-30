@@ -2367,6 +2367,10 @@ def main():
     parser.add_argument("--model_id", type=str, default="gemini-3.1-pro-preview")
     args = parser.parse_args()
 
+    from core.generated_library import bind_generated_library_to_workspace
+
+    bind_generated_library_to_workspace(args.workspace)
+
     proposal_path = os.path.join(args.workspace, f"proposal_{args.run_name}.json")
     if not os.path.exists(proposal_path):
         raise FileNotFoundError(

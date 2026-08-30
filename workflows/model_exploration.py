@@ -79,6 +79,7 @@ from agent.prompt_templates.implementor.task_blocks import load_implementor_task
 from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
 from agent.prompt_templates.proposal.task_blocks import load_proposal_task_blocks
 from agent.schemas.external_agents import ExternalAgentOutput
+from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
     HyperparamTuningInput,
@@ -113,6 +114,7 @@ from core.hardware_context import get_or_create as get_or_create_hardware_contex
 from core.resume import RestoredState, union_key_findings
 from core.run_invariants import (
     LockLaunchIdentity,
+    RunHealthMaterialization,
     build_run_invariants,
     ensure_run_invariants,
     validate_stamped_invariants,
@@ -506,9 +508,10 @@ def _aggregate_worst_offender_rejections(
 
 
 def _synthetic_prior_iter_tune_output(
-    ge: GateExhaustionInfo,
+    ge: GateExhaustionInfo | None = None,
+    trial_validity_feedback: TrialValidityFeedback | None = None,
 ) -> HyperparamTuningOutput:
-    """Wrap a prior-chain-iter ``GateExhaustionInfo`` as a minimal
+    """Wrap prior-chain negative feedback as a minimal
     ``HyperparamTuningOutput`` for the ``recent_tune_outputs`` deque.
 
     The interp→propose protocol's only read of each deque entry is
@@ -527,8 +530,39 @@ def _synthetic_prior_iter_tune_output(
         completed_rounds=0,
         total_attempts=0,
         gate_exhaustion=ge,
+        trial_validity_feedback=trial_validity_feedback,
         started_at=now,
         finished_at=now,
+    )
+
+
+def _restored_negative_feedback(
+    restored_state: RestoredState | None,
+) -> list[tuple[GateExhaustionInfo | None, TrialValidityFeedback | None]]:
+    """Return the current typed channel, with the pre-#396 fallback."""
+    if restored_state is None:
+        return []
+    if restored_state.accumulated_negative_feedback:
+        return restored_state.accumulated_negative_feedback
+    return [(item, None) for item in restored_state.accumulated_gate_exhaustions]
+
+
+def _seed_recent_negative_feedback(
+    state: ChainState,
+    feedback: list[tuple[GateExhaustionInfo | None, TrialValidityFeedback | None]],
+) -> None:
+    """Seed the bounded proposer window from prior chain iterations."""
+    if not feedback:
+        return
+    for gate_exhaustion, trial_feedback in feedback:
+        state.recent_tune_outputs.append(
+            _synthetic_prior_iter_tune_output(gate_exhaustion, trial_feedback)
+        )
+    count = len(state.recent_tune_outputs)
+    print(
+        f"  [chain] Pre-seeded recent_tune_outputs with {count} "
+        f"cross-iter negative-feedback summar{'y' if count == 1 else 'ies'} "
+        f"(deque maxlen=3 keeps the latest)."
     )
 
 
@@ -1131,46 +1165,40 @@ def refuse_builtin_proposal_under_isolation(
         )
 
 
-def refuse_legacy_lit_review_on_composed_run(
+def refuse_shipped_lit_review_config_on_composed_run(
     *,
     task_composition: Any,
     lit_review_enabled: bool,
+    lit_review_config_path: str,
 ) -> None:
-    """Fail closed when a COMPOSED run explicitly enables literature review.
+    """Keep composed runs from inheriting the shipped task-specific config.
 
     Step 12 / PR-12a C7, D-12a-7 (Q-12-3, RATIFIED 2026-08-22).
 
-    The literature-review path is still task-specific (TIDMAD) science. It is
-    opt-in and OFF at all three layers — the chain script defaults
-    ``ML_LIT_REVIEW_ENABLED=0``, resolution is CLI > YAML > False, and the
-    shipped ``lit_review_config.yaml`` says ``enabled: false`` — so it is NOT
-    a load-bearing node of the normal composed chain. That is precisely why
-    Step 12's external-task graduation does not claim literature-review
-    support, and why full genericization is NAMED post-roadmap debt rather
-    than this PR's work.
-
-    What must not happen is a composed run EXPLICITLY enabling it and quietly
-    receiving another task's literature framing in its proposals.
-
-    Keyed on composition PRESENCE, never on a task identity (C-P56-1).
-    Un-composed runs are unaffected.
+    The node and its four-channel proposer handoff are task-generic, and the
+    task description already resolves from the active composition. The shipped
+    default YAML is not generic: its root papers and confidence rubric are
+    TIDMAD-owned. A composed run may therefore enable literature review only
+    with an explicit non-default config. Un-composed compatibility is
+    unchanged.
 
     Raises:
-        ValueError: composed AND explicitly enabled — naming the remediation
-            and the ratified disposition, before any LLM or GPU spend.
+        ValueError: composed and enabled while still selecting the shipped
+            default config, before any LLM or GPU spend.
     """
     if task_composition is None or not lit_review_enabled:
         return
+    default_path = os.path.abspath(resolve_lit_review_config_path("configs/lit_review_config.yaml"))
+    selected_path = os.path.abspath(resolve_lit_review_config_path(lit_review_config_path))
+    if selected_path != default_path:
+        return
     raise ValueError(
-        "literature review is enabled on a COMPOSED run, and the "
-        "literature-review path is still task-specific (TIDMAD) science. "
-        "Running it here would inject another task's literature framing "
-        "into this run's proposals.\n"
-        "  Remediation: launch without --ml_lit_review_enabled (it is OFF "
-        "by default at every layer), or run un-composed.\n"
-        "  Status: generic literature review is NAMED post-roadmap debt "
-        "(Q-12-3, ratified 2026-08-22). Step 12's external-task "
-        "graduation deliberately does not claim it."
+        "literature review is enabled on a COMPOSED run with the shipped "
+        "default configs/lit_review_config.yaml. That file contains "
+        "task-specific root papers and confidence criteria, so using it would "
+        "inject another task's literature framing into this run.\n"
+        "  Remediation: supply the composed task's own config through "
+        "--ml_lit_review_config, or launch without --ml_lit_review_enabled."
     )
 
 
@@ -1180,46 +1208,33 @@ def resolve_tuner_health_config_source(
     effective_config_path: str | None,
     operator_config: str | None,
 ) -> str | None:
-    """The HealthGate config the workflow hands the tuner (Step 12 / PR-12a).
+    """The original HealthGate source the workflow hands the tuner.
 
-    **The defect this closes (F-P56-3, health half).** The chain's pre-flight
-    materializes the run's EFFECTIVE Health config, resolving the composed
-    task's family through its ``task_health_binding``. Forwarding the
-    operator's RAW value instead meant the tuner re-materialized from scratch
-    with no binding, 08b resolved ``LEGACY_OMITTED``, and a COMPOSED run's
-    per-model gates were TIDMAD's. That is not a mislabelled document: TIDMAD's
-    roster peeks file indices a smaller composed topology does not have, so the
-    run refused itself at startup naming another task's gates.
+    The chain and tuner each materialize the effective config in their own
+    workspace. They must start from the same original source and the same
+    task binding. Passing the chain's already-materialized file through a
+    second materialization drops its ``resolved_plugins`` provenance marker,
+    changes ``health_config_sha256``, and makes iteration two refuse iteration
+    one's otherwise-comparable records.
 
-    **Why composition PRESENCE and not "always the effective path".** The
-    swap would be harmless for the roster on a legacy run — a legacy effective
-    document re-resolves to itself — but the tuner captures whatever it is
-    given as ``health_checks_config_source`` BEFORE its own effective swap, and
-    that value is a PERSISTED output field
-    (``HyperparamTuningOutput.health_checks_config_source``) and record key.
-    Swapping it unconditionally would move a legacy run's recorded provenance
-    from ``None`` to a path. Regime A stays byte-identical.
-
-    The discriminator is composition presence, never a task identity or any
-    surrogate for one (C-P56-1).
+    The tuner now receives the task binding through ``TaskCompositionRef``.
+    Therefore the old workaround of substituting the chain-level effective
+    path is no longer needed and is actively incorrect. Keeping this named
+    boundary documents the transport rule and avoids reintroducing an inline
+    branch at the orchestration site.
 
     Args:
-        task_composition: the run's ``RunTaskComposition``, or ``None`` when
-            the launcher composed nothing. Typed ``object`` because only its
-            PRESENCE is consulted — reading a field here would make this a
-            second composition authority.
-        effective_config_path: the chain-level materialized effective config,
-            or ``None`` when HealthGates are disabled (no effective config
-            exists for a disabled run).
+        task_composition: retained for call-site compatibility; the binding
+            itself crosses through ``TaskCompositionRef``.
+        effective_config_path: retained for call-site compatibility and never
+            forwarded because an effective artifact is not an input source.
         operator_config: the operator's raw ``--health_checks_config`` value.
 
     Returns:
-        The effective config path for a composed run whose gates are enabled;
-        otherwise ``operator_config`` unchanged.
+        ``operator_config`` unchanged.
     """
-    if task_composition is None or effective_config_path is None:
-        return operator_config
-    return effective_config_path
+    del task_composition, effective_config_path
+    return operator_config
 
 
 def _register_plugin(
@@ -1410,7 +1425,7 @@ def _register_plugin(
 
 
 def _promote_loss_to_global(impl_output) -> None:
-    """Promote a generated loss plugin to the global loss library.
+    """Promote a generated loss plugin to the resolved capability library.
 
     arXiv P1 — the destination is the resolved generated-library losses dir
     (``core.generated_library.generated_losses_dir()``), NEVER the repository
@@ -1418,13 +1433,9 @@ def _promote_loss_to_global(impl_output) -> None:
     read-only for dedup / idempotency so pre-migration promotions are neither
     duplicated nor overwritten.
 
-    L6c — called after the iteration's tuner completes so the loss is
-    accessible to:
-
-      * Future chain iterations whose workspace may differ from this one
-        (workspaces are scratch; the global library persists across runs).
-      * Parallel chain workflows that share the global capability registry.
-      * Cross-process Branch B reuse after a chain resume from disk.
+    Supported entry points bind the destination to the chain workspace, so
+    later iterations and resumed child processes can reuse the validated loss
+    without exposing it to another workspace.
 
     Trigger condition: ``impl_output.loss_provenance.action == "generated"``.
     Per the design discussion (2026-06-23 L6c review), promotion fires
@@ -1436,8 +1447,9 @@ def _promote_loss_to_global(impl_output) -> None:
     Rule 9 constraints.
 
     Content-hash deduplication: before copying, compares SHA256 of the
-    source against every ``.py`` already in EITHER library location
-    (resolved library, then legacy checkout). On match, skips promotion and
+    source against every ``.py`` in the active library set. Workspace-bound
+    runs use only their resolved library; unbound legacy callers also consult
+    the checkout fallback. On match, skips promotion and
     logs which existing entry is the duplicate. Catches the case where two
     iterations generate plugins with different ``loss_name``s but
     byte-identical contents (e.g. an LLM regenerating the same canonical
@@ -1448,9 +1460,8 @@ def _promote_loss_to_global(impl_output) -> None:
     ``CapabilityRegistry.replace()`` so subsequent Branch B reuse and
     cross-process resume resolve to the stable location.
 
-    Idempotency: if a file with the destination name already exists in
-    EITHER library location (e.g. a parallel chain promoted first, or a
-    pre-migration run promoted into the checkout), promotion skips silently
+    Idempotency: if a file with the destination name already exists in the
+    active library set, promotion skips silently
     — first writer wins — and the registry update still fires, pointing this
     chain's index entry at the file that actually exists.
 
@@ -1463,7 +1474,7 @@ def _promote_loss_to_global(impl_output) -> None:
 
     from agent_generated._loss_loader import LOSSES_DIR
     from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
-    from core.generated_library import generated_losses_dir
+    from core.generated_library import generated_library_is_workspace_bound, generated_losses_dir
 
     src = loss_prov.loss_file_path
     if not src or not os.path.isfile(src):
@@ -1479,6 +1490,9 @@ def _promote_loss_to_global(impl_output) -> None:
     # and the same-name idempotency check — so a loss promoted before the
     # migration is neither duplicated nor clobbered, and is never written to.
     library_losses_dir = generated_losses_dir()
+    loss_library_dirs = [library_losses_dir]
+    if not generated_library_is_workspace_bound():
+        loss_library_dirs.append(LOSSES_DIR)
     dest_basename = f"{loss_prov.loss_name}.py"
     global_dest = os.path.join(library_losses_dir, dest_basename)
 
@@ -1487,7 +1501,7 @@ def _promote_loss_to_global(impl_output) -> None:
     # the idempotency branch below owns that case. Caches src hash to avoid
     # re-reading.
     src_hash = _sha256_file(src)
-    for scan_dir in (library_losses_dir, LOSSES_DIR):
+    for scan_dir in loss_library_dirs:
         if not os.path.isdir(scan_dir):
             continue
         for fname in os.listdir(scan_dir):
@@ -1509,9 +1523,12 @@ def _promote_loss_to_global(impl_output) -> None:
     # locations: a copy already promoted (a parallel chain into the resolved
     # library, or a pre-migration run into the checkout) keeps its bytes, and
     # the registry below is pointed at the file that actually exists.
-    legacy_same_name = os.path.join(LOSSES_DIR, dest_basename)
     existing_same_name = next(
-        (path for path in (global_dest, legacy_same_name) if os.path.isfile(path)),
+        (
+            os.path.join(path, dest_basename)
+            for path in loss_library_dirs
+            if os.path.isfile(os.path.join(path, dest_basename))
+        ),
         None,
     )
     if existing_same_name is not None:
@@ -1588,7 +1605,7 @@ def _sha256_file(path: str) -> str:
 
 
 def _promote_model_to_global(impl_output) -> None:
-    """Promote a generated model plugin to the global model library.
+    """Promote a generated model plugin to the resolved capability library.
 
     arXiv P1 — the destination is the resolved generated-library models dir
     (``core.generated_library.generated_models_dir()``), NEVER the repository
@@ -1598,9 +1615,9 @@ def _promote_model_to_global(impl_output) -> None:
 
     Mirrors :func:`_promote_loss_to_global` for the model surface. Called
     by the workflow's iteration loop right after ``_register_plugin``
-    returns (early-promotion timing matches the issue-#92 fix for losses)
-    so a parallel chain or future-iter resume can resolve the model via
-    the capability index without depending on this run's workspace.
+    returns (early-promotion timing matches the issue-#92 fix for losses),
+    so a future iteration or resume in the same workspace can resolve it
+    through the capability index.
 
     Trigger condition: ``impl_output.model_file_path`` exists AND
     ``impl_output.model_type`` is registered in the capability index with
@@ -1612,17 +1629,17 @@ def _promote_model_to_global(impl_output) -> None:
     already correct).
 
     Content-hash deduplication: before copying, compares SHA256 of the
-    source against every ``.py`` already in EITHER library location
-    (resolved library, then legacy checkout). On match, skips the copy and
+    source against every ``.py`` in the active library set. Workspace-bound
+    runs use only their resolved library; unbound legacy callers also consult
+    the checkout fallback. On match, skips the copy and
     logs which existing entry is the duplicate.
 
     Registry update: after promotion, the capability registry entry's
     ``file_path`` is rewritten to the promoted path via
     ``CapabilityRegistry.replace()``.
 
-    Idempotency: if a file with the destination name already exists in
-    EITHER library location (e.g. a parallel chain promoted first, Branch B
-    reuse, or a pre-migration run promoted into the checkout), the copy is
+    Idempotency: if a file with the destination name already exists in the
+    active library set, the copy is
     skipped silently and the registry update is still re-asserted against
     the file that actually exists.
 
@@ -1635,7 +1652,7 @@ def _promote_model_to_global(impl_output) -> None:
         return  # Built-in / Branch B with no fresh codegen / defensive guard.
 
     from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
-    from core.generated_library import generated_models_dir
+    from core.generated_library import generated_library_is_workspace_bound, generated_models_dir
     from ml_models.plugin_loader import AGENT_GENERATED_DIR as LEGACY_MODELS_DIR
 
     model_name = getattr(impl_output, "model_type", None)
@@ -1649,16 +1666,16 @@ def _promote_model_to_global(impl_output) -> None:
     # same-name idempotency), so a model promoted before the migration is
     # neither duplicated nor clobbered — and is never written to.
     library_models_dir = generated_models_dir()
+    model_library_dirs = [library_models_dir]
+    if not generated_library_is_workspace_bound():
+        model_library_dirs.append(LEGACY_MODELS_DIR)
 
     # Branch B reuse path: model_file_path already points into EITHER library
     # location (the implementor's Branch B short-circuit returns the
     # registry's file_path verbatim — which is a legacy checkout path for a
     # pre-migration promotion). Nothing to copy or update.
     abs_src = os.path.abspath(model_file_path)
-    if os.path.dirname(abs_src) in (
-        os.path.abspath(library_models_dir),
-        os.path.abspath(LEGACY_MODELS_DIR),
-    ):
+    if os.path.dirname(abs_src) in tuple(os.path.abspath(path) for path in model_library_dirs):
         return
 
     dest_basename = f"{model_name}.py"
@@ -1669,7 +1686,7 @@ def _promote_model_to_global(impl_output) -> None:
     # the idempotency branch below owns that case. Caches src hash to avoid
     # re-reading.
     src_hash = _sha256_file(abs_src)
-    for scan_dir in (library_models_dir, LEGACY_MODELS_DIR):
+    for scan_dir in model_library_dirs:
         if not os.path.isdir(scan_dir):
             continue
         for fname in os.listdir(scan_dir):
@@ -1691,9 +1708,12 @@ def _promote_model_to_global(impl_output) -> None:
     # locations (a parallel chain into the resolved library, or a
     # pre-migration run into the checkout); the registry below is pointed at
     # the file that actually exists.
-    legacy_same_name = os.path.join(LEGACY_MODELS_DIR, dest_basename)
     existing_same_name = next(
-        (path for path in (global_dest, legacy_same_name) if os.path.isfile(path)),
+        (
+            os.path.join(path, dest_basename)
+            for path in model_library_dirs
+            if os.path.isfile(os.path.join(path, dest_basename))
+        ),
         None,
     )
     if existing_same_name is not None:
@@ -1715,8 +1735,10 @@ def _promote_model_to_global(impl_output) -> None:
     desc_path = getattr(impl_output, "description_file_path", "") or ""
     if desc_path and os.path.isfile(desc_path):
         desc_dest = os.path.join(library_models_dir, model_name, "description.md")
-        legacy_desc = os.path.join(LEGACY_MODELS_DIR, model_name, "description.md")
-        if not os.path.exists(desc_dest) and not os.path.exists(legacy_desc):
+        existing_descriptions = [
+            os.path.join(path, model_name, "description.md") for path in model_library_dirs
+        ]
+        if not any(os.path.exists(path) for path in existing_descriptions):
             os.makedirs(os.path.dirname(desc_dest), exist_ok=True)
             shutil.copy2(desc_path, desc_dest)
             print(f"  Promoted model description → {desc_dest}")
@@ -2018,8 +2040,10 @@ def run_workflow(
     # loop means before any LLM call and any GPU work. The decision itself is
     # a named authority so this orchestrator gains a CALL rather than another
     # branch family (§12.1's sibling-shape tripwire).
-    refuse_legacy_lit_review_on_composed_run(
-        task_composition=task_composition, lit_review_enabled=launch.lit_review_enabled
+    refuse_shipped_lit_review_config_on_composed_run(
+        task_composition=task_composition,
+        lit_review_enabled=launch.lit_review_enabled,
+        lit_review_config_path=launch.lit_review_config_path,
     )
 
     # DS7 — deprecated no-op strategy params (removal tracked as FU-2).
@@ -2044,17 +2068,18 @@ def run_workflow(
     # All workflow output goes under {workspace}/{run_name}/
     run_dir = os.path.join(workspace, run_name)
     os.makedirs(run_dir, exist_ok=True)
+    # Runtime-generated capabilities belong to this workspace. This happens
+    # before registry cleanup, preload, and run-invariant construction so all
+    # readers and writers observe one root and descendant processes inherit it.
+    from core.generated_library import bind_generated_library_to_workspace
+
+    bind_generated_library_to_workspace(workspace)
     _snapshot_task_config(run_dir)
     started_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Anchor SIDERIUS_CHAIN_WORKSPACE for in-process / single-iteration
-    # callers (e.g. integration smoke tests, ad-hoc workflow invocations).
-    # ml_models.model_descriptions.get_model_description reads this env var
-    # to walk {workspace}/plugins/*/{model_type}/description.md and resolve
-    # agent-generated plugin descriptions on iter > 1. The chain entry
-    # script (run_one_iteration.py) sets it earlier; only override here
-    # when unset so chain mode keeps precedence.
-    os.environ.setdefault("SIDERIUS_CHAIN_WORKSPACE", os.path.abspath(workspace))
+    # ``bind_generated_library_to_workspace`` also anchors
+    # SIDERIUS_CHAIN_WORKSPACE for in-process callers. The chain entry script
+    # derives the same value from the same workspace argument.
 
     print(f"\n{'=' * 60}")
     print("  SIDERIUS Model Exploration Workflow")
@@ -2076,10 +2101,8 @@ def run_workflow(
             f"{'y' if _n_pruned == 1 else 'ies'} (missing file_path): "
             f"{_pruned_names}"
         )
-    # arXiv P1 — name the resolved generated-capability library once at
-    # startup (log provenance; the run-invariants lock records the same
-    # value durably via build_run_invariants). Promotions write here;
-    # the legacy checkout agent_generated/ stays a read-only fallback.
+    # Name the workspace-owned generated-capability library once at startup.
+    # The run-invariants lock records the same path durably.
     from core.generated_library import resolve_generated_library
 
     _lib = resolve_generated_library()
@@ -2255,8 +2278,10 @@ def run_workflow(
         # which keeps 08b's `LEGACY_OMITTED` resolution and leaves the
         # workspace lock byte-identical (the fingerprint key is OMITTED, not
         # serialized as null — design §5.9).
-        task_health_binding=(
-            task_composition.task_health_binding if task_composition is not None else None
+        health_materialization=RunHealthMaterialization(
+            task_health_binding=(
+                task_composition.task_health_binding if task_composition is not None else None
+            )
         ),
         task_composition_fingerprint=(
             task_composition.semantic_fingerprint if task_composition is not None else None
@@ -2425,9 +2450,7 @@ def run_workflow(
     accumulated_physical_rejections = (
         restored_state.accumulated_physical_rejections if restored_state else None
     )
-    accumulated_gate_exhaustions = (
-        restored_state.accumulated_gate_exhaustions if restored_state else None
-    )
+    accumulated_negative_feedback = _restored_negative_feedback(restored_state)
     restored_previous_proposal = restored_state.previous_proposal_data if restored_state else None
     restored_chain_incumbent_score = (
         restored_state.chain_best_valid_formal_score if restored_state else None
@@ -2471,22 +2494,14 @@ def run_workflow(
             f"{len(state.model_knowledge_cache)} model(s) {_cache_keys_preview}."
         )
 
-    # V8 Domain 1 — pre-seed the bounded window with synthetic wrappers carrying
-    # ONLY the prior chain iters' gate_exhaustions. Without this, every
+    # V8 Domain 1 / V20 PR D — pre-seed the bounded window with synthetic
+    # wrappers carrying prior chain iterations' resource and Health feedback. Without this, every
     # chain-mode subprocess starts with an empty deque (max_iterations=1 means
     # the in-process append at iter-end never feeds the same-subprocess
     # proposer). The protocol reads only `.gate_exhaustion` from each entry, so
     # placeholder values for the other required fields are safe.
     # See docs/V8_Gap_Report.md Domain 1.
-    if accumulated_gate_exhaustions:
-        for _ge in accumulated_gate_exhaustions:
-            state.recent_tune_outputs.append(_synthetic_prior_iter_tune_output(_ge))
-        print(
-            f"  [chain] Pre-seeded recent_tune_outputs with "
-            f"{len(state.recent_tune_outputs)} cross-iter gate-exhaustion summary"
-            f"{'y' if len(state.recent_tune_outputs) == 1 else 'ies'} "
-            f"(deque maxlen=3 keeps the latest)."
-        )
+    _seed_recent_negative_feedback(state, accumulated_negative_feedback)
 
     # --- Iteration loop ---
     from pathlib import Path as _Path

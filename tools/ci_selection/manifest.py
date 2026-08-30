@@ -118,6 +118,11 @@ DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
     # a production dependency, so each one states what it reaches.
     "tests/helpers/step00_pseudo_iteration.py": ("nodes/ml_hyperparameter_tune_agent/",),
     "tests/helpers/tuner_source.py": ("nodes/ml_hyperparameter_tune_agent/",),
+    # Imports the focused private module through a computed importlib name, so
+    # the AST cannot derive the production edge.
+    "tests/unit/nodes/ml_hyperparameter_tune_agent/test_issue_384_probe_data.py": (
+        "nodes/ml_hyperparameter_tune_agent/probe_data.py",
+    ),
 }
 
 # ---------------------------------------------------------------------------

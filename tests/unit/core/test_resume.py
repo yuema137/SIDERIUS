@@ -1130,6 +1130,85 @@ class TestRestorePriorStateNegativeFeedbackCarryOver:
         msgs = [g.summary_message for g in state.accumulated_gate_exhaustions]
         assert msgs == ["iter1", "iter2", "iter3"]
 
+    def test_collects_trial_validity_for_next_chain_process(self, tmp_path, isolated_registries):
+        """A Health-invalid iteration must reach the next process's proposer.
+
+        This fails on the production one-iteration-per-process path if resume
+        restores resource exhaustion but drops scientific invalidity.
+        """
+        feedback = {
+            "trial_records_considered": 1,
+            "invalid_count": 1,
+            "unknown_validity_count": 0,
+            "execution_failure_count": 0,
+            "formal_skipped_for_no_valid_winner": True,
+            "healthgate_mode": "blocking",
+        }
+        _materialise_iter(
+            tmp_path,
+            1,
+            "resume_test_collapsed",
+            run_output_overrides={"trial_validity_feedback": feedback},
+        )
+        state = restore_prior_state(str(tmp_path), 2, [])
+        assert len(state.accumulated_negative_feedback) == 1
+        gate, restored = state.accumulated_negative_feedback[0]
+        assert gate is None
+        assert restored is not None
+        assert restored.invalid_count == 1
+        assert restored.execution_failure_count == 0
+
+    def test_no_records_restores_feedback_without_restoring_candidate(
+        self, tmp_path, isolated_registries
+    ):
+        """Regression for #396: negative evidence crosses a no-records
+        boundary, while the invalid model, score, and source artifact do not.
+
+        This test fails if resume returns early before validating the manifest
+        feedback, or if the repair accidentally promotes the invalid
+        iteration into ordinary committed history.
+        """
+        run_name = _iter_run_name(1)
+        iter_dir = tmp_path / run_name
+        iter_dir.mkdir()
+        feedback = {
+            "trial_records_considered": 1,
+            "invalid_count": 1,
+            "unknown_validity_count": 0,
+            "execution_failure_count": 0,
+            "formal_skipped_for_no_valid_winner": False,
+            "healthgate_mode": "blocking",
+        }
+        (iter_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "no_records",
+                    "iteration_dir": str(iter_dir),
+                    "output_path": None,
+                    "model_name": "resume_test_collapsed",
+                    "best_score": None,
+                    "negative_feedback": {
+                        "gate_exhaustion": _gate_exhaustion(summary="iteration 1"),
+                        "trial_validity_feedback": feedback,
+                    },
+                }
+            )
+        )
+
+        state = restore_prior_state(str(tmp_path), 2, ["/seed/reference.json"])
+
+        assert state.committed_iters == []
+        assert state.restored_plugins == []
+        assert state.resolved_source_paths == ["/seed/reference.json"]
+        assert [item.summary_message for item in state.accumulated_gate_exhaustions] == [
+            "iteration 1"
+        ]
+        assert len(state.accumulated_negative_feedback) == 1
+        gate, restored = state.accumulated_negative_feedback[0]
+        assert gate is not None
+        assert restored is not None
+        assert restored.invalid_count == 1
+
     def test_rejections_capped_at_K10_most_recent_wins(self, tmp_path, isolated_registries):
         """Build a 3-iter chain that produces 12 rejections total. After cap,
         only the 10 most-recent should remain (oldest 2 evicted)."""

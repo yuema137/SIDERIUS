@@ -77,6 +77,7 @@ def _preflight(manifest: Path, workspace: Path) -> subprocess.CompletedProcess[s
         sys.path.insert(0, {str(REPO_ROOT)!r})
 
         from core.run_invariants import (
+            RunHealthMaterialization,
             RunInvariantsViolation,
             build_run_invariants,
             ensure_run_invariants,
@@ -92,7 +93,9 @@ def _preflight(manifest: Path, workspace: Path) -> subprocess.CompletedProcess[s
             health_gate_files=None,
             health_checks_config=None,
             workspace={str(workspace)!r},
-            task_health_binding=composition.task_health_binding,
+            health_materialization=RunHealthMaterialization(
+                task_health_binding=composition.task_health_binding,
+            ),
             task_composition_fingerprint=composition.semantic_fingerprint,
         )
         try:

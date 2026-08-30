@@ -144,11 +144,14 @@ def preload_global_losses() -> list[str]:
         neither directory exists or both are empty (first-run / fresh host).
     """
     from agent_generated._loss_loader import LOSSES_DIR
-    from core.generated_library import generated_losses_dir
+    from core.generated_library import generated_library_is_workspace_bound, generated_losses_dir
 
     loaded: list[str] = []
     seen_basenames: set[str] = set()
-    for losses_dir in (generated_losses_dir(), LOSSES_DIR):
+    loss_dirs = [generated_losses_dir()]
+    if not generated_library_is_workspace_bound():
+        loss_dirs.append(LOSSES_DIR)
+    for losses_dir in loss_dirs:
         if not os.path.isdir(losses_dir):
             continue
         for fname in sorted(os.listdir(losses_dir)):

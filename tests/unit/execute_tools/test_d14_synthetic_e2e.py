@@ -280,12 +280,13 @@ class TestSyntheticEndToEnd:
 
     def test_missed_binding_fails_closed_never_trains_on_tidmad_path(self, synthetic_engine_setup):
         """THE deterministic negative (parent §3, child §8.1 trap 2): the
-        synthetic scope under regime-A resolves TIDMAD's implementation,
-        whose scope check REFUSES a foreign scope object loudly. No epoch
-        runs, nothing is persisted."""
+        synthetic scope under regime-A has no task implementation to resolve.
+        The framework refuses before any epoch runs or artifact is persisted."""
         model_cfg, train_cfg, loss_cfg, sandbox_dirs, tmp_path = synthetic_engine_setup
         # NO bind_task_data_path: regime-A. The engine will resolve the
-        # registered TIDMAD compatibility implementation.
+        from execute_tools.task_data_path import bootstrap_legacy_tidmad_data_path
+
+        bootstrap_legacy_tidmad_data_path()
         with pytest.raises(TypeError, match="TidmadScope"):
             tes.run_experiment_streaming(
                 model_cfg,

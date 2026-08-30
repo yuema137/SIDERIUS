@@ -77,6 +77,7 @@ from agent.skills.model_io_probe_skill import (
 )
 from agent.skills.training_skill.estimator import resolve_model_field
 from core.hardware_context import HardwareContext, discover
+from execute_tools.model_input_dtype import TRAINING_SITE_DTYPE, resolve_input_dtype
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import (
     LossConfig,
@@ -725,6 +726,13 @@ def run_skill(sandbox, **kwargs):
     vram_budget_gb: float | None = kwargs.get("vram_budget_gb")
     hardware_context: HardwareContext | None = kwargs.get("hardware_context")
     model_io_contract: ModelIOContract | None = kwargs.get("model_io_contract")
+    probe_input_sample: torch.Tensor | None = kwargs.get("probe_input_sample")
+    probe_target_sample: torch.Tensor | None = kwargs.get("probe_target_sample")
+    max_inference_batch_size: int | None = kwargs.get("max_inference_batch_size")
+    if (probe_input_sample is None) != (probe_target_sample is None):
+        raise ValueError("probe_input_sample and probe_target_sample must be supplied together")
+    if max_inference_batch_size is not None and max_inference_batch_size < 1:
+        raise ValueError("max_inference_batch_size must be positive")
 
     loss_type = loss_cfg.get("loss_type", "ce")
     # I14 — loss_name plumbs through to _build_probe_tensors so the helper
@@ -826,14 +834,24 @@ def run_skill(sandbox, **kwargs):
 
         # 3. Training-phase probe ─────────────────────────────────────────
         rss_before = psutil.Process().memory_info().rss
-        x_train, y_train = _build_probe_tensors(
-            batch_size,
-            seg_size,
-            loss_type,
-            loss_name,
-            model_type=model_type,
-            model_io_contract=model_io_contract,
-        )
+        if probe_input_sample is not None and probe_target_sample is not None:
+            x_train = probe_input_sample.to(
+                resolve_input_dtype(
+                    model_type,
+                    model_io_contract,
+                    site_preference=TRAINING_SITE_DTYPE,
+                )
+            )
+            y_train = probe_target_sample.to(get_target_torch_dtype(LossConfig(**loss_cfg)))
+        else:
+            x_train, y_train = _build_probe_tensors(
+                batch_size,
+                seg_size,
+                loss_type,
+                loss_name,
+                model_type=model_type,
+                model_io_contract=model_io_contract,
+            )
         with _forward_pass_timeout(_BUDGETS.single_probe_seconds, "training_probe"):
             training_probe = probe_activation_footprint(
                 model=model_for_train,
@@ -884,6 +902,7 @@ def run_skill(sandbox, **kwargs):
                 model_for_resolve,
                 segmentation_size=seg_size,
                 cap_bytes=cap_bytes,
+                max_batch_size=max_inference_batch_size,
                 budgets=_BUDGETS,
                 model_identity=model_type,
                 model_io_contract=model_io_contract,

@@ -1,0 +1,11 @@
+{
+  "aggregation": "mean_band_bias",
+  "direction": "lower",
+  "id": "band_bias",
+  "references": [],
+  "scoreability": {
+    "contract_id": "deliverable_presence"
+  },
+  "transform": null,
+  "transform_params": {}
+}

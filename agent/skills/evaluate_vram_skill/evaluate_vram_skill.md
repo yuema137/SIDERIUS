@@ -90,6 +90,8 @@ production through `run_production_preflight`
 | `vram_budget_gb` | `None` | operator soft cap. `None` means *no operator ceiling*, never *unset*: the cap then comes from the hardware context's `usable_cap_gb`. An operator budget may only LOWER the 80 % physical ceiling, never raise it. |
 | `hardware_context` | `None` | resolved `HardwareContext`. When absent the wrapper falls back to `core.hardware_context.discover()`, so the cap is physically correct but the on-disk manifest is not consulted. |
 | `model_io_contract` | `None` | the **run-bound** normalized `ModelIOContract` (Step 05b). When supplied, the probe's float target is realized from it through `agent/skills/model_io_probe_skill` at the candidate's real batch and segmentation size, instead of from a `[B, 256, T]` literal. |
+| `probe_input_sample` / `probe_target_sample` | `None` | a paired task-valid training batch materialized by the isolated worker through the composed run's existing `TaskDataPath.training_dataset` contract. Both must be supplied together. The wrapper applies the same declared input and objective target dtypes as training before probing. |
+| `max_inference_batch_size` | `None` | optional task-semantic ceiling transported from `TaskInferenceBatching`. Resource probing may choose a smaller feasible batch but never a larger one. |
 
 `model_io_contract` is always supplied **explicitly by the caller**; this
 skill never resolves one of its own. A resource consumer that re-read an
@@ -110,6 +112,24 @@ A contract that cannot be realized — a `classifier` declaration under a
 contract carrying no class axis, or a contract supplied without a
 `model_type` — **fails loudly**. It never falls back to the literal shape:
 a silently-wrong probe reports a capacity number for a different model.
+
+For a composed run with a task-owned training scope,
+`run_production_preflight` carries a typed `TaskProbeDataSpec` into the
+isolated worker. The spec contains the already-resolved manifest identity,
+serialized training scope, physical data root, epoch sampling parameters, and
+the optional task-declared inference batch ceiling.
+The worker verifies the composition fingerprint and obtains one full batch
+through `TaskDataPath.training_dataset`; it does not invent target values from
+shape and dtype. This is required for masked, sparse, graph, and other losses
+whose target validity has semantic structure. Un-composed and single-file
+runs retain the existing synthetic probe path. CPU-only runs still skip the
+VRAM probe without reading task data.
+
+The autograd-tape measurement accounts for saved sparse tensors by their
+physical component buffers rather than by calling dense storage APIs on the
+sparse tensor object. COO tensors contribute indices and values; compressed
+CSR, CSC, BSR, and BSC tensors contribute their index and value buffers. An
+unknown layout refuses explicitly instead of reporting a partial estimate.
 
 **Key returned fields** (`wrapper.py`):
 

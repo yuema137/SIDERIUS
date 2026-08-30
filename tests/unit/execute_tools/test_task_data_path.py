@@ -138,6 +138,13 @@ class TestTheResolverTruthTable:
         resolved = resolve_task_data_path(None)
         assert resolved.task_data_path_id == TIDMAD_COMPATIBILITY_ID
 
+    def test_explicit_legacy_bootstrap_preserves_the_uncomposed_path(self):
+        """Removing import-time registration must not remove regime A."""
+        from execute_tools.task_data_path import bootstrap_legacy_tidmad_data_path
+
+        resolved = bootstrap_legacy_tidmad_data_path()
+        assert resolved.task_data_path_id == TIDMAD_COMPATIBILITY_ID
+
     def test_explicit_binding_with_absent_id_fails_closed(self):
         """Row 2, REQUIRED test 2 — the load-bearing genericity row.
 

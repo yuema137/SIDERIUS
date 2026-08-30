@@ -15,7 +15,12 @@ from typing import Any, Literal
 
 import numpy as np
 
-from execute_tools.health_checks.config import GateConfig, load_health_gates_config
+from execute_tools.health_checks._composition import TaskHealthBinding
+from execute_tools.health_checks.config import (
+    GateConfig,
+    load_composed_health_config,
+    load_health_gates_config,
+)
 from execute_tools.health_checks.registry import get as registry_get
 from execute_tools.health_checks.runner import evaluate_gate, resolve_action
 from execute_tools.health_checks.schemas import (
@@ -341,15 +346,20 @@ def evaluate_and_persist_health_gates(
     *,
     config_path: str | None = None,
     production_config_path: str | None = None,
+    task_health_binding: TaskHealthBinding | None = None,
     gate_ids: list[str] | None = None,
     healthgate_mode: str | None = None,
     result_authority: str | None = None,
 ) -> tuple[list[GateResult], list[PersistedHealthGateResult], GateAction]:
     """Run every gate matching ``ctx.round_index`` and build durable results."""
     config = load_health_gates_config(config_path)
-    production = (
-        load_health_gates_config(production_config_path) if production_config_path else None
-    )
+    production = None
+    if production_config_path:
+        production = (
+            load_health_gates_config(production_config_path)
+            if task_health_binding is None
+            else load_composed_health_config(production_config_path, task_health_binding)[0]
+        )
     production_by_id = {gate.id: gate for gate in production.health_gates} if production else {}
     checkpoint_sha256 = _sha256(ctx.checkpoint_path)
     runtime_results: list[GateResult] = []

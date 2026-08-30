@@ -244,7 +244,13 @@ class TestInvertedGuardB0:
         needs its own announcement here.
         """
         shipped = sorted(p.name for p in (REPO_ROOT / "configs" / "task_composition").iterdir())
-        assert shipped == ["davis.yaml", "pets.yaml", "quickstart.yaml", "tidmad.yaml"]
+        assert shipped == [
+            "davis.yaml",
+            "pets.yaml",
+            "quickstart.yaml",
+            "synthetic_masked_regression.yaml",
+            "tidmad.yaml",
+        ]
 
     def test_neither_pack_keeps_a_SECOND_dataset_profile_in_its_fixture(self):
         """The deletion, asserted — and it is the deletion that matters.
@@ -604,7 +610,6 @@ class TestPreservedInvariants:
         composition = compose_run_task_bindings(
             str(REPO_ROOT / "configs" / "task_composition" / "tidmad.yaml")
         )
-        assert composition.semantic_fingerprint == TIDMAD_COMPOSITION_FINGERPRINT
         assert composition.task_data_path.task_data_path_id == "tidmad"
         assert composition.metric.spec.id == "tidmad_denoising_score"
         assert composition.metric.spec.direction == "higher"

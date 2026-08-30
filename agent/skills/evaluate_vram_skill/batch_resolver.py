@@ -133,6 +133,7 @@ def resolve_inference_batch(
     budgets: ProbeBudgets | None = None,
     model_identity: str | None = None,
     model_io_contract: ModelIOContract | None = None,
+    max_batch_size: int | None = None,
 ) -> int:
     """Return the largest candidate batch that clears both caps.
 
@@ -156,6 +157,10 @@ def resolve_inference_batch(
             cap — "vram", "compute_intensity", or "vram+compute_intensity"
             — so ``killer_report`` can emit a targeted suggestion.
     """
+    if max_batch_size is not None:
+        if isinstance(max_batch_size, bool) or max_batch_size < 1:
+            raise ValueError(f"max_batch_size must be a positive int; got {max_batch_size!r}.")
+        candidate_batches = tuple(batch for batch in candidate_batches if batch <= max_batch_size)
     if not candidate_batches:
         raise ValueError("candidate_batches must be non-empty.")
 

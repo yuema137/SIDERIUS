@@ -25,6 +25,7 @@ from agent.schemas.ordering import (
     resolve_ordering,
     validate_ordering_shape,
 )
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
@@ -1414,6 +1415,14 @@ class TaskCompositionRef(BaseModel):
             "``task_health_binding`` is: this schema must not import "
             "``ml_models`` to name ``LossConfig``. ``None`` is every run that "
             "exists today and leaves the planner's choice standing."
+        ),
+    )
+    parameter_rules: ParameterRules | None = Field(
+        default=None,
+        description=(
+            "Task-owned parameter constraints resolved at the composition edge. "
+            "None leaves every plan parameter agent-controlled. Typed Any keeps "
+            "this projection independent of the parameter-rule implementation."
         ),
     )
 

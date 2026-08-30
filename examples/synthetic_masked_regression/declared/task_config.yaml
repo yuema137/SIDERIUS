@@ -1,0 +1,23 @@
+task_description: |
+  Tiny deterministic regression over three synthetic features. The model
+  predicts one continuous value. Supervision carries both the target and an
+  explicit validity mask; invalid rows are transported but never contribute
+  to the training objective or terminal metrics.
+
+forward_contract:
+  model_io:
+    input:
+      axes:
+        - {role: batch, dimension: {symbolic: "B"}}
+        - {dimension: {fixed: 3}}
+      dtype: {admissible: ["float32"]}
+    output:
+      axes:
+        - {role: batch, dimension: {symbolic: "B"}}
+        - {dimension: {fixed: 1}}
+      dtype: {admissible: ["float32"]}
+  input_description: "three continuous synthetic features in [-1, 1]"
+  output_description: "one continuous prediction per row"
+  task_type: "regression"
+  output_head_note: "Output exactly [B, 1]; the validity mask belongs to supervision, not model output."
+  task_note: "The custom objective consumes target [truth, validity_mask] and refuses shape-only surrogates."

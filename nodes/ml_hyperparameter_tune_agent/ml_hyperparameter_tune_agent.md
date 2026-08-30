@@ -227,6 +227,8 @@ run_model_io  = run_bound_model_io_contract()      # Step 03 — Model-I/O
 |---|---|---|
 | `run_profile` | `_run_time_preflight` → `evaluate_time_skill.run_skill` (a **required** kwarg), and the §5 step guardrails | a time gate that re-read an ambient topology prices the run against a dataset it is not using |
 | `run_model_io` | `run_production_preflight` → `IsolatedProbeSpec` → the isolated worker → `evaluate_vram_skill.run_skill` | the capacity probe must realize the target the run will actually train against, not a `[B, 256, T]` literal |
+| composed attempt training scope | `build_task_probe_data` → `TaskProbeDataSpec` → the isolated worker → `TaskDataPath.training_dataset` | shape and dtype alone cannot produce semantically valid targets for masked or sparse task objectives; the resource probe must execute the same task-owned batch contract as training |
+| optional task inference batch ceiling | `TaskInferenceBatching` → `TaskProbeDataSpec` → isolated VRAM resolver → `active_params["inference_batch"]` → inference child | a memory-feasible synthetic batch is not proof that variable-shaped task samples can be collated; resource selection and execution must use one task-semantic maximum |
 
 `run_bound_model_io_contract()` (`workflows/task_config.py`) is the **one**
 acquisition point: `SandboxExecutor._write_model_io_config` uses it too, so
@@ -926,6 +928,10 @@ for the full design rationale.
 - **Round-loop structure**: each round runs **plan → resource check → train → infer → score → reflect**:
   1. **Plan** — `bridge.plan(...)` produces an `ExperimentPlan` (hyperparameters + `is_trial` choice). Subject to `plan_overrides`.
   2. **Resource check** — `evaluate_vram_skill` + `evaluate_time_skill` pre-flight gates. A failure here counts as an *attempt* (not a *round*); the round retries up to its budget.
+     For a composed attempt, the VRAM worker materializes one full task-valid
+     batch from the already-resolved training scope. It verifies the task
+     composition fingerprint before reading data. Legacy un-composed attempts
+     retain the shape-and-dtype synthetic batch.
   2b. **Pre-phase GPU measurement** (V20 PR C2, **formal attempts with a real device only**) — a bounded isolated measurement of the exact candidate on the current card, feeding PR B's admission gate. A stop consumes the attempt and starts no GPU work. See *Pre-phase GPU measurement* above.
   3. **Train** — `training_skill` runs as a subprocess via `TidmadSandbox`. Writes the trained model + denoised outputs. **Step 07a**: the tuner's `eval_sample_set` reaches the trainer (`--eval_sample_set_json`), which evaluates the same run-resolved objective on it after every completed epoch (R3, transactional: model / optimizer / objective state and every RNG restored) and emits `training_history` beside the three legacy keys; the tuner interprets the results through the typed boundary `_interpret_training_status` → `interpret_training_results(raw, expected_validation=eval_sample_set is not None)` (a contract violation → the existing `error_training` record path) and derives `training_diagnosis` once.
   4. **Infer** — `inference_skill` runs as a subprocess. Writes denoised HDF5s.
@@ -1126,6 +1132,7 @@ it exists to block.**
 |---|---|---|
 | boundary | `nodes/ml_hyperparameter_tune_agent/round_health.py` | `evaluate_round_health(...) -> RoundHealthOutcome`. A total function with explicit inputs: it resolves the round's gate set, builds the `HealthCheckContext`, calls the engine and projects the score-meta. Extracted rather than widening the `if`, because `run_inference_scoring_health` is already a phase orchestrator and the decomposition rule forbids adding branching to one |
 | call site | `execution.py`, AFTER the scoring `try/except`, before the record is built | Reached on ALL THREE routes. Both routes arrive carrying the same three round facts (`file_vector`, `final_scalar`, `per_sample_evidence`); the task-owned route transports them from the child's payload, where `file_vector = MetricResult.per_sample` gives D18's mapping verbatim. A payload omitting the key entirely yields `PerSampleEvidence.UNDECLARED` — absence is never read as `scalar_only` |
+| task-owned Health payload | `HealthCheckContext.load_evaluation_payload()` | Lazily calls the run-bound `TaskDataPath.read_evaluation_payload` with the current attempt identity. A view provider consumes the task's decoded payload and never reconstructs indexed filenames or storage layout. The callback is built at the round boundary and excluded from serialization; missing wiring raises rather than falling back to another task's naming convention. |
 | scoring failure | unchanged | A scoring exception still takes the `error_scoring` path and never reaches a gate. A gate that could not be evaluated is not a gate that passed |
 | gates disabled | `health_gate_enabled=False` (DataScope DS5) | `evaluated=False`, no engine call, no I/O. Score-validity classification stays active, exactly as before |
 | structural guard | `tests/unit/nodes/test_f2_round_boundary_health.py` | Asserts by AST that the gate call has no `ScoringRoute` condition among its ancestors, and that `execution.py` contains no second gate call. The detector is itself proved to fire on the original defect shape, so the guard cannot pass vacuously |
@@ -1486,11 +1493,25 @@ that declares none — in both cases the plan is returned unchanged. A
 substitution that does happen is announced with a `[objective]` print line
 naming the planner's choice and the value that replaced it.
 
+## Task-composed parameter rules
+
+A composition may declare `parameter_rules` over dotted `ExperimentPlan`
+paths. `exact` is a hard lock; `range`, `allowed`, and a registered
+`predicate` leave the choice with the planner and validate the final effective
+value. Enforcement runs after round-mode inheritance, the declared objective,
+and the epoch bound, so Formal cannot replace a locked Trial parameter and a
+rule cannot silently weaken the safety ceiling. Rules are
+fingerprinted with the task composition and every changed field is attributed
+to `composition-declared parameter rules` in execution provenance. A rule may not
+target `loss_config` when the task declares an objective, because the objective
+is the sole authority for loss semantics.
+
 ## The reflector is told what RESOLVED, not what was proposed (Lane D / F15)
 
 `plan.hypothesis` is free prose the planner authors **before** the framework
-resolves the plan. Six steps then overrule parts of it — operator
+resolves the plan. Seven steps then overrule parts of it — operator
 `plan_overrides`, the mode-override chain, the task-declared objective,
+task-composed parameter rules,
 partial-scope strategy normalization, the mode-aware epoch bound
 (`--max_epochs` / `--trial_max_epochs` / `--formal_max_epochs`, D-BUD-6), and
 the forced model type — and none of them revisits the prose. The reflector received that
@@ -1543,6 +1564,10 @@ carries it on `RunBindings.run_scientific_gate_ids`.
 input projection instead of the run's own authority made a composed chain
 refuse its own output. `None` for an un-composed run resolves the legacy
 default exactly as before, so TIDMAD's `best_*` selection is unaffected.
+The forced-Formal boundary uses the same value when `_best_trial_winner`
+classifies Trial records; otherwise a valid task-owned Trial can be followed
+by an accidental attempt to bind the legacy/default Health family before
+Formal begins.
 
 ## The run's FIRST health resolution uses the run's own binding (F-C12P-CP12-1)
 

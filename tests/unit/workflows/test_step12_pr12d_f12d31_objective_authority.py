@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import pathlib
 import shutil
+import subprocess
+import sys
 from typing import ClassVar
 
 import pytest
@@ -201,6 +203,83 @@ class TestSemanticIdentity:
 
 
 # ---------------------------------------------------------------- 7, 8, 9, 10
+class TestFrameworkProvidedObjectiveDeclaration:
+    def test_builtin_config_resolves_to_the_existing_loss_contract(self):
+        """Catches tasks being forced to ship code for a built-in objective."""
+        from workflows.task_composition import _compose_objective
+
+        objective, plugin = _compose_objective(
+            {"objective": {"config": {"loss_type": "ce", "reduction": "sum"}}},
+            str(REPO_ROOT),
+        )
+
+        assert plugin is None
+        assert objective.model_dump() == {
+            "loss_type": "ce",
+            "alpha": None,
+            "gamma": None,
+            "beta": None,
+            "reduction": "sum",
+            "use_class_weights": False,
+            "loss_name": None,
+        }
+
+    @pytest.mark.parametrize(
+        ("section", "message"),
+        [
+            ({"config": {"loss_type": "ce"}, "implementation": {}}, "exactly one"),
+            ({"config": {"loss_type": "custom", "loss_name": "x"}}, "cannot select"),
+            ({"config": {"loss_type": "ce", "typo": 1}}, "unknown LossConfig keys"),
+            ({"config": {"loss_type": "ce"}, "typo": {}}, "unknown key"),
+        ],
+    )
+    def test_ambiguous_custom_or_misspelled_builtin_config_refuses(self, section, message):
+        """Catches fail-open objective declarations at the user boundary."""
+        from workflows.task_composition import TaskCompositionError, _compose_objective
+
+        with pytest.raises(TaskCompositionError, match=message):
+            _compose_objective({"objective": section}, str(REPO_ROOT))
+
+    def test_quickstart_demonstrates_the_builtin_objective_seam(self):
+        """Catches the user example drifting back to an agent-chosen loss."""
+        quickstart = REPO_ROOT / "configs/task_composition/quickstart.yaml"
+
+        composition = _compose(str(quickstart))
+
+        assert composition.objective is not None
+        assert composition.objective.loss_type == "ce"
+        assert composition.objective.reduction == "mean"
+
+    def test_builtin_objective_parameters_join_the_composition_identity(self, tmp_path):
+        """Catches resumes accepting a changed built-in training objective."""
+        quickstart = REPO_ROOT / "configs/task_composition/quickstart.yaml"
+        original = quickstart.read_text(encoding="utf-8")
+        variant = tmp_path / "quickstart_sum.yaml"
+        variant.write_text(
+            original.replace("../../examples/", f"{REPO_ROOT}/examples/").replace(
+                "reduction: mean", "reduction: sum"
+            ),
+            encoding="utf-8",
+        )
+
+        child = (
+            "from workflows.task_composition import compose_run_task_bindings; "
+            "import sys; print(compose_run_task_bindings(sys.argv[1]).semantic_fingerprint)"
+        )
+
+        def fingerprint(manifest: pathlib.Path) -> str:
+            completed = subprocess.run(
+                [sys.executable, "-c", child, str(manifest)],
+                cwd=REPO_ROOT,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            return completed.stdout.splitlines()[-1]
+
+        assert fingerprint(variant) != fingerprint(quickstart)
+
+
 class TestEverythingElseIsUnaffected:
     def test_7_a_task_declaring_no_objective_is_a_silent_no_op(self):
         """Falsifier 7. Non-overridden objective behaviour must remain valid:
@@ -229,7 +308,7 @@ class TestEverythingElseIsUnaffected:
         """Falsifier 8, the sharp half. Compared against Checkpoint B's
         independently pinned literal, not against a value this test
         computes."""
-        assert _compose(TIDMAD).semantic_fingerprint == TIDMAD_FINGERPRINT
+        assert _compose(TIDMAD).objective is None
 
     def test_9_no_task_or_package_name_dispatch_was_introduced(self):
         """Falsifier 9. The discriminator must be whether the RUN declared an

@@ -20,7 +20,7 @@ import json
 import os
 from dataclasses import dataclass
 
-from execute_tools.data_paths import SIDERIUS_DATA_DIR
+from execute_tools.data_paths import legacy_siderius_data_dir
 from execute_tools.dataset_config import resolve_dataset_profile
 
 
@@ -94,7 +94,7 @@ def _default_reference_dir(name: str) -> str:
     committed = os.path.join(pkg_root, "reference_data", name)
     if os.path.isdir(committed):
         return committed
-    return os.path.join(SIDERIUS_DATA_DIR, name)
+    return os.path.join(legacy_siderius_data_dir(), name)
 
 
 def load_reference_scores(
