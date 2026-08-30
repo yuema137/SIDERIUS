@@ -291,6 +291,87 @@ class TestDeadlineParityWhenNoValidationEvidenceExists:
         assert source == "verified_components"
 
 
+class TestIncompleteEvidenceCannotTightenAnOperatorBudget:
+    """Regression for #388's external composed-task failure."""
+
+    def test_setup_only_evidence_retains_the_formal_operator_budget(self, tmp_path):
+        sidecar = _write_sidecar(
+            tmp_path / "setup_only.json",
+            {
+                "setup": _component(1.264, source="real_dataset_setup"),
+                "training": {"prediction": None},
+                "validation": {"prediction": None},
+            },
+        )
+        deadline, source = _watchdog_deadline_provider(
+            _Policy(
+                operator_budget_seconds=1200.0,
+                safety_factor=3.5,
+                floor_seconds=120.0,
+            ),
+            sidecar,
+        )()
+        assert deadline == pytest.approx(1200.0)
+        assert source == "operator_budget"
+
+    def test_training_only_evidence_waits_for_declared_validation(self, tmp_path):
+        sidecar = _write_sidecar(
+            tmp_path / "validation_pending.json",
+            {
+                "setup": _component(1.264, source="real_dataset_setup"),
+                "training": _component(92.0, source="real_training_verification"),
+                "validation": {
+                    "workload": {
+                        "phase": "validation",
+                        "unit": "validation_batch",
+                        "unit_count": 2,
+                    },
+                    "prediction": None,
+                },
+            },
+        )
+        deadline, source = _watchdog_deadline_provider(
+            _Policy(operator_budget_seconds=1200.0, safety_factor=3.5), sidecar
+        )()
+        assert deadline == pytest.approx(1200.0)
+        assert source == "operator_budget"
+
+    def test_static_training_prediction_cannot_complete_setup_evidence(self, tmp_path):
+        sidecar = _write_sidecar(
+            tmp_path / "static_training.json",
+            {
+                "setup": _component(1.0, source="real_dataset_setup"),
+                "training": _component(
+                    10.0,
+                    source="historical_observation_prior",
+                    eligible=False,
+                ),
+            },
+        )
+        deadline, source = _watchdog_deadline_provider(
+            _Policy(operator_budget_seconds=600.0, safety_factor=3.5), sidecar
+        )()
+        assert deadline == pytest.approx(600.0)
+        assert source == "operator_budget"
+
+    def test_inference_ignores_other_complete_phase_evidence(self, tmp_path):
+        sidecar = _write_sidecar(
+            tmp_path / "inference_pending.json",
+            {
+                "setup": _component(1.0, source="real_dataset_setup"),
+                "training": _component(10.0, source="real_training_verification"),
+                "inference": {"prediction": None},
+            },
+        )
+        deadline, source = _watchdog_deadline_provider(
+            _Policy(operator_budget_seconds=600.0, safety_factor=3.5),
+            sidecar,
+            phase="inference",
+        )()
+        assert deadline == pytest.approx(600.0)
+        assert source == "operator_budget"
+
+
 class TestTheDeadlineGrowsByTheValidationTermAndNothingElse:
     def test_the_number_is_exact(self, tmp_path):
         """Hardcoded, not recomputed from the implementation — a test that
@@ -349,7 +430,14 @@ class TestTheDeadlineGrowsByTheValidationTermAndNothingElse:
             tmp_path / "rv.json",
             {
                 "training": _component(TRAIN_ACTUAL_S, source="real_training_verification"),
-                "validation": {"prediction": None},
+                "validation": {
+                    "workload": {
+                        "phase": "validation",
+                        "unit": "validation_batch",
+                        "unit_count": 0,
+                    },
+                    "prediction": None,
+                },
             },
         )
         deadline, _ = _watchdog_deadline_provider(_Policy(safety_factor=1.0), sidecar)()

@@ -45,8 +45,11 @@ from core.recorders import BaseRecorder as BaseRecorder
 from core.recorders import LocalRecorder as LocalRecorder
 from core.recorders import MongoRecorder as MongoRecorder
 from core.runtime_control.launch_argv import has_scope_to_launch_from, runtime_control_argv
-from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES, RuntimeObservation
+from core.runtime_control.records import RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
+from core.runtime_control.watchdog_deadline import (
+    watchdog_deadline_provider as _build_watchdog_deadline_provider,
+)
 from execute_tools.data_paths import legacy_tidmad_data_dir, resolve_physical_data_root
 from execute_tools.dataset_config import (
     DataScope,
@@ -378,82 +381,18 @@ def _ensure_dir(path: str) -> None:
 
 
 def _watchdog_deadline_provider(
-    policy: "RuntimeControlPolicy", rv_sidecar_path: str
+    policy: RuntimeControlPolicy,
+    rv_sidecar_path: str,
+    *,
+    phase: str = "training",
 ) -> Callable[[], tuple[float | None, str]]:
-    """§4 deadline: ``max(floor, min(operator_budget, verified × safety))``.
-
-    The safety multiplier is the WATCHDOG-EFFECTIVE factor:
-    ``policy.watchdog.safety_factor`` when set (V19 admission/watchdog
-    split, 2026-07-29), else the shared ``policy.safety_factor`` —
-    admission always reads the shared factor, so setting the watchdog
-    override can never change admission behavior.
-
-    The verified estimate comes from the attempt's LIVE observation
-    sidecar (the RT2 event log) — the deadline tightens mid-flight as
-    soon as the in-subprocess verification lands component predictions.
-    Returns a provider yielding ``(deadline_seconds | None,
-    estimate_source)``; ``None`` disables the deadline (nothing to
-    enforce yet).
-
-    **CLOCK CONVENTION — TOTAL ELAPSED SINCE SUBPROCESS START, not time
-    remaining.** Recorded here by Step 07 / PR 07c C5 because it was
-    implicit, and a term added under the wrong convention produces a
-    deadline that looks right and fires at the wrong moment. The enforcement
-    site is the only authority: ``t_start = time.perf_counter()`` is taken
-    immediately after ``Popen`` and the watchdog loop compares
-    ``elapsed = time.perf_counter() - t_start`` against ``deadline``. So a
-    returned value is the whole wall-clock budget for the child, which is
-    exactly what ``sum(predicted) * watchdog_factor`` already expresses.
-
-    That is why 07c added the validation term WITHOUT touching the
-    arithmetic below: a validation component with a measurement-backed
-    prediction joins ``sum(predicted)`` and the total grows by the
-    validation term and by nothing else.
-    """
-    watchdog_factor = (
-        policy.watchdog.safety_factor
-        if policy.watchdog.safety_factor is not None
-        else policy.safety_factor
+    """Delegate the TOTAL ELAPSED SINCE SUBPROCESS START deadline authority."""
+    return _build_watchdog_deadline_provider(
+        policy,
+        rv_sidecar_path,
+        phase=phase,
+        observation_reader=_read_runtime_observation_sidecar,
     )
-
-    def provider() -> tuple[float | None, str]:
-        candidates: list[tuple[float, str]] = []
-        if policy.operator_budget_seconds is not None:
-            candidates.append((policy.operator_budget_seconds, "operator_budget"))
-        # VALIDATION POSTURE, None in every production campaign. A third
-        # candidate rather than a replacement, so it can only ever TIGHTEN
-        # the deadline. It is the only hard wall clock available on a
-        # trial round, where operator_budget_seconds is None by design and
-        # every remaining candidate is forecast-derived.
-        if policy.watchdog.max_phase_seconds is not None:
-            candidates.append((policy.watchdog.max_phase_seconds, "validation_max_phase"))
-        block = _read_runtime_observation_sidecar(rv_sidecar_path)
-        if block:
-            components = (block.get("components") or {}).values()
-            # C8d: a deadline may only be derived from MEASUREMENT-BACKED
-            # component predictions (§7.4 watchdog column: static evidence
-            # is `never_used`, historical priors `never_used_alone`). Every
-            # prediction the RT2 session writes is measurement-backed by
-            # construction — setup measures itself, phases predict only
-            # after verifying — so this changes no production number; it
-            # closes the door on a prior ever setting a kill deadline.
-            # The arithmetic below is unchanged.
-            predicted = [
-                c["prediction"]["predicted_seconds"]
-                for c in components
-                if c.get("prediction") is not None
-                and c["prediction"].get("predicted_seconds") is not None
-                and c["prediction"].get("source") in MEASUREMENT_BACKED_SOURCES
-            ]
-            if predicted:
-                estimate = sum(predicted) * watchdog_factor
-                candidates.append((estimate, "verified_components"))
-        if not candidates:
-            return None, "none"
-        deadline, source = min(candidates, key=lambda t: t[0])
-        return max(deadline, policy.watchdog.floor_seconds), source
-
-    return provider
 
 
 def _phase_requirement(sandbox: Any, phase: str) -> tuple[float | None, str | None]:
@@ -1594,7 +1533,9 @@ class TidmadSandbox:
                     env=env,
                     preexec_fn=preexec,
                     capture_stdout=not self.progress_bar,
-                    deadline_provider=_watchdog_deadline_provider(policy_obj, rv_sidecar_path),
+                    deadline_provider=_watchdog_deadline_provider(
+                        policy_obj, rv_sidecar_path, phase="training"
+                    ),
                     grace_seconds=policy_obj.watchdog.grace_seconds,
                     poll_seconds=policy_obj.watchdog.poll_seconds,
                     observer=_observer,
@@ -1945,7 +1886,9 @@ class TidmadSandbox:
                     env=env,
                     preexec_fn=preexec,
                     capture_stdout=not self.progress_bar,
-                    deadline_provider=_watchdog_deadline_provider(policy_obj, rv_sidecar_path),
+                    deadline_provider=_watchdog_deadline_provider(
+                        policy_obj, rv_sidecar_path, phase="inference"
+                    ),
                     grace_seconds=policy_obj.watchdog.grace_seconds,
                     poll_seconds=policy_obj.watchdog.poll_seconds,
                     observer=_observer,

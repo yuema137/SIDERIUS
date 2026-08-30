@@ -562,8 +562,16 @@ subprocess phases that caused the incident).
 
   ```
   deadline = min( operator_hard_budget,
-                  calibrated_estimate × safety_factor )
+                  complete_calibrated_estimate × safety_factor )
   ```
+
+  A component sum is complete only when the subprocess phase it would bound
+  has measurement-backed evidence. Training also requires the declared
+  validation term when that workload is non-zero; inference requires its own
+  term. Setup-only, static-prior, or training-only evidence cannot shorten an
+  explicit operator budget while a required phase remains unverified. The
+  measured components remain useful evidence, but incompleteness cannot turn a
+  partial lower bound into a kill deadline.
 
   `safety_factor` is a configurable input field (schema-level, recorded
   in run_config provenance), NOT a hardcoded constant. It ships with a
