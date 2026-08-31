@@ -1,192 +1,10 @@
 #!/bin/bash
-# ---------------------------------------------------------------------------
-# SIDERIUS campaign preflight (arXiv launch topology, H100 band fleet)
-# ---------------------------------------------------------------------------
-# Role   : ONE launch-blocking gate for a band-fleet campaign launch. Every
-#          row prints PASS/FAIL/SKIP/INFO with its evidence; ANY FAIL exits
-#          non-zero. Run it on the campaign host, per arm, before
-#          launch_band_fleet.sh (X9 arms) or run_gold_campaign.sh (campaign
-#          arms).
+# SIDERIUS X9 campaign preflight.
 #
-# Arms — TWO launch topologies share this preflight:
-#   x9    with-prior-art | without-prior-art. The #255 prior-art contrast
-#         fleet: launch_band_fleet.sh -> launch_prior_baseline_experiment.sh,
-#         FOUR CO-RESIDENT band chains on ONE card (h100_posture.env v3).
-#   gold  goldpod. The official campaign: run_gold_campaign.sh ->
-#         stage1_search.sh -> stage1_run_band.sh, EXCLUSIVE_SINGLE_BAND
-#         residency, ONE band chain per card (operator hardware disposition
-#         2026-08-26, _gold_campaign_lib.sh:gold_band_gpu).
-#
-#   Both topologies build the SAME per-band workspace
-#   "{root}/{arm}_band{band}" (launch_prior_baseline_experiment.sh:222 and
-#   stage1_run_band.sh:122), so the machine/environment rows and the
-#   cold-start row are shared verbatim. Rows that INVOKE the X9 launcher
-#   (R6, R7) or that check the X9 CO-RESIDENCY posture (R4) do not describe
-#   the campaign topology: under a gold arm they are SKIPPED BY NAME and
-#   never reported as PASS. The gold launcher's own refusals point HERE for
-#   the mount and library checks (_gold_campaign_lib.sh:326 for R1c,
-#   :626 for R1), so those rows must be reachable with --arm goldpod.
-#
-#   NOT in this script's remit: gold-vs-blind treatment symmetry. R7 is the
-#   #255 X9 arm-symmetry gate (campaign_arm_symmetry.py, whose arm
-#   vocabulary and lit-review expectation are X9's); the campaign's own
-#   Gold<->Blind symmetry is a separate blind-launch prerequisite, and
-#   'blindpod' is therefore refused here by name rather than half-served.
-#
-# Rows:
-#   R1  workspace root exists / writable / on a PERSISTENT mount.
-#       Expectation: the filesystem holding the root must survive pod
-#       loss — records/checkpoints/manifests/provenance live there. The
-#       check reads the mount's fstype (findmnt, df -PT fallback) and
-#       FAILS on tmpfs/ramfs/overlay (pod-local ephemeral state); network
-#       or block filesystems (nfs*, lustre, ext4, xfs, ...) pass.
-#   R1b calibration store on a PERSISTENT mount (H100-prep finding,
-#       2026-08-25; same fstype logic as R1). $SIDERIUS_CALIBRATION_DIR
-#       (default ~/.siderius) holds the learned time-calibration k-tables
-#       and the measured runtime-profile overlay (#311) — on a pod, ~ is
-#       typically the ephemeral container overlay, so pod loss would
-#       silently destroy the very artifacts H100 qualification produces.
-#       Converts R8's former RETAIN-by-design assumption into a check.
-#   R1c generated-capability library root DECLARED and on a PERSISTENT
-#       mount (F-GENLIB-WIRE-1; same fstype logic as R1/R1b). The root is
-#       resolved by CALLING the production authority
-#       (`core.generated_library.resolve_generated_library`) rather than
-#       re-deriving it here, so this check can never drift from what the
-#       run actually uses. It FAILS when the resolution reports
-#       source="default" — i.e. $SIDERIUS_GENERATED_LIBRARY_DIR was not
-#       exported — because the default ~/.siderius/generated_library is
-#       the ephemeral container overlay on a pod AND is shared across
-#       campaigns, so promoted capabilities from one campaign leak into
-#       the next arm's proposer surface. R8 cannot see this: it globs the
-#       CHECKOUT dir only and is blind to this root, which is exactly how
-#       the contamination went unnoticed.
-#   R2  authoritative code revision: `git rev-parse HEAD` printed
-#       (launch-packet row `repo_sha=`), compared against --revision
-#       (prefix >= 7 chars accepted); a DIRTY tree FAILS — commit first,
-#       a campaign must be attributable to one SHA.
-#   R2b import resolution: a neutral-cwd probe proves the PINNED
-#       (PYTHONPATH=this tree) child resolves hyperparam_tuning inside this
-#       tree with the #299-tolerant loss_history, and reports what an
-#       UNPINNED child would resolve (the editable-install E1 trap).
-#   R3  dataset availability: abra_training_NNNN.h5 + abra_validation_NNNN.h5
-#       for every index of every band (0..19) under the resolved data dir
-#       (--data_dir > tidmad_data_config.yaml via execute_tools.data_paths).
-#   R4  X9 ARMS ONLY. Posture arithmetic (sourced from h100_posture.env):
-#       chains x per-chain VRAM + min headroom must fit the card total
-#       (pure function, unit-tested); and H100_CORESIDENCY_FACTOR must be
-#       FILLED (empty predicts the band launcher's refusal — run
-#       gpu_c_coresidency_probe.sh first). Both halves describe FOUR
-#       CO-RESIDENT chains on one card; the campaign runs one chain per
-#       card and its launcher never reads h100_posture.env, so under a gold
-#       arm this row is SKIPPED rather than asserted about a posture the
-#       campaign does not adopt. The posture file is still SOURCED for
-#       every arm, because R5's host-RAM expectation lives in it.
-#   R5  host-RAM headroom: MemAvailable >= expected 4-chain anon-RSS +
-#       headroom (both posture rows; the 47 GB figure is the recorded
-#       4-chain inspection OOM). Applies to every arm: both topologies fork
-#       FOUR concurrent band chains onto ONE host, and the host has one RAM
-#       pool however the cards are divided.
-#   R6  X9 ARMS ONLY. arm+band identity coherence: the band launcher's --dry-run for
-#       EVERY band of --arm resolves rc=0 with the expected
-#       experiment_arm, derived run_name, and the DS8 pair
-#       (--data_scope band + --health_gate_files <band files>) on the
-#       child argv. It executes launch_prior_baseline_experiment.sh, which
-#       is not the campaign's launcher; SKIPPED under a gold arm.
-#   R7  X9 ARMS ONLY. arm symmetry (#255 exposure determination — launch validity
-#       is CONDITIONED on it), in THREE layers:
-#         argv  — both arms' dry-runs with otherwise identical arguments may
-#                 differ ONLY in declared arm policy + derived naming;
-#                 especially the lock-invisible population knobs
-#                 (formal_portion / formal_train_portion /
-#                 formal_eval_portion), --data_dir, band/scope, time
-#                 budgets, VRAM budgets and the output-type surface must be
-#                 IDENTICAL.
-#         surface (F-SCANG-4, release blocker) — the RENDERED PROMPT BYTES,
-#                 the ENVIRONMENT and the MACHINE-LOCAL STORES, captured by
-#                 campaign_arm_surface.py through the production renderers.
-#                 The first two layers are both argv, and the frozen row's
-#                 finding is that "every route that actually differs between
-#                 two pods — home-directory stores, environment variables,
-#                 rendered prompt BYTES — is outside what it can see".
-#                 Prompt bytes are compared in two states: the NEUTRAL render
-#                 (both arms at baseline_isolation=false) must be
-#                 byte-identical, since with the treatment held constant only
-#                 machine-local state can move it; the ARM render must differ
-#                 on the declared treatment surfaces.
-#       This arm's surface is PUBLISHED to
-#       {workspace-root}/.campaign_arm_surface_{arm}.json; the sibling arm's
-#       published surface is used when it is there, otherwise the sibling is
-#       captured on this host.
-#
-#       N-6 — THE LABEL MAY NOT CLAIM MORE THAN THE COMPARISON ESTABLISHED.
-#       This script reports only WHERE it read the sibling surface
-#       (--sibling-source published|local, a fact it cannot be wrong about);
-#       what that file is WORTH is DERIVED by campaign_arm_symmetry.py from
-#       the surface's own recorded host, code revision and captured-at
-#       (schema v2 — a surface without them is REFUSED, exit 2). The derived
-#       evidence state is one of cross_pod_verified / cross_pod_stale /
-#       same_host / revision_mismatch / unverifiable, and R7 prints a caveat
-#       in EVERY one of them — the weaker states louder than the verified
-#       state, never the reverse. Previously "published" was asserted on file
-#       existence alone and the disclaimer was printed ONLY in the local
-#       state, so one same-host rehearsal (or a day-1 publication, which no
-#       cold start removes: R8 globs the per-band workspaces, never the
-#       campaign root) both upgraded the label and deleted the warning.
-#
-#       And a layer that CANNOT differ is reported NOT COMPARED, never as
-#       agreeing: capture_environment() and resolve_stores() take no arm
-#       argument, so on one host the environment, the machine-local stores
-#       and the NEUTRAL prompt render are equal by construction. A DIFFERENCE
-#       in those layers is still a violation in every state — scoping
-#       withholds the claim that agreement proves something; it never
-#       silences a difference. The ARM prompt render and both argv layers
-#       test the treatment wiring, not the machine, and stay COMPARED always.
-#       Field-by-field diff on failure (campaign_arm_symmetry.py; both arms
-#       run from THIS checkout, so the SHA of R2 covers both). SKIPPED under
-#       a gold arm: the checker's arms ARE the X9 pair and it positively
-#       requires the lit-review split the campaign freezes OFF in both of its
-#       arms, so it cannot be repointed at the campaign without a redesign
-#       this script does not own.
-#   R8  cold-start preconditions (#260 checklist, gate_testing_standard.md):
-#       item 1 per-band workspaces absent/empty — resolved through
-#       preflight_band_workspace for the arm ACTUALLY under check, so a
-#       gold preflight inspects goldpod_band<band> and can never report a
-#       cleanliness verdict about a different arm's directory; item 3
-#       agent_generated/models/*.py + _capability_index.json absent;
-#       items 4 (workspace plugins/) covered by item 1; items 2/7
-#       (seeds, advice) enforced by launcher refusals — stated per arm,
-#       because the campaign's advice file is goldpod's DECLARED treatment
-#       (_gold_campaign_lib.sh:511) and not a contaminant; items 5/6
-#       (root-paper cache, runtime calibration) RETAIN by design — INFO.
-#   R9  LLM reachability + concurrency smoke (campaign_llm_smoke.py):
-#       a bounded burst of 8 parallel one-word completions through the
-#       repo's own config loading; success count + p95 latency. NOT a
-#       quota guarantee (provider-side limits act on the sustained
-#       pattern) — skip with --skip_llm_smoke for offline rehearsals.
-#
-# Usage (campaign host):
-#   bash sdsc_submission_scripts/campaign_preflight.sh \
-#       --workspace-root /persist/siderius_campaign \
-#       --arm with-prior-art|without-prior-art|goldpod \
-#       --revision <expected sha> \
-#       [--data_dir DIR] [--llm_config FILE] [--skip_llm_smoke] \
-#       [--symmetry-band 0-3] \
-#       -- --healthgate_mode blocking --result_authority scientific \
-#          [more chain flags the real launch will pass...]
-#
-#   Everything after `--` is forwarded VERBATIM to every dry-run (both
-#   arms identically), so R6/R7 validate the launch you will actually
-#   perform; --healthgate_mode + --result_authority are REQUIRED there
-#   (run_one_iteration.py refuses a formal launch without them).
-#   Dry-runs import the full framework: expect ~1-5 min total.
-#
-#   Under --arm goldpod R6/R7 do not run, so nothing after `--` reaches a
-#   dry-run and the whole preflight is fast; --healthgate_mode and
-#   --result_authority are still REQUIRED, so one habit answers for both
-#   topologies and a campaign operator cannot omit the flags whose absence
-#   run_one_iteration.py refuses a formal launch over. --symmetry-band is
-#   likewise accepted and unused there.
-# ---------------------------------------------------------------------------
+# This launch-blocking gate serves the with-prior-art and without-prior-art
+# comparison arms. Each R1-R9 row prints PASS, FAIL, SKIP, or INFO with its
+# evidence; any FAIL produces a non-zero exit. Task-specific campaign gates
+# belong to the experiment repository.
 
 set -euo pipefail
 
@@ -232,21 +50,8 @@ preflight_host_ram_check() {
     [ "$memavailable_gib" -ge "$required" ]
 }
 
-# The per-band chain workspace ROOT/ARM_bandBAND, for the arm actually
-# under check. AUTHORITY: both launchers build this same path — the X9
-# band launcher at launch_prior_baseline_experiment.sh:222 and the campaign
-# band loop at stage1_run_band.sh:122 — and R8 must inspect the workspace
-# the run will really use.
-#
-# WHY THIS IS A FUNCTION and not an inline string. Before --arm goldpod was
-# accepted, the only way to reach the machine-level rows for a campaign
-# launch was to pass an X9 arm; R8 then built ROOT/with-prior-art_bandBAND
-# and reported "workspace absent/empty" about a directory the campaign
-# never writes, PASSING while the real goldpod_bandBAND was full. A
-# cleanliness verdict about the wrong tree is worse than no verdict: it is
-# green exactly when the run it clears would resume instead of starting
-# cold. The resolution is therefore one named thing that can be asserted on
-# its resolved value.
+# Resolve the per-band X9 workspace inspected by the cold-start check.
+# The launcher and preflight share this single path construction.
 preflight_band_workspace() {
     local root="$1" arm="$2" band="$3"
     printf '%s\n' "${root%/}/${arm}_band${band}"
@@ -408,30 +213,13 @@ pf_main() {
         echo "Required: --workspace-root DIR --arm ARM --revision SHA (see --help)" >&2
         return 1
     fi
-    # ARM_KIND selects the TOPOLOGY, never a per-arm special case: the
-    # machine/environment rows and R8 are shared, and only the rows bound to
-    # the X9 launcher or to the X9 co-residency posture consult it.
-    local ARM_KIND=""
     case "$ARM" in
-        with-prior-art|without-prior-art) ARM_KIND="x9" ;;
-        goldpod)                          ARM_KIND="gold" ;;
-        blindpod)
-            echo "ERROR: --arm 'blindpod' is not accepted here yet." >&2
-            echo "  The campaign arm vocabulary is goldpod|blindpod" >&2
-            echo "  (_gold_campaign_lib.sh GOLD_ARMS), but a blind launch is gated on the" >&2
-            echo "  separate Gold<->Blind treatment-symmetry prerequisite, which this" >&2
-            echo "  preflight does not check and R7 cannot be repointed at (see the header" >&2
-            echo "  'NOT in this script's remit'). Accepting the label here would report a" >&2
-            echo "  blind launch as preflighted while the check that conditions it does not" >&2
-            echo "  exist. Run the goldpod preflight for the machine-level rows." >&2
-            return 1 ;;
+        with-prior-art|without-prior-art) ;;
         *)
-            echo "ERROR: unknown --arm '$ARM' (accepted: with-prior-art, without-prior-art, goldpod)" >&2
+            echo "ERROR: unknown --arm '$ARM' (accepted: with-prior-art, without-prior-art)" >&2
             return 1 ;;
     esac
-    # The X9 symmetry partner. EMPTY for a gold arm: there is no second arm
-    # this script compares against, and inventing one is how a campaign
-    # preflight ends up reporting on a fleet it is not launching.
+    # The X9 symmetry partner.
     local OTHER_ARM=""
     if [ "$ARM" = "with-prior-art" ]; then
         OTHER_ARM="without-prior-art"
@@ -455,7 +243,7 @@ pf_main() {
     local SCRATCH
     SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/campaign_preflight.XXXXXX")"
 
-    echo "[preflight] arm=$ARM topology=$ARM_KIND workspace_root=$WORKSPACE_ROOT symmetry_band=$SYMMETRY_BAND"
+    echo "[preflight] arm=$ARM workspace_root=$WORKSPACE_ROOT symmetry_band=$SYMMETRY_BAND"
 
     # ---- R1: workspace root persistence -----------------------------------
     if [ ! -d "$WORKSPACE_ROOT" ]; then
@@ -533,7 +321,7 @@ pf_main() {
             local GENLIB_FSTYPE=""
             if command -v findmnt >/dev/null 2>&1; then
                 GENLIB_FSTYPE="$(findmnt -n -o FSTYPE --target "$GENLIB_PROBE" 2>/dev/null || true)"
-            fi
+        fi
             [ -z "$GENLIB_FSTYPE" ] && GENLIB_FSTYPE="$(df -PT "$GENLIB_PROBE" 2>/dev/null | awk 'NR==2 {print $2}')"
             local GENLIB_MOUNT_SRC
             GENLIB_MOUNT_SRC="$(df -P "$GENLIB_PROBE" 2>/dev/null | awk 'NR==2 {print $1 " on " $6}')"
@@ -609,37 +397,30 @@ pf_main() {
             if [ "${#BAND_MISSING[@]}" -gt 0 ]; then
                 pf_fail "R3 band $band missing under $DATA_DIR: ${BAND_MISSING[*]}"
                 MISSING=1
-            fi
+        fi
         done
         [ "$MISSING" -eq 0 ] && pf_pass "R3 all 20 file indices (training+validation pairs) present under $DATA_DIR"
     fi
 
     # ---- R4: posture arithmetic + coresidency factor -----------------------
-    # The posture file is SOURCED for every arm — R5's host-RAM expectation
-    # lives in it, and a gold arm that skipped the source would silently fall
-    # back to R5's hardcoded defaults and stop tracking a posture bump. Only
-    # R4's own two verdicts are X9 co-residency claims.
+    # The posture file also owns the host-RAM expectation used by R5.
     if [ ! -f "$PF_POSTURE" ]; then
         pf_fail "R4 posture file missing: $PF_POSTURE"
     else
         # shellcheck disable=SC1090
         source "$PF_POSTURE"
-        if [ "$ARM_KIND" = "gold" ]; then
-            pf_skip "R4 co-residency posture NOT APPLICABLE to arm $ARM — both halves of this row describe ${H100_CORESIDENT_CHAINS:-4} chains sharing ONE card (h100_posture.env v${H100_POSTURE_VERSION:-?}); the campaign runs EXCLUSIVE_SINGLE_BAND, one band chain per card (_gold_campaign_lib.sh:gold_band_gpu), and its launcher never reads h100_posture.env, so neither the aggregate VRAM arithmetic nor the H100_CORESIDENCY_FACTOR refusal it predicts applies. R5's host-RAM row DOES apply and reads this file"
-        else
-            local ARITH
-            if ARITH="$(preflight_admission_arithmetic \
+        local ARITH
+        if ARITH="$(preflight_admission_arithmetic \
                     "${H100_CORESIDENT_CHAINS:-4}" "${H100_PER_CHAIN_VRAM_GB:-18}" \
                     "${H100_CARD_TOTAL_VRAM_GB:-80}" "${H100_MIN_CARD_VRAM_HEADROOM_GB:-6}")"; then
                 pf_pass "R4 admission arithmetic fits: $ARITH"
-            else
+        else
                 pf_fail "R4 admission arithmetic does NOT fit: $ARITH"
-            fi
-            if [ -n "${H100_CORESIDENCY_FACTOR:-}" ]; then
+        fi
+        if [ -n "${H100_CORESIDENCY_FACTOR:-}" ]; then
                 pf_pass "R4 coresidency factor filled: H100_CORESIDENCY_FACTOR=${H100_CORESIDENCY_FACTOR} (posture v${H100_POSTURE_VERSION:-?})"
-            else
+        else
                 pf_fail "R4 H100_CORESIDENCY_FACTOR is EMPTY — the band launcher will refuse --h100 campaign launches; run: bash $PF_PROBE"
-            fi
         fi
     fi
 
@@ -656,10 +437,7 @@ pf_main() {
 
     # ---- R6: arm+band identity coherence (dry-runs, this arm) --------------
     local band OUT RC EXPECT_FILES EXPECT_FILES_Q ARM_CAPTURE=""
-    if [ "$ARM_KIND" = "gold" ]; then
-        pf_skip "R6 launcher identity dry-runs NOT APPLICABLE to arm $ARM — this row executes $(basename "$PF_LAUNCHER"), the X9 band launcher, which refuses a campaign arm; the campaign's own identity is resolved by run_gold_campaign.sh --dry-run and is not this script's to assert"
-    else
-        for band in "${PF_BANDS[@]}"; do
+         for band in "${PF_BANDS[@]}"; do
             OUT="${SCRATCH}/dryrun_${ARM}_band${band}.out"
             RC=0
             bash "$PF_LAUNCHER" --arm "$ARM" --band "$band" --workspace-root "$WORKSPACE_ROOT" \
@@ -679,30 +457,17 @@ pf_main() {
                 pf_fail "R6 band $band child argv lacks '--data_scope ${band}' (see $OUT)"
             elif ! grep -qF -- "--health_gate_files ${EXPECT_FILES_Q} " "$OUT"; then
                 pf_fail "R6 band $band child argv lacks DS8 pair '--health_gate_files ${EXPECT_FILES}' (see $OUT)"
-            else
+        else
                 pf_pass "R6 band $band identity coherent (arm, run_name, DS8 scope pair)"
-            fi
-            # An explicit `if`, not `[ ... ] && ARM_CAPTURE=...`. A trailing
-            # AND-list leaves the loop's exit status at 1 on every run whose
-            # LAST band is not the symmetry band (the default: 15-19 vs 0-3),
-            # and that status then propagates out of whatever compound
-            # encloses it. The same shape cost this campaign a launch already:
-            # gold_select_bands' emission loop ended in
-            # `[ "$name" = "$band" ] && printf`, so `--only 0-3` printed the
-            # correct selection and returned 1, and the caller's
-            # `|| return 1` turned it into a launch refusal with no message on
-            # any stream (_gold_campaign_lib.sh, the `return 0` note). Do not
-            # reintroduce the idiom here.
+        fi
+            # Keep the capture assignment in an explicit conditional so a
+            # non-matching final band cannot leak status 1 from an AND-list.
             if [ "$band" = "$SYMMETRY_BAND" ]; then
                 ARM_CAPTURE="$OUT"
-            fi
+        fi
         done
-    fi
 
     # ---- R7: arm symmetry — argv + surface (#255, F-SCANG-4) ---------------
-    if [ "$ARM_KIND" = "gold" ]; then
-        pf_skip "R7 arm symmetry NOT APPLICABLE to arm $ARM — $(basename "$PF_SYMMETRY") compares the X9 pair (with-prior-art / without-prior-art) and positively requires their lit-review split, which the campaign freezes OFF in BOTH of its arms; the campaign's Gold<->Blind treatment symmetry is a separate blind-launch prerequisite, deliberately NOT served here — including its surface layer"
-    else
         local OTHER_OUT="${SCRATCH}/dryrun_${OTHER_ARM}_band${SYMMETRY_BAND}.out"
         RC=0
         bash "$PF_LAUNCHER" --arm "$OTHER_ARM" --band "$SYMMETRY_BAND" --workspace-root "$WORKSPACE_ROOT" \
@@ -713,7 +478,7 @@ pf_main() {
             local WITH_CAP="$ARM_CAPTURE" WITHOUT_CAP="$OTHER_OUT"
             if [ "$ARM" = "without-prior-art" ]; then
                 WITH_CAP="$OTHER_OUT"; WITHOUT_CAP="$ARM_CAPTURE"
-            fi
+        fi
             # F-SCANG-4 layer 3. Each arm's isolation flag is READ from that
             # arm's own resolved-config print, never re-derived here: the
             # launcher decides it from --arm, and a second table in this
@@ -730,10 +495,10 @@ pf_main() {
             if [ "$SURF_RC" -eq 0 ]; then
                 SELF_ISO="$(pf_isolation_for_arm "$ARM" "$WITH_ISO" "$WITHOUT_ISO")" || SURF_RC=$?
                 OTHER_ISO="$(pf_isolation_for_arm "$OTHER_ARM" "$WITH_ISO" "$WITHOUT_ISO")" || SURF_RC=$?
-            fi
+        fi
             if [ "$SURF_RC" -eq 0 ]; then
                 pf_capture_surface "$ARM" "$SELF_ISO" "${SCRATCH}/surface_${ARM}.json" || SURF_RC=$?
-            fi
+        fi
             # PUBLISH into the shared campaign root. This is what makes the
             # comparison CROSS-POD: the arm that preflights second reads the
             # first pod's recorded surface instead of a sibling re-derived
@@ -761,13 +526,13 @@ pf_main() {
                     SIBLING_SOURCE="local"
                     pf_capture_surface "$OTHER_ARM" "$OTHER_ISO" "$OTHER_SURFACE" || SURF_RC=$?
                 fi
-            fi
+        fi
             # ONE verdict for the whole surface layer. Two pf_fail calls for
             # one broken capture would double the failure count and read as
             # two independent defects in the summary.
             if [ "$SURF_RC" -ne 0 ]; then
                 pf_fail "R7 could not build the arm SURFACE layer (rendered prompt bytes / environment / machine-local stores) — see the [arm-surface] lines above; the argv layer alone cannot claim arm symmetry (F-SCANG-4)"
-            else
+        else
                 local WITH_SURF="${SCRATCH}/surface_${ARM}.json" WITHOUT_SURF="$OTHER_SURFACE"
                 if [ "$ARM" = "without-prior-art" ]; then
                     WITH_SURF="$OTHER_SURFACE"; WITHOUT_SURF="${SCRATCH}/surface_${ARM}.json"
@@ -802,9 +567,8 @@ pf_main() {
                 else
                     pf_info "R7 CAVEAT — the symmetry checker reported no evidence state this script recognises (got '${EV_STATE:-<none>}'), so the strength of the ${OTHER_ARM} surface is UNKNOWN: treat the environment and machine-local-store layers as NOT COMPARED"
                 fi
-            fi
         fi
-    fi
+        fi
 
     # ---- R8: cold-start preconditions (#260) -------------------------------
     for band in "${PF_BANDS[@]}"; do
@@ -832,16 +596,7 @@ pf_main() {
         pf_pass "R8 item3 no _capability_index.json"
     fi
     pf_info "R8 item4 workspace plugins/ covered by item1 (fresh workspace)"
-    # Stated per topology. Under a gold arm the advice file is not a
-    # contaminant to be refused: it IS goldpod's declared treatment, injected
-    # every proposer round (_gold_campaign_lib.sh:511). Repeating the X9
-    # sentence there would assert a refusal the campaign launcher does not
-    # make, about the one input the campaign exists to deliver.
-    if [ "$ARM_KIND" = "gold" ]; then
-        pf_info "R8 item2 seeds: --seed_paths is refused as passthrough by the campaign entrypoint (GOLD_RESERVED_PASSTHROUGH); item7 advice: NOT a cold-start contaminant for arm $ARM — the advice file is goldpod's DECLARED treatment, bound by the launcher and required by it"
-    else
-        pf_info "R8 items2/7 seeds + advice files: enforced by launcher refusals in both arms"
-    fi
+    pf_info "R8 items2/7 seeds + advice files: enforced by launcher refusals in both arms"
     pf_info "R8 item5 root_papers_cache: RETAIN by design"
     pf_info "R8 item6 runtime calibration store: RETAIN by design — persistence of its mount is CHECKED by R1b, not assumed"
 
@@ -862,7 +617,7 @@ pf_main() {
     # ---- summary -----------------------------------------------------------
     echo ""
     echo "############################################################"
-    echo "  CAMPAIGN PREFLIGHT SUMMARY  (arm=$ARM topology=$ARM_KIND)"
+    echo "  CAMPAIGN PREFLIGHT SUMMARY  (arm=$ARM)"
     echo "  repo_sha=${REPO_SHA}"
     local row
     for row in "${PF_ROWS[@]}"; do

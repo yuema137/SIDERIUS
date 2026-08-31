@@ -90,7 +90,7 @@ HEALTH_CHECKS_CONFIG=""             # optional; empty preserves tuner's shipped 
 # argv stays byte-identical. Until this flag existed the chain could not
 # launch a composed run at all, even though run_one_iteration.py has parsed
 # --task_composition since P1.
-TASK_COMPOSITION=""                 # optional; empty == omit == un-composed (legacy)
+TASK_COMPOSITION=""                 # required task declaration
 DATA_SCOPE=""                       # DS6c: '4-9' / '4,5,6,7,8,9' / mixed; empty = complete dataset
 HEALTH_GATE_ENABLED=1               # DS6c: --no-health_gate_enabled disables the subsystem
 HEALTH_GATE_FILES=""                # DS6c: shared monitored-file list; empty = YAML defaults
@@ -175,19 +175,14 @@ IS_PSEUDO_TRAINING=0
 # halts the *chain* when the most recent N committed iters all carry
 # manifest.status='failed'. Default 3 matches the Python argparse default.
 MAX_FAILED_ITERATIONS=3
-# R-RETENTION-1 (Gold campaign release blocker, 2026-08-26). Default 1
-# preserves the historical chain behavior byte-identically: exploratory
-# chain runs emit --cleanup_denoised because per-experiment denoised .h5
-# files accumulate at ~76 GB / attempt. --no-cleanup_denoised (typed by the
-# campaign entrypoint) suppresses the token so the child argv carries NO
-# cleanup flag and official FORMAL execution RETAINS its deliverables — a
-# cleaned formal winner leaves Stage-3 nothing to pool
-# (docs/campaign/stage_artifact_contract.md, retention clause).
+# Default 1 preserves historical chain behavior: exploratory runs remove
+# large per-attempt denoised files. A caller that needs those deliverables
+# for later result composition can pass --no-cleanup_denoised; the child argv
+# then carries no cleanup flag.
 CLEANUP_DENOISED=1
-# --- F-SCANI-2 ENTRY CONDITION (release blocker, 2026-08-26) ---------------
+# --- Shell entry condition ---------------------------------------------------
 # "Initialise every consumed shell variable" is an ENTRY CONDITION of this
-# reused library (D-ARCH-2 reuse map: _chain_common.sh is REUSED_AS_IS by
-# the canonical campaign entrypoint), NOT a cleanup step performed by each
+# reused library, not a cleanup step performed by each
 # caller. Every variable build_app_args reads is assigned HERE, at source
 # time, BEFORE parse_chain_args runs — so the only route into the child
 # argv is a flag.
@@ -817,7 +812,7 @@ print_chain_header() {
         echo "  LLM config       : $LLM_CONFIG"
     fi
     echo "  HealthGate config: ${HEALTH_CHECKS_CONFIG:-(shipped default)}"
-    echo "  Task composition : ${TASK_COMPOSITION:-(none — un-composed legacy run)}"
+    echo "  Task composition : ${TASK_COMPOSITION:-(missing)}"
     echo "  Required profile : ${REQUIRED_RUNTIME_PROFILE:-(none — measured > shipped > uncalibrated ladder)}${REQUIRED_RUNTIME_PROFILE:+ sha256=${REQUIRED_RUNTIME_PROFILE_SHA256:-(unset)} artifact=${REQUIRED_RUNTIME_PROFILE_PATH:-(unset)}}"
     echo "  Data scope       : ${DATA_SCOPE:-(complete dataset)}"
     echo "  HealthGate       : enabled=$HEALTH_GATE_ENABLED monitored=${HEALTH_GATE_FILES:-(YAML defaults)}"

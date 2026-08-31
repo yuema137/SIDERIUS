@@ -1,7 +1,6 @@
-"""D-BUD-6 — mode-aware epoch ceilings (release-blocker row 31).
+"""D-BUD-6: mode-aware epoch ceilings.
 
-The frozen campaign decision (``docs/campaign/official_campaign_decisions.yaml``
-D-BUD-6; plan §19.6) is ``trial_max_epochs=2 / formal_max_epochs=1`` — two
+The retained regression fixture uses ``trial_max_epochs=2 / formal_max_epochs=1`` as two
 CEILINGS keyed on the round's trial/formal role. The mechanism:
 ``HyperparamTuningInput.trial_max_epochs`` / ``formal_max_epochs`` resolve
 through the ONE authority ``resolve_epoch_cap(is_trial=...)`` (precedence:
@@ -64,6 +63,17 @@ from tests.helpers.step00_pseudo_iteration import (
 )
 
 _PREFLIGHT_FIXTURE = Path(__file__).parent / "fixtures" / "step00_preflight_results.json"
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+def _required_cli_args() -> list[str]:
+    return [
+        "--task_composition",
+        str(_REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"),
+        "--data_dir",
+        "/tmp/dbud6_data",
+    ]
+
 
 
 def _minimal_input(**overrides) -> HyperparamTuningInput:
@@ -247,6 +257,7 @@ class TestWitnessCTransportHops:
                 "/tmp/dbud6_cli",
                 "--run_name",
                 "dbud6_cli",
+                *_required_cli_args(),
                 "--is_trial",
                 "--max_epochs",
                 "1",
@@ -276,6 +287,7 @@ class TestWitnessCTransportHops:
                 "/tmp/dbud6_cli",
                 "--run_name",
                 "dbud6_cli",
+                *_required_cli_args(),
                 "--is_trial",
                 "--max_epochs",
                 "1",
@@ -312,6 +324,7 @@ class TestWitnessDRefusalReachability:
                 "/tmp/dbud6_cli",
                 "--run_name",
                 "dbud6_cli",
+                *_required_cli_args(),
                 "--is_trial",
                 flag,
                 "0",

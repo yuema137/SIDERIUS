@@ -65,8 +65,7 @@ cp dashboard_config.example.yaml   dashboard_config.yaml
 | `tidmad_data_dir` | where raw TIDMAD `.h5` files live |
 | `siderius_data_dir` | where run outputs are written |
 
-You do **not** need to precompute a scoring anchor map — it ships committed at
-`reference_data/segment_anchors.json`.
+Task-specific scoring references, including TIDMAD anchor maps, belong to the external task package.
 
 ## API keys
 

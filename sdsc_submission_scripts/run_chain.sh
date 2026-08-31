@@ -42,11 +42,10 @@
 #   --auto_resume        pick up where a partial chain left off (default ON)
 #   --no_auto_resume     force fresh start regardless of workspace state
 #   --start_iter N       manual pin (overrides auto-resume)
-#   --task_composition F  YAML task-composition manifest. Omitted = the legacy
-#                        un-composed run (byte-identical child argv). Supplying
-#                        it binds the task's data path, dataset profile, metric,
+#   --task_composition F  required YAML task-composition manifest;
+#                        binds the task's data path, dataset profile, metric,
 #                        declared secondaries, Health family and task config for
-#                        the whole run. Shipped: configs/task_composition/tidmad.yaml
+#                        the whole run. Shipped example: configs/task_composition/quickstart.yaml
 #
 # Usage examples:
 #
@@ -331,6 +330,14 @@ SUBMITTED_JOBS=()
 
 parse_chain_args "$@"
 load_advice_file
+if [ -z "$TASK_COMPOSITION" ]; then
+    echo "Required: --task_composition FILE" >&2
+    exit 1
+fi
+if [ -z "$DATA_DIR" ]; then
+    echo "Required: --data_dir DIRECTORY" >&2
+    exit 1
+fi
 
 if [ -z "$MODE" ]; then
     echo "Required: --mode {lilab,sdsc}" >&2

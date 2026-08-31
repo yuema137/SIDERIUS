@@ -220,8 +220,8 @@ class TestSignatureAndCallers:
 
 
 class TestTheCompositionFlag:
-    def test_both_edges_expose_it_and_default_to_the_legacy_run(self):
-        """Absent ⇒ `None` ⇒ un-composed, on BOTH composition edges."""
+    def test_both_edges_require_an_explicit_task_composition(self):
+        """Both supported composition edges refuse an undeclared task."""
         for path in (LAUNCHER, WORKFLOW):
             tree = ast.parse(path.read_text(encoding="utf-8"))
             declared = [
@@ -237,12 +237,12 @@ class TestTheCompositionFlag:
             assert len(declared) == 1, (
                 f"{path.name} does not declare --task_composition exactly once"
             )
-            defaults = {
+            required = {
                 kw.arg: ast.literal_eval(kw.value)
                 for kw in declared[0].keywords
-                if kw.arg == "default"
+                if kw.arg == "required"
             }
-            assert defaults == {"default": None}
+            assert required == {"required": True}
 
     def test_the_transport_flag_is_NOT_an_operator_surface(self):
         """`--task_data_path_id` is emitted from a RESOLVED binding by
@@ -338,21 +338,10 @@ class TestEndToEndAtTheEdge:
         with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             verify_composition_is_bound(composition)
 
-    def test_an_absent_flag_produces_an_un_composed_run(self):
-        """The legacy path, taken exactly as the launcher takes it."""
-        from workflows.task_composition import (
-            bind_run_task_composition,
-            verify_composition_is_bound,
-        )
+    def test_an_absent_flag_is_refused(self):
+        """A supported launcher requires a declared task instead of selecting one."""
+        from workflows.task_composition import TaskCompositionError, bind_run_task_composition
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--task_composition", type=str, default=None)
-        args = parser.parse_args([])
-
-        composition = None if not args.task_composition else pytest.fail("unreachable")
-        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
-            verify_composition_is_bound(composition)
-
-        from execute_tools.task_data_path import active_task_data_path
-
-        assert active_task_data_path() is None
+        with pytest.raises(TaskCompositionError, match="task composition is required"):
+            with bind_run_task_composition(None, physical_data_root=COMPOSED_TEST_DATA_ROOT):
+                pass

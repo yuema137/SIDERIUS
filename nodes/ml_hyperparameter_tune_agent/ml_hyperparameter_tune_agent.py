@@ -1784,7 +1784,6 @@ def main() -> int:
     `active_run_model_plugins()`, `active_deliverable_naming()`, etc.).
     Composing twice would be a SECOND resolution — the registry-identity
     rules (Step 12 / PR-12bc CASE A) treat that as a fresh instance, not the
-    same one. Omitted ⇒ `None` ⇒ `bind_run_task_composition` is a no-op and
     every un-composed launch is byte-identical to before this flag existed.
 
     Mirrors the SAME pattern the chain launcher already uses
@@ -1799,7 +1798,7 @@ def main() -> int:
 
     bind_generated_library_to_workspace(args.workspace)
     run_composition = (
-        compose_run_task_bindings(args.task_composition) if args.task_composition else None
+        compose_run_task_bindings(args.task_composition)
     )
     agent_input = build_agent_input(args, parser, run_composition)
 

@@ -264,9 +264,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--data_dir",
         type=str,
-        default=None,
-        help="TIDMAD data directory used by evaluate_time_skill's real-dataset "
-        "warmup. None makes the skill fall back to its static formula.",
+        required=True,
+        help="Physical data directory for the declared task. "
     )
     parser.add_argument(
         "--health_checks_config",
@@ -505,10 +504,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--task_composition",
         type=str,
-        default=None,
+        required=True,
         help=(
-            "Path to a YAML task-composition manifest. Omitted = the legacy "
-            "un-composed run, byte-identical to its pre-Step-10 behaviour. "
+            "Path to a required YAML task-composition manifest. "
             "Supplied, it binds this run's task data path, dataset profile, "
             "metric, declared secondaries, Health family and task "
             "description/forward contract EXPLICITLY, and every "

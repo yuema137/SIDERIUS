@@ -33,11 +33,6 @@ with its evidence; any `FAIL` exits non-zero. Full row descriptions live in
 the script's own `--help` and in `sdsc_submission_scripts/README.md`. Two
 things about its output are worth knowing before you read a report.
 
-**A `SKIP` is not a `PASS`.** Rows bound to the X9 launcher (`R6`, `R7`) or
-to the X9 four-way co-residency posture (`R4`) are skipped by name under
-`--arm goldpod`. A row that the topology cannot exercise has proven
-nothing, and it does not count as a failure either.
-
 **R7 states which layers it actually compared.** The arm-symmetry row
 (#255, launch validity is conditioned on it) compares five layers, and not
 all of them are meaningful in every situation:
@@ -101,11 +96,11 @@ bash sdsc_submission_scripts/run_chain.sh \
 
 | flag | meaning |
 |---|---|
-| `--mode {lilab,sdsc}` | **the only flag the launcher validates as required.** `lilab` = foreground subprocess; `sdsc` = `sbatch` + `afterany` chain |
+| `--mode {lilab,sdsc}` | required `lilab` = foreground subprocess; `sdsc` = `sbatch` + `afterany` chain |
 | `--workspace DIR` | chain workspace root — required in practice |
 | `--run_name NAME` | pins the immutable run id — required in practice |
-| `--task_composition FILE` | the task manifest. **Omitted = the legacy un-composed run** with byte-identical child argv |
-| `--data_dir DIR` | physical data root. **Required for any composed run**; a composed run without it fails closed before any LLM or GPU work |
+| `--task_composition FILE` | the required task manifest; omission is refused |
+| `--data_dir DIR` | physical data root. required; a run without it fails closed before any LLM or GPU work |
 | `--num_iterations N` | default `2` |
 | `--seed_paths P [P…]` | prior run outputs to seed from. **Optional** — an empty list is a valid cold start |
 | `--auto_resume` / `--no_auto_resume` | default **ON**: pick up where a partial chain stopped. The inspector's captured value is VALIDATED (F-SCANB-4): only the exit-0 capture's last line, and only a bare non-negative integer, becomes `START_ITER`; anything else (e.g. plugin-loader stdout chatter with no trailing value line) refuses loudly and names the workaround below — never a silent default |
@@ -152,8 +147,8 @@ Other flags that define a run:
 
 | flag | default |
 |---|---|
-| `--task_composition` | `None` (legacy un-composed) |
-| `--data_dir` | `None` |
+| `--task_composition` | required |
+| `--data_dir` | required |
 | `--data_scope` | `None` (full scope) |
 | `--health_gate_enabled` / `--no-health_gate_enabled` | enabled |
 | `--health_gate_files` | `None` |
@@ -218,104 +213,6 @@ python scripts/run_comparison.py --model punet --is_trial
 Key flags: `--model` (required, single-valued), `--is_trial`, `--max_rounds`
 (default `50`), `--provider` / `--model_id` and the `--reflect_*` split,
 `--data_scope`, `--health_checks_config`.
-
-## `scripts/stage3/stage3_composed_best.py` — Stage-3 Composed Best (Gold campaign)
-
-Pools the four Stage-1 band winners' SOURCE-BAND deliverables and scores the
-composed 20-file set **exactly once** through the shared
-`scripts/stage3/stage3_common.compose_and_score` wrapper
-(`docs/campaign/stage_artifact_contract.md` §1/§3/§4). Emits one authoritative
-`denoising_score` plus an identity-only provenance JSON under
-`{workspace_root}/stage3/composed_best/{arm}/`. Read-only against Stage-1
-workspaces (the pooled input is a symlink farm in the stage3 namespace).
-
-```bash
-.venv/bin/python -m scripts.stage3.stage3_composed_best \
-    --workspace_root /path/to/campaign_root --arm gold
-```
-
-Flags (both required, no defaults): `--workspace_root` (the campaign's
-persistent root; band workspaces are `{workspace_root}/{arm}_band{BAND}`),
-`--arm` (opaque arm label; must match each workspace's invariants lock).
-
-Refusals (exit 2, message on stderr): missing/scope-mismatched/unverifiable
-workspaces, anomalous `is_trial` shapes, missing `metric_spec` stamps, missing
-winner deliverables (retention clause), and every `compose_and_score` refusal
-(missing/duplicate pooled file indices, swapped anchor artifact). **No
-per-band scalar appears in any output, log, or provenance field** — per-band
-information is expressed only as per-file vector entries (F-SCAND-1; pinned by
-an SRI-11 census test).
-
-`stage3_common.compose_and_score(deliverable_dirs, *, files=range(20),
-sample_set=None, reconciled_spec)` is the contract's §4 interface (as
-amended by the supervisor's local-gate Step-09a ruling, 2026-08-26): all
-three Stage-3 writers call it, none re-inlines `score_vector`, a partial
-`files` range or non-`None` `sample_set` is refused, and `reconciled_spec`
-is the caller's RECONCILED 09a `MetricSpec` stamp — required identity
-transport for refusal envelopes; the composer derives nothing.
-
-## `scripts/stage3/stage3_strict_best.py` — Stage-3 Strict Best (Gold campaign)
-
-Fail-closed finalization over the Stage-2 retrain matrix: verifies all 16
-units (`{workspace_root}/stage2/{design}_{band}/` with an atomic
-`COMPLETE.json`, `healthgate_valid: true`, strict §2 schema), pools each
-design's four band `deliverables/` dirs, obtains StrictScore(design) from
-**one** `compose_and_score` call at full 0..19 scope, and selects the best
-under `MetricOrder` (direction from the RECONCILED 09a `metric_spec`
-stamps persisted in the 16 units' chain workspaces, read through the
-manifest-verified loader and reconciled by the ONE authority — this module
-derives nothing and contains no `max`/`min`/`sorted`; AST-censused). ANY
-missing/malformed/invalid unit refuses the WHOLE finalization (one
-aggregated refusal naming every failing unit, zero composer calls, no
-selection, exit 2 — Q-S3-1 ruling A). The marker's own `denoising_score` is
-validated and never echoed.
-
-```bash
-.venv/bin/python -m scripts.stage3.stage3_strict_best \
-    --workspace_root /path/to/campaign_root \
-    --designs wavenetA,punetB,gatedfnoC,rnnD
-```
-
-Flags: `--workspace_root` (required), `--designs` (required; comma-separated
-ids of exactly 4 distinct frozen winner designs), `--out` (default
-`{workspace_root}/stage3/strict_best/strict_best_selection.json`, written by
-atomic rename, stamped `selection_rule =
-strict_best.fail_closed.one_composed_score_per_design.v1`).
-
-## `scripts/stage3/stage3_terminal_eval.py` — Stage-3 terminal re-evaluation (Gold campaign)
-
-The ONE terminal full-scope (100%) measurement of the selected champion,
-taken AFTER search freezes; the terminal number never feeds back into
-search. Everything it writes lives under the isolation namespace
-`{workspace_root}/stage3/terminal_eval/` (contract §3): output paths are
-validated against the namespace at construction, a champion without
-HealthGate-valid provenance is refused by name through
-`classify_under_pinned_policy` — against the gate set the champion's OWN
-workspace pinned, never the repo-current shipped config, and an
-unestablished roster is UNKNOWN and therefore a refusal —
-scoring goes through the shared `compose_and_score` exactly once, and the
-write path refuses band-shaped scalar fields. The module also ships the
-read-closure guard (`audit_terminal_read_closure` /
-`assert_terminal_read_closure`) proving no search-side consumer's input
-roots reach the namespace — including planted-artifact detection via the
-self-declared `artifact_namespace` marker.
-
-```bash
-.venv/bin/python -m scripts.stage3.stage3_terminal_eval \
-    --champion_json /path/to/champion.json \
-    --workspace_root /path/to/campaign_root
-```
-
-Flags (both required): `--champion_json` (a JSON file with the
-`TerminalChampion` shape — identity + `deliverable_dirs` +
-`provenance_records` + `metric_spec`, the champion's reconciled 09a stamp,
-required since the Step-09a gate ruling; a spec-less champion is a pre-09a
-shape and refuses at validation — plus `provenance_workspace`, the run
-workspace whose pinned `health_checks_effective.yaml` governs every
-provenance record, required since F-4 because the value it would otherwise
-default to is a different run's policy), `--workspace_root`. Refusals exit
-non-zero with the named reason on stderr — a refusal must never look like
-a successful terminal measurement.
 
 ## Data scope
 

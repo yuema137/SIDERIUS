@@ -465,6 +465,10 @@ def _run_dry(
         str(num_iters),
         "--seed_paths",
         str(seed_path),
+        "--task_composition",
+        str(_RUN_CHAIN_SH.parents[1] / "configs" / "task_composition" / "quickstart.yaml"),
+        "--data_dir",
+        str(workspace.parent),
         *extra_args,
     ]
     proc = _subprocess.run(cmd, capture_output=True, text=True, timeout=60)

@@ -910,9 +910,8 @@ def write_manifest(
         # records, trial and formal mixed (records.py), so it answers "is
         # there an artifact for the next iteration to consume?" and nothing
         # else. `status` keeps deriving from it because the manifest status
-        # vocabulary is FROZEN at completed|failed|no_records
-        # (docs/campaign/stage_artifact_contract.md section 1) and is the
-        # token core/resume.py, stage3 and the inspector branch on — a
+        # vocabulary is completed|failed|no_records and is shared by
+        # core/resume.py, result consumers, and the inspector. A
         # trial-only iteration DID produce a consumable run_output and a
         # restorable plugin.
         score = tune_output.best_denoising_score
@@ -1641,10 +1640,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--task_composition",
         type=str,
-        default=None,
+        required=True,
         help=(
-            "Path to a YAML task-composition manifest. Omitted = the legacy "
-            "un-composed run, byte-identical to its pre-Step-10 behaviour. "
+            "Path to a required YAML task-composition manifest. "
             "Supplied, it binds this run's task data path, dataset profile, "
             "metric, Health family, interpretation blocks and task "
             "description/forward contract EXPLICITLY, and every unresolvable "
@@ -1951,11 +1949,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--data_dir",
         type=str,
-        default=None,
-        help="Physical dataset directory for this run — an OPERATOR OVERRIDE. "
-        "Omit it and the machine-local tidmad_data_config.yaml "
-        "(execute_tools.data_paths.TIDMAD_DATA_DIR) answers instead. Either "
-        "way the value is resolved and validated at launch, before any LLM "
+        required=True,
+        help="Physical dataset directory for this run. "
+        "The value is resolved and validated at launch, before any LLM "
         "or training work, and the resolved path is what reaches the "
         "real-dataset warmup AND the pre-phase GPU measurement.",
     )

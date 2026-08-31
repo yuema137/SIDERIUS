@@ -1,6 +1,6 @@
 """F-SCANE-4 — the honest per-model fields travel; the mixed ones no longer travel alone.
 
-Frozen row: ``docs/campaign/official_campaign_decisions.yaml`` ``F-SCANE-4``::
+Historical regression boundary retained after campaign evidence moved to external ownership.
 
     finding: ModelRunSummary.best_valid_formal_score ... - the only per-model
     headline that is BOTH HealthGate-valid AND formal - has no production

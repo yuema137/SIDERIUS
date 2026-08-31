@@ -112,8 +112,7 @@ Notes on the flags that are not obvious:
 - Time budgets prevent a badly chosen data portion from producing a multi-hour
   round.
 
-Omitting `--task_composition` runs the ⚠ legacy un-composed path. It works, but
-it is not the path to learn.
+Omitting `--task_composition` is refused. Every supported run declares its task explicitly.
 
 ## What you will see
 

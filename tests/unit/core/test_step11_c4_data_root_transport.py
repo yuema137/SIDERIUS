@@ -252,15 +252,13 @@ class TestAComposedRunMustDeclareItsRoot:
             with bind_run_task_composition(composition):
                 pass
 
-    def test_an_uncomposed_run_is_unaffected(self):
-        """`None` stays a no-op that binds nothing — the legacy path must
-        not acquire a new requirement.
-        """
-        from workflows.task_composition import bind_run_task_composition
+    def test_an_uncomposed_run_is_refused(self):
+        """A supported run cannot select a scientific task by omission."""
+        from workflows.task_composition import TaskCompositionError, bind_run_task_composition
 
-        with bind_run_task_composition(None) as got:
-            assert got is None
-            assert active_physical_data_root() is None
+        with pytest.raises(TaskCompositionError, match="task composition is required"):
+            with bind_run_task_composition(None):
+                pass
 
     def test_the_refusal_names_the_operator_flag(self):
         from workflows.task_composition import (

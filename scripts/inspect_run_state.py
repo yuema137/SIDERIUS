@@ -108,14 +108,10 @@ def _formal_evidence_detail(parsed: HyperparamTuningOutput) -> str:
     """The formal-evidence fragment of a report's ``detail`` (F-SCANB-3).
 
     Degrades rather than raises. The role authority refuses an anomalous
-    ``is_trial`` / ``trial_portion`` shape LOUDLY because a silent choice
-    there could silently move a campaign winner — but that refusal belongs
-    to the winner scanner (``gold_campaign_state``), which runs right after
-    this walk and fails closed with the record named. This walk is chain
-    bookkeeping: it must not turn a reporting call into an uncaught crash
-    that PRE-EMPTS that refusal and downgrades a named rc-2 into rc 1.
-
-    The anomaly is stated in the row instead of being swallowed.
+    ``is_trial`` / ``trial_portion`` shape because a silent choice could
+    select the wrong record. This inspector owns chain bookkeeping, so it
+    reports the anomaly in the row instead of turning reporting into an
+    uncaught crash.
     """
     try:
         evidence = formal_evidence_of(parsed)

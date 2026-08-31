@@ -1,6 +1,6 @@
 """F-SCANE-3 — the validation term reaches the LLM that is told to attribute it.
 
-Frozen row: ``docs/campaign/official_campaign_decisions.yaml`` ``F-SCANE-3``::
+Historical regression boundary retained after campaign evidence moved to external ownership.
 
     consequence: No LLM can see the term it is being asked to attribute to
     architecture. A candidate can be shrunk for time spent validating it.

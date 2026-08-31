@@ -3593,7 +3593,7 @@ def main():
     parser.add_argument(
         "--data_dir",
         type=str,
-        default=None,
+        required=True,
         help="Root data directory containing existing tuning results.",
     )
     parser.add_argument(
@@ -3710,18 +3710,13 @@ def main():
     parser.add_argument(
         "--task_composition",
         type=str,
-        default=None,
+        required=True,
         help=(
-            "Path to a YAML task-composition manifest. Omitted = the legacy "
-            "un-composed run. See the chain launcher's flag of the same name."
+            "Path to a required YAML task-composition manifest. "
+            "It binds the task for the complete run and fails closed if unresolved."
         ),
     )
     args = parser.parse_args()
-
-    if args.data_dir is None:
-        from execute_tools.data_paths import SIDERIUS_DATA_DIR
-
-        args.data_dir = SIDERIUS_DATA_DIR
 
     # Build LLM config: --llm_config file takes precedence, then --provider/--model_id
     if args.llm_config:
@@ -3735,11 +3730,7 @@ def main():
 
     # Step 10 / P1 — the module CLI is a composition edge too, and it owns
     # the binding for exactly the same reason the chain launcher does.
-    # `--task_composition` omitted ⇒ `None` ⇒ a no-op context and the legacy
-    # un-composed run.
-    run_composition = (
-        compose_run_task_bindings(args.task_composition) if args.task_composition else None
-    )
+    run_composition = compose_run_task_bindings(args.task_composition)
     # Step 11 C4 — same binding, same authority as the chain launcher.
     # A composed run with no --data_dir is refused rather than silently
     # reading TIDMAD's data (R-11-8).

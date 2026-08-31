@@ -362,7 +362,7 @@ class TestSurfaceContract:
         )
         with pytest.raises(ValueError, match="unknown arm"):
             surface_mod.build_surface(
-                arm="goldpod",
+                arm="unsupported",
                 baseline_isolation=False,
                 environ={},
                 stores={sid: [] for sid in surface_mod.STORE_IDS},
@@ -1306,63 +1306,3 @@ class TestPreflightWiring:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout == "<refused>", result.stdout
-
-    def test_the_gold_arm_still_skips_the_whole_row(self, tmp_path):
-        """The boundary. Gold<->Blind treatment symmetry is a separate
-        blind-launch prerequisite; F-SCANG-4 extends what R7 compares for
-        the X9 pair and must NOT quietly start reporting on the campaign
-        arms. Fails if the surface layer runs under --arm goldpod."""
-        sdsc = tmp_path / "sdsc"
-        sdsc.mkdir()
-        for name in (
-            "campaign_preflight.sh",
-            "_import_resolution_probe.py",
-            "h100_posture.env",
-            "campaign_arm_symmetry.py",
-            "campaign_arm_surface.py",
-        ):
-            shutil.copy2(SDSC / name, sdsc / name)
-        launcher = sdsc / "launch_prior_baseline_experiment.sh"
-        launcher.write_text("#!/bin/sh\nexit 0\n")
-        launcher.chmod(0o755)
-        fake_python = tmp_path / "fakepython"
-        fake_python.write_text("#!/bin/sh\nexit 1\n")
-        fake_python.chmod(0o755)
-        root = tmp_path / "root"
-        root.mkdir()
-        result = subprocess.run(
-            [
-                "bash",
-                str(sdsc / "campaign_preflight.sh"),
-                "--workspace-root",
-                str(root),
-                "--arm",
-                "goldpod",
-                "--revision",
-                "deadbeefcafe",
-                "--skip_llm_smoke",
-                "--",
-                "--healthgate_mode",
-                "blocking",
-                "--result_authority",
-                "scientific",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env={
-                "PATH": "/usr/bin:/bin",
-                "HOME": str(tmp_path),
-                "SIDERIUS_PYTHON": str(fake_python),
-            },
-        )
-        r7_rows = [
-            line.strip()
-            for line in result.stdout.splitlines()
-            if line.strip().split(None, 2)[:2] in (["SKIP", "R7"], ["PASS", "R7"], ["FAIL", "R7"])
-        ]
-        assert r7_rows, result.stdout
-        assert all(row.startswith("SKIP") for row in r7_rows), r7_rows
-        assert not list(root.glob(".campaign_arm_surface_*.json")), (
-            "a gold preflight must not publish an arm surface"
-        )

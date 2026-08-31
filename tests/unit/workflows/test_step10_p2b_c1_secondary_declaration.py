@@ -300,10 +300,12 @@ class TestTheRunScopedBinding:
         ):
             assert resolve_bound_run_secondary_metrics() == ()
 
-    def test_a_None_composition_is_still_a_no_op(self):
-        with bind_run_task_composition(None) as composition:
-            assert composition is None
-            assert resolve_bound_run_secondary_metrics() == ()
+    def test_a_none_composition_is_refused(self):
+        from workflows.task_composition import TaskCompositionError
+
+        with pytest.raises(TaskCompositionError, match="task composition is required"):
+            with bind_run_task_composition(None):
+                pass
 
     def test_nested_runs_do_not_leak_into_each_other(self, tmp_path):
         outer = compose_run_task_bindings(str(_secondary_manifest(tmp_path / "outer")))

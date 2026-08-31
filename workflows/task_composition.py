@@ -2652,8 +2652,7 @@ def bind_run_task_composition(
     materialisation both happen before iteration 1 and both read the run's
     profile.
 
-    ``None`` activates only the bounded legacy TIDMAD compatibility adapter,
-    then yields ``None`` without setting a ContextVar. Real-task modules do
+    ``None`` is refused because supported runs require an explicit task declaration;
     not register merely because a composed child imported them.
 
     Every binding is token-reset through :class:`~contextlib.ExitStack`, so
@@ -2669,11 +2668,9 @@ def bind_run_task_composition(
     to arrive, which is the ambiguity this whole milestone removes.
     """
     if composition is None:
-        from execute_tools.task_data_path import bootstrap_legacy_tidmad_data_path
-
-        bootstrap_legacy_tidmad_data_path()
-        yield None
-        return
+        raise TaskCompositionError(
+            "a task composition is required; the framework does not select a scientific task"
+        )
 
     from execute_tools.data_paths import bind_physical_data_root
     from execute_tools.dataset_config import bind_dataset_profile
