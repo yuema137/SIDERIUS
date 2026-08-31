@@ -418,6 +418,23 @@ def _merge_output_json_for(args, payload: dict) -> None:
         print(f"Updated {args.output_json} with score.")
 
 
+def _require_composed_scoring_args(args: argparse.Namespace) -> None:
+    """Refuse a scoring child that was not launched from a task composition."""
+    required = {
+        "--task_manifest": args.task_manifest,
+        "--task_data_path_id": args.task_data_path_id,
+        "--dataset_profile_json": args.dataset_profile_json,
+        "--task_eval_scope_ref": args.task_eval_scope_ref,
+        "--task_eval_scope_digest": args.task_eval_scope_digest,
+    }
+    missing = [flag for flag, value in required.items() if value is None]
+    if missing:
+        raise ValueError(
+            "scoring requires an explicit task composition and transported "
+            f"evaluation scope; missing {', '.join(missing)}"
+        )
+
+
 def main(argv: list[str] | None = None) -> None:
     """Score ONE deliverable. The child's whole behaviour, in a function.
 
@@ -435,6 +452,7 @@ def main(argv: list[str] | None = None) -> None:
     is the evidence.
     """
     args = build_parser().parse_args(argv)
+    _require_composed_scoring_args(args)
 
     # ---------------------------------------------------------------------------
     # Deprecation notices for legacy flags
@@ -480,10 +498,7 @@ def main(argv: list[str] | None = None) -> None:
     # by the transported manifest and verifies the parent-pinned identity. The
     # uncomposed compatibility path is activated explicitly below.
     from execute_tools.deliverable_spec import derive_run_deliverable_spec
-    from execute_tools.evaluation_metric import (
-        NotScoreableResult,
-        derive_tidmad_metric,
-    )
+    from execute_tools.evaluation_metric import NotScoreableResult
 
     # Dataset Profile: supplied-but-broken fails closed, absent keeps Regime-A.
     if args.dataset_profile_json is not None:
@@ -539,12 +554,9 @@ def main(argv: list[str] | None = None) -> None:
     # subprocess. A composed run must NEVER silently score with TIDMAD's
     # metric — that is the C-P56-1 failure class one layer down, and a
     # fallback here would be indistinguishable from success.
-    if args.task_manifest is not None:
-        from workflows.task_composition import compose_metric_from_manifest
+    from workflows.task_composition import compose_metric_from_manifest
 
-        metric = compose_metric_from_manifest(args.task_manifest)
-    else:
-        metric = derive_tidmad_metric(dataset_profile, deliverable_spec)
+    metric = compose_metric_from_manifest(args.task_manifest)
 
     # Step 12 / PR-12d D4b — the TASK-OWNED scoring route.
     #
@@ -553,9 +565,8 @@ def main(argv: list[str] | None = None) -> None:
     # a metric call carrying all five. A composed task that declares its own
     # scope scores through ITS OWN metric instead, and the framework hands that
     # metric only what the framework legitimately owns.
-    if args.task_eval_scope_ref is not None:
-        _emit_task_owned_score(args, dataset_profile, metric, declared_naming=_declared_naming)
-        return
+    _emit_task_owned_score(args, dataset_profile, metric, declared_naming=_declared_naming)
+    return
 
     if args.denoising_model == "none":
         # RAW validation file — Step-02-owned INPUT topology, from the profile.
