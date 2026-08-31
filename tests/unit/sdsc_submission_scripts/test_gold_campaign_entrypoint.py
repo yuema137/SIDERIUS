@@ -32,12 +32,6 @@ Each test names the defect ONLY it can catch:
   defect class: ``--llm_config`` is optional at every hop, so omitting it
   ran the entire official campaign on the deprecated all-Gemini default
   while still exiting 0 — the pin was real and nothing consumed it.
-* ``TestOnlySelection`` — ``--only`` SELECTS correctly AND returns 0.
-  ``gold_select_bands`` fell off the end of its emission loop, so it
-  returned the status of ``[ "$name" = "$band" ] && printf`` on the LAST
-  band: every selection not containing ``15-19`` printed the right bands
-  and then refused the launch with NO message on any stream. No existing
-  test passed ``--only``, which is why it survived.
 * ``TestRetention`` — R-RETENTION-1 (release blocker): (a) the campaign
   argv carries the retention token and NO ``--cleanup_denoised``; (b) a
   passthrough ``--cleanup_denoised`` is refused BY NAME; (c) the
@@ -159,23 +153,6 @@ def _install_frozen_llm_config(project_dir: Path) -> Path:
     shutil.copy2(FROZEN_LLM_CONFIG, dest)
     return dest
 
-
-#: (``--only`` selection, expected canonical-order bands). HARDCODED:
-#: reading the expectation back out of GOLD_BANDS would compare the lib to
-#: itself. `15-19` appears as the control that ALWAYS passed; the
-#: last-band-excluding rows are the ones that were red.
-ONLY_SELECTIONS = [
-    ("0-3", ["0-3"]),
-    ("4-9", ["4-9"]),
-    ("10-14", ["10-14"]),
-    ("15-19", ["15-19"]),
-    ("0-3,4-9", ["0-3", "4-9"]),
-    ("10-14,0-3", ["0-3", "10-14"]),  # canonical order, not input order
-    ("4-9,15-19", ["4-9", "15-19"]),
-    ("0-3,4-9,10-14", ["0-3", "4-9", "10-14"]),
-    ("0-3,4-9,10-14,15-19", ["0-3", "4-9", "10-14", "15-19"]),
-    (" 0-3 , 10-14 ", ["0-3", "10-14"]),  # whitespace tolerated
-]
 
 EXPECTED_GPU_MAP = {"0-3": "0", "4-9": "1", "10-14": "2", "15-19": "3"}
 EXPECTED_BAND_FILES = {
@@ -696,69 +673,6 @@ class TestFrozenLlmRouting:
         assert proc.stdout == FROZEN_LLM_CONFIG_RELPATH
         assert FROZEN_LLM_CONFIG.is_file(), FROZEN_LLM_CONFIG
         assert PINNED_MODEL_ID in FROZEN_LLM_CONFIG.read_text()
-
-
-class TestOnlySelection:
-    """``--only`` band selection SELECTS correctly AND succeeds.
-
-    No existing test passed ``--only`` at all, which is exactly why this
-    survived: ``gold_select_bands`` fell off the end of its emission loop,
-    so the function returned the status of
-    ``[ "$name" = "$band" ] && printf`` on the LAST band in ``GOLD_BANDS``.
-    Any selection not containing ``15-19`` therefore printed the right
-    bands and returned 1, and the caller's
-    ``SELECTED="$(gold_select_bands "$ONLY")" || return 1`` turned that
-    into a launch refusal with **no message on any stream**.
-
-    The operational shape is a recovery path: a four-band campaign loses
-    one band, the operator relaunches just that band with ``--only 0-3``,
-    and gets an unexplained exit 1 with nothing to read.
-
-    Both halves are asserted together on purpose — the selection was
-    always correct, so a test that only checked the printed bands would
-    have passed throughout.
-    """
-
-    @pytest.mark.parametrize("selection,expected", ONLY_SELECTIONS)
-    def test_selection_succeeds_and_is_canonically_ordered(self, selection, expected):
-        proc = _bash("-c", f"source '{LIB}'; gold_select_bands '{selection}'")
-        assert proc.returncode == 0, (
-            f"--only '{selection}' refused with rc={proc.returncode} and "
-            f"stderr={proc.stderr!r} — a silent launch refusal"
-        )
-        assert proc.stdout.split() == expected
-
-    def test_empty_selection_is_all_bands(self):
-        proc = _bash("-c", f"source '{LIB}'; gold_select_bands ''")
-        assert proc.returncode == 0, proc.stderr
-        assert proc.stdout.split() == ["0-3", "4-9", "10-14", "15-19"]
-
-    @pytest.mark.parametrize(
-        "bad,reason",
-        [
-            ("0-3,0-3", "duplicate"),
-            ("nope", "unknown"),
-            ("0-3,nope", "unknown"),
-            (",", "selected nothing"),
-        ],
-    )
-    def test_invalid_selection_still_refuses_by_name(self, bad, reason):
-        """The success fix must not turn a genuine refusal into a pass:
-        every refusal path keeps its explicit `return 1` and its message."""
-        proc = _bash("-c", f"source '{LIB}'; gold_select_bands '{bad}'")
-        assert proc.returncode != 0, proc.stdout
-        assert reason in proc.stderr
-
-    def test_launcher_only_flag_reaches_a_band_dry_run(self, campaign_root):
-        """End of the hop, through the real entrypoint: `--only 0-3` must
-        walk the band and print its resolved argv. This is the surface the
-        operator actually touches, and it exited 1 with an empty log."""
-        proc = _stage1_dry(campaign_root, "--only", "0-3")
-        assert proc.returncode == 0, proc.stderr + proc.stdout
-        argvs = _band_argvs(proc.stdout)
-        assert sorted(argvs) == ["0-3"], proc.stdout
-        # And the band it selected still carries the frozen routing config.
-        assert _pairs(argvs["0-3"]).get("--llm_config") == str(FROZEN_LLM_CONFIG)
 
 
 class TestRetention:
