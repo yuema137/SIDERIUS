@@ -48,7 +48,7 @@ from workflows.task_composition import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 FOURTH_MANIFEST = FIXTURES / "fourth_task" / "composition.yaml"
-PETS_MANIFEST = FIXTURES / "pets" / "composition.yaml"
+QUICKSTART_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 
 @pytest.fixture(autouse=True)
@@ -184,8 +184,8 @@ class TestConsumerReachabilityMatrix:
     Each family is exercised through the expression its own production code
     uses, so this is reachability rather than a restatement of the seam test.
     The hazard it kills: a region that covers the proposer and the tuner while
-    the planner, a literature-review call or the interpreter reads the default
-    YAML from outside it — one run, two task descriptions, no error.
+    the planner, a literature-review call or the interpreter loses the bound
+    declaration — one run, inconsistent task descriptions, no error.
     """
 
     def test_all_five_families_read_the_composed_description(self, composition):
@@ -232,50 +232,48 @@ class TestConsumerReachabilityMatrix:
             ("interpreter", interpreter_rendered),
         ):
             assert "Spectrogram band-coverage" in rendered, f"{name} rendered the wrong task"
-            assert "SQUID" not in rendered, f"{name} rendered the LEGACY task description"
         assert implementor_value == composed
 
     def test_the_matrix_is_not_vacuous(self):
-        """Un-composed, those same expressions render the LEGACY description.
+        """Without a composition, the same reader refuses explicitly.
 
         Without this, the assertions above would pass on any fixture whose
         text happened to appear everywhere — including one where nothing was
         bound at all.
         """
-        from workflows.task_config import get_task_description, load_task_config
+        from workflows.task_config import load_task_config
 
-        legacy = get_task_description(load_task_config())
-        assert "Spectrogram band-coverage" not in legacy
+        with pytest.raises(ValueError, match="no task configuration is bound"):
+            load_task_config()
 
 
 class TestNoLeakAcrossRuns:
     """A missing token reset is invisible until the NEXT run inherits a task."""
 
     def test_composed_then_un_composed_leaves_nothing_bound(self, composition):
-        from execute_tools.dataset_config import TIDMAD_PROFILE, resolve_dataset_profile
         from execute_tools.evaluation_metric import resolve_bound_run_metric
         from execute_tools.task_data_path import active_task_data_path
-        from workflows.task_config import get_task_description, load_task_config
+        from workflows.task_config import load_task_config
 
         with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             pass
 
         assert active_task_data_path() is None
-        assert resolve_dataset_profile() is TIDMAD_PROFILE
         assert resolve_bound_run_metric() is None
-        assert "Spectrogram band-coverage" not in get_task_description(load_task_config())
+        with pytest.raises(ValueError, match="no task configuration is bound"):
+            load_task_config()
 
     def test_composed_A_then_composed_B_shows_no_contamination(self, composition):
         from execute_tools.dataset_config import resolve_dataset_profile
         from execute_tools.evaluation_metric import resolve_bound_run_metric
 
-        pets = compose_run_task_bindings(str(PETS_MANIFEST))
+        quickstart = compose_run_task_bindings(str(QUICKSTART_MANIFEST))
 
         with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             assert resolve_bound_run_metric().spec.id == "band_coverage_error"
-        with bind_run_task_composition(pets, physical_data_root=COMPOSED_TEST_DATA_ROOT):
+        with bind_run_task_composition(quickstart, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             assert resolve_bound_run_metric().spec.id == "accuracy"
-            assert resolve_dataset_profile() is pets.dataset_profile
+            assert resolve_dataset_profile() is quickstart.dataset_profile
         with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             assert resolve_bound_run_metric().spec.id == "band_coverage_error"
             assert resolve_dataset_profile() is composition.dataset_profile
@@ -283,27 +281,28 @@ class TestNoLeakAcrossRuns:
     def test_nested_runs_restore_the_outer_binding(self, composition):
         from execute_tools.evaluation_metric import resolve_bound_run_metric
 
-        pets = compose_run_task_bindings(str(PETS_MANIFEST))
+        quickstart = compose_run_task_bindings(str(QUICKSTART_MANIFEST))
         with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
-            with bind_run_task_composition(pets, physical_data_root=COMPOSED_TEST_DATA_ROOT):
-                assert resolve_bound_run_metric() is pets.metric
+            with bind_run_task_composition(quickstart, physical_data_root=COMPOSED_TEST_DATA_ROOT):
+                assert resolve_bound_run_metric() is quickstart.metric
             assert resolve_bound_run_metric() is composition.metric
 
     def test_an_exception_inside_the_region_still_unwinds_every_binding(self, composition):
         """The reason this is a ``finally``/token idiom and not a pair of
         assignments: a run that raises must not leave its task bound for
         whatever runs next in the same process."""
-        from execute_tools.dataset_config import TIDMAD_PROFILE, resolve_dataset_profile
         from execute_tools.evaluation_metric import resolve_bound_run_metric
         from execute_tools.task_data_path import active_task_data_path
+        from workflows.task_config import load_task_config
 
         with pytest.raises(RuntimeError, match="deliberate"):
             with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
                 raise RuntimeError("deliberate failure inside the run region")
 
         assert active_task_data_path() is None
-        assert resolve_dataset_profile() is TIDMAD_PROFILE
         assert resolve_bound_run_metric() is None
+        with pytest.raises(ValueError, match="no task configuration is bound"):
+            load_task_config()
 
 
 # ---------------------------------------------------------------------------
@@ -314,15 +313,19 @@ class TestNoLeakAcrossRuns:
 def _build(workspace: str, fingerprint: str | None, **kwargs):
     from core.run_invariants import build_run_invariants
 
-    invariants, _ = build_run_invariants(
-        resolved_data_scope=[0, 1],
-        health_gate_enabled=False,
-        health_gate_files=None,
-        health_checks_config=None,
-        workspace=workspace,
-        task_composition_fingerprint=fingerprint,
-        **kwargs,
-    )
+    composition = compose_run_task_bindings(str(QUICKSTART_MANIFEST))
+    with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
+        invariants, _ = build_run_invariants(
+            resolved_data_scope=[0, 1],
+            health_gate_enabled=False,
+            health_gate_files=None,
+            health_checks_config=None,
+            workspace=workspace,
+            task_composition_fingerprint=(fingerprint or composition.semantic_fingerprint),
+            **kwargs,
+        )
+    if fingerprint is None:
+        return invariants.model_copy(update={"task_composition_fingerprint": None})
     return invariants
 
 
@@ -398,27 +401,6 @@ class TestCompositionFingerprintInTheLock:
 
 
 class TestTaskHealthBindingPassThrough:
-    def test_an_un_composed_build_omits_the_binding_keyword(self, tmp_path, monkeypatch):
-        """08b's ``LEGACY_OMITTED`` is resolved by the keyword being ABSENT,
-        not by passing the enum — so the call shape is the contract."""
-        import core.run_invariants as ri
-
-        seen: dict = {}
-
-        def _spy(*args, **kwargs):
-            seen.update(kwargs)
-            return ("/tmp/effective.yaml", "sha")
-
-        monkeypatch.setattr("execute_tools.health_checks.config.materialize_effective_config", _spy)
-        ri.build_run_invariants(
-            resolved_data_scope=[0],
-            health_gate_enabled=True,
-            health_gate_files=None,
-            health_checks_config=None,
-            workspace=str(tmp_path),
-        )
-        assert "task_health_binding" not in seen
-
     def test_a_composed_build_passes_the_composed_binding(self, tmp_path, monkeypatch, composition):
         import core.run_invariants as ri
 
@@ -429,14 +411,16 @@ class TestTaskHealthBindingPassThrough:
             return ("/tmp/effective.yaml", "sha")
 
         monkeypatch.setattr("execute_tools.health_checks.config.materialize_effective_config", _spy)
-        ri.build_run_invariants(
-            resolved_data_scope=[0],
-            health_gate_enabled=True,
-            health_gate_files=None,
-            health_checks_config=None,
-            workspace=str(tmp_path),
-            health_materialization=ri.RunHealthMaterialization(
-                task_health_binding=composition.task_health_binding,
-            ),
-        )
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
+            ri.build_run_invariants(
+                resolved_data_scope=[0],
+                health_gate_enabled=True,
+                health_gate_files=None,
+                health_checks_config=None,
+                workspace=str(tmp_path),
+                task_composition_fingerprint=composition.semantic_fingerprint,
+                health_materialization=ri.RunHealthMaterialization(
+                    task_health_binding=composition.task_health_binding,
+                ),
+            )
         assert seen["task_health_binding"] == composition.task_health_binding

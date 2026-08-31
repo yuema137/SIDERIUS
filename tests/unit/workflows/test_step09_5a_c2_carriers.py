@@ -117,10 +117,14 @@ class TestImmutability:
 #:   concrete 0.1 defaults were dead transit (no tuner consumer) that made
 #:   "typed" indistinguishable from "defaulted", which is how the frozen
 #:   campaign portions failed to reach execution.
+#: * Repository separation (2026-08-31): literature-review science is owned by
+#:   the caller. ``None`` keeps review disabled unless an enabled run supplies
+#:   an explicit task-owned config; the framework ships no scientific default.
 POST_REFACTOR_DEFAULT_CHANGES: dict[str, object] = {
     "trial_portion": None,
     "train_portion": None,
     "eval_portion": None,
+    "lit_review_config_path": None,
 }
 
 #: * ``bypass_formal_time_budget_minutes`` — Lane F3 / F-BYPASS-WD-1: the

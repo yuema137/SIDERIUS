@@ -23,10 +23,8 @@ repository catches them:
   with hand-built fixture pairs, because a fingerprint that accidentally
   hashed an absolute path passes every test that never relocates anything.
 
-Four composition fixtures exercise the same contract on materially different
-tasks — TIDMAD (higher-is-better, in-tree module refs), Pets (higher,
-explicit Health, no interpretation blocks), DAVIS (**lower**-is-better), and
-a synthetic fourth task supplied entirely by out-of-tree plugin FILES.
+The framework-owned Quickstart and a synthetic external task exercise the same
+contract through different declarations and plugin files.
 """
 
 from __future__ import annotations
@@ -47,9 +45,7 @@ from workflows.task_composition import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 
-TIDMAD_MANIFEST = FIXTURES / "tidmad" / "composition.yaml"
-PETS_MANIFEST = FIXTURES / "pets" / "composition.yaml"
-DAVIS_MANIFEST = FIXTURES / "davis" / "composition.yaml"
+QUICKSTART_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 FOURTH_MANIFEST = FIXTURES / "fourth_task" / "composition.yaml"
 
 
@@ -74,50 +70,26 @@ def _clear_task_config_cache():
 # ---------------------------------------------------------------------------
 
 
-class TestThreeTrackCompositionMatrix:
+class TestFrameworkCompositionExamples:
     """Design §6: the same interface, different supplied values."""
 
-    def test_tidmad_composes_through_the_same_generic_loader(self):
-        """The compatibility id is an ORDINARY id. If TIDMAD needed a special
-        affordance to compose, "a fourth task needs zero framework edits"
-        would be untestable."""
-        composition = compose_run_task_bindings(str(TIDMAD_MANIFEST))
+    def test_quickstart_composes_through_the_public_loader(self):
+        composition = compose_run_task_bindings(str(QUICKSTART_MANIFEST))
 
-        assert composition.task_data_path_id == "tidmad"
-        assert composition.metric.spec.id == "tidmad_denoising_score"
-        assert composition.metric.spec.direction == "higher"
-        assert composition.dataset_profile.partition_count == 20
-        assert composition.interpretation_blocks is not None
-        assert composition.task_description.strip()
-
-    def test_pets_composes_with_an_explicit_health_family_and_no_task_blocks(self):
-        composition = compose_run_task_bindings(str(PETS_MANIFEST))
-
-        assert composition.task_data_path_id == "oxford_iiit_pet"
+        assert composition.task_data_path_id == "quickstart_tabular"
         assert composition.metric.spec.id == "accuracy"
         assert composition.metric.spec.direction == "higher"
-        assert str(composition.task_health_binding).endswith("task_health.yaml")
-        # 09b: a task that declares no interpretation prose renders nothing.
         assert composition.interpretation_blocks is None
+        assert composition.task_description.strip()
 
-    def test_davis_composes_with_a_lower_is_better_metric(self):
-        """The direction is a VALUE the declaration carries. Two of the four
-        fixtures are higher-is-better; if the loader had a default, this is
-        the test that would catch it."""
-        composition = compose_run_task_bindings(str(DAVIS_MANIFEST))
-
-        assert composition.task_data_path_id == "davis_future_prediction"
-        assert composition.metric.spec.id == "mse"
-        assert composition.metric.spec.direction == "lower"
-
-    def test_the_four_compositions_are_semantically_distinct(self):
-        """One fingerprint per task package. Four tasks colliding on one
+    def test_the_two_compositions_are_semantically_distinct(self):
+        """One fingerprint per task package. Two tasks colliding on one
         digest would make the resume guard vacuous."""
         fingerprints = {
             manifest.parent.name: compose_run_task_bindings(str(manifest)).semantic_fingerprint
-            for manifest in (TIDMAD_MANIFEST, PETS_MANIFEST, DAVIS_MANIFEST, FOURTH_MANIFEST)
+            for manifest in (QUICKSTART_MANIFEST, FOURTH_MANIFEST)
         }
-        assert len(set(fingerprints.values())) == 4, fingerprints
+        assert len(set(fingerprints.values())) == 2, fingerprints
 
 
 class TestFourthTaskNeedsNoFrameworkEdit:
@@ -191,11 +163,9 @@ class TestTaskDataPathIsResolvedExactlyOnce:
         """A class and a factory are both callable, and a class also answers
         ``task_data_path_id`` — so carrying the class would pass registration
         (its methods are callable) and then hand every consumer unbound
-        functions. Both ref forms are checked: the fourth task names a class
-        in a plugin file, TIDMAD names one in a module."""
-        for manifest in (FOURTH_MANIFEST, TIDMAD_MANIFEST):
-            impl = compose_run_task_bindings(str(manifest)).task_data_path
-            assert not isinstance(impl, type), f"{manifest.parent.name} carried the CLASS"
+        functions."""
+        impl = compose_run_task_bindings(str(FOURTH_MANIFEST)).task_data_path
+        assert not isinstance(impl, type), "composition carried the class instead of an instance"
 
     def test_the_id_is_read_FROM_the_resolved_object(self):
         """``task_data_path_id`` is a property over the resolved object, not a
@@ -469,7 +439,7 @@ class TestLegacyOmittedIsUnreachableFromAComposition:
     def test_no_composed_value_can_be_legacy_omitted(self, tmp_path):
         from execute_tools.health_checks._composition import HealthBindingState
 
-        for manifest in (TIDMAD_MANIFEST, PETS_MANIFEST, DAVIS_MANIFEST, FOURTH_MANIFEST):
+        for manifest in (QUICKSTART_MANIFEST, FOURTH_MANIFEST):
             binding = compose_run_task_bindings(str(manifest)).task_health_binding
             assert binding is not HealthBindingState.LEGACY_OMITTED
 

@@ -2694,7 +2694,7 @@ def run_workflow(
             lit_agent = MLLiteratureReviewAgent(
                 bridge_factory=bridge_factory,
                 root_cache_dir=os.path.join(
-                    workspace,
+                    bindings.workspace,
                     "cache",
                     "literature",
                     "root_papers",
