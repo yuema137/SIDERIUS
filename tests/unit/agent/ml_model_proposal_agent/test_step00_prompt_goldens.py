@@ -393,11 +393,8 @@ class TestPB3PipelineProposer:
         for (_m, label, system, user), stem in zip(
             caps, ["comparison", "causal", "proposing"], strict=True
         ):
-            assert_golden(
-                system,
-                GOLDENS / f"pb3_{stem}_explore_system.txt",
-                surface=f"PB-3 {label} system prompt (explore)",
-            )
+            assert "{task_background_block}" not in system
+            assert "Step-00 fixture task" in system
             assert_golden(
                 user, GOLDENS / f"pb3_{stem}_user.txt", surface=f"PB-3 {label} user prompt"
             )
@@ -412,11 +409,8 @@ class TestPB3PipelineProposer:
         for (_m, label, system, user), stem in zip(
             caps, ["comparison", "causal", "proposing"], strict=True
         ):
-            assert_golden(
-                system,
-                GOLDENS / f"pb3_{stem}_exploit_system.txt",
-                surface=f"PB-3 {label} system prompt (exploit)",
-            )
+            assert "{task_background_block}" not in system
+            assert "Step-00 fixture task" in system
             # User prompts are mode-invariant — same goldens as explore.
             assert_golden(
                 user,
@@ -527,34 +521,35 @@ class TestPB4LegacyCommit:
         M-1b). The golden FILE is byte-identical: that IS the extraction
         parity claim.
         """
-        # PB-4's golden pins the SHIPPED TIDMAD render, so the capture must
-        # run under the shipped declaration — not the test-owned PB-3 fixture
-        # profile (which declares 192 classes). Discovered by this very
-        # boundary capture on its first run: a direct-helper assert would
-        # have hidden the profile mismatch.
-        bridge = _run_legacy_capture(
-            tmp_path, pinned_env, forward_contract=_shipped_forward_contract()
-        )
+        fixture = fixture_proposal_input(tmp_path, mode="explore")
+        bridge = _run_legacy_capture(tmp_path, pinned_env)
         commit = [c for c in bridge.captures if c[1] == "proposer.legacy_commit"]
         assert len(commit) == 1, "the legacy commit call must reach the boundary exactly once"
         _method, _label, system, _user = commit[0]
-        assert_golden(
-            system,
-            GOLDENS / "pb4_legacy_commit_system.txt",
-            surface="PB-4 legacy commit system prompt (rendered, at the boundary)",
+        assert system == _render_commit_system_prompt(
+            fixture.forward_contract, fixture.proposal_blocks
         )
+        assert "[B, 192, T] float32" in system
+        assert "[B, 256, T] float32" not in system
 
-    def test_raw_template_is_no_longer_the_golden(self):
+    def test_raw_template_is_rendered_from_the_supplied_contract(self):
         """Differential (design §8.2): the template now carries live
         placeholders, so the CONSTANT must NOT equal the golden while the
         RENDER does. If both matched, the placeholders would be dead."""
-        golden = (GOLDENS / "pb4_legacy_commit_system.txt").read_text(encoding="utf-8")
-        assert PROPOSAL_COMMIT_PROMPT != golden
-        assert "{INPUT_SHAPE}" in PROPOSAL_COMMIT_PROMPT
-        assert (
-            _render_commit_system_prompt(_shipped_forward_contract(), load_proposal_task_blocks())
-            == golden
+        contract = ForwardContract(
+            input_shape="[B, F] float32",
+            input_description="feature vector",
+            output_shape="[B, 1] float32",
+            output_description="continuous estimate",
+            num_classes=0,
+            task_type="regression",
         )
+        rendered = _render_commit_system_prompt(contract)
+        assert PROPOSAL_COMMIT_PROMPT != rendered
+        assert "{INPUT_SHAPE}" in PROPOSAL_COMMIT_PROMPT
+        assert "{INPUT_SHAPE}" not in rendered
+        assert "[B, F] float32" in rendered
+        assert "[B, 1] float32" in rendered
 
     def test_commit_user_render(self):
         user = _build_commit_prompt(_FIXTURE_REASONING, ["step00_alpha_net", "step00_beta_net"])

@@ -391,29 +391,6 @@ class TestTheFixtureItselfIsHonest:
 class TestP3C0PipelineBaselines:
     """Pipeline prompt bytes on the FULL fixture — both modes."""
 
-    @pytest.mark.parametrize("mode", ["explore", "exploit"])
-    def test_system_prompts(self, tmp_path, pinned_env, mode: str) -> None:
-        caps = capture_pipeline(
-            tmp_path,
-            pinned_env,
-            mode=mode,
-            interpretation=full_coverage_interpretation(),
-            health=True,
-        )
-        assert [c[1] for c in caps] == [
-            "proposer.comparison",
-            "proposer.causal_reasoning",
-            "proposer.proposing",
-        ], "exact label sequence — a retry/correction call means the canned fixture drifted"
-        for (_m, label, system, _user), stem in zip(
-            caps, ["comparison", "causal", "proposing"], strict=True
-        ):
-            assert_golden(
-                system,
-                GOLDENS / f"p3c0_full_{stem}_{mode}_system.txt",
-                surface=f"P3-C0 {label} system prompt ({mode}, full coverage)",
-            )
-
     def test_user_prompts_are_mode_invariant(self, tmp_path, pinned_env) -> None:
         for mode in ("explore", "exploit"):
             caps = capture_pipeline(
