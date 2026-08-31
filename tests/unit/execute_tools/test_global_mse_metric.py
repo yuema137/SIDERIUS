@@ -1,15 +1,14 @@
-"""GlobalMseMetric — Step-06 instance #3 (D14-3 C5).
+"""GlobalMseMetric arithmetic and declared-spec rebinding.
 
 What only this suite catches: the frozen aggregation degrading into a
 mean-of-means (which differs from the global mean whenever samples have
 unequal sizes — the discriminating case is built here), a partial dense
-deliverable being scored anyway, a silent shape mismatch, and the DAVIS
+deliverable being scored anyway, a silent shape mismatch, and a generic
 declaration failing to rebind to an executable spec.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -24,12 +23,19 @@ from execute_tools.evaluation_metric import (
     metric_spec_from_declaration,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DECLARED = REPO_ROOT / "examples" / "davis_future_prediction" / "declared" / "metric_mse.json"
+DECLARATION = {
+    "id": "mse",
+    "direction": "lower",
+    "aggregation": "global_mean_squared_error_over_all_declared_elements",
+    "transform": "identity",
+    "transform_params": {},
+    "references": [],
+    "scoreability": {"contract_id": "deliverable_presence"},
+}
 
 
 def _spec() -> MetricSpec:
-    return metric_spec_from_declaration(json.loads(DECLARED.read_text(encoding="utf-8")))
+    return metric_spec_from_declaration(DECLARATION)
 
 
 def _deliverable(tmp_path: Path) -> str:
@@ -112,10 +118,10 @@ class TestHandleOrder:
 
 
 class TestDeclarationRebind:
-    def test_the_committed_davis_declaration_rebinds_exactly(self):
+    def test_a_generic_declaration_rebinds_exactly(self):
         spec = _spec()
         assert spec.id == "mse"
         assert spec.direction == "lower"
-        assert spec.aggregation == "global_mean_squared_error_over_clips_x_C_x_T_x_H_x_W"
+        assert spec.aggregation == "global_mean_squared_error_over_all_declared_elements"
         assert isinstance(spec.scoreability, PresenceScoreabilityContract)
-        assert spec.model_dump(mode="json") == json.loads(DECLARED.read_text(encoding="utf-8"))
+        assert spec.model_dump(mode="json") == DECLARATION

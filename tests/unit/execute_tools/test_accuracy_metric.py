@@ -1,15 +1,12 @@
-"""AccuracyMetric + declared-spec rebinding (D14-2 C5).
+"""AccuracyMetric arithmetic and declared-spec rebinding.
 
 What only this suite catches: accuracy arithmetic drifting off the declared
 aggregation (truth-denominated, missing prediction = not correct), the
-handle's scoreability-before-arithmetic order breaking for instance #2, and
+handle's scoreability-before-arithmetic order breaking, and
 the declaration→spec rebind inventing or losing metric identity.
 """
 
 from __future__ import annotations
-
-import json
-from pathlib import Path
 
 import pytest
 
@@ -23,12 +20,19 @@ from execute_tools.evaluation_metric import (
     scoreability_contract_from_declaration,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DECLARED = REPO_ROOT / "examples" / "oxford_iiit_pet" / "declared" / "metric_accuracy.json"
+DECLARATION = {
+    "id": "accuracy",
+    "direction": "higher",
+    "aggregation": "fraction_correct_over_declared_evaluation_rows",
+    "transform": "identity",
+    "transform_params": {},
+    "references": [],
+    "scoreability": {"contract_id": "deliverable_presence"},
+}
 
 
 def _spec() -> MetricSpec:
-    return metric_spec_from_declaration(json.loads(DECLARED.read_text(encoding="utf-8")))
+    return metric_spec_from_declaration(DECLARATION)
 
 
 class TestArithmetic:
@@ -77,14 +81,13 @@ class TestHandleOrder:
 
 
 class TestDeclarationRebind:
-    def test_the_committed_declaration_rebinds_exactly(self):
+    def test_a_generic_declaration_rebinds_exactly(self):
         spec = _spec()
         assert spec.id == "accuracy"
         assert spec.direction == "higher"
-        assert spec.aggregation == "fraction_correct_over_final_eval_images"
+        assert spec.aggregation == "fraction_correct_over_declared_evaluation_rows"
         assert isinstance(spec.scoreability, PresenceScoreabilityContract)
-        # Round-trip: the rebound spec re-serializes to the committed payload.
-        assert spec.model_dump(mode="json") == json.loads(DECLARED.read_text(encoding="utf-8"))
+        assert spec.model_dump(mode="json") == DECLARATION
 
     def test_unknown_contract_id_fails_closed_naming_the_vocabulary(self):
         with pytest.raises(ValueError, match="deliverable_presence"):
