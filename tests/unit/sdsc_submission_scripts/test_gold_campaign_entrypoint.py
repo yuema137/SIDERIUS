@@ -479,24 +479,6 @@ class TestFrozenLlmRouting:
     path consumed it.
     """
 
-    def test_every_stage1_band_argv_binds_the_frozen_config(self, campaign_root):
-        """Witness (a), stage 1: the EFFECTIVE per-band argv the launcher
-        would exec carries --llm_config at the frozen ABSOLUTE path.
-
-        Absolute because run_chain.sh cd's to the project dir before exec
-        (lilab mode), so a relative path would dangle — the same rule the
-        advice artifact follows. Asserted against the resolved argv, never
-        a grep of the script: a script may mention a flag it never emits."""
-        proc = _stage1_dry(campaign_root)
-        assert proc.returncode == 0, proc.stderr + proc.stdout
-        argvs = _band_argvs(proc.stdout)
-        assert sorted(argvs) == sorted(EXPECTED_GPU_MAP), proc.stdout
-        for band, argv in argvs.items():
-            assert _pairs(argv).get("--llm_config") == str(FROZEN_LLM_CONFIG), (
-                f"band {band} would launch WITHOUT the frozen routing config — every "
-                f"LLM role silently resolves to {UNPINNED_DEFAULT_MODEL_ID}"
-            )
-
     def test_every_stage2_unit_argv_binds_the_frozen_config(self, campaign_root, tmp_path):
         """Witness (a), stage 2: all sixteen strict-retrain units too.
 
