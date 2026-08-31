@@ -24,17 +24,21 @@ selects ``mode="formal"``.
 
 from __future__ import annotations
 
-import json
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
-from execute_tools.dataset_config import DataScope
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from tests.helpers.scoring_stubs import stub_scoring
+from workflows.task_composition import (
+    bind_run_task_composition,
+    build_task_composition_ref,
+    compose_run_task_bindings,
+)
 
 from .test_tuning_agent import (
     FAKE_REFLECT_RESPONSE,
@@ -42,19 +46,21 @@ from .test_tuning_agent import (
     _synth_reference,
 )
 
-# A full permutation of DataScope 4-9, deliberately NOT ascending: an
+# A full permutation of the Quickstart scope, deliberately NOT ascending: an
 # ascending order would make a sorting bug invisible.
-PERMUTATION = [9, 7, 5, 4, 8, 6]
-SCOPE_SPEC = "4-9"
+PERMUTATION = [3, 1, 0, 2]
+QUICKSTART_MANIFEST = (
+    Path(__file__).resolve().parents[4] / "configs" / "task_composition" / "quickstart.yaml"
+)
 
 # is_trial=False is what selects formal mode once trial_allowed is true.
 FORMAL_PLAN_RESPONSE = {
-    "model_type": "punet",
+    "model_type": "quickstart_reference_mlp",
     "hypothesis": "Formal round with a forced sequential ordering.",
     "reasoning": "Exercise the formal branch.",
-    "model_config": {"depth": 4, "segmentation_size": 40000, "batch_size": 1},
+    "model_config": {"hidden_dim": 16, "segmentation_size": 4, "batch_size": 1},
     "train_config": {"epochs": 1, "lr": 1e-4},
-    "loss_config": {"loss_type": "focal", "gamma": 2.0},
+    "loss_config": {"loss_type": "ce", "reduction": "mean"},
     "is_trial": False,
 }
 
@@ -94,27 +100,26 @@ def formal_round(tmp_path):
         mock_sandbox = MockSandbox.return_value
         mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
         mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
-        # ``is_trial=True`` (needed for trial_allowed, which is what makes
-        # formal mode reachable) triggers the tuner's anchor-map preload, so
-        # a minimal valid map must exist. The formal path uses the
-        # 'snapshot' strategy and never reads the anchors themselves.
-        data_dir = tmp_path / "anchor_data"
+        data_dir = tmp_path / "quickstart_data"
         data_dir.mkdir(exist_ok=True)
-        (data_dir / "segment_anchors.json").write_text(
-            json.dumps({"s_max": 1.0, "anchors": {str(i): [1.0] for i in range(4, 10)}})
-        )
-        mock_sandbox.dirs = {"configs": configs_dir, "data": str(data_dir)}
+        deliverable_dir = tmp_path / "deliverables"
+        deliverable_dir.mkdir(exist_ok=True)
+        mock_sandbox.base_dir = str(deliverable_dir)
+        mock_sandbox.dirs = {
+            "configs": configs_dir,
+            "data": str(data_dir),
+            "denoised": str(deliverable_dir),
+        }
         # The multi-file scoring path (`file_vector, scalar = score_vector(...)`)
         # is reached only in trial/formal mode; the legacy single-file tests
         # never hit it, so the shared MagicMock sandbox has no return value for
-        # it. Length-20 vector with values only inside the resolved scope.
-        _fv = [None] * 20
-        for _i in range(4, 10):
-            _fv[_i] = 1.75
+        # it. The framework-owned Quickstart example has four partitions.
+        _fv = [1.75] * 4
         stub_scoring(mock_sandbox, _fv, 1.75)
 
+        composition = compose_run_task_bindings(str(QUICKSTART_MANIFEST))
         agent_input = HyperparamTuningInput(
-            model_type="punet",
+            model_type="quickstart_reference_mlp",
             run_name="formal_ordering_test",
             max_rounds=1,
             attempts_per_round=1,
@@ -122,13 +127,12 @@ def formal_round(tmp_path):
             max_fail_rounds=1,
             # trial_allowed=True; the plan's is_trial=False then selects formal.
             is_trial=True,
-            # Scope 4-9 so PERMUTATION is a full permutation of it. Gates are
-            # disabled to keep this test on the ordering contract rather than
-            # DS8's health_gate_files pairing.
-            data_scope=DataScope.from_cli(SCOPE_SPEC),
+            # Quickstart declares four partitions, so PERMUTATION covers the
+            # complete task domain without inventing task-specific subset syntax.
             health_gate_enabled=False,
             order_strategy_override="sequential",
             file_order_override=PERMUTATION,
+            task_composition_ref=build_task_composition_ref(composition),
             llm_provider="gemini",
             llm_model_id="test-model",
             storage=StorageConfig(
@@ -137,7 +141,8 @@ def formal_round(tmp_path):
             ),
             progress_bar=False,
         )
-        HyperparamTuningAgent().run(agent_input)
+        with bind_run_task_composition(composition, physical_data_root=str(data_dir)):
+            HyperparamTuningAgent().run(agent_input)
 
     assert captured, "training_skill was never dispatched"
     assert saved_records, "no record was persisted"
