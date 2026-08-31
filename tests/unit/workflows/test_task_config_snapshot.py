@@ -3,38 +3,44 @@ Unit tests for the task config snapshot helper in
 ``workflows/model_exploration.py`` (Commit T1b).
 
 The helper :func:`workflows.model_exploration._snapshot_task_config` is the
-one-line dependency of ``run_workflow`` that copies the active
-``configs/task_config.yaml`` into ``{workspace}/{run_name}/task_config_snapshot.yaml``
-exactly once per chain — see ``docs/design/enable_global_task_config.md``
-§ Commit T1b.
+one-line dependency of ``run_workflow`` that serializes the active task
+binding into ``{workspace}/{run_name}/task_config_snapshot.yaml`` exactly
+once per chain.
 
 These tests exercise the helper directly so we don't have to stand up the
 full agent loop.
 
 Covered behaviours:
-  1. Clean ``run_dir`` → snapshot is written, content is byte-identical to
-     the source ``configs/task_config.yaml``.
+  1. Clean ``run_dir`` → the active binding is written.
   2. Pre-existing snapshot → helper does NOT overwrite it (chain-mode
      iter 2+ semantics: the snapshot reflects the config active when the
      run was initialized, not whatever the operator edited mid-chain).
-  3. The source path resolves relative to ``SIDERIUS_ROOT`` (anchored to
-     the repo root), not the process cwd — verified by running the helper
-     from a tmp cwd and confirming the snapshot still gets the committed
-     repo content.
+  3. Snapshotting is independent of the process cwd.
 """
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
+import yaml
 
-from workflows.model_exploration import SIDERIUS_ROOT, _snapshot_task_config
+from workflows.model_exploration import _snapshot_task_config
+from workflows.task_config import bind_task_config
 
-_REPO_TASK_CONFIG = os.path.join(SIDERIUS_ROOT, "configs", "task_config.yaml")
+TASK_CONFIG = {
+    "task_description": "Predict a scalar response from a compact feature vector.",
+    "forward_contract": {
+        "input_shape": "[B, F] float32",
+        "input_description": "compact feature vector",
+        "output_shape": "[B, 1] float32",
+        "output_description": "continuous scalar response",
+        "num_classes": 0,
+        "task_type": "regression",
+    },
+}
 
 
-def _read(path: str | os.PathLike[str]) -> bytes:
-    return Path(path).read_bytes()
+def _snapshot_bound_config(run_dir) -> None:
+    with bind_task_config(TASK_CONFIG):
+        _snapshot_task_config(str(run_dir))
 
 
 class TestSnapshotTaskConfig:
@@ -45,19 +51,19 @@ class TestSnapshotTaskConfig:
         snapshot = run_dir / "task_config_snapshot.yaml"
         assert not snapshot.exists(), "fixture setup error: snapshot pre-existed"
 
-        _snapshot_task_config(str(run_dir))
+        _snapshot_bound_config(run_dir)
 
         assert snapshot.exists(), "helper did not write the snapshot"
 
-    def test_snapshot_is_byte_identical_to_source(self, tmp_path):
-        """The snapshot content matches the committed configs/task_config.yaml
-        byte-for-byte — uses shutil.copy2, not a re-serialise pass."""
+    def test_snapshot_semantically_matches_active_binding(self, tmp_path):
+        """The snapshot records the active task declaration."""
         run_dir = tmp_path / "ws" / "run_alpha"
         run_dir.mkdir(parents=True)
 
-        _snapshot_task_config(str(run_dir))
+        _snapshot_bound_config(run_dir)
 
-        assert _read(run_dir / "task_config_snapshot.yaml") == _read(_REPO_TASK_CONFIG)
+        snapshot = yaml.safe_load((run_dir / "task_config_snapshot.yaml").read_text())
+        assert snapshot == TASK_CONFIG
 
     def test_existing_snapshot_is_not_overwritten(self, tmp_path):
         """Chain-mode iter 2+ semantics: a pre-existing snapshot survives a
@@ -70,19 +76,15 @@ class TestSnapshotTaskConfig:
         sentinel = b"# sentinel content set by iter 1\n"
         snapshot.write_bytes(sentinel)
 
-        _snapshot_task_config(str(run_dir))
+        _snapshot_bound_config(run_dir)
 
-        assert _read(snapshot) == sentinel, (
+        assert snapshot.read_bytes() == sentinel, (
             "helper overwrote an existing snapshot — chain-mode iter 2+ would "
             "silently lose the iter-1 provenance"
         )
 
-    def test_source_path_is_resolved_relative_to_repo_root_not_cwd(self, tmp_path, monkeypatch):
-        """Helper anchors the source path on SIDERIUS_ROOT so integration
-        tests that don't chdir into the repo root still pick up the
-        committed config."""
-        # chdir into a tmp dir that has no configs/ subtree at all — a
-        # cwd-relative copy would raise FileNotFoundError here.
+    def test_active_binding_is_independent_of_cwd(self, tmp_path, monkeypatch):
+        """The helper does not look for an ambient cwd-relative task file."""
         foreign_cwd = tmp_path / "foreign_cwd"
         foreign_cwd.mkdir()
         monkeypatch.chdir(foreign_cwd)
@@ -90,9 +92,7 @@ class TestSnapshotTaskConfig:
         run_dir = tmp_path / "ws" / "run_alpha"
         run_dir.mkdir(parents=True)
 
-        _snapshot_task_config(str(run_dir))
+        _snapshot_bound_config(run_dir)
 
-        # The snapshot must exist + carry the REPO content (not whatever
-        # might happen to live in the foreign cwd).
-        assert (run_dir / "task_config_snapshot.yaml").exists()
-        assert _read(run_dir / "task_config_snapshot.yaml") == _read(_REPO_TASK_CONFIG)
+        snapshot = yaml.safe_load((run_dir / "task_config_snapshot.yaml").read_text())
+        assert snapshot == TASK_CONFIG
