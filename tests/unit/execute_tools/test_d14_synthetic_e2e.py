@@ -1,17 +1,15 @@
 """D14-1 C5 — full-surface synthetic end-to-end through the REAL engine.
 
-The claim (child §5 C5): a task that shares nothing with TIDMAD — in-memory
+The claim (child §5 C5): a task with in-memory
 samples, list-of-string-ids scope, scalar-int target vs vector-float output —
 trains through the PRODUCTION `run_experiment_streaming` body via the
 run-scoped TaskDataPath binding, and completes the four-method surface
-(train → outputs → deliverable → payload) with zero TIDMAD code touched on
-the data path. Plus the deterministic FAIL-CLOSED negative: the same
-synthetic scope under regime-A (a missed binding) fails LOUDLY on TIDMAD's
-scope check — never a silent train on TIDMAD's path.
+(train → outputs → deliverable → payload) through the declared data path.
+The deterministic negative proves that the same synthetic scope with a missed
+binding fails loudly before training rather than selecting an implicit task.
 
 In-process and deterministic: unit-owned per the #221 layer doctrine — this
-is structural genericity evidence, not a fake Gate 2 (the real TIDMAD
-lifecycle stays Gate 2's, run at C2a/C6).
+is structural genericity evidence, not a hardware qualification.
 """
 
 from __future__ import annotations
@@ -39,12 +37,13 @@ from execute_tools.task_data_path import (
     EpochSamplingParams,
     EvalMaterializationParams,
     EvaluationReadRequest,
+    TaskDataPathResolutionError,
     bind_task_data_path,
 )
 from ml_models.models_format_sandbox import LossConfig, TrainConfig
 
 # ---------------------------------------------------------------------------
-# The synthetic task: three independent axes away from TIDMAD (child §3)
+# The synthetic task exercises independent input, target, and output axes.
 # ---------------------------------------------------------------------------
 
 
@@ -106,9 +105,8 @@ _MODEL_TYPE = "synthetic_tiny_classifier"
 def _synthetic_contract() -> ModelIOContract:
     """The task's declared boundary: float32 [B, 4] in, float32 [B, 2] out.
 
-    The contract — not any TIDMAD default — is the engine's dtype authority
-    (Step 03); without it, regime-A resolution would cast the float inputs to
-    TIDMAD's int site preference.
+    The contract is the engine's dtype authority (Step 03); no implicit task
+    preference may reinterpret these float inputs.
     """
 
     def axis(role, **dim) -> TensorAxis:
@@ -154,7 +152,7 @@ class TestSyntheticEndToEnd:
                 model_cfg,
                 train_cfg,
                 loss_cfg,
-                sample_set={},  # legacy TIDMAD argument, unused by the seam path
+                sample_set={},  # compatibility argument, unused by the seam path
                 data_dir=str(tmp_path),
                 sandbox_dirs=sandbox_dirs,
                 exp_id="synth_e2e_1",
@@ -208,7 +206,7 @@ class TestSyntheticEndToEnd:
         assert all(len(row["output"]) == 2 for row in payload)
 
     def test_explicit_eval_scope_produces_real_r3_through_the_engine(self, synthetic_engine_setup):
-        """D14-2 C5b: an EXPLICIT task_eval_scope (no TIDMAD eval_sample_set)
+        """D14-2 C5b: an explicit task-owned evaluation scope
         triggers the REAL per-epoch R3 pass — validation_objective rows land
         in training_history with requested == materialized pinned by the
         caller's declaration."""
@@ -278,16 +276,10 @@ class TestSyntheticEndToEnd:
             histories.append(results["loss_history"])
         assert histories[0] == histories[1]
 
-    def test_missed_binding_fails_closed_never_trains_on_tidmad_path(self, synthetic_engine_setup):
-        """THE deterministic negative (parent §3, child §8.1 trap 2): the
-        synthetic scope under regime-A has no task implementation to resolve.
-        The framework refuses before any epoch runs or artifact is persisted."""
+    def test_missed_binding_fails_closed_before_training(self, synthetic_engine_setup):
+        """A synthetic scope cannot execute without a declared task data path."""
         model_cfg, train_cfg, loss_cfg, sandbox_dirs, tmp_path = synthetic_engine_setup
-        # NO bind_task_data_path: regime-A. The engine will resolve the
-        from execute_tools.task_data_path import bootstrap_legacy_tidmad_data_path
-
-        bootstrap_legacy_tidmad_data_path()
-        with pytest.raises(TypeError, match="TidmadScope"):
+        with pytest.raises(TaskDataPathResolutionError, match="No task data path is bound"):
             tes.run_experiment_streaming(
                 model_cfg,
                 train_cfg,
