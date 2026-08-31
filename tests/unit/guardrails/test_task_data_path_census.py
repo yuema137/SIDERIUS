@@ -1,18 +1,4 @@
-"""D14-1 C5 — the no-dual-path AST census and the task-identity guardrail.
-
-Child §5 C5: after the relocation (C2b-C4) there is ONE way to reach TIDMAD's
-executable data path — through the registry-resolved ``TaskDataPath``. The
-compat re-export is import-compat only, so this census counts *constructions
-and codec CALLS*, never imports (child §8). Counts are pinned EXACTLY: a new
-direct construction or codec call anywhere in production — including a second
-one inside a sanctioned file — is a dual path and fails here.
-
-The task-identity guardrail (parent §3.1 capability-key row: "the framework
-never inspects the id's spelling") extends the token discipline to the
-data-path surface for the D14 task family (``tidmad|pet|davis``): no
-production comparison against those literals on the surface files. The
-surface list GROWS at D14-2/3 when the pets/davis packs land.
-"""
+"""Permanent task-data-path binding and task-identity guardrails."""
 
 from __future__ import annotations
 
@@ -21,37 +7,9 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
-#: Production roots the construction/codec census walks (tests excluded by
-#: construction — the census is about PRODUCTION dual paths).
-_PRODUCTION_ROOTS = (
-    "execute_tools",
-    "core",
-    "nodes",
-    "agent",
-    "workflows",
-    "ml_models",
-    "scripts",
-    "dashboard",
-    "tools",
-    "sdsc_submission_scripts",
-)
-
-#: file (repo-relative) -> exact allowed number of CALLS.
-_ALLOWED_DATASET_CONSTRUCTIONS = {
-    "execute_tools/tidmad_data_path.py": 2,  # training_dataset + validation_dataset
-}
-_ALLOWED_CREATE_ABRA_CALLS = {
-    "execute_tools/tidmad_data_path.py": 1,  # write_deliverable delegation
-    # The fix-mode (baseline) single-file writer: baseline deliverables carry
-    # no run/exp identity, which the seam request requires (C4 ledger).
-    "execute_tools/inference_single.py": 1,
-}
-
 #: The data-path surface for the task-identity token guardrail.
-#: GROWS with each task pack (D14-2 added the Pets implementation).
 _DATA_PATH_SURFACE = (
     "execute_tools/task_data_path.py",
-    "execute_tools/tidmad_data_path.py",
     "execute_tools/train_engine_sandbox.py",
     "execute_tools/inference_single.py",
     "execute_tools/denoising_score_single.py",
@@ -65,15 +23,6 @@ _DATA_PATH_SURFACE = (
 )
 
 _TASK_NAME_TOKENS = {"tidmad", "pet", "pets", "davis"}
-
-
-def _production_files() -> list[Path]:
-    files: list[Path] = []
-    for root in _PRODUCTION_ROOTS:
-        base = _REPO_ROOT / root
-        if base.exists():
-            files.extend(p for p in base.rglob("*.py") if "__pycache__" not in p.parts)
-    return files
 
 
 def _call_name(node: ast.Call) -> str | None:
@@ -91,32 +40,6 @@ def _count_calls(tree: ast.AST, name: str) -> int:
 
 
 class TestNoDualPath:
-    def test_tidmad_epoch_dataset_constructed_only_inside_the_owner(self):
-        violations: list[str] = []
-        for path in _production_files():
-            rel = path.relative_to(_REPO_ROOT).as_posix()
-            count = _count_calls(ast.parse(path.read_text(encoding="utf-8")), "TIDMADEpochDataset")
-            allowed = _ALLOWED_DATASET_CONSTRUCTIONS.get(rel, 0)
-            if count != allowed:
-                violations.append(f"{rel}: {count} construction(s), {allowed} allowed")
-        assert not violations, (
-            "TIDMADEpochDataset must be constructed ONLY by the TIDMAD "
-            f"TaskDataPath implementation (dual-path census): {violations}"
-        )
-
-    def test_create_abra_file_called_only_at_sanctioned_sites(self):
-        violations: list[str] = []
-        for path in _production_files():
-            rel = path.relative_to(_REPO_ROOT).as_posix()
-            count = _count_calls(ast.parse(path.read_text(encoding="utf-8")), "create_abra_file")
-            allowed = _ALLOWED_CREATE_ABRA_CALLS.get(rel, 0)
-            if count != allowed:
-                violations.append(f"{rel}: {count} call(s), {allowed} allowed")
-        assert not violations, (
-            "create_abra_file (the deliverable byte codec) may be CALLED only "
-            f"at the sanctioned sites (dual-path census): {violations}"
-        )
-
     def test_the_production_path_goes_through_the_resolved_binding(self):
         """Delete-the-hop detector (static half; the synthetic e2e is the
         dynamic half): each relocated caller must reach the data path through
@@ -135,9 +58,7 @@ class TestNoDualPath:
             (_REPO_ROOT / "execute_tools/inference_single.py").read_text(encoding="utf-8")
         )
         assert (
-            _count_calls(inference, "resolve_child_task_data_path")
-            + _count_calls(inference, "bootstrap_legacy_tidmad_data_path")
-            >= 1
+            _count_calls(inference, "resolve_child_task_data_path") >= 1
         )
         assert _count_calls(inference, "write_deliverable") >= 1
 
@@ -167,8 +88,7 @@ class TestTaskIdentityGuardrail:
     def test_no_task_name_literal_comparison_on_the_data_path_surface(self):
         """The framework resolves ids by LOOKUP; nothing on the surface may
         branch on the spelling of a task name (``tidmad|pet|davis``). The
-        declared ``TIDMAD_COMPATIBILITY_ID`` constant is a declaration, not a
-        comparison, and does not match here."""
+        declarations are resolved by registry lookup rather than spelling."""
         violations: list[str] = []
         for rel in _DATA_PATH_SURFACE:
             tree = ast.parse((_REPO_ROOT / rel).read_text(encoding="utf-8"))
@@ -200,17 +120,9 @@ class TestTaskIdentityGuardrail:
         believe the area is covered. That is the F-P2b-4 shape: a census
         green for the wrong reason.
 
-        Import-time real-task bootstrap is forbidden. The remaining TIDMAD
-        imports are explicit legacy codec/dataset dependencies and the one
-        bounded compatibility adapter; Pets and DAVIS reach children only
-        through transported manifests. The exact residue is pinned so adding
-        a task import or removing the final legacy dependency is deliberate.
+        Import-time real-task bootstrap is forbidden. Every task reaches the
+        child only through its transported manifest.
         """
-        expected = {
-            "execute_tools/train_engine_sandbox.py",
-            "execute_tools/inference_single.py",
-            "execute_tools/task_data_path.py",
-        }
         found: dict[str, set[str]] = {}
         for rel in _DATA_PATH_SURFACE:
             tree = ast.parse((_REPO_ROOT / rel).read_text(encoding="utf-8"))
@@ -227,11 +139,4 @@ class TestTaskIdentityGuardrail:
             if names:
                 found[rel] = names
 
-        assert set(found) == expected, (
-            "task-implementation imports appeared on a data-path surface that "
-            f"has no bootstrap role, or a bootstrap disappeared: {sorted(found)}"
-        )
-        for rel, names in found.items():
-            assert names == {"execute_tools.tidmad_data_path"}, (
-                f"{rel} imports an unexpected real task: {sorted(names)}"
-            )
+        assert not found, f"real-task implementations entered framework surfaces: {found}"
