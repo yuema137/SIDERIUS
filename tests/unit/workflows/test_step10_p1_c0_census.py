@@ -86,25 +86,16 @@ def _production_py_files() -> list[Path]:
 
 
 class TestCensusAFiveDefaultMechanisms:
-    """P1 design §2.1, one test per family. These pin the UN-COMPOSED
-    mechanism; they must still hold at C6, because the legacy path is what
-    P1 preserves and Step 12 later removes."""
+    """Historical P1 census, updated as Step 12 retires implicit defaults."""
 
-    def test_default_1_task_data_path_resolves_the_compatibility_id_when_unbound(self):
-        """The explicit legacy bootstrap preserves the compatibility path.
-
-        Real-task imports are registry-neutral so they cannot shadow a
-        transported external implementation in a composed child.
-        """
+    def test_default_1_task_data_path_refuses_when_unbound(self):
         from execute_tools.task_data_path import (
-            TIDMAD_COMPATIBILITY_ID,
-            bootstrap_legacy_tidmad_data_path,
-            registered_task_data_path_ids,
+            TaskDataPathResolutionError,
+            resolve_bound_task_data_path,
         )
 
-        impl = bootstrap_legacy_tidmad_data_path()
-        assert TIDMAD_COMPATIBILITY_ID in registered_task_data_path_ids()
-        assert impl.task_data_path_id == TIDMAD_COMPATIBILITY_ID
+        with pytest.raises(TaskDataPathResolutionError, match="No task data path is bound"):
+            resolve_bound_task_data_path()
 
     def test_default_2_dataset_profile_falls_back_to_the_shipped_tidmad_profile(self):
         from execute_tools.dataset_config import TIDMAD_PROFILE, resolve_dataset_profile
@@ -132,29 +123,8 @@ class TestCensusAFiveDefaultMechanisms:
         assert len(calls) == 1, "one materialization call site expected"
         assert "task_health_binding" not in {kw.arg for kw in calls[0].keywords}
 
-    def test_default_4_the_tuner_has_exactly_one_metric_acquisition_site(self):
-        """ONE acquisition, and the legacy derivation is its FALLBACK.
-
-        At C0 this was a bare `derive_tidmad_metric(...)` call. C2 turned it
-        into `resolve_bound_run_metric() or derive_tidmad_metric(...)`, which
-        is the whole of P1's metric change.
-
-        **Step 12 / PR-12d seam B moved the RULE, not the property.** The
-        `or` became `evaluation_metric.resolve_run_metric(...)`, because the
-        deliverable spec became optional (B11) and the tuner's `run()` is
-        branch-capped. Both properties below are unchanged and are now
-        asserted where the rule lives: ONE acquisition site in the tuner, and
-        the BOUND metric consulted FIRST inside the resolver.
-
-        Two things this catches that no behavioural test does. A SECOND
-        acquisition site: the run's metric identity, direction and acceptance
-        contract would then have two sources that agree until the day they do
-        not. And the fallback being dropped or reordered: putting the
-        derivation first would make every composed run execute TIDMAD's
-        arithmetic while the composed metric sat unused, and an un-composed
-        TIDMAD run — the only kind the suite exercises end to end — would look
-        perfectly healthy.
-        """
+    def test_default_4_the_tuner_has_exactly_one_declared_metric_acquisition_site(self):
+        """The tuner resolves one bound metric and contains no task fallback."""
         source = (
             REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "ml_hyperparameter_tune_agent.py"
         ).read_text(encoding="utf-8")
@@ -176,10 +146,6 @@ class TestCensusAFiveDefaultMechanisms:
             "obtain the run's metric is how two sources agree until they do not"
         )
 
-        # The ORDER rule, at its owner. Putting the derivation first would make
-        # every composed run execute TIDMAD's arithmetic while the composed
-        # metric sat unused — and an un-composed TIDMAD run, the only kind the
-        # suite exercises end to end, would look perfectly healthy.
         resolver = next(
             node
             for node in ast.walk(
@@ -192,9 +158,8 @@ class TestCensusAFiveDefaultMechanisms:
             for node in ast.walk(resolver)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
         ]
-        assert called.index("resolve_bound_run_metric") < called.index("derive_tidmad_metric"), (
-            f"the BOUND metric must be consulted before the legacy derivation; got {called}"
-        )
+        assert called.count("resolve_bound_run_metric") == 1
+        assert "derive_tidmad_metric" not in called
 
     def test_default_5_both_interpretation_callers_pass_no_path(self):
         """Zero-arg ⇒ ``LEGACY_DEFAULT_TASK_INTERPRETATION_CONFIG``. The

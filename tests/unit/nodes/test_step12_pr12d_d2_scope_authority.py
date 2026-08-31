@@ -287,19 +287,11 @@ class TestDifferentialOracleUnderTidmad:
         profile = resolve_dataset_profile()
         assert derive_run_deliverable_spec(profile) == derive_tidmad_deliverable_spec(profile)
 
-    def test_the_run_metric_resolution_is_unchanged_for_an_unbound_run(self):
-        from execute_tools.deliverable_spec import derive_tidmad_deliverable_spec
-        from execute_tools.evaluation_metric import (
-            TIDMAD_METRIC_ID,
-            derive_tidmad_metric,
-            resolve_run_metric,
-        )
+    def test_run_metric_resolution_refuses_an_unbound_run(self):
+        from execute_tools.evaluation_metric import NoRunMetricError, resolve_run_metric
 
-        profile = resolve_dataset_profile()
-        spec = derive_tidmad_deliverable_spec(profile)
-        resolved = resolve_run_metric(profile, spec)
-        assert resolved.spec == derive_tidmad_metric(profile, spec).spec
-        assert resolved.spec.id == TIDMAD_METRIC_ID
+        with pytest.raises(NoRunMetricError, match="no metric bound from a task composition"):
+            resolve_run_metric()
 
 
 class TestDeclaredAbsence:
@@ -390,13 +382,6 @@ class TestFailClosed:
         with pytest.raises(TaskTopologyUnavailableError) as excinfo:
             facts.require_physical_dataset("resolving a raw validation-file path for a Health peek")
         assert "Health peek" in str(excinfo.value)
-
-    def test_a_composed_run_that_declares_no_metric_and_no_geometry_REFUSES(self):
-        """The legacy metric branch must never be reached by a composed task."""
-        from execute_tools.evaluation_metric import NoRunMetricError, resolve_run_metric
-
-        with pytest.raises(NoRunMetricError, match="nothing to derive"):
-            resolve_run_metric(contrast_profile(), None)
 
     def test_the_channel_identity_and_encoding_are_untouched_by_the_projection(self):
         """The projection carries the DATASET half only.

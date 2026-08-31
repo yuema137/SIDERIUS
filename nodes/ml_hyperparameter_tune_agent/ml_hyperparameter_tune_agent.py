@@ -754,20 +754,10 @@ class HyperparamTuningAgent:
         # no process boundary (the scoring subprocess re-derives it from
         # `--dataset_profile_json`).
         #
-        # A COMPOSED run supplies the metric its declaration named, resolved
-        # once at the composition edge — so a composed classification or
-        # regression run never executes TIDMAD's derivation. An UN-COMPOSED
-        # run finds nothing bound and takes the byte-identical legacy branch:
-        # the frozen TIDMAD instance derived under Regime A, with its
-        # scoreability contract declared AGAINST the run's deliverable spec.
-        # `derive_tidmad_metric` is therefore the bounded legacy adapter from
-        # here on; removing it belongs to Step 12 with the composition root.
-        # Step 12 / PR-12d, seam B: the SAME rule, moved into the metric
-        # module. `resolve_run_metric` is byte-identical to the `or` it
-        # replaces for every run that has a spec, and it is what narrows the
-        # now-optional spec — see its docstring for why the branch left this
-        # function rather than growing inside it.
-        run_metric: EvaluationMetric = resolve_run_metric(run_profile, run_deliverable_spec)
+        # A composed run supplies the metric its declaration named, resolved
+        # once at the composition edge. An uncomposed run refuses here rather
+        # than selecting a scientific metric on the framework's authority.
+        run_metric: EvaluationMetric = resolve_run_metric()
 
         # --- The run's DECLARED observational secondaries (Step 10 / P2b) ---
         # Acquired at the SAME site as the primary, from the same composition,

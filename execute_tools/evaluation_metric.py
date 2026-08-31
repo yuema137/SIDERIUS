@@ -1211,40 +1211,21 @@ def derive_tidmad_metric(
     return TidmadDenoisingMetric(derive_tidmad_metric_spec(dataset_profile, deliverable_spec))
 
 
-def resolve_run_metric(
-    dataset_profile: DatasetProfile, deliverable_spec: DeliverableSpec | None
-) -> EvaluationMetric:
-    """The run's ONE metric: the DECLARED one, else TIDMAD's regime-A instance.
+def resolve_run_metric() -> EvaluationMetric:
+    """Return the metric selected by the active task composition.
 
-    Step 12 / PR-12d, seam B. The rule is byte-identical to the expression it
-    replaces (``resolve_bound_run_metric() or derive_tidmad_metric(profile,
-    spec)``); what moved is WHERE it lives. Two reasons, both structural:
-
-    * the tuner's ``run()`` is hard-capped at its current branch count, and
-      the ``or`` was one of its branch nodes — resolving here spends none of
-      that budget;
-    * ``deliverable_spec`` became ``DeliverableSpec | None`` when B11 was
-      closed, and the narrowing belongs beside the derivation that needs it
-      rather than inside a 1,100-line orchestrator.
-
-    A composed run finds its declared metric bound and never reaches the
-    legacy branch. An un-composed run has, by construction, a profile that
-    declares TIDMAD's geometry — so its spec is never ``None``, and a ``None``
-    arriving here would mean a composed run reached the legacy branch, which
-    is ``C-P56-1`` and is refused by name rather than silently derived
-    against an invented topology.
+    A scientific metric has task-owned arithmetic, direction, scoreability,
+    and references. The framework therefore cannot manufacture one when the
+    caller omitted the task composition. Supported execution binds the metric
+    before the tuner runs; reaching this function unbound is a wiring error.
     """
     declared = resolve_bound_run_metric()
     if declared is not None:
         return declared
-    if deliverable_spec is None:
-        raise NoRunMetricError(
-            "this run declares no metric AND its task declares no TIDMAD "
-            "deliverable geometry, so there is nothing to derive the legacy "
-            "TIDMAD metric from. Scoring a composed task with TIDMAD's metric "
-            "is the failure this refusal exists to prevent."
-        )
-    return derive_tidmad_metric(dataset_profile, deliverable_spec)
+    raise NoRunMetricError(
+        "this run has no metric bound from a task composition; SIDERIUS cannot "
+        "select a scientific metric implicitly"
+    )
 
 
 # ---------------------------------------------------------------------------
