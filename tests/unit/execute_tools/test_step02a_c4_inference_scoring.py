@@ -187,18 +187,25 @@ class TestAllThreeEntriesShareOneTransport:
     """
 
     @pytest.mark.parametrize(
-        "module_path",
+        ("module_path", "allows_uncomposed_profile"),
         [
-            "execute_tools/train_engine_sandbox.py",
-            "execute_tools/inference_single.py",
-            "execute_tools/denoising_score_single.py",
+            ("execute_tools/train_engine_sandbox.py", True),
+            ("execute_tools/inference_single.py", True),
+            ("execute_tools/denoising_score_single.py", False),
         ],
     )
-    def test_each_entry_declares_the_flag_and_fails_closed(self, module_path):
+    def test_each_entry_declares_the_flag_and_fails_closed(
+        self, module_path, allows_uncomposed_profile
+    ):
         source = (REPO_ROOT / module_path).read_text()
         assert '"--dataset_profile_json"' in source, f"{module_path} must expose the flag"
         assert "load_dataset_profile(" in source, f"{module_path} must fail closed on a bad path"
-        assert "resolve_dataset_profile()" in source, f"{module_path} must keep Regime-A"
+        if allows_uncomposed_profile:
+            assert "resolve_dataset_profile()" in source, f"{module_path} must keep Regime-A"
+        else:
+            assert "resolve_dataset_profile()" not in source, (
+                f"{module_path} must require the composed profile"
+            )
 
     # Migrated production modules that read the RAW validation file.
     MIGRATED_ENTRIES: ClassVar[tuple[str, ...]] = (

@@ -479,10 +479,6 @@ class TestTheScoringChildBindsEveryNamingConsumer:
         [
             # the task-owned route: SCAN and reported NAME under one binding
             "with bind_dataset_profile(dataset_profile), declared_naming_binding(declared_naming):",
-            # the legacy TIDMAD route's payload scan
-            "with bind_dataset_profile(dataset_profile), declared_naming_binding(_declared_naming):",
-            # the spec derivation the child always had
-            "with declared_naming_binding(_declared_naming):",
         ],
     )
     def test_each_scoring_naming_consumer_is_inside_the_binding(self, consumer):
