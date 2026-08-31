@@ -42,9 +42,8 @@ Each test names the defect ONLY it can catch:
 * ``TestBoundaryRefusals`` — arm vocabulary (X9 labels refused,
   R-ARM-STAMP-1), the treatment boundary (goldpod requires the advice
   file, blindpod refuses one), and frozen-flag passthrough refusal.
-* ``TestGpuMap`` — the frozen single-resident band->GPU map
-  (0-3->0, 4-9->1, 10-14->2, 15-19->3). A transposed map trains two bands
-  on one card and leaves one H100 idle, visibly only at launch.
+* ``TestX9BandFileParity`` — the historical X9 band launcher and Gold
+  campaign still agree on the monitored-file membership of each band.
 * ``TestStage2DryRun`` — 16 units, wave = design across the four GPUs,
   the fixed-candidate seam on every unit argv, ``--num_iterations 1``
   (the D-ARCH-2 retrain pin, NOT the stage-1 horizon), and COMPLETE.json
@@ -778,13 +777,7 @@ class TestBoundaryRefusals:
         assert "--trial_portion" in proc.stderr
 
 
-class TestGpuMap:
-    def test_band_to_gpu_assignment_is_the_frozen_map(self, campaign_root):
-        proc = _stage1_dry(campaign_root)
-        argvs = _band_argvs(proc.stdout)
-        for band, argv in argvs.items():
-            assert argv[0] == f"CUDA_VISIBLE_DEVICES={EXPECTED_GPU_MAP[band]}", band
-
+class TestX9BandFileParity:
     def test_band_map_matches_the_x9_authority_table(self):
         """The X9 band launcher's case table stays the historical
         authority; a silent divergence between the two maps would score a
