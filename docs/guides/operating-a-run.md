@@ -129,7 +129,12 @@ several fire, severity resolves
 Remember what a PASS means: nothing detectably invalid. Not "good". See
 [health gates](../concepts/health-gates.md).
 
-## Cross-hardware bring-up (H100 posture)
+## Archived X9 H100 posture
+
+The executable posture and its machine-checked table moved to
+`siderius-exp/campaigns/tidmad_x9`. This section is retained temporarily as
+historical derivation context; its old `sdsc_submission_scripts/` paths are
+not supported SIDERIUS entrypoints.
 
 **Claim this section makes.** The campaign's resource posture on the H100 fleet
 is declared, source-backed and provenance-labelled: every limit the runtime

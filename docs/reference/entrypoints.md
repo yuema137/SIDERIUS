@@ -17,16 +17,22 @@ the flags that decide *what a run is*.
 |---|---|
 | run the full multi-iteration agent loop | `sdsc_submission_scripts/run_chain.sh` |
 | launch a task-specific campaign | use the campaign entrypoint in the experiment repository; it delegates to this repository's `run_chain.sh` |
-| run one arm of the prior-art baseline experiment (arXiv X9) | `sdsc_submission_scripts/launch_prior_baseline_experiment.sh` |
+| run one arm of a task-specific comparison | use that experiment repository's launcher with an explicit SIDERIUS checkout |
 | run exactly one iteration (or debug one) | `sdsc_submission_scripts/run_one_iteration.py` |
 | drive the workflow directly from Python | `workflows/model_exploration.py` |
-| compare a built-in TIDMAD model against baselines | `scripts/run_comparison.py` |
-| gate a campaign launch before running any of the above | `sdsc_submission_scripts/campaign_preflight.sh` (see below) |
+| compare a task model against baselines | use the task package's comparison entrypoint |
+| gate a campaign launch | use the campaign-owned preflight in the experiment repository |
 
 > Note the directory: the chain launchers live in `sdsc_submission_scripts/`,
 > **not** in `scripts/`. Several older documents said otherwise.
 
-## `campaign_preflight.sh` — the launch-blocking gate
+## Archived X9 preflight reference
+
+The X9 preflight and its executable documentation moved to
+`siderius-exp/campaigns/tidmad_x9`. The material below is historical design
+context only; none of the named campaign paths is a SIDERIUS entrypoint.
+
+### Historical launch-blocking gate
 
 One gate, rows `R1`…`R9`, each printing `PASS` / `FAIL` / `SKIP` / `INFO`
 with its evidence; any `FAIL` exits non-zero. Full row descriptions live in
