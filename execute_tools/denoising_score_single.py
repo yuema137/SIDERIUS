@@ -179,11 +179,13 @@ def _resolve_child_data_path(args):
     Lifted verbatim from the agent-mode branch so the task-owned route and
     the TIDMAD agent route cannot drift into two resolutions.
     """
-    from execute_tools.task_data_path import bootstrap_legacy_tidmad_data_path
+    from execute_tools.task_data_path import TaskDataPathResolutionError
     from workflows.task_composition import resolve_child_task_data_path
 
     if args.task_data_path_id is None:
-        return bootstrap_legacy_tidmad_data_path()
+        raise TaskDataPathResolutionError(
+            "Scoring requires --task_data_path_id from an explicit task composition."
+        )
     return resolve_child_task_data_path(
         args.task_data_path_id,
         identity=args.task_data_path_identity,
@@ -578,7 +580,7 @@ def main(argv: list[str] | None = None) -> None:
         from execute_tools.dataset_config import bind_dataset_profile
         from execute_tools.task_data_path import (
             EvaluationReadRequest,
-            bootstrap_legacy_tidmad_data_path,
+            TaskDataPathResolutionError,
         )
 
         # C3: one resolution authority across all three children. Scoring already
@@ -586,14 +588,14 @@ def main(argv: list[str] | None = None) -> None:
         # out-of-tree task resolves the same way here as in training and inference.
         from workflows.task_composition import resolve_child_task_data_path
 
-        _data_path = (
-            resolve_child_task_data_path(
-                args.task_data_path_id,
-                identity=args.task_data_path_identity,
-                manifest_path=args.task_manifest,
+        if args.task_data_path_id is None:
+            raise TaskDataPathResolutionError(
+                "Scoring requires --task_data_path_id from an explicit task composition."
             )
-            if args.task_data_path_id is not None
-            else bootstrap_legacy_tidmad_data_path()
+        _data_path = resolve_child_task_data_path(
+            args.task_data_path_id,
+            identity=args.task_data_path_identity,
+            manifest_path=args.task_manifest,
         )
         # F-COV-8 — THE SCAN. `read_evaluation_payload` re-derives its spec
         # inside the call (`tidmad_data_path.py:571`), so it reads the naming

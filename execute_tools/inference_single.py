@@ -43,8 +43,8 @@ from execute_tools.model_input_dtype import (
 from execute_tools.scope_artifact import load_transported_scope
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
+    TaskDataPathResolutionError,
     bind_task_data_path,
-    bootstrap_legacy_tidmad_data_path,
 )
 
 # D14-1 C4: the deliverable READER lives with the TIDMAD codec now; the alias
@@ -616,14 +616,14 @@ def main():
     # ABOVE this one, and only a composed run ever reaches it.
     from workflows.task_composition import resolve_child_task_data_path
 
-    data_path = (
-        resolve_child_task_data_path(
-            args.task_data_path_id,
-            identity=args.task_data_path_identity,
-            manifest_path=args.task_manifest,
+    if args.task_data_path_id is None:
+        raise TaskDataPathResolutionError(
+            "Inference requires --task_data_path_id from an explicit task composition."
         )
-        if args.task_data_path_id is not None
-        else bootstrap_legacy_tidmad_data_path()
+    data_path = resolve_child_task_data_path(
+        args.task_data_path_id,
+        identity=args.task_data_path_identity,
+        manifest_path=args.task_manifest,
     )
 
     # V20 PR C2, validation only. ``None`` — and therefore completely

@@ -1,5 +1,4 @@
 import argparse
-import contextlib
 import gc
 import json
 import os
@@ -54,9 +53,9 @@ from execute_tools.task_data_path import (
     EpochSamplingParams,
     EvalMaterializationParams,
     TaskDataPath,
+    TaskDataPathResolutionError,
     TrainingScopeError,
     bind_task_data_path,
-    bootstrap_legacy_tidmad_data_path,
     resolve_bound_task_data_path,
 )
 from execute_tools.task_data_path import (
@@ -2311,7 +2310,7 @@ def main():
         #
         # Task-data-path transport: SUPPLIED resolves the transported
         # id as an EXPLICIT binding (unknown -> fail closed, never a
-        # fallback); ABSENT leaves regime-A to the run itself.
+        # fallback); ABSENT is invalid because execution has no task owner.
         if args.task_data_path_id is not None:
             # C3: imported here, not at module scope — the composition layer
             # sits ABOVE this one, and only a composed run ever reaches it.
@@ -2325,8 +2324,9 @@ def main():
                 )
             )
         else:
-            bootstrap_legacy_tidmad_data_path()
-            binding_cm = contextlib.nullcontext()
+            raise TaskDataPathResolutionError(
+                "Training requires --task_data_path_id from an explicit task composition."
+            )
         with binding_cm, child_observables_binding(args.task_manifest):
             # Step 12 / PR-12bc B6 — the child side of the SCOPE transport, and
             # the close of the pairing gap. Before this the binding crossed and
