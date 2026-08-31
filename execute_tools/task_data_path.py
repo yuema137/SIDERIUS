@@ -828,11 +828,9 @@ def registered_task_data_path_ids() -> list[str]:
 class TaskBindingContext(BaseModel):
     """An EXPLICIT task binding. Its very PRESENCE is the discriminator.
 
-    ``None`` where a context is expected IS the legacy regime-A compatibility
-    path — the launch surfaces that predate task binding. A future Pets run
-    necessarily constructs one of these, so a missed binding step fails
-    closed instead of silently training on TIDMAD's path (child §4.2). Never
-    discriminate by task name.
+    Supported execution always supplies this context. ``None`` is retained as
+    an input shape only so old callers receive a named refusal rather than an
+    attribute error; it never selects a scientific task.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -841,17 +839,13 @@ class TaskBindingContext(BaseModel):
 
 
 def resolve_task_data_path(context: TaskBindingContext | None) -> TaskDataPath:
-    """The frozen truth table (child §4.2), row by row."""
+    """Resolve an explicitly declared task data path, or fail closed."""
     if context is None:
-        # Legacy regime-A compatibility: the absence of any explicit binding.
-        impl = _REGISTRY.get(TIDMAD_COMPATIBILITY_ID)
-        if impl is None:
-            raise TaskDataPathResolutionError(
-                "Legacy regime-A resolution requires the compatibility "
-                f"implementation {TIDMAD_COMPATIBILITY_ID!r}, which is not "
-                f"registered. Currently registered: {sorted(_REGISTRY)}."
-            )
-        return impl
+        raise TaskDataPathResolutionError(
+            "No task data path was declared. Supply a task composition whose "
+            "task_data_path identifies a registered implementation; SIDERIUS "
+            "does not select a scientific task by default."
+        )
     if context.task_data_path_id is None:
         raise TaskDataPathResolutionError(
             "An explicit task binding was supplied with NO task_data_path_id. "
@@ -870,18 +864,18 @@ def resolve_task_data_path(context: TaskBindingContext | None) -> TaskDataPath:
 
 
 def bootstrap_legacy_tidmad_data_path() -> TaskDataPath:
-    """Register and return the bounded legacy TIDMAD compatibility path.
+    """Register and return the temporary explicit TIDMAD compatibility adapter.
 
     Real-task modules no longer register as an import side effect. Composed
     runs must therefore resolve their implementation from their transported
-    manifest, while an explicitly un-composed application edge calls this
-    adapter to preserve the historical TIDMAD path.
+    manifest. This adapter remains only while old application edges are being
+    retired; generic resolution never calls it.
     """
     from execute_tools.tidmad_data_path import TidmadTaskDataPath
 
     if TIDMAD_COMPATIBILITY_ID not in _REGISTRY:
         register_task_data_path(TidmadTaskDataPath())
-    return resolve_task_data_path(None)
+    return _REGISTRY[TIDMAD_COMPATIBILITY_ID]
 
 
 # ---------------------------------------------------------------------------
@@ -908,15 +902,15 @@ def bind_task_data_path(impl: TaskDataPath) -> Iterator[TaskDataPath]:
 
 
 def resolve_bound_task_data_path() -> TaskDataPath:
-    """What a production call site asks for.
-
-    A bound implementation wins; an unbound context IS the legacy regime-A
-    path and resolves through the truth table's first row.
-    """
+    """Return the run-bound implementation, or refuse an uncomposed call."""
     bound = _ACTIVE_TASK_DATA_PATH.get()
     if bound is not None:
         return bound
-    return resolve_task_data_path(None)
+    raise TaskDataPathResolutionError(
+        "No task data path is bound for this execution. Enter the task "
+        "composition binding before training, inference, or scoring; "
+        "SIDERIUS does not select a scientific task by default."
+    )
 
 
 def active_task_data_path() -> TaskDataPath | None:

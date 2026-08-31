@@ -484,27 +484,6 @@ def capture_uncomposed_child_argv(sandbox, tmp_path) -> dict[str, list[str]]:
     return vectors
 
 
-class TestCensusCLegacyChildArgv:
-    def test_no_child_receives_the_transport_flag_today(self, sandbox, tmp_path):
-        from execute_tools.task_data_path import TASK_DATA_PATH_ARGV_FLAG
-
-        vectors = capture_uncomposed_child_argv(sandbox, tmp_path)
-        assert set(vectors) == {"training", "inference", "scoring"}
-        for phase, cmd in vectors.items():
-            assert TASK_DATA_PATH_ARGV_FLAG not in cmd, (
-                f"the un-composed {phase} child received {TASK_DATA_PATH_ARGV_FLAG}; "
-                "the legacy path must emit nothing"
-            )
-
-    def test_every_child_still_receives_the_dataset_profile(self, sandbox, tmp_path):
-        """The sibling transport the emission will sit beside. If this moved,
-        the 'append beside --dataset_profile_json' plan (design §5.4) no
-        longer describes the code."""
-        vectors = capture_uncomposed_child_argv(sandbox, tmp_path)
-        for phase, cmd in vectors.items():
-            assert "--dataset_profile_json" in cmd, f"{phase} lost the profile transport"
-
-
 # ---------------------------------------------------------------------------
 # The parity instrument itself must be discriminative
 # ---------------------------------------------------------------------------

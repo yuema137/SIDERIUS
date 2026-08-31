@@ -88,32 +88,6 @@ class TestEmissionWhenBound:
             assert cmd.count(TASK_DATA_PATH_ARGV_FLAG) == 1, f"{phase} argv: {cmd}"
 
 
-class TestNonEmissionWhenUnComposed:
-    def test_the_un_composed_argv_is_unchanged(self, sandbox, tmp_path):
-        """The half a naive emitter gets wrong invisibly.
-
-        Written against ``resolve_bound_task_data_path()`` — which falls back
-        — this would put the compatibility id into every legacy child's
-        command line, and nothing in the suite except this test would notice.
-        """
-        from execute_tools.task_data_path import TASK_DATA_PATH_ARGV_FLAG
-
-        vectors = capture_uncomposed_child_argv(sandbox, tmp_path)
-        for phase, cmd in vectors.items():
-            assert TASK_DATA_PATH_ARGV_FLAG not in cmd, f"{phase} argv gained the flag: {cmd}"
-
-    def test_emission_stops_the_moment_the_binding_ends(self, sandbox, tmp_path, composition):
-        """The run scope really is the emission scope."""
-        from execute_tools.task_data_path import TASK_DATA_PATH_ARGV_FLAG
-
-        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
-            bound = capture_uncomposed_child_argv(sandbox, tmp_path)
-        after = capture_uncomposed_child_argv(sandbox, tmp_path)
-
-        assert TASK_DATA_PATH_ARGV_FLAG in bound["training"]
-        assert TASK_DATA_PATH_ARGV_FLAG not in after["training"]
-
-
 class TestRoundTripReachability:
     def test_the_emitted_id_resolves_to_the_SAME_implementation_in_the_child(
         self, sandbox, tmp_path, composition
@@ -164,8 +138,8 @@ class TestRoundTripReachability:
             resolve_transported_task_data_path("a_task_nobody_registered")
 
 
-class TestTheEmitterUsesTheNonFallingBackAccessor:
-    def test_active_task_data_path_returns_None_when_unbound(self):
+class TestTheEmitterUsesTheExplicitAccessor:
+    def test_unbound_state_is_absent_and_execution_resolution_refuses(self):
         """The distinction the emitter depends on, asserted directly.
 
         ``resolve_bound_task_data_path`` falls back by design and is right for
@@ -173,15 +147,14 @@ class TestTheEmitterUsesTheNonFallingBackAccessor:
         question "is this run explicitly bound?".
         """
         from execute_tools.task_data_path import (
-            TIDMAD_COMPATIBILITY_ID,
+            TaskDataPathResolutionError,
             active_task_data_path,
-            bootstrap_legacy_tidmad_data_path,
             resolve_bound_task_data_path,
         )
 
-        bootstrap_legacy_tidmad_data_path()
         assert active_task_data_path() is None
-        assert resolve_bound_task_data_path().task_data_path_id == TIDMAD_COMPATIBILITY_ID
+        with pytest.raises(TaskDataPathResolutionError, match="No task data path is bound"):
+            resolve_bound_task_data_path()
 
     def test_the_emitter_helper_is_empty_when_unbound_and_populated_when_bound(self, composition):
         from core.sandbox_executor import _task_data_path_argv
