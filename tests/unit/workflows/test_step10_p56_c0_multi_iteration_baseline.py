@@ -28,6 +28,7 @@ here.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -43,8 +44,11 @@ from tests.unit.workflows.test_model_exploration import (
 )
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 ITERATIONS = 3
+REPO_ROOT = Path(__file__).resolve().parents[3]
+QUICKSTART = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 #: One distinct finding per iteration, so "did iteration N's finding survive to
 #: iteration N+1's proposer?" is answerable by string identity.
@@ -73,7 +77,13 @@ def loop_env(tmp_path):
     ``state.all_model_types`` and mirrors plugin files per model name, so a
     repeated name collides. This is the established multi-iteration idiom.
     """
-    _write_tuning_output(tmp_path, "punet")
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    _write_tuning_output(
+        tmp_path,
+        "punet",
+        fingerprint=composition.semantic_fingerprint,
+        metric_spec=composition.metric.spec,
+    )
     workspace = str(tmp_path / "workflow_output")
 
     with (
@@ -101,19 +111,24 @@ def loop_env(tmp_path):
         MockImpl.return_value.run.return_value = _make_implementor_output()
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
         MockTune.return_value.run.side_effect = lambda inp: _make_tune_output(
-            model_type=inp.model_type, score=1.6
+            model_type=inp.model_type,
+            score=1.6,
+            fingerprint=composition.semantic_fingerprint,
+            metric_spec=composition.metric.spec,
         )
 
-        run_workflow(
-            launch=WorkflowLaunchConfig(
-                data_dir=str(tmp_path / "data"),
-                model_types=["punet"],
-                source_run_name="v1",
-                max_iterations=ITERATIONS,
-            ),
-            workspace=workspace,
-            run_name="p56_c0",
-        )
+        with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=str(tmp_path / "data"),
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    max_iterations=ITERATIONS,
+                ),
+                workspace=workspace,
+                run_name="p56_c0",
+                task_composition=composition,
+            )
         yield {
             "interp_inputs": [c[0][0] for c in MockInterp.return_value.run.call_args_list],
             "propose_inputs": [c[0][0] for c in MockPropose.return_value.run.call_args_list],

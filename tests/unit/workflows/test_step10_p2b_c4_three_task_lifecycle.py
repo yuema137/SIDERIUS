@@ -41,6 +41,7 @@ The three declaration shapes are non-equivalent:
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -172,20 +173,13 @@ class _LifecycleSandbox(RecordingSandbox):
 
 
 def _manifest_with_secondaries(tmp_path: Path, metric_ids: tuple[str, ...]) -> Path:
+    package_root = tmp_path / "relocated_quickstart"
+    manifest_dir = package_root / "configs" / "task_composition"
+    manifest_dir.mkdir(parents=True)
+    shutil.copytree(REPO_ROOT / "examples" / "quickstart", package_root / "examples" / "quickstart")
     manifest = yaml.safe_load(QUICKSTART.read_text(encoding="utf-8"))
-
-    def resolve_refs(value: Any, key: str | None = None) -> Any:
-        if isinstance(value, dict):
-            return {name: resolve_refs(item, name) for name, item in value.items()}
-        if isinstance(value, list):
-            return [resolve_refs(item) for item in value]
-        if isinstance(value, str) and key in {"config", "declaration", "dir", "file"}:
-            return str((QUICKSTART.parent / value).resolve())
-        return value
-
-    manifest = resolve_refs(manifest)
     manifest["secondary_metrics"] = [SECONDARY_REFS[metric_id] for metric_id in metric_ids]
-    path = tmp_path / "composition.yaml"
+    path = manifest_dir / "composition.yaml"
     path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
     return path
 
