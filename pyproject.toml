@@ -47,8 +47,9 @@ dependencies = [
 where = ["."]
 include = [
     "agent*", "nodes*", "core*", "execute_tools*", "ml_models*",
-    "tools*", "scripts*", "workflows*", "dashboard*",
+    "tools*", "workflows*", "dashboard*",
 ]
+exclude = ["agent_generated*", "scripts*"]
 namespaces = true
 
 [dependency-groups]

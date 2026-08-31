@@ -1,5 +1,12 @@
 # `advice/`
 
+> **Historical archive, not a framework default.** These files record advice
+> used by dated development and validation runs. SIDERIUS does not select any
+> of them implicitly, they are excluded from the Python distribution, and new
+> scientific tasks or experiments must keep active advice in their own
+> workspace or consumer repository. They remain here only while historical
+> tests and design ledgers cite their exact bytes.
+
 Operator-written JSON advice files passed to SIDERIUS agents at run time.
 Two levels exist and the distinction matters — they have different schemas
 and different injection points in the graph.

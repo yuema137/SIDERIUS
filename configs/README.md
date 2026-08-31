@@ -1,4 +1,4 @@
-# `configs/` — committed configuration: task reference packaging + framework policy
+# `configs/` — committed framework policy and synthetic example composition
 
 **Audience**: a coding agent or engineer wondering what a file in this
 directory is, and who owns it.
@@ -10,24 +10,18 @@ Template:
 
 ## Purpose
 
-The version-controlled configuration shipped with the repository. Two very
-different kinds of thing live here, and confusing them is the classic
-mistake: **task semantics** (TIDMAD's reference declarations, plus the
-shipped example manifests — *reference packaging*, which an external task
-replaces with its own files anywhere on disk) and **framework policy** (what
-a health failure *does* — which no task file can express).
+The version-controlled configuration shipped with the repository contains
+framework policy and pointers to lightweight synthetic examples. Real task
+semantics and experiment treatment belong to caller-owned packages.
 
 ## Public interface
 
 | path | kind | loaded by |
 |---|---|---|
-| `task_composition/{tidmad,pets,davis,quickstart}.yaml` | shipped composition manifests — pointers into task declarations, resolved relative to the manifest file | `workflows/task_composition.py` |
-| `task_config.yaml` (+ `.example`) | TIDMAD's `task_description` + `forward_contract` (legacy un-composed runs read it directly) | task-config loader |
-| `task_health/tidmad.yaml` | TIDMAD's task-owned health family: roster, thresholds, peek files, value scale, prose | `execute_tools/health_checks/_task_health_config.py` via composition |
-| `task_proposal/` · `task_implementor/` · `task_interpretation/` | TIDMAD's task-science prompt blocks | the three task-blocks adapters |
+| `task_composition/{quickstart,synthetic_masked_regression}.yaml` | pointers to the two lightweight framework examples | `workflows/task_composition.py` |
+| `task_config.example.yaml` | copyable shape example; never a runtime default | task-config documentation |
 | `health_checks.yaml` | **framework policy only**: per-disposition gate role, cadence, short-circuit, `on_pass`/`on_fail`, and the default `aggregation` | `execute_tools/health_checks/config.py` |
 | `health_checks_baseline_observe_mode.yaml` | same policy with blocking failures downgraded to observation (differs only in `blocking.on_fail`) | selected via `--healthgate_mode observe_only` |
-| `lit_review_config.yaml` | literature-review budget, root papers, rubric | the literature-review node |
 | `v17_pregate_threshold_review.json` | a frozen point-in-time review artifact | nothing at runtime |
 
 ## Inputs
@@ -56,9 +50,9 @@ pair.
   tighten one gate without touching the others. Everything else in
   `check_config` is injected unconditionally. See
   `TASK_DECLARABLE_POLICY_KEYS`.
-- **In-repo task files are reference packaging.** An external task supplies
-  its own manifest and declaration files anywhere on disk; nothing requires
-  a file to be added under `configs/` to run a new task.
+- **Real task files are external inputs.** An external task supplies its own
+  manifest and declaration files anywhere on disk; nothing requires a file to
+  be added under `configs/` to run a new task.
 
 ## Non-owned semantics
 

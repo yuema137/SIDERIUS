@@ -10,6 +10,11 @@
   TIDMAD or any other scientific task implicitly.
 - The shipped Quickstart and synthetic examples are framework specifications,
   not scientific defaults, benchmarks, or campaign templates.
+- During the active repository-separation work, after any conversation
+  compaction, reread
+  `docs/design/framework_experiment_repository_separation.md` before taking
+  another task action. Keep that work ledger current with decisions, changed
+  ownership, validation evidence, and unresolved findings.
 
 ## Environment
 - **Always use the project virtualenv**: every Python command must use the

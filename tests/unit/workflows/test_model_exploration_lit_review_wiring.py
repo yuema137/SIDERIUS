@@ -16,6 +16,7 @@ workflow is out of scope.
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from agent.schemas.interpretation import InterpretationOutput
@@ -27,7 +28,7 @@ from workflows.model_exploration import (
     merge_external_agent_outputs,
     should_run_literature_review,
 )
-from workflows.task_config import get_task_description, load_task_config
+from workflows.task_config import bind_task_config, get_task_description, load_task_config
 
 # ---------------------------------------------------------------------------
 # Builders
@@ -82,6 +83,17 @@ _LLM_KWARGS = {
     "search_llm_provider": "deepseek",
     "search_llm_model_id": "deepseek-v4-pro",
 }
+
+
+@pytest.fixture(autouse=True)
+def _bound_synthetic_task():
+    with bind_task_config(
+        {
+            "task_description": "Predict a continuous synthetic target from tabular inputs.",
+            "forward_contract": {},
+        }
+    ):
+        yield
 
 
 def _storage(tmp_path) -> StorageConfig:

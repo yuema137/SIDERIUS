@@ -16,6 +16,11 @@ populations with different maintenance contracts: a small durable operator
 surface, and a large set of point-in-time investigation and gate harnesses
 kept as provenance for dated campaigns.
 
+The directory is excluded from the Python distribution. Task-specific scripts
+are historical source evidence only: active scientific utilities belong in
+the task or campaign package that owns their semantics. No framework launch
+may select a script or advice artifact from this archive by default.
+
 ## Public interface
 
 The durable operator surface:
