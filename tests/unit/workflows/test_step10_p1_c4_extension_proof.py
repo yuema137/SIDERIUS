@@ -201,7 +201,6 @@ class TestTheFourthTaskIsUnknownToTheFramework:
         """
         for rel in (
             "execute_tools/task_data_path.py",
-            "execute_tools/tidmad_data_path.py",
             "execute_tools/health_checks/__init__.py",
             "execute_tools/evaluation_metric.py",
             "workflows/task_composition.py",

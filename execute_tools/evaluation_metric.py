@@ -690,23 +690,46 @@ _SCOREABILITY_CONTRACT_TYPES: dict[str, type[ScoreabilityContract]] = {
 }
 
 
-def scoreability_contract_from_declaration(payload: Mapping[str, Any]) -> ScoreabilityContract:
+def scoreability_contract_from_declaration(
+    payload: Mapping[str, Any],
+    *,
+    additional_types: Mapping[str, type[ScoreabilityContract]] | None = None,
+) -> ScoreabilityContract:
     """Rebuild a declared scoreability contract from its ``contract_id``.
 
     Fail closed: an unknown id names itself and the known vocabulary —
     a task pack cannot smuggle in an unimplemented acceptance contract.
     """
+    contract_types = dict(_SCOREABILITY_CONTRACT_TYPES)
+    for declared_id, contract_type in (additional_types or {}).items():
+        if not isinstance(contract_type, type) or not issubclass(
+            contract_type, ScoreabilityContract
+        ):
+            raise TypeError(
+                f"scoreability contract {declared_id!r} must be a "
+                "ScoreabilityContract subclass"
+            )
+        # The active task declaration is the execution authority. A legacy
+        # framework type with the same id may remain temporarily for persisted
+        # record replay, but it must not shadow the task plugin during
+        # composition.
+        contract_types[declared_id] = contract_type
+
     contract_id = payload.get("contract_id")
-    contract_cls = _SCOREABILITY_CONTRACT_TYPES.get(str(contract_id))
+    contract_cls = contract_types.get(str(contract_id))
     if contract_cls is None:
         raise ValueError(
             f"unknown scoreability contract_id {contract_id!r}; known: "
-            f"{sorted(_SCOREABILITY_CONTRACT_TYPES)}"
+            f"{sorted(contract_types)}"
         )
     return contract_cls.model_validate(payload)
 
 
-def metric_spec_from_declaration(payload: Mapping[str, Any]) -> MetricSpec:
+def metric_spec_from_declaration(
+    payload: Mapping[str, Any],
+    *,
+    scoreability_contract_types: Mapping[str, type[ScoreabilityContract]] | None = None,
+) -> MetricSpec:
     """A pack's declared metric JSON → the executable ``MetricSpec``.
 
     ``MetricSpec.model_validate`` alone cannot instantiate the ABSTRACT
@@ -716,7 +739,9 @@ def metric_spec_from_declaration(payload: Mapping[str, Any]) -> MetricSpec:
     the single authority for the metric's identity.
     """
     data = dict(payload)
-    data["scoreability"] = scoreability_contract_from_declaration(dict(data["scoreability"]))
+    data["scoreability"] = scoreability_contract_from_declaration(
+        dict(data["scoreability"]), additional_types=scoreability_contract_types
+    )
     return MetricSpec.model_validate(data)
 
 

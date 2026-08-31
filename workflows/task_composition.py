@@ -63,7 +63,7 @@ import os
 import posixpath
 import re
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -975,14 +975,6 @@ def _compose_metric(
             f"{where} declaration at {declaration_path!r} must be a JSON "
             f"object; got {type(payload).__name__}."
         )
-    try:
-        spec = metric_spec_from_declaration(payload)
-    except Exception as exc:
-        raise TaskCompositionError(
-            f"{where} declaration at {declaration_path!r} is not a valid "
-            f"MetricSpec: {type(exc).__name__}: {exc}"
-        ) from exc
-
     implementation = section.get("implementation")
     if not isinstance(implementation, dict):
         raise TaskCompositionError(
@@ -990,6 +982,23 @@ def _compose_metric(
             f"EvaluationMetric to instantiate; got {implementation!r}."
         )
     metric_cls, plugin_ref = _load_symbol(implementation, manifest_dir, f"{where}.implementation")
+    scoreability_contract_types = getattr(metric_cls, "SCOREABILITY_CONTRACTS", None)
+    if scoreability_contract_types is not None and not isinstance(
+        scoreability_contract_types, Mapping
+    ):
+        raise TaskCompositionError(
+            f"{where}.implementation SCOREABILITY_CONTRACTS must be a mapping"
+        )
+    try:
+        spec = metric_spec_from_declaration(
+            payload,
+            scoreability_contract_types=scoreability_contract_types,
+        )
+    except Exception as exc:
+        raise TaskCompositionError(
+            f"{where} declaration at {declaration_path!r} is not a valid "
+            f"MetricSpec: {type(exc).__name__}: {exc}"
+        ) from exc
     try:
         metric = metric_cls(spec)
     except Exception as exc:
