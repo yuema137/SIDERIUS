@@ -42,6 +42,10 @@ _MINIMAL_ARGV = [
     "r",
     "--start_iteration",
     "1",
+    "--task_composition",
+    str(_REPO / "configs/task_composition/quickstart.yaml"),
+    "--data_dir",
+    str(_REPO),
 ]
 
 

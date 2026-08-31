@@ -42,6 +42,8 @@ def test_chain_exports_no_bytecode_policy_before_every_python_call(tmp_path: Pat
 
     seed = tmp_path / "seed.json"
     seed.write_text("{}", encoding="utf-8")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
     env_log = tmp_path / "bytecode-env.log"
     env = os.environ.copy()
     env.update(
@@ -60,6 +62,10 @@ def test_chain_exports_no_bytecode_policy_before_every_python_call(tmp_path: Pat
             str(tmp_path / "workspace"),
             "--run_name",
             "bytecode_boundary",
+            "--task_composition",
+            str(REPO_ROOT / "configs/task_composition/quickstart.yaml"),
+            "--data_dir",
+            str(data_dir),
             "--num_iterations",
             "1",
             "--seed_paths",

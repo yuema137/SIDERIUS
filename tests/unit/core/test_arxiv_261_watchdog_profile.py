@@ -39,17 +39,14 @@ def empty_overlay_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_shipped_5090_single_row_is_the_frozen_campaign_posture(empty_overlay_dir):
-    """The defect only this catches: someone editing the shipped 5090/single
-    row away from the V19/V20 campaign literals (launch_v20_campaign.sh:
-    179-184, v19_queue_runner.sh:548-553) without a deliberate, reviewed
-    decision. Expectations HARDCODED, never read back from the YAML."""
+def test_framework_ships_no_device_specific_profile(empty_overlay_dir):
+    """A deployment profile must not become an implicit framework default."""
     profile = resolve_runtime_profile(RTX_5090, "single")
-    assert profile.calibrated is True
-    assert profile.watchdog_enabled is True
-    assert profile.watchdog_safety_factor == 3.5
-    assert profile.watchdog_floor_seconds == 120
-    assert profile.provenance == "shipped:nvidia_geforce_rtx_5090/single"
+    assert profile.calibrated is False
+    assert profile.watchdog_enabled is False
+    assert profile.watchdog_safety_factor is None
+    assert profile.watchdog_floor_seconds == 60.0
+    assert profile.provenance == "uncalibrated"
 
 
 def test_unknown_pair_resolves_the_explicit_uncalibrated_state(empty_overlay_dir):
@@ -67,11 +64,26 @@ def test_unknown_pair_resolves_the_explicit_uncalibrated_state(empty_overlay_dir
     assert profile.provenance == "uncalibrated"
 
 
-def test_borrowing_across_regimes_is_impossible_by_construction(empty_overlay_dir):
+def test_borrowing_across_regimes_is_impossible_by_construction(tmp_path, monkeypatch):
     """The defect only this catches: the resolver keying on device alone, so
     5090/single's calibrated numbers silently apply to a 5090 co-resident
     fleet (cross-REGIME borrowing — same device, different topology).
     Fails by: the four-way pair resolving calibrated."""
+    monkeypatch.setenv("SIDERIUS_CALIBRATION_DIR", str(tmp_path))
+    overlay = tmp_path / f"runtime_profiles_{gpu_slug(RTX_5090)}.json"
+    overlay.write_text(
+        json.dumps(
+            {
+                "profiles": {
+                    f"{gpu_slug(RTX_5090)}/single": {
+                        "watchdog_enabled": True,
+                        "watchdog_safety_factor": 2.0,
+                        "watchdog_floor_seconds": 90.0,
+                    }
+                }
+            }
+        )
+    )
     assert resolve_runtime_profile(RTX_5090, "single").calibrated is True
     quad = resolve_runtime_profile(RTX_5090, "four_way_coresident")
     assert quad.calibrated is False
@@ -185,12 +197,27 @@ def test_profile_mode_uncalibrated_reproduces_legacy_bare_launch_exactly(empty_o
     assert resolved.profile_calibrated is False
 
 
-def test_profile_mode_calibrated_applies_the_profile_with_field_overrides(empty_overlay_dir):
+def test_profile_mode_calibrated_applies_the_profile_with_field_overrides(tmp_path, monkeypatch):
     """The defect only this catches: PROFILE MODE ignoring a lone
     field-level flag (an operator pinning just the floor while letting the
     profile decide enablement must get exactly that composition). Fails by:
     the profile floor overriding the explicit one, or the profile's
     enablement/safety not applying."""
+    monkeypatch.setenv("SIDERIUS_CALIBRATION_DIR", str(tmp_path))
+    overlay = tmp_path / f"runtime_profiles_{gpu_slug(RTX_5090)}.json"
+    overlay.write_text(
+        json.dumps(
+            {
+                "profiles": {
+                    f"{gpu_slug(RTX_5090)}/single": {
+                        "watchdog_enabled": True,
+                        "watchdog_safety_factor": 2.5,
+                        "watchdog_floor_seconds": 90.0,
+                    }
+                }
+            }
+        )
+    )
     resolved = resolve_watchdog_launch_settings(
         cli_enabled=None,
         cli_safety_factor=None,
@@ -199,10 +226,10 @@ def test_profile_mode_calibrated_applies_the_profile_with_field_overrides(empty_
         device_name=RTX_5090,
     )
     assert resolved.enabled is True
-    assert resolved.safety_factor == 3.5
+    assert resolved.safety_factor == 2.5
     assert resolved.floor_seconds == 200.0
     assert resolved.profile_calibrated is True
-    assert resolved.provenance.startswith("shipped:nvidia_geforce_rtx_5090/single")
+    assert resolved.provenance.startswith("measured:")
 
 
 # ---------------------------------------------------------------------------

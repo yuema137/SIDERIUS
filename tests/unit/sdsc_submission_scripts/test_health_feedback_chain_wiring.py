@@ -63,7 +63,19 @@ class TestAllThreeLockSites:
 class TestChainCli:
     def _args(self, extra=()):
         return roi.build_parser().parse_args(
-            ["--workspace", "/tmp/ws", "--start_iteration", "1", "--run_name", "t", *extra]
+            [
+                "--workspace",
+                "/tmp/ws",
+                "--start_iteration",
+                "1",
+                "--run_name",
+                "t",
+                "--task_composition",
+                str(_REPO / "configs/task_composition/quickstart.yaml"),
+                "--data_dir",
+                str(_REPO),
+                *extra,
+            ]
         )
 
     def test_defaults_off_3_8(self):
@@ -103,11 +115,18 @@ class TestChainCli:
         assert exc.value.code != 0
 
     def test_lock_built_from_cli_args(self, tmp_path):
+        from workflows.task_composition import (
+            bind_run_task_composition,
+            compose_run_task_bindings,
+        )
+
         args = self._args(["--enable_structured_health_feedback"])
         args.workspace = str(tmp_path)
         args.health_gate_enabled = False  # avoid materializing gate config
         args.health_gate_files = None
-        invariants = roi.compute_expected_invariants(args)
+        composition = compose_run_task_bindings(args.task_composition)
+        with bind_run_task_composition(composition, physical_data_root=args.data_dir):
+            invariants = roi.compute_expected_invariants(args, run_composition=composition)
         assert invariants.structured_health_feedback_enabled is True
         assert invariants.health_feedback_history_window_iterations == 3
         assert invariants.health_feedback_history_max_entries_per_model == 8

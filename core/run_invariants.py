@@ -959,15 +959,14 @@ def build_run_invariants(
             # entry point pins the same file the same way.
             task_config_sha256=task_config_sha,
             # arXiv U1 — CANONICAL, so threaded explicitly by every caller
-            # (a compared value must never arrive ambiently); the defaults
-            # are the legacy state the documented default caller
-            # (`scripts/run_comparison.py`) relies on.
+            # (a compared value must never arrive ambiently). The default is
+            # the generic unlabelled, literature-review-disabled posture.
             lit_review_enabled=_launch_identity.lit_review_enabled,
             lit_review_config_sha256=_launch_identity.lit_review_config_sha256,
             experiment_arm=_launch_identity.experiment_arm,
             baseline_isolation=_launch_identity.baseline_isolation,
-            # Gold campaign — CANONICAL, so threaded explicitly like the four
-            # above. The value handed in here is the OBSERVED digest of the
+            # Advice identity is CANONICAL, so it is threaded explicitly like
+            # the fields above. The value handed in here is the OBSERVED digest of the
             # bytes the run read; this builder never re-derives it, because a
             # digest recomputed here would describe whatever is on disk NOW
             # rather than what the run consumed (F-12bc-7's lesson: a pin

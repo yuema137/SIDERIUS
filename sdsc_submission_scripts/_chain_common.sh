@@ -275,85 +275,6 @@ MEM="48G"
 GPUS=1
 CPUS=8
 
-# ---------------------------------------------------------------------------
-# filter_roster — V19 O2 selective launching (design:
-# docs/design/v19_priorities/o1a_o2_operator_tooling.md §2).
-#
-# Side-effect-free selection of roster entries by run_name. Pure stdout/
-# return-code contract so it is directly unit-testable without GPU,
-# screen, or any launch.
-#
-#   filter_roster "<only_csv>" "<entry1>" "<entry2>" ...
-#
-#   * entries are "run_name:rest..." specs (the wave-roster format);
-#   * only_csv == ""  → every entry, original order (identity — the
-#     no-`--only` path must remain byte-identical to prior behavior);
-#   * names are comma-separated, surrounding whitespace trimmed;
-#   * unknown name        → error listing the valid names, rc=1;
-#   * duplicate name      → error, rc=1 (operator confusion is surfaced,
-#     never silently deduplicated — operator decision 2026-07-29);
-#   * empty/blank selection ("," / "  ") → error, rc=1;
-#   * CANONICAL ROSTER ORDER is preserved regardless of the order the
-#     names were given (launch stagger/topology follow roster order —
-#     operator decision 2026-07-29);
-#   * matching entries are printed one per line; NO fallback to "all"
-#     on any error path.
-# ---------------------------------------------------------------------------
-filter_roster() {
-  local only_csv="$1"; shift
-  local roster=("$@")
-
-  if [ -z "$only_csv" ]; then
-    printf '%s\n' "${roster[@]}"
-    return 0
-  fi
-
-  local valid_names=()
-  local spec
-  for spec in "${roster[@]}"; do
-    valid_names+=("${spec%%:*}")
-  done
-
-  # Parse + trim + validate the requested names.
-  local requested=() raw name
-  IFS=',' read -ra _parts <<< "$only_csv"
-  for raw in "${_parts[@]}"; do
-    name="$(echo "$raw" | xargs)"   # trim surrounding whitespace
-    [ -z "$name" ] && continue
-    local seen
-    for seen in ${requested[@]+"${requested[@]}"}; do
-      if [ "$seen" = "$name" ]; then
-        echo "[filter_roster] duplicate name in --only: '$name'" >&2
-        return 1
-      fi
-    done
-    local known=0 v
-    for v in "${valid_names[@]}"; do
-      [ "$v" = "$name" ] && known=1
-    done
-    if [ "$known" = 0 ]; then
-      echo "[filter_roster] unknown name in --only: '$name' (valid: ${valid_names[*]})" >&2
-      return 1
-    fi
-    requested+=("$name")
-  done
-
-  if [ "${#requested[@]}" -eq 0 ]; then
-    echo "[filter_roster] --only selected nothing (valid: ${valid_names[*]})" >&2
-    return 1
-  fi
-
-  # Emit in CANONICAL roster order.
-  for spec in "${roster[@]}"; do
-    name="${spec%%:*}"
-    local want
-    for want in "${requested[@]}"; do
-      [ "$want" = "$name" ] && printf '%s\n' "$spec"
-    done
-  done
-  return 0
-}
-
 parse_chain_args() {
     while [[ $# -gt 0 ]]; do
       case $1 in
@@ -1085,7 +1006,7 @@ _manifest_status() {  # path -> status on stdout, empty if unreadable
 # old clean verdict could ever see it: the file existed, and the child's
 # exit status was 0. A chain whose every iteration exhausted its gates
 # trained nothing, scored nothing, printed CHAIN COMPLETE and exited 0 —
-# and `v19_queue_runner.sh` read `EXIT=0`, resolved `DISPOSITION=complete`
+# and an external scheduler read `EXIT=0`, resolved `DISPOSITION=complete`
 # and advanced the campaign wave.
 #
 # `no_records` is a DESIGNED chainable state, not a crash, so it is not

@@ -37,6 +37,14 @@ from agent.schemas.health_feedback import TrialValidityFeedback
 from sdsc_submission_scripts import run_one_iteration as runner
 from tests.helpers.launcher_bindings import effective_workflow_kwargs
 
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+_QUICKSTART_ARGS = [
+    "--task_composition",
+    str(_REPO_ROOT / "configs/task_composition/quickstart.yaml"),
+    "--data_dir",
+    str(_REPO_ROOT),
+]
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -69,6 +77,11 @@ def _plugin_src(model_type: str) -> str:
 
 
 def _materialise_iter(workspace, iter_idx, model_type, *, write_plugin=True):
+    from workflows.task_composition import compose_run_task_bindings
+
+    composition = compose_run_task_bindings(
+        str(_REPO_ROOT / "configs/task_composition/quickstart.yaml")
+    )
     run_name = f"iter_{iter_idx:03d}"
     iter_dir = workspace / run_name
     model_dir = iter_dir / "iteration_001" / model_type
@@ -88,6 +101,8 @@ def _materialise_iter(workspace, iter_idx, model_type, *, write_plugin=True):
                 "best_denoising_score": 0.5 + 0.05 * iter_idx,
                 "started_at": "2026-04-27T10:00:00",
                 "finished_at": "2026-04-27T11:00:00",
+                "resolved_data_scope": list(range(4)),
+                "task_composition_fingerprint": composition.semantic_fingerprint,
             }
         )
     )
@@ -155,6 +170,7 @@ class TestArgparseSurface:
             "iter_001",
             "--seed_paths",
             "/tmp/seed.json",
+            *_QUICKSTART_ARGS,
             *extra,
         ]
 
@@ -211,7 +227,15 @@ class TestArgparseSurface:
         --seed_paths with no values remains an argparse error (nargs='+'),
         covered by the cold-start CLI tests."""
         args = runner.build_parser().parse_args(
-            ["--workspace", "/tmp/ws", "--run_name", "iter_001", "--start_iteration", "1"]
+            [
+                "--workspace",
+                "/tmp/ws",
+                "--run_name",
+                "iter_001",
+                "--start_iteration",
+                "1",
+                *_QUICKSTART_ARGS,
+            ]
         )
         normalized = runner.normalize_args(args)
         assert normalized.seed_paths == []
@@ -228,6 +252,7 @@ class TestArgparseSurface:
                 "1",
                 "--source_paths",
                 "/tmp/seed.json",
+                *_QUICKSTART_ARGS,
             ]
         )
         with warnings.catch_warnings(record=True) as caught:
@@ -256,6 +281,7 @@ class TestArgparseSurface:
                 "/tmp/a.json",
                 "--source_paths",
                 "/tmp/b.json",
+                *_QUICKSTART_ARGS,
             ]
         )
         with pytest.raises(SystemExit):
@@ -482,6 +508,12 @@ def _run_main(argv):
     # test_gate_data_dir_resolution.py, which does NOT use this helper.
     if "--data_dir" not in argv:
         argv = [*argv, "--data_dir", str(_WIRING_DATA_DIR)]
+    if "--task_composition" not in argv:
+        argv = [
+            *argv,
+            "--task_composition",
+            str(_REPO_ROOT / "configs/task_composition/quickstart.yaml"),
+        ]
     with patch.object(sys, "argv", ["run_one_iteration.py", *argv]):
         try:
             runner.main()
@@ -1322,6 +1354,7 @@ class TestLitReviewCLI:
             "/tmp/seed.json",
             "--start_iteration",
             "1",
+            *_QUICKSTART_ARGS,
             *extra,
         ]
 
@@ -1369,7 +1402,15 @@ class TestLitReviewCLI:
 from core.run_invariants import RunInvariants  # noqa: E402
 from execute_tools.dataset_config import DataScope  # noqa: E402
 
-_BASE = ["--workspace", "WS", "--start_iteration", "1", "--run_name", "iter_001"]
+_BASE = [
+    "--workspace",
+    "WS",
+    "--start_iteration",
+    "1",
+    "--run_name",
+    "iter_001",
+    *_QUICKSTART_ARGS,
+]
 
 
 def _normalized(*extra):
@@ -1404,29 +1445,34 @@ class TestDataScopeCLI:
 
 
 class TestComputeExpectedInvariants:
+    @staticmethod
+    def _compute(args):
+        from workflows.task_composition import (
+            bind_run_task_composition,
+            compose_run_task_bindings,
+        )
+
+        composition = compose_run_task_bindings(args.task_composition)
+        with bind_run_task_composition(composition, physical_data_root=args.data_dir):
+            return runner.compute_expected_invariants(args, run_composition=composition)
+
     def test_default_full_scope_materializes(self, tmp_path):
         args = _normalized()
         args.workspace = str(tmp_path)
-        inv = runner.compute_expected_invariants(args)
+        inv = self._compute(args)
         assert isinstance(inv, RunInvariants)
-        assert inv.resolved_data_scope == list(range(20))
+        assert inv.resolved_data_scope == list(range(4))
         assert inv.health_gate_enabled is True
         assert inv.health_config_sha256 is not None
         assert os.path.isfile(os.path.join(str(tmp_path), "health_checks_effective.yaml"))
 
     def test_disabled_gates_null_sha_no_file(self, tmp_path):
-        args = _normalized("--no-health_gate_enabled", "--data_scope", "4-9")
+        args = _normalized("--no-health_gate_enabled", "--data_scope", "0-1")
         args.workspace = str(tmp_path)
-        inv = runner.compute_expected_invariants(args)
-        assert inv.resolved_data_scope == [4, 5, 6, 7, 8, 9]
+        inv = self._compute(args)
+        assert inv.resolved_data_scope == [0, 1]
         assert inv.health_config_sha256 is None
         assert not os.path.exists(os.path.join(str(tmp_path), "health_checks_effective.yaml"))
-
-    def test_partial_scope_without_files_fails(self, tmp_path):
-        args = _normalized("--data_scope", "4-9")
-        args.workspace = str(tmp_path)
-        with pytest.raises(ValueError):
-            runner.compute_expected_invariants(args)
 
 
 class TestDataScopeChainWiring:
@@ -1451,12 +1497,12 @@ class TestDataScopeChainWiring:
         return code, mock_wf
 
     def test_scope_and_gates_reach_workflow(self, tmp_path):
-        code, mock_wf = self._main(tmp_path, "--data_scope", "4-9", "--health_gate_files", "4,7,9")
+        code, mock_wf = self._main(tmp_path, "--data_scope", "0-1", "--health_gate_files", "0")
         assert code == 0
         kwargs = effective_workflow_kwargs(mock_wf.call_args)
-        assert kwargs["data_scope"] == DataScope(file_indices=[4, 5, 6, 7, 8, 9])
+        assert kwargs["data_scope"] == DataScope(file_indices=[0, 1])
         assert kwargs["health_gate_enabled"] is True
-        assert kwargs["health_gate_files"] == [4, 7, 9]
+        assert kwargs["health_gate_files"] == [0]
         # Invariants were materialized into the chain root pre-restore.
         assert os.path.isfile(os.path.join(str(tmp_path), "health_checks_effective.yaml"))
 
@@ -1473,41 +1519,37 @@ class TestDataScopeChainWiring:
         ``TestAutoResumeRecovery`` proves ``--auto_resume`` does not lift
         it, while a ``failed``/``no_records`` slot IS the auto-resume
         recovery case (rows D/E)."""
-        code, _ = self._main(tmp_path, "--data_scope", "4-9", "--health_gate_files", "4,7,9")
+        code, _ = self._main(tmp_path, "--data_scope", "0-1", "--health_gate_files", "0")
         assert code == 0
         manifest_path = tmp_path / "iter_001" / "manifest.json"
         first = manifest_path.read_bytes()
         assert json.loads(first)["status"] == "completed"
 
-        code2, mock_wf2 = self._main(tmp_path, "--data_scope", "4-9", "--health_gate_files", "5,8")
+        code2, mock_wf2 = self._main(tmp_path, "--data_scope", "0-1", "--health_gate_files", "1")
         assert code2 == 2
         mock_wf2.assert_not_called()
         assert manifest_path.read_bytes() == first
 
-    def test_an_explicit_replacement_still_crashes_on_the_conflicting_config(self, tmp_path):
-        """The original property, kept: with the replacement requested, the
-        materialized-config immutability guard fires inside
-        compute_expected_invariants before restore/run_workflow. The crashed
-        manifest now carries the replacement provenance, and the committed
-        one is set aside rather than destroyed."""
-        code, _ = self._main(tmp_path, "--data_scope", "4-9", "--health_gate_files", "4,7,9")
+    def test_an_explicit_replacement_accepts_a_new_config_with_provenance(self, tmp_path):
+        """An explicit replacement may change configuration without losing history."""
+        code, _ = self._main(tmp_path, "--data_scope", "0-1", "--health_gate_files", "0")
         assert code == 0
         first = (tmp_path / "iter_001" / "manifest.json").read_bytes()
 
         code2, mock_wf2 = self._main(
             tmp_path,
             "--data_scope",
-            "4-9",
+            "0-2",
             "--health_gate_files",
-            "5,8",
+            "1",
             "--replace_iteration_manifest",
             "--replacement_reason",
             "conflicting rerun (test)",
         )
-        assert code2 == 1
-        mock_wf2.assert_not_called()
+        assert code2 == 0
+        mock_wf2.assert_called_once()
         manifest = json.loads((tmp_path / "iter_001" / "manifest.json").read_text())
-        assert manifest["status"] == "failed"
+        assert manifest["status"] == "completed"
         prov = manifest["manifest_replacement"]
         assert prov["replacement_reason"] == "conflicting rerun (test)"
         assert prov["previous_manifest_status"] == "completed"
@@ -1898,6 +1940,7 @@ class TestFormalLaunchPolicyIsEnforcedAtTheChainBoundary:
 
         from sdsc_submission_scripts import run_one_iteration as runner
 
+        argv = [*argv, *_QUICKSTART_ARGS]
         argv = ["run_one_iteration.py", *argv]
         old = _sys.argv
         _sys.argv = argv

@@ -436,8 +436,8 @@ partial `--data_scope` (anything narrower than the full 20 files),
    DS8's `validate_health_scope` refuses to launch when the shipped
    `configs/health_checks.yaml`'s `peek_file_indices` fall outside
    the resolved scope OR when any check omits an explicit peek list
-   under partial scope. `sdsc_submission_scripts/launch_v18_wave1.sh:121`
-   is the canonical pairing.
+   under partial scope. The external task workflow must derive both arguments
+   from one declared scope authority.
 
 2. **Always cold-start real-training gate runs (operator rule,
    2026-07-27).** Omit `--seed_paths` entirely. Rationale:

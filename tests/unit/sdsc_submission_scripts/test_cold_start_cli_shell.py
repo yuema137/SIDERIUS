@@ -16,7 +16,18 @@ _REPO = Path(__file__).resolve().parents[3]
 _ROI = _REPO / "sdsc_submission_scripts" / "run_one_iteration.py"
 _CHAIN_COMMON = _REPO / "sdsc_submission_scripts" / "_chain_common.sh"
 
-_BASE_ARGV = ["--workspace", "/tmp/x", "--run_name", "y", "--start_iteration", "1"]
+_BASE_ARGV = [
+    "--workspace",
+    "/tmp/x",
+    "--run_name",
+    "y",
+    "--start_iteration",
+    "1",
+    "--task_composition",
+    str(_REPO / "configs/task_composition/quickstart.yaml"),
+    "--data_dir",
+    str(_REPO),
+]
 
 
 def _load_roi():

@@ -3,11 +3,10 @@
 What only these tests catch:
 
 * ``TestLockSiteCensus`` — the PR 2 lock-collision failure mode for the
-  three new canonical fields: a ``build_run_invariants(`` site relying on
-  builder defaults would write a lock contradicting the chain's and abort
-  every labelled / lit-review-ON run. The documented default caller
-  (``scripts/run_comparison.py``) is pinned to pass NONE of them, and a
-  fifth production caller cannot appear unnoticed.
+  canonical launch-identity fields: a ``build_run_invariants(`` site relying
+  on builder defaults would write a lock contradicting the chain's and abort
+  every labelled or literature-review-enabled run. A new production caller
+  cannot appear unnoticed.
 * ``TestChainCli`` / ``TestLaunchIdentityResolution`` — the resolution
   order (CLI > YAML > off), the sha being the resolved FILE's bytes, and
   an enabled-but-unreadable config being refused before any work.
@@ -49,7 +48,6 @@ LOCK_SITES = {
     "workflow": _REPO / "workflows/model_exploration.py",
     "chain": _REPO / "sdsc_submission_scripts/run_one_iteration.py",
 }
-DEFAULT_SITE = _REPO / "scripts/run_comparison.py"
 
 IDENTITY_KWARGS = (
     "lit_review_enabled=",
@@ -59,7 +57,18 @@ IDENTITY_KWARGS = (
     "baseline_isolation=",
 )
 
-_BASE_ARGV = ["--workspace", "/tmp/ws", "--start_iteration", "1", "--run_name", "t"]
+_BASE_ARGV = [
+    "--workspace",
+    "/tmp/ws",
+    "--start_iteration",
+    "1",
+    "--run_name",
+    "t",
+    "--task_composition",
+    str(_REPO / "configs/task_composition/quickstart.yaml"),
+    "--data_dir",
+    str(_REPO),
+]
 
 
 def _args(extra=()):
@@ -104,20 +113,9 @@ class TestLockSiteCensus:
                 f"{site}: no LockLaunchIdentity construction threads {kwarg}"
             )
 
-    def test_the_documented_default_caller_stays_on_defaults(self):
-        """`scripts/run_comparison.py` is the ONE caller left on the builder's
-        defaults (an unlabelled, lit-review-less baseline campaign). A future
-        edit that threads ONE of the three there without the others would
-        produce a lock nothing else can match; pin the whole posture."""
-        windows = _call_windows(DEFAULT_SITE.read_text(encoding="utf-8"))
-        assert len(windows) == 1
-        for kwarg in IDENTITY_KWARGS:
-            assert kwarg not in windows[0], f"run_comparison threads {kwarg} unexpectedly"
-
-    def test_exactly_four_production_callers(self):
-        """A fifth production caller could not have been audited for the
-        identity fields; the census names the four so a new one is visible."""
-        expected = {p.resolve() for p in (*LOCK_SITES.values(), DEFAULT_SITE)}
+    def test_exactly_three_production_callers(self):
+        """A fourth production caller must join the audited identity surface."""
+        expected = {p.resolve() for p in LOCK_SITES.values()}
         found: set[Path] = set()
         for top in (
             "agent",
@@ -199,20 +197,29 @@ class TestLaunchIdentityResolution:
             )
 
     def test_compute_expected_invariants_carries_the_identity(self, tmp_path):
+        from workflows.task_composition import (
+            bind_run_task_composition,
+            compose_run_task_bindings,
+        )
+
         cfg = self._yaml(tmp_path, enabled=True)
         args = _args(["--experiment_arm", "with-prior-art", "--ml_lit_review_config", str(cfg)])
         args.workspace = str(tmp_path)
         args.health_gate_enabled = False  # avoid materializing gate config
         args.health_gate_files = None
-        explicit = roi.compute_expected_invariants(
-            args, launch_identity=roi.resolve_launch_identity(args)
-        )
+        composition = compose_run_task_bindings(args.task_composition)
+        with bind_run_task_composition(composition, physical_data_root=args.data_dir):
+            explicit = roi.compute_expected_invariants(
+                args,
+                run_composition=composition,
+                launch_identity=roi.resolve_launch_identity(args),
+            )
+            implicit = roi.compute_expected_invariants(args, run_composition=composition)
         assert explicit.experiment_arm == "with-prior-art"
         assert explicit.lit_review_enabled is True
         assert explicit.lit_review_config_sha256 == hashlib.sha256(cfg.read_bytes()).hexdigest()
         # A caller that predates the parameter resolves the SAME identity
         # through the same function — the two cannot diverge.
-        implicit = roi.compute_expected_invariants(args)
         assert implicit.canonical() == explicit.canonical()
 
 
