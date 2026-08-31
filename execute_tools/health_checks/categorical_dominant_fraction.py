@@ -106,9 +106,11 @@ class CategoricalDominantFractionCheck:
 
         reason = ""
         if not passed:
+            dominant_count = int(counts[dominant_index])
             reason = (
                 f"{self.name}: symbol {dominant_symbol} accounts for "
-                f"{dominant_fraction:.6g} of {n} prediction(s), above the "
+                f"{dominant_count} of {n} prediction(s) "
+                f"({dominant_fraction:.6g}), above the "
                 f"ceiling {ceiling:g} — a collapsed or near-collapsed "
                 f"categorical deliverable."
             )

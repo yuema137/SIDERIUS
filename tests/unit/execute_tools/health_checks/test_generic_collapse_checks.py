@@ -159,6 +159,7 @@ class TestDominantFractionArithmetic:
         assert result.metrics["dominant_fraction"] == PETS_DOMINANT_FRACTION
         assert result.metrics["dominant_symbol"] == PETS_DOMINANT_SYMBOL
         assert result.metrics["max_dominant_fraction"] == PETS_CEILING
+        assert f"accounts for 369 of {PETS_N} prediction(s)" in result.reason
 
     def test_a_healthy_spread_passes(self):
         result = CategoricalDominantFractionCheck().run(

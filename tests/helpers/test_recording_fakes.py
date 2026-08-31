@@ -72,7 +72,8 @@ class TestRecordingLLMBridge:
         assert len(bridge.calls) == 2
         # Step-00 WF-3 tuple shapes (design §13.5, updated in the same
         # commit as the helper widening per §17 rule 3): generate records
-        # its kwargs dict as the 4th element; reflect keeps its 5-tuple.
+        # its kwargs dict as the 4th element; reflect records kwargs as its
+        # 6th element while preserving the original first five positions.
         assert bridge.calls[0] == ("generate", "sys1", "user1", {})
         assert bridge.calls[1] == (
             "reflect",
@@ -80,6 +81,7 @@ class TestRecordingLLMBridge:
             "hypo",
             {"loss": 0.5},
             {"baseline": 1.0},
+            {},
         )
 
     def test_wf3_generate_records_label_and_components(self):
@@ -134,6 +136,7 @@ class TestRecordingLLMBridge:
             "hyp",
             {"denoising_score": 1.0},
             {"baseline_score": 0.9},
+            {},
         )
 
     def test_fifo_queue_returns_responses_in_order(self):
