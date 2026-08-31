@@ -41,8 +41,8 @@ from agent.schemas.hyperparam_tuning import ExperimentPlan
 from agent.schemas.proposal import FalsifiablePrediction, ProposalOutput
 from agent.schemas.telemetry import LLMBridgeContextError
 from agent.schemas.validator import LLMCodeReview
-from tests.helpers.metric_fixtures import shipped_spec
-from tests.unit.agent.llm_bridge.test_step00_prompt_goldens import tidmad_task_render
+from tests.helpers.metric_fixtures import accuracy_like_spec
+from tests.helpers.tuner_prompt_fixtures import TASK_RENDER
 
 # ===================================================================
 # Schema round-trip tests — one per B2a label
@@ -171,9 +171,7 @@ def test_plan_method_routes_to_synthesiser():
     # other caller. The stub's DISPATCH is what this test is about; the
     # tuner always supplies the object in production, including under
     # `--is_pseudo_llm`, which is why the guard costs the stub path nothing.
-    raw = bridge.plan(
-        memory_history=[], task_render=tidmad_task_render(), metric_spec=shipped_spec()
-    )
+    raw = bridge.plan(memory_history=[], task_render=TASK_RENDER, metric_spec=accuracy_like_spec())
     plan = ExperimentPlan.model_validate(raw)
     assert plan.model_type == _synth_stub_model_name(0, "a")
 
@@ -183,7 +181,7 @@ def test_reflect_method_routes_to_synthesiser():
     "tuner.reflector")`` directly. The stub's override must dispatch."""
     bridge = StubLLMBridge()
     raw = bridge.reflect(
-        "exp_001", "stub hypothesis", {"final_loss": 0.5}, metric_spec=shipped_spec()
+        "exp_001", "stub hypothesis", {"final_loss": 0.5}, metric_spec=accuracy_like_spec()
     )
     assert raw["conclusion"]
     assert raw["memory_update"]

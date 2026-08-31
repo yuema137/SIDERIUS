@@ -36,22 +36,19 @@ import copy
 
 from agent.prompts import _PLANNER_HIDDEN_RECORD_KEYS, _truncate_memory_history
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
-from tests.unit.agent.llm_bridge.test_step00_prompt_goldens import (
-    _HISTORY_3,
-    planner_fixture_kwargs,
-)
+from tests.helpers.tuner_prompt_fixtures import HISTORY, planner_kwargs
 
 _PAYLOAD = {
-    "metric_id": "tidmad_denoising_score",
+    "metric_id": "fixture_quality",
     "direction": "higher",
     "scalar": -2.55,
-    "references_used": ["anchor_map"],
+    "references_used": ["fixture_reference"],
 }
 _REFUSAL = {
-    "metric_id": "tidmad_denoising_score",
+    "metric_id": "fixture_quality",
     "direction": "higher",
     "verdict": {
-        "contract_id": "tidmad_denoised_h5",
+        "contract_id": "fixture_deliverable",
         "failures": [
             {
                 "requirement": "required_dtype",
@@ -107,7 +104,7 @@ def _render(history: list[dict]) -> str:
     """The USER message as it crosses ``LLMBridge._chat_json`` — the real LLM
     boundary (PB-1's ``BoundaryRecorderBridge``, network-guarded), with every
     other ``plan()`` parameter pinned by the shared fixture surface."""
-    kwargs = planner_fixture_kwargs()
+    kwargs = planner_kwargs()
     kwargs["memory_history"] = history
     bridge = BoundaryRecorderBridge()
     bridge.plan(**kwargs)
@@ -150,8 +147,8 @@ def test_the_planner_prompt_is_byte_identical_with_and_without_the_payload():
     nothing. The absence assertions below still run against the FULL prompt, so
     a raw key or an inner-only value leaking into the rendered block is caught.
     """
-    plain = _render(_HISTORY_3)
-    loaded = _render(_with_payload(_HISTORY_3))
+    plain = _render(HISTORY)
+    loaded = _render(_with_payload(HISTORY))
     assert _without_dynamics_block(loaded) == _without_dynamics_block(plain)
     # ...and the render really is live: the block exists and reflects the
     # payload, so the equality above is not achieved by rendering nothing.
@@ -166,13 +163,13 @@ def test_the_planner_prompt_is_byte_identical_with_and_without_the_payload():
     assert "sample_count_weighted_mean_of_batch_criterion" not in loaded
     assert "best_validation_epoch" not in loaded
     # ...and the payload WAS present in the input, so the equality is not vacuous.
-    assert any("metric_result" in rec for rec in _with_payload(_HISTORY_3))
-    assert all(all(k in rec for k in _STEP07A_KEYS) for rec in _with_payload(_HISTORY_3))
+    assert any("metric_result" in rec for rec in _with_payload(HISTORY))
+    assert all(all(k in rec for k in _STEP07A_KEYS) for rec in _with_payload(HISTORY))
 
 
 def test_the_condensed_tail_never_carries_the_payload_either():
     """Six records: three condensed + three verbatim — no position renders it."""
-    six = _with_payload(_HISTORY_3 + copy.deepcopy(_HISTORY_3))
+    six = _with_payload(HISTORY + copy.deepcopy(HISTORY))
     for i, rec in enumerate(six):
         rec["exp_id"] = f"exp_{i:03d}"
     windowed = _truncate_memory_history(six)
@@ -188,7 +185,7 @@ def test_the_condensed_tail_never_carries_the_payload_either():
 def test_the_persisted_record_is_untouched_by_the_render():
     """The filter is a RENDERING decision: the input dicts keep their keys
     (the record on disk, and what Steps 07a/09 will read, is unchanged)."""
-    loaded = _with_payload(_HISTORY_3)
+    loaded = _with_payload(HISTORY)
     before = copy.deepcopy(loaded)
     _truncate_memory_history(loaded)
     _render(loaded)
@@ -202,7 +199,7 @@ def test_a_collapsed_formal_record_renders_only_the_policy_adjusted_score():
     ``denoising_score`` is the gate policy's penalty while
     ``metric_result.scalar`` is the raw evaluation. The planner must see ONE
     number — the policy-adjusted one it always saw — not both."""
-    collapsed = copy.deepcopy(_HISTORY_3[-1])
+    collapsed = copy.deepcopy(HISTORY[-1])
     collapsed.update(
         {
             "status": "failed_mode_collapse",
@@ -271,7 +268,7 @@ def test_widening_the_set_moved_no_existing_prompt_byte():
     pre_p2b_keys = {"metric_result", "metric_refusal", "training_history", "training_diagnosis"}
     assert pre_p2b_keys < set(_PLANNER_HIDDEN_RECORD_KEYS), "P2b only WIDENS the set"
 
-    history = copy.deepcopy(_HISTORY_3)
+    history = copy.deepcopy(HISTORY)
     assert not any(k.startswith("secondary_") for rec in history for k in rec), (
         "these fixtures predate P2b — that is the point of using them here"
     )
