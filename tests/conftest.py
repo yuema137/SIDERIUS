@@ -34,18 +34,7 @@ import h5py
 import numpy as np
 import pytest
 
-try:
-    from execute_tools.data_paths import TIDMAD_DATA_DIR
-
-    REAL_DATA_DIR: str | None = TIDMAD_DATA_DIR
-except (FileNotFoundError, ImportError):
-    # Reached only by a corrupted checkout: `data_paths` falls back to the
-    # TRACKED `tidmad_data_config.example.yaml` with a warning and only raises
-    # when that template is missing too (execute_tools/data_paths.py:27-43).
-    # `None` rather than any concrete path — a test must never silently fall
-    # back to a developer-specific location (CLAUDE.md). The two consumers
-    # below turn `None` into a named skip.
-    REAL_DATA_DIR = None
+REAL_DATA_DIR: str | None = os.environ.get("SIDERIUS_TEST_DATA_DIR")
 REAL_DATA_FILE = "abra_training_0000.h5"
 
 
@@ -57,10 +46,8 @@ def _require_real_data_dir(flag: str) -> str:
     """
     if REAL_DATA_DIR is None:
         pytest.skip(
-            f"{flag} requires TIDMAD_DATA_DIR, but execute_tools.data_paths "
-            "could not be imported — tidmad_data_config.yaml is absent AND the "
-            "tracked tidmad_data_config.example.yaml template is missing. "
-            "Restore the template or create the config."
+            f"{flag} requires an explicit SIDERIUS_TEST_DATA_DIR. "
+            "Framework tests do not select a scientific dataset by default."
         )
     return REAL_DATA_DIR
 

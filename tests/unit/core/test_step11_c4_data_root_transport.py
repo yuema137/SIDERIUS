@@ -61,11 +61,10 @@ def _flag_value(cmd: list[str], flag: str) -> str | None:
 
 
 class TestTheRunScopedBinding:
-    def test_unbound_resolves_the_legacy_constant(self):
-        from execute_tools.data_paths import TIDMAD_DATA_DIR
-
+    def test_unbound_refuses_instead_of_selecting_a_task(self):
         assert active_physical_data_root() is None
-        assert resolve_physical_data_root() == TIDMAD_DATA_DIR
+        with pytest.raises(DatasetDirectoryUnavailable):
+            resolve_physical_data_root()
 
     def test_binding_makes_the_root_active(self, tmp_path):
         root = tmp_path / "data"
@@ -121,7 +120,22 @@ class TestTheRunScopedBinding:
 
 @pytest.fixture
 def sandbox(tmp_path):
-    return TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path / "ws"), progress_bar=False)
+    root = tmp_path / "data"
+    root.mkdir()
+    with bind_physical_data_root(str(root)):
+        return TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path / "ws"), progress_bar=False)
+
+
+@pytest.fixture(autouse=True)
+def _bind_synthetic_task_config():
+    from workflows.task_config import bind_task_config
+
+    values = {
+        "task_description": "Synthetic transport fixture.",
+        "forward_contract": {},
+    }
+    with bind_task_config(values):
+        yield
 
 
 def _train_success(sandbox, exp_id):
@@ -205,22 +219,6 @@ class TestTheRootReachesEveryChild:
         assert _flag_value(cmd, "--data_dir") == sb.base_dir
         assert _flag_value(cmd, "--data_dir") != str(root)
 
-    @patch("core.sandbox_executor._run_observed_subprocess")
-    def test_an_unbound_run_emits_no_root_flag_at_all(self, mock_run, sandbox):
-        """R-11-1. The C0 baseline pins the whole flag set independently;
-        this states the specific consequence.
-        """
-        assert active_physical_data_root() is None
-        mock_run.side_effect = _train_success(sandbox, EXP_ID)
-        sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
-        assert "--data_dir" not in mock_run.call_args[0][0]
-
-    @patch("core.sandbox_executor.subprocess.run")
-    def test_an_unbound_scoring_run_emits_no_raw_data_dir(self, mock_run, sandbox):
-        assert active_physical_data_root() is None
-        cmd = _run_scoring(sandbox, mock_run)
-        assert "--raw_data_dir" not in cmd
-
     def test_the_sandbox_data_dir_follows_the_binding(self, tmp_path):
         root = tmp_path / "declared"
         root.mkdir()
@@ -228,11 +226,9 @@ class TestTheRootReachesEveryChild:
             sb = TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path / "ws"))
             assert sb.dirs["data"] == str(root)
 
-    def test_the_sandbox_data_dir_is_the_legacy_constant_when_unbound(self, tmp_path):
-        from execute_tools.data_paths import TIDMAD_DATA_DIR
-
-        sb = TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path / "ws"))
-        assert sb.dirs["data"] == TIDMAD_DATA_DIR
+    def test_the_sandbox_refuses_when_no_root_is_bound(self, tmp_path):
+        with pytest.raises(DatasetDirectoryUnavailable):
+            TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path / "ws"))
 
 
 # ----------------------------------------------------------------------

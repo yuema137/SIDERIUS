@@ -1568,6 +1568,7 @@ class HyperparamTuningAgent:
                         device_identity=device_identity,
                         data_dir=time_data_dir,
                         run_profile=run_profile,
+                        measurement_capability=agent_input.measurement_capability,
                     )
 
                     # Phase F post-flight REMOVED (operator decision 2026-08-03).

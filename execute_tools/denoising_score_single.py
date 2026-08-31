@@ -106,9 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--raw_data_dir",
         type=str,
         default=None,
-        help="Directory containing the raw abra_validation_XXXX.h5 "
-        "files (used for CH2 center-freq pickup). "
-        "Default: TIDMAD_DATA_DIR.",
+        help="Required directory containing the raw source files used by scoring.",
     )
     parser.add_argument(
         "--anchor_map",
@@ -458,17 +456,15 @@ def main(argv: list[str] | None = None) -> None:
     # ---------------------------------------------------------------------------
 
     from execute_tools.build_anchor_map import resolve_anchor_map_path
-    from execute_tools.data_paths import TIDMAD_DATA_DIR
+    from execute_tools.data_paths import resolve_dataset_dir
     from execute_tools.dataset_config import (
         load_dataset_profile,
         resolve_dataset_profile,
         tidmad_topology,
     )
 
-    if args.data_dir is None:
-        args.data_dir = TIDMAD_DATA_DIR
-    if args.raw_data_dir is None:
-        args.raw_data_dir = TIDMAD_DATA_DIR
+    args.data_dir = resolve_dataset_dir(args.data_dir, purpose="scoring deliverables")
+    args.raw_data_dir = resolve_dataset_dir(args.raw_data_dir, purpose="scoring source data")
     # Anchor map: an explicit --anchor_map override wins; otherwise use the
     # committed reference artifact (reference_data/segment_anchors.json), resolved
     # from the package location independently of the current working directory. The

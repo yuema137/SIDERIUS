@@ -50,7 +50,7 @@ from core.runtime_control.session import RuntimeControlPolicy
 from core.runtime_control.watchdog_deadline import (
     watchdog_deadline_provider as _build_watchdog_deadline_provider,
 )
-from execute_tools.data_paths import legacy_tidmad_data_dir, resolve_physical_data_root
+from execute_tools.data_paths import resolve_physical_data_root
 from execute_tools.dataset_config import (
     DataScope,
     ScopeViolationError,
@@ -88,11 +88,6 @@ from ml_models.models_format_sandbox import (
     validate_output_loss_compatibility,
 )
 from ml_models.plugin_loader import UnknownOutputContractError
-
-
-def _tidmad_data_dir() -> str:
-    return legacy_tidmad_data_dir()
-
 
 # ---------------------------------------------------------------------------
 # Subprocess host-RAM hardening (Fix 1 of docs/optimize_inference_and_scoring.md)

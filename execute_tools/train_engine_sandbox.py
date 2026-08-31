@@ -2187,10 +2187,9 @@ def main():
         )
 
     # Resolve defaults from config file
-    if args.data_dir is None:
-        from execute_tools.data_paths import TIDMAD_DATA_DIR
+    from execute_tools.data_paths import resolve_dataset_dir
 
-        args.data_dir = TIDMAD_DATA_DIR
+    args.data_dir = resolve_dataset_dir(args.data_dir, purpose="training child")
 
     # Define standard sandbox structure
     base_sandbox = args.sandbox_dir

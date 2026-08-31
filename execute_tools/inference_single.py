@@ -669,10 +669,9 @@ def main():
         # milestone name implying it.
         trace.record("after_cuda_init", detail=f"DEVICE={DEVICE}")
 
-    if args.data_dir is None:
-        from execute_tools.data_paths import TIDMAD_DATA_DIR
+    from execute_tools.data_paths import resolve_dataset_dir
 
-        args.data_dir = TIDMAD_DATA_DIR
+    args.data_dir = resolve_dataset_dir(args.data_dir, purpose="inference child")
 
     # 2. Model Loading Logic
     if args.mode == "fix":

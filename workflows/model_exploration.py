@@ -3172,6 +3172,7 @@ def run_workflow(
             tuning_storage,
             max_rounds=launch.max_rounds,
             health_checks_config=bindings.health_checks_config,
+            measurement_capability=bindings.measurement_capability,
             # Step 12 / PR-12a (D-12a-1) — the composition projection crosses
             # the edge on the INPUT, beside every other run-scoped decision
             # this protocol already maps.

@@ -3200,8 +3200,6 @@ def main():
         # `measurement_capability.py` states this contract explicitly:
         # "Callers that know the task supply those." The workflow must not
         # name a task resolver itself.
-        from execute_tools.data_paths import resolve_tidmad_measurement_capability
-
         # Step 10 / P1 — the composition EDGE.
         #
         # Resolved here, before the workflow, for the same reason the
@@ -3234,14 +3232,8 @@ def main():
         # ADMITTED on the strength of another task's dataset where it is
         # present, which is every campaign host.
         #
-        # The branch is on composition PRESENCE, exactly like the composition
-        # edge itself, never on a task name. Un-composed keeps the identical
-        # zero-argument legacy call, so its identity and its availability
-        # verdict are unchanged.
-        measurement_capability = (
-            resolve_composed_measurement_capability(run_composition, dataset_root=args.data_dir)
-            if run_composition is not None
-            else resolve_tidmad_measurement_capability()
+        measurement_capability = resolve_composed_measurement_capability(
+            run_composition, dataset_root=args.data_dir
         )
         # Step 11 C4 — the run's resolved physical data root travels with
         # the composition binding. `args.data_dir` was already put through

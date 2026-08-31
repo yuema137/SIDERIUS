@@ -36,6 +36,7 @@ from agent.schemas.training_diagnosis import TrainingDiagnosis
 # field did before. Same layering as proposal.py importing
 # core.hardware_context.
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
@@ -1536,6 +1537,13 @@ class HyperparamTuningInput(BaseModel):
         default=None,
         description=(
             "Optional HealthGate YAML override. None preserves the shipped default config."
+        ),
+    )
+    measurement_capability: ResolvedMeasurementCapability | None = Field(
+        default=None,
+        description=(
+            "Caller-resolved measurement identity and availability. Generic tuning "
+            "never derives a scientific task identity from the dataset path."
         ),
     )
     resume: bool = Field(

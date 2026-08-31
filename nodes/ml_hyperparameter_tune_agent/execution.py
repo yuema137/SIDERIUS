@@ -600,6 +600,7 @@ def run_admission_preflight(
                 # already computed by the VRAM gate and
                 # already recorded as vram_budget_gb.
                 vram_threshold_gb=(resource_check or {}).get("limit_gb"),
+                measurement_capability=agent_input.measurement_capability,
             )
             == "abort"
         ):

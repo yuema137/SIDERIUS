@@ -657,6 +657,7 @@ def _resolve_time_check_probe_request(
     device_identity: Any | None = None,
     result_authority: str | None = None,
     vram_threshold_gb: float | None = None,
+    measurement_capability: Any | None = None,
 ) -> str:
     """C9d: turn a REQUEST_PROBE pre-flight into a terminal decision.
 
@@ -726,14 +727,20 @@ def _resolve_time_check_probe_request(
     )
     from core.runtime_control.provenance import capture_software_stack
 
-    # V20 PR C1 / C-C3b. The capability is resolved by the TASK layer, which
-    # knows which dataset it needs; generic runtime-control used to import
-    # `TIDMAD_DATA_DIR` itself and so refused silently on any other task.
-    # `data_dir` is already this function's parameter, so the resolved root
-    # is the one the probe will actually use.
-    from execute_tools.data_paths import resolve_tidmad_measurement_capability
+    capability = measurement_capability
+    if capability is None:
+        from core.runtime_control.measurement_capability import (
+            ResolvedMeasurementCapability,
+        )
 
-    capability = resolve_tidmad_measurement_capability(dataset_root=data_dir)
+        capability = ResolvedMeasurementCapability(
+            task_identity="unresolved_task",
+            dataset_adapter="unresolved_dataset_adapter",
+            data_shape_class="unresolved_data_shape",
+            probe_available=False,
+            unavailability_reason="no measurement capability was supplied by the caller",
+            dataset_root=data_dir,
+        )
     available, detail = probe_runner_availability(capability)
     if not available:
         breakdown["probe_resolution"] = "unavailable"
@@ -1690,49 +1697,6 @@ def _append_runtime_observation(sandbox, run_name: str, rv_block: dict | None) -
         print(f"[runtime_control] observation-store append failed (non-fatal): {exc}")
 
 
-def _tidmad_calibration_identity_applicable(run_profile: Any) -> bool:
-    """May this run's calibration be labelled with TIDMAD's identity?
-
-    C12-P B5. ``resolve_tidmad_measurement_capability`` answers for TIDMAD and
-    for TIDMAD only -- ``task_identity="tidmad_denoise"`` and the
-    ``psd..._seg..._files...`` shape class are LITERALS over the module-level
-    TIDMAD profile (``execute_tools/data_paths.py``), and only ``dataset_root``
-    is parameterised. Consulting it for a task that declares no TIDMAD topology
-    does not produce a weaker identity; it produces a CONFIDENT WRONG one, and
-    the calibration bucket does not separate tasks (``calibration_policy
-    .bucket_components`` keys on ``model_family``, never on ``task_identity``),
-    so a foreign record would sit in the same promotion bucket as genuine
-    TIDMAD evidence.
-
-    The bounded rule, therefore: *no applicable declared measurement identity
-    under the existing supported contract => DO NOT EXPORT calibration state
-    for that task.* **Absence of a valid identity is not a licence to call the
-    task TIDMAD.** The measurement itself is still preserved -- it quarantines
-    with a reason (O-2) -- it simply never becomes authority.
-
-    **A MEMBERSHIP TEST, never a caught ``ValueError``.** ``tidmad_topology()``
-    raises for sections ABSENT and for sections PRESENT-but-MALFORMED alike, so
-    inferring "this is some other task" from catching it would silently
-    reclassify a BROKEN TIDMAD declaration as inapplicable and quietly stop
-    exporting evidence that must instead stay visible. A malformed TIDMAD
-    profile therefore returns ``True`` here and still fails loudly downstream.
-
-    Regime A -- ``run_profile`` that is not a ``DatasetProfile`` -- is an
-    UN-COMPOSED run, which IS TIDMAD, so it stays applicable and TIDMAD's
-    behaviour is bit-for-bit what it was.
-
-    Deliberately the same three-line shape as
-    ``execution.wall_time_preflight_applicable`` and the prephase rule above:
-    this consumes an existing authority rather than inventing a generic
-    measurement-identity capability family.
-    """
-    from execute_tools.dataset_config import DatasetProfile, declares_tidmad_topology
-
-    if not isinstance(run_profile, DatasetProfile):
-        return True
-    return declares_tidmad_topology(run_profile)
-
-
 def _derive_calibration_from_observation(
     sandbox,
     *,
@@ -1740,6 +1704,7 @@ def _derive_calibration_from_observation(
     device_identity,
     data_dir: str | None,
     run_profile: Any = None,
+    measurement_capability: Any | None = None,
 ) -> None:
     """Derive a v2 calibration record from a SUCCESSFUL attempt's observation.
 
@@ -1791,7 +1756,6 @@ def _derive_calibration_from_observation(
         )
         from core.runtime_control.provenance import capture_software_stack
         from core.runtime_control.records import RuntimeObservation
-        from execute_tools.data_paths import resolve_tidmad_measurement_capability
 
         observation = RuntimeObservation.model_validate(rv_block)
         uuid = getattr(device_identity, "uuid", None)
@@ -1827,8 +1791,8 @@ def _derive_calibration_from_observation(
         # topology. A second guard there would imply the first one is not
         # trusted. Do not reintroduce it.
         identity = None
-        if _tidmad_calibration_identity_applicable(run_profile) and uuid:
-            capability = resolve_tidmad_measurement_capability(dataset_root=data_dir)
+        if measurement_capability is not None and uuid:
+            capability = measurement_capability
             identity = IdentityContext(
                 task_identity=capability.task_identity,
                 data_shape_class=capability.data_shape_class,

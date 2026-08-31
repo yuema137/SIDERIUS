@@ -23,7 +23,7 @@ The task-facing seams:
 | `dataset_config.py` | `DatasetProfile` (generic identity + opaque `topology` the framework never reads) · `DataScope` (`--data_scope "4-9"`) · `ChannelIdentity` / `ValueEncoding` · the TIDMAD constants |
 | `deliverable_spec.py` | `DeliverableNaming` — **the sole owner of deliverable file naming** — and `DeliverableStorage`/`DeliverableSpec` |
 | `sample_set_builder.py` / `scoring_utils.py` | `build_sample_set` (constructive scope enforcement) · `validate_sample_set` (the boundary guarantee before all file I/O) · `score_vector` (pure 2-tuple scoring — frozen TIDMAD arithmetic) |
-| `data_paths.py` | physical data root: `bind/active/resolve_physical_data_root`; ⚠ import-time `TIDMAD_DATA_DIR` fallback is legacy-only |
+| `data_paths.py` | explicit physical data-root validation plus run-scoped bind/active/resolve transport |
 | `scope_artifact.py` | the hash-verified scope artifact ABI crossing the process boundary |
 | `task_registration_scope.py` | run-scoped registration visibility/rollback |
 

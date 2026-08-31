@@ -33,6 +33,7 @@ from agent.schemas.proposal import ProposalOutput
 from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import DataScope
 
 
@@ -42,6 +43,7 @@ def local_validated_model(
     storage: StorageConfig,
     max_rounds: int = 50,
     health_checks_config: str | None = None,
+    measurement_capability: ResolvedMeasurementCapability | None = None,
     # Step 12 / PR-12a (D-12a-1) — the run's task-composition PROJECTION.
     # Additive and default-None: an un-composed run passes nothing and the
     # tuner sees `None`, which is regime A byte-for-byte.
@@ -293,6 +295,7 @@ def local_validated_model(
         file_index=file_index,
         max_rounds=max_rounds,
         health_checks_config=health_checks_config,
+        measurement_capability=measurement_capability,
         # Step 12 / PR-12a — mapped straight through. This protocol is the
         # field-mapping layer, so the projection crosses the edge here rather
         # than the tuner rediscovering it from the ambient environment.

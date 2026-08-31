@@ -259,6 +259,49 @@ validate.
   yes, establish the boundary first. Adding detail to a focused function
   is fine; adding another responsibility to a giant orchestrator is not.
 
+- **Maintainability without critical-path drift (binding, operator decision
+  2026-08-31)**: clarity, local testability, and explicit data flow are part
+  of correctness. Prefer the simplest implementation that preserves the
+  required boundary: simple, then explicit, modular, testable, and extensible.
+  Do not introduce abstraction, inheritance, dispatch machinery, or special
+  cases for hypothetical consumers. Use composition and small typed
+  interfaces where behavior genuinely varies by task, backend, or provider.
+
+  Size is a review signal, not a mechanical splitting rule. A cohesive
+  function below roughly 100 lines is normally unremarkable; 100--200 lines
+  warrants a responsibility check; above 300 lines creates a strong
+  presumption for decomposition; and ordinary handwritten functions above
+  500 lines require a compelling documented reason. Cohesive modules below
+  roughly 1,000 lines are normally acceptable; 1,000--2,000 lines warrant
+  review; above 2,000 lines is a strong modularization candidate; and ordinary
+  handwritten modules above 3,000 lines require a compelling architectural
+  reason. Generated, vendored, schema-generated, and static-data files are
+  exceptions. Extract real responsibilities, never meaningless numbered
+  helpers.
+
+  Keep control flow shallow through guard clauses, focused policy functions,
+  and typed adapters. Nesting beyond three levels, long conditional chains,
+  or cyclomatic complexity above 10 should trigger review; complexity above
+  15 is a strong refactoring candidate unless the domain logic is inherently
+  branch-heavy. Comments explain scientific invariants, policy reasons, and
+  compatibility constraints; they do not compensate for tangled code.
+
+  Preserve public APIs, CLIs, configuration contracts, serialization formats,
+  and task/plugin interfaces during internal refactoring. Tests follow the
+  real boundary: pure policy tests, contract tests, bounded component tests,
+  and only the end-to-end tests that require the complete chain. Before a
+  non-trivial commit, ask whether the same behavior can be expressed more
+  simply, whether a special case or speculative abstraction was added, and
+  whether another implementation could be added without editing unrelated
+  branches.
+
+  These rules are preventive, not authorization for a repository-wide cleanup.
+  The active priority is clean campaign readiness and completion of the
+  framework/experiment separation. Refactor only when the current change would
+  worsen an unhealthy boundary, the existing structure makes the repair
+  unsafe, or nearby duplication and special cases are accumulating. Keep such
+  refactors bounded, behavior-preserving, and separately validated.
+
   **Why this is a rule and not a preference**: `HyperparamTuningAgent.run()`
   reached 2,487 lines and sat *exactly* on pyright's strict complexity
   ceiling — 258 branch nodes passed, 259 failed. Past that limit strict
