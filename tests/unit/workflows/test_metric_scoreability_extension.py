@@ -47,9 +47,6 @@ class ExternalScoreability(ScoreabilityContract):
 
 class ExternalMetric(EvaluationMetric):
     IMPLEMENTS: ClassVar[tuple[str, ...]] = ("external_metric",)
-    SCOREABILITY_CONTRACTS = {
-        "external_semantic_output": ExternalScoreability,
-    }
 
     def _compute(self, deliverables, /, **kwargs):
         return 1.0, None, ()
@@ -61,6 +58,12 @@ class ExternalMetric(EvaluationMetric):
         {
             "declaration": declaration.name,
             "implementation": {"file": plugin.name, "symbol": "ExternalMetric"},
+            "scoreability_contracts": {
+                "external_semantic_output": {
+                    "file": plugin.name,
+                    "symbol": "ExternalScoreability",
+                }
+            },
         },
         str(tmp_path),
     )
@@ -103,8 +106,6 @@ class TaskPresence(ScoreabilityContract):
 
 
 class ExternalMetric(EvaluationMetric):
-    SCOREABILITY_CONTRACTS = {"deliverable_presence": TaskPresence}
-
     def _compute(self, deliverables, /, **kwargs):
         return 1.0, None, ()
 """,
@@ -115,6 +116,12 @@ class ExternalMetric(EvaluationMetric):
         {
             "declaration": declaration.name,
             "implementation": {"file": plugin.name, "symbol": "ExternalMetric"},
+            "scoreability_contracts": {
+                "deliverable_presence": {
+                    "file": plugin.name,
+                    "symbol": "TaskPresence",
+                }
+            },
         },
         str(tmp_path),
     )

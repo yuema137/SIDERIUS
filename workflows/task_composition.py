@@ -80,7 +80,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.task_config import ForwardContract
     from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
     from execute_tools.dataset_config import DatasetProfile
-    from execute_tools.evaluation_metric import EvaluationMetric
+    from execute_tools.evaluation_metric import EvaluationMetric, ScoreabilityContract
     from execute_tools.health_checks._composition import TaskHealthBinding
     from execute_tools.task_data_path import TaskDataPath
 
@@ -982,13 +982,9 @@ def _compose_metric(
             f"EvaluationMetric to instantiate; got {implementation!r}."
         )
     metric_cls, plugin_ref = _load_symbol(implementation, manifest_dir, f"{where}.implementation")
-    scoreability_contract_types = getattr(metric_cls, "SCOREABILITY_CONTRACTS", None)
-    if scoreability_contract_types is not None and not isinstance(
-        scoreability_contract_types, Mapping
-    ):
-        raise TaskCompositionError(
-            f"{where}.implementation SCOREABILITY_CONTRACTS must be a mapping"
-        )
+    scoreability_contract_types = _compose_scoreability_contract_types(
+        section.get("scoreability_contracts"), manifest_dir, where
+    )
     try:
         spec = metric_spec_from_declaration(
             payload,
@@ -1042,6 +1038,43 @@ def _compose_metric(
             "disagree with it, silently."
         )
     return metric, payload, plugin_ref
+
+
+def _compose_scoreability_contract_types(
+    declarations: Any, manifest_dir: str, where: str
+) -> dict[str, type[ScoreabilityContract]]:
+    """Load task-owned scoreability classes explicitly named by a metric."""
+    from execute_tools.evaluation_metric import ScoreabilityContract
+
+    if declarations is None:
+        return {}
+    if not isinstance(declarations, Mapping):
+        raise TaskCompositionError(f"{where}.scoreability_contracts must be a mapping")
+
+    resolved: dict[str, type[ScoreabilityContract]] = {}
+    for contract_id, plugin in declarations.items():
+        if not isinstance(contract_id, str) or not contract_id.strip():
+            raise TaskCompositionError(
+                f"{where}.scoreability_contracts keys must be non-empty strings"
+            )
+        if not isinstance(plugin, dict):
+            raise TaskCompositionError(
+                f"{where}.scoreability_contracts[{contract_id!r}] must be a plugin mapping"
+            )
+        contract_type, _ = _load_symbol(
+            plugin,
+            manifest_dir,
+            f"{where}.scoreability_contracts[{contract_id!r}]",
+        )
+        if not isinstance(contract_type, type) or not issubclass(
+            contract_type, ScoreabilityContract
+        ):
+            raise TaskCompositionError(
+                f"{where}.scoreability_contracts[{contract_id!r}] must resolve to a "
+                "ScoreabilityContract subclass"
+            )
+        resolved[contract_id] = contract_type
+    return resolved
 
 
 def _compose_secondary_metrics(
