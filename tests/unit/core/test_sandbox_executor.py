@@ -10,33 +10,48 @@ Uses unittest.mock to intercept subprocess.run — no GPU, no real data needed.
 import json
 import os
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
 from core.sandbox_executor import TidmadSandbox, get_plugin_dir
+from execute_tools.data_paths import bind_physical_data_root
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+
+QUICKSTART = Path(__file__).resolve().parents[3] / "configs/task_composition/quickstart.yaml"
 
 # ==========================================
 # Fixtures
 # ==========================================
 
 
+@pytest.fixture(autouse=True)
+def _bind_data_root(tmp_path):
+    with bind_physical_data_root(str(tmp_path)):
+        yield
+
+
 @pytest.fixture
 def sandbox(tmp_path):
-    return TidmadSandbox(
-        run_name="test_run",
-        workspace=str(tmp_path),
-        progress_bar=False,
-    )
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
+        yield TidmadSandbox(
+            run_name="test_run",
+            workspace=str(tmp_path),
+            progress_bar=False,
+        )
 
 
 @pytest.fixture
 def sandbox_progress(tmp_path):
-    return TidmadSandbox(
-        run_name="test_run",
-        workspace=str(tmp_path),
-        progress_bar=True,
-    )
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
+        yield TidmadSandbox(
+            run_name="test_run",
+            workspace=str(tmp_path),
+            progress_bar=True,
+        )
 
 
 # Minimal valid configs that pass Pydantic validation
@@ -555,7 +570,7 @@ class TestSandboxPluginDir:
         sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
         assert "env" in kwargs
-        assert kwargs["env"]["SIDERIUS_PLUGIN_DIRS"] == sandbox.plugin_dir
+        assert kwargs["env"]["SIDERIUS_PLUGIN_DIRS"].split(os.pathsep)[0] == sandbox.plugin_dir
 
 
 # ==========================================
@@ -847,7 +862,7 @@ class TestSandboxLossDir:
         assert "env" in kwargs
         assert kwargs["env"]["SIDERIUS_LOSS_DIRS"] == sandbox.loss_dir
         # And plugin_dir is still wired — regression guard for the existing path.
-        assert kwargs["env"]["SIDERIUS_PLUGIN_DIRS"] == sandbox.plugin_dir
+        assert kwargs["env"]["SIDERIUS_PLUGIN_DIRS"].split(os.pathsep)[0] == sandbox.plugin_dir
 
 
 class TestGetLossDir:
