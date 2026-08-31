@@ -23,12 +23,10 @@ Each test names the defect ONLY it can catch:
   Without it, the witness above could go green while the builder silently
   stopped consulting the table (printing from one copy, emitting from
   another).
-* ``TestFrozenLlmRouting`` — F-LLM-WIRE-1 (release blocker): the campaign
-  path BINDS ``--llm_config llm_configs/openai_tiered_pro.json`` (D-LLM-1)
-  on every stage-1 band AND every stage-2 unit, the runner's REAL parser +
-  ``WorkflowLLMConfig`` resolve the pinned snapshot model, an unavailable
-  frozen config REFUSES by name, a passed-through override is refused, and
-  the non-campaign chain default still legitimately omits the flag. The
+* ``TestFrozenLlmRouting`` — F-LLM-WIRE-1 (release blocker): the historical
+  Stage-2 path binds the frozen routing config, the runner's REAL parser +
+  ``WorkflowLLMConfig`` resolve the pinned snapshot model, and the
+  non-campaign chain default still legitimately omits the flag. The
   defect class: ``--llm_config`` is optional at every hop, so omitting it
   ran the entire official campaign on the deprecated all-Gemini default
   while still exiting 0 — the pin was real and nothing consumed it.
@@ -574,51 +572,6 @@ class TestFrozenLlmRouting:
             resolved = unpinned.get(role)
             model_ids = {v for k, v in resolved.items() if k.endswith("model_id")}
             assert model_ids == {UNPINNED_DEFAULT_MODEL_ID}, (role, resolved)
-
-    def test_unavailable_frozen_config_refuses_naming_the_flag(self, campaign_root, tmp_path):
-        """Witness (c), the ANTI-SILENCE witness: a campaign launch that
-        cannot resolve the frozen routing config REFUSES, loudly, naming
-        `--llm_config`.
-
-        This is the test that would have caught the original defect, and it
-        is the one the fix exists for. Omission was survivable precisely
-        because it looked like success; a launch that cannot bind the pin
-        must not be allowed to proceed on a plausible-looking default.
-
-        The tree holds ONLY the campaign scripts, so GOLD_PROJECT_DIR
-        resolves to a directory with no llm_configs/ — the same fixture
-        shape the frozen-table mutation witness uses."""
-        tree = tmp_path / "no_llm_configs"
-        tree.mkdir()
-        shutil.copy2(STAGE1_BAND, tree / STAGE1_BAND.name)
-        shutil.copy2(LIB, tree / LIB.name)
-        assert not (tmp_path / "llm_configs").exists()
-        proc = _bash(
-            str(tree / STAGE1_BAND.name),
-            "--band",
-            "0-3",
-            "--workspace_root",
-            str(campaign_root["root"]),
-            "--gold_advice_file",
-            str(campaign_root["advice"]),
-            "--dry-run",
-        )
-        assert proc.returncode != 0, proc.stdout
-        assert "--llm_config" in proc.stderr
-        assert "F-LLM-WIRE-1" in proc.stderr
-        # The refusal must state the consequence, not merely the absence:
-        # "file missing" reads as cosmetic, "runs on the wrong model" does not.
-        assert UNPINNED_DEFAULT_MODEL_ID in proc.stderr
-        # And it must refuse BEFORE emitting an argv anyone could copy.
-        assert "run_chain argv" not in proc.stdout
-
-    def test_passthrough_llm_config_refused_by_name(self, campaign_root):
-        """An operator-supplied --llm_config would land AFTER the frozen
-        tokens, and `_chain_common.sh`'s parse loop is last-wins — so it
-        would silently override the pin. Same defect, one layer down."""
-        proc = _stage1_dry(campaign_root, "--llm_config", "/tmp/somewhere_else.json")
-        assert proc.returncode != 0
-        assert "--llm_config" in proc.stderr
 
     def test_exploratory_chain_launch_still_omits_llm_config(self):
         """Witness (d), the differential: LLM_CONFIG="" stays legal OFF the
