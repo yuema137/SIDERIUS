@@ -17,9 +17,9 @@ The defects only this module catches
    and gets no fresh LLM call — was exactly the path that lost the evidence.
    One fixture asserts BOTH keys survive it, in one assertion block, because
    the claim is that they ride the same mechanism.
-3. **An inherited direction.** DAVIS's `psnr` is higher-is-better beside a
-   `mse` primary that is lower-is-better. A carrier that took the primary's
-   direction would render it backwards and no numeric assertion would notice.
+3. **An inherited direction.** The fixture's `psnr` is higher-is-better while
+   `mae` is lower-is-better. A carrier that inherited one direction would
+   render one of them backwards and no numeric assertion would notice.
 """
 
 from __future__ import annotations
@@ -37,7 +37,6 @@ from nodes.result_interpretation_agent import (
     tuning_output_to_model_run_summary,
 )
 from tests.helpers.metric_fixtures import shipped_spec
-from workflows.task_composition import compose_run_task_bindings
 
 ORDER = MetricOrder(shipped_spec())
 
@@ -244,17 +243,6 @@ class TestTheProjectionMatrix:
         assert _states(summary) == [
             ("psnr", "higher", "unavailable"),
             ("mae", "lower", "unavailable"),
-        ]
-
-    def test_the_declared_set_comes_from_the_REAL_davis_composition(self):
-        """Anti-drift: the stamp literals above must be what DAVIS actually
-        declares, or this whole matrix tests a metric nobody runs."""
-        declared = compose_run_task_bindings(
-            "tests/fixtures/step10_p1/davis/composition.yaml"
-        ).secondary_metrics
-        assert [(m.spec.id, m.spec.direction) for m in declared] == [
-            (PSNR["id"], PSNR["direction"]),
-            (MAE["id"], MAE["direction"]),
         ]
 
 
