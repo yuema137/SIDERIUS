@@ -192,7 +192,7 @@ CLEANUP_DENOISED=1
 # ran a validation posture reached APP_ARGS directly. That is not a
 # cosmetic hole: --validation_fixed_candidate_plan BYPASSES THE PROPOSER,
 # substituting one fixed candidate plan for the whole campaign, and
-# launch_prior_baseline_experiment.sh REFUSES that flag by name (:150-154)
+# Task-specific launchers must refuse ambient validation overrides themselves.
 # — the environment route went around a refusal that was already written.
 #
 # The `:-` form is retained at the read sites on purpose: it is what makes

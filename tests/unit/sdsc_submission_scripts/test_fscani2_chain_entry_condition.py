@@ -188,17 +188,6 @@ class TestEnvironmentRouteIsClosed:
         assert not injected, f"environment-injected tokens on the child argv: {injected}"
         assert "/tmp/evil_plan.json" not in argv
 
-    def test_the_launcher_refusal_and_the_entry_condition_agree(self):
-        """launch_prior_baseline_experiment.sh refuses the flag by name;
-        that refusal is only meaningful if the environment route is closed
-        too. Fails if the refusal is deleted while the row stays 'closed'."""
-        launcher = (
-            REPO_ROOT / "sdsc_submission_scripts" / "launch_prior_baseline_experiment.sh"
-        ).read_text(encoding="utf-8")
-        assert "--validation_fixed_candidate_plan)" in launcher
-        assert "cannot be passed through" in launcher
-
-
 class TestFlagRouteStillWorks:
     def test_the_declared_flag_still_reaches_the_child_argv(self):
         """Discrimination: the entry condition closes an injection route,

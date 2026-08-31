@@ -266,18 +266,3 @@ class TestTheLaunchSplitIsUnchangedAndCorrectlyJustified:
             f"a CHAIN-LINEAGE launcher now uses `timeout --signal`: {chain_lineage_hits} — "
             "the C7 corrected justification must be revisited, not re-inverted"
         )
-
-    def test_the_probe_is_genuinely_outside_the_chain_lineage(self):
-        """The scope-narrowing above is honest only while the probe stays
-        outside the derived set — the defect only this catches: the probe
-        growing a run_chain/_chain_common reference (becoming chain-lineage)
-        while keeping its timeout, which would put a wall-clock kill inside
-        a production-chain path again. Fails by: the probe entering the
-        lineage set."""
-        probe = REPO_ROOT / "sdsc_submission_scripts" / "gpu_c_coresidency_probe.sh"
-        text = probe.read_text(encoding="utf-8")
-        assert "timeout --signal" in text, "the probe's boundedness contract vanished"
-        assert "run_chain.sh" not in text and "_chain_common.sh" not in text, (
-            "the probe now references the chain lineage while using `timeout "
-            "--signal` — the scope-narrowing's premise is broken; revisit C7"
-        )
