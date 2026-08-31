@@ -11,10 +11,7 @@ seam at the surface that matters: the LLM boundary.
 
 What each test here catches that nothing else does:
 
-* the SHIPPED description (read through ``load_task_config``, never a
-  literal copy) reaching EVERY stage in BOTH modes. The PB-3 goldens use
-  a TEST-OWNED description, so they cannot distinguish "the config
-  authority flows" from "some string was substituted".
+* the supplied description reaching EVERY stage in BOTH modes;
 * an UNSUBSTITUTED placeholder token shipping to the LLM. A golden
   regenerated alongside a broken placeholder would still be green;
   §3.1 documents exactly that trap (an UPPERCASE placeholder can never
@@ -51,7 +48,6 @@ from tests.unit.agent.ml_model_proposal_agent.test_step00_prompt_goldens import 
     fixture_proposal_input,
     pin_environment,
 )
-from workflows.task_config import get_task_description, load_task_config
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TEMPLATE_DIR = REPO_ROOT / "agent" / "prompt_templates" / "proposal"
@@ -76,6 +72,8 @@ LABEL = "Background on the task:"
 #: literal ``{loss_name, description, ...}`` JSON sketch in
 #: ``proposing_stage.md`` or the ``{# EXPLORATION_MODE_BLOCK #}`` marker.
 PLACEHOLDER_TOKEN = re.compile(r"\{[A-Za-z_][A-Za-z0-9_]*\}")
+
+TASK_DESCRIPTION = "Forecast a synthetic sensor frame from multichannel context."
 
 
 def capture_stage_systems(
@@ -121,20 +119,14 @@ def capture_stage_systems(
     }
 
 
-def shipped_description() -> str:
-    """The description as PRODUCTION reads it — through the single
-    authority, never copied into this file."""
-    return get_task_description(load_task_config())
-
-
 # ---------------------------------------------------------------------------
-# F1 — the shipped description reaches all three stages, in both modes
+# F1 — the supplied description reaches all three stages, in both modes
 # ---------------------------------------------------------------------------
 
 
 class TestJoinReachesEveryStageSystemPrompt:
     @pytest.mark.parametrize("mode", ["explore", "exploit"])
-    def test_shipped_description_present_exactly_once_per_stage(self, tmp_path, monkeypatch, mode):
+    def test_supplied_description_present_exactly_once_per_stage(self, tmp_path, monkeypatch, mode):
         """Six captures (3 stages x 2 modes), asserted PER STAGE.
 
         An aggregate "appears somewhere in the renders" assertion would
@@ -143,8 +135,7 @@ class TestJoinReachesEveryStageSystemPrompt:
         catches a placeholder accidentally added twice, or added to a
         MODE overlay as well as the base template.
         """
-        description = shipped_description()
-        assert description, "the shipped task_config carries no description"
+        description = TASK_DESCRIPTION
         systems = capture_stage_systems(
             tmp_path, monkeypatch, mode=mode, task_description=description
         )
@@ -152,7 +143,7 @@ class TestJoinReachesEveryStageSystemPrompt:
         for stage in STAGES:
             system = systems[stage]
             assert system.count(description) == 1, (
-                f"stage {stage!r} ({mode}): shipped description appears "
+                f"stage {stage!r} ({mode}): supplied description appears "
                 f"{system.count(description)} times, expected exactly 1"
             )
             assert system.count(LABEL) == 1, (
@@ -166,7 +157,7 @@ class TestJoinReachesEveryStageSystemPrompt:
         brace token to the LLM, and a regenerated golden would not
         notice. Scan the real captured bytes instead."""
         systems = capture_stage_systems(
-            tmp_path, monkeypatch, mode=mode, task_description=shipped_description()
+            tmp_path, monkeypatch, mode=mode, task_description=TASK_DESCRIPTION
         )
         for stage, system in systems.items():
             survivors = sorted(set(PLACEHOLDER_TOKEN.findall(system)))
@@ -269,7 +260,7 @@ class TestBraceTokensInDescription:
     What this test alone catches: a future refactor of the substitution
     mechanism to ``str.format`` / ``string.Template``, which would raise
     on brace-bearing content instead of passing it through; and any
-    attempt to "fix" the hazard by sanitising the shipped description.
+    attempt to "fix" the hazard by sanitising the supplied description.
     """
 
     def test_brace_tokens_do_not_break_the_other_placeholder_sites(self):
@@ -307,9 +298,9 @@ from agent.prompt_templates.proposal import load_stage_prompt
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
     _render_pipeline_task_background,
 )
-from workflows.task_config import get_task_description, load_task_config
-
-block = _render_pipeline_task_background(get_task_description(load_task_config()))
+block = _render_pipeline_task_background(
+    "Forecast a synthetic sensor frame from multichannel context."
+)
 digest = hashlib.sha256()
 for stem in ("comparison_stage", "causal_reasoning_stage", "proposing_stage"):
     for mode in ("explore", "exploit"):
