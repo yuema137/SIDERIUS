@@ -271,6 +271,10 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path,
         f"Expected MLLiteratureReviewAgent.run to fire once; got "
         f"{len(captured_lit_inputs)} call(s)."
     )
+    MockLitReview.assert_called_once_with(
+        bridge_factory=None,
+        root_cache_dir=os.path.join(workspace, "cache", "literature", "root_papers"),
+    )
     lit_input = captured_lit_inputs[0]
     assert len(lit_input.root_papers) == 1
     assert lit_input.root_papers[0].identifier == _SENTINEL_ARXIV_ID, (

@@ -1357,10 +1357,9 @@ class TestLitReviewCLI:
         assert args.ml_lit_review_config == "/path/to/other.yaml"
 
     def test_ml_lit_review_config_default(self):
-        """Default --ml_lit_review_config value is the canonical
-        configs/lit_review_config.yaml path."""
+        """No task or experiment literature settings are selected implicitly."""
         args = runner.build_parser().parse_args(self._argv())
-        assert args.ml_lit_review_config == "configs/lit_review_config.yaml"
+        assert args.ml_lit_review_config is None
 
 
 # ===========================================================================

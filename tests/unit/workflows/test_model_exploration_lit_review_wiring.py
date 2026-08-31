@@ -149,12 +149,27 @@ class TestShouldRunLiteratureReview:
 
 
 class TestBuildLitReviewInput:
-    def test_canonical_yaml_round_trips_every_knob(self, tmp_path):
-        """The repo's default YAML at configs/lit_review_config.yaml carries
-        every operator-visible knob explicit; verify each round-trips into
+    def test_caller_config_round_trips_every_knob(self, tmp_path):
+        """A caller-owned config carries every operator-visible knob into
         the resulting LiteratureReviewInput."""
-        with open("configs/lit_review_config.yaml", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
+        cfg = {
+            "root_papers": [{"source_type": "arxiv", "identifier": "2406.04378", "verbosity": 1}],
+            "dynamic_search": {
+                "enabled": True,
+                "max_rounds": 3,
+                "initial_verbosity": 0,
+            },
+            "findings_verbosity": 1,
+            "synthesis": {"transfer_tolerance": "moderate"},
+            "confidence_rubric": {
+                "omit_below": 0.40,
+                "bands": [
+                    {"lower": 0.40, "upper": 0.59, "criteria": "low"},
+                    {"lower": 0.60, "upper": 0.79, "criteria": "medium"},
+                    {"lower": 0.80, "upper": 1.00, "criteria": "high"},
+                ],
+            },
+        }
         inp = _build_lit_review_input(
             cfg,
             _interp(),

@@ -120,11 +120,13 @@ class TestArgParser:
         invocation and the node-doc contract, and no schema or type checker
         sees argparse wiring. Fails: SystemExit on parse, or a
         default/dest mismatch against the documented table."""
-        args = node_mod._build_arg_parser().parse_args([])
+        args = node_mod._build_arg_parser().parse_args(
+            ["--lit_review_config", "/task/literature.yaml"]
+        )
         assert args.workspace == "./siderius_workspace"
         assert args.run_name == "v1"
         assert args.experiment_history is None
-        assert args.lit_review_config == "configs/lit_review_config.yaml"
+        assert args.lit_review_config == "/task/literature.yaml"
         assert args.provider == "gemini"
         assert args.model_id == "gemini-3.1-flash-lite-preview"
 
@@ -136,8 +138,15 @@ class TestArgParser:
         alias keeps both alive. Fails: SystemExit from the dropped
         spelling."""
         parser = node_mod._build_arg_parser()
-        assert parser.parse_args(["--experiment-history", "a.json"]).experiment_history == "a.json"
-        assert parser.parse_args(["--experiment_history", "b.json"]).experiment_history == "b.json"
+        common = ["--lit_review_config", "/task/literature.yaml"]
+        assert (
+            parser.parse_args([*common, "--experiment-history", "a.json"]).experiment_history
+            == "a.json"
+        )
+        assert (
+            parser.parse_args([*common, "--experiment_history", "b.json"]).experiment_history
+            == "b.json"
+        )
 
 
 # ---------------------------------------------------------------------------

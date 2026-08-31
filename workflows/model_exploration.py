@@ -723,7 +723,7 @@ def resolve_lit_review_config_path(config_path: str) -> str:
     return os.path.join(SIDERIUS_ROOT, config_path)
 
 
-def lit_review_config_sha256(config_path: str, *, enabled: bool) -> str | None:
+def lit_review_config_sha256(config_path: str | None, *, enabled: bool) -> str | None:
     """sha256 of the resolved lit-review YAML bytes, or ``None`` when disabled.
 
     arXiv U1 (#253): the lock pins the lit-review CONFIG, not just the
@@ -738,6 +738,11 @@ def lit_review_config_sha256(config_path: str, *, enabled: bool) -> str | None:
     """
     if not enabled:
         return None
+    if config_path is None:
+        raise ValueError(
+            "literature review is enabled but no config was declared. Supply "
+            "the task or experiment config explicitly before launch."
+        )
     resolved = resolve_lit_review_config_path(config_path)
     try:
         with open(resolved, "rb") as f:
@@ -778,8 +783,8 @@ def _build_lit_review_input(
     pr_04b_task_description_single_source.md``.
 
     Args:
-        config: Parsed YAML dict from ``configs/lit_review_config.yaml`` (or
-            the operator-supplied path via ``--ml_lit_review_config``).
+        config: Parsed YAML dict from the caller-supplied path given through
+            ``--ml_lit_review_config``.
             Supplies the lit-review module's own knobs only — root papers,
             search, verbosity, synthesis, confidence rubric. A
             ``task_description`` key here is stale and is ignored.
@@ -799,8 +804,7 @@ def _build_lit_review_input(
     from agent.schemas.literature_review import LiteratureReviewInput
 
     # Step 04b — SINGLE SOURCE. The task description is resolved from the
-    # canonical §13 task profile (configs/task_config.yaml), NOT from the
-    # lit-review YAML, which no longer declares one. `config` is deliberately
+    # active task declaration, NOT from the lit-review YAML. `config` is deliberately
     # not consulted for this key: a stale operator copy that still carries
     # `task_description:` must be IGNORED, never merged or preferred, or the
     # duplicate authority this PR removed would return invisibly.
@@ -1165,40 +1169,31 @@ def refuse_builtin_proposal_under_isolation(
         )
 
 
-def refuse_shipped_lit_review_config_on_composed_run(
+def require_lit_review_config_when_enabled(
     *,
-    task_composition: Any,
     lit_review_enabled: bool,
-    lit_review_config_path: str,
+    lit_review_config_path: str | None,
 ) -> None:
-    """Keep composed runs from inheriting the shipped task-specific config.
+    """Require explicit literature-review configuration when enabled.
 
     Step 12 / PR-12a C7, D-12a-7 (Q-12-3, RATIFIED 2026-08-22).
 
-    The node and its four-channel proposer handoff are task-generic, and the
-    task description already resolves from the active composition. The shipped
-    default YAML is not generic: its root papers and confidence rubric are
-    TIDMAD-owned. A composed run may therefore enable literature review only
-    with an explicit non-default config. Un-composed compatibility is
-    unchanged.
+    The node and its four-channel proposer handoff are task-generic. Root
+    papers, search settings, and confidence criteria are task or experiment
+    inputs, so the framework never supplies a scientific default.
 
     Raises:
-        ValueError: composed and enabled while still selecting the shipped
-            default config, before any LLM or GPU spend.
+        ValueError: literature review is enabled without an explicit config,
+            before any LLM or GPU spend.
     """
-    if task_composition is None or not lit_review_enabled:
+    if not lit_review_enabled:
         return
-    default_path = os.path.abspath(resolve_lit_review_config_path("configs/lit_review_config.yaml"))
-    selected_path = os.path.abspath(resolve_lit_review_config_path(lit_review_config_path))
-    if selected_path != default_path:
+    if lit_review_config_path is not None:
         return
     raise ValueError(
-        "literature review is enabled on a COMPOSED run with the shipped "
-        "default configs/lit_review_config.yaml. That file contains "
-        "task-specific root papers and confidence criteria, so using it would "
-        "inject another task's literature framing into this run.\n"
-        "  Remediation: supply the composed task's own config through "
-        "--ml_lit_review_config, or launch without --ml_lit_review_enabled."
+        "literature review is enabled but no config was declared. Supply the "
+        "task or experiment config through --ml_lit_review_config, or launch "
+        "without --ml_lit_review_enabled."
     )
 
 
@@ -2040,8 +2035,7 @@ def run_workflow(
     # loop means before any LLM call and any GPU work. The decision itself is
     # a named authority so this orchestrator gains a CALL rather than another
     # branch family (§12.1's sibling-shape tripwire).
-    refuse_shipped_lit_review_config_on_composed_run(
-        task_composition=task_composition,
+    require_lit_review_config_when_enabled(
         lit_review_enabled=launch.lit_review_enabled,
         lit_review_config_path=launch.lit_review_config_path,
     )
@@ -2688,6 +2682,10 @@ def run_workflow(
         if should_run_literature_review(interpretation, enabled=launch.lit_review_enabled):
             # arXiv U1 — the same resolver the pre-flight hashed through, so
             # the lock's `lit_review_config_sha256` pins THIS file.
+            if launch.lit_review_config_path is None:
+                raise AssertionError(
+                    "literature-review config was not validated at workflow startup"
+                )
             yaml_path = resolve_lit_review_config_path(launch.lit_review_config_path)
             print(f"  [{iteration}] Running lit-review (config: {yaml_path})...")
             with open(yaml_path, encoding="utf-8") as _f:
@@ -2700,7 +2698,15 @@ def run_workflow(
                 storage=lit_storage,
                 run_name=bindings.run_name,
             )
-            lit_agent = MLLiteratureReviewAgent(bridge_factory=bridge_factory)
+            lit_agent = MLLiteratureReviewAgent(
+                bridge_factory=bridge_factory,
+                root_cache_dir=os.path.join(
+                    workspace,
+                    "cache",
+                    "literature",
+                    "root_papers",
+                ),
+            )
             _bind_iter_context(lit_agent)
             lit_output = lit_agent.run(lit_input)
             external_outputs.append(lit_output)

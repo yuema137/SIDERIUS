@@ -804,7 +804,7 @@ class LaunchIdentity:
 
     experiment_arm: str | None
     lit_review_enabled: bool
-    lit_review_config_path: str
+    lit_review_config_path: str | None
     lit_review_config_sha256: str | None
     baseline_isolation: bool = False
     advice_path: str | None = None
@@ -2101,14 +2101,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ml_lit_review_config",
         type=str,
-        default="configs/lit_review_config.yaml",
+        default=None,
         help=(
-            "Path to the lit-review YAML config (default: "
-            "configs/lit_review_config.yaml). Resolved relative to "
-            "SIDERIUS_ROOT inside the workflow. Pass an absolute path "
-            "or a different relative path to use a non-default config "
-            "without editing the default file (Design Decision 2, "
-            "2026-06-11)."
+            "Explicit path to the task or experiment's lit-review YAML config. "
+            "Required when literature review is enabled; relative paths resolve "
+            "against SIDERIUS_ROOT."
         ),
     )
     # arXiv U1 (#254) — the OPAQUE experiment-arm label. Pinned into the
@@ -2222,7 +2219,7 @@ def _experiment_arm_label(value: str) -> str:
     return value
 
 
-def resolve_lit_review_enabled(cli_flag: bool | None, config_path: str) -> bool:
+def resolve_lit_review_enabled(cli_flag: bool | None, config_path: str | None) -> bool:
     """Resolve the lit-review enable flag (Design Decisions 1 + 2, 2026-06-11).
 
     Priority: CLI flag (when explicitly set) > the YAML's top-level
@@ -2234,6 +2231,8 @@ def resolve_lit_review_enabled(cli_flag: bool | None, config_path: str) -> bool:
     """
     if cli_flag is not None:
         return cli_flag
+    if config_path is None:
+        return False
     yaml_path = resolve_lit_review_config_path(config_path)
     try:
         with open(yaml_path, encoding="utf-8") as f:
@@ -2682,7 +2681,11 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
         "start_iteration": args.start_iteration,
         "experiment_arm": identity.experiment_arm,
         "lit_review_enabled": identity.lit_review_enabled,
-        "lit_review_config_path": resolve_lit_review_config_path(identity.lit_review_config_path),
+        "lit_review_config_path": (
+            resolve_lit_review_config_path(identity.lit_review_config_path)
+            if identity.lit_review_config_path is not None
+            else None
+        ),
         "lit_review_config_sha256": identity.lit_review_config_sha256,
         "baseline_isolation": identity.baseline_isolation,
         "task_composition": args.task_composition or None,

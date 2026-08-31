@@ -21,8 +21,8 @@ docs/paper_resolver_pilot.md findings F1-F4):
     leaving ample room for the system prompt and completion.
   - ``task_description`` is an optional parameter defaulting to ``""``.
     The lit-review node always passes its resolved task description
-    (from ``LiteratureReviewInput.task_description``, sourced from
-    ``configs/lit_review_config.yaml``); the default only fires for test
+    (from ``LiteratureReviewInput.task_description``, sourced from the
+    caller's task declaration); the default only fires for test
     callers that omit the kwarg, in which case the ``{TASK_DESCRIPTION}``
     placeholder is filled with empty string.
 """

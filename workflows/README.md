@@ -93,7 +93,7 @@ library is not (recorded product gap; see
 | `CompositionDataRootMissing` | composed run without `--data_dir`, before any LLM/GPU work |
 | `CompositionNotBoundError` | a code path reached execution without the run-scoped binding — a wiring defect, not an operator error |
 | `RunInvariantsViolation` at startup | workspace lock mismatch — use a new workspace |
-| shipped task-specific lit-review config on a composed run | refused by name (`refuse_shipped_lit_review_config_on_composed_run`); an explicit task-owned config is accepted |
+| literature review enabled without an explicit config | refused by name (`require_lit_review_config_when_enabled`); a task- or experiment-owned config is accepted |
 
 ## Files normally edited
 

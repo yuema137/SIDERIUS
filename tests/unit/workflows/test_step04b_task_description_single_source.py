@@ -48,7 +48,6 @@ from workflows.task_config import get_task_description, load_task_config
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONFIGS_DIR = REPO_ROOT / "configs"
 TASK_CONFIG_YAML = CONFIGS_DIR / "task_config.yaml"
-LIT_REVIEW_YAML = CONFIGS_DIR / "lit_review_config.yaml"
 
 # A description that cannot be confused with the shipped TIDMAD one, in any
 # substring direction.
@@ -205,21 +204,18 @@ class TestSingleSourceDeclarationGuard:
         assert "task_description" in parsed
         assert example.name not in self._declaring_files()
 
-    def test_the_guard_reads_declarations_not_prose(self):
+    def test_the_guard_reads_declarations_not_prose(self, tmp_path):
         """The negative control — and the reason this guard parses YAML.
 
-        ``configs/lit_review_config.yaml`` legitimately *explains* in a
-        comment where the description now lives, so its raw text contains the
-        phrase while its parsed mapping declares nothing. A substring scan
-        would red on that comment — including the one Step 04b itself wrote.
+        A config may explain the task-description boundary in a comment, so
+        its raw text can contain the phrase while its parsed mapping declares
+        nothing. A substring scan would reject valid explanatory prose.
         """
-        text = LIT_REVIEW_YAML.read_text(encoding="utf-8")
-        assert "task_description" in text, (
-            "expected the lit-review config to keep explaining where the "
-            "description comes from — if that prose was deleted, this control "
-            "no longer proves the guard ignores comments"
-        )
-        assert "lit_review_config.yaml" not in self._declaring_files()
+        path = tmp_path / "literature.yaml"
+        text = "# task_description comes from the task declaration\nroot_papers: []\n"
+        path.write_text(text, encoding="utf-8")
+        assert "task_description" in text
+        assert "task_description" not in yaml.safe_load(path.read_text(encoding="utf-8"))
 
     def test_the_canonical_declaration_still_exists(self):
         """Not zero sources. A guard that only forbade declarations would be
@@ -265,19 +261,18 @@ class TestRung134ALitReviewHalf:
     def test_the_lit_review_input_follows_the_canonical_source(self, tmp_path, monkeypatch):
         """The rung itself, driven through the REAL production builder.
 
-        The lit-review config handed in is the SHIPPED one, parsed from disk —
-        so this is the production pairing, not a synthetic dict chosen to make
-        the point.
+        The lit-review settings are task-neutral and contain no duplicate task
+        description, so the canonical declaration is the only possible source.
         """
         path = _write_task_config_with(tmp_path, ALT_TASK)
-        shipped_lit_cfg = yaml.safe_load(LIT_REVIEW_YAML.read_text(encoding="utf-8"))
+        lit_cfg: dict = {}
 
         monkeypatch.setattr(tc, "_SIDERIUS_ROOT", str(tmp_path))  # F-SCANA-2 root redirection
         tc._clear_cache_for_tests()
         assert Path(tc.default_task_config_path()).resolve() == path.resolve()
 
         inp = _build_lit_review_input(
-            shipped_lit_cfg,
+            lit_cfg,
             _interp(),
             llm_kwargs=_LLM_KWARGS,
             storage=_storage(tmp_path),
@@ -300,8 +295,7 @@ class TestRung134ALitReviewHalf:
         source would pass the test above whenever the YAML had no key.
         """
         _write_task_config_with(tmp_path, ALT_TASK)
-        stale_cfg = yaml.safe_load(LIT_REVIEW_YAML.read_text(encoding="utf-8"))
-        stale_cfg["task_description"] = "STALE-LOCAL-COPY: this value must never be used."
+        stale_cfg = {"task_description": "STALE-LOCAL-COPY: this value must never be used."}
 
         monkeypatch.setattr(tc, "_SIDERIUS_ROOT", str(tmp_path))
         tc._clear_cache_for_tests()
@@ -340,10 +334,8 @@ class TestCheckpointCProductionPath:
 
     def _run_capture(self, tmp_path) -> BoundaryRecorderBridge:
         recorder = BoundaryRecorderBridge()
-        shipped_lit_cfg = yaml.safe_load(LIT_REVIEW_YAML.read_text(encoding="utf-8"))
         inp = _build_lit_review_input(
             {
-                **shipped_lit_cfg,
                 "root_papers": [],
                 "dynamic_search": {"enabled": True, "max_rounds": 1, "escalation_allowed": False},
             },

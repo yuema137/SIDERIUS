@@ -442,8 +442,8 @@ class LiteratureReviewInput(BaseModel):
     root_papers: list[PaperSource] = Field(
         default_factory=list,
         description="Foundational papers always resolved at agent start. "
-        "Loaded from configs/lit_review_config.yaml. Per-paper extracts "
-        "cached on disk under reference_data/root_papers_cache/.",
+        "Supplied by the caller's task or experiment config. Per-paper "
+        "extracts are cached under the run workspace.",
     )
     dynamic_search: DynamicSearchConfig = Field(
         default_factory=DynamicSearchConfig,
@@ -496,12 +496,11 @@ class LiteratureReviewInput(BaseModel):
         description="The research task this lit-review run is supporting. "
         "Injected into the {TASK_DESCRIPTION} placeholder of every "
         "lit-review prompt (paper-extract, search-decision, synthesis). "
-        "Operators should set this in configs/lit_review_config.yaml to "
-        "specialize the agent for their problem domain. When empty, the "
+        "Callers should set this from their task declaration to specialize "
+        "the agent for their problem domain. When empty, the "
         "{TASK_DESCRIPTION} placeholder is filled with the empty string, "
         "leaving the prompt section bare — the LLM gets no task-domain "
-        "anchor. Workflow logs a warning when this field is empty so "
-        "operators see the misconfiguration.",
+        "anchor.",
     )
 
 
