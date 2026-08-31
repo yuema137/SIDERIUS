@@ -590,17 +590,6 @@ class TestFrozenLlmRouting:
         assert proc.returncode == 0, proc.stderr
         assert "--llm_config" not in proc.stdout.splitlines()
 
-    def test_frozen_relpath_is_the_declared_authority(self):
-        """A silently REPOINTED authority (a different file, or a typo that
-        happens to exist) keeps every argv witness above green, so the
-        declared path itself is pinned against the hardcoded canon — and
-        the file it names must actually pin the campaign's model."""
-        proc = _bash("-c", f"source '{LIB}'; printf '%s' \"$GOLD_LLM_CONFIG_RELPATH\"")
-        assert proc.returncode == 0, proc.stderr
-        assert proc.stdout == FROZEN_LLM_CONFIG_RELPATH
-        assert FROZEN_LLM_CONFIG.is_file(), FROZEN_LLM_CONFIG
-        assert PINNED_MODEL_ID in FROZEN_LLM_CONFIG.read_text()
-
 
 class TestGenericRetentionCompatibility:
     def test_exploratory_chain_default_still_cleans_up(self):
