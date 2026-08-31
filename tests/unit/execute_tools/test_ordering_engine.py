@@ -1,76 +1,26 @@
-"""Training-engine data ordering: visit sequence, parity, and boundaries.
+"""Task-neutral ordering primitives: visit sequence, parity, and boundaries.
 
 Ordering changes the sequence in which selected samples are visited and
-nothing else. These tests assert the ACTUAL visited row sequence rather
-than the configuration value, and pin the four-part default-``shuffle``
-parity contract: same selection, same RNG behavior, same visited
-sequence, same step count
-(``docs/design/v19_priorities/pr2_data_ordering.md`` §3.1, §7.1).
+nothing else. These tests assert the actual visited row sequence rather
+than merely checking a configuration value, plus the invariant that shuffle
+and sequential strategies execute the same number of optimizer steps.
 
 Loader partitioning is explicitly NOT part of this: one global DataLoader
 with the global ``drop_last``, so batches may span a file boundary and the
 step count is identical across strategies (Decision 4a).
+
+Task-owned dataset construction and runtime execution belong to external task
+qualification. This module protects only the reusable ordering mechanism.
 """
 
 from __future__ import annotations
 
 import random
 
-import h5py
-import numpy as np
 import pytest
 from torch.utils.data import DataLoader, Dataset
 
 import execute_tools.train_engine_sandbox as tes
-from execute_tools.dataset_config import (
-    TIDMAD_PROFILE,
-    bind_dataset_profile,
-    tidmad_topology,
-)
-
-SEG_SIZE = 1000
-
-
-# ---- fixtures ----
-
-
-@pytest.fixture
-def multi_file_data(tmp_path):
-    """Three tiny training files (indices 4, 5, 6), 2 PSD segments each.
-
-    The declared psd_segment_length is shrunk to SEG_SIZE so one PSD segment
-    is exactly one ML row — making row counts trivially predictable.
-
-    Was ``monkeypatch.setattr(tes, "PSD_SEGMENT_LENGTH", SEG_SIZE)`` until
-    PR-02a C3 moved the loaders onto the resolved Dataset Profile. Geometry
-    is now declared, not patched; every assertion below is unchanged.
-    """
-    segments_per_file = 2
-    rng = np.random.default_rng(0)
-    for file_index in (4, 5, 6):
-        # Build the name from the DECLARATION, not from whatever the
-        # engine module happens to import — C3 removed the engine's
-        # dependency on the TIDMAD singleton entirely.
-        path = tmp_path / tidmad_topology(TIDMAD_PROFILE).dataset.training_file_name(file_index)
-        n = segments_per_file * SEG_SIZE
-        with h5py.File(path, "w") as f:
-            ts = f.create_group("timeseries")
-            ts.create_group("channel0001").create_dataset(
-                "timeseries", data=rng.integers(-128, 127, size=n, dtype=np.int8)
-            )
-            ts.create_group("channel0002").create_dataset(
-                "timeseries", data=rng.integers(-128, 127, size=n, dtype=np.int16)
-            )
-    sample_set = {"4": [0, 1], "5": [0, 1], "6": [0, 1]}
-    tiny = TIDMAD_PROFILE.model_copy(
-        update={
-            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
-                update={"psd_segment_length": SEG_SIZE}
-            )
-        }
-    )
-    with bind_dataset_profile(tiny):
-        yield str(tmp_path), sample_set
 
 
 class _IdentityDataset(Dataset):
@@ -187,52 +137,6 @@ def test_step_count_is_identical_across_strategies(batch_size):
     assert len(sequential_loader) == len(shuffle_loader) == n // batch_size
 
 
-# ---- dataset block layout ----
-
-
-def test_file_row_ranges_cover_the_dataset_contiguously(multi_file_data):
-    data_dir, sample_set = multi_file_data
-    dataset = tes.TIDMADEpochDataset(
-        data_dir=data_dir, sample_set=sample_set, seg_size=SEG_SIZE, rng=random.Random(0)
-    )
-    assert dataset.file_row_ranges == {4: (0, 2), 5: (2, 4), 6: (4, 6)}
-    assert len(dataset) == 6
-
-
-def test_file_row_ranges_skip_a_missing_file(multi_file_data, capsys):
-    data_dir, sample_set = multi_file_data
-    sample_set = {**sample_set, "7": [0, 1]}  # file 7 does not exist on disk
-    dataset = tes.TIDMADEpochDataset(
-        data_dir=data_dir, sample_set=sample_set, seg_size=SEG_SIZE, rng=random.Random(0)
-    )
-    assert 7 not in dataset.file_row_ranges
-    assert "not found, skipping" in capsys.readouterr().out
-    assert len(dataset) == 6
-
-
-def test_selection_is_identical_regardless_of_ordering(multi_file_data):
-    """Ordering must not change WHICH samples are selected — the datasets
-    built for either strategy are byte-identical under the same seed."""
-    data_dir, sample_set = multi_file_data
-    a = tes.TIDMADEpochDataset(
-        data_dir=data_dir,
-        sample_set=sample_set,
-        seg_size=SEG_SIZE,
-        train_portion=0.5,
-        rng=random.Random(11),
-    )
-    b = tes.TIDMADEpochDataset(
-        data_dir=data_dir,
-        sample_set=sample_set,
-        seg_size=SEG_SIZE,
-        train_portion=0.5,
-        rng=random.Random(11),
-    )
-    assert np.array_equal(a.inputs, b.inputs)
-    assert np.array_equal(a.targets, b.targets)
-    assert a.file_row_ranges == b.file_row_ranges
-
-
 # ---- boundary validation ----
 
 
@@ -269,117 +173,3 @@ def test_valid_permutation_and_defaults_pass():
     tes.validate_ordering_against_scope("sequential", [6, 4, 5], sample_set)
     tes.validate_ordering_against_scope("sequential", None, sample_set)
     tes.validate_ordering_against_scope("shuffle", None, sample_set)
-
-
-# ---- default-shuffle parity: the ordering code must not touch that path ----
-
-
-def _tiny_configs():
-    from ml_models.models_format_sandbox import LossConfig, TrainConfig, WaveNetConfig
-
-    return (
-        WaveNetConfig(
-            segmentation_size=SEG_SIZE,
-            input_channels=4,
-            residual_channels=8,
-            gate_channels=8,
-            skip_channels=8,
-            kernel_size=2,
-            num_blocks=1,
-        ),
-        TrainConfig(lr=1e-4, epochs=1, batch_size=1, optimizer_type="adam", device="cpu"),
-        LossConfig(),
-    )
-
-
-def _run_engine(tmp_path, data_dir, sample_set, monkeypatch, **ordering):
-    """Run the real engine on the tiny CPU setup, capturing DataLoader kwargs."""
-    model_cfg, train_cfg, loss_cfg = _tiny_configs()
-    sandbox_dirs = {
-        "models": str(tmp_path / "cached_models"),
-        "results": str(tmp_path / "records"),
-    }
-    for d in sandbox_dirs.values():
-        __import__("os").makedirs(d, exist_ok=True)
-
-    captured: list[dict] = []
-    real_dataloader = tes.DataLoader
-
-    def spy(dataset, **kwargs):
-        captured.append(kwargs)
-        return real_dataloader(dataset, **kwargs)
-
-    monkeypatch.setattr(tes, "DataLoader", spy)
-
-    summary = tes.run_experiment_streaming(
-        model_cfg,
-        train_cfg,
-        loss_cfg,
-        sample_set=sample_set,
-        data_dir=data_dir,
-        sandbox_dirs=sandbox_dirs,
-        exp_id="ordering_parity",
-        train_base_seed=42,
-        **ordering,
-    )
-    return summary, captured
-
-
-def test_default_shuffle_path_is_unchanged(tmp_path, multi_file_data, monkeypatch, capsys):
-    """Four-part parity contract, default path: the engine still builds
-    DataLoader(shuffle=True) with no sampler, so selection, RNG source, and
-    visited sequence are exactly the pre-PR2 ones."""
-    data_dir, sample_set = multi_file_data
-    summary, captured = _run_engine(tmp_path, data_dir, sample_set, monkeypatch)
-
-    assert summary is not None
-    assert len(captured) == 1
-    assert captured[0]["shuffle"] is True
-    assert "sampler" not in captured[0]
-    assert captured[0]["drop_last"] is True
-    assert "[data_order] resolved=shuffle file_order=none epoch=0" in capsys.readouterr().out
-
-
-def test_sequential_path_uses_a_sampler_and_keeps_the_step_count(
-    tmp_path, multi_file_data, monkeypatch, capsys
-):
-    """Sequential swaps the sampler in — and nothing else. Same global
-    drop_last, same number of optimizer steps as the shuffle run above."""
-    data_dir, sample_set = multi_file_data
-    summary, captured = _run_engine(
-        tmp_path,
-        data_dir,
-        sample_set,
-        monkeypatch,
-        order_strategy="sequential",
-        file_order=[6, 4, 5],
-    )
-
-    assert summary is not None
-    kwargs = captured[0]
-    assert "shuffle" not in kwargs
-    assert kwargs["drop_last"] is True
-    assert sorted(kwargs["sampler"]) == list(range(6)), "every row visited exactly once"
-    # File 6 occupies rows 4-5, and it is visited first.
-    assert sorted(kwargs["sampler"][0:2]) == [4, 5]
-
-    out = capsys.readouterr().out
-    assert "[data_order] resolved=sequential file_order=[6, 4, 5] epoch=0" in out
-
-
-def test_engine_rejects_a_file_order_that_is_not_a_permutation(
-    tmp_path, multi_file_data, monkeypatch
-):
-    """Defense in depth: the tuner validated already, but the engine has its
-    own CLI and must not trust its input."""
-    data_dir, sample_set = multi_file_data
-    with pytest.raises(ValueError) as exc:
-        _run_engine(
-            tmp_path,
-            data_dir,
-            sample_set,
-            monkeypatch,
-            order_strategy="sequential",
-            file_order=[4, 5],  # omits 6
-        )
-    assert "not a permutation" in str(exc.value)
