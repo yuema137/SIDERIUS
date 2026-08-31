@@ -1,4 +1,4 @@
-# agent_generated/_stub_plugin_template.py
+# Synthetic model-plugin template used by framework contract tests.
 #
 # Hardcoded plugin source consumed by StubLLMBridge's `implementor.code`
 # label. The bridge returns this file's contents verbatim regardless of
@@ -39,9 +39,9 @@ class StubArch(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # forward contract: input [B, T] int → output [B, 256, T] float
-        x = self.embedding(x.long())   # [B, T, hidden_dim]
-        x = self.head(x)               # [B, T, 256]
-        return x.transpose(1, 2)       # [B, 256, T]
+        x = self.embedding(x.long())  # [B, T, hidden_dim]
+        x = self.head(x)  # [B, T, 256]
+        return x.transpose(1, 2)  # [B, 256, T]
 
 
 PLUGIN_MODEL_CLASS = StubArch

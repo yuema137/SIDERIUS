@@ -19,7 +19,7 @@ from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
-from agent_generated._registry import CapabilityMetadata
+from core.capability_registry import CapabilityMetadata
 from core.hardware_context import HardwareContext
 
 # Fields the implementor is NEVER allowed to adjust. These are owned by the

@@ -25,7 +25,7 @@ import pytest
 
 from agent.schemas.implementor import ImplementorInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
-from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+from core.capability_registry import CapabilityMetadata, CapabilityRegistry
 from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
 
 

@@ -27,7 +27,7 @@ from pydantic import ValidationError
 from agent.schemas.hyperparam_tuning import ExpertAdvice
 from agent.schemas.proposal import CustomLossSpec, ProposalOutput
 from agent.schemas.proposer_evidence import build_proposer_evidence
-from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+from core.capability_registry import CapabilityMetadata, CapabilityRegistry
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 
 # ---------------------------------------------------------------------------

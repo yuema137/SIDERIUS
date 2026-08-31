@@ -265,7 +265,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--data_dir",
         type=str,
         required=True,
-        help="Physical data directory for the declared task. "
+        help="Physical data directory for the declared task. ",
     )
     parser.add_argument(
         "--health_checks_config",

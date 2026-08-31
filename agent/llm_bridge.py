@@ -2533,7 +2533,7 @@ class StubLLMBridge(LLMBridge):
 
     def _synth_implementor_code(self) -> dict:
         """Snippets that, after ``_assemble_plugin``, produce a plugin
-        functionally equivalent to ``agent_generated/_stub_plugin_template.py``.
+        functionally equivalent to the synthetic model-plugin contract fixture.
 
         The bridge cannot return the template's flat source string
         directly — the implementor's caller treats the response as a

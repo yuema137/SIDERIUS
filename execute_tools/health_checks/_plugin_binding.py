@@ -3,7 +3,7 @@
 
 **The one missing seam.** The model surface
 (``ml_models/plugin_loader.py``) and the loss surface
-(``agent_generated/_loss_loader.py``) already load external Python from
+(``ml_models/loss_plugin_loader.py``) already loads external Python from
 config-named locations, register it into a generic registry, and fail closed
 when a declared name does not resolve. Health had no such instance: the ONLY
 thing that populated its registry was ``__init__._bootstrap_registry``, a

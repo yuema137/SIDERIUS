@@ -140,7 +140,7 @@ def _declared_custom_reduction(loss_name: str | None) -> str | None:
     if not loss_name:
         return None
     try:
-        from agent_generated._loss_loader import get_loss_declared_reduction
+        from ml_models.loss_plugin_loader import get_loss_declared_reduction
     except ImportError:
         return None
     return get_loss_declared_reduction(loss_name)

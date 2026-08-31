@@ -52,8 +52,8 @@ consumer keeps its shape::
 callers.** Each consumer keeps its
 checkout-level location as a lower-priority read fallback (the constants
 ``ml_models.plugin_loader.AGENT_GENERATED_DIR``,
-``agent_generated._loss_loader.LOSSES_DIR``,
-``agent_generated._registry._LEGACY_CHECKOUT_INDEX_PATH``, …). A supported
+``ml_models.loss_plugin_loader.LOSSES_DIR``,
+``core.capability_registry._LEGACY_CHECKOUT_INDEX_PATH``, …). A supported
 workspace-bound execution excludes these fallbacks, so a fresh workspace
 cannot absorb checkout history. No production path WRITES to the checkout
 root — continued repository-root writes are deliberately not preserved for

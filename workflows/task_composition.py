@@ -1488,7 +1488,7 @@ def _refuse_ambiguous_objective(
     # different question than runtime asks is how a guard passes while the
     # thing it guards is broken.
     try:
-        from agent_generated._loss_loader import _resolve_loss_dirs
+        from ml_models.loss_plugin_loader import _resolve_loss_dirs
 
         search_roots = list(_resolve_loss_dirs())
     except Exception:  # pragma: no cover - loader absent in a trimmed checkout
@@ -1617,7 +1617,7 @@ def _compose_objective(raw: dict[str, Any], manifest_dir: str):
             f"naming the plugin file and the symbol it declares itself with; got "
             f"{implementation!r}."
         )
-    from agent_generated._loss_loader import REQUIRED_LOSS_PLUGIN_SYMBOLS
+    from ml_models.loss_plugin_loader import REQUIRED_LOSS_PLUGIN_SYMBOLS
 
     declared_name, resolved_ref = _load_symbol(
         implementation,

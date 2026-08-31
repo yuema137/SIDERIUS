@@ -1460,9 +1460,9 @@ def _promote_loss_to_global(impl_output) -> None:
     if loss_prov is None or loss_prov.action != "generated":
         return
 
-    from agent_generated._loss_loader import LOSSES_DIR
-    from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+    from core.capability_registry import CapabilityMetadata, CapabilityRegistry
     from core.generated_library import generated_library_is_workspace_bound, generated_losses_dir
+    from ml_models.loss_plugin_loader import LOSSES_DIR
 
     src = loss_prov.loss_file_path
     if not src or not os.path.isfile(src):
@@ -1639,7 +1639,7 @@ def _promote_model_to_global(impl_output) -> None:
     if not model_file_path or not os.path.isfile(model_file_path):
         return  # Built-in / Branch B with no fresh codegen / defensive guard.
 
-    from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+    from core.capability_registry import CapabilityMetadata, CapabilityRegistry
     from core.generated_library import generated_library_is_workspace_bound, generated_models_dir
     from ml_models.plugin_loader import AGENT_GENERATED_DIR as LEGACY_MODELS_DIR
 
@@ -2079,7 +2079,7 @@ def run_workflow(
     # post-validation, but existing indexes may already carry phantoms
     # from prior runs (e.g. v16 global index still has
     # ``gated_dilated_tcn`` pointing at a stale pytest tmp dir).
-    from agent_generated._registry import CapabilityRegistry as _StartupCapReg
+    from core.capability_registry import CapabilityRegistry as _StartupCapReg
 
     _n_pruned, _pruned_names = _cleanup_stale_registry_entries(_StartupCapReg())
     if _n_pruned:
@@ -3049,7 +3049,7 @@ def run_workflow(
                         # iter_015 ``gated_dilated_tcn``).
                         _capmeta = getattr(impl_output, "capability_metadata", None)
                         if _capmeta is not None:
-                            from agent_generated._registry import (
+                            from core.capability_registry import (
                                 CapabilityRegistry as _CapReg,
                             )
 

@@ -46,7 +46,7 @@ from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import LLMCodeReview
-from agent_generated._registry import CapabilityRegistry
+from core.capability_registry import CapabilityRegistry
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_model_implementor.ml_model_implementor import (
     MLModelImplementor,

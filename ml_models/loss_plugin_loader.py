@@ -1,6 +1,6 @@
-# agent_generated/_loss_loader.py
+# ml_models/loss_plugin_loader.py
 """
-Loss plugin loader for agent-generated loss functions.
+Loss plugin loader for run-generated loss functions.
 
 Mirrors ``ml_models/plugin_loader.py`` for the loss-plugin surface. Each loss
 plugin file must define exactly three module-level symbols:
@@ -35,7 +35,7 @@ required-attr check. See ``docs/design/enable_loss_inventory.md`` § Commit L1
 "Rationale" block for the full justification.
 
 Files starting with ``_`` are skipped (same convention as
-``ml_models/plugin_loader.py``). This keeps ``_stub_loss_template.py`` dormant
+``ml_models/plugin_loader.py``). This keeps underscore-prefixed templates dormant
 even when it accidentally ends up in a scanned directory.
 """
 
@@ -47,14 +47,15 @@ import sys
 from typing import Any
 
 # LEGACY CHECKOUT loss-plugin directory: the repository's
-# ``agent_generated/losses/``, computed from this file's own location so the
-# resolver works regardless of the caller's cwd. arXiv P1: this is a READ-ONLY
+# ``agent_generated/losses/``, computed from the repository root beside this
+# package so the resolver works regardless of the caller's cwd. arXiv P1: this is a READ-ONLY
 # compatibility fallback — promotions write to the resolved generated-library
 # root (``core.generated_library.generated_losses_dir()``), and this dir is
 # scanned LAST so a pre-migration checkout keeps resolving what it already
 # promoted while never being written to again.
 LOSSES_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "agent_generated",
     "losses",
 )
 

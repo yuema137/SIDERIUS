@@ -1,11 +1,11 @@
-# agent_generated/_registry.py
+# core/capability_registry.py
 """
 Unified discovery layer for agent-generated capabilities (losses today; models /
 data-analysis tools / feature extractors in future).
 
 A "capability" is anything the agent generates at runtime that subsequent
 iterations may want to discover and reuse. The first concrete type is a custom
-loss function (see ``agent_generated/_loss_loader.py``). The registry is
+loss function (see ``ml_models.loss_plugin_loader``). The registry is
 type-agnostic by design: each entry carries a ``capability_type`` field, and
 callers filter by it.
 
@@ -38,15 +38,16 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 # LEGACY CHECKOUT index path: the repository's
-# ``agent_generated/_capability_index.json``, computed from this file's own
-# location. arXiv P1: this is a READ-ONLY compatibility fallback — the
+# ``agent_generated/_capability_index.json``, computed from the repository
+# root beside this package. arXiv P1: this is a READ-ONLY compatibility fallback — the
 # default index lives in the resolved generated-library root
 # (``core.generated_library.capability_index_path()``, resolved at
 # CONSTRUCTION time so env changes and test monkeypatching take effect),
 # and this legacy file is consulted only when a default-constructed
 # registry finds no resolved index yet. It is never written.
 _LEGACY_CHECKOUT_INDEX_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "agent_generated",
     "_capability_index.json",
 )
 
@@ -145,9 +146,7 @@ class CapabilityRegistry:
 
             self._index_path = capability_index_path()
             self._legacy_read_path = (
-                None
-                if generated_library_is_workspace_bound()
-                else _LEGACY_CHECKOUT_INDEX_PATH
+                None if generated_library_is_workspace_bound() else _LEGACY_CHECKOUT_INDEX_PATH
             )
 
     @property

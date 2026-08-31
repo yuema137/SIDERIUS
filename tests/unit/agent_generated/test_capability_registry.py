@@ -1,5 +1,5 @@
 """
-Unit tests for ``agent_generated/_registry.py`` — ``CapabilityMetadata`` +
+Unit tests for ``core.capability_registry`` — ``CapabilityMetadata`` +
 ``CapabilityRegistry``.
 
 Coverage:
@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+from core.capability_registry import CapabilityMetadata, CapabilityRegistry
 
 
 def _meta(
@@ -284,7 +284,7 @@ class TestAtomicWrite:
 
 class TestCapabilityRegistryReplace:
     def _make_loss_metadata(self, name: str, file_path: str):
-        from agent_generated._registry import CapabilityMetadata
+        from core.capability_registry import CapabilityMetadata
 
         return CapabilityMetadata(
             name=name,
@@ -297,7 +297,7 @@ class TestCapabilityRegistryReplace:
 
     def test_replace_overwrites_file_path(self, tmp_path):
         """L6c — replace() updates an existing row's file_path in place."""
-        from agent_generated._registry import CapabilityRegistry
+        from core.capability_registry import CapabilityRegistry
 
         registry = CapabilityRegistry(index_path=str(tmp_path / "_capability_index.json"))
         original = self._make_loss_metadata("foo", "/tmp/old/foo.py")
@@ -315,7 +315,7 @@ class TestCapabilityRegistryReplace:
     def test_replace_missing_raises(self, tmp_path):
         """L6c — replace() on a non-existent (name, type) pair raises
         ValueError instead of silently inserting."""
-        from agent_generated._registry import CapabilityRegistry
+        from core.capability_registry import CapabilityRegistry
 
         registry = CapabilityRegistry(index_path=str(tmp_path / "_capability_index.json"))
         ghost = self._make_loss_metadata("ghost", "/nowhere.py")
@@ -325,7 +325,7 @@ class TestCapabilityRegistryReplace:
     def test_replace_does_not_touch_other_rows(self, tmp_path):
         """L6c — replace() preserves siblings; only the (name, type) match
         is rewritten."""
-        from agent_generated._registry import CapabilityRegistry
+        from core.capability_registry import CapabilityRegistry
 
         registry = CapabilityRegistry(index_path=str(tmp_path / "_capability_index.json"))
         a = self._make_loss_metadata("a", "/old/a.py")
@@ -344,7 +344,7 @@ class TestCapabilityMetadataMathematicalDefinition:
     def test_capability_metadata_mathematical_definition_default_empty(self):
         """L6c — ``mathematical_definition`` is optional with default empty
         string so pre-L6c registry rows (no such field) still validate."""
-        from agent_generated._registry import CapabilityMetadata
+        from core.capability_registry import CapabilityMetadata
 
         meta = CapabilityMetadata(
             name="x",
@@ -357,7 +357,7 @@ class TestCapabilityMetadataMathematicalDefinition:
     def test_capability_metadata_mathematical_definition_round_trip(self):
         """L6c — when set explicitly, the formula round-trips through
         model_dump/model_validate without loss."""
-        from agent_generated._registry import CapabilityMetadata
+        from core.capability_registry import CapabilityMetadata
 
         formula = "loss = mean((soft_pred - y)^2)"
         meta = CapabilityMetadata(
@@ -385,7 +385,7 @@ class TestGeneratedLibraryDefaultAndLegacyFallback:
     def legacy_index(self, tmp_path, monkeypatch):
         """Point the legacy checkout index at a tmp fixture file (matrix F:
         a seeded fake legacy artifact — never the real checkout)."""
-        from agent_generated import _registry as registry_module
+        from core import capability_registry as registry_module
 
         legacy = tmp_path / "legacy" / "_capability_index.json"
         legacy.parent.mkdir()

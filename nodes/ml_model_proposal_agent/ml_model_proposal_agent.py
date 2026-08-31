@@ -49,7 +49,7 @@ from agent.schemas.task_config import ForwardContract
 from agent.skills.model_io_probe_skill import declared_output_tensor
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
-from agent_generated._registry import CapabilityRegistry
+from core.capability_registry import CapabilityRegistry
 from core.hardware_context import HardwareContext
 from execute_tools.dataset_config import (
     DatasetConfig,

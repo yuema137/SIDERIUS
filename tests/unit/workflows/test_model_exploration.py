@@ -2127,7 +2127,7 @@ def l6c_global_losses_dir(tmp_path, monkeypatch):
     dir (arXiv P1) — to a tmp root, and point the legacy checkout member
     (``LOSSES_DIR``, read-only fallback) at a separate tmp dir so promotion
     tests touch neither real location."""
-    from agent_generated import _loss_loader
+    from ml_models import loss_plugin_loader as _loss_loader
 
     monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
     legacy = tmp_path / "legacy_losses"

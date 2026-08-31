@@ -32,6 +32,28 @@ def test_distribution_excludes_workspace_state_and_diagnostic_scripts():
     assert "scripts*" not in discovery["include"]
     assert set(discovery["exclude"]) >= {"agent_generated*", "scripts*"}
 
+    manifest = (REPO_ROOT / "MANIFEST.in").read_text(encoding="utf-8").splitlines()
+    assert "prune agent_generated" in manifest
+    assert "prune scripts" in manifest
+
+
+def test_production_never_imports_the_legacy_generated_tree():
+    """Catch installed-wheel imports of files excluded from the distribution.
+
+    The legacy generated tree is runtime state, not an importable framework
+    package.  If production imports it again, editable checkouts may pass while
+    installed wheels fail because that tree is intentionally excluded.
+    """
+    production_roots = tuple(path.removesuffix("*") for path in EXPECTED_PACKAGE_ROOTS)
+    offenders: list[str] = []
+    for root_name in production_roots:
+        root = REPO_ROOT / root_name
+        for source in root.rglob("*.py"):
+            text = source.read_text(encoding="utf-8")
+            if "from agent_generated" in text or "import agent_generated" in text:
+                offenders.append(str(source.relative_to(REPO_ROOT)))
+    assert offenders == []
+
 
 def test_distribution_roots_are_an_explicit_framework_allowlist():
     """Catch a task, campaign, deployment, or workspace package entering the wheel.

@@ -30,7 +30,7 @@ from __future__ import annotations
 import json
 
 from agent.schemas.implementor import ImplementorOutput
-from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+from core.capability_registry import CapabilityMetadata, CapabilityRegistry
 
 
 class TestModelNotRegisteredBeforeValidation:

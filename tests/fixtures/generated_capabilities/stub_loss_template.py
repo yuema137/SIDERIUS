@@ -1,4 +1,4 @@
-# agent_generated/_stub_loss_template.py
+# Synthetic loss-plugin template used by framework contract tests.
 #
 # Hardcoded loss-plugin source used by the L1 unit tests to verify
 # ``_loss_loader.py`` can load a valid loss plugin.
@@ -24,7 +24,7 @@ PLUGIN_LOSS_TYPE = "stub_ce"
 # I13 — declares the dtype this loss expects for ``targets`` at training
 # time. ``"long"`` (int64) is the classifier contract; ``"float"`` is the
 # regressor contract. Consumers (evaluate_time_skill, train_engine_sandbox)
-# read this via ``agent_generated._loss_loader.get_loss_target_dtype`` and
+# read this via ``ml_models.loss_plugin_loader.get_loss_target_dtype`` and
 # cast targets accordingly. Defaults to ``"long"`` when missing so existing
 # pre-I13 plugins keep working. See docs/design/enable_loss_inventory.md § I13.
 PLUGIN_LOSS_TARGET_DTYPE = "long"

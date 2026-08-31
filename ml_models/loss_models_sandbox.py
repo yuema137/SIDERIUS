@@ -11,7 +11,7 @@ appropriate loss class.  Built-in types (``focal``, ``focal_cw``, ``ce``,
      for the loss surface so in-process consumers (e.g. ``evaluate_vram_skill``,
      ``evaluate_time_skill``) can resolve plugins without depending on
      ``SIDERIUS_LOSS_DIRS`` (which is set only for training subprocesses).
-  2. **Filesystem fallback** via ``agent_generated/_loss_loader.load_loss_plugin``,
+  2. **Filesystem fallback** via ``ml_models.loss_plugin_loader.load_loss_plugin``,
      which walks ``SIDERIUS_LOSS_DIRS`` ∪ ``agent_generated/losses/`` (L6c
      union mode). Used by training subprocesses that inherit the env var.
 
@@ -75,7 +75,7 @@ def register_loss_in_memory(plugin_path: str) -> str | None:
     """
     # Lazy import keeps ml_models loadable without agent_generated/ on the
     # Python path (legacy tests that exercise loss_models_sandbox in isolation).
-    from agent_generated._loss_loader import (
+    from ml_models.loss_plugin_loader import (
         LOSS_REDUCTION_REGISTRY,
         LOSS_TARGET_DTYPE_REGISTRY,
         load_loss_plugin_from_path,
@@ -143,8 +143,8 @@ def preload_global_losses() -> list[str]:
         List of ``loss_type`` strings successfully loaded. Empty list when
         neither directory exists or both are empty (first-run / fresh host).
     """
-    from agent_generated._loss_loader import LOSSES_DIR
     from core.generated_library import generated_library_is_workspace_bound, generated_losses_dir
+    from ml_models.loss_plugin_loader import LOSSES_DIR
 
     loaded: list[str] = []
     seen_basenames: set[str] = set()
@@ -291,7 +291,7 @@ def _load_custom_loss(loss_name: str) -> nn.Module:
 
     # Tier 2 — filesystem fallback. Lazy import keeps ml_models loadable
     # without agent_generated/ on the Python path (legacy isolation tests).
-    from agent_generated._loss_loader import load_loss_plugin
+    from ml_models.loss_plugin_loader import load_loss_plugin
 
     plugin = load_loss_plugin(loss_name)
     if plugin is None:
@@ -347,7 +347,7 @@ def get_target_torch_dtype(config: LossConfig) -> torch.dtype:
     # config.loss_type == "custom" — read from the plugin's declaration.
     # Lazy import for the same reason ``_load_custom_loss`` uses it: keep
     # ``ml_models`` loadable without ``agent_generated/`` on the path.
-    from agent_generated._loss_loader import get_loss_target_dtype
+    from ml_models.loss_plugin_loader import get_loss_target_dtype
 
     declared = get_loss_target_dtype(config.loss_name or "")
     return torch.long if declared == "long" else torch.float32

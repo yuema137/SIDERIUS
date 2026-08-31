@@ -47,7 +47,7 @@ from agent.skills.model_io_probe_skill import (
     input_index_extent,
     probe_config_kwargs,
 )
-from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+from core.capability_registry import CapabilityMetadata, CapabilityRegistry
 from core.hardware_context import HardwareContext
 from workflows.task_config import render_forward_contract
 
@@ -1085,7 +1085,7 @@ def _dummy_tensor_validate_loss(
         # assembled plugin here too, or an LLM-generated plugin passes
         # validation, is promoted, is SKIPPED by the registry, and dies at
         # admission with a misleading "run the implementor first" remediation.
-        from agent_generated._loss_loader import REQUIRED_LOSS_PLUGIN_SYMBOLS
+        from ml_models.loss_plugin_loader import REQUIRED_LOSS_PLUGIN_SYMBOLS
 
         for attr in REQUIRED_LOSS_PLUGIN_SYMBOLS:
             if not hasattr(module, attr):

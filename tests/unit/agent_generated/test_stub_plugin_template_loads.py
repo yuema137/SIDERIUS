@@ -1,4 +1,4 @@
-"""Plugin-contract tests for ``agent_generated/_stub_plugin_template.py``.
+"""Plugin-contract tests for the synthetic model-plugin fixture.
 
 The template is the source string the StubLLMBridge's ``implementor.code``
 label returns verbatim. Production code in ``ml_models/plugin_loader.py``
@@ -14,6 +14,7 @@ asserts three things on every plugin file it loads:
 These tests pin those guarantees on the hardcoded template so any drift
 fails fast in unit tests instead of mid-chain at training time.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -23,12 +24,9 @@ import sys
 import torch
 from pydantic import BaseModel
 
-
-_REPO_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..")
-)
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 _TEMPLATE_PATH = os.path.join(
-    _REPO_ROOT, "agent_generated", "_stub_plugin_template.py"
+    _REPO_ROOT, "tests", "fixtures", "generated_capabilities", "stub_model_template.py"
 )
 
 
@@ -40,7 +38,8 @@ def _import_template():
     we call its inner ``importlib`` machinery directly.
     """
     spec = importlib.util.spec_from_file_location(
-        "siderius_plugin__stub_plugin_template", _TEMPLATE_PATH,
+        "siderius_plugin__stub_plugin_template",
+        _TEMPLATE_PATH,
     )
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -50,9 +49,7 @@ def _import_template():
 
 def test_template_file_exists():
     """The B1 commit creates this file. Missing file → B1 not landed."""
-    assert os.path.isfile(_TEMPLATE_PATH), (
-        f"stub template missing at {_TEMPLATE_PATH!r}"
-    )
+    assert os.path.isfile(_TEMPLATE_PATH), f"stub template missing at {_TEMPLATE_PATH!r}"
 
 
 def test_template_exposes_three_plugin_symbols():

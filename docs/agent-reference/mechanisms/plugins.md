@@ -2,7 +2,7 @@
 
 **Semantic owners**: `workflows/task_composition.py` (manifest-declared),
 `ml_models/plugin_binding.py` (declared model/loss roots),
-`ml_models/plugin_loader.py` and `agent_generated/_loss_loader.py`
+`ml_models/plugin_loader.py` and `ml_models/loss_plugin_loader.py`
 (directory-scanned), `execute_tools/health_checks/_plugin_binding.py` (health)
 **Status**: ✅ Current
 
@@ -154,7 +154,7 @@ plugins next to a scanned directory without them being picked up implicitly.
 | registration rollback | `:525-527`, `execute_tools/task_registration_scope.py:114` |
 | data-path registry | `execute_tools/task_data_path.py:612-743` (`register_task_data_path` `:682`) |
 | model plugin loader | `ml_models/plugin_loader.py:9-13, 32, 110-199` |
-| loss plugin loader | `agent_generated/_loss_loader.py:8-10, 26-27, 99-136` |
+| loss plugin loader | `ml_models/loss_plugin_loader.py` |
 | health plugin binding | `execute_tools/health_checks/_plugin_binding.py:34-37, 86-91` |
 | health plugin refs | `_task_health_config.py:171-191` |
 

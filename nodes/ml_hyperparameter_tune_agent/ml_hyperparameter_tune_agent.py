@@ -612,7 +612,7 @@ class HyperparamTuningAgent:
         # snapshot; new entries the implementor adds DURING a run are
         # picked up because ``CapabilityRegistry`` reads the file each
         # ``list()`` call.
-        from agent_generated._registry import CapabilityRegistry
+        from core.capability_registry import CapabilityRegistry
 
         self._registry = CapabilityRegistry(index_path=capability_index_path)
         # Token-usage audit plumbing (Phase 1 Commit 4 — design doc §1.4).
