@@ -119,62 +119,12 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 #: are green before workstream A lands anything.
 FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "step10_p1" / "fourth_task"
 
-#: The modules whose import registers a shipped implementation — the
-#: built-ins' bootstrap, which Step 08b's sentence distinguishes from the
-#: extension path.
-_BUILTIN_MODULES = frozenset({"execute_tools.tidmad_data_path"})
-
-# Only the bounded uncomposed compatibility implementation is framework
-# bootstrap state now. Real task packages compose through their manifests.
-tdp.bootstrap_legacy_tidmad_data_path()
-
-
-def _builtin_ids() -> tuple[str, ...]:
-    """The ids the three shipped modules registered — DERIVED, never listed.
-
-    A literal list here would be the F-12bc-6 shape: the first draft of this
-    module guessed ``("tidmad", "pets", "davis")`` and two of the three were
-    wrong (they are ``oxford_iiit_pet`` and ``davis_future_prediction``), so
-    N6's collision fixture registered a FRESH id instead of colliding — and
-    the control would have reported "no refusal" for a case it never set up.
-    Reading the registry keeps this correct through any future rename.
-    """
-    return tuple(
-        sorted(
-            impl_id
-            for impl_id, impl in tdp._REGISTRY.items()
-            if type(impl).__module__ in _BUILTIN_MODULES
-        )
-    )
-
-
-#: Snapshotted at COLLECTION, after the three bootstrap imports above and
-#: before any fixture has replaced the registry.
-_BUILTIN_IDS = _builtin_ids()
-
 
 @pytest.fixture(autouse=True)
 def _isolated_registry(monkeypatch):
-    """A registry holding exactly the built-ins.
-
-    Not a blanked one: N6 needs ``tidmad`` present to collide with, and
-    blanking would make the collision unreachable while the test still passed
-    for a different reason. Not the live one either: another module composing
-    the fixture leaks its id, and a leaked registration turns N2's setup into
-    N4's failure.
-    """
-    assert _BUILTIN_IDS, (
-        "no shipped implementation is registered — the built-ins' bootstrap "
-        "did not run, so N6 would have nothing to collide with and would pass "
-        "for the wrong reason (F-12bc-8: a module imported under a blanked "
-        "registry never registers again)"
-    )
-    monkeypatch.setattr(
-        tdp, "_REGISTRY", {k: v for k, v in tdp._REGISTRY.items() if k in _BUILTIN_IDS}
-    )
-    monkeypatch.setattr(
-        tdp, "_CONTENT", {k: v for k, v in tdp._CONTENT.items() if k in _BUILTIN_IDS}
-    )
+    """Give every extension control an empty, isolated task registry."""
+    monkeypatch.setattr(tdp, "_REGISTRY", {})
+    monkeypatch.setattr(tdp, "_CONTENT", {})
 
 
 # ======================================================================
@@ -722,70 +672,6 @@ class TestN5MissingRequiredDeclaration:
 # ======================================================================
 
 
-class TestN6TaskIdCollisionWithABuiltIn:
-    """§J N6 · failure class: the id namespace.
-    Required evidence: a named refusal, **never silent replacement**.
-
-    The second clause is the one worth executing. A framework that let an
-    external package take ``tidmad``'s id would not fail — it would run
-    TIDMAD's chain against somebody else's code, and every record would still
-    say ``tidmad``.
-    """
-
-    def _collide(self, tmp_path: Path, builtin_id: str) -> Vehicle:
-        vehicle = materialize_vehicle(tmp_path)
-        original = vehicle.plugin.read_text(encoding="utf-8")
-        # Only the QUOTED id, in either style: the package names its task in
-        # docstrings and error messages too, and rewriting those would change
-        # prose rather than the declaration.
-        rewritten = original.replace(f'"{vehicle.task_id}"', f'"{builtin_id}"').replace(
-            f"'{vehicle.task_id}'", f"'{builtin_id}'"
-        )
-        assert rewritten != original, (
-            f"N6 could not make the plugin CLAIM {builtin_id!r}: no quoted "
-            f"{vehicle.task_id!r} literal in {vehicle.plugin.name}. The control "
-            f"FAILS rather than skipping — a collision control that silently "
-            f"set nothing up reports 'no refusal needed' for a case it never "
-            f"created, and §J requires N6 executed."
-        )
-        vehicle.plugin.write_text(rewritten, encoding="utf-8")
-        _rewrite_manifest(vehicle, lambda raw: raw["task_data_path"].update(id=builtin_id))
-        return vehicle
-
-    @pytest.mark.parametrize("builtin_id", _BUILTIN_IDS)
-    def test_claiming_a_built_in_id_is_refused_by_name(self, builtin_id, tmp_path):
-        vehicle = self._collide(tmp_path, builtin_id)
-        with pytest.raises(TaskCompositionError) as exc:
-            compose_run_task_bindings(str(vehicle.manifest))
-        assert builtin_id in str(exc.value)
-
-    @pytest.mark.parametrize("builtin_id", _BUILTIN_IDS)
-    def test_the_built_in_is_NOT_replaced_by_the_collision(self, builtin_id, tmp_path):
-        """The 'never silent replacement' half, asserted at the registry after
-        the refusal: the built-in still resolves to the built-in.
-
-        The expected module is READ from the registry before the collision,
-        not written down — the id -> module pairing is exactly the kind of
-        fact that goes stale (this module's first draft got two of three ids
-        wrong)."""
-        before = resolve_task_data_path(TaskBindingContext(task_data_path_id=builtin_id))
-        origin = type(before).__module__
-        assert origin in _BUILTIN_MODULES
-
-        vehicle = self._collide(tmp_path, builtin_id)
-        with pytest.raises(TaskCompositionError):
-            compose_run_task_bindings(str(vehicle.manifest))
-
-        after = resolve_task_data_path(TaskBindingContext(task_data_path_id=builtin_id))
-        assert after is before
-        assert type(after).__module__ == origin
-
-
-# ======================================================================
-# N7 — invalid task-owned config (12d seam A)
-# ======================================================================
-
-
 class TestN7InvalidTaskOwnedConfig:
     """§J N7 · failure class: a malformed ``config:`` mapping.
     Required evidence: a named refusal; **never silently ignored**.
@@ -991,7 +877,7 @@ class TestTheControlsRanAgainstTheRealPackage:
             "self-satisfying and relocation equality untestable (§I.1)"
         )
 
-    def test_the_matrix_this_module_owns_is_N1_to_N9_plus_N11(self):
+    def test_the_matrix_excludes_retired_builtin_collision_control(self):
         """§J's owner column, made auditable from either side.
 
         N10 (resume against an incompatible package identity) belongs to
@@ -1007,9 +893,10 @@ class TestTheControlsRanAgainstTheRealPackage:
             for name in globals()
             if (match := re.match(r"^TestN(\d+)[A-Z]", name))
         }
-        # 9 is the census-plant class, which also traces N11 — the two plant
-        # rows share one owner because both are proven in the census module.
-        assert owned == {1, 2, 3, 4, 5, 6, 7, 8, 9}, owned
+        # N6 tested collision with a framework-owned real-task implementation.
+        # No such implementation remains after task ownership moved outside
+        # the framework. N9 is the census-plant class, which also traces N11.
+        assert owned == {1, 2, 3, 4, 5, 7, 8, 9}, owned
         assert "TestN10ResumeIdentity" not in globals(), (
             "N10 is workstream C's; a copy here would be the duplicated-helper defect §G.3 forbids"
         )

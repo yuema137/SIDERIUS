@@ -26,7 +26,6 @@ import execute_tools.task_data_path as tdp
 from execute_tools.task_data_path import (
     TASK_DATA_PATH_ARGV_FLAG,
     TASK_DATA_PATH_IDENTITY_FLAG,
-    TIDMAD_COMPATIBILITY_ID,
     DeliverableWriteRequest,
     EpochSamplingParams,
     EvalMaterializationParams,
@@ -122,7 +121,7 @@ def _tidmad_stand_in():
     impl = SyntheticTaskDataPath()
     impl_cls = type("TidmadStandIn", (SyntheticTaskDataPath,), {})
     impl = impl_cls()
-    impl_cls.task_data_path_id = TIDMAD_COMPATIBILITY_ID
+    impl_cls.task_data_path_id = "legacy_stand_in"
     return impl
 
 
@@ -136,13 +135,6 @@ class TestTheResolverTruthTable:
         register_task_data_path(_tidmad_stand_in())
         with pytest.raises(TaskDataPathResolutionError, match="does not select"):
             resolve_task_data_path(None)
-
-    def test_explicit_legacy_bootstrap_preserves_the_uncomposed_path(self):
-        """Removing import-time registration must not remove regime A."""
-        from execute_tools.task_data_path import bootstrap_legacy_tidmad_data_path
-
-        resolved = bootstrap_legacy_tidmad_data_path()
-        assert resolved.task_data_path_id == TIDMAD_COMPATIBILITY_ID
 
     def test_explicit_binding_with_absent_id_fails_closed(self):
         """Row 2, REQUIRED test 2 — the load-bearing genericity row.

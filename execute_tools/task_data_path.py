@@ -625,18 +625,10 @@ def deserialize_rows_scope(payload: str, kind: str, row_model, scope_model):
 
 
 def require_bound_task_data_path() -> TaskDataPath:
-    """The EXPLICITLY bound implementation — never the regime-A fallback.
+    """Return the explicitly bound implementation or fail closed.
 
-    Step 12 / PR-12bc B5/B7. :func:`resolve_bound_task_data_path` falls back to
-    the TIDMAD compatibility implementation when nothing is bound, which is
-    correct for a legacy caller and CATASTROPHIC for a composed one: a run that
-    declared a task and then failed to bind it would silently build TIDMAD's
-    scopes and train on TIDMAD's data, which is C-P56-1 exactly.
-
-    A composed caller asks for THIS instead. It lives here rather than at the
-    call site because ``active_task_data_path`` is an ambient read that the
-    tuner package is censused against — the ambient lookup belongs in the
-    module that owns the binding, and callers get a fail-closed answer.
+    The ambient lookup lives with the binding authority so callers cannot
+    invent a fallback when composition was missed.
 
     Raises:
         TaskDataPathResolutionError: Nothing is bound. The caller said the run
@@ -647,10 +639,8 @@ def require_bound_task_data_path() -> TaskDataPath:
     if bound is None:
         raise TaskDataPathResolutionError(
             "an EXPLICITLY bound task data path was required, but none is "
-            "bound. This caller declared the run composed, so falling back to "
-            f"the {TIDMAD_COMPATIBILITY_ID!r} compatibility implementation "
-            "would silently execute another task's data path — refusing "
-            "instead."
+            "bound. Falling back would silently execute another task's data "
+            "path, so execution is refused."
         )
     return bound
 
@@ -706,12 +696,6 @@ _REGISTRY: dict[str, TaskDataPath] = {}
 #: same key set; :func:`registry_invariant_holds` states that, and C1's tests
 #: assert it after every lifecycle operation.
 _CONTENT: dict[str, str] = {}
-
-#: The id the legacy regime-A compatibility path resolves to. A constant, not
-#: a branch: regime-A detection is the ABSENCE of a binding context (child
-#: §4.2), and this names which registered implementation that absence means.
-TIDMAD_COMPATIBILITY_ID = "tidmad"
-
 
 def content_identity(impl: object) -> str:
     """WHAT this implementation is, independent of WHERE it came from.
@@ -849,8 +833,7 @@ def resolve_task_data_path(context: TaskBindingContext | None) -> TaskDataPath:
     if context.task_data_path_id is None:
         raise TaskDataPathResolutionError(
             "An explicit task binding was supplied with NO task_data_path_id. "
-            "Explicitly bound tasks never fall back to the TIDMAD "
-            "compatibility path (parent Amendment 3) — declare the task's "
+            "Explicitly bound tasks never fall back to another task. Declare the task's "
             f"data-path id. Currently registered: {sorted(_REGISTRY)}."
         )
     impl = _REGISTRY.get(context.task_data_path_id)
@@ -858,24 +841,9 @@ def resolve_task_data_path(context: TaskBindingContext | None) -> TaskDataPath:
         raise TaskDataPathResolutionError(
             f"Unknown task data path id {context.task_data_path_id!r}. "
             f"Currently registered: {sorted(_REGISTRY)}. Unknown ids fail "
-            "closed — they never fall back to the TIDMAD compatibility path."
+            "closed; they never fall back to another task."
         )
     return impl
-
-
-def bootstrap_legacy_tidmad_data_path() -> TaskDataPath:
-    """Register and return the temporary explicit TIDMAD compatibility adapter.
-
-    Real-task modules no longer register as an import side effect. Composed
-    runs must therefore resolve their implementation from their transported
-    manifest. This adapter remains only while old application edges are being
-    retired; generic resolution never calls it.
-    """
-    from execute_tools.tidmad_data_path import TidmadTaskDataPath
-
-    if TIDMAD_COMPATIBILITY_ID not in _REGISTRY:
-        register_task_data_path(TidmadTaskDataPath())
-    return _REGISTRY[TIDMAD_COMPATIBILITY_ID]
 
 
 # ---------------------------------------------------------------------------
