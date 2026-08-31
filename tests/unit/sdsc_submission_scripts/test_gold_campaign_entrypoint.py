@@ -6,23 +6,11 @@ Each test names the defect ONLY it can catch:
   the three executables use the standard source-safe entry guard, so
   sourcing one for its functions can never launch a campaign (the
   2026-07-31 gate-runner incident class).
-* ``TestFrozenNineteenWitness`` — the effective-resolution witness: the
-  dry-run's fully-resolved per-band run_chain argv carries ALL NINETEEN
-  frozen values TYPED (decisions D-BUD-2/3/4/6/7/8, D-BUD-11/13, P6-A, P6-B;
-  the D-BUD-6 row split ``max_epochs=1`` into ``trial_max_epochs`` /
-  ``formal_max_epochs`` when the per-mode transport landed, 2026-08-26; the
-  TRIAL value was lowered 2 -> 1 by operator ruling 2026-08-27).
-  The expected pairs are HARDCODED here — asserting values read back from
-  the lib would compare the table to itself and pass for any table. This
-  is the defect class F-LAUNCH-1 closes: a chain default silently standing
-  in for a frozen campaign value (e.g. skip_formal_min_delta -1.0 vs the
-  frozen -2.0) is invisible to every other check because the launch still
-  exits 0.
 * ``TestFrozenTableMutation`` — the mutation witness: dropping one row
   from a COPY of the frozen table makes the dry-run FAIL NAMING that key.
-  Without it, the witness above could go green while the builder silently
-  stopped consulting the table (printing from one copy, emitting from
-  another).
+  Without it, an external value witness could go green while the retained
+  compatibility builder silently stopped consulting its one table (printing
+  from one copy, emitting from another).
 * ``TestFrozenLlmRouting`` — F-LLM-WIRE-1 (release blocker): the historical
   Stage-2 path binds the frozen routing config, the runner's REAL parser +
   ``WorkflowLLMConfig`` resolve the pinned snapshot model, and the
@@ -236,42 +224,7 @@ class TestSourceSafety:
         assert "source it" in proc.stderr
 
 
-class TestFrozenNineteenWitness:
-    def test_every_band_argv_carries_all_nineteen_typed(self, campaign_root):
-        proc = _stage1_dry(campaign_root)
-        assert proc.returncode == 0, proc.stderr + proc.stdout
-        argvs = _band_argvs(proc.stdout)
-        assert sorted(argvs) == sorted(EXPECTED_GPU_MAP), proc.stdout
-        for band, argv in argvs.items():
-            pairs = _pairs(argv)
-            for flag, value in CANONICAL_NINETEEN.items():
-                assert pairs.get(flag) == value, (
-                    f"band {band}: frozen value {flag} {value} missing or wrong "
-                    f"(got {pairs.get(flag)!r})"
-                )
-            # D-BUD-6: the pair REPLACES the retired mode-agnostic
-            # stand-in — a re-emitted --max_epochs would be a third epoch
-            # authority on the child argv.
-            assert "--max_epochs" not in argv, band
-
-    def test_band_identity_pair_and_arm_tokens(self, campaign_root):
-        proc = _stage1_dry(campaign_root)
-        argvs = _band_argvs(proc.stdout)
-        for band, argv in argvs.items():
-            pairs = _pairs(argv)
-            assert pairs["--data_scope"] == band
-            assert pairs["--health_gate_files"] == EXPECTED_BAND_FILES[band]
-            assert pairs["--experiment_arm"] == "goldpod"
-            assert pairs["--workspace"].endswith(f"goldpod_band{band}")
-            assert pairs["--run_name"] == f"goldpod_band{band}"
-            # Q-LIT-1 OFF as a NAMED absence: the explicit negative token,
-            # asserted at TOKEN level (substring checks would be fooled by
-            # the negative form containing the positive spelling).
-            assert "--no-ml_lit_review_enabled" in argv
-            assert "--ml_lit_review_enabled" not in argv
-            # The treatment boundary: the advice artifact, absolute.
-            assert pairs["--advice"] == str(campaign_root["advice"])
-
+class TestBypassTransportCompatibility:
     def test_bypass_ceiling_emission_mirrors_both_probe_conditions(self, campaign_root):
         """The parallel-lane interface: emitting the flag before the WHOLE
         transport accepts it would refuse every campaign launch with
@@ -389,18 +342,6 @@ class TestFrozenTableMutation:
         assert proc.returncode != 0
         assert "trial_time_budget_minutes" in proc.stderr
         assert "FROZEN TABLE MISSING VALUE" in proc.stderr
-
-    def test_lib_table_matches_the_canonical_nineteen_exactly(self):
-        """A silently EDITED value (30 -> 20) keeps the dry-run green, so
-        the table itself is pinned against the hardcoded canon."""
-        proc = _bash(
-            "-c",
-            f"source '{LIB}'; printf '%s\\n' \"${{GOLD_FROZEN_ROWS[@]}}\"",
-        )
-        assert proc.returncode == 0, proc.stderr
-        rows = {line.split("=")[0]: line.split("=", 1)[1] for line in proc.stdout.split()}
-        expected = {k.lstrip("-"): v for k, v in CANONICAL_NINETEEN.items()}
-        assert rows == expected
 
 
 class TestCampaignPolicyExternalizationSeam:
