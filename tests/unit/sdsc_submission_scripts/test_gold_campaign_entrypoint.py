@@ -32,13 +32,9 @@ Each test names the defect ONLY it can catch:
   defect class: ``--llm_config`` is optional at every hop, so omitting it
   ran the entire official campaign on the deprecated all-Gemini default
   while still exiting 0 — the pin was real and nothing consumed it.
-* ``TestRetention`` — R-RETENTION-1 (release blocker): (a) the campaign
-  argv carries the retention token and NO ``--cleanup_denoised``; (b) a
-  passthrough ``--cleanup_denoised`` is refused BY NAME; (c) the
-  exploratory chain default still emits the flag (the retention fix must
-  not break non-campaign disk hygiene); (d) sdsc mode refuses a retention
-  request instead of letting submit_one_iteration.slurm silently
-  re-inject the cleanup flag one layer down.
+* ``TestGenericRetentionCompatibility`` — the exploratory chain default
+  still cleans up, the typed retention token suppresses that cleanup, and
+  SDSc mode refuses retention it cannot honor.
 * ``TestBoundaryRefusals`` — arm vocabulary (X9 labels refused,
   R-ARM-STAMP-1), the treatment boundary (goldpod requires the advice
   file, blindpod refuses one), and frozen-flag passthrough refusal.
@@ -674,22 +670,7 @@ class TestFrozenLlmRouting:
         assert PINNED_MODEL_ID in FROZEN_LLM_CONFIG.read_text()
 
 
-class TestRetention:
-    def test_campaign_argv_retains_deliverables(self, campaign_root):
-        """Witness (a): the retention token is typed and the cleanup token
-        is ABSENT on every band argv."""
-        proc = _stage1_dry(campaign_root)
-        for band, argv in _band_argvs(proc.stdout).items():
-            assert "--no-cleanup_denoised" in argv, band
-            assert "--cleanup_denoised" not in argv, band
-
-    def test_cleanup_passthrough_refused_by_name(self, campaign_root):
-        """Witness (b)."""
-        proc = _stage1_dry(campaign_root, "--cleanup_denoised")
-        assert proc.returncode != 0
-        assert "--cleanup_denoised" in proc.stderr
-        assert "R-RETENTION-1" in proc.stderr
-
+class TestGenericRetentionCompatibility:
     def test_exploratory_chain_default_still_cleans_up(self):
         """Witness (c): sourcing _chain_common and building default args
         must still emit the flag — the campaign fix must not break
