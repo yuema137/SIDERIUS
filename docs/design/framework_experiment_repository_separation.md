@@ -672,6 +672,7 @@ Validation:
 
 | Date | Repository | Commit or issue | Evidence and disposition |
 |---|---|---|---|
+| 2026-08-30 | SIDERIUS | workspace bytecode boundary repair | The supported chain and direct one-iteration entrypoints now disable Python bytecode writes before importing framework modules, so external task execution cannot place ignored cache files in the SIDERIUS checkout. A focused launcher witness covers the preflight probes, and a source-order regression protects direct invocation. No task semantics, generated-module location, or workspace artifact contract changed. |
 | 2026-08-29 | `siderius-exp` | `108dea0` | Private consumer repository created with one-way SIDERIUS dependency, explicit directory ownership, exact `v0.1.4` commit pin, and migration provenance rules. |
 | 2026-08-29 | `siderius-exp` | `6a71218` | Gold campaign documents, task overlays, launchers, and state helpers imported byte-identically from SIDERIUS `624e1a93`; per-file SHA256 manifest recorded. Imported assets are explicitly not yet portable or launch-qualified. |
 | 2026-08-29 | `siderius-exp` | `4ec9177` | TIDMAD, Oxford-IIIT Pet, DAVIS future prediction, and Cancer Gene Identification task packages imported from their recorded source revisions; no framework source was deleted. |

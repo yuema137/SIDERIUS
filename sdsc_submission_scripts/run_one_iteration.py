@@ -40,6 +40,8 @@ status is ``failed`` or ``no_records``; a ``completed`` manifest is never
 replaced by auto-resume.
 """
 
+# ruff: noqa: E402 -- bytecode policy must precede third-party and framework imports.
+
 import argparse
 import glob
 import hashlib
@@ -52,6 +54,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
+
+# A direct one-iteration launch does not pass through run_chain.sh.  Establish
+# the same read-only-checkout policy before importing any SIDERIUS module, and
+# transport it to every training, inference, scoring, and probe subprocess.
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+sys.dont_write_bytecode = True
 
 import yaml
 from dotenv import load_dotenv

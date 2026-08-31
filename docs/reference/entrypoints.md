@@ -83,6 +83,10 @@ re-run here.
 
 The primary user-facing entrypoint. Owns Python resolution, auto-resume, and
 dispatch to either a foreground subprocess or a Slurm dependency chain.
+It disables Python bytecode writes before its first interpreter invocation so
+an external task cannot mutate the SIDERIUS source checkout. Run artifacts,
+generated modules, and task-owned extensions remain under the declared
+workspace.
 
 ```bash
 bash sdsc_submission_scripts/run_chain.sh \
@@ -131,6 +135,10 @@ trial / formal time and VRAM budgets.
 
 This is where composition is actually entered. Useful for debugging a single
 iteration without chain machinery.
+
+Direct invocation establishes the same no-bytecode policy before importing
+framework modules and passes it to child processes. This keeps the framework
+checkout read-only without changing workspace artifact ownership.
 
 Two flags have **no defaults and are required for a formal launch** — the run
 exits `2` without them:

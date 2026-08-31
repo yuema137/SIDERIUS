@@ -77,6 +77,11 @@
 set -e
 set -o pipefail
 
+# The framework checkout is source, not run storage.  Disable Python bytecode
+# writes before the first interpreter invocation (including the source-tree
+# authority probe); run artifacts and generated modules belong to WORKSPACE.
+export PYTHONDONTWRITEBYTECODE=1
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 RUNNER="${SCRIPT_DIR}/run_one_iteration.py"
