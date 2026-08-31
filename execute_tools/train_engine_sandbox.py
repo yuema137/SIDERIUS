@@ -61,8 +61,6 @@ from execute_tools.task_data_path import (
 from execute_tools.task_data_path import (
     ValidationScopeError as ValidationScopeError,
 )
-from execute_tools.tidmad_data_path import TIDMADEpochDataset as TIDMADEpochDataset
-from execute_tools.tidmad_data_path import TidmadScope
 from execute_tools.training_history import (
     STATIC_OBSERVATIONS_KEY,
     TRAINING_HISTORY_KEY,
@@ -1100,32 +1098,6 @@ def run_experiment(
     return summary
 
 
-def _regime_a_train_scope(
-    sample_set: dict | None, seg_size: int, profile: DatasetProfile
-) -> TidmadScope:
-    """Assemble regime A's training scope from the legacy arguments.
-
-    Reached only when NO task scope was transported. In that regime a legacy
-    ``SampleSet`` is what the run trains from, so its absence is not a
-    degraded mode to paper over — it means the run has no scope at all, and
-    ``main`` already refuses that combination in
-    ``_has_scope_to_train_from``. This states the same invariant at the point
-    of USE, where the value is consumed.
-
-    Extracted rather than inlined: ``run_experiment_streaming`` is frozen by
-    the PR-12bc B0 / PR-12d D0 structural baselines, and §E.2 requires new
-    behaviour to arrive by extraction rather than by spending the branch
-    allowance. The caller keeps exactly the one branch it already had.
-    """
-    if sample_set is None:
-        raise ValueError(
-            "no task scope was transported and no legacy sample set was "
-            "supplied — this run has nothing to train from. A composed run "
-            "carries `--task_scope_ref`; a legacy run carries a SampleSet."
-        )
-    return TidmadScope(sample_set=sample_set, seg_size=seg_size, profile=profile)
-
-
 def _setup_storage_provenance(
     data_dir: str, sample_set: dict | None, profile: DatasetProfile
 ) -> dict:
@@ -1306,16 +1278,13 @@ def run_experiment_streaming(
     seg_size = model_cfg.segmentation_size
 
     # D14-1 C3 — ONE data path for the whole run, from the run-scoped binding
-    # (regime-A resolves to TIDMAD's registered implementation; an explicit
-    # binding was installed by the caller / the argv transport in main()).
-    # Scope objects are opaque here; when absent, regime-A assembles TIDMAD's
-    # from the legacy arguments — discrimination by PRESENCE, never task name.
+    # binding installed by the caller / argv transport in main()). Scope
+    # objects remain opaque to the engine and must come from that task.
     data_path = resolve_bound_task_data_path()
     if task_scope is None:
-        task_scope = _regime_a_train_scope(sample_set, seg_size, profile)
-    # (The regime-A EVAL scope is assembled further down, after the 07c C6
-    # clamp has produced the EFFECTIVE eval_sample_set — assembling it here
-    # would freeze the pre-clamp scope and break `requested == materialized`.)
+        raise TaskDataPathResolutionError(
+            "Training requires a task-owned scope from the active task composition."
+        )
 
     # Model initialization (once)
     model_class = MODEL_REGISTRY.get(model_cfg.model_type)
@@ -1414,35 +1383,10 @@ def run_experiment_streaming(
             "unvalidated R3."
         )
     if eval_sample_set is not None:
-        # 07c C6. The ceiling bounds the REQUESTED scope, here, before the
-        # pre-flight measures it — so `validation_requested_samples` is the
-        # EFFECTIVE request and 07a's `requested == materialized` invariant
-        # holds untouched. Applied after the natural scope has been measured,
-        # so the pre-limit count survives as provenance the effective count
-        # can no longer recover (Q-07c-9).
-        max_validation_samples = (
-            runtime_session.policy.validation_max_samples if runtime_session is not None else None
+        raise TaskDataPathResolutionError(
+            "Validation requires a task-owned evaluation scope; the training "
+            "engine does not interpret a task-specific sample-set format."
         )
-        if max_validation_samples is not None:
-            validation_rows_before_limit = _preflight_validation_scope(
-                data_dir, eval_sample_set, seg_size, profile
-            )
-            eval_sample_set = clamp_validation_scope(
-                eval_sample_set,
-                max_samples=max_validation_samples,
-                ml_segs_per_psd=tidmad_topology(profile).dataset.psd_segment_length // seg_size,
-            )
-        validation_requested_rows = _preflight_validation_scope(
-            data_dir, eval_sample_set, seg_size, profile
-        )
-        # D14-1 C3 — regime-A eval scope, assembled from the EFFECTIVE
-        # (post-clamp) eval_sample_set so the implementation's relocated
-        # exact-materialization check compares against the same request the
-        # preflight measured and TrainingHistory pins.
-        if task_eval_scope is None:
-            task_eval_scope = TidmadScope(
-                sample_set=eval_sample_set, seg_size=seg_size, profile=profile
-            )
     # D14-2 C5b — the SHARED validation-pass arming, one tail for both legs:
     # regime-A (declaration = the preflight, above) and an explicit
     # task_eval_scope (declaration = the caller's validation_requested_rows,
@@ -1575,11 +1519,10 @@ def run_experiment_streaming(
             # keeps epoch N's ordering stream from colliding with epoch N+1's
             # subsampling stream.
             order_rng = random.Random(f"order:{epoch_seed}")
-            # Recorded D14-1 C3 residue: sequential ordering is TIDMAD-file
-            # vocabulary (`file_row_ranges`) — the cast makes the residue
-            # explicit; a non-TIDMAD dataset here would fail loudly.
+            # Sequential ordering is an optional dataset capability. Tasks
+            # that select it must expose the declared row groups.
             epoch_indices = build_sequential_indices(
-                cast("TIDMADEpochDataset", dataset).file_row_ranges, file_order, order_rng
+                cast("Any", dataset).file_row_ranges, file_order, order_rng
             )
             # ONE global loader with the global drop_last, exactly as the
             # shuffle path: ordering changes the visit sequence only. Batches
