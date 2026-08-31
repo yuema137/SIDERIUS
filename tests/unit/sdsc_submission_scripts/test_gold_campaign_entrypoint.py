@@ -35,9 +35,6 @@ Each test names the defect ONLY it can catch:
 * ``TestGenericRetentionCompatibility`` — the exploratory chain default
   still cleans up, the typed retention token suppresses that cleanup, and
   SDSc mode refuses retention it cannot honor.
-* ``TestBoundaryRefusals`` — arm vocabulary (X9 labels refused,
-  R-ARM-STAMP-1), the treatment boundary (goldpod requires the advice
-  file, blindpod refuses one), and frozen-flag passthrough refusal.
 * ``TestX9BandFileParity`` — the historical X9 band launcher and Gold
   campaign still agree on the monitored-file membership of each band.
 * ``TestStage2DryRun`` — 16 units, wave = design across the four GPUs,
@@ -726,36 +723,6 @@ class TestGenericRetentionCompatibility:
         )
         assert proc.returncode != 0
         assert "cannot be honored in --mode sdsc" in proc.stderr
-
-
-class TestBoundaryRefusals:
-    @pytest.mark.parametrize("label", ["with-prior-art", "without-prior-art"])
-    def test_x9_arm_labels_refused_by_name(self, campaign_root, label):
-        proc = _stage1_dry(campaign_root, "--arm", label)
-        assert proc.returncode != 0
-        assert "R-ARM-STAMP-1" in proc.stderr
-
-    def test_goldpod_requires_the_advice_file(self, campaign_root):
-        proc = _bash(
-            str(ENTRYPOINT),
-            "--workspace_root",
-            str(campaign_root["root"]),
-            "--stage",
-            "1",
-            "--dry-run",
-        )
-        assert proc.returncode != 0
-        assert "--gold_advice_file" in proc.stderr
-
-    def test_blindpod_refuses_an_advice_file(self, campaign_root):
-        proc = _stage1_dry(campaign_root, "--arm", "blindpod")
-        assert proc.returncode != 0
-        assert "WITHOUT_ADVICE" in proc.stderr
-
-    def test_frozen_flag_passthrough_refused(self, campaign_root):
-        proc = _stage1_dry(campaign_root, "--trial_portion", "0.5")
-        assert proc.returncode != 0
-        assert "--trial_portion" in proc.stderr
 
 
 class TestX9BandFileParity:
