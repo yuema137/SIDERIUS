@@ -48,8 +48,6 @@ from execute_tools.dataset_config import (
     tidmad_topology,
 )
 from execute_tools.deliverable_spec import (
-    DeliverableStorage,
-    default_deliverable_storage,
     derive_tidmad_deliverable_spec,
 )
 from execute_tools.sample_set_builder import build_sample_set
@@ -252,54 +250,6 @@ class TIDMADEpochDataset(Dataset):
             self.inputs[idx].astype(enc.compute_dtype) + enc.value_offset,
             self.targets[idx].astype(enc.compute_dtype) + enc.value_offset,
         )
-
-
-def is_complete_trial_output(
-    path: str, expected_samples: int, storage: DeliverableStorage | None = None
-) -> bool:
-    """Return whether an attempt-scoped trial HDF5 is safe to reuse.
-
-    A CUDA/host failure can leave earlier files from the same inference
-    subprocess fully flushed while later files are absent or incomplete.
-    Reuse is deliberately opt-in and requires both channels to be readable
-    vectors of the exact expected length in the persisted storage dtype.
-
-    Step 05c — this is a READER of the deliverable and it restated both facts
-    the producer writes: the two channel-group names and the storage dtype.
-    Left inlined, a task whose profile named different channels would have had
-    every output declared incomplete and silently re-inferred. ``storage``
-    defaults to the shipped representation, so a caller predating 05c is
-    unaffected.
-
-    D14-1 C4: moved verbatim from ``inference_single`` (which re-exports it) —
-    a deliverable READER belongs with the deliverable codec.
-    """
-    resolved = storage if storage is not None else default_deliverable_storage()
-    try:
-        with h5py.File(path, "r") as handle:
-            channel1 = _h5_dataset(handle, "timeseries", resolved.input_channel_group, "timeseries")
-            channel2 = _h5_dataset(
-                handle, "timeseries", resolved.target_channel_group, "timeseries"
-            )
-            expected_shape = (expected_samples,)
-            expected_dtype = np.dtype(resolved.storage_dtype)
-            if (
-                channel1.shape != expected_shape
-                or channel2.shape != expected_shape
-                or channel1.dtype != expected_dtype
-                or channel2.dtype != expected_dtype
-            ):
-                return False
-            # Force reads at both allocation boundaries. Opening metadata alone
-            # is insufficient evidence that the final chunks were flushed.
-            if expected_samples:
-                channel1[0]
-                channel1[-1]
-                channel2[0]
-                channel2[-1]
-        return True
-    except (KeyError, OSError, ValueError):
-        return False
 
 
 #: The scope payload's self-identifying tag. A scope that does not declare it
