@@ -111,6 +111,11 @@ landed — read the status markers.
 | [`sdsc_submission_scripts/README.md`](../sdsc_submission_scripts/README.md) | chain launcher internals |
 | [`reports/`](../reports/) | frozen point-in-time run reports |
 
+`reports/` is an approved historical-provenance exception: it is ignored for
+new runtime output, excluded from distributions, and never consulted by
+framework execution. Existing tracked reports describe their named revisions;
+they are evidence, not current behavior or reusable task assets.
+
 ## Conventions
 
 - **Status markers**: ✅ current · 🟡 partial · 🧭 planned (design frozen) ·
