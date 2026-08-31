@@ -288,17 +288,11 @@ un-composed path with byte-identical child argv.
 
 ## Worked example
 
-`configs/task_composition/tidmad.yaml` is the shipped reference manifest. It
-declares eight of the fifteen sections — no `secondary_metrics` (TIDMAD has
-none), no `deliverable` (it *is* the shipped indexed default — resolution
-state 3 above), no `model_plugins`/`loss_plugins` (TIDMAD's models are the
-built-ins plus run-generated plugins) and no `objective` (the planner chooses).
-Nothing in it is special-cased: the id `tidmad` is an ordinary declared id and
-the built-in metric class is reached by the same `module:`/`symbol:` mechanism
-an external task uses. `configs/task_composition/pets.yaml` and `davis.yaml`
-are the shipped contrast manifests — both declare `model_plugins:`, and
-`davis.yaml` additionally declares `loss_plugins:` and an authoritative
-`objective:`.
+`configs/task_composition/quickstart.yaml` is the shipped reference manifest.
+It binds only framework-owned synthetic declarations and demonstrates the same
+resolution, plugin, objective, Health, and identity surfaces an external task
+uses. Real scientific manifests live with their task packages outside this
+repository.
 
 ---
 

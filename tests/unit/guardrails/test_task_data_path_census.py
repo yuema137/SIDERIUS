@@ -52,8 +52,6 @@ _ALLOWED_CREATE_ABRA_CALLS = {
 _DATA_PATH_SURFACE = (
     "execute_tools/task_data_path.py",
     "execute_tools/tidmad_data_path.py",
-    "execute_tools/pets_data_path.py",
-    "execute_tools/davis_data_path.py",
     "execute_tools/train_engine_sandbox.py",
     "execute_tools/inference_single.py",
     "execute_tools/denoising_score_single.py",

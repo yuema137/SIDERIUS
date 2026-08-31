@@ -5,10 +5,7 @@ legacy rev-3 classes still kept until commit-6. See
 ``docs/design/pluggable_health_checks.md`` §3 for the schema and §15.2
 for the per-commit test scope rule of thumb.
 
-Config parsing only — this file does NOT exercise any check's ``run``
-method. amplitude_collapse in the shipped YAML uses ``collapse_threshold:
-0.95`` for the distribution-based predicate landing in commit-4; that
-predicate is not tested here, only that the YAML parses.
+Config parsing only — this file does NOT exercise any check's ``run`` method.
 """
 
 from __future__ import annotations
@@ -22,10 +19,7 @@ import pytest
 from pydantic import ValidationError
 
 from execute_tools.health_checks import config as config_module
-from execute_tools.health_checks._composition import (
-    LEGACY_DEFAULT_TASK_HEALTH_CONFIG,
-    HealthBindingState,
-)
+from execute_tools.health_checks._composition import HealthBindingState
 from execute_tools.health_checks.config import (
     _DEFAULT_CONFIG_PATH,
     ActionConfig,
@@ -38,17 +32,6 @@ from execute_tools.health_checks.config import (
     materialize_effective_config,
 )
 from execute_tools.health_checks.schemas import GateAction
-
-SHIPPED_GATE_IDS = (
-    "output_diversity_blocking",
-    "output_std_blocking",
-    "amplitude_collapse_blocking",
-    "pearson_dispersion_recording",
-    "spectral_peak_ratio_recording",
-    "per_file_output_std_recording",
-)
-"""TIDMAD's six gates, hardcoded — read back from the loader they would
-compare the composition to itself."""
 
 
 @pytest.fixture(autouse=True)
@@ -264,9 +247,7 @@ class TestLoadHealthGatesConfig:
         assert g.on_pass.action is GateAction.CONTINUE
         assert g.on_fail.action is GateAction.INVALIDATE_ROUND
 
-    def test_a_rosterless_file_composes_the_task_roster_and_only_explicit_none_is_empty(
-        self, tmp_path
-    ):
+    def test_a_rosterless_file_stays_empty_without_a_task_binding(self, tmp_path):
         """Step 08b C5 — the A/B distinction, at the loader.
 
         A file carrying no roster is not a statement that there are no gates:
@@ -283,7 +264,7 @@ class TestLoadHealthGatesConfig:
         composed = load_health_gates_config(path=str(p))
         explicit_none, _, _ = load_composed_health_config(str(p), HealthBindingState.EXPLICIT_NONE)
 
-        assert [g.id for g in composed.health_gates] == list(SHIPPED_GATE_IDS)
+        assert composed.health_gates == []
         assert explicit_none.health_gates == []
 
     def test_path_override_bypasses_cache(self, tmp_path):
@@ -322,32 +303,10 @@ class TestLoadHealthGatesConfig:
         assert [g.id for g in cfg1.health_gates] == ["g0"]
         assert [g.id for g in cfg2.health_gates] == ["g1"]
 
-    def test_default_path_loads_shipped_config(self):
-        """The shipped configs/health_checks.yaml must load cleanly and
-        contain the M8 rev-7 gate set: 3 blocking + 3 recording, all
-        firing on every round. See M8 execution plan §3.5."""
+    def test_default_path_loads_framework_policy_without_task_gates(self):
+        """The framework default must not silently select task science."""
         cfg = load_health_gates_config()
-        ids = [g.id for g in cfg.health_gates]
-        assert "output_diversity_blocking" in ids
-        assert "output_std_blocking" in ids
-        assert "amplitude_collapse_blocking" in ids
-        assert "pearson_dispersion_recording" in ids
-        assert "spectral_peak_ratio_recording" in ids
-        assert "per_file_output_std_recording" in ids
-        # All gates fire on every round.
-        for g in cfg.health_gates:
-            assert g.after_round == "every", f"{g.id} should be after_round=every"
-        # Blocking gates route to invalidate_round on failure.
-        blocking = {
-            "output_diversity_blocking",
-            "output_std_blocking",
-            "amplitude_collapse_blocking",
-        }
-        for g in cfg.health_gates:
-            if g.id in blocking:
-                assert g.on_fail.action.value == "invalidate_round"
-            else:
-                assert g.on_fail.action.value == "continue"
+        assert cfg.health_gates == []
 
     def test_shipped_config_all_actions_valid(self):
         """Every on_pass/on_fail action string in the shipped YAML must
@@ -363,13 +322,8 @@ class TestLoadHealthGatesConfig:
 class TestTheShippedDefaultsDoNotDependOnTheWorkingDirectory:
     """F-7 — the shipped-config defaults are anchored to THIS checkout.
 
-    Both defaults used to be RELATIVE paths, resolved against the caller's
-    working directory. The stage scripts never ``cd``, so a campaign launched
-    from anywhere but the repo root raised
-    ``FileNotFoundError: 'configs/task_health/tidmad.yaml'`` and refused every
-    band scan and every Stage-2 finalize. It fails loud, which is why it
-    ranked below the silent defects — but the released framework's documented
-    launch surface should not carry a working-directory assumption.
+    Framework paths must resolve from this checkout rather than the caller's
+    working directory.
 
     CLAUDE.md's portability rule is the governing one: path resolution derives
     from the file's own location or a supplied root, never from the caller's
@@ -388,26 +342,14 @@ class TestTheShippedDefaultsDoNotDependOnTheWorkingDirectory:
 
         monkeypatch.chdir(tmp_path)
 
-        assert load_health_gates_config(None).health_gates, "zero-argument loader"
-        assert required_blocking_gate_ids(), "the eligibility shim's own default"
-        assert load_health_gates_config(_DEFAULT_CONFIG_PATH).health_gates, (
-            "explicit framework path"
-        )
+        assert load_health_gates_config(None).health_gates == []
+        assert required_blocking_gate_ids() == frozenset()
+        assert load_health_gates_config(_DEFAULT_CONFIG_PATH).health_gates == []
 
-    def test_both_defaults_point_into_THIS_checkout(self):
-        """Absolute is not enough — it must be THIS tree.
-
-        An absolute path anchored to some other clone would pass a
-        cwd-independence test while validating the wrong repository, which is
-        the exact failure CLAUDE.md's portability section records.
-        """
+    def test_framework_default_points_into_this_checkout(self):
         repo_root = Path(__file__).resolve().parents[4]
 
         assert Path(_DEFAULT_CONFIG_PATH) == repo_root / "configs" / "health_checks.yaml"
-        assert (
-            Path(LEGACY_DEFAULT_TASK_HEALTH_CONFIG)
-            == repo_root / "configs" / "task_health" / "tidmad.yaml"
-        )
 
 
 class TestAMaterializedConfigDoesNotRecordWhichCheckoutProducedIt:

@@ -113,9 +113,9 @@ weakening a refusal into a fallback is the defect class the guards exist for.
 ```bash
 # one composed dry iteration, directly through the module CLI
 .venv/bin/python workflows/model_exploration.py \
-    --task_composition configs/task_composition/tidmad.yaml \
-    --data_dir /path/to/data --workspace /tmp/ws --run_name demo_v1 \
-    --models punet --source_run_name seed --max_iterations 1
+    --task_composition configs/task_composition/quickstart.yaml \
+    --data_dir /tmp/quickstart-data --workspace /tmp/ws --run_name demo_v1 \
+    --source_run_name seed --max_iterations 1
 ```
 
 For real runs use the chain launcher

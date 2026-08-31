@@ -11,9 +11,9 @@ A fragment would still raise, so a negative test written against one passes
 **for the wrong reason**: it proves the required-section check fires, not
 the branch it claims to exercise.
 
-The shipped TIDMAD manifest is the base, with its relative refs rewritten to
-absolute so the copy resolves from ``tmp_path``. Derived from the current
-checkout — never a hardcoded path.
+The framework-owned Quickstart manifest is the base, with its relative refs
+rewritten to absolute so the copy resolves from ``tmp_path``. Derived from the
+current checkout — never a hardcoded path or an external experiment package.
 """
 
 from __future__ import annotations
@@ -25,10 +25,10 @@ from typing import Any
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BASE_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "tidmad.yaml"
+BASE_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 #: Keys whose values are refs the composer resolves relative to the manifest.
-_REF_KEYS = ("config", "declaration")
+_REF_KEYS = ("config", "declaration", "dir")
 
 
 def _absolutize(node: Any, base_dir: Path) -> Any:

@@ -8,8 +8,8 @@
 #
 # What NO LONGER lives here: the gate roster, thresholds, check parameters,
 # the health-peek file set, the millivolt value scale, and the scientific
-# reason prose. All of that is TASK-owned and moved, unchanged, to
-# `configs/task_health/tidmad.yaml`. The framework config must never become
+# reason prose. All of that is TASK-owned and supplied through the task
+# composition. The framework config must never become
 # `tidmad: … / pets: … / <user task>: …` — that would move task branching
 # out of Python and into YAML while still requiring a SIDERIUS edit per task
 # (Step-08 parent §6a.4).
@@ -52,9 +52,7 @@ health_policy:
                                       # deferral (m9 execution plan §9 Q1).
                                       # The DEFAULT for blocking gates that
                                       # declare no aggregation of their own —
-                                      # which is every gate the shipped TIDMAD
-                                      # roster declares, so this value is what
-                                      # the campaign runs on, unchanged.
+                                      # The task may override it per gate.
 
   recording:
     # Measures and records only; never invalidates anything. The measured

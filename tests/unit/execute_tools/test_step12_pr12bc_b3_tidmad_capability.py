@@ -40,7 +40,11 @@ import pytest
 from execute_tools.dataset_config import (
     NUM_FILES,
     SEGMENTS_PER_FILE,
+    ChannelIdentity,
     DataScope,
+    DatasetConfig,
+    DatasetProfile,
+    ValueEncoding,
     bind_dataset_profile,
 )
 from execute_tools.sample_set_builder import build_sample_set
@@ -51,14 +55,28 @@ from execute_tools.task_data_path import (
     resolve_task_scope_capability,
 )
 from execute_tools.tidmad_data_path import TidmadScope, TidmadTaskDataPath
-from tests.unit.core.test_step12_pr12bc_b0_baselines import (
-    SMALL_DATASET,
-    SMALL_PROFILE,
-    SMALL_SEG_SIZE,
-)
 
 IMPL = TidmadTaskDataPath()
 SEG_SIZE = 10_000
+SMALL_DATASET = DatasetConfig(
+    psd_segment_length=40,
+    segments_per_file=5,
+    num_files=3,
+    sampling_frequency=100.0,
+)
+SMALL_PROFILE = DatasetProfile(
+    dataset=SMALL_DATASET,
+    channels=ChannelIdentity(input_channel="channel0001", target_channel="channel0002"),
+    encoding=ValueEncoding(
+        storage_dtype="int8",
+        compute_dtype="int16",
+        value_offset=128,
+        num_classes=256,
+    ),
+    anchor_selection_files=[0, 2],
+    health_peek_files=[1],
+)
+SMALL_SEG_SIZE = 10
 
 
 def _request(**kw) -> ScopeBuildRequest:

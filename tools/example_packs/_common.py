@@ -13,15 +13,6 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-#: The three persistent example roots (roadmap §22.23.2). Presence of all
-#: three is a permanent regression requirement; it is NOT an exclusivity
-#: list — additional roots are permitted under normal pack governance.
-PERSISTENT_EXAMPLE_ROOTS: tuple[str, ...] = (
-    "tidmad",
-    "oxford_iiit_pet",
-    "davis_future_prediction",
-)
-
 
 def repo_root() -> Path:
     """The checkout root, derived from this file's location (CLAUDE.md portability).

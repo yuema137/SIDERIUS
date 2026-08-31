@@ -55,141 +55,12 @@ iter loop identical across backends so lilab and SDSC can never diverge.
 The shared library is also unit-testable in isolation (see
 `tests/unit/sdsc_submission_scripts/`).
 
-### Gold campaign (F-LAUNCH-1 — D-ARCH-1 hierarchy)
+### Task-specific campaigns
 
-The official campaign's canonical launcher. It implements NO scientific
-workflow: the iteration unit is the existing chain, reused unchanged. The
-X9 launchers above stay untouched (X9 reproducibility); the campaign does
-NOT route through their arm logic. Frozen paths + winner rule:
-`docs/campaign/stage_artifact_contract.md`.
-
-**Preflight the campaign with its OWN arm label**, before stage 1:
-
-```bash
-bash sdsc_submission_scripts/campaign_preflight.sh \
-    --workspace-root /persist/siderius_campaign --arm goldpod \
-    --revision <sha> -- --healthgate_mode blocking --result_authority scientific
-```
-
-`--arm goldpod` is what makes R8 inspect the real `goldpod_band…`
-workspaces and what makes R1/R1c reachable at all — the launcher's own
-refusals send the operator here for both. Passing an X9 arm instead
-checks a different arm's directories and reports cold-start clean about a
-tree the campaign never writes. R4/R6/R7 print `SKIP` there (X9 launcher
-and X9 co-residency posture); nothing after `--` reaches a dry-run, so
-the run is fast.
-
-| file | role |
-|---|---|
-| `run_gold_campaign.sh` | **CANONICAL CAMPAIGN ENTRYPOINT** — thin: binds the frozen boundary (the nineteen typed chain values — including `max_rounds` and the five D-BUD-4 attempt budgets, added by F-LAUNCH-1 / adversarial F-2 because an agreeing `_chain_common.sh` default is not a binding — the frozen LLM routing config, `--arm goldpod\|blindpod` with the X9 labels refused, lit-review explicitly OFF in both arms, the `--gold_advice_file` treatment boundary, `--task_config` validated + sha-recorded, retention), **observes the advice artifact's sha256 ONCE** and threads it to both stages as `--gold_advice_sha256` so every band inherits ONE treatment identity, writes the resolved launch manifest (which records `advice_path` + `advice_sha256` and `llm_config` + `llm_config_sha256` beside `task_config`), dispatches `--stage 1\|2`. `--dry-run` prints the frozen table + every fully-resolved per-band/per-unit `run_chain.sh` argv, launches nothing, writes nothing. |
-| `_gold_campaign_lib.sh` | **CAMPAIGN SHARED BOUNDARY** (source-only) — the frozen-value table (one row per value; builder and printer both consult it, so a dropped row fails NAMING the key), the frozen LLM routing authority (`GOLD_LLM_CONFIG_RELPATH=llm_configs/openai_tiered_pro.json`, D-LLM-1 — see below), band vocabulary + band→files + band→GPU maps (0-3→0, 4-9→1, 10-14→2, 15-19→3, single_resident), arm/advice pairing, the **cross-band advice-identity check** (`gold_arm_args ARM ADVICE [EXPECTED]` reads the artifact itself and REFUSES when its own observation differs from the campaign's inherited digest — without it each staggered band would hash independently and certify against itself, which cannot fail; blindpod refuses an inherited digest outright), reserved-passthrough refusals (incl. `--cleanup_denoised`, R-RETENTION-1, `--llm_config` / `--llm_model`, `--advice_sha256` and `--enable_chain_incumbent_formal_gates`), the unconditional incumbent-formal-gate switch (F-GATE-WIRE-1 — see below), and the bypass-ceiling probe (`--bypass_formal_time_budget_minutes 200` emitted only once the chain parses it — parallel lane). |
-
-**LLM routing is bound, not defaulted (D-LLM-1; defect F-LLM-WIRE-1).**
-Every stage-1 band argv and every stage-2 unit argv carries
-`--llm_config <repo>/llm_configs/openai_tiered_pro.json`, resolved to an
-absolute path because `run_chain.sh` cd's to the project dir before exec.
-The value is bound once in `gold_frozen_chain_args`, the single builder both
-stages consume, so a stage-2 unit can never run on a different model than the
-stage-1 bands whose designs it retrains.
-
-This is a **refusal, not a default**: `--llm_config` is optional at every hop
-(`_chain_common.sh` `LLM_CONFIG=""` forwards nothing; `run_one_iteration.py`
-falls back to `WorkflowLLMConfig.uniform("gemini", --llm_model)`, whose
-`--llm_model` default is `gemini-3.1-pro-preview`). A campaign launched
-without the flag therefore runs every LLM role on the deprecated all-Gemini
-default, exits 0, and writes records that look entirely normal. So a campaign
-launch that cannot resolve the frozen config **refuses by name** rather than
-proceeding, and `--llm_config` / `--llm_model` are reserved passthroughs:
-operator tokens land *after* the frozen ones and the chain's parse loop is
-last-wins, so a passed-through value would silently override the pin.
-
-**The formal gates are armed, not merely declared (F-GATE-WIRE-1, #316 B1).**
-`gold_frozen_chain_args` emits `--enable_chain_incumbent_formal_gates`
-unconditionally, immediately after the two frozen deltas
-`--skip_formal_min_delta -2.0` and
-`--bypass_formal_time_budget_min_delta 0.5`, for **both** stages. It is not a
-frozen-table row because the table emits `--key value` pairs and this is a
-valueless `store_true` switch; it carries no capability probe because both
-transport halves are on disk (`_chain_common.sh` parses at `:370` and
-forwards at `:663`; `run_one_iteration.py` parses at `:1047`) — and a
-self-disabling probe is exactly the failure this closes.
-
-Without the switch the two deltas are transported, parsed and then **never
-consumed**: the tuner nulls the incumbent reference
-(`ml_hyperparameter_tune_agent.py:1103-1107`), so
-`_resolve_formal_comparison_thresholds` returns `gates_disabled` and both the
-SkipFormal and the bypass gate go inert while every surface still displays the
-frozen deltas. `_should_bypass_formal_time_budget` is not itself gates-aware —
-it is inert only because the resolver handed it a `None` threshold — so
-restoring the switch re-arms **both** gates at once. It is a reserved
-passthrough for the same reason `--max_epochs` is: gate activation is a
-scientific-policy fact of the campaign, not of the invocation.
-
-| `stage1_search.sh` | **STAGE-1 FAN-OUT** — one band per GPU per the frozen map; staggered `nohup` starts, per-band logs + PID manifest under `${WORKSPACE_ROOT}/gold_stage1_logs/`; `--only 0-3,4-9` selects bands (selection is order-insensitive and emitted in canonical band order — this is the per-band relaunch path when one band of a four-band campaign dies); `--dry-run` walks each band foreground. |
-| `stage1_run_band.sh` | **STAGE-1 BAND LOOP** — persisted-state orchestrator: scans with `gold_campaign_state.py band-state` (inspector verifiers + the contract winner rule), invokes `run_chain.sh` over the full frozen horizon with auto-resume, watches committed manifests, refreshes `{root}/{arm}_band{B}.gold_status.json` (sibling of the chain workspace), and requests a graceful C13 STOP when the FCNet+2 rule is evaluable and satisfied (`--fcnet_reference_json`; absent = A2-FCNET interim, full horizon). No-progress brake after 3 chain cycles without a new committed iteration. |
-| `stage2_strict_retrain.sh` | **STAGE-2 STRICT RETRAIN** — 4 designs x 4 bands = 16 units under `{root}/stage2/{design}_{band}/` (contract section 2); wave = one design across the four GPUs; each unit is `run_chain.sh --validation_fixed_candidate_plan <design>.json --num_iterations 1 --data_scope <band>` with the same frozen boundary; completed units (COMPLETE.json present) are skipped; finalization copies the unit's TARGET-BAND deliverables only (band file set derived via `DataScope.from_cli` from the unit's own band, count 4/6/5/5; `COMPLETE.json` carries the counted `deliverable_count` — Q-S3-2 ruling A) and writes COMPLETE.json LAST, atomically. `--design_registry DIR` must hold exactly four `<design>.json` plans. |
-| `gold_campaign_state.py` | **PERSISTED-STATE HELPER** — `band-state` (next iteration via the `inspect_run_state` functions, the cumulative HealthGate-valid FORMAL incumbent per the contract winner table under `MetricOrder`, the FCNet+2 verdict) and `stage2-finalize` (unit winner, deliverable copies via the `DeliverableNaming` authority, atomic COMPLETE.json). The FORMAL predicate is the frozen contract rule — `is_trial` **absent OR `False`** (`_is_formal_role`; #316 B2), because `model_dump()` materializes `is_trial: False` onto every persisted formal record; the superseded key-absence test discarded every real formal record, leaving the champion permanently empty while Stage 1 still exited 0. All diagnostics on stderr; the state JSON is written atomically to `--out`. |
-
-**The VRAM ceiling is a transport seam carrying NO value (D-HW-6).**
-`--gold_trial_vram_budget_gb V` and `--gold_formal_vram_budget_gb V` on
-`run_gold_campaign.sh` forward verbatim to the chain's existing
-`--trial_vram_budget_gb` / `--formal_vram_budget_gb` on every stage-1 band
-and every stage-2 unit, bound once in `gold_frozen_chain_args` like the LLM
-config. **No number is frozen, defaulted or embedded anywhere on this path**:
-the campaign's ceiling is `HARDWARE_DERIVED / PENDING_H100_QUALIFICATION`, so
-the launcher accepts a measured value and never invents one. Before this seam
-the Gold layer had no VRAM surface at all — a qualified number had nothing to
-travel through, and applying one would have meant editing tagged code on the
-pod.
-
-*Supply both or neither.* They are two independent per-mode ceilings
-(qualification may measure trial and formal differently), so they are not
-collapsed into one operator value — that would assert `trial == formal`, which
-nobody decided. A **half** supply is refused at the boundary: a capped trial
-beside an uncapped formal on four co-resident bands is the exhaustion the
-ceiling exists to prevent, and the stage scripts fork one background chain per
-band, so a half-cap noticed downstream has already launched the fleet.
-
-*The boundary is every entry point, not just the entrypoint.* `run_gold_campaign.sh`
-refuses a half supply before the manifest write, and `stage1_search.sh` does the
-same for a **direct** invocation — it calls `gold_vram_budget_args` and
-`gold_required_profile_args` itself and keys each group's forwarding on the
-builder's output, so the pair and the profile triple cannot be dropped at the
-band fan-out. Until the N-7 release remediation it keyed on the trial variable
-alone and never called the builders, so `--gold_formal_vram_budget_gb` on its
-own exited 0 with no ceiling on any band; the profile triple had the identical
-shape (`--gold_required_runtime_profile_path` or `..._sha256` alone was
-silently dropped, and the campaign ran the legacy calibration ladder while the
-operator believed a profile was pinned).
-Malformed values (non-numeric, zero, negative) are refused there too, rather
-than by `argparse` inside four already-running children — note `0` is **not**
-"disabled": `evaluate_vram_skill` computes `min(physical_cap, budget * _GB)`,
-so a zero budget is a zero-byte cap in which nothing fits.
-
-*Unsupplied is legal and inert* — no token reaches the child argv and the
-launch is byte-identical to a pre-seam one. This is deliberately **not** a
-refusal (unlike `SIDERIUS_GENERATED_LIBRARY_DIR`): omitting a ceiling diverges
-from no pinned authority — `_chain_common.sh` defaults both budgets to
-`"" == omit`, the state every campaign launch has run in — so refusing would
-block pre-M4 rehearsals to protect nothing. The absence is instead **printed**
-in the dry-run table and **recorded** in the launch manifest
-(`trial_vram_budget_gb: null` plus a `vram_budget_provenance` naming
-`PENDING_H100_QUALIFICATION`), so "no ceiling was supplied" is an observed fact
-rather than a silence.
-
-*Units are deliberately not settled here.* D-HW-6 records a live GB/GiB gap —
-the flags spell `_gb`, but `agent/skills/evaluate_vram_skill/wrapper.py`
-multiplies by `_GB = 1024**3` (GiB). The seam carries the operator's value
-**unchanged**, with no conversion, no normalisation and no unit-assuming
-validator; the only check is a unit-neutral shape check. A transport that
-silently interpreted units would acquire an authority nobody granted and would
-close D-HW-6's question by accident. The manifest therefore records what
-crossed, not an interpretation of it.
-`--trial_vram_budget_gb` / `--formal_vram_budget_gb` are reserved
-passthroughs: operator tokens land *after* the frozen ones and the chain parse
-is last-wins, so a passed-through value would override the supplied ceiling
-while the dry-run row and manifest still named the old one.
-
+Campaign launchers, frozen treatments, state helpers, and campaign evidence
+belong to the experiment repository. They select this checkout explicitly and
+delegate execution to `run_chain.sh`; SIDERIUS does not ship a scientific
+campaign or a task-specific launch default.
 ### Tier 3 integration test
 
 | file | role |
@@ -431,19 +302,18 @@ canonical/derived contract — is in this file and in the launcher headers
 
 5. **`--task_composition <manifest>` binds a run to ONE declared task**
    (Step 10 / P5+P6, W1). Without it the chain launches an un-composed
-   (legacy TIDMAD) run whose argv is byte-identical to before the flag
+   legacy un-composed run whose argv is byte-identical to before the flag
    existed — the flag is forwarded to `run_one_iteration.py` only when
    non-empty. With it, the manifest's data path, dataset profile, metric,
    optional secondary metrics, Health family and task config are all
    resolved ONCE at the launcher edge and bound for the run.
 
-   * shipped manifest: `configs/task_composition/tidmad.yaml`
+   * shipped framework example: `configs/task_composition/quickstart.yaml`
    * the resolved `task_composition_fingerprint` is pinned into
      `{workspace}/run_invariants_lock.json`, so a resume under a DIFFERENT
      composition fails closed
-   * a composed run does **not** load TIDMAD's legacy per-file reference
-     table — that is task-specific science and its absence is deliberate
-     and named (ruling C-P56-1), not a regression
+   * a composed run does not load any undeclared task-specific reference
+     table; absence is deliberate, not a fallback
    * a malformed or unreadable manifest refuses the launch and writes a
      `failed` manifest, so the consecutive-failure brake can still see it
 

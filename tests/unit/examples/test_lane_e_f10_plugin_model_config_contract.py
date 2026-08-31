@@ -157,12 +157,7 @@ def test_the_census_actually_found_the_shipped_exemplars():
     every current minimal pack — the shape of census blindness that has bitten this
     repository before."""
     names = {p.parent.parent.name for p in PLUGINS}
-    assert names == {
-        "quickstart",
-        "oxford_iiit_pet",
-        "davis_future_prediction",
-        "synthetic_masked_regression",
-    }, names
+    assert names == {"quickstart", "synthetic_masked_regression"}, names
 
 
 @pytest.mark.parametrize("path", PLUGINS, ids=lambda p: p.parent.parent.name)

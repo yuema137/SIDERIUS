@@ -309,7 +309,7 @@ in this ledger.
 | M1. Repository boundary and consumer foundation | 95% | The ownership rule is frozen; `siderius-exp` exists; real tasks and Gold source assets are preserved with provenance and repository-local paths. | All four task packages, ordinary qualification experiments, campaign package stubs, and the external Gold source lineage exist. The first direct-asset test audit classifies all 38 executable references; the broader source/provenance census remains open. |
 | M2. Known generic blocker closure | 99% | Every currently reproduced external-consumer defect is fixed generically, has a focused regression, and passes its external witness. This means no **known material blocker**, not a claim that infrastructure is bug-free forever. | Issues #383--#387, #389--#393, #395, and #396 are repaired and externally accepted. The #388 setup-only watchdog repair is merged with focused evidence; its H100 replay was supportive but completed below the historical failure boundary, so counterfactual-discriminative external evidence remains before closure. Merge-candidate qualification remains in M7. |
 | M3. Minimal framework examples cover the supported lifecycle | 100% | Small CPU/offline examples collectively cover declaration through provenance, including semantic targets, metric direction, scoreability, Health, and resource admission. | Quickstart's deterministic scored handoff passes and demonstrates framework-provided objective selection. Synthetic masked regression covers a task-owned objective, task-owned Health through the evaluation codec, task-valid probe data, matched H100 admission/refusal, bounded production training over semantic supervision, literature-review ON/OFF topology, deterministic production-workflow traversal, record-level primary-only selection, checkout-portable resume/refusal, and standalone typed node invocation. All eleven assigned generic-contract tests plus the corrected observable-declaration module now use only generic fixtures. |
-| M4. Physical framework/experiment separation | 48% | SIDERIUS packages no real task, campaign, pod, deployment, or scientific-result asset; a read-only checkout plus one configured workspace supports the full lifecycle without ambient generated-capability state; all supported framework behavior remains covered by minimal examples and TIDMAD behavior parity. | All four ordinary qualification launchers now live outside static task packages. TIDMAD Gold Stage-1/Stage-2 workflow, calibrated Health, frozen-treatment, shell-integrity, Stage-2 builder, persisted-state, finalization, X9-parity, and remaining campaign-binding test ownership now live in `siderius-exp`. SIDERIUS retains only mixed compatibility evidence around generic consumers while the duplicate launch assets still exist. Real example packs, task-specific defaults, compatibility code, and physical duplicate asset removal remain the main gap. |
+| M4. Physical framework/experiment separation | 65% | SIDERIUS packages no real task, campaign, pod, deployment, or scientific-result asset; a read-only checkout plus one configured workspace supports the full lifecycle without ambient generated-capability state; all supported framework behavior remains covered by minimal examples and TIDMAD behavior parity. | Real example packs and task helper tools are removed after synthetic replacement coverage; Pets and DAVIS runtime implementations are task-local in `siderius-exp`; Gold Stage-1/Stage-2 launch ownership and tests are external; undeclared prompt guidance and Health science now resolve empty instead of selecting TIDMAD. Remaining work includes Stage-3/reference assets, deeper legacy TIDMAD compatibility paths, final packaging scans, and exact-revision external qualification. |
 | M5. TestPod external-task qualification | 75% | Pets, DAVIS, and Cancer Gene Identification each complete a bounded end-to-end run from `siderius-exp` against one exact SIDERIUS revision, with valid scoring and best-score-versus-iteration evidence. | A synchronized four-task matrix at SIDERIUS `3eb8fc67` / `siderius-exp` `b3bb1c2` proves two-iteration external execution, Formal behavior, metric direction, Health routing, and cross-iteration state. DAVIS and Cancer produced valid scientific scores; Pets and TIDMAD were correctly invalidated. Merge-candidate qualification and the remaining task-level scientific evidence stay open. |
 | M6. Gold workflow portability and dry-run qualification | 55% | The Gold workflow runs from `siderius-exp`, uses the same qualified framework execution core, preserves four-band Stage 1 and Stage-2 refusal, and starts from a fresh campaign identity without inheriting invalidated state. | `siderius-exp` PR #9 requires an explicit SIDERIUS checkout, executes that checkout's existing chain, binds campaign-owned task and calibrated Health files, passes a separated Stage-1 dry-run, refuses a changed task config, and keeps Stage 2 unauthorized. The broader imported deployment preflight, campaign-only test migration, duplicate SIDERIUS asset removal, and final H100/release qualification remain. |
 | M7. Integrated qualification and release | 0% | One final SIDERIUS merge-candidate passes canonical automatic CI; `siderius-exp` records both repository SHAs; release contents satisfy the boundary scan. | Intentionally deferred until M2--M6 produce the required evidence. |
@@ -465,7 +465,7 @@ The known issues are repaired after the consumer boundary exists but before sour
 ### Phase C — complete framework examples
 
 - [x] Select the smallest set of examples that collectively covers the lifecycle.
-- [ ] Replace real-task test dependencies with behavior-preserving synthetic fixtures.
+- [x] Replace the bounded real-task test dependencies in this checkpoint with behavior-preserving synthetic fixtures.
 - [x] Add a coverage matrix that maps each lifecycle contract to at least one example.
 - [x] Verify CPU, offline, and checkout-portable execution.
 
@@ -609,9 +609,9 @@ Validation:
 
 ### Phase D — remove duplication from SIDERIUS
 
-- [ ] Move or retire campaign launchers and campaign-only tests.
-- [ ] Move real task packages and scientific documentation.
-- [ ] Remove task-specific imports and defaults from framework production code.
+- [x] Move or retire Gold Stage-1/Stage-2 launchers and campaign-only tests in this checkpoint.
+- [x] Move the four real task packages and their active package documentation.
+- [x] Remove implicit task guidance, Health defaults, and Pets/DAVIS runtime imports from the touched framework surfaces.
 - [ ] Preserve only explicitly approved historical records, with clear archive labeling.
 - [ ] Run targeted boundary and packaging validation.
 
@@ -672,6 +672,7 @@ Validation:
 
 | Date | Repository | Commit or issue | Evidence and disposition |
 |---|---|---|---|
+| 2026-08-30 | SIDERIUS / `siderius-exp` | task-default and duplicate-asset retirement checkpoint | Removed the four in-framework real task packs, Pets/DAVIS runtime implementations and Gate launchers, and duplicate Gold Stage-1/Stage-2 launch ownership after their external replacements landed. Undeclared interpretation, proposal, implementation, and Health inputs now resolve to empty validated values rather than TIDMAD science; explicit task declarations remain fail-closed. Generic Health execution, chain compatibility, synthetic examples, and task-neutral plugin contracts remain in SIDERIUS. The final changed-file suite passes 336 tests; the focused default/boundary suite passes 214 with 11 environment-independent skips; collection discovers 14,128 tests without errors; Ruff, formatting, and diff integrity pass. Stage-3/reference assets and deeper legacy TIDMAD compatibility remain separate later slices. |
 | 2026-08-30 | SIDERIUS | workspace bytecode boundary repair | The supported chain and direct one-iteration entrypoints now disable Python bytecode writes before importing framework modules, so external task execution cannot place ignored cache files in the SIDERIUS checkout. A focused launcher witness covers the preflight probes, and a source-order regression protects direct invocation. No task semantics, generated-module location, or workspace artifact contract changed. |
 | 2026-08-29 | `siderius-exp` | `108dea0` | Private consumer repository created with one-way SIDERIUS dependency, explicit directory ownership, exact `v0.1.4` commit pin, and migration provenance rules. |
 | 2026-08-29 | `siderius-exp` | `6a71218` | Gold campaign documents, task overlays, launchers, and state helpers imported byte-identically from SIDERIUS `624e1a93`; per-file SHA256 manifest recorded. Imported assets are explicitly not yet portable or launch-qualified. |
@@ -823,7 +824,11 @@ Additional synchronized-run findings:
 
 Current operational state:
 
-- no source experiment asset has been deleted from SIDERIUS;
+- real task packs, task helper tools, Pets/DAVIS runtime implementations, and
+  duplicate Gold Stage-1/Stage-2 launch assets have been removed from the
+  separation branch after external ownership and replacement evidence landed;
+- undeclared prompt guidance and Health science resolve to an explicit empty
+  value. Quickstart remains an example only and is not a scientific fallback;
 - Gold is operator-stopped; all synchronized H100 qualification chains have
   exited, and the remaining M6 deployment and release qualification stays
   deferred without being removed from the separation scope;

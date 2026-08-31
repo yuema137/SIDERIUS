@@ -22,8 +22,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tools.example_packs._common import PERSISTENT_EXAMPLE_ROOTS
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES_ROOT = REPO_ROOT / "examples"
 
@@ -148,10 +146,6 @@ def _tracked(repo_root: Path, rel: str) -> list[str]:
     return [line for line in result.stdout.splitlines() if line]
 
 
-def _missing_persistent_roots(examples_root: Path) -> list[str]:
-    return [r for r in PERSISTENT_EXAMPLE_ROOTS if not (examples_root / r).is_dir()]
-
-
 # ---------------------------------------------------------------------------
 # (a) MATURITY PIN — no parallel task_description / forward_contract YAML
 #     [valid: before Step 12 — owner: Step 12]
@@ -215,10 +209,7 @@ def test_negative_an_UNBOUND_pack_task_config_is_still_an_offender() -> None:
     manifest resolves can tell the two rules apart.
     """
     bound = _composition_bound_task_configs(REPO_ROOT)
-    shipped = [
-        EXAMPLES_ROOT / pack / "declared" / "task_config.yaml"
-        for pack in ("davis_future_prediction", "oxford_iiit_pet")
-    ]
+    shipped = [pack / "declared" / "task_config.yaml" for pack in _pack_dirs(EXAMPLES_ROOT)]
     assert shipped, "no pack ships a task config, so this proves nothing"
     for path in shipped:
         assert path.resolve() in bound, f"{path} is shipped but no manifest binds it"
@@ -324,8 +315,7 @@ def test_every_pack_has_the_three_docs_and_status_names_a_maturity_level() -> No
     """[PERMANENT — roadmap §22.23.3 categories, §22.23.4 honest maturity]
 
     Defect caught: a pack lacks README / PROVENANCE / STATUS, or its STATUS
-    stops naming a maturity level `L0`-`L4` (TIDMAD additionally names itself a
-    "production-backed resolved projection")."""
+    stops naming a maturity level `L0`-`L4`."""
     packs = _pack_dirs(EXAMPLES_ROOT)
     assert packs, "no example packs found"
     for pack in packs:
@@ -333,8 +323,6 @@ def test_every_pack_has_the_three_docs_and_status_names_a_maturity_level() -> No
             assert (pack / doc).is_file(), f"{pack.name} lacks {doc}"
         status = (pack / "STATUS.md").read_text(encoding="utf-8")
         assert MATURITY_LEVEL.search(status), f"{pack.name}/STATUS.md names no L0-L4 level"
-    tidmad_status = (EXAMPLES_ROOT / "tidmad" / "STATUS.md").read_text(encoding="utf-8")
-    assert "production-backed resolved projection" in tidmad_status
 
 
 # ---------------------------------------------------------------------------
@@ -358,34 +346,17 @@ def test_every_pack_readme_cites_the_roadmap_authority() -> None:
 
 
 # ---------------------------------------------------------------------------
-# (f) PERMANENT — the three persistent roots EXIST (presence, never exclusivity)
+# (f) PERMANENT — the two framework-owned minimal roots exist
 # ---------------------------------------------------------------------------
 
 
-def test_the_three_persistent_roots_exist_and_are_tracked() -> None:
-    """[PERMANENT — roadmap §22.23.2; presence, NEVER exclusivity]
-
-    Defect caught: one of `tidmad` / `oxford_iiit_pet` / `davis_future_prediction`
-    disappears from the checkout OR from the git index (the class of defect an
-    unanchored `.gitignore` rule caused during PR0 — present on disk, ignored
-    by git). Additional roots are permitted under normal pack governance; this
-    guard asserts presence only."""
-    assert _missing_persistent_roots(EXAMPLES_ROOT) == []
-    for root in PERSISTENT_EXAMPLE_ROOTS:
+def test_framework_minimal_roots_exist_and_are_tracked() -> None:
+    """The framework keeps one quickstart and one synthetic contrast pack."""
+    for root in ("quickstart", "synthetic_masked_regression"):
+        assert (EXAMPLES_ROOT / root).is_dir()
         tracked = _tracked(REPO_ROOT, f"examples/{root}")
         assert tracked, f"examples/{root} has no tracked files (ignored or never committed?)"
         assert f"examples/{root}/README.md" in tracked
-
-
-def test_presence_guard_accepts_an_extra_root_and_rejects_a_missing_one(tmp_path: Path) -> None:
-    """Proves guard (f) asserts presence, not exclusivity: a mirror with the
-    three roots PLUS an extra one passes; a mirror missing one fails."""
-    mirror = tmp_path / "examples"
-    for root in (*PERSISTENT_EXAMPLE_ROOTS, "an_additional_future_pack"):
-        (mirror / root).mkdir(parents=True)
-    assert _missing_persistent_roots(mirror) == []
-    (mirror / "oxford_iiit_pet").rmdir()
-    assert _missing_persistent_roots(mirror) == ["oxford_iiit_pet"]
 
 
 # ---------------------------------------------------------------------------
@@ -410,8 +381,7 @@ def test_every_resolved_snapshot_dir_carries_the_read_only_banner() -> None:
     lacks the DO-NOT-EDIT / runtime-does-not-read banner — a user could take a
     generated snapshot for an authoring input. `test_tidmad_projection` pins
     the TIDMAD banner's exact generated text; this guard is the cross-pack
-    rule and asserts at least one such directory exists today."""
-    assert (EXAMPLES_ROOT / "tidmad" / "resolved").is_dir()
+    rule. A framework pack need not ship a resolved snapshot."""
     assert _resolved_dirs_without_banner(EXAMPLES_ROOT) == []
 
 

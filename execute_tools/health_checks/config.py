@@ -27,7 +27,6 @@ from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks._composition import (
     DEFAULT_DISPOSITION_POLICY,
-    LEGACY_DEFAULT_TASK_HEALTH_CONFIG,
     SIDERIUS_ROOT,
     DispositionPolicy,
     HealthBindingState,
@@ -667,11 +666,9 @@ def _load_task_binding(
     """
     if binding is HealthBindingState.EXPLICIT_NONE:
         return None, ()
-    resolved_ref = (
-        LEGACY_DEFAULT_TASK_HEALTH_CONFIG
-        if binding is HealthBindingState.LEGACY_OMITTED
-        else binding
-    )
+    if binding is HealthBindingState.LEGACY_OMITTED:
+        return None, ()
+    resolved_ref = binding
 
     from execute_tools.health_checks._plugin_binding import (
         load_task_health_plugins,
@@ -807,10 +804,10 @@ def materialize_effective_config(
     (same inputs, different body — e.g. the shipped
     ``configs/health_checks.yaml`` changed underneath the workspace).
 
-    Step 08b: ``task_health_binding`` selects between the three binding
-    states (§3.10). The default — the argument omitted — is the pre-08b
-    compatibility path and produces a BYTE-IDENTICAL artifact, so every
-    existing workspace and every existing caller is unaffected.
+    ``task_health_binding`` selects between the three binding states (§3.10).
+    An omitted binding means that no task roster was declared; it does not
+    silently select a framework-shipped scientific task. Tasks that use
+    Health checks pass their own config path explicitly.
 
     Returns:
         (effective_config_path, body_sha256)
@@ -830,7 +827,6 @@ def materialize_effective_config(
             dataset_partition_count=dataset_partition_count,
         )
 
-    # State A adds no keys, so its document is the pre-08b one exactly.
     document = {
         **cfg.model_dump(mode="json"),
         **body_markers(task_health_binding, resolved_plugins),

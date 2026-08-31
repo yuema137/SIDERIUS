@@ -128,7 +128,6 @@ class TestNoTaskIdentityDispatchInProduction:
         """
         allowed = {
             "execute_tools/evaluation_metric.py",
-            "execute_tools/pets_data_path.py",
         }
         offenders: dict[str, list[tuple[int, str]]] = {}
         for path in _production_py_files():

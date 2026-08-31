@@ -101,9 +101,8 @@ detected at startup.
 ## Files normally edited
 
 `llm_configs/`-routed stages aside, the legitimate edits here are:
-TIDMAD-reference maintenance with citation (the same discipline as
-`ml_models/legacy_baseline_configs.json`), and framework-policy changes as
-deliberate, reviewed framework PRs — never as a per-task step.
+Framework-policy changes as deliberate, reviewed framework PRs — never as a
+per-task step.
 
 ## Files normally NOT edited
 
@@ -115,7 +114,7 @@ see [define a task](../docs/guides/define-a-task.md)).
 
 ```bash
 bash sdsc_submission_scripts/run_chain.sh … \
-    --task_composition configs/task_composition/tidmad.yaml --data_dir …
+    --task_composition configs/task_composition/quickstart.yaml --data_dir …
 ```
 
 ## Related tests

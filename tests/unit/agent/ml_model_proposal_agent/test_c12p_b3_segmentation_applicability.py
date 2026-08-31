@@ -37,12 +37,10 @@ from execute_tools.dataset_config import (
 #: from ``TIDMAD.psd_segment_length`` would compare the rule to itself.
 TIDMAD_PSD = 10_000_000
 
-#: Pets' own declared default, ``examples/oxford_iiit_pet/plugins/
-#: pets_reference_cnn.py:29``. ``10_000_000 % 144 == 64``.
+#: A non-divisor image-task segmentation size. ``10_000_000 % 144 == 64``.
 PETS_SEGMENTATION_SIZE = 144
 
-#: DAVIS' own declared default, ``examples/davis_future_prediction/plugins/
-#: davis_reference_predictor.py:33``. ``10_000_000 % 128 == 0`` — a divisor.
+#: A divisor video-task segmentation size. ``10_000_000 % 128 == 0``.
 DAVIS_SEGMENTATION_SIZE = 128
 
 #: The value the production runs kept failing on under TIDMAD.

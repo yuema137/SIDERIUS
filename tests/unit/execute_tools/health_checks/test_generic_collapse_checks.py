@@ -24,7 +24,6 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pytest
-import yaml
 
 from execute_tools.health_checks import _plugin_binding, runner
 from execute_tools.health_checks import categorical_distinct_symbols as cds_module
@@ -36,7 +35,6 @@ from execute_tools.health_checks._categorical_validity import (
 from execute_tools.health_checks._composition import (
     INJECTABLE_AXIS_PARAMETERS,
     INJECTED_PARAMETER_KEYS,
-    LEGACY_DEFAULT_TASK_HEALTH_CONFIG,
     HealthCompositionError,
     compose_health_gates,
     injected_parameters_for,
@@ -63,7 +61,6 @@ from execute_tools.health_checks.standard_views import (
     CATEGORICAL_PREDICTIONS,
     CategoricalPredictionsPayload,
 )
-from tests.unit.execute_tools.health_checks.test_standard_views import REPO_ROOT
 
 # The four §2.5 anchor values, hardcoded — the real preserved D14 Pets
 # collapse: 370 predictions, 369 of class 5 plus one of class 12, using 2
@@ -427,12 +424,12 @@ class TestCardinalityInjection:
         with pytest.raises(HealthCompositionError, match="symbol_cardinality"):
             compose_health_gates(config)
 
-    def test_tidmads_shipped_task_config_authors_no_injected_key(self):
-        """The §3.3 census: the refusal cannot move TIDMAD's behaviour."""
-        body = yaml.safe_load((REPO_ROOT / LEGACY_DEFAULT_TASK_HEALTH_CONFIG).read_text())
-        for entry in body["roster"]:
-            authored = set(entry.get("parameters", {})) & INJECTED_PARAMETER_KEYS
-            assert not authored, (entry["gate_id"], sorted(authored))
+    def test_a_valid_task_roster_authors_no_injected_key(self):
+        """Task rosters leave declaration-derived axes to composition."""
+        config = _pets_shaped_config()
+        for entry in config.roster:
+            authored = set(entry.parameters) & INJECTED_PARAMETER_KEYS
+            assert not authored, (entry.gate_id, sorted(authored))
 
 
 class TestComposedChainEndToEnd:

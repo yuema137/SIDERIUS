@@ -26,32 +26,11 @@ from typing import Any
 import yaml
 from pydantic import BaseModel
 
-SIDERIUS_ROOT: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-"""This checkout's repository root, derived from this file's own location.
-
-Path resolution for the three adapters' shipped-config defaults, which is
-mechanics and therefore belongs here rather than being re-derived in each
-adapter. The 09b interpretation adapter imports THIS constant and keeps its
-own loader — anchoring a path is not the migration this module's docstring
-declines to make.
-
-**F-7, second occurrence.** The three ``LEGACY_DEFAULT_TASK_*_CONFIG``
-constants were RELATIVE paths, so they resolved against the caller's working
-directory, and each adapter's loader is fail-closed. No launcher under
-``sdsc_submission_scripts/`` or ``scripts/`` cd's to the repo root, so an
-un-composed chain launched from any other cwd raised ``FileNotFoundError`` in
-the proposer, the implementor AND the interpreter — the same launch geometry
-that produced the original F-7 failure in the Health config, one layer over.
-CLAUDE.md's portability rule names exactly this: path resolution derives from
-the file's own location or a supplied root, never from the caller's cwd.
-"""
-
 
 def load_task_blocks_declaration[Blocks: BaseModel](
     model: type[Blocks],
     *,
     path: str | None,
-    default_path: str,
     kind: str,
 ) -> Blocks:
     """Parse a task-owned declaration file into ``model``. FAIL-CLOSED.
@@ -60,9 +39,8 @@ def load_task_blocks_declaration[Blocks: BaseModel](
         model: the typed blocks contract to validate against. Its OWN
             ``extra="forbid"`` is what rejects a typo'd section name — this
             function never enumerates keys.
-        path: the caller's declaration path, or ``None`` for ``default_path``.
-        default_path: the bounded legacy compatibility default. A CONSTANT
-            supplied by the caller, never derived here from a task name.
+        path: the caller's declaration path. ``None`` means that this task
+            declared no guidance and returns an empty validated value.
         kind: the family name, used only to make errors say which declaration
             failed.
 
@@ -71,7 +49,9 @@ def load_task_blocks_declaration[Blocks: BaseModel](
         ValueError: the file is not a YAML mapping, or the mapping fails the
             model's contract (unknown key, wrong type).
     """
-    resolved = path if path is not None else default_path
+    if path is None:
+        return model.model_validate({})
+    resolved = path
     if not os.path.exists(resolved):
         raise FileNotFoundError(
             f"{kind} task-blocks declaration not found: {resolved!r} — the "

@@ -1,13 +1,15 @@
 # SIDERIUS Project Rules
 
 ## Context
-- SIDERIUS is a project that utilizes LLM agents to explore advanced denoising
-  algorithms (stage 0), propose new hypotheses, and conduct experiments to
-  investigate them (stage 1).
-- Primary application: SQUID / TIDMAD signal denoising (framed in
-  `configs/task_config.yaml`). The framework is task-agnostic — porting to a new
-  task starts with editing `configs/task_config.yaml`, not with grep-and-replace
-  across Python sources.
+- SIDERIUS is a task-generic closed-loop research framework for supervised
+  scientific machine learning. Its agent loop surrounds a deterministic core
+  that owns execution, scoring, validity checks, and provenance.
+- Real scientific tasks and campaigns are external consumers. A task declares
+  its data, metric, objective, Health checks, prompt guidance, and plugins in
+  its own composition manifest and workspace. Framework source must not select
+  TIDMAD or any other scientific task implicitly.
+- The shipped Quickstart and synthetic examples are framework specifications,
+  not scientific defaults, benchmarks, or campaign templates.
 
 ## Environment
 - **Always use the project virtualenv**: every Python command must use the
@@ -20,30 +22,21 @@
   paths resolve to `scripts/nodes/...` instead of `nodes/...`, that's the
   double-dirname fix from commit `6789e29` — verify that fix is on disk before
   running.
-- **Standard baseline / chain launch command** (as of 2026-07):
+- **Generic chain dry-run**:
   ```bash
-  python scripts/run_comparison.py \
-      --model {wavenet|punet|...} \
-      --provider openai --model_id gpt-5.5 \
-      --reflect_provider openai --reflect_model_id gpt-5.5 \
-      --max_rounds 10 \
-      --max_epochs 1 \
-      --trial_time_budget_minutes 20 \
-      --formal_time_budget_minutes 120 \
-      --formal_portion 0.1 \
-      --formal_train_portion 1.0 \
-      --run_name healthgate_baseline_v1 \
-      --is_trial \
-      --progress_bar \
-      --cleanup_denoised
+  bash sdsc_submission_scripts/run_chain.sh \
+      --mode lilab \
+      --workspace /path/to/workspace \
+      --run_name quickstart_v1 \
+      --task_composition configs/task_composition/quickstart.yaml \
+      --data_dir /path/to/workspace/quickstart_data \
+      --num_iterations 1 \
+      --max_rounds 1 \
+      --dry-run
   ```
-  - `--max_epochs 1` matches the TIDMAD paper spec (direct communication from
-    the paper authors). The 10-epoch default was wrong.
-  - `--trial_time_budget_minutes` / `--formal_time_budget_minutes` cap per-round
-    wall time. Without them, a badly-chosen `trial_portion` from the LLM planner
-    can produce multi-hour trial rounds.
-  - `--max_epochs` is forwarded to the tuner subprocess (clamps LLM-planned
-    epochs to `min(planned, max_epochs)`).
+  Real task manifests, data, workflow settings, and campaign launchers belong
+  in the consumer repository. They call the same framework entrypoint without
+  modifying this checkout.
 
 ## Repository and Environment Portability
 
@@ -520,10 +513,9 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   `health_policy` block mapping each disposition (`blocking` / `recording`)
   to gate role, cadence, short-circuit, `on_pass`/`on_fail` and per-check
   policy keys such as `aggregation`. It must NEVER carry a task identity,
-  roster, threshold, peek set or science prose. TIDMAD's roster, thresholds,
-  `peek_samples`, health-peek files, mV value scale and `reason` prose live
-  in **`configs/task_health/tidmad.yaml`**; an external task supplies its own
-  file anywhere on disk and needs no SIDERIUS edit. The two compose
+  roster, threshold, peek set or science prose. An external task supplies its
+  own Health declaration and plugins from its task package and needs no
+  SIDERIUS edit. The two inputs compose
   deterministically into the same pinned
   `{workspace}/health_checks_effective.yaml`, and
   `load_health_gates_config()` returns that COMPOSED result. To change a
@@ -1364,9 +1356,12 @@ identical to TIDMAD's `network.py:FocalLoss1D`.
   a fresh session — never from the conversation that produced this correction.
   See the Step-07 parent §17.1.
 
-- **Active line of work**: the **v0.1.0 release train** on `master` — release
-  candidate `v0.1.0-rc.2` (`2e4ce1ce`), with the campaign lanes tracked in
-  `docs/campaign/`.
+- **Active line of work (2026-08-30)**: separate reusable framework ownership
+  from real tasks and campaigns. The live ledger is
+  `docs/design/framework_experiment_repository_separation.md`. Real task and
+  campaign assets move to `siderius-exp`; SIDERIUS retains only generic
+  mechanisms and lightweight synthetic examples. Historical entries below
+  remain provenance, not current ownership instructions.
 
 - **HISTORICAL — superseded, retained for provenance, NOT actionable.** The
   four entries below were accurate around 2026-08-17 and are kept because this

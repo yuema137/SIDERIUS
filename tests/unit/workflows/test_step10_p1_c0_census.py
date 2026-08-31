@@ -292,8 +292,6 @@ class TestCensusBTransportEmissionSites:
             "execute_tools/train_engine_sandbox.py",
             "execute_tools/inference_single.py",
             "execute_tools/denoising_score_single.py",
-            "scripts/run_pets_gate2.py",
-            "scripts/run_davis_gate2.py",
         }
         #: Step 12 / PR-12d: exempt by ENCLOSING FUNCTION, not by file.
         #:

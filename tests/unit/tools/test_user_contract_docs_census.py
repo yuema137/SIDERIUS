@@ -364,6 +364,6 @@ class TestMatcherOracle:
         assert flag_units(extract_units(text)) == []
 
     def test_table_cells_are_units(self) -> None:
-        text = "| goal | do |\n|---|---|\n| stricter check | edit `configs/task_health/tidmad.yaml` |\n"
+        text = "| goal | do |\n|---|---|\n| stricter check | edit `configs/health_checks.yaml` |\n"
         flagged = [u for _, u in flag_units(extract_units(text))]
-        assert flagged == ["edit `configs/task_health/tidmad.yaml`"]
+        assert flagged == ["edit `configs/health_checks.yaml`"]

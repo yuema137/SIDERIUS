@@ -362,7 +362,7 @@ class TestSecondStepOneSurface:
         HISTORY. PR 01a froze the literal shape column AND the "256 amplitude
         bins" sentence as surviving every rung — "not an oversight to be
         cleaned up here". PR-12a C7-3 (D-12a-6) relocated the SENTENCE to
-        `configs/task_proposal/tidmad.yaml` behind
+        a task-owned proposal declaration behind
         `{OUTPUT_CONTRACT_GUIDANCE}` and deliberately declined to widen into
         the COLUMN. C12-P-P's P1-B then retired the column's TIDMAD literals,
         replacing them with the static task-neutral wording below. Nothing was

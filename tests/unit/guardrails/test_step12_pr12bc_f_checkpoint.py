@@ -241,11 +241,7 @@ class TestItem8NoUnconditionalTidmadScopeConstruction:
 #: The landed tree is clean under the wider scope: 52 additional files, zero
 #: offenders in all three checks. Nothing is exempted to make that true.
 GENERIC_PREFIXES = ("core/", "workflows/", "nodes/", "agent/", "execute_tools/")
-TASK_OWNED = (
-    "execute_tools/tidmad_data_path.py",
-    "execute_tools/pets_data_path.py",
-    "execute_tools/davis_data_path.py",
-)
+TASK_OWNED = ("execute_tools/tidmad_data_path.py",)
 TASK_NAMES = {"tidmad", "oxford_iiit_pet", "davis_future_prediction", "pets", "davis"}
 
 
