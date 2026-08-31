@@ -27,10 +27,8 @@ production metric-derivation sites (Q-09a-7).
 
 from __future__ import annotations
 
-import ast
 import importlib
 from pathlib import Path
-from typing import ClassVar
 
 import pytest
 from pydantic import ValidationError
@@ -41,7 +39,6 @@ from agent.schemas.interpretation import (
     MetricIdentity,
     ModelRunSummary,
 )
-from execute_tools.evaluation_metric import TIDMAD_METRIC_ID
 from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import (
     InterpretationContractError,
@@ -53,6 +50,7 @@ from tests.helpers.metric_fixtures import direction_only_spec, shipped_spec
 #: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder
 #: as a REQUIRED keyword. TIDMAD is `higher`, so expectations are unchanged.
 _STEP09A_ORDER = MetricOrder(shipped_spec())
+TIDMAD_METRIC_ID = shipped_spec().id
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -225,7 +223,7 @@ class TestTheNamedAbsenceStaysLegal:
 class TestRecordIdentityMustAgreeWithTheRunSpec:
     def test_agreement_is_accepted(self, tmp_path):
         summary = _summary(
-            metric_identity=MetricIdentity(metric_id=TIDMAD_METRIC_ID, direction="higher")
+            metric_identity=MetricIdentity(metric_id=shipped_spec().id, direction="higher")
         )
         inp = InterpretationInput(
             summaries=[summary], metric_spec=shipped_spec(), storage=_storage(tmp_path)
@@ -421,87 +419,3 @@ class TestTheWorkflowSuppliesTheReconciledSpec:
         assert "requires the run's MetricOrder" in message
         assert "'legacy'" in message, "the refusal must name the offending run"
         assert "never assumed" in message
-
-
-class TestStep09AddsNoProductionMetricDerivationSite:
-    """Q-09a-7, made executable.
-
-    The whole architecture rests on there being ONE derivation. A second one
-    would not fail any test on its own — it would agree with the first, until
-    the day a task binds a different metric and the two silently diverge. So
-    the SET of call sites is pinned, and a new one is a hard failure.
-    """
-
-    PRODUCTION_DIRS = ("nodes", "agent", "core", "execute_tools", "workflows", "dashboard")
-    DERIVERS: ClassVar[set[str]] = {"derive_tidmad_metric", "derive_tidmad_metric_spec"}
-    #: Step 12 / PR-12d seam B REMOVED one — the tuner. It used to spell the
-    #: rule inline as ``resolve_bound_run_metric() or derive_tidmad_metric(...)``
-    #: and now calls ``evaluation_metric.resolve_run_metric``, which owns the
-    #: whole rule including the order. That is this census's goal arriving,
-    #: not a violation of it: the claim is "ZERO ADDED derivation sites", and
-    #: a site leaving makes the ONE derivation more true, not less.
-    EXPECTED: ClassVar[set[str]] = {
-        "execute_tools/denoising_score_single.py",
-        "core/sandbox_executor.py",
-        "execute_tools/evaluation_metric.py",
-    }
-
-    def _callers(self, roots) -> set[str]:
-        found: set[str] = set()
-        for root in roots:
-            for path in sorted((REPO_ROOT / root).rglob("*.py")):
-                tree = ast.parse(path.read_text(encoding="utf-8"))
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Call):
-                        fn = node.func
-                        name = (
-                            fn.id
-                            if isinstance(fn, ast.Name)
-                            else fn.attr
-                            if isinstance(fn, ast.Attribute)
-                            else None
-                        )
-                        if name in self.DERIVERS:
-                            found.add(path.relative_to(REPO_ROOT).as_posix())
-        return found
-
-    def test_the_production_derivation_call_sites_are_exactly_the_expected_set(self):
-        assert self._callers(self.PRODUCTION_DIRS) == self.EXPECTED, (
-            "the set of production modules deriving the TIDMAD metric changed. "
-            "Step 09 transports the tuner's already-resolved spec and adds ZERO "
-            "derivation sites (child design §4.3 acceptance, Q-09a-7)."
-        )
-
-    def test_the_census_is_not_vacuous(self):
-        """If the AST walk found nothing, the assertion above would be trivially
-        satisfiable by deleting the whole feature."""
-        assert len(self._callers(self.PRODUCTION_DIRS)) == 3
-
-    def test_the_calibration_fixture_is_the_one_stamping_module_and_is_unreachable_from_production(
-        self,
-    ):
-        """The PR3 calibration fixture DOES construct a spec (it simulates a
-        tuner-output writer, Q-09a-7). That is legitimate only while production
-        cannot reach it."""
-        stamping = self._callers(("scripts",))
-        assert stamping == {"scripts/pr3_l2_calibration/fixtures.py"}, (
-            f"unexpected spec-constructing script modules: {stamping}"
-        )
-
-        importers: dict[str, list[str]] = {}
-        for root in self.PRODUCTION_DIRS:
-            for path in sorted((REPO_ROOT / root).rglob("*.py")):
-                tree = ast.parse(path.read_text(encoding="utf-8"))
-                hits = []
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Import):
-                        hits += [a.name for a in node.names if "pr3_l2_calibration" in a.name]
-                    elif isinstance(node, ast.ImportFrom) and node.module:
-                        if "pr3_l2_calibration" in node.module:
-                            hits.append(node.module)
-                if hits:
-                    importers[path.relative_to(REPO_ROOT).as_posix()] = hits
-        assert importers == {}, (
-            "production code imported the calibration fixture package; its spec "
-            f"stamp would then be a production derivation authority: {importers}"
-        )

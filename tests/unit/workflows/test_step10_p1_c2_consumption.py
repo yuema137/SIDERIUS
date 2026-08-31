@@ -107,7 +107,7 @@ class TestEachFamilyIsConsumedThroughItsOwnSeam:
             assert get_task_description(values) == composition.task_description
             assert values["forward_contract"]["task_type"] == "segmentation"
 
-    def test_the_tuner_acquires_the_composed_metric_rather_than_deriving_tidmad(self, composition):
+    def test_the_tuner_acquires_the_composed_metric(self, composition):
         """Reachability for the ONE production line C2 changed.
 
         The seam test above proves the ContextVar works; this proves the
@@ -116,18 +116,12 @@ class TestEachFamilyIsConsumedThroughItsOwnSeam:
         `or` — making every composed run silently run TIDMAD's arithmetic —
         turns this RED.
         """
-        from execute_tools.dataset_config import TIDMAD_PROFILE
-        from execute_tools.evaluation_metric import (
-            derive_tidmad_metric,
-            resolve_bound_run_metric,
-        )
+        from execute_tools.evaluation_metric import resolve_bound_run_metric
 
         with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
-            acquired = resolve_bound_run_metric() or derive_tidmad_metric(TIDMAD_PROFILE)
+            acquired = resolve_bound_run_metric()
         assert acquired is composition.metric
-
-        un_composed = resolve_bound_run_metric() or derive_tidmad_metric(TIDMAD_PROFILE)
-        assert un_composed.spec.id == "tidmad_denoising_score"
+        assert resolve_bound_run_metric() is None
 
 
 class TestTheWorkflowRefusesAHalfComposedRun:

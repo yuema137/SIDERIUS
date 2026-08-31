@@ -73,9 +73,10 @@ class MetricOrder:
             either.
 
     Example:
-        >>> from execute_tools.evaluation_metric import derive_tidmad_metric_spec
-        >>> from execute_tools.dataset_config import TIDMAD
-        >>> order = MetricOrder(derive_tidmad_metric_spec(TIDMAD))
+        >>> from execute_tools.evaluation_metric import MetricSpec, PresenceScoreabilityContract
+        >>> spec = MetricSpec(id="score", direction="higher", aggregation="mean",
+        ...                   scoreability=PresenceScoreabilityContract())
+        >>> order = MetricOrder(spec)
         >>> order.direction
         'higher'
         >>> order.is_better(-2.55, -2.91)

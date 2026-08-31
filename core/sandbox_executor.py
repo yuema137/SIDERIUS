@@ -62,7 +62,6 @@ from execute_tools.evaluation_metric import (
     MetricResult,
     NotScoreableError,
     NotScoreableResult,
-    derive_tidmad_metric,
 )
 from execute_tools.scope_artifact import task_scope_argv, validation_rows_argv
 
@@ -2062,11 +2061,9 @@ class TidmadSandbox:
     ) -> tuple:
         """Anchor-normalised multi-file scoring — the pre-Step-06 2-tuple seam.
 
-        Kept for callers that predate the metric handle: the same arguments,
-        the same ``(file_vector, final_scalar_score)`` return. Since Step 06
-        it is a thin wrapper over :meth:`evaluate_metric`; ``metric=None``
-        (Regime A) resolves the TIDMAD instance from the run's profile, so a
-        legacy caller obtains exactly today's values through the handle.
+        Kept as the two-tuple adapter used by the tuner. The caller must pass
+        the metric selected by its active task composition; the generic
+        sandbox cannot manufacture scientific scoring semantics.
 
         Raises:
             ValueError: as :meth:`evaluate_metric`.
@@ -2074,9 +2071,13 @@ class TidmadSandbox:
                 contract refuses is a structured refusal, not an incidental
                 error from inside the scorer worker.
         """
-        handle = metric if metric is not None else derive_tidmad_metric(resolve_dataset_profile())
+        if metric is None:
+            raise ValueError(
+                "score_vector requires the evaluation metric selected by the active "
+                "task composition"
+            )
         result = self.evaluate_metric(
-            handle,
+            metric,
             sample_set,
             anchor_map,
             s_max,

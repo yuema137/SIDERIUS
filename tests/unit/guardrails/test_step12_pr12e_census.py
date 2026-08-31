@@ -235,8 +235,8 @@ _TIDMAD_DEFAULT_SYMBOLS = frozenset(
     }
 )
 
-#: The legacy regime-A rows that legitimately default to a TIDMAD semantic,
-#: pinned by file AND exact count so a NEW one anywhere is red.
+#: The remaining legacy regime-A row, pinned by file and exact count so a new
+#: implicit task default anywhere is red.
 #:
 #: Neither is a composed-run fallback, which is what §I.3 bullet 4 forbids.
 #: Both are the *declared* pre-composition compatibility path — the state
@@ -251,9 +251,6 @@ _ALLOWED_LEGACY_DEFAULTS: dict[str, int] = {
     # `return _ACTIVE_PROFILE.get() or TIDMAD_PROFILE` — the documented
     # "nothing bound resolves the shipped TIDMAD profile" accessor.
     "execute_tools/dataset_config.py": 1,
-    # `handle = metric if metric is not None else derive_tidmad_metric(...)`
-    # — Step 06's Regime-A row inside the legacy scoring entry point.
-    "core/sandbox_executor.py": 1,
 }
 
 

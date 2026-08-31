@@ -185,10 +185,10 @@ class _Sandbox:
 
 
 def _bindings(agent_input, configs_dir) -> RunBindings:
-    from execute_tools.evaluation_metric import derive_tidmad_metric
     from execute_tools.metric_order import MetricOrder
+    from tests.helpers.metric_fixtures import direction_only_metric
 
-    metric = derive_tidmad_metric(TIDMAD_PROFILE)
+    metric = direction_only_metric()
     return RunBindings(
         agent_input=agent_input,
         sandbox=_Sandbox(configs_dir),
