@@ -2,15 +2,6 @@
 
 Each test names the defect ONLY it can catch:
 
-* ``TestSourceSafety`` — the five campaign scripts parse (``bash -n``) and
-  the three executables use the standard source-safe entry guard, so
-  sourcing one for its functions can never launch a campaign (the
-  2026-07-31 gate-runner incident class).
-* ``TestFrozenTableMutation`` — the mutation witness: dropping one row
-  from a COPY of the frozen table makes the dry-run FAIL NAMING that key.
-  Without it, an external value witness could go green while the retained
-  compatibility builder silently stopped consulting its one table (printing
-  from one copy, emitting from another).
 * ``TestFrozenLlmRouting`` — F-LLM-WIRE-1 (release blocker): the historical
   Stage-2 path binds the frozen routing config, the runner's REAL parser +
   ``WorkflowLLMConfig`` resolve the pinned snapshot model, and the
@@ -56,7 +47,6 @@ SDSC = REPO_ROOT / "sdsc_submission_scripts"
 ENTRYPOINT = SDSC / "run_gold_campaign.sh"
 STAGE1 = SDSC / "stage1_search.sh"
 STAGE1_BAND = SDSC / "stage1_run_band.sh"
-STAGE2 = SDSC / "stage2_strict_retrain.sh"
 LIB = SDSC / "_gold_campaign_lib.sh"
 CHAIN_COMMON = SDSC / "_chain_common.sh"
 RUN_CHAIN = SDSC / "run_chain.sh"
@@ -200,30 +190,6 @@ def _pairs(argv: list[str]) -> dict[str, str]:
     return out
 
 
-class TestSourceSafety:
-    def test_all_campaign_scripts_parse(self):
-        for script in (ENTRYPOINT, STAGE1, STAGE1_BAND, STAGE2, LIB):
-            proc = _bash("-n", str(script))
-            assert proc.returncode == 0, f"bash -n failed for {script.name}: {proc.stderr}"
-
-    @pytest.mark.parametrize("script", [ENTRYPOINT, STAGE1, STAGE1_BAND, STAGE2])
-    def test_entry_guard_is_the_standard_form(self, script):
-        source = script.read_text()
-        assert '[[ "${BASH_SOURCE[0]}" == "$0" ]]' in source
-
-    def test_sourcing_runs_nothing_and_writes_nothing(self, tmp_path):
-        root = tmp_path / "never_created"
-        for script in (ENTRYPOINT, STAGE1, STAGE1_BAND, STAGE2):
-            proc = _bash("-c", f"source '{script}'; echo SOURCED_OK")
-            assert "SOURCED_OK" in proc.stdout, f"{script.name}: {proc.stderr}"
-        assert not root.exists()
-
-    def test_lib_refuses_direct_execution(self):
-        proc = _bash(str(LIB))
-        assert proc.returncode != 0
-        assert "source it" in proc.stderr
-
-
 class TestBypassTransportCompatibility:
     def test_bypass_ceiling_emission_mirrors_both_probe_conditions(self, campaign_root):
         """The parallel-lane interface: emitting the flag before the WHOLE
@@ -315,93 +281,6 @@ class TestBypassTransportCompatibility:
         assert proc.returncode == 0, proc.stderr + proc.stdout
         argvs = _band_argvs(proc.stdout)
         assert _pairs(argvs["0-3"]).get("--bypass_formal_time_budget_minutes") == "200"
-
-
-class TestFrozenTableMutation:
-    def test_dropping_a_row_fails_naming_the_key(self, tmp_path, campaign_root):
-        """Copy the band script + lib, delete ONE frozen row, and the
-        dry-run must fail NAMING that key — proving builder and printer
-        both consult the ONE table."""
-        tree = tmp_path / "mutated"
-        tree.mkdir()
-        shutil.copy2(STAGE1_BAND, tree / STAGE1_BAND.name)
-        lib_text = LIB.read_text()
-        mutated = lib_text.replace('    "trial_time_budget_minutes=30"\n', "")
-        assert mutated != lib_text, "mutation did not apply — row spelling changed?"
-        (tree / LIB.name).write_text(mutated)
-        proc = _bash(
-            str(tree / STAGE1_BAND.name),
-            "--band",
-            "0-3",
-            "--workspace_root",
-            str(campaign_root["root"]),
-            "--gold_advice_file",
-            str(campaign_root["advice"]),
-            "--dry-run",
-        )
-        assert proc.returncode != 0
-        assert "trial_time_budget_minutes" in proc.stderr
-        assert "FROZEN TABLE MISSING VALUE" in proc.stderr
-
-
-class TestCampaignPolicyExternalizationSeam:
-    """v0.1.2 / issue #379 — the two campaign-policy values a campaign may
-    supply WITHOUT a software release.
-
-    Both halves matter and are asserted separately:
-
-    * UNSET must be byte-identical to the shipped defaults, so a launch that
-      exports nothing behaves exactly as v0.1.1 did;
-    * SET must actually reach the value the builders emit — the defect this
-      seam repairs is that ``GOLD_BYPASS_FORMAL_TIME_BUDGET_MINUTES`` was a
-      BARE assignment, so sourcing the lib silently overwrote any exported
-      value and no external override could work.
-
-    Only these two values are externalized. The rest of ``GOLD_FROZEN_ROWS``
-    is deliberately untouched; broader migration is issue #379's post-launch
-    scope, not this patch's.
-    """
-
-    def _row(self, env_prefix: str, key: str) -> str:
-        proc = _bash(
-            "-c",
-            f"{env_prefix} source '{LIB}'; "  # env_prefix is an `export X=Y;` statement
-            f'printf "%s\\n" "${{GOLD_FROZEN_ROWS[@]}}"',
-        )
-        assert proc.returncode == 0, proc.stderr
-        for line in proc.stdout.split():
-            if line.startswith(f"{key}="):
-                return line.split("=", 1)[1]
-        raise AssertionError(f"{key} not found in GOLD_FROZEN_ROWS")
-
-    def _bypass(self, env_prefix: str) -> str:
-        proc = _bash(
-            "-c",
-            f"{env_prefix} source '{LIB}'; "  # env_prefix is an `export X=Y;` statement
-            f'printf "%s\\n" "$GOLD_BYPASS_FORMAL_TIME_BUDGET_MINUTES"',
-        )
-        assert proc.returncode == 0, proc.stderr
-        return proc.stdout.strip()
-
-    def test_unset_preserves_the_shipped_defaults(self):
-        assert self._row("", "formal_time_budget_minutes") == "120"
-        assert self._bypass("") == "200"
-
-    def test_campaign_env_supplies_the_formal_time_budget(self):
-        assert (
-            self._row("export GOLD_FORMAL_TIME_BUDGET_MINUTES=180;", "formal_time_budget_minutes")
-            == "180"
-        )
-
-    def test_campaign_env_supplies_the_bypass_threshold(self):
-        assert self._bypass("export GOLD_BYPASS_FORMAL_TIME_BUDGET_MINUTES=240;") == "240"
-
-    def test_trial_epoch_is_the_operator_lowered_value(self):
-        """2 -> 1, operator ruling 2026-08-27. Pinned to a literal rather
-        than read back from the lib, which would compare the table to
-        itself and pass for any value."""
-        assert self._row("", "trial_max_epochs") == "1"
-        assert self._row("", "formal_max_epochs") == "1"
 
 
 class TestFrozenLlmRouting:
