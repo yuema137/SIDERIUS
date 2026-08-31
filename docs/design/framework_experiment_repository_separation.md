@@ -771,20 +771,45 @@ Qualification evidence matrix (latest complete run per task):
 
 | Task | Exact revisions (SIDERIUS / `siderius-exp`) | Two iterations | Formal execution | Scientific result | Direction / trajectory | Cross-iteration state | Qualification reading |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Oxford-IIIT Pet | `e31da5c7` / `83f9957` | yes | one attempted Formal per iteration; both correctly invalidated | no valid score | accuracy, higher; no valid curve | no incumbent or source restoration; typed negative feedback reached iteration 2 | fresh acceptance proves the #396 no-records feedback repair; candidates still failed task-owned Health |
-| Cancer Gene Identification | `4968d061` / `8e0bf16` | yes | one successful Formal per iteration | valid mean AUPRC | higher; `0.33353437961836196` to `0.385523263398698` | iteration 2 restored the verified iteration-1 incumbent | full separated Trial/Formal trajectory passed on the two-network qualification scope |
-| DAVIS future prediction | `0e092302` / `83f9957` | yes | one successful Formal per iteration | valid MSE | lower; `0.029764309801557073` to `0.016089017514105866` | iteration 2 restored the verified iteration-1 incumbent under the same Health SHA-256 | fresh acceptance proves the `72be1d1c` Health identity repair |
-| TIDMAD qualification | `0e092302` / `83f9957` | yes | iteration 1 had no successful Formal; iteration 2 had one successful Formal | valid score `-0.5314745777130531` in iteration 2 | higher; only one valid point, so no improvement curve | no valid iteration-1 incumbent; its negative feedback was lost, exposing #396 | infrastructure and Health behavior passed; scientific quality is not competitive evidence |
+| Oxford-IIIT Pet | `3eb8fc67` / `b3bb1c2` | yes | Trial and Formal executed in both iterations | no valid score; all four candidates were Health-invalid at accuracy `0.02702702702702703` | accuracy, higher; no valid curve | iteration 2 consumed iteration-1 collapse feedback and proposed an anti-collapse variant | infrastructure PASS; scientific candidates invalid; manifest `no_records` is the correct scientific-authority outcome |
+| Cancer Gene Identification | `3eb8fc67` / `b3bb1c2` | yes | iteration 1 produced one valid Formal after seven failed Formal attempts; iteration 2 exhausted fifteen Formal attempts under the task VRAM cap | best valid mean AUPRC `0.44797222164665007` from iteration 1; iteration-2 Trial scored `0.32718416507856324` | mean AUPRC, higher; the valid Formal trajectory has one point | iteration 2 restored the verified iteration-1 Formal incumbent | infrastructure PASS with bounded retry behavior; iteration-2 Formal failures are model/task-budget VRAM failures, not watchdog kills |
+| DAVIS future prediction | `3eb8fc67` / `b3bb1c2` | yes | Trial and Formal succeeded in both iterations after one first-attempt Trial watchdog kill recovered through the existing retry path | valid Formal MSE in both iterations | MSE, lower; `0.01582557971089261` to `0.016200793074869296` (slightly worse) | iteration 2 consumed iteration-1 records under the same composed task identity | infrastructure PASS; lower-is-better ordering, Formal execution, retry recovery, Health, persistence, and two-iteration continuity are proven |
+| TIDMAD qualification | `3eb8fc67` / `b3bb1c2` | yes | Trial and Formal executed in both iterations | no valid score; all four candidates produced constant-output collapse | TIDMAD score, higher; invalid Formal scalars were `-3.091274633731049` and `-14.259092650952104` and do not form a valid curve | iteration 2 explicitly consumed iteration-1 collapse evidence and tested CE after the focal-loss collapse | infrastructure PASS; scientific candidates invalid; this is a bounded classification-contract qualification, not Gold regression-treatment evidence |
 
-The matrix is cumulative evidence, not a synchronized merge-candidate run:
-Cancer, DAVIS, TIDMAD, and Pets still use different exact SIDERIUS revisions.
-M7 therefore requires one synchronized final
-qualification after the remaining blockers are repaired.
+This is the first synchronized four-task qualification against one exact
+framework/experiment pair. It proves the separated multi-task execution
+boundary at SIDERIUS `3eb8fc67` and `siderius-exp` `b3bb1c2`; it does not by
+itself qualify Gold campaign treatment or scientific competitiveness.
+
+Additional synchronized-run findings:
+
+- the #388 Cancer workload produced a successful Formal attempt with the
+  explicit 1,200-second budget preserved and no watchdog kill, but the H100
+  completed that attempt below the historical 120-second failure boundary;
+  the replay is therefore supportive but not counterfactual-discriminative,
+  and #388 remains open;
+- Cancer iteration 2 repeatedly exceeded its declared 16-GiB task envelope
+  despite abundant physical H100 memory. This is correct budget enforcement
+  over a model whose graph activations are large, not evidence that the pod had
+  only 16 GiB available;
+- TIDMAD failed every blocking qualification gate with one observed symbol,
+  zero output standard deviation, and dominant-mode fraction `1.0`. The
+  amplitude gate alone would still reject these candidates, so the outcome is
+  unchanged by the separate Gold amplitude-only ruling;
+- the synchronized TIDMAD workflow exercises the classification contract and
+  may not be cited as evidence for the frozen Gold continuous-regression
+  treatment;
+- five ignored Python bytecode files were written into the SIDERIUS checkout
+  during external execution. No tracked source changed, but a future boundary
+  slice must prevent or redirect interpreter bytecode writes so the framework
+  checkout remains physically read-only during consumer runs.
 
 Current operational state:
 
 - no source experiment asset has been deleted from SIDERIUS;
-- Gold is operator-stopped; all H100 and RTX 5090 qualification chains have exited, and M6 remains deferred without being removed from the separation scope;
+- Gold is operator-stopped; all synchronized H100 qualification chains have
+  exited, and M6 remains deferred without being removed from the separation
+  scope;
 - no Gold workload has been launched from `siderius-exp`;
 - the imported Gold launcher still assumes repository co-location and is not portable;
 - all four imported real task manifests pass composition-only external validation; Cancer additionally has distinct two-network qualification and complete eight-network formal compositions;
@@ -794,32 +819,31 @@ Current operational state:
 - issue #386 has an external failing witness, lazy legacy-config repair, and passing workflow/data-root compatibility evidence;
 - issues #383--#387 and #389--#393 are repaired and closed with their
   published commits and validation evidence. The setup-only watchdog defect
-  (#388) has a focused generic repair at `b6990340` and awaits external replay
-  before issue closure;
+  (#388) has a focused generic repair included in `3eb8fc67`; its synchronized
+  Cancer replay succeeded without a watchdog kill but completed below the old
+  120-second boundary, so a counterfactual-discriminative external witness is
+  still required before issue closure;
 - issue #396 is repaired by `e31da5c7`, externally accepted by a fresh
   two-iteration H100 Pets chain, and closed without promoting either invalid
   candidate;
-- separated TIDMAD has a fresh uninterrupted two-iteration RTX 5090 chain with
-  measured warmup, Trial and Formal training, streamed inference, scoring,
-  Health, persistence, and one Health-valid Formal result;
-- Cancer's real NatureBench files are verified outside the repositories, and
-  its separated H100 chain completed two LLM-driven iterations with valid
-  inference, scoring, and mean-AUPRC selection;
+- the prior RTX 5090 TIDMAD witness remains historical evidence. The latest
+  synchronized H100 qualification supersedes it for merge-candidate
+  compatibility and produced no Health-valid candidate;
+- Cancer's real NatureBench files are verified outside the repositories. The
+  synchronized H100 chain completed two LLM-driven iterations with valid
+  Trial inference/scoring in both iterations and one valid Formal in iteration
+  1; iteration 2 exhausted its bounded Formal retries under the declared VRAM
+  cap;
 - all eleven safe generic-fixture replacements are complete: the final Health cache and objective authority modules now use only synthetic or framework-owned example evidence, while real-task Health and objective parity is owned by `siderius-exp` PR #1;
 - the two-pack minimal-example coverage matrix is frozen; quickstart's deterministic composed-scoring gap is closed, and synthetic masked regression now covers core scoring, task-owned Health, task-valid resource measurement, bounded production training over semantic supervision, offline literature-review ON/OFF topology, deterministic production-workflow traversal, record-level primary-only selection, checkout-portable resume/refusal, and standalone typed node invocation. The direct 38-file dependency audit is complete. The next checkpoint continues the safe generic-fixture cohort one responsibility at a time; no blocked or mixed file moves early. No real-task source removal begins before its assigned replacement evidence passes;
-- Gold launcher portability and final synchronized TestPod qualification remain
-  explicit later milestones;
-- H100 v5 completed two Pets iterations and two Cancer iterations. Fresh DAVIS
-  v6 acceptance completed two Trial/Formal iterations against `72be1d1c` and
-  proved incumbent restoration under an unchanged composed Health identity.
-  The completed Pets and Cancer evidence remains intact and was not replayed
-  merely for synchronization.
-- RTX 5090 TIDMAD qualification completed two iterations. The second
-  iteration produced one Health-valid Formal score after its Trial collapsed,
-  proving that scientific invalidation and infrastructure completion remain
-  separate. The first iteration also exposed the no-records negative-feedback
-  transport defect tracked by #396; the defect is repaired and externally
-  accepted, and no additional workload is running during this migration slice.
+- Gold launcher portability remains an explicit later milestone. Final
+  synchronized TestPod qualification is complete for the four bounded
+  qualification workflows at `3eb8fc67` / `b3bb1c2`; Gold scientific treatment
+  qualification remains separate;
+- the synchronized H100 run completed two iterations for Pets, DAVIS, Cancer,
+  and TIDMAD. All four tmux sessions exited, no qualification workload remains
+  active, and infrastructure validity is reported separately from scientific
+  candidate validity.
 
 ## 13. Work-ledger rule
 
