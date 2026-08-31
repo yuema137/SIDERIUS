@@ -53,7 +53,6 @@ See docs/resource_estimator_implement.md §10.5 / §10.14 Commit 6.
 from __future__ import annotations
 
 import gc
-import math
 import os
 import statistics
 import time
@@ -66,7 +65,6 @@ from agent.skills.inference_skill import estimator as _inference_est
 from agent.skills.training_skill import estimator as _training_est
 from execute_tools.dataset_config import (
     DatasetProfile,
-    declares_tidmad_topology,
     tidmad_topology,
 )
 
@@ -335,37 +333,6 @@ def _measure_ms_per_step(
         print("    [warmup skipped] CUDA not available; falling back to static formula.")
         return None, empty_breakdown
 
-    # ── C12-P — the DECLARATION boundary, deliberately OUTSIDE the broad
-    # operational fallback below. Two different questions, two different
-    # answers, and the ordering is what keeps them apart.
-    #
-    # 1. MEMBERSHIP (`declares_tidmad_topology`) is an explicit decision, never
-    #    a caught exception. `tidmad_topology` raises for TWO reasons —
-    #    sections ABSENT and sections PRESENT-BUT-MALFORMED — so the old
-    #    `try: tidmad_topology(...) / except ValueError: SKIP` claimed a
-    #    membership conclusion ("not TIDMAD") from an exception that also means
-    #    "your TIDMAD declaration is broken".
-    #
-    # 2. DECODE runs here, before the `try`, so a malformed declaration
-    #    PROPAGATES. Inside the try it was swallowed by the broad
-    #    `except Exception` at the bottom, which degraded a semantically
-    #    invalid declaration to a static-formula estimate — logged, but not
-    #    loud, and the run continued on a number derived from a declaration
-    #    nobody had validated.
-    #
-    # The broad catch keeps its job: an UNKNOWN OPERATIONAL failure (dataloader,
-    # CUDA, a codec, a missing shard) still degrades conservatively. What may no
-    # longer reach it is a KNOWN semantic invalidity, which is a configuration
-    # defect the operator must fix rather than a measurement that went wrong.
-    if not declares_tidmad_topology(profile):
-        print(
-            "    [measurement] inference-time measurement NOT APPLICABLE: this "
-            "task declares no TIDMAD topology, so there is no psd_segment_length "
-            "to measure against."
-        )
-        return None, empty_breakdown
-    _topology = tidmad_topology(profile)
-
     try:
         from torch.utils.data import DataLoader
 
@@ -390,49 +357,20 @@ def _measure_ms_per_step(
         )
         from ml_models.models_sandbox import MODEL_REGISTRY
 
-        seg_size = int(model_config["segmentation_size"])
         batch_size = int(train_config.get("batch_size", 1))
         loss_type = _training_est.resolve_loss_type(loss_config)
 
-        # Pick a minimal slice of the sample_set large enough for the required batches.
-        # Both early returns must obey the declared ``tuple[float | None, dict]``
-        # signature — bare ``None`` would crash caller unpacking at L496.
-        if not sample_set:
-            return None, empty_breakdown
-        first_key = sorted(sample_set.keys(), key=int)[0]
-        first_psds = list(sample_set[first_key])
-        if not first_psds:
-            return None, empty_breakdown
-
-        # Step 12 / PR-12bc B7, F-12-2. Everything from here down is TIDMAD's
-        # physical geometry — a PSD segment length divided by the planner's ML
-        # segmentation size, then a slice of a `{file: [segments]}` sample set.
-        # A composed task that declares no such topology cannot be measured
-        # this way, and the honest answer is to SKIP measurement with a NAMED
-        # reason: the caller already handles a `None` estimate, whereas
-        # measuring against somebody else's geometry would return a confident
-        # wrong number.
-        ml_per_psd = _topology.dataset.psd_segment_length // seg_size
         required_segs = (n_warmup_batches + n_timed_batches) * batch_size
-        n_psd_needed = max(1, math.ceil(required_segs / max(ml_per_psd, 1)))
-        n_psd_needed = min(n_psd_needed, 5, len(first_psds))
-        mini_sample_set = {first_key: first_psds[:n_psd_needed]}
-
         if task_scope is None:
-            from execute_tools.tidmad_data_path import TidmadScope
-
-            measurement_scope = TidmadScope(
-                sample_set=mini_sample_set,
-                seg_size=seg_size,
-                profile=profile,
+            print(
+                "    [warmup skipped] no task-owned training scope was supplied; "
+                "the framework does not construct a scientific task scope."
             )
-        else:
-            # The attempt already owns a task-built scope. Reconstructing a
-            # same-named in-tree class here breaks an external binding even
-            # when the serialized semantics are identical (#392). The
-            # existing max_samples carrier bounds materialization without
-            # inspecting or rewriting the task's opaque scope.
-            measurement_scope = task_scope
+            return None, empty_breakdown
+        # The attempt already owns a task-built scope. The existing max_samples
+        # carrier bounds materialization without inspecting or rewriting the
+        # task's opaque scope.
+        measurement_scope = task_scope
 
         dataset = resolve_bound_task_data_path().training_dataset(
             measurement_scope,

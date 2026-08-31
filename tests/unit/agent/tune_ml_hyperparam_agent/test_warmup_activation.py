@@ -136,10 +136,11 @@ def test_warmup_path_entered_with_valid_data_dir(tmp_path, capsys):
             model_config={"segmentation_size": 1000},
             train_config={"batch_size": 1, "epochs": 1},
             loss_config={},
-            data_dir=str(tmp_path),
-            sample_set={"0": list(range(100))},
-            profile=TIDMAD_PROFILE,
-        )
+                data_dir=str(tmp_path),
+                sample_set={"0": list(range(100))},
+                profile=TIDMAD_PROFILE,
+                task_scope=object(),
+            )
 
     out = capsys.readouterr().out
 
