@@ -8,7 +8,7 @@ This is the ONLY commit in 07b that changes what the LLM reads on purpose, so
 the claims are about MEANING, not byte-stability:
 
 1. **Direction comes from the declaration.** "maximize", "GOOD if HIGHER",
-   "beats the best score" were TIDMAD's convention stated as the framework's.
+   "beats the best score" were one task's convention stated as the framework's.
    Under a lower-is-better metric they are not incomplete — they are backwards,
    and would have the reflector praise every regression.
 
@@ -29,9 +29,6 @@ the claims are about MEANING, not byte-stability:
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 from agent.prompt_templates.tuner.rendering import (
@@ -45,47 +42,17 @@ from agent.prompt_templates.tuner.rendering import (
 from agent.schemas.training_diagnosis import TrainingDiagnosis
 from execute_tools.evaluation_metric import MetricSpec
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
-from tests.helpers.metric_fixtures import direction_only_spec, shipped_spec
-from tests.unit.agent.llm_bridge.test_step00_prompt_goldens import (
-    _HISTORY_3,
-    _REFLECT_DIAGNOSIS,
-    planner_fixture_kwargs,
-    reflect_fixture_args,
-    reflect_fixture_kwargs,
+from tests.helpers.metric_fixtures import accuracy_like_spec, error_like_spec
+from tests.helpers.tuner_prompt_fixtures import (
+    DIAGNOSIS,
+    HISTORY,
+    planner_kwargs,
+    reflector_args,
+    reflector_kwargs,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-EXAMPLES = REPO_ROOT / "examples"
-
-
-def _pack_spec(pack: str, filename: str) -> MetricSpec:
-    """A MetricSpec loaded from a persistent example pack's DECLARED metric.
-
-    Not a fixture written for this test: these are the packs' own
-    ``declared/metric_*.json`` files, so the rung consumes the same
-    declaration a real Pets/DAVIS run would (PR0; §3.12).
-    """
-    raw = json.loads((EXAMPLES / pack / "declared" / filename).read_text(encoding="utf-8"))
-    from execute_tools.evaluation_metric import PresenceScoreabilityContract
-
-    return MetricSpec(
-        id=raw["id"],
-        direction=raw["direction"],
-        aggregation=raw["aggregation"],
-        transform=raw["transform"],
-        transform_params=raw["transform_params"],
-        references=tuple(raw["references"]),
-        scoreability=PresenceScoreabilityContract(),
-    )
-
-
-def _pack_diagnosis(pack: str) -> TrainingDiagnosis:
-    raw = json.loads(
-        (EXAMPLES / pack / "expected" / "training_diagnosis_l1_fixture.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    return TrainingDiagnosis.model_validate(raw["training_diagnosis"])
+_HIGHER = accuracy_like_spec("fixture_quality")
+_LOWER = error_like_spec("fixture_error")
 
 
 # ---------------------------------------------------------------------------
@@ -95,30 +62,27 @@ def _pack_diagnosis(pack: str) -> TrainingDiagnosis:
 
 class TestDirectionAndIdentity:
     def test_the_words_invert_with_the_declaration(self):
-        assert render_metric_direction_words(shipped_spec()) == {
+        assert render_metric_direction_words(_HIGHER) == {
             "verb": "maximize",
             "comparative": "higher",
             "antonym": "lower",
         }
-        assert render_metric_direction_words(direction_only_spec()) == {
+        assert render_metric_direction_words(_LOWER) == {
             "verb": "minimize",
             "comparative": "lower",
             "antonym": "higher",
         }
 
     def test_the_identity_line_names_the_metric_and_its_direction(self):
-        assert render_metric_identity_line(shipped_spec()) == (
-            "golden metric `tidmad_denoising_score` (higher is better)"
+        assert render_metric_identity_line(_HIGHER) == (
+            "golden metric `fixture_quality` (higher is better)"
         )
-        assert render_metric_identity_line(
-            _pack_spec("oxford_iiit_pet", "metric_accuracy.json")
-        ) == ("golden metric `accuracy` (higher is better)")
-        assert render_metric_identity_line(
-            _pack_spec("davis_future_prediction", "metric_mse.json")
-        ) == ("golden metric `mse` (lower is better)")
+        assert render_metric_identity_line(_LOWER) == (
+            "golden metric `fixture_error` (lower is better)"
+        )
 
     def test_an_unusual_id_renders_verbatim_inside_backticks(self):
-        spec = shipped_spec().model_copy(update={"id": "psnr@4x_v2"})
+        spec = _HIGHER.model_copy(update={"id": "psnr@4x_v2"})
         assert "`psnr@4x_v2`" in render_metric_identity_line(spec)
 
 
@@ -126,7 +90,7 @@ class TestDirectionAndIdentity:
 # 2. The training-dynamics line
 # ---------------------------------------------------------------------------
 
-_OK = _REFLECT_DIAGNOSIS
+_OK = DIAGNOSIS
 
 
 class TestTrainingDynamicsLine:
@@ -210,11 +174,11 @@ class TestPlannerDynamicsBlock:
     def test_one_line_per_record_including_those_without_a_diagnosis(self):
         """The block's shape must not depend on how many rounds happened to
         record a history, or its absence would itself carry meaning."""
-        block = render_planner_dynamics_block(_HISTORY_3)
+        block = render_planner_dynamics_block(HISTORY)
         assert block.startswith("### Training dynamics (last 3 experiments)")
         assert len(block.splitlines()) == 4
         assert block.count("none recorded") == 2
-        assert "[focal] train 0.02->0.01" in block
+        assert "[cross_entropy] train 0.02->0.01" in block
 
     def test_an_empty_history_renders_nothing_at_all(self):
         assert render_planner_dynamics_block([]) == ""
@@ -230,9 +194,9 @@ class TestBridgeFailsClosed:
         """MUTATION TARGET: defaulting to "maximize".
 
         A default is not a smaller version of the truth here — it inverts the
-        goal for a minimised metric, and every TIDMAD test would still pass.
+        goal for a minimised metric, while higher-is-better tests would still pass.
         """
-        kwargs = {k: v for k, v in planner_fixture_kwargs().items() if k != "metric_spec"}
+        kwargs = {k: v for k, v in planner_kwargs(_HIGHER).items() if k != "metric_spec"}
         bridge = BoundaryRecorderBridge()
         with pytest.raises(ValueError, match="metric_spec"):
             bridge.plan(**kwargs)
@@ -240,9 +204,9 @@ class TestBridgeFailsClosed:
 
     def test_reflect_without_a_metric_spec_refuses(self):
         bridge = BoundaryRecorderBridge()
-        kwargs = {k: v for k, v in reflect_fixture_kwargs().items() if k != "metric_spec"}
+        kwargs = {k: v for k, v in reflector_kwargs().items() if k != "metric_spec"}
         with pytest.raises(ValueError, match="metric_spec"):
-            bridge.reflect(*reflect_fixture_args(), **kwargs)
+            bridge.reflect(*reflector_args(), **kwargs)
         assert bridge.captures == []
 
 
@@ -253,14 +217,19 @@ class TestBridgeFailsClosed:
 
 def _render_planner(**overrides) -> tuple[str, str]:
     bridge = BoundaryRecorderBridge()
-    bridge.plan(**{**planner_fixture_kwargs(), **overrides})
+    bridge.plan(
+        **{
+            **planner_kwargs(_HIGHER),
+            **overrides,
+        }
+    )
     _method, _label, system, user = bridge.captures[0]
     return system, user
 
 
 def _render_reflector(**overrides) -> tuple[str, str]:
     bridge = BoundaryRecorderBridge()
-    bridge.reflect(*reflect_fixture_args(), **{**reflect_fixture_kwargs(), **overrides})
+    bridge.reflect(*reflector_args(), **{**reflector_kwargs(), **overrides})
     _method, _label, system, user = bridge.captures[0]
     return system, user
 
@@ -269,7 +238,7 @@ class TestBoundary:
     def test_the_planner_sees_the_summary_and_not_the_raw_payload(self):
         _system, user = _render_planner()
         assert "### Training dynamics (last 3 experiments)" in user
-        assert "[focal] train 0.02->0.01" in user
+        assert "[cross_entropy] train 0.02->0.01" in user
         for raw in ("training_history", "training_diagnosis", "metric_result", "metric_refusal"):
             assert raw not in user
         # ...and values that exist ONLY inside those payloads.
@@ -284,7 +253,7 @@ class TestBoundary:
             assert raw not in user
 
     def test_a_record_with_no_diagnosis_still_renders_the_block(self):
-        plain = [{k: v for k, v in r.items() if k != "training_diagnosis"} for r in _HISTORY_3]
+        plain = [{k: v for k, v in r.items() if k != "training_diagnosis"} for r in HISTORY]
         _system, user = _render_planner(memory_history=plain)
         assert "### Training dynamics (last 3 experiments)" in user
         assert user.count("none recorded") == 3
@@ -293,10 +262,6 @@ class TestBoundary:
 # ---------------------------------------------------------------------------
 # 5. Rung B-07b-2 — the rendering axis across three declarations
 # ---------------------------------------------------------------------------
-
-_LOWER = direction_only_spec()
-_PETS = None  # bound below
-_DAVIS = None
 
 
 class TestB07b2RenderingAxis:
@@ -312,12 +277,10 @@ class TestB07b2RenderingAxis:
     @pytest.mark.parametrize(
         ("spec_factory", "expected_verb", "expected_comparative"),
         [
-            (shipped_spec, "maximize", "higher"),
-            (direction_only_spec, "minimize", "lower"),
-            (lambda: _pack_spec("oxford_iiit_pet", "metric_accuracy.json"), "maximize", "higher"),
-            (lambda: _pack_spec("davis_future_prediction", "metric_mse.json"), "minimize", "lower"),
+            (lambda: _HIGHER, "maximize", "higher"),
+            (lambda: _LOWER, "minimize", "lower"),
         ],
-        ids=["tidmad", "lower", "pets_accuracy", "davis_mse"],
+        ids=["higher", "lower"],
     )
     def test_the_planner_states_the_declared_direction(
         self, spec_factory, expected_verb, expected_comparative
@@ -332,11 +295,10 @@ class TestB07b2RenderingAxis:
     @pytest.mark.parametrize(
         ("spec_factory", "good", "bad"),
         [
-            (shipped_spec, "HIGHER", "LOWER"),
-            (direction_only_spec, "LOWER", "HIGHER"),
-            (lambda: _pack_spec("davis_future_prediction", "metric_mse.json"), "LOWER", "HIGHER"),
+            (lambda: _HIGHER, "HIGHER", "LOWER"),
+            (lambda: _LOWER, "LOWER", "HIGHER"),
         ],
-        ids=["tidmad", "lower", "davis_mse"],
+        ids=["higher", "lower"],
     )
     def test_the_reflector_judging_rule_follows_the_declaration(self, spec_factory, good, bad):
         """Under a minimised metric the shipped wording would have the reflector
@@ -359,13 +321,9 @@ class TestB07b2RenderingAxis:
         assert any("GOOD" in ln and "LOWER" in ln for ln in judging)
         assert not any("GOOD" in ln and "HIGHER" in ln for ln in judging)
 
-    @pytest.mark.parametrize(
-        "pack", ["oxford_iiit_pet", "davis_future_prediction"], ids=["pets", "davis"]
-    )
-    def test_a_pack_fixture_diagnosis_renders_at_both_surfaces(self, pack):
-        """L1 evidence: the packs' own 07a expected fixtures render through the
-        production renderers. No real Pets/DAVIS execution — that is D14."""
-        diagnosis = _pack_diagnosis(pack)
+    def test_a_generic_diagnosis_renders_at_both_surfaces(self):
+        """A task-neutral diagnosis reaches both production renderers."""
+        diagnosis = _OK
         planner_line = render_training_dynamics_line(diagnosis, "cross_entropy")
         reflector_block = render_reflector_dynamics_block(diagnosis)
         assert planner_line.startswith("[cross_entropy] train ")
@@ -381,9 +339,9 @@ class TestB07b2RenderingAxis:
 # ---------------------------------------------------------------------------
 
 
-def test_the_denoising_score_field_name_is_still_what_the_prompt_names():
+def test_the_persisted_score_field_name_is_still_what_the_prompt_names():
     """Q-07b-3: the metric IDENTITY was ADDED beside the field noun, not
     substituted for it. The LLM reads `denoising_score` out of the history
     JSON, and renaming the field is D1's decision."""
-    system, _user = _render_planner(metric_spec=direction_only_spec())
+    system, _user = _render_planner(metric_spec=_LOWER)
     assert "`denoising_score`" in system
