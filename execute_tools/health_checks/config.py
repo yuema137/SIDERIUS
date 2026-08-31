@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.health_checks import _plugin_binding
@@ -288,6 +288,16 @@ class GateConfig(BaseModel):
     )
 
 
+class PersistedHealthPluginIdentity(BaseModel):
+    """Canonical plugin provenance carried by a materialized Health config."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    configured_ref: str
+    member: str = ""
+    content_sha256: str
+
+
 class HealthChecksConfig(BaseModel):
     """The rev-6 HealthGate YAML root.
 
@@ -351,6 +361,14 @@ class HealthChecksConfig(BaseModel):
             "and while it was dropped as an undeclared extra an "
             "``explicit_none`` effective config read back as 'no roster "
             "supplied' and acquired the legacy task's family (F-6)."
+        ),
+    )
+    resolved_plugins: tuple[PersistedHealthPluginIdentity, ...] = Field(
+        default=(),
+        exclude=True,
+        description=(
+            "Canonical plugin identities read from a materialized effective "
+            "config. They are provenance, not a second plugin-loading path."
         ),
     )
 
@@ -827,10 +845,16 @@ def materialize_effective_config(
             dataset_partition_count=dataset_partition_count,
         )
 
-    document = {
-        **cfg.model_dump(mode="json"),
-        **body_markers(task_health_binding, resolved_plugins),
-    }
+    markers = body_markers(task_health_binding, resolved_plugins)
+    if (
+        task_health_binding is not HealthBindingState.EXPLICIT_NONE
+        and not resolved_plugins
+        and cfg.resolved_plugins
+    ):
+        markers["resolved_plugins"] = [
+            identity.model_dump(mode="json") for identity in cfg.resolved_plugins
+        ]
+    document = {**cfg.model_dump(mode="json"), **markers}
     body = yaml.safe_dump(document, sort_keys=True)
     sha = hashlib.sha256(body.encode()).hexdigest()
     files_repr = sorted({int(i) for i in files}) if files else None

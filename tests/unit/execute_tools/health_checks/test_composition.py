@@ -452,6 +452,42 @@ class TestPluginBytesAreInThePinnedIdentity:
 
         assert str(tmp_path) not in body
 
+    def test_rematerializing_an_effective_config_preserves_the_plugin_pin(
+        self, tmp_path, clean_registry
+    ):
+        """A child workspace must retain the chain's resolved plugin identity."""
+        config_path = _task_package(tmp_path / "pkg")
+        first_path, first_sha = materialize_effective_config(
+            _empty_framework_yaml(tmp_path),
+            None,
+            str(tmp_path / "chain"),
+            task_health_binding=str(config_path),
+        )
+
+        _plugin_binding.reset_run_scope()
+        second_path, second_sha = materialize_effective_config(
+            first_path,
+            None,
+            str(tmp_path / "child"),
+            task_health_binding=str(config_path),
+        )
+
+        assert second_sha == first_sha
+        assert (
+            yaml.safe_load(Path(second_path).read_text())["resolved_plugins"]
+            == (yaml.safe_load(Path(first_path).read_text())["resolved_plugins"])
+        )
+
+        none_path, _ = materialize_effective_config(
+            first_path,
+            None,
+            str(tmp_path / "explicit_none"),
+            task_health_binding=HealthBindingState.EXPLICIT_NONE,
+        )
+        none_body = yaml.safe_load(Path(none_path).read_text())
+        assert none_body["task_health_binding"] == "explicit_none"
+        assert "resolved_plugins" not in none_body
+
     def test_mutated_plugin_bytes_change_the_pin_and_fail_a_resume_closed(
         self, tmp_path, clean_registry
     ):

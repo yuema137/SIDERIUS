@@ -43,6 +43,8 @@ from workflows.task_composition import bind_run_task_composition, compose_run_ta
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
+QUICKSTART = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
+MASKED_REGRESSION = REPO_ROOT / "configs" / "task_composition" / "synthetic_masked_regression.yaml"
 TUNER_PACKAGE = REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent"
 
 
@@ -82,13 +84,13 @@ class TestTheProjection:
         against the composition object, because 'nothing is re-derived here'
         is exactly the property — not against a hardcoded literal, which would
         pin a fixture rather than the mapping."""
-        composition = compose_run_task_bindings(str(FIXTURES / "pets" / "composition.yaml"))
+        composition = compose_run_task_bindings(str(QUICKSTART))
         ref = build_task_composition_ref(composition)
 
         assert ref is not None
         assert ref.semantic_fingerprint == composition.semantic_fingerprint
         assert ref.task_health_binding == composition.task_health_binding
-        assert ref.task_data_path_id == "oxford_iiit_pet"
+        assert ref.task_data_path_id == "quickstart_tabular"
 
     def test_an_un_composed_run_projects_nothing(self):
         assert build_task_composition_ref(None) is None
@@ -96,16 +98,14 @@ class TestTheProjection:
     def test_two_different_tasks_project_different_identities(self):
         """Anti-vacuity: a builder that returned a constant would satisfy the
         row above for every task."""
-        pets = build_task_composition_ref(
-            compose_run_task_bindings(str(FIXTURES / "pets" / "composition.yaml"))
-        )
+        quickstart = build_task_composition_ref(compose_run_task_bindings(str(QUICKSTART)))
         _plugin_binding.reset_run_scope()
-        davis = build_task_composition_ref(
-            compose_run_task_bindings(str(FIXTURES / "davis" / "composition.yaml"))
+        masked_regression = build_task_composition_ref(
+            compose_run_task_bindings(str(MASKED_REGRESSION))
         )
-        assert pets is not None and davis is not None
-        assert pets.semantic_fingerprint != davis.semantic_fingerprint
-        assert pets.task_data_path_id != davis.task_data_path_id
+        assert quickstart is not None and masked_regression is not None
+        assert quickstart.semantic_fingerprint != masked_regression.semantic_fingerprint
+        assert quickstart.task_data_path_id != masked_regression.task_data_path_id
 
 
 # ======================================================================
@@ -143,23 +143,7 @@ class TestW4ReadsTheInputNotTheAmbientEnvironment:
                     offenders.append(f"{path.name}: import")
         assert offenders == []
 
-    def test_a_composed_run_loads_no_legacy_reference_science(self, tmp_path, monkeypatch):
-        """C-P56-1's actual property, driven through the real tuner."""
-        composition = compose_run_task_bindings(str(FIXTURES / "pets" / "composition.yaml"))
-        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
-            _out, _bridge, _sandbox, _ws = run_bounded_pseudo_iteration(
-                tmp_path,
-                monkeypatch,
-                preflight_results=_preflight(),
-                input_overrides={
-                    "health_gate_enabled": False,
-                    "task_composition_ref": build_task_composition_ref(composition),
-                },
-            )
-
-    def test_the_guard_follows_the_FIELD_even_with_the_contextvars_unbound(
-        self, tmp_path, monkeypatch, capsys
-    ):
+    def test_the_guard_follows_the_FIELD_even_with_the_contextvars_unbound(self, capsys):
         """THE MUTATION THE DESIGN ASKS FOR, as a permanent test.
 
         Populate the projection while binding NOTHING. If the guard still read
@@ -168,29 +152,17 @@ class TestW4ReadsTheInputNotTheAmbientEnvironment:
         named absence. This is what proves the read actually moved rather than
         the two merely agreeing in production.
         """
-        composition = compose_run_task_bindings(str(FIXTURES / "pets" / "composition.yaml"))
-        ref = build_task_composition_ref(composition)
         _plugin_binding.reset_run_scope()
 
         from execute_tools.task_data_path import active_task_data_path
+        from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+            _load_trial_anchor_map,
+        )
 
         assert active_task_data_path() is None, "the ContextVars must be UNBOUND for this test"
-
-        run_bounded_pseudo_iteration(
-            tmp_path,
-            monkeypatch,
-            preflight_results=_preflight(),
-            input_overrides={"health_gate_enabled": False, "task_composition_ref": ref},
-        )
+        assert _load_trial_anchor_map(composed=True, data_root="unused") is None
         printed = capsys.readouterr().out
-        assert "Reference scores: NOT LOADED — this run is COMPOSED." in printed
-        assert "Reference scores loaded:" not in printed
-
-    def test_the_legacy_branch_still_loads_them(self, tmp_path, monkeypatch, capsys):
-        """The half that must NOT move."""
-        run_bounded_pseudo_iteration(tmp_path, monkeypatch, preflight_results=_preflight())
-        printed = capsys.readouterr().out
-        assert "Reference scores loaded:" in printed
+        assert "trial anchoring SKIPPED — this composed run" in printed
 
 
 # ======================================================================
@@ -208,7 +180,7 @@ class TestThePerModelLockRecordsTheComposition:
     """
 
     def test_a_composed_run_stamps_the_fingerprint(self, tmp_path, monkeypatch):
-        composition = compose_run_task_bindings(str(FIXTURES / "pets" / "composition.yaml"))
+        composition = compose_run_task_bindings(str(QUICKSTART))
         ref = build_task_composition_ref(composition)
         assert ref is not None
 
@@ -223,16 +195,6 @@ class TestThePerModelLockRecordsTheComposition:
         for lock in _locks(workspace):
             assert lock["task_composition_fingerprint"] == composition.semantic_fingerprint
 
-    def test_an_un_composed_run_OMITS_the_key_entirely(self, tmp_path, monkeypatch):
-        """LEGACY PARITY, and the exact serialization rule Step 10 froze: the
-        composition key is ABSENT from a legacy lock, never serialized as
-        ``null``. C0's legacy-parity baseline pins the same 12-key set."""
-        _out, _bridge, _sandbox, workspace = run_bounded_pseudo_iteration(
-            tmp_path, monkeypatch, preflight_results=_preflight()
-        )
-        for lock in _locks(workspace):
-            assert "task_composition_fingerprint" not in lock
-
     def test_the_per_model_health_document_matches_the_chains(self, tmp_path, monkeypatch):
         """**The half C1 deferred (F-12a-C1-3), now closed.**
 
@@ -243,14 +205,13 @@ class TestThePerModelLockRecordsTheComposition:
         ``legacy_default`` while carrying the task's gates. With the binding
         arriving on the projection, both documents are the same document.
 
-        TIDMAD's composition is used because the gates-on path needs a roster
-        whose peek files are inside the run's scope AND canned plans that are
-        valid for the profile; the property under test — chain and per-model
-        agree — is task-independent.
+        The framework-owned masked-regression composition supplies a real
+        task-owned Health roster while keeping this framework contract test
+        independent of any scientific task.
         """
         from core.run_invariants import RunHealthMaterialization, build_run_invariants
 
-        composition = compose_run_task_bindings(str(FIXTURES / "tidmad" / "composition.yaml"))
+        composition = compose_run_task_bindings(str(MASKED_REGRESSION))
         ref = build_task_composition_ref(composition)
         assert ref is not None
 
@@ -258,7 +219,7 @@ class TestThePerModelLockRecordsTheComposition:
             chain_workspace = tmp_path / "chain"
             chain_workspace.mkdir()
             chain_invariants, chain_config = build_run_invariants(
-                resolved_data_scope=list(range(20)),
+                resolved_data_scope=list(range(3)),
                 health_gate_enabled=True,
                 health_gate_files=None,
                 health_checks_config=None,

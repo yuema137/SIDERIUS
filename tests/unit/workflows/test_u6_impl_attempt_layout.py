@@ -35,13 +35,22 @@ from tests.unit.workflows.test_model_exploration import (
 )
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 RUN = "u6_layout"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+QUICKSTART = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 
 def _run_with_forced_retries(tmp_path, verdicts: tuple[bool, ...]):
     """Drive one iteration whose implement→validate loop needs ``len(verdicts)`` tries."""
-    _write_tuning_output(tmp_path, "punet")
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    _write_tuning_output(
+        tmp_path,
+        "punet",
+        fingerprint=composition.semantic_fingerprint,
+        metric_spec=composition.metric.spec,
+    )
     workspace = str(tmp_path / "workflow_output")
     impl_inputs: list = []
     valid_inputs: list = []
@@ -101,20 +110,25 @@ def _run_with_forced_retries(tmp_path, verdicts: tuple[bool, ...]):
         propose.return_value.run.side_effect = _propose
         impl.return_value.run.side_effect = _implement
         valid.return_value.run.side_effect = _validate
-        tune.return_value.run.return_value = _make_tune_output()
-
-        run_workflow(
-            launch=WorkflowLaunchConfig(
-                data_dir=str(tmp_path / "data"),
-                model_types=["punet"],
-                source_run_name="v1",
-                max_iterations=1,
-                max_proposal_attempts=1,
-                max_impl_attempts=len(verdicts),
-            ),
-            workspace=workspace,
-            run_name=RUN,
+        tune.return_value.run.return_value = _make_tune_output(
+            fingerprint=composition.semantic_fingerprint,
+            metric_spec=composition.metric.spec,
         )
+
+        with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=str(tmp_path / "data"),
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    max_iterations=1,
+                    max_proposal_attempts=1,
+                    max_impl_attempts=len(verdicts),
+                ),
+                workspace=workspace,
+                run_name=RUN,
+                task_composition=composition,
+            )
         register_calls = register.call_args_list
 
     iter_dir = os.path.join(workspace, RUN, "iteration_001")
