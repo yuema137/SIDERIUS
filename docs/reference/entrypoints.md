@@ -247,6 +247,7 @@ different one fails at startup.
 | `run_chain.sh` | ✅ (forwards) |
 | `run_one_iteration.py` | ✅ |
 | `workflows/model_exploration.py` | ✅ |
+| `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` | ✅ (required) |
 | `scripts/run_comparison.py` | ❌ |
 
 ---

@@ -375,7 +375,7 @@ class TestStandaloneCliDisposition:
         # The CLI derives its input path from --workspace/--run_name
         # (there is no --interpretation flag); mirror that exactly.
         (tmp_path / "interpretation_cli_probe.json").write_text(
-            json.dumps({"model_types": ["punet"], "total_experiments": 1}),
+            json.dumps({"model_types": ["fixture_model"], "total_experiments": 1}),
             encoding="utf-8",
         )
 
@@ -387,6 +387,13 @@ class TestStandaloneCliDisposition:
                 run_name="cli_probe",
                 provider="openai",
                 model_id="gpt-5.5",
+                task_composition=str(
+                    pathlib.Path(__file__).resolve().parents[4]
+                    / "configs"
+                    / "task_composition"
+                    / "quickstart.yaml"
+                ),
+                data_dir=str(tmp_path),
             ),
         )
 
@@ -413,14 +420,21 @@ class TestStandaloneCliDisposition:
 
         rendered = _render_commit_system_prompt(agent_input.forward_contract)
         assert re.findall(r"\{[A-Z][A-Z_]*\}", rendered) == []
-        assert "[B, T] int64" in rendered
+        assert "[B, 4] float32" in rendered
+        assert "[B, 2] float32" in rendered
 
     def test_cli_contract_comes_from_the_canonical_loader(self, tmp_path, monkeypatch):
         """§3.1 forbids inventing a second config path: the CLI's contract
         must be byte-equal to what `load_task_config()` yields."""
-        from workflows.task_config import load_task_config
+        from workflows.task_composition import compose_run_task_bindings
 
         agent_input = self._run_main_capturing_input(tmp_path, monkeypatch)
-        assert agent_input.forward_contract == ForwardContract(
-            **load_task_config()["forward_contract"]
+        composition = compose_run_task_bindings(
+            str(
+                pathlib.Path(__file__).resolve().parents[4]
+                / "configs"
+                / "task_composition"
+                / "quickstart.yaml"
+            )
         )
+        assert agent_input.forward_contract == composition.forward_contract

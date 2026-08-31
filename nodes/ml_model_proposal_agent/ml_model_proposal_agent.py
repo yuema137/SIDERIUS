@@ -2371,11 +2371,26 @@ def main():
     )
     parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai"])
     parser.add_argument("--model_id", type=str, default="gemini-3.1-flash-lite-preview")
+    parser.add_argument(
+        "--task_composition",
+        required=True,
+        help="Task-composition manifest that supplies the node's scientific contract",
+    )
+    parser.add_argument(
+        "--data_dir",
+        required=True,
+        help="Physical data root used while the task composition is bound",
+    )
     args = parser.parse_args()
 
     from core.generated_library import bind_generated_library_to_workspace
+    from workflows.task_composition import (
+        bind_run_task_composition,
+        compose_run_task_bindings,
+    )
 
     bind_generated_library_to_workspace(args.workspace)
+    run_composition = compose_run_task_bindings(args.task_composition)
 
     interp_path = os.path.join(args.workspace, f"interpretation_{args.run_name}.json")
     if not os.path.exists(interp_path):
@@ -2395,33 +2410,34 @@ def main():
     # declaration through the SAME canonical loader every other production
     # caller uses (workflows/model_exploration.py, scripts/...): no second
     # config path is introduced.
-    _task_cfg = load_task_config()
-    # Step 10 / P3 C1 — the standalone entrypoint builds its evidence through the
-    # SAME projection the protocol uses, on the SAME shape: the interpreter
-    # persists exactly ``model_dump_json``, so the file loaded above and the
-    # in-memory dump the workflow passes are one input shape with two sources.
-    # This is what makes "one authority, two entrypoints" true rather than
-    # aspirational — before it, the CLI was a second reader of the raw mapping
-    # that had already drifted from production (parent §3.6).
-    evidence = build_proposer_evidence(interpretation)
-    agent_input = ProposalInput.model_validate(
-        {
-            "interpretation_evidence": evidence,
-            "task_description": get_task_description(_task_cfg),
-            "forward_contract": _task_cfg["forward_contract"],
-            "storage": {
-                "backend": "local",
-                "local": {"workspace": args.workspace, "run_name": args.run_name},
-            },
-        }
-    )
-    print(
-        f"✅ Input validated: models={evidence.model_types} | "
-        f"experiments={evidence.total_experiments}"
-    )
+    with bind_run_task_composition(run_composition, physical_data_root=args.data_dir):
+        _task_cfg = load_task_config()
+        # Step 10 / P3 C1 — the standalone entrypoint builds its evidence through the
+        # SAME projection the protocol uses, on the SAME shape: the interpreter
+        # persists exactly ``model_dump_json``, so the file loaded above and the
+        # in-memory dump the workflow passes are one input shape with two sources.
+        # This is what makes "one authority, two entrypoints" true rather than
+        # aspirational — before it, the CLI was a second reader of the raw mapping
+        # that had already drifted from production (parent §3.6).
+        evidence = build_proposer_evidence(interpretation)
+        agent_input = ProposalInput.model_validate(
+            {
+                "interpretation_evidence": evidence,
+                "task_description": get_task_description(_task_cfg),
+                "forward_contract": _task_cfg["forward_contract"],
+                "storage": {
+                    "backend": "local",
+                    "local": {"workspace": args.workspace, "run_name": args.run_name},
+                },
+            }
+        )
+        print(
+            f"✅ Input validated: models={evidence.model_types} | "
+            f"experiments={evidence.total_experiments}"
+        )
 
-    agent = MLModelProposalAgent(provider=args.provider, model_id=args.model_id)
-    output = agent.run(agent_input)
+        agent = MLModelProposalAgent(provider=args.provider, model_id=args.model_id)
+        output = agent.run(agent_input)
 
     print(f"\n{'=' * 60}")
     print(f"  Proposal — {output.model_name}")
