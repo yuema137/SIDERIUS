@@ -6,13 +6,8 @@ handle changes the observed behaviour — not by inspection alone").
 
 Two properties, each with the defect only it catches:
 
-1. **Reachability through the PRODUCTION loop.** One bounded pseudo iteration
-   of the real ``HyperparamTuningAgent.run`` (Step-00 harness: canned bridge,
-   ``RecordingSandbox``, real ``_emit_record``) records WHICH handle the
-   scoring seam received. Under Regime A it is the TIDMAD instance; with the
-   run-scope derivation swapped for a contrast handle it is the contrast — so
-   a tuner that quietly re-derived or hardcoded the metric at the call site
-   would be caught, which reading the source cannot prove.
+1. **Composition reachability.** The framework-owned Quickstart composition
+   binds its metric handle and the run resolver returns that exact object.
 
 2. **The scoring-failure record helper.** ``_build_scoring_failure_record``
    was extracted from ``run()``'s scoring ``except`` so the ONE new outcome
@@ -24,98 +19,37 @@ Two properties, each with the defect only it catches:
 from __future__ import annotations
 
 import importlib
-import json
 import re
 from pathlib import Path
 
 import pytest
 
 from execute_tools.evaluation_metric import (
-    TIDMAD_METRIC_ID,
-    MetricSpec,
     NotScoreableError,
     NotScoreableResult,
-    PresenceScoreabilityContract,
     ScoreabilityFailure,
     ScoreabilityVerdict,
 )
-from tests.helpers.step00_pseudo_iteration import run_bounded_pseudo_iteration
 from tests.helpers.tuner_source import tuner_node_source
 
 _TUNER = importlib.import_module("nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent")
-_PREFLIGHT_FIXTURE = Path(__file__).parent / "fixtures" / "step00_preflight_results.json"
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_QUICKSTART = _REPO_ROOT / "configs/task_composition/quickstart.yaml"
 
 
-def _preflight():
-    return json.loads(_PREFLIGHT_FIXTURE.read_text(encoding="utf-8"))["results"]
-
-
-def _scoring_calls(sandbox):
-    return [c for c in sandbox.calls if c and c[0] == "evaluate_metric"]
-
-
-# ---------------------------------------------------------------------------
-# 1. Reachability — the live route receives the run-scope handle
-# ---------------------------------------------------------------------------
-
-
-def test_the_production_loop_scores_through_the_tidmad_handle(tmp_path, monkeypatch):
-    """Regime A: every scoring call the real loop makes goes to
-    ``sandbox.evaluate_metric`` carrying the TIDMAD identity/direction; the
-    legacy ``score_vector`` seam is not called by the live route."""
-    _, _, sandbox, _ = run_bounded_pseudo_iteration(
-        tmp_path, monkeypatch, preflight_results=_preflight()
+def test_run_metric_is_the_handle_bound_by_the_quickstart_composition(tmp_path: Path):
+    """The resolver returns the declared handle, never a task fallback."""
+    from execute_tools.evaluation_metric import resolve_run_metric
+    from workflows.task_composition import (
+        bind_run_task_composition,
+        compose_run_task_bindings,
     )
-    calls = _scoring_calls(sandbox)
-    assert calls, "the bounded iteration reached scoring at least once"
-    assert all(c[1:] == (TIDMAD_METRIC_ID, "higher") for c in calls), calls
-    assert not [c for c in sandbox.calls if c and c[0] == "score_vector"]
 
-
-def test_a_contrast_handle_bound_at_run_scope_reaches_the_scoring_seam(tmp_path, monkeypatch):
-    """Swap the run-scope derivation for a scalar-only lower-is-better handle
-    and the LIVE route carries THAT identity — proving the call site reads
-    ``run_metric`` and does not re-derive TIDMAD on its own authority.
-    (Roadmap §10.5's contrast, at the seam; the record payload is C4/C6.)"""
-
-    class _ContrastHandle:
-        spec = MetricSpec(
-            id="step06_contrast_lower",
-            direction="lower",
-            aggregation="single_value",
-            scoreability=PresenceScoreabilityContract(),
-        )
-
-    # The contrast is returned ONLY by the first resolution — the run-scope
-    # binding. A call site that re-resolved the metric on its own authority
-    # (a second resolution per scoring call) would obtain the SHIPPED
-    # instance and the seam would see TIDMAD, not the contrast. (C7 mutation
-    # "live route bypasses the handle" survived the always-contrast stub —
-    # equivalent under that oracle — and is killed by this one.)
-    #
-    # Step 12 / PR-12d seam B UPGRADED the patch TARGET, not the intent. The
-    # tuner used to spell this `resolve_bound_run_metric() or
-    # derive_tidmad_metric(profile, spec)` inline; the whole rule now lives in
-    # `evaluation_metric.resolve_run_metric`, because the spec became optional
-    # (B11) and `run()` is branch-capped. The question this test asks —
-    # is the metric resolved EXACTLY ONCE, at run scope, and does the live
-    # scoring route carry THAT identity — is unchanged, so the stub follows
-    # the resolution to its new owner.
-    shipped = _TUNER.resolve_run_metric
-    derivations: list[int] = []
-
-    def _bind_once(*args, **kwargs):
-        derivations.append(1)
-        return _ContrastHandle() if len(derivations) == 1 else shipped(*args, **kwargs)
-
-    monkeypatch.setattr(_TUNER, "resolve_run_metric", _bind_once)
-    _, _, sandbox, _ = run_bounded_pseudo_iteration(
-        tmp_path, monkeypatch, preflight_results=_preflight()
-    )
-    calls = _scoring_calls(sandbox)
-    assert calls
-    assert all(c[1:] == ("step06_contrast_lower", "lower") for c in calls), calls
-    assert len(derivations) == 1, "the metric is resolved exactly once per run, at run scope"
+    data_root = tmp_path / "quickstart_data"
+    data_root.mkdir()
+    composition = compose_run_task_bindings(str(_QUICKSTART))
+    with bind_run_task_composition(composition, physical_data_root=str(data_root)):
+        assert resolve_run_metric() is composition.metric
 
 
 # ---------------------------------------------------------------------------
@@ -179,10 +113,10 @@ def test_a_not_scoreable_refusal_is_described_as_such_not_as_a_crash(monkeypatch
     ``failure_type="not_scoreable"``, and never says "crashed"."""
     monkeypatch.setattr(_TUNER.time, "strftime", lambda *_a, **_k: "2026-08-15 00:00:00")
     refusal = NotScoreableResult(
-        metric_id=TIDMAD_METRIC_ID,
+        metric_id="synthetic_metric",
         direction="higher",
         verdict=ScoreabilityVerdict(
-            contract_id="tidmad_denoised_h5",
+            contract_id="synthetic_deliverable_contract",
             failures=(
                 ScoreabilityFailure(
                     requirement="required_attrs",
@@ -200,7 +134,7 @@ def test_a_not_scoreable_refusal_is_described_as_such_not_as_a_crash(monkeypatch
     assert "not scoreable" in memory["conclusion"]
     assert "required_attrs[file 4]" in memory["conclusion"]
     assert "voltage_range_mV" in memory["conclusion"]
-    assert "tidmad_denoised_h5" in memory["conclusion"]
+    assert "synthetic_deliverable_contract" in memory["conclusion"]
     assert "crash" not in memory["conclusion"].lower()
     assert "No scorer arithmetic was reached" in memory["discovery"]
     assert (memory["round_index"], memory["attempt_in_round"]) == (3, 1)
