@@ -2,11 +2,9 @@
 
 **The failures these exist to prevent, both observed for real.**
 
-PR-12d's TIDMAD attempts 5 and 6 were blocked by ONE defect with TWO
-consumers: ``scripts/run_comparison.py`` never forwarded ``data_dir`` to the
-tuner, so ``agent_input.data_dir`` arrived as ``None`` and runtime-control
-refused — fail-closed, correctly, but only *after* a real LLM had generated,
-validated and registered a candidate.
+An external task launcher once failed to forward ``data_dir`` to the tuner,
+so ``agent_input.data_dir`` arrived as ``None`` and runtime-control refused —
+fail-closed, correctly, but only after expensive upstream work.
 
     armed time budget    -> core/runtime_control/probe_production.py
                             "no dataset directory was supplied to the probe"
@@ -50,18 +48,12 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 #: refusal, and a second resolver would be a second convention.
 AUTHORITY = "resolve_dataset_dir"
 
-#: Every module that is a RUN LAUNCH ENTRY POINT -- where an operator starts a
-#: run and where the physical root must therefore be resolved once, before any
-#: expensive work. Declared explicitly rather than globbed: a census that
+#: Every framework-owned run launch entry point. External task and campaign
+#: launchers are owned and tested by their consumer repositories. Declared
+#: explicitly rather than globbed: a census that
 #: silently skipped a launcher would be the exact blindness this file exists to
 #: correct (F-12bc-9 / F-P2b-4, and PR-04a's guard one launcher over).
-LAUNCH_BOUNDARIES: tuple[str, ...] = (
-    "scripts/run_comparison.py",
-    "sdsc_submission_scripts/run_one_iteration.py",
-)
-
-#: The argv flag the resolved value travels on to the tuner.
-DATA_DIR_FLAG = "--data_dir"
+LAUNCH_BOUNDARIES: tuple[str, ...] = ("sdsc_submission_scripts/run_one_iteration.py",)
 
 
 def _calls(rel: str) -> set[str]:
@@ -125,31 +117,6 @@ class TestEveryLaunchBoundaryResolvesThroughTheOneAuthority:
                 f"of asking {AUTHORITY}(). The precedence belongs to the "
                 f"authority; a launcher-local fallback is a second convention."
             )
-
-
-class TestTheResolvedValueReachesTheTuner:
-    def test_run_comparison_forwards_the_resolved_root(self) -> None:
-        """The transport that was missing, pinned at the spawn site.
-
-        DEFECT THIS TEST ALONE CATCHES
-            PR-12d attempts 5 and 6 exactly: the launcher resolves the root
-            (or would) but never puts it on the tuner's argv, so both
-            runtime-control consumers still see None. Resolution without
-            transport fixes nothing, and the census above cannot see it.
-
-        HOW IT FAILS WHEN THE BEHAVIOUR REGRESSES
-            The flag disappears from the argv construction and the assertion
-            names the file.
-        """
-        src = (REPO_ROOT / "scripts/run_comparison.py").read_text(encoding="utf-8")
-        assert f'"{DATA_DIR_FLAG}"' in src, (
-            f"scripts/run_comparison.py never places {DATA_DIR_FLAG} on the "
-            f"tuner's argv. The resolved root does not reach the tuner, so "
-            f"agent_input.data_dir is None and BOTH runtime-control consumers "
-            f"refuse: probe_production.py ('no dataset directory was supplied') "
-            f"and gpu_measurement_worker_main.py ('dataset directory "
-            f"unavailable for the measurement: None')."
-        )
 
 
 class TestBothBlockedConsumersReadTheTransportedValue:
