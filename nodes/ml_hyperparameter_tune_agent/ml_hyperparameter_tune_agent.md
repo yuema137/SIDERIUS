@@ -1426,41 +1426,20 @@ all retry / round / attempt semantics.
 
 ---
 
-## Reference science is not implicit in a composed run (Step 10 / P5+P6, C-P56-1)
+## Reference science is never selected implicitly
 
-`load_reference_scores()` supplies TIDMAD's per-file legacy reference
-table. It is **task-specific science**, so it is loaded ONLY when the run
-is un-composed:
+The tuner carries no task reference dataset and resolves no comparison path.
+When the caller declares no reference evidence, `load_reference_scores()`
+returns `None`, the run records a named absence, and the optional comparison
+table is omitted. This rule applies equally to composed and isolated node
+invocations.
 
-```python
-if agent_input.task_composition_ref is None:
-    reference_scores = load_reference_scores()
-else:
-    reference_scores = None      # composed run: named absence
-```
-
-The guard keys on **composition PRESENCE**, never on `TIDMAD_METRIC_ID`, a
-task name, or any other task-identity surrogate — a surrogate would answer
-"is this TIDMAD?" when the question is "did this run declare its own
-science?".
-
-**Step 12 / PR-12a (D-12a-1) changed WHERE the presence is read**, not what
-it means. It used to call `active_task_data_path()` — which answers "is a
-data-path implementation bound in this process right now?", a subsystem seam
-consulted as a proxy for "is MY run composed?". The two coincide in
-production and can diverge anywhere else, and a node should not have to read
-a ContextVar to learn what kind of run it was handed. The run's composition
-now arrives as a typed projection on the node's own INPUT
-(`HyperparamTuningInput.task_composition_ref`, additive and default-`None`).
-The presence test and both branches are unchanged, so the guard's OUTPUT is
-identical on both paths.
-
-**Declared consequence, not a regression** (frozen ruling **C-P56-1**): a
-composed run's tuner/interpreter/proposer prompts carry the named absence
-where a legacy run carries the 42-file reference table, and the record's
-`formal_comparison_reference_source` says so. Observed live in the Step-10
-Gate: `Reference scores: NOT LOADED — this run is COMPOSED`. The legacy
-(un-composed) path is byte-for-byte unchanged.
+Task-specific baselines, ceilings, and published-result tables belong to the
+external task package. Tests may inject synthetic evidence through the narrow
+`load_reference_scores` dependency seam to exercise downstream table
+construction, but production never imports a task loader or examines a task
+name, metric identity, environment variable, or checkout-relative data path to
+choose that evidence.
 
 Downstream, `reference_scores` may therefore be `None`, and the score-table
 guard in `execution.py` tests for it. Carried debt: `contracts.py` still

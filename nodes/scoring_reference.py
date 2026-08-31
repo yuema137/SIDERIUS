@@ -20,7 +20,6 @@ import json
 import os
 from dataclasses import dataclass
 
-from execute_tools.data_paths import legacy_siderius_data_dir
 from execute_tools.dataset_config import resolve_dataset_profile
 
 
@@ -81,34 +80,16 @@ class ReferenceScores:
 _CACHE: ReferenceScores | None = None
 
 
-def _default_reference_dir(name: str) -> str:
-    """Resolve a reference-score directory (``"raw_baseline"`` / ``"ground_truth"``).
-
-    The reference scores are a fixed artifact uniquely determined by the TIDMAD
-    data (+ anchor map), so prefer the committed, server-independent copy at
-    ``reference_data/{name}`` — resolved from the package location, independent
-    of the current working directory. Fall back to ``{SIDERIUS_DATA_DIR}/{name}``
-    for machines predating the committed copy.
-    """
-    pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    committed = os.path.join(pkg_root, "reference_data", name)
-    if os.path.isdir(committed):
-        return committed
-    return os.path.join(legacy_siderius_data_dir(), name)
-
-
 def load_reference_scores(
-    raw_dir: str | None = None,
-    gt_dir: str | None = None,
+    raw_dir: str,
+    gt_dir: str,
     *,
     use_cache: bool = True,
 ) -> ReferenceScores:
     """Return the frozen ``ReferenceScores`` bundle.
 
-    Reads from the committed, server-independent ``reference_data/raw_baseline/``
-    and ``reference_data/ground_truth/`` (resolved package-relative) by default,
-    falling back to ``{SIDERIUS_DATA_DIR}/...`` on machines predating the
-    committed copy. Tests pass explicit directories and set ``use_cache=False``.
+    Reads only from the two explicit directories supplied by the caller.
+    The framework carries no task-specific reference dataset or default path.
 
     Raises ``FileNotFoundError`` with a regenerate-hint if any of the 42
     expected JSON files (20 raw per-file + raw scalar + 20 gt per-file +
@@ -118,9 +99,6 @@ def load_reference_scores(
     global _CACHE
     if use_cache and _CACHE is not None:
         return _CACHE
-
-    raw_dir = raw_dir or _default_reference_dir("raw_baseline")
-    gt_dir = gt_dir or _default_reference_dir("ground_truth")
 
     raw_log: list[float] = []
     gt_log: list[float] = []

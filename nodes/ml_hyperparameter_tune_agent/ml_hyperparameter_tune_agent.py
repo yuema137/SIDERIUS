@@ -211,8 +211,17 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
     project_attempt_topology_facts,
 )
-from nodes.scoring_reference import load_reference_scores
 from workflows.task_config import run_bound_model_io_contract
+
+
+def load_reference_scores() -> object | None:
+    """Return no evidence when a caller has declared no reference source.
+
+    Kept as the narrow dependency seam used by isolated node tests. Production
+    never resolves a task-specific path or dataset through this function.
+    """
+    return None
+
 
 # `_emit_record` is the node's ONE record-emission point, called from four
 # modules. Same reasoning as `_runtime._run_skill`: resolve it through its
@@ -1043,63 +1052,18 @@ class HyperparamTuningAgent:
                 data_root=sandbox.dirs["data"],
             )
 
-        # Pre-load reference scores (raw_baseline + ground_truth per-file
-        # logs, linear_sums, n_segments, and full-20 scalars). One disk
-        # read per run — cached at module level after the first call.
-        # Used every round to build the per-file score-comparison table
-        # attached to each ExperimentRecord and substituted into the
-        # tuner/reflector/interp/proposer prompts.
-        # See docs/aggregated_score_table_awareness.md §7.1.
-        #
-        # Step 10 / P5+P6 W4 (ruling C-P56-1). The reference tables are LEGACY
-        # TIDMAD science — 42 committed per-file JSONs plus the two anchors.
-        # Loading them unconditionally meant a composed run silently borrowed
-        # them: for a contrast task whose profile declares FEWER files than
-        # TIDMAD ships, every lookup still hits an existing TIDMAD artifact, so
-        # the wrong `s_max`, baseline and ground-truth numbers reach that run's
-        # prompt tables. Silent wrong science, not a crash.
-        #
-        # The guard keys on composition PRESENCE and nothing else. It does NOT
-        # branch on a task name, on `TIDMAD_METRIC_ID`, on a score sign or
-        # range, or on any other task-identity surrogate — the operator's
-        # review rejected exactly that shape, because a metric-id conditional
-        # guarding a TIDMAD-only science table is still a science-identity
-        # branch inside generic orchestration, and one the task-name census
-        # cannot even see.
-        #
-        #     legacy / un-composed  -> byte-for-byte the existing behaviour
-        #     ANY composed run      -> a NAMED absence and a log line
-        #
-        # A `None` score table is already a supported state downstream (it
-        # skips the enriched prompt block), so the absence needs no new
-        # machinery. If a composed task ever genuinely needs reference/SOTA
-        # evidence, that is a future GENERIC declared capability, never
-        # inferred by core.
-        #
-        # Step 12 / PR-12a (D-12a-1) — the discriminator is now the run's own
-        # INPUT, not the ambient environment. It used to call
-        # `active_task_data_path()`, which answers "is a data-path
-        # implementation bound in this process right now?" — a subsystem seam
-        # consulted as a proxy for "is MY run composed?". The two coincide in
-        # production and can diverge anywhere else, and a node should not have
-        # to read a ContextVar to know what kind of run it was handed. The
-        # PRESENCE test and both branches are unchanged, so the guard's OUTPUT
-        # is identical on both paths.
-        if agent_input.task_composition_ref is None:
-            reference_scores = load_reference_scores()
+        # Reference evidence is absent unless a caller injects it at the node's
+        # dependency seam. The framework never selects a task, path, or baseline
+        # table when no evidence was declared.
+        reference_scores = load_reference_scores()
+        if reference_scores is None:
             print(
-                f"Reference scores loaded: s_max={reference_scores.s_max:.4e}, "
-                f"raw_scalar_full={reference_scores.raw_scalar_full:.4f}, "
-                f"gt_scalar_full={reference_scores.gt_scalar_full:.4f}."
+                "Reference scores: NOT DECLARED. The framework does not select "
+                "task-specific comparison evidence implicitly; comparison tables "
+                "are omitted for this run."
             )
         else:
-            reference_scores = None
-            print(
-                "Reference scores: NOT LOADED — this run is COMPOSED. The "
-                "legacy TIDMAD reference tables are task-specific science and "
-                "are never loaded implicitly for a composed run; score-comparison "
-                "tables are omitted for this run."
-            )
+            print("Reference scores: supplied by the caller dependency.")
 
         # Resolve invocation-wide formal comparison metadata once (V19 PR 1:
         # the SINGLE authoritative computation — startup logging, durable
@@ -1797,9 +1761,7 @@ def main() -> int:
     from core.generated_library import bind_generated_library_to_workspace
 
     bind_generated_library_to_workspace(args.workspace)
-    run_composition = (
-        compose_run_task_bindings(args.task_composition)
-    )
+    run_composition = compose_run_task_bindings(args.task_composition)
     agent_input = build_agent_input(args, parser, run_composition)
 
     agent = HyperparamTuningAgent()
