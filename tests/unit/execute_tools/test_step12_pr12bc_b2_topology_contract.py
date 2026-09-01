@@ -176,7 +176,6 @@ class TestExactlyOneSemanticAuthority:
 #: silently skipped a module would be the F-P2b-4 failure mode.
 GENERIC_CORE_MODULES = (
     "core/resume.py",
-    "core/campaign_artifacts.py",
     "execute_tools/health_checks/config.py",
     "execute_tools/health_checks/pearson_dispersion.py",
     "execute_tools/health_checks/per_file_output_std.py",

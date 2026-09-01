@@ -62,7 +62,6 @@ P1_OWNED_SURFACE = (
     "workflows/task_composition.py",
     "workflows/run_bindings.py",
     "workflows/task_config.py",
-    "core/campaign_artifacts.py",
 )
 
 
@@ -232,9 +231,8 @@ class TestP1OwnedSurfacesCarryNoAmbientTaskAuthority:
 
     def test_no_p1_owned_surface_imports_a_task_dataset_singleton(self):
         """`model_exploration.py` used to import ``TIDMAD as _DATASET_CONFIG``
-        and resolve the run's scope against it; `campaign_artifacts.py` used
-        to import the same singleton for its full-scope default. Both now
-        take the value from the run.
+        and resolve the run's scope against it. The surviving framework
+        surfaces take the value from the run.
 
         The import is the thing to forbid: while it exists, the next reader
         who needs "how many files are there" has a wrong answer within easy
@@ -276,46 +274,3 @@ class TestP1OwnedSurfacesCarryNoAmbientTaskAuthority:
             "The run's own profile is the authority; an ambient import is how "
             "a composed run silently gets somebody else's topology."
         )
-
-    def test_campaign_artifacts_pulls_no_profile_of_its_own(self):
-        """S7: generic campaign code takes task semantics as PARAMETERS."""
-        tree = ast.parse((REPO_ROOT / "core" / "campaign_artifacts.py").read_text(encoding="utf-8"))
-        calls = [
-            node.func.id
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id in {"resolve_dataset_profile", "resolve_bound_task_data_path"}
-        ]
-        assert calls == [], f"campaign_artifacts resolves task semantics itself: {calls}"
-
-    def test_the_two_task_semantic_values_are_declared_parameters(self):
-        """The positive statement of the same property, so deleting the
-        parameters cannot make the census above pass by vacuity."""
-        import inspect
-
-        from core.campaign_artifacts import (
-            validate_experiment_completeness,
-            validate_phase1_baseline,
-        )
-
-        completeness = inspect.signature(validate_experiment_completeness).parameters
-        assert "declared_health_peek" in completeness
-        assert completeness["declared_health_peek"].default is inspect.Parameter.empty, (
-            "the declared peek set must be REQUIRED — a default would let a "
-            "caller silently fall back to somebody's assumption again"
-        )
-        baseline = inspect.signature(validate_phase1_baseline).parameters
-        assert "full_scope_num_files" in baseline
-        assert baseline["full_scope_num_files"].default is inspect.Parameter.empty
-
-    def test_the_frozen_record_key_is_not_renamed(self):
-        """D1: parameterizing the scalar key must not RENAME it. The default
-        is still the frozen name, so every existing record and reader is
-        unaffected."""
-        import inspect
-
-        from core.campaign_artifacts import validate_experiment_completeness
-
-        parameters = inspect.signature(validate_experiment_completeness).parameters
-        assert parameters["scalar_score_key"].default == "denoising_score"
