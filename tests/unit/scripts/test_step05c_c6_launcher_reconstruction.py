@@ -11,10 +11,7 @@ experiment repository, where they retain the old artifact names deliberately.
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
-
-import pytest
 
 from execute_tools.deliverable_spec import DeliverableNaming, default_deliverable_naming
 from tests.unit.execute_tools.test_step05c_c0_deliverable_baseline import (
@@ -26,61 +23,6 @@ from tests.unit.execute_tools.test_step05c_c0_deliverable_baseline import (
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-
-# OD-05c-3: production launcher + canonical reconstruction/validation.
-MIGRATED_SCRIPTS = ("scripts/pregate_runtime_control_validation.py",)
-
-
-def _executed_string_constants(source: str) -> list[str]:
-    """Every string literal the module actually RUNS, docstrings excluded.
-
-    Scoped to executed code for the same reason C3's producer scan is: a
-    module may legitimately name the artifact pattern in its operator
-    documentation, and banning the token there would either be vacuous or
-    force a pointless doc edit. What must not survive is a second executed
-    copy of the template.
-
-    f-strings are covered: their literal segments are ``Constant`` nodes
-    inside a ``JoinedStr``, so ``f"abra_validation_denoised_{x}.h5"`` is
-    caught by its prefix segment.
-    """
-    tree = ast.parse(source)
-    docstrings = {
-        id(node.body[0].value)
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.body
-        and isinstance(node.body[0], ast.Expr)
-        and isinstance(node.body[0].value, ast.Constant)
-        and isinstance(node.body[0].value.value, str)
-    }
-    return [
-        node.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and id(node) not in docstrings
-    ]
-
-
-@pytest.mark.parametrize("relative", MIGRATED_SCRIPTS)
-def test_reconstruction_tooling_holds_no_inlined_deliverable_template(relative):
-    """No run-reconstructing script re-states the producer's template.
-
-    Each surviving framework-owned reconstruction tool must follow the current
-    naming contract. Task launchers that moved to the experiment repository are
-    outside this framework-source inventory.
-    """
-    source = (_REPO_ROOT / relative).read_text()
-
-    inlined = [s for s in _executed_string_constants(source) if "abra_validation_denoised" in s]
-
-    assert inlined == [], (
-        f"{relative} still executes its own copy of the deliverable template: {inlined}"
-    )
-    assert "default_deliverable_naming" in source, (
-        f"{relative} must resolve deliverable names through the contract"
-    )
 
 
 def test_the_launcher_resolves_the_c0_producer_name():

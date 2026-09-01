@@ -558,10 +558,9 @@ Notes:
   training 1-5 min (unknown LLM-invented model, 25-100 ms/step band)
   + inference ~10-25 s + scoring ~3 s + ~50 s subprocess startups.
 - Pathological/rejection demonstrations should NOT run the workload:
-  drive the executor directly (e.g.
-  `scripts/pregate_runtime_control_validation.py`-style, no LLM) with
-  guardrails overridden and the production budget — rejection arrives
-  in ~2 min (setup + live verification only).
+  drive the supported executor API directly with no LLM, guardrails
+  overridden, and the production budget — rejection should stop after setup
+  and live verification rather than executing the full workload.
 
 **Failure handling**:
 - If all proposals fail validation → LLM quality issue, not a feature bug.

@@ -53,7 +53,6 @@ OWNED_PRODUCTION_FILES = (
     "execute_tools/array2h5.py",
     "core/sandbox_executor.py",
     "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
-    "scripts/pregate_runtime_control_validation.py",
 )
 
 # Outside the rung by design: the historical readers must keep matching
