@@ -1,4 +1,4 @@
-"""C12-P / W3 — B1: the wall-time pre-flight family is TIDMAD-topology-only.
+"""C12-P / W3 — B1: wall-time pre-flight requires its complete legacy workload.
 
 The corrective unit's confirmed defect: every wall-time pre-flight site
 resolves its step counts through ``execute_tools.workload_resolvers``, whose
@@ -16,6 +16,11 @@ ONE shared semantic authority — the membership predicate
 ``execute_tools.dataset_config.declares_tidmad_topology`` (introduced by
 PR-12d, seam B) — never to a re-inlined list of section names and never to a
 caught ``ValueError``.
+
+The H100 external-task replay later exposed the second half of the same
+boundary: topology membership alone is insufficient when a composed TIDMAD
+task carries opaque task-owned scopes and intentionally has no legacy
+``SampleSet``.
 
 Every test states the defect it ALONE catches and how it fails on regression.
 """
@@ -158,7 +163,7 @@ class TestTheApplicabilityDecisionIsMadeCallerSide:
             anchor_selection_files=[0],
             health_peek_files=[0],
         )
-        assert wall_time_preflight_applicable(foreign) is False
+        assert wall_time_preflight_applicable(foreign, {"0": [0]}) is False
 
     def test_regime_a_and_malformed_tidmad_both_stay_applicable(self) -> None:
         """The two ways this must NOT be over-applied.
@@ -179,7 +184,7 @@ class TestTheApplicabilityDecisionIsMadeCallerSide:
             wall_time_preflight_applicable,
         )
 
-        assert wall_time_preflight_applicable(None) is True, (
+        assert wall_time_preflight_applicable(None, {"0": [0]}) is True, (
             "Regime A (un-composed) IS TIDMAD and must keep its wall-time gate"
         )
         malformed = DatasetProfile(
@@ -189,10 +194,29 @@ class TestTheApplicabilityDecisionIsMadeCallerSide:
             anchor_selection_files=[0],
             health_peek_files=[0],
         )
-        assert wall_time_preflight_applicable(malformed) is True, (
+        assert wall_time_preflight_applicable(malformed, {"0": [0]}) is True, (
             "a MALFORMED TIDMAD topology is not a foreign task: it must stay "
             "applicable and fail closed, never be silently skipped"
         )
+
+    def test_task_owned_scope_does_not_enter_the_legacy_forecast_family(self) -> None:
+        """Opaque composed scopes cannot be partially priced as SampleSets.
+
+        DEFECT THIS TEST ALONE CATCHES
+            A composed task that still declares TIDMAD topology enters the
+            legacy estimator even though planning intentionally produced no
+            SampleSet. Training then crashes on ``None.items()``; repairing
+            only that phase moves the crash to inference or scoring.
+
+        HOW IT FAILS WHEN THE BEHAVIOUR REGRESSES
+            The predicate returns True for ``legacy_sample_set=None`` and the
+            caller invokes a forecast family missing its required workload.
+        """
+        from nodes.ml_hyperparameter_tune_agent.execution import (
+            wall_time_preflight_applicable,
+        )
+
+        assert wall_time_preflight_applicable(TIDMAD_PROFILE, None) is False
 
 
 class TestRetiredSkillSideShape:

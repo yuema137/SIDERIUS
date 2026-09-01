@@ -163,7 +163,10 @@ def _emit_attempt_record(sandbox, record: dict, agent_input, *, status: dict | N
 SIDERIUS_ROOT = str(_Path(__file__).resolve().parents[2])
 
 
-def wall_time_preflight_applicable(run_profile: object) -> bool:
+def wall_time_preflight_applicable(
+    run_profile: object,
+    legacy_sample_set: object,
+) -> bool:
     """Is the wall-time pre-flight family in this run's domain at all?
 
     C12-P / B1 + B4. The whole family — the training and inference wall-time
@@ -176,6 +179,18 @@ def wall_time_preflight_applicable(run_profile: object) -> bool:
     from. It is **semantically outside the subsystem**, which is precisely
     what ``NOT_APPLICABLE`` means; it is not a missing artifact and not an
     error.
+
+    A TIDMAD topology is necessary but not sufficient. The estimator family
+    also consumes the legacy physical ``SampleSet`` for training, inference,
+    and scoring. A composed task may legitimately declare TIDMAD topology yet
+    carry an opaque task-owned scope instead of that mapping. Entering the
+    legacy estimator with ``None`` would then crash at ``sample_set.items()``.
+    A partial task-scope repair for training would merely move the same defect
+    into inference or scoring, whose cost models are also TIDMAD-specific.
+    Therefore the family is applicable only when its complete workload input
+    is present. The attempt's independently configured in-subprocess runtime
+    policy still measures and enforces Formal execution; this decision skips
+    only the unsupported advance forecast.
 
     **ONE decision for the whole family, made caller-side.** B1 (the estimate)
     and B4 (the probe lane) are two consumers of the same assumption, and B1
@@ -192,11 +207,16 @@ def wall_time_preflight_applicable(run_profile: object) -> bool:
     returns ``True`` here, still runs, and still fails closed.
 
     ``run_profile`` that is not a ``DatasetProfile`` is Regime A — an
-    un-composed run, which IS TIDMAD — so it stays applicable and the legacy
-    path is bit-for-bit unchanged.
+    un-composed run, which IS TIDMAD — but it is applicable only when that
+    legacy run supplied its SampleSet. A mapping (including an empty mapping)
+    is structurally valid; ``None`` means the task-owned-scope regime.
     """
+    from collections.abc import Mapping
+
     from execute_tools.dataset_config import DatasetProfile, declares_tidmad_topology
 
+    if not isinstance(legacy_sample_set, Mapping):
+        return False
     if not isinstance(run_profile, DatasetProfile):
         return True
     return declares_tidmad_topology(run_profile)
@@ -546,14 +566,15 @@ def run_admission_preflight(
     # C12-P B1/B4 — decided ONCE, before the gate, for the whole family.
     # `time_check` staying None is the state an unset budget already produces,
     # so an inapplicable run takes a downstream path that has always existed.
-    _walltime_applicable = wall_time_preflight_applicable(run_profile)
+    _walltime_applicable = wall_time_preflight_applicable(run_profile, train_sample_set)
     if chosen_time_budget is not None and not _walltime_applicable:
         print(
-            "  Wall-time pre-flight NOT APPLICABLE: this task declares no "
-            "TIDMAD topology, and the wall-time family prices a workload as "
-            "psd_segment_length // segmentation_size. No time estimate and no "
-            "bounded probe is attempted for this run; the VRAM capacity gate "
-            "is unaffected. This is an applicability decision, not a failure."
+            "  Wall-time pre-flight NOT APPLICABLE: this attempt does not "
+            "provide the complete legacy TIDMAD SampleSet workload consumed "
+            "by the training, inference, and scoring forecast family. No "
+            "advance time estimate or forecast-driven probe is attempted; "
+            "the VRAM capacity gate and in-subprocess runtime policy are "
+            "unaffected. This is an applicability decision, not a failure."
         )
     if chosen_time_budget is not None and _walltime_applicable:
         stage.name = "time_estimation"

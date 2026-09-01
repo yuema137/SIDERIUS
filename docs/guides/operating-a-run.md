@@ -125,6 +125,14 @@ replace Trial/Formal wall-time budgets or change the VRAM ceiling. A timeout or
 host-memory stop is an inconclusive measurement, never evidence that the model
 is too large for the GPU.
 
+The advance wall-time forecast is a separate legacy TIDMAD facility. It runs
+only when an attempt supplies the complete physical ``SampleSet`` consumed by
+its training, inference, and scoring estimators. A composed task that carries
+an opaque task-owned scope does not enter that partial forecast, even when its
+dataset profile includes TIDMAD topology. Its Formal time budget is still
+enforced by the in-subprocess runtime policy against measured execution. This
+is an applicability boundary, not a silent fallback or an unlimited run.
+
 ## Failures and refusals
 
 Interpret terminal evidence by responsibility:
