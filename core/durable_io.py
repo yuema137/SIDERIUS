@@ -3,7 +3,7 @@
 Consolidates, without redesigning, three mechanisms that already existed as
 separate copies in the repository:
 
-* **atomic replace** — ``core/wave_records.py::_write_derived`` and
+* **atomic replace** — used by persisted derived views such as
   ``execute_tools/per_file_best.py::_atomic_write_bytes``: same-directory
   temp file, ``flush`` + ``fsync``, ``os.replace``. A reader sees the old
   file or the new one, never a torn one, and a failed publish leaves the
@@ -12,9 +12,8 @@ separate copies in the repository:
   temp file, published with ``os.link``, which FAILS when the target exists
   instead of overwriting it. First writer wins; a second writer receives
   ``FileExistsError`` and must decide, by name, what that means.
-* **durable append** — ``core/wave_records.py::_append_canonical``: append,
-  ``flush``, ``fsync``. The canonical evidence is on disk before any derived
-  view that describes it can be.
+* **durable append** — append, ``flush``, ``fsync``. Canonical evidence is
+  on disk before any derived view that describes it can be.
 
 Two details are load-bearing and deliberately uniform here:
 

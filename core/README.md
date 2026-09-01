@@ -26,7 +26,7 @@ what a task means — task semantics live in
 | `runtime_control/` | measurement, admission, watchdog, calibration registry, `launch_guard.run_launch_self_test`, estimator/policy identity |
 | `server_configs/` | per-server calibration registry (`_base.py` schema; one module per host) |
 | `campaign*` / `campaign/` | resumable-campaign manifests, identity, slot scheduling |
-| `committed_digests.py` · `memory_probe.py` · `wave_records.py` · `inference_defaults.py` · `scientific_authority.py` | single-purpose authorities (read their docstrings) |
+| `committed_digests.py` · `memory_probe.py` · `inference_defaults.py` · `scientific_authority.py` | single-purpose authorities (read their docstrings) |
 
 ## Inputs
 

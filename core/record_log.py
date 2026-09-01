@@ -1,8 +1,7 @@
 """The experiment record history: one canonical fact, one derived view.
 
-arXiv-readiness S2 / U5 (#257, #258). Same rule ``core/wave_records.py``
-already states for wave summaries — *which copy is true is stated before it
-is written, not discovered when the two disagree*:
+arXiv-readiness S2 / U5 (#257, #258). The ownership rule is: *which copy is
+true is stated before it is written, not discovered when two views disagree*:
 
     canonical : <workspace>/records/<run_name>/records.jsonl   append-only history
     derived   : <workspace>/summary_<run_name>.json            latest-wins projection
