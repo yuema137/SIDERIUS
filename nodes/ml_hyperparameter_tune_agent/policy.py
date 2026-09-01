@@ -1326,13 +1326,14 @@ class ScoringRoute(StrEnum):
 def resolve_scoring_route(anchor_map_data, task_scopes) -> ScoringRoute:
     """Decide the route from what each one actually REQUIRES.
 
-    Order is the specificity order, and each test names its own precondition:
-    anchor-normalized scoring cannot run without an anchor map; task-owned
-    scoring cannot run without the task's evaluation scope; the subprocess
-    legacy route needs neither.
+    An explicit task scope is the strongest authority: the task that built an
+    opaque evaluation scope must also decode and score it. The in-process
+    anchor route remains the compatibility path for an uncomposed run with a
+    legacy ``SampleSet`` and anchor map. The subprocess legacy route needs
+    neither.
     """
-    if anchor_map_data is not None:
-        return ScoringRoute.ANCHOR_NORMALIZED
     if getattr(task_scopes, "evaluation", None) is not None:
         return ScoringRoute.TASK_OWNED
+    if anchor_map_data is not None:
+        return ScoringRoute.ANCHOR_NORMALIZED
     return ScoringRoute.SUBPROCESS_LEGACY

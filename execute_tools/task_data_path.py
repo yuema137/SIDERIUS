@@ -394,6 +394,20 @@ class EvaluationReadRequest(BaseModel):
     model_type: str = Field(min_length=1)
 
 
+class TaskEvaluationPayload(BaseModel):
+    """A decoded task value plus every artifact scoreability must inspect.
+
+    Most tasks have one declared deliverable and can keep returning their
+    decoded value directly. A task whose scientific result spans multiple
+    files can return this carrier without adding another protocol method.
+    """
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True, extra="forbid")
+
+    value: Any
+    deliverables: dict[int, str]
+
+
 # ---------------------------------------------------------------------------
 # The contract
 # ---------------------------------------------------------------------------
@@ -431,7 +445,8 @@ class TaskDataPath(Protocol):
     def read_evaluation_payload(self, request: EvaluationReadRequest) -> object:
         """Decode the persisted deliverable into the payload handed to the
         Step-06 evaluation authority. Codec only, by construction and by name
-        (parent Amendment 2)."""
+        (parent Amendment 2). Return ``TaskEvaluationPayload`` when the result
+        spans multiple artifacts that scoreability must inspect."""
         ...
 
 
@@ -696,6 +711,7 @@ _REGISTRY: dict[str, TaskDataPath] = {}
 #: same key set; :func:`registry_invariant_holds` states that, and C1's tests
 #: assert it after every lifecycle operation.
 _CONTENT: dict[str, str] = {}
+
 
 def content_identity(impl: object) -> str:
     """WHAT this implementation is, independent of WHERE it came from.

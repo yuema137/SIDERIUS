@@ -156,6 +156,15 @@ def _resolve_child_data_path(args):
     )
 
 
+def _scoreable_payload(payload: object, fallback: dict[int, str]) -> tuple[object, dict[int, str]]:
+    """Separate task-semantic content from artifacts checked before scoring."""
+    from execute_tools.task_data_path import TaskEvaluationPayload
+
+    if isinstance(payload, TaskEvaluationPayload):
+        return payload.value, payload.deliverables
+    return payload, fallback
+
+
 def _emit_task_owned_score(args, dataset_profile, metric, *, declared_naming=None) -> None:
     """Score a composed task's OWN deliverable through its OWN metric.
 
@@ -227,6 +236,7 @@ def _emit_task_owned_score(args, dataset_profile, metric, *, declared_naming=Non
         deliverable = os.path.join(
             args.data_dir, task_declared_deliverable_name(data_path, request)
         )
+    payload, scoreable_deliverables = _scoreable_payload(payload, {0: deliverable})
     print(f"Scoring task-owned deliverable: {os.path.basename(deliverable)}")
 
     # `data_dir` here is the task's PHYSICAL DATA ROOT, which on this leg
@@ -249,7 +259,7 @@ def _emit_task_owned_score(args, dataset_profile, metric, *, declared_naming=Non
     # experiment repository: a metric can consult its own task object without
     # assuming that the package containing it is importable in this child.
     with bind_task_data_path(data_path):
-        outcome = metric.evaluate({0: deliverable}, **compute_kwargs)
+        outcome = metric.evaluate(scoreable_deliverables, **compute_kwargs)
         secondaries = _evaluate_task_owned_secondaries(args, deliverable, compute_kwargs)
     _emit_outcome(args, outcome, secondaries=secondaries)
 

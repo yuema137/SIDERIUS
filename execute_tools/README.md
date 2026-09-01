@@ -133,6 +133,13 @@ class MyTaskDataPath:
     def read_evaluation_payload(self, request): ...     # codec only
 ```
 
+`read_evaluation_payload` normally returns the decoded task value. If one
+scientific result spans multiple physical artifacts, return
+`TaskEvaluationPayload(value=..., deliverables=...)` instead. The scoring child
+then gives `value` to the task metric while the scoreability contract inspects
+every named artifact. This is an explicit carrier, not a filename or
+payload-shape heuristic; single-artifact tasks remain unchanged.
+
 Declared from a manifest via `file:` — never by editing this package.
 
 ## Related tests
