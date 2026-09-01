@@ -62,6 +62,7 @@ from agent.skills.evaluate_vram_skill.overhead import (
 )
 from agent.skills.evaluate_vram_skill.probe_budgets import (
     ProbeBudgets,
+    ProbeOperation,
     ProbeTimeoutRecord,
     classify_host_memory_exception,
 )
@@ -120,7 +121,11 @@ _BUDGETS = ProbeBudgets()
 
 
 class ForwardPassTimeoutError(Exception):
-    """Raised when a probe's forward pass exceeds ``_FORWARD_PASS_TIMEOUT_S``."""
+    """One named footprint operation exceeded its workflow watchdog."""
+
+    def __init__(self, message: str, *, operation: ProbeOperation) -> None:
+        super().__init__(message)
+        self.operation = operation
 
 
 @contextmanager
@@ -146,7 +151,8 @@ def _forward_pass_timeout(seconds: float, label: str):
             f"This is an INCONCLUSIVE inspection result: the measurement did "
             f"not complete, so it says nothing about whether this model fits "
             f"or how fast it is. It is not a reason to reduce model capacity "
-            f"or batch size."
+            f"or batch size.",
+            operation=label,
         )
 
     old_handler = signal.signal(signal.SIGALRM, _handler)
@@ -1040,7 +1046,7 @@ def run_skill(sandbox, **kwargs):
         }
     except ForwardPassTimeoutError as e:
         record = ProbeTimeoutRecord(
-            operation="model_inspection",
+            operation=e.operation,
             budget_seconds=probe_budgets.single_probe_seconds,
             elapsed_seconds=probe_budgets.single_probe_seconds,
             model_identity=model_type,

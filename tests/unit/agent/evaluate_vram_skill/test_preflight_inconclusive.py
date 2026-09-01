@@ -179,6 +179,28 @@ class TestAgentFacingText:
         assert "nn.Module.forward" not in message
         assert "not a reason to reduce" in message
 
+    def test_the_timeout_record_names_the_operation_that_expired(self, monkeypatch):
+        """Training and inference timeouts must not both claim inspection."""
+        from agent.skills.evaluate_vram_skill import wrapper
+
+        error = wrapper.ForwardPassTimeoutError(
+            "timed out",
+            operation="inference_probe",
+        )
+        monkeypatch.setattr(
+            wrapper, "_build_model", lambda *_args, **_kwargs: (_ for _ in ()).throw(error)
+        )
+
+        result = wrapper.run_skill(
+            None,
+            model_type="synthetic_model",
+            model_config={},
+            train_config={},
+            loss_config={},
+        )
+
+        assert result["timeout_record"]["operation"] == "inference_probe"
+
 
 class TestPromptSafety:
     """An inconclusive attempt must not become a silent size ceiling."""
