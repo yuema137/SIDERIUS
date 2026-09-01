@@ -4,47 +4,40 @@ Design: ``docs/design/generic_framework_upgrade/step_02_dataset_sample_topology/
 pr_02c_systematic_groups.md`` §6, §6.1, §11.3.
 
 ``validate_experiment_completeness`` runs a per-file completeness check
-only for gates that peeked the task's health-peek selection. That
-selection used to be a hardcoded ``[3, 10, 17]`` — a second copy of a
-value the shipped health config already carried. It now reads the bound
-task's declaration.
+only for gates that peeked the task's declared health-peek selection.
 
 Two separable properties, and both need saying:
 
-* **Authority moved.** Under a task declaring a DIFFERENT health-peek
-  set, that set is what triggers enforcement, and TIDMAD's triplet stops
-  triggering it. Nothing in the TIDMAD-only matrix
-  (``test_campaign_artifacts.py``) can show this, because there the
-  declaration and the old literal are the same three numbers.
+* **Authority is declarative.** Under two tasks declaring different
+  health-peek sets, only the active declaration triggers enforcement.
 
-* **Policy did NOT move.** The comparison is still exact ordered list
-  equality against whatever is declared. A reordered copy of the
-  DECLARED set must still take the silent else-branch, exactly as a
-  reordered ``[10, 3, 17]`` does today. Comparing as a set — or sorting
-  either side — would newly ENFORCE records that are skipped today,
-  which is a policy change wearing an authority change's clothes.
+* **Policy did NOT move.** The comparison is still exact ordered-list
+  equality against whatever is declared. Comparing as a set, or sorting
+  either side, would newly enforce records that are skipped today.
 
-The full TIDMAD policy matrix lives in ``test_campaign_artifacts.py``
-and is deliberately not duplicated here; this file only covers what a
-contrast declaration reveals.
+The broader campaign-artifact policy matrix lives in
+``test_campaign_artifacts.py`` and is deliberately not duplicated here.
 """
 
 from __future__ import annotations
 
 from core.campaign_artifacts import validate_experiment_completeness
 from execute_tools.dataset_config import (
-    TIDMAD_PROFILE,
     bind_dataset_profile,
     resolve_dataset_profile,
 )
+from tests.helpers.two_family_profile import make_two_family_profile
 
 GATE_ID = "output_diversity_blocking"
 _CONTRAST_PEEK = [2, 8, 14, 18]
+_OTHER_PEEK = [1, 5, 11]
 _PER_FILE_ERROR_MARKER = "missing per-file entries"
 
 
 def _contrast_profile():
-    return TIDMAD_PROFILE.model_copy(update={"health_peek_files": _CONTRAST_PEEK})
+    return make_two_family_profile(num_files=20).model_copy(
+        update={"health_peek_files": _CONTRAST_PEEK}
+    )
 
 
 def _record(files_requested: list[int], per_file: dict) -> dict:
@@ -91,15 +84,15 @@ class TestTheTriggerFollowsTheDeclaration:
             "not enforced — the validator is still keyed on a literal"
         )
 
-    def test_tidmad_s_triplet_stops_triggering_under_another_task(self):
+    def test_another_declared_selection_does_not_trigger(self):
         """The other half of the same claim. Without this, an
-        implementation that enforced on the union of "declared OR
-        [3,10,17]" would pass the test above."""
+        implementation that enforced on the union of multiple task
+        declarations would pass the test above."""
         with bind_dataset_profile(_contrast_profile()):
-            errors = _errors(_record([3, 10, 17], per_file={}))
+            errors = _errors(_record(list(_OTHER_PEEK), per_file={}))
         assert not _enforced(errors), (
-            "TIDMAD's triplet still triggers enforcement under a task that "
-            "declares something else — a hardcoded copy survives"
+            "a different task's selection still triggers enforcement under "
+            "the active declaration — a second authority survives"
         )
 
 
@@ -110,7 +103,7 @@ class TestPolicyDidNotMoveWithTheAuthority:
         `test_campaign_artifacts.py` pins this for TIDMAD's order; this
         pins that the property is a property of the COMPARISON, not of
         the particular numbers — a `set()`/`sorted()` rewrite would red
-        both, and a rewrite that special-cased TIDMAD would red only this.
+        both declaration-driven controls.
         """
         reordered = [_CONTRAST_PEEK[1], _CONTRAST_PEEK[0], *_CONTRAST_PEEK[2:]]
         assert reordered != _CONTRAST_PEEK and sorted(reordered) == sorted(_CONTRAST_PEEK)
