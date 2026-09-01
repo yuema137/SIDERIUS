@@ -45,6 +45,7 @@ import pytest
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ReasoningPipelineConfig
 from agent.schemas.proposer_evidence import build_proposer_evidence
+from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from tests.helpers.golden import assert_golden
 from tests.helpers.metric_fixtures import accuracy_like_spec, error_like_spec
@@ -56,6 +57,14 @@ from tests.unit.agent.ml_model_proposal_agent.test_step00_prompt_goldens import 
 )
 
 GOLDENS = Path(__file__).parent / "goldens"
+
+
+@pytest.fixture(autouse=True)
+def _bind_golden_profile():
+    """Render the historical full-coverage baseline under its profile."""
+    with bind_dataset_profile(TIDMAD_PROFILE):
+        yield
+
 
 #: A DAVIS-shaped LOWER-is-better run. Chosen deliberately over a TIDMAD-shaped
 #: one: under ``lower`` a direction mistake in the C2 clamp migration or the C4
