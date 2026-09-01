@@ -608,8 +608,8 @@ class TestPluginBytesAreInThePinnedIdentity:
 class TestExistingReadersStillWork:
     """The composed artifact must not break its downstream consumers."""
 
-    def test_the_wave_summary_reader_shape_survives(self, tmp_path, clean_registry):
-        """``scripts/v18_wave_summary.py`` walks health_gates → checks → config."""
+    def test_materialized_check_config_shape_survives(self, tmp_path, clean_registry):
+        """Materialized checks retain their declared config payload."""
         config_path = _task_package(tmp_path / "pkg")
         path, _ = materialize_effective_config(
             _empty_framework_yaml(tmp_path),

@@ -31,7 +31,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 MIGRATED_SCRIPTS = (
     "scripts/finalize_recovered_diagnostic_round.py",
     "scripts/pregate_runtime_control_validation.py",
-    "scripts/v18_wave_summary.py",
 )
 
 
@@ -40,10 +39,9 @@ def _executed_string_constants(source: str) -> list[str]:
 
     Scoped to executed code for the same reason C3's producer scan is: a
     module may legitimately name the artifact pattern in its operator
-    documentation — ``v18_wave_summary``'s docstring describes exactly which
-    files the audit sweeps — and banning the token there would either be
-    vacuous or force a pointless doc edit. What must not survive is a second
-    executed copy of the template.
+    documentation, and banning the token there would either be vacuous or
+    force a pointless doc edit. What must not survive is a second executed
+    copy of the template.
 
     f-strings are covered: their literal segments are ``Constant`` nodes
     inside a ``JoinedStr``, so ``f"abra_validation_denoised_{x}.h5"`` is
@@ -104,49 +102,6 @@ def test_the_launcher_resolves_the_c0_producer_name():
         )
         == GOLDEN_SAMPLE_SET_NAME
     )
-
-
-def test_the_workspace_auditor_recognises_renamed_artifacts(tmp_path):
-    """``v18_wave_summary`` finds out-of-scope artifacts under ANY naming.
-
-    It previously carried its own regex — a second restatement of the
-    template. The failure mode that removes is silent and expensive: under a
-    renamed deliverable the auditor would recognise nothing, find no
-    out-of-scope artifact, and report a clean workspace. It would pass.
-    """
-    from scripts.v18_wave_summary import _check_denoised_artifacts
-
-    naming = default_deliverable_naming()
-    in_scope = naming.name(model_type="wavenet", run_name="r", exp_id="e", input_identity=4)
-    out_of_scope = naming.name(model_type="wavenet", run_name="r", exp_id="e", input_identity=11)
-    (tmp_path / in_scope).write_bytes(b"x")
-    (tmp_path / out_of_scope).write_bytes(b"x")
-    (tmp_path / "abra_validation_0011.h5").write_bytes(b"x")
-
-    abnormal: list[str] = []
-    _check_denoised_artifacts(str(tmp_path), [4, 5, 6], abnormal)
-
-    assert len(abnormal) == 1
-    assert out_of_scope in abnormal[0]
-
-
-def test_the_auditor_ignores_files_that_are_not_deliverables(tmp_path):
-    """A raw validation input is not an out-of-scope deliverable.
-
-    The old regex matched on a trailing 4-digit index, which a raw
-    ``abra_validation_0011.h5`` also has; the prefix is what distinguishes
-    them. Reported as abnormal, it would send an operator hunting for a
-    scope violation that never happened.
-    """
-    from scripts.v18_wave_summary import _check_denoised_artifacts
-
-    (tmp_path / "abra_validation_0011.h5").write_bytes(b"x")
-    (tmp_path / "model_wavenet_e_agent.pth").write_bytes(b"x")
-
-    abnormal: list[str] = []
-    _check_denoised_artifacts(str(tmp_path), [4, 5, 6], abnormal)
-
-    assert abnormal == []
 
 
 def test_launcher_and_producer_move_together_under_a_rename():

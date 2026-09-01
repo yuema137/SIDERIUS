@@ -65,7 +65,7 @@ class TestAtomicReplace:
 
     def test_the_temp_file_is_invisible_to_the_repository_json_globs(self, tmp_path, monkeypatch):
         """DEFECT: a temp named ``summary_x.json<rand>`` matches the
-        ``summary_*.json`` globs in run_comparison / v18_wave_summary and a
+        ``summary_*.json`` globs in historical experiment readers and a
         reader could open a half-written view. Observed at the instant the
         temp exists (inside the failing replace)."""
         target = tmp_path / "summary_x.json"

@@ -55,7 +55,6 @@ OWNED_PRODUCTION_FILES = (
     "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
     "scripts/finalize_recovered_diagnostic_round.py",
     "scripts/pregate_runtime_control_validation.py",
-    "scripts/v18_wave_summary.py",
 )
 
 # Outside the rung by design: the historical readers must keep matching

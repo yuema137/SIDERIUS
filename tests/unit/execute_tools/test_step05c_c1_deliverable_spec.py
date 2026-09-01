@@ -134,10 +134,10 @@ def test_globs_match_exactly_the_c0_cleanup_sets(tmp_path):
 def test_file_index_parse_is_the_inverse_of_name():
     """``file_index_of`` inverts ``name`` — and rejects a non-deliverable.
 
-    ``v18_wave_summary.py:55`` carries its own regex for this today, which is
-    a second restatement of the template: rename the deliverable and the
-    auditor silently stops recognising any artifact, reporting a clean
-    workspace. Round-tripping through one authority is what removes that.
+    Historical workspace auditors carried their own regex for this, a second
+    restatement of the template. Renaming the deliverable could therefore make
+    an auditor silently stop recognising artifacts. Round-tripping through one
+    authority is what removes that failure class.
     """
     naming = default_deliverable_naming()
 
@@ -146,8 +146,8 @@ def test_file_index_parse_is_the_inverse_of_name():
         assert naming.input_identity_of(resolved) == index
 
     # The fix-mode shape parses too, and MUST: it is a deliverable of this
-    # spec and it does carry a file index. The production regex it replaces
-    # (``v18_wave_summary.py:55``) matches it for the same reason.
+    # spec and it does carry a file index. Historical auditor regexes matched
+    # it for the same reason.
     assert (
         naming.input_identity_of(naming.unqualified_name(model_type="wavenet", input_identity=3))
         == 3
