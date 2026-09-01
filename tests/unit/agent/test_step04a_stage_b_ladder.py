@@ -245,7 +245,7 @@ class TestRung65C:
 
         assert varied["expected_output_shape"] == str((PROBE_BATCH, PROBE_SYMBOLIC_EXTENT))
         assert varied["plugin_forward_comment"] == "input [B, T] int64 → output [B, T] float32"
-        assert varied["plugin_output_comment"] == "[B, T] → continuous waveform regression"
+        assert varied["plugin_output_comment"] == "[B, T] → continuous [B, T] output"
         assert '"regressor" must emit [B, T]' in varied["review_prompt"]
         assert "(not declared by this task)" in varied["review_prompt"]
 

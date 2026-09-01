@@ -1984,10 +1984,9 @@ def main():
         default=None,
         help=(
             "Path to a resolved Dataset Profile JSON (topology, geometry, "
-            "channel identity, value encoding). OMITTED means the Regime-A "
-            "compatibility adapter: resolve the shipped TIDMAD profile, "
-            "exactly as before this flag existed. SUPPLIED but broken fails "
-            "closed — it never falls back to the singleton."
+            "channel identity, value encoding). OMITTED delegates to the "
+            "active task binding and refuses when none exists. SUPPLIED but "
+            "broken fails closed."
         ),
     )
     parser.add_argument(
@@ -2148,11 +2147,11 @@ def main():
     # Dataset Profile resolution — the child side of the parent's transport.
     #
     #   flag SUPPLIED but broken  -> fail closed, diagnostic names the path
-    #   flag ABSENT               -> Regime-A adapter, shipped TIDMAD profile
+    #   flag ABSENT               -> active task binding, or named refusal
     #
-    # The two are deliberately different: a bound task whose profile file is
-    # unreadable must never be silently run against TIDMAD's topology, while a
-    # caller that predates the flag must not be broken by genericization.
+    # The two are deliberately different: a supplied file is decoded directly;
+    # omission delegates to the already-established run binding. Neither path
+    # may select scientific task semantics implicitly.
     if args.dataset_profile_json is not None:
         dataset_profile = load_dataset_profile(args.dataset_profile_json)
     else:

@@ -6,14 +6,13 @@ Design:
 
 **Why these tests are contrast-based, and why that is not optional.**
 
-Regime-A says an absent flag resolves the shipped TIDMAD profile. That is
-the right compatibility semantic, and it has a sharp consequence for
-testing: under TIDMAD, deleting the entire transport changes NOTHING
-observable. Parity tests cannot see a hop that is gone, because the
-fallback produces the same answers.
+An absent flag delegates to the active run binding and refuses when no task
+profile is bound. Transport reachability still needs a contrast profile:
+under an explicitly bound TIDMAD profile, deleting the entire transport can
+change NOTHING observable because the active parent and child values agree.
 
 So the transport's reachability evidence must run a profile that is NOT
-TIDMAD through the real argparse and the real loaders, and require the
+TIDMAD through the real argparse and loaders, and require the
 engine to follow it. A test that only checks TIDMAD behaviour would pass
 with the flag deleted, the loader ignoring it, or both.
 """
@@ -151,6 +150,7 @@ class TestFailClosedVersusRegimeA:
             path.write_text(content)
         with pytest.raises(ValueError):
             load_dataset_profile(str(path))
+
 
 # ---------------------------------------------------------------------------
 # The child actually CONSUMES what crossed the boundary

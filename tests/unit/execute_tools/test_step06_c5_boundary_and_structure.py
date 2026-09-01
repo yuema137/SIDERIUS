@@ -9,7 +9,7 @@ Three properties, each with the defect only it catches:
   (``test_step06_c1_evaluation_metric.py`` §3: loss-shaped identities refused
   on every metric type, ``loss_history`` refused under any key, no loss field
   structurally). Not duplicated here; referenced.
-* **Declared exactly once.** The TIDMAD metric identity and the metric
+* **Declared exactly once.** The compatibility metric identity and the metric
   DIRECTION vocabulary live in ONE executed constant each, in the metric
   module. A second executed ``"tidmad_denoising_score"`` or a stray
   ``"higher"``/``"lower"`` literal anywhere in production is a second
@@ -143,7 +143,7 @@ def test_no_production_surface_executes_a_direction_literal_outside_the_metric_m
     handle or not at all.
 
     TWO modules name it, and the split is the architecture: the metric module
-    DECLARES the vocabulary (``MetricDirection``) and TIDMAD's value; the
+    DECLARES the vocabulary (``MetricDirection``); the
     order module (Step 07 PR 07b) INTERPRETS it. Anything else executing
     ``"higher"``/``"lower"`` is a third authority that a direction flip would
     leave behind — which is the entire defect 07b removed from 21 tuner sites.
@@ -153,8 +153,10 @@ def test_no_production_surface_executes_a_direction_literal_outside_the_metric_m
         rel = p.relative_to(REPO_ROOT).as_posix()
         found = [s for s in _executed(p) if s in ("higher", "lower")]
         if rel == METRIC_MODULE:
-            # Literal["higher", "lower"] (vocabulary) + direction="higher" (TIDMAD).
-            assert sorted(found) == ["higher", "higher", "lower"], found
+            # Literal["higher", "lower"] is the complete direction vocabulary.
+            # Scientific metric values are task declarations, not framework
+            # constants.
+            assert sorted(found) == ["higher", "lower"], found
             continue
         if rel == ORDER_MODULE:
             # Five executed literals, all in one place on purpose:

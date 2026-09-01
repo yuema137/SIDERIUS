@@ -2796,7 +2796,10 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
         return
 
     from execute_tools.data_paths import active_physical_data_root
-    from execute_tools.dataset_config import resolve_dataset_profile
+    from execute_tools.dataset_config import (
+        DatasetProfileBindingError,
+        resolve_dataset_profile,
+    )
     from execute_tools.evaluation_metric import (
         resolve_bound_run_metric,
         resolve_bound_run_secondary_metrics,
@@ -2813,7 +2816,11 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
     # would silently resolve TIDMAD's import-time constant.
     if active_physical_data_root() is None:
         unbound.append("physical_data_root")
-    if resolve_dataset_profile() is not composition.dataset_profile:
+    try:
+        active_profile = resolve_dataset_profile()
+    except DatasetProfileBindingError:
+        active_profile = None
+    if active_profile is not composition.dataset_profile:
         unbound.append("dataset_profile")
     if resolve_bound_run_metric() is not composition.metric:
         unbound.append("metric")

@@ -175,6 +175,13 @@ class TestInjectionReachability:
                     raise RuntimeError("boom")
             assert resolve_dataset_profile() is TIDMAD_PROFILE
 
+    def test_an_unbound_profile_refuses_instead_of_selecting_task_science(self):
+        """A missing composition must not silently execute TIDMAD topology."""
+        from execute_tools.dataset_config import DatasetProfileBindingError
+
+        with pytest.raises(DatasetProfileBindingError, match="no dataset profile is bound"):
+            resolve_dataset_profile()
+
 
 # ---------------------------------------------------------------------------
 # Class 4 — topology representability (what makes rung A1 possible)

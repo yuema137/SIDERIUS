@@ -1337,11 +1337,12 @@ class ProposalOutput(BaseModel):
         reclassify a malformed TIDMAD profile as "this task declares none".
         A malformed TIDMAD topology must still RAISE.
 
-        Under Regime A — nothing bound, or TIDMAD bound —
+        With the TIDMAD profile bound explicitly,
         ``tidmad_topology(TIDMAD_PROFILE).dataset`` IS the ``TIDMAD``
         singleton this code used to read, so the rule and its diagnostic are
-        byte-identical. The generic positive-int check above is task-neutral
-        and stays unguarded.
+        byte-identical. With nothing bound, profile resolution refuses before
+        this task-owned rule can run. The generic positive-int check above is
+        task-neutral and stays unguarded.
         """
         model_cfg = self.baseline_config.get("model_config") if self.baseline_config else None
         if not isinstance(model_cfg, dict):

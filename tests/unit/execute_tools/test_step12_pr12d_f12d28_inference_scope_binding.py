@@ -21,9 +21,11 @@ this is the mirror — the scope crossed, and the binding did not.
 **Resolving is not binding.** `inference_single.main` computed
 `data_path = resolve_child_task_data_path(...)` and held it in a local, then
 called `load_transported_scope`, which delegates to whichever implementation
-is **ACTIVE**. With nothing bound, that is the registered TIDMAD one, which
-refused the composed payload by name. The training child had this right all
-along — its `main` deserializes the scope inside that binding — so
+is **ACTIVE**. At the incident revision, an absent binding selected the
+registered TIDMAD implementation, which refused the composed payload by name;
+current execution refuses an absent binding before task scope decoding. The
+training child had this right all along — its `main` deserializes the scope
+inside that binding — so
 the asymmetry — not the concept — was the defect.
 
 Each test names a defect only it can catch.
