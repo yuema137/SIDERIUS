@@ -10,6 +10,7 @@ Uses unittest.mock to intercept subprocess.run — no GPU, no real data needed.
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
@@ -525,18 +526,30 @@ class TestSubprocessEnv:
         env = _subprocess_env(plugin_dir=str(tmp_path))
         assert env["SIDERIUS_PLUGIN_DIRS"] == str(tmp_path)
 
-    def test_plugin_dir_does_not_clobber_pythonpath(self, tmp_path):
-        """Regression guard: the plugin_dir wiring must not interfere with
-        the PYTHONPATH construction that lets flat imports resolve in the
-        training subprocess."""
+    def test_plugin_dir_does_not_restore_ambient_pythonpath(self, monkeypatch, tmp_path):
+        """Generated plugins use their own channel, never framework PYTHONPATH."""
+        monkeypatch.setenv("PYTHONPATH", "/foreign/source")
         env = _subprocess_env(plugin_dir=str(tmp_path))
-        assert "PYTHONPATH" in env
-        project_root = _os.path.dirname(
-            _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+        assert "PYTHONPATH" not in env
+        assert env["SIDERIUS_PLUGIN_DIRS"] == str(tmp_path)
+
+    def test_neutral_child_imports_framework_from_the_exact_environment(self, tmp_path):
+        """A child outside the checkout must not need a source-path injection."""
+        env = _subprocess_env()
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import core.sandbox_executor as module; print(module.__file__)",
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
         )
-        assert project_root in env["PYTHONPATH"]
-        assert _os.path.join(project_root, "ml_models") in env["PYTHONPATH"]
-        assert _os.path.join(project_root, "execute_tools") in env["PYTHONPATH"]
+        source = Path(completed.stdout.strip()).resolve()
+        assert source.is_relative_to(Path(__file__).resolve().parents[3])
 
 
 # ==========================================
@@ -812,17 +825,12 @@ class TestSubprocessEnvLossDir:
         assert env["SIDERIUS_PLUGIN_DIRS"] == str(plugin)
         assert env["SIDERIUS_LOSS_DIRS"] == str(loss)
 
-    def test_loss_dir_does_not_clobber_pythonpath(self, tmp_path):
-        """Regression guard: the loss_dir wiring must not interfere with
-        PYTHONPATH construction. Mirror of the plugin_dir version above."""
+    def test_loss_dir_does_not_restore_ambient_pythonpath(self, monkeypatch, tmp_path):
+        """Generated losses use their own channel, never framework PYTHONPATH."""
+        monkeypatch.setenv("PYTHONPATH", "/foreign/source")
         env = _subprocess_env(loss_dir=str(tmp_path))
-        assert "PYTHONPATH" in env
-        project_root = _os.path.dirname(
-            _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-        )
-        assert project_root in env["PYTHONPATH"]
-        assert _os.path.join(project_root, "ml_models") in env["PYTHONPATH"]
-        assert _os.path.join(project_root, "execute_tools") in env["PYTHONPATH"]
+        assert "PYTHONPATH" not in env
+        assert env["SIDERIUS_LOSS_DIRS"] == str(tmp_path)
 
 
 class TestSandboxLossDir:

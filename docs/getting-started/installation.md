@@ -86,7 +86,7 @@ EOF
 
 ```bash
 python env_validation/test_agent_env.py     # environment + API reachability
-uv run pytest tests/unit/ -q                # no GPU, no API calls, mocked LLM
+.venv/bin/python -m pytest tests/unit/ -q    # no GPU, no API calls, mocked LLM
 ```
 
 The unit suite is the CI gate: mocked LLM, no GPU, no network. If it passes, your

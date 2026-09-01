@@ -5,8 +5,9 @@ checkout, which may sit on an unrelated branch. A chain child whose cwd
 leaves the campaign worktree then silently imports THAT tree's code — the
 concrete observed consequence being a campaign running WITHOUT #299's
 divergence-record repair while its git SHA says otherwise (supervisor
-finding, 2026-08-25; first seen as the lane's E1 trap). `PYTHONPATH=<tree>`
-pins resolution; this probe proves the pin from a NEUTRAL cwd.
+finding, 2026-08-25; first seen as the lane's E1 trap). The supported launcher
+now requires the intended checkout's own uv-managed virtualenv; this probe
+proves its installed source binding from a NEUTRAL cwd without PYTHONPATH.
 
 Run as a FILE from a directory OUTSIDE every checkout (the preflight copies
 it to a fresh temp dir first): a `-c` probe is blind because the cwd itself
@@ -66,9 +67,9 @@ def main() -> int:
     if not str(resolved).startswith(str(intended) + "/"):
         print(
             f"[import-probe] FAIL: resolves OUTSIDE the intended tree {intended} — "
-            "an unpinned child imports another checkout's code. Export "
-            "PYTHONPATH=<campaign tree> (the launchers do this; a bespoke "
-            "invocation must too).",
+            "the selected checkout's virtualenv imports another checkout's "
+            "code. Rebuild it with `uv sync --group dev --frozen` in the "
+            "intended checkout.",
             file=sys.stderr,
         )
         return 4

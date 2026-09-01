@@ -14,7 +14,7 @@ key at all* — every LLM is mocked, nothing touches the network, and CI runs
 the same suite (`-m "not real_run"`) with no secrets configured:
 
 ```bash
-uv run pytest tests/unit/ -q
+.venv/bin/python -m pytest tests/unit/ -q
 ```
 
 That claim is enforced, not aspirational: the handful of tests that *do* need
@@ -28,7 +28,7 @@ LLM and subprocess responses — the complete plan → train → score → refle
 in milliseconds, still no API key, no GPU:
 
 ```bash
-uv run pytest tests/integration/ -q
+.venv/bin/python -m pytest tests/integration/ -q
 ```
 
 This is the fastest way to see the shape of the system. It is not a scientific

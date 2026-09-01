@@ -364,7 +364,7 @@ is not yet explained. Owned by this lane; see the audit's findings register.
 
 ## 8. Typecheck parity — CP-9 (CLOSED)
 
-CI runs `uv run pyright` (`ci.yml:78`) against the version `uv.lock` pins:
+CI runs `.venv/bin/pyright` against the version `uv.lock` pins:
 **1.1.409**. `pyproject.toml:51`'s `pyright>=1.1.409` is a floor, so the lock is
 the authority.
 

@@ -11,7 +11,7 @@ The chain a never-before-seen generated model must survive:
     generated plugin
       -> plugin directory
       -> worker spec (carries plugin_dir)
-      -> subprocess environment (SIDERIUS_PLUGIN_DIRS + PYTHONPATH)
+      -> subprocess environment (SIDERIUS_PLUGIN_DIRS; no source PYTHONPATH)
       -> child startup
       -> child import
       -> registry reconstruction
