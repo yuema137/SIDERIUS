@@ -25,7 +25,12 @@ import pytest
 
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.proposal import ExpertAdvice, ProposalOutput
-from execute_tools.dataset_config import TIDMAD, DatasetProfile
+from execute_tools.dataset_config import (
+    TIDMAD,
+    TIDMAD_PROFILE,
+    DatasetProfile,
+    bind_dataset_profile,
+)
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
     _applicable_dataset_constraints,
 )
@@ -61,6 +66,13 @@ def _foreign_profile(*_args) -> DatasetProfile:
         anchor_selection_files=[0],
         health_peek_files=[0],
     )
+
+
+@pytest.fixture(autouse=True)
+def _bind_baseline_profile():
+    """Make the baseline side explicit while preserving foreign overrides."""
+    with bind_dataset_profile(TIDMAD_PROFILE):
+        yield
 
 
 # ==========================================================================
