@@ -24,9 +24,13 @@ from __future__ import annotations
 import pytest
 
 from agent.skills.evaluate_time_skill import wrapper as ts
-from execute_tools.dataset_config import (
-    TIDMAD_PROFILE,
-    tidmad_topology,
+from tests.helpers.two_family_profile import make_two_family_profile
+
+PHYSICAL_SEGMENT_LENGTH = 1_600_000
+PROFILE = make_two_family_profile(
+    num_files=20,
+    psd_segment_length=PHYSICAL_SEGMENT_LENGTH,
+    segments_per_file=20,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,12 +60,12 @@ def _base_kwargs(**overrides) -> dict:
         "model_config": {"segmentation_size": 16000},
         "train_config": {"batch_size": 1, "epochs": 1, "device": "cpu"},
         "loss_config": {"loss_type": "focal"},
-        "sample_set": {str(i): list(range(20)) for i in range(20)},  # 400 PSDs
+        "sample_set": {str(i): list(range(20)) for i in range(20)},
         "train_portion": 1.0,
         "time_budget_minutes": 60.0,
         # Step 05b: the run-bound topology is a REQUIRED kwarg — the skill
         # no longer resolves one of its own.
-        "dataset_profile": TIDMAD_PROFILE,
+        "dataset_profile": PROFILE,
     }
     kw.update(overrides)
     return kw
@@ -77,7 +81,7 @@ def test_suggest_lever_high_ms_per_step_recommends_shrinking_model():
         ms_per_step=80.0,
         seg_size=1000,
         batch_size=1,
-        psd_segment_length=tidmad_topology(TIDMAD_PROFILE).dataset.psd_segment_length,
+        psd_segment_length=PHYSICAL_SEGMENT_LENGTH,
     )
 
 
@@ -86,7 +90,7 @@ def test_suggest_lever_small_seg_bs1_recommends_raising_batch():
         ms_per_step=2.0,
         seg_size=1000,
         batch_size=1,
-        psd_segment_length=tidmad_topology(TIDMAD_PROFILE).dataset.psd_segment_length,
+        psd_segment_length=PHYSICAL_SEGMENT_LENGTH,
     )
 
 
@@ -96,7 +100,7 @@ def test_suggest_lever_otherwise_recommends_raising_seg_size():
         ms_per_step=10.0,
         seg_size=16000,
         batch_size=1,
-        psd_segment_length=tidmad_topology(TIDMAD_PROFILE).dataset.psd_segment_length,
+        psd_segment_length=PHYSICAL_SEGMENT_LENGTH,
     )
     assert "segmentation_size" in msg
 
