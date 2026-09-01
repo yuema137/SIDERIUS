@@ -100,7 +100,7 @@ class TestRawValidationNameComesFromTheProfile:
     def test_tidmad_parity_is_preserved(self, captured_raw_names):
         """The same call under the shipped profile still produces the exact
         string the scorer used to inline."""
-        _score(None)
+        _score(TIDMAD_PROFILE)
         assert captured_raw_names == ["abra_validation_0007.h5"]
 
 
@@ -134,6 +134,7 @@ class TestDerivedArtifactIndexing:
             denoised_filename_fn=namer,
             raw_data_dir=".",
             parallel=False,
+            profile=TIDMAD_PROFILE,
         )
         assert sorted(seen_keys) == [3, 11]
 
