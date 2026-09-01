@@ -242,8 +242,15 @@ def _emit_task_owned_score(args, dataset_profile, metric, *, declared_naming=Non
         "task_scope": task_eval_scope,
         "data_dir": args.raw_data_dir,
     }
-    outcome = metric.evaluate({0: deliverable}, **compute_kwargs)
-    secondaries = _evaluate_task_owned_secondaries(args, deliverable, compute_kwargs)
+    # The task-owned metric may need another capability exposed by the same
+    # resolved task implementation that decoded its scope and deliverable.
+    # Keep that implementation active while both primary and secondary
+    # arithmetic run.  This is a generic binding, not an import path for an
+    # experiment repository: a metric can consult its own task object without
+    # assuming that the package containing it is importable in this child.
+    with bind_task_data_path(data_path):
+        outcome = metric.evaluate({0: deliverable}, **compute_kwargs)
+        secondaries = _evaluate_task_owned_secondaries(args, deliverable, compute_kwargs)
     _emit_outcome(args, outcome, secondaries=secondaries)
 
 

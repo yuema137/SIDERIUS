@@ -455,12 +455,10 @@ class TestTheScoringChildScanUsesTheDeclaredTemplate:
         nothing to bind.
 
         NOTE this route does NOT raise ``NotApplicable`` for an absent
-        declaration, and asserting that it does would assert a fiction — the
-        refusal keys on ``active_task_data_path()``, and this child's
-        ``bind_task_data_path`` covers only ``load_transported_scope``, so no
-        implementation is bound when the scan runs. That is a SEPARATE
-        binding-scope gap (a different ContextVar), reported as carried debt
-        rather than widened into here.
+        declaration. The task-data-path binding covers scope deserialization
+        and, separately, metric arithmetic; the deliverable scan remains
+        outside it so the naming behavior tested here stays unchanged. The
+        metric-scoped binding is covered by its own focused regression.
         """
         emitted = _score_task_owned(tmp_path, deliverable=None)
 

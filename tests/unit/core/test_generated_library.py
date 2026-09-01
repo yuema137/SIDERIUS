@@ -167,6 +167,7 @@ class TestRunInvariantsProvenance:
             health_gate_files=None,
             health_checks_config=None,
             workspace=str(tmp_path),
+            task_composition_fingerprint="synthetic-generated-library-task",
         )
         return inv
 
