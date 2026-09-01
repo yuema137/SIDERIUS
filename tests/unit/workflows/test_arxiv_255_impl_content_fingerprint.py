@@ -214,13 +214,13 @@ def test_direct_unit_key_semantics():
     legacy payload; two different identities ⇒ two fingerprints). Fails by:
     any of the three orderings collapsing."""
     from agent.schemas.task_config import ForwardContract
-    from execute_tools.dataset_config import resolve_dataset_profile
+    from execute_tools.dataset_config import TIDMAD_PROFILE
     from execute_tools.health_checks._composition import HealthBindingState
     from workflows.task_composition import compute_semantic_fingerprint
 
     kwargs = dict(
         task_data_path_id="probe_task",
-        dataset_profile=resolve_dataset_profile(),
+        dataset_profile=TIDMAD_PROFILE,
         metric_declaration={"id": "m", "direction": "higher"},
         task_health_binding=HealthBindingState.EXPLICIT_NONE,
         task_health_content=None,

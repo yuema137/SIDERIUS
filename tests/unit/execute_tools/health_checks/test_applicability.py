@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from execute_tools.dataset_config import resolve_dataset_profile
+from execute_tools.dataset_config import TIDMAD_PROFILE
 from execute_tools.health_checks._regime_a_facts import derive_health_facts, resolve_health_facts
 from execute_tools.health_checks.schemas import (
     APPLICABLE,
@@ -242,7 +242,7 @@ class TestRegimeADerivation:
     """The derived facts are pinned to HARDCODED values, never read back."""
 
     def test_tidmad_profile_derives_the_expected_facts(self):
-        facts = derive_health_facts(resolve_dataset_profile())
+        facts = derive_health_facts(TIDMAD_PROFILE)
         assert facts.encoding_family == "int8_symbol_stream"
         assert facts.symbol_cardinality == 256
         assert facts.file_group_size == 20
@@ -255,15 +255,15 @@ class TestRegimeADerivation:
         it would flip TIDMAD's std checks to inapplicable. Ownership moves
         with the thresholds in 08b.
         """
-        assert derive_health_facts(resolve_dataset_profile()).value_scale_unit is None
+        assert derive_health_facts(TIDMAD_PROFILE).value_scale_unit is None
 
     def test_resolved_facts_match_the_explicit_derivation(self):
-        assert resolve_health_facts() == derive_health_facts(resolve_dataset_profile())
+        assert resolve_health_facts() == derive_health_facts(TIDMAD_PROFILE)
 
     def test_derived_tidmad_facts_satisfy_the_int8_family_declaration(self):
         """Ties the derivation to the parity claim rather than to a literal."""
         verdict = applicability(
-            INT8_PEEK_DECLARATION, derive_health_facts(resolve_dataset_profile()), _full_ctx()
+            INT8_PEEK_DECLARATION, derive_health_facts(TIDMAD_PROFILE), _full_ctx()
         )
         assert verdict.applicable is True
 

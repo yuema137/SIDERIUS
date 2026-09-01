@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from execute_tools.dataset_config import resolve_dataset_profile
+from execute_tools.dataset_config import TIDMAD_PROFILE
 from execute_tools.deliverable_spec import derive_tidmad_deliverable_spec
 from tests.unit.execute_tools.test_step05c_c0_deliverable_baseline import (
     GOLDEN_EXP_ID,
@@ -197,6 +197,6 @@ def test_the_reconstructed_spec_resolves_the_c0_filename_set(accessor, kwargs, e
     ever stopped composing the shipped naming — say by keying it off the
     profile — the two would diverge and every artifact would be renamed.
     """
-    spec = derive_tidmad_deliverable_spec(resolve_dataset_profile())
+    spec = derive_tidmad_deliverable_spec(TIDMAD_PROFILE)
 
     assert getattr(spec.naming, accessor)(**kwargs) == expected
