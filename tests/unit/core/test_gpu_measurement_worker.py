@@ -89,15 +89,15 @@ def _patch_bounded_loader(monkeypatch):
     describing production.
     """
     import core.runtime_control.gpu_measurement_data as data_mod
-    from execute_tools.dataset_config import tidmad_topology
 
     def _bounded(*, data_dir, batch_size, segment_length, profile=None):
         assert profile is not None, "the worker omitted its declared dataset profile"
+        channels = profile.to_wire()["channels"]
         return data_mod.BoundedProbeBatch(
             tensor=torch.randint(0, 256, (batch_size, segment_length), dtype=torch.long),
             evidence=data_mod.BoundedReadEvidence(
                 source_file="fixture.h5",
-                channel=tidmad_topology(profile).channels.input_channel,
+                channel=channels["input_channel"],
                 segment_count=batch_size,
                 segment_length=segment_length,
                 first_sample=0,
