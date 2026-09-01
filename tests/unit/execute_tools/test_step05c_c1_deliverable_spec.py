@@ -19,10 +19,10 @@ import pytest
 from pydantic import ValidationError
 
 from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
     ChannelIdentity,
     DatasetProfile,
     ValueEncoding,
-    resolve_dataset_profile,
 )
 from execute_tools.deliverable_spec import (
     DeliverableNaming,
@@ -231,7 +231,7 @@ def test_tidmad_derivation_reproduces_the_inlined_literals():
     profile change that silently moved the persisted representation would red
     here rather than in a scientific result months later.
     """
-    spec = derive_tidmad_deliverable_spec(resolve_dataset_profile())
+    spec = derive_tidmad_deliverable_spec(TIDMAD_PROFILE)
 
     assert spec.storage.input_channel_group == "channel0001"
     assert spec.storage.target_channel_group == "channel0002"
@@ -258,7 +258,7 @@ def test_derivation_survives_the_persisted_execution_input_round_trip():
     miniature: a stored run's existing values construct the identical spec,
     with no migration and no new field.
     """
-    live = resolve_dataset_profile()
+    live = TIDMAD_PROFILE
     restored = DatasetProfile.model_validate(live.model_dump())
 
     assert derive_tidmad_deliverable_spec(restored) == derive_tidmad_deliverable_spec(live)
@@ -272,7 +272,7 @@ def test_contrast_profile_moves_storage_and_leaves_naming_fixed():
     tracked the profile, every task would silently rename artifacts that
     already exist on disk.
     """
-    live = resolve_dataset_profile()
+    live = TIDMAD_PROFILE
     contrast = live.model_copy(
         update={
             "channels": ChannelIdentity(input_channel="sensor_a", target_channel="sensor_b"),

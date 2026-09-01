@@ -231,10 +231,10 @@ def test_only_the_naming_axis_moves_under_a_rename():
     three things and proving none of them — and a rename would silently
     rewrite the persisted representation.
     """
-    from execute_tools.dataset_config import resolve_dataset_profile
+    from execute_tools.dataset_config import TIDMAD_PROFILE
     from execute_tools.deliverable_spec import derive_tidmad_deliverable_spec
 
-    shipped = derive_tidmad_deliverable_spec(resolve_dataset_profile())
+    shipped = derive_tidmad_deliverable_spec(TIDMAD_PROFILE)
     renamed = shipped.model_copy(update={"naming": RENAMED})
 
     assert renamed.storage == shipped.storage

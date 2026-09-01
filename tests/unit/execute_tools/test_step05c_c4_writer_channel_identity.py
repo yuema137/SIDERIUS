@@ -23,7 +23,7 @@ import numpy as np
 import pytest
 
 from execute_tools.array2h5 import create_abra_file
-from execute_tools.dataset_config import ChannelIdentity, resolve_dataset_profile
+from execute_tools.dataset_config import TIDMAD_PROFILE, ChannelIdentity, bind_dataset_profile
 from execute_tools.deliverable_spec import (
     DeliverableStorage,
     default_deliverable_storage,
@@ -73,7 +73,7 @@ def test_tidmad_artifact_is_logically_identical_to_the_c0_golden(tmp_path, stora
     resolved = (
         None
         if storage is None
-        else derive_tidmad_deliverable_spec(resolve_dataset_profile()).storage
+        else derive_tidmad_deliverable_spec(TIDMAD_PROFILE).storage
     )
 
     inspection = canonical_h5_inspection(_write(tmp_path, resolved))
@@ -197,7 +197,7 @@ def test_default_storage_equals_the_derived_tidmad_storage():
     """
     assert (
         default_deliverable_storage()
-        == derive_tidmad_deliverable_spec(resolve_dataset_profile()).storage
+        == derive_tidmad_deliverable_spec(TIDMAD_PROFILE).storage
     )
 
 
@@ -209,9 +209,7 @@ def test_the_derivation_follows_a_bound_profile(tmp_path):
     would pass every other test in this module and silently write the wrong
     groups for a bound task.
     """
-    from execute_tools.dataset_config import bind_dataset_profile
-
-    live = resolve_dataset_profile()
+    live = TIDMAD_PROFILE
     bound = live.model_copy(
         update={"channels": ChannelIdentity(input_channel="bound_in", target_channel="bound_out")}
     )
