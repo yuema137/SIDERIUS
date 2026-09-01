@@ -186,13 +186,15 @@ class TestConsumerSitesReadFacts:
         for task in ("pets", "oxford", "davis"):
             assert task not in lowered
 
-    def test_the_sample_set_builder_is_reached_only_when_geometry_is_DECLARED(self):
-        """B2's positive contract.
+    def test_the_legacy_sample_set_builder_is_not_a_composed_task_transport(self):
+        """A composed task transports its opaque task-owned scopes only.
 
-        ``build_sample_set`` is, and stays, TIDMAD's scope builder — D2 did
-        not genericize it, it stopped calling it for a task whose profile
-        declares nothing it could build from. The guard is on the CALL's
-        guard condition, because that is what changed.
+        The legacy ``build_sample_set`` remains available to an uncomposed
+        caller whose profile declares the old physical geometry.  A composed
+        task already owns training and evaluation scopes, so sending the
+        legacy sample-set pair beside those scopes creates two authorities and
+        the task-generic training engine must refuse it.  This assertion fails
+        if planning reintroduces that contradictory transport.
         """
         tree = ast.parse((TUNER / "planning.py").read_text(encoding="utf-8"))
         prepare = next(
@@ -212,9 +214,10 @@ class TestConsumerSitesReadFacts:
             )
         ]
         assert guards, "the builder is still called from prepare_attempt"
-        assert any("declares_physical_geometry" in guard for guard in guards), (
-            f"the builder's guard does not consult the projection: {guards}"
-        )
+        assert any(
+            "declares_physical_geometry" in guard and "task_composition_ref is None" in guard
+            for guard in guards
+        ), f"the legacy builder can still run for a composed task: {guards}"
 
     def test_the_builder_itself_still_fails_closed_without_topology(self):
         """PRESERVED. Its refusal is what makes the guard above necessary."""

@@ -682,17 +682,17 @@ def prepare_attempt(
     # for every trial/formal round — before and independently of
     # `acquire_attempt_scopes`. A composed contrast run therefore died here,
     # holding a perfectly good task scope capability it was never asked to
-    # use. The legacy SampleSets are now built only when the run's task
-    # declares the geometry they are made of; a composed task without it
-    # carries `task_scopes` instead.
-    #
-    # DEFERRED BY NAME to D3 (12bc's B6): the legacy sample sets still reach
-    # the training spawn (`runtime.py:875`), both inference spawns
-    # (`execution.py:992`, `:1038`) and the validation-expectation decision
-    # (`execution.py:716`). D3 flips those consumers to the transported scope.
-    # Until it does, a composed contrast run reaches those sites with `None`
-    # — strictly further than the `tidmad_topology` refusal it hit before.
-    if trial_config.mode in ("trial", "formal") and topology_facts.declares_physical_geometry:
+    # use. The legacy SampleSets are now built only for an UNCOMPOSED caller
+    # whose profile declares the geometry they encode. A composed run already
+    # owns opaque task scopes. Sending both representations gives the child
+    # two scope authorities and is correctly refused by the task-generic
+    # training engine. This distinction is by composition presence, never
+    # task name.
+    if (
+        trial_config.mode in ("trial", "formal")
+        and topology_facts.declares_physical_geometry
+        and agent_input.task_composition_ref is None
+    ):
         # Step-02b: the run's profile is supplied EXPLICITLY to
         # both construction sites, rather than each one resolving
         # it ambiently inside the builder. Two consequences: a run

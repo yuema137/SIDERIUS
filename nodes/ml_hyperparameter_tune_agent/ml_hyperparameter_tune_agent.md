@@ -146,8 +146,9 @@ A task may now declare an **optional sibling capability**,
 before.
 
 ```text
-declared?  no  -> the legacy build_sample_set path, byte-identical
-           yes -> the tuner asks the TASK to build the attempt's scopes
+un-composed caller with legacy physical geometry
+              -> the legacy build_sample_set path, byte-identical
+composed task -> the tuner asks the TASK to build the attempt's scopes
                   (nodes/ml_hyperparameter_tune_agent/scope_acquisition.py)
                   -> the task serializes them
                   -> the parent writes a scope ARTIFACT + sha256 digest
@@ -191,26 +192,21 @@ profile that declares TIDMAD's sections but carries a malformed payload still
 raises out of `tidmad_topology()` rather than being reclassified as "declares
 none".
 
-Two consumers now SKIP rather than fabricate when the run's task declares no
-physical geometry, instead of dying:
+Two consumers now SKIP rather than fabricate instead of dying:
 
 - `_validate_data_config` (PSD-segment divisibility / per-file segment
   counts) — skipped; per the D-BC-8 precedent, this is TASK topology, not the
   generic partition-count bound.
 - the two legacy `build_sample_set()` calls (training + validation
-  SampleSets) — skipped in favour of `AttemptScopes`, the task-owned scope
-  acquired separately by `acquire_attempt_scopes` (PR-12bc B5).
+  SampleSets) — skipped for every composed task in favour of `AttemptScopes`,
+  the task-owned scopes acquired separately by `acquire_attempt_scopes`
+  (PR-12bc B5). A composed task that also declares legacy physical geometry
+  does not receive both representations: doing so would create two scope
+  authorities and the task-generic training engine correctly refuses it.
 
-**Deferred by name, not fixed here**: the legacy SampleSets still reach the
-training spawn, both inference spawns and the validation-expectation decision
-in `execution.py`. A composed contrast run without physical geometry reaches
-those sites with `None` — further than the outright `tidmad_topology`
-refusal it hit before PR-12d, but D3 (12bc's B6) is what flips those
-consumers to read the transported task scope instead.
-
-Under TIDMAD — composed or not — every fact `AttemptTopologyFacts` reports is
-the SAME object it was before this projection existed; nothing here changes
-un-composed or TIDMAD-composed behaviour.
+Under an un-composed legacy physical-data caller, every fact
+`AttemptTopologyFacts` reports and both legacy SampleSets remain unchanged.
+Composition presence, never a task name, selects the task-owned scope path.
 
 ### Resource and time planning (Step-05b)
 

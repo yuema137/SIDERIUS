@@ -44,7 +44,8 @@ from execute_tools.scope_artifact import (
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-PAYLOAD = '{"kind":"tidmad_scope_v1","sample_set":{"0":[1,2]},"seg_size":10000}'
+PAYLOAD = '{"kind":"synthetic_scope_v1","rows":[1,2]}'
+MUTATED_PAYLOAD = '{"kind":"synthetic_scope_v1","rows":[1,3]}'
 
 
 @pytest.fixture
@@ -86,7 +87,7 @@ class TestTheDigestIsDeterministic:
         )
 
     def test_a_one_character_change_changes_the_digest(self):
-        assert scope_digest(PAYLOAD) != scope_digest(PAYLOAD.replace("10000", "10001"))
+        assert scope_digest(PAYLOAD) != scope_digest(MUTATED_PAYLOAD)
 
     def test_non_ascii_payloads_digest_by_bytes_not_by_code_points(self):
         """A task is free to serialize non-ASCII. Encoding is pinned so a
@@ -129,7 +130,7 @@ class TestTheArtifactRoundTrip:
         a = scope_artifact_path(configs, TRAINING_SCOPE_STEM, "attempt_a")
         b = scope_artifact_path(configs, TRAINING_SCOPE_STEM, "attempt_b")
         da = write_scope_artifact(a, PAYLOAD)
-        db = write_scope_artifact(b, PAYLOAD.replace("10000", "512"))
+        db = write_scope_artifact(b, MUTATED_PAYLOAD)
         assert a != b
         assert read_scope_artifact(a, da) == PAYLOAD
         assert read_scope_artifact(b, db) != PAYLOAD
@@ -151,7 +152,7 @@ class TestTamperingIsRefusedBeforeDeserialization:
         path = scope_artifact_path(configs, TRAINING_SCOPE_STEM, "exp1")
         digest = write_scope_artifact(path, PAYLOAD)
         with open(path, "w", encoding="utf-8") as fh:
-            fh.write(PAYLOAD.replace("10000", "10001"))
+            fh.write(MUTATED_PAYLOAD)
         with pytest.raises(ScopeArtifactError, match="does not match the digest"):
             read_scope_artifact(path, digest)
 
@@ -296,7 +297,6 @@ class TestExactlyOneDigestAuthority:
         for rel in (
             "core/sandbox_executor.py",
             "execute_tools/train_engine_sandbox.py",
-            "execute_tools/tidmad_data_path.py",
             "execute_tools/task_data_path.py",
         ):
             src = (REPO_ROOT / rel).read_text(encoding="utf-8")

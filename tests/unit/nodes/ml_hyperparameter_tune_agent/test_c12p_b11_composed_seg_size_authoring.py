@@ -260,6 +260,25 @@ def _prepare(impl, configs_dir):
         )
 
 
+def test_composed_physical_task_uses_only_its_task_owned_scopes(tmp_path):
+    """A composed physical task must not also receive legacy SampleSets.
+
+    Defect caught: after the training engine retired its task-specific
+    SampleSet interpretation, planning still produced both legacy SampleSets
+    and opaque task-owned scopes for a composed task whose profile declared
+    physical geometry.  The child then refused every attempt before epoch 0
+    because two scope authorities arrived together.
+    """
+    prepared = _prepare(_ScopeRecorder(), tmp_path)
+
+    assert prepared.task_scopes.training is not None
+    assert prepared.task_scopes.evaluation is not None
+    assert prepared.train_sample_set is None
+    assert prepared.eval_sample_set is None
+    assert prepared.active_params["sample_set"] is None
+    assert prepared.active_params["eval_sample_set"] is None
+
+
 def test_planner_history_uses_the_run_scientific_gate_set(tmp_path, monkeypatch):
     """A composed run must not rebind the legacy Health family while planning.
 
