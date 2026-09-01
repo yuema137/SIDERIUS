@@ -17,15 +17,27 @@ import numpy as np
 import pytest
 
 from execute_tools.dataset_config import (
-    TIDMAD_PROFILE,
+    bind_dataset_profile,
     tidmad_topology,
 )
 from execute_tools.probe_batch import build_bounded_probe_batch
+from tests.helpers.two_family_profile import make_two_family_profile
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 SEG = 32
 BATCH = 3
+PROFILE = make_two_family_profile(
+    num_files=20,
+    psd_segment_length=2000,
+    segments_per_file=4,
+)
+
+
+@pytest.fixture(autouse=True)
+def explicit_profile_binding():
+    with bind_dataset_profile(PROFILE):
+        yield
 
 
 def _write_file(directory: Path, name: str, *, samples: int) -> np.ndarray:
@@ -37,10 +49,10 @@ def _write_file(directory: Path, name: str, *, samples: int) -> np.ndarray:
     targets = rng.integers(-128, 128, size=samples, dtype=np.int8)
     with h5py.File(directory / name, "w") as handle:
         group = handle.create_group("timeseries")
-        group.create_group(tidmad_topology(TIDMAD_PROFILE).channels.input_channel).create_dataset(
+        group.create_group(tidmad_topology(PROFILE).channels.input_channel).create_dataset(
             "timeseries", data=inputs
         )
-        group.create_group(tidmad_topology(TIDMAD_PROFILE).channels.target_channel).create_dataset(
+        group.create_group(tidmad_topology(PROFILE).channels.target_channel).create_dataset(
             "timeseries", data=targets
         )
     return inputs
@@ -48,7 +60,7 @@ def _write_file(directory: Path, name: str, *, samples: int) -> np.ndarray:
 
 def _build(data_dir: Path, **over):
     kwargs = {
-        "profile": TIDMAD_PROFILE,
+        "profile": PROFILE,
         "data_dir": str(data_dir),
         "batch_size": BATCH,
         "segment_length": SEG,
@@ -64,24 +76,28 @@ class TestItOpensADeclaredFile:
         """The predecessor globbed and took `sorted(...)[0]`. Enumerating the
         declared indices must reach the same answer on a gappy directory —
         otherwise 07c would silently change which data is measured."""
-        expected = _write_file(tmp_path, "abra_training_0003.h5", samples=SEG * (BATCH + 1))
+        name = tidmad_topology(PROFILE).dataset.training_file_name(3)
+        expected = _write_file(tmp_path, name, samples=SEG * (BATCH + 1))
         result = _build(tmp_path)
-        assert result.evidence.source_file == "abra_training_0003.h5"
-        first = expected[:SEG].astype(tidmad_topology(TIDMAD_PROFILE).encoding.compute_dtype)
-        first = first + tidmad_topology(TIDMAD_PROFILE).encoding.value_offset
+        assert result.evidence.source_file == name
+        first = expected[:SEG].astype(tidmad_topology(PROFILE).encoding.compute_dtype)
+        first = first + tidmad_topology(PROFILE).encoding.value_offset
         assert result.tensor[0].tolist() == first.tolist()
 
     def test_the_lowest_declared_index_wins_over_a_higher_one(self, tmp_path):
         """Deterministic choice, not directory order."""
-        _write_file(tmp_path, "abra_training_0007.h5", samples=SEG * (BATCH + 1))
-        _write_file(tmp_path, "abra_training_0002.h5", samples=SEG * (BATCH + 1))
-        assert _build(tmp_path).evidence.source_file == "abra_training_0002.h5"
+        dataset = tidmad_topology(PROFILE).dataset
+        _write_file(tmp_path, dataset.training_file_name(7), samples=SEG * (BATCH + 1))
+        low_name = dataset.training_file_name(2)
+        _write_file(tmp_path, low_name, samples=SEG * (BATCH + 1))
+        assert _build(tmp_path).evidence.source_file == low_name
 
     def test_an_undeclared_file_on_disk_is_never_substituted(self, tmp_path):
         """The real behaviour change. `abra_training_0099.h5` matches the old
         glob and would have been consumed; index 99 is outside the profile's
         declared `num_files`, so the task never claimed that data."""
-        _write_file(tmp_path, "abra_training_0099.h5", samples=SEG * (BATCH + 1))
+        undeclared = tidmad_topology(PROFILE).dataset.training_file_name(99)
+        _write_file(tmp_path, undeclared, samples=SEG * (BATCH + 1))
         with pytest.raises(RuntimeError, match="no declared training file exists"):
             _build(tmp_path)
 
@@ -91,9 +107,9 @@ class TestItOpensADeclaredFile:
         with pytest.raises(RuntimeError) as excinfo:
             _build(tmp_path)
         message = str(excinfo.value)
-        assert tidmad_topology(TIDMAD_PROFILE).dataset.training_file_name(0) in message
-        assert tidmad_topology(TIDMAD_PROFILE).dataset.training_file_name(
-            tidmad_topology(TIDMAD_PROFILE).dataset.num_files - 1
+        assert tidmad_topology(PROFILE).dataset.training_file_name(0) in message
+        assert tidmad_topology(PROFILE).dataset.training_file_name(
+            tidmad_topology(PROFILE).dataset.num_files - 1
         ) in (message)
 
 
@@ -107,9 +123,13 @@ class TestTheReadStaysExactlyAsWideAsTheBatch:
         the batch was materialised from HDF5, which is the seam that failed at
         24.10 GiB.
         """
-        _write_file(tmp_path, "abra_training_0000.h5", samples=SEG * 40)
+        _write_file(
+            tmp_path,
+            tidmad_topology(PROFILE).dataset.training_file_name(0),
+            samples=SEG * 40,
+        )
         evidence = _build(tmp_path).evidence
-        itemsize = np.dtype(tidmad_topology(TIDMAD_PROFILE).encoding.storage_dtype).itemsize
+        itemsize = np.dtype(tidmad_topology(PROFILE).encoding.storage_dtype).itemsize
         assert evidence.bytes_read == BATCH * SEG * itemsize
         assert evidence.file_sample_count == SEG * 40
         assert evidence.fraction_of_file_read < 0.1
@@ -133,10 +153,10 @@ class TestTheMeasurementPathHoldsNoTaskLiterals:
         from an instruction.
         """
         forbidden_strings = {
-            tidmad_topology(TIDMAD_PROFILE).channels.input_channel,
-            tidmad_topology(TIDMAD_PROFILE).channels.target_channel,
+            tidmad_topology(PROFILE).channels.input_channel,
+            tidmad_topology(PROFILE).channels.target_channel,
         }
-        pattern_stem = tidmad_topology(TIDMAD_PROFILE).dataset.training_file_pattern.split("{")[0]
+        pattern_stem = tidmad_topology(PROFILE).dataset.training_file_pattern.split("{")[0]
         module = ast.parse((REPO_ROOT / relative_path).read_text(encoding="utf-8"))
         for node in ast.walk(module):
             if not isinstance(node, ast.Constant):
@@ -164,7 +184,7 @@ class TestTheMeasurementPathHoldsNoTaskLiterals:
             if isinstance(n, ast.Constant)
             and isinstance(n.value, int)
             and not isinstance(n.value, bool)
-            and n.value == tidmad_topology(TIDMAD_PROFILE).encoding.value_offset
+            and n.value == tidmad_topology(PROFILE).encoding.value_offset
         ]
         assert offsets == [], "the class-index offset must come from the profile"
 
@@ -177,7 +197,11 @@ class TestBothProductionPathsReachTheOneBuilder:
         import execute_tools.probe_batch as probe_batch
         from core.runtime_control.gpu_measurement_data import load_bounded_probe_batch
 
-        _write_file(tmp_path, "abra_training_0000.h5", samples=SEG * 20)
+        _write_file(
+            tmp_path,
+            tidmad_topology(PROFILE).dataset.training_file_name(0),
+            samples=SEG * 20,
+        )
         calls: list[dict] = []
         real = probe_batch.build_bounded_probe_batch
 
@@ -220,7 +244,11 @@ class TestBothProductionPathsReachTheOneBuilder:
         MODEL_REGISTRY[model_type] = _Model
         PLUGIN_CONFIG_REGISTRY[model_type] = _Config
         try:
-            _write_file(tmp_path, "abra_training_0000.h5", samples=SEG * 20)
+            _write_file(
+                tmp_path,
+                tidmad_topology(PROFILE).dataset.training_file_name(0),
+                samples=SEG * 20,
+            )
             calls: list[dict] = []
             real = probe_batch.build_bounded_probe_batch
 
