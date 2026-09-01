@@ -32,6 +32,7 @@ from agent.schemas.model_io_contract import (
     TensorAxis,
     TensorContract,
 )
+from execute_tools.dataset_config import DatasetProfile
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
     EpochSamplingParams,
@@ -41,6 +42,12 @@ from execute_tools.task_data_path import (
     bind_task_data_path,
 )
 from ml_models.models_format_sandbox import LossConfig, TrainConfig
+
+SYNTHETIC_PROFILE = DatasetProfile(
+    partition_count=6,
+    anchor_selection_files=[0],
+    health_peek_files=[0],
+)
 
 # ---------------------------------------------------------------------------
 # The synthetic task exercises independent input, target, and output axes.
@@ -159,6 +166,7 @@ class TestSyntheticEndToEnd:
                 train_base_seed=7,
                 model_io=_synthetic_contract(),
                 task_scope=list(SCOPE_IDS),
+                profile=SYNTHETIC_PROFILE,
             )
 
         assert results is not None
@@ -227,6 +235,7 @@ class TestSyntheticEndToEnd:
                 task_scope=list(SCOPE_IDS),
                 task_eval_scope=list(eval_ids),
                 validation_requested_rows=len(eval_ids),
+                profile=SYNTHETIC_PROFILE,
             )
         assert results is not None
         th = results["training_history"]
@@ -251,6 +260,7 @@ class TestSyntheticEndToEnd:
                     model_io=_synthetic_contract(),
                     task_scope=list(SCOPE_IDS),
                     task_eval_scope=["va"],
+                    profile=SYNTHETIC_PROFILE,
                 )
 
     def test_determinism_two_runs_same_seed_same_history(self, synthetic_engine_setup):
@@ -271,6 +281,7 @@ class TestSyntheticEndToEnd:
                     train_base_seed=7,
                     model_io=_synthetic_contract(),
                     task_scope=list(SCOPE_IDS),
+                    profile=SYNTHETIC_PROFILE,
                 )
             assert results is not None
             histories.append(results["loss_history"])
@@ -290,5 +301,6 @@ class TestSyntheticEndToEnd:
                 exp_id="neg_1",
                 train_base_seed=7,
                 task_scope=list(SCOPE_IDS),
+                profile=SYNTHETIC_PROFILE,
             )
         assert list(Path(sandbox_dirs["models"]).glob("*.pth")) == []
