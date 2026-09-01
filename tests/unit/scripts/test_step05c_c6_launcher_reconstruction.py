@@ -47,7 +47,6 @@ HISTORICAL_SCRIPTS = (
     "scripts/fcnet_full_file_scan.py",
     "scripts/fcnet_diversity_pearson_scan.py",
     "scripts/investigate_pearson_feasibility.py",
-    "scripts/official_paper_health_scan.py",
 )
 
 
