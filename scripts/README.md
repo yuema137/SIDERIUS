@@ -36,7 +36,7 @@ The durable operator surface:
 
 Everything else — `fcnet_*`, `investigate_*`, `score_tidmad_official_*`,
 `phase2_diagnostic_no_dynamic_search.py`, `pregate_runtime_control_validation.py`,
-`vram_preflight_validation.py`, `c2_prephase_validation.py`,
+`c2_prephase_validation.py`,
 `c12_stamp_failure_class.py`, `checkpoint_*`,
 `step12_pr12a_gate2_evaluate.py`,
 `finalize_recovered_diagnostic_round.py`, `render_*`,
