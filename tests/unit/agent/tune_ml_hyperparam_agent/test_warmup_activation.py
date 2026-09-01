@@ -15,8 +15,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from execute_tools.dataset_config import TIDMAD_PROFILE
 from execute_tools.task_data_path import bind_task_data_path
+from tests.helpers.two_family_profile import make_two_family_profile
+
+_PROFILE = make_two_family_profile(
+    num_files=3,
+    psd_segment_length=1_600_000,
+    segments_per_file=20,
+)
 
 
 def test_warmup_skipped_when_data_dir_is_none():
@@ -30,7 +36,7 @@ def test_warmup_skipped_when_data_dir_is_none():
         loss_config={},
         data_dir=None,
         sample_set={"0": list(range(100))},
-        profile=TIDMAD_PROFILE,
+        profile=_PROFILE,
     )
     assert ms is None
     assert breakdown["aggregator"] is None
@@ -47,7 +53,7 @@ def test_warmup_skipped_when_data_dir_is_empty_string():
         loss_config={},
         data_dir="",
         sample_set={"0": list(range(100))},
-        profile=TIDMAD_PROFILE,
+        profile=_PROFILE,
     )
     assert ms is None
 
@@ -63,7 +69,7 @@ def test_warmup_skipped_when_data_dir_does_not_exist():
         loss_config={},
         data_dir="/nonexistent/path/that/does/not/exist",
         sample_set={"0": list(range(100))},
-        profile=TIDMAD_PROFILE,
+        profile=_PROFILE,
     )
     assert ms is None
 
@@ -97,7 +103,7 @@ def test_static_formula_uses_patched_constants():
             sample_set={"0": list(range(100))},
             ms_per_step=None,
             num_params=num_params,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
 
     bd = result["breakdown"]
@@ -136,11 +142,11 @@ def test_warmup_path_entered_with_valid_data_dir(tmp_path, capsys):
             model_config={"segmentation_size": 1000},
             train_config={"batch_size": 1, "epochs": 1},
             loss_config={},
-                data_dir=str(tmp_path),
-                sample_set={"0": list(range(100))},
-                profile=TIDMAD_PROFILE,
-                task_scope=object(),
-            )
+            data_dir=str(tmp_path),
+            sample_set={"0": list(range(100))},
+            profile=_PROFILE,
+            task_scope=object(),
+        )
 
     out = capsys.readouterr().out
 
@@ -166,7 +172,7 @@ def test_warmup_path_entered_with_valid_data_dir(tmp_path, capsys):
 
 
 def test_composed_warmup_materializes_the_task_owned_scope(monkeypatch, tmp_path):
-    """Catch the external TIDMAD scope identity failure from issue #392."""
+    """Catch the external composed-scope identity failure from issue #392."""
     import torch
 
     from agent.skills.evaluate_time_skill.wrapper import _measure_ms_per_step
@@ -190,7 +196,7 @@ def test_composed_warmup_materializes_the_task_owned_scope(monkeypatch, tmp_path
             loss_config={},
             data_dir=str(tmp_path),
             sample_set={"0": [0]},
-            profile=TIDMAD_PROFILE,
+            profile=_PROFILE,
             task_scope=external_scope,
             n_warmup_batches=0,
             n_timed_batches=1,
