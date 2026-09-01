@@ -539,9 +539,8 @@ ADVICE_PER_AGENT_KEYS = ("interpret", "propose", "implement", "validate", "tune"
 ADVICE_RECOGNISED_KEYS = (*ADVICE_PER_AGENT_KEYS, "mindset")
 
 #: The ONE way to say "this key is deliberately not advice". A leading
-#: underscore marks an inert annotation block — the convention already in
-#: ``advice/workflow/gate2_smoke_advice.json``, whose ``_meta`` records why
-#: that artifact exists. It is spelled as an explicit opt-out precisely so
+#: underscore marks an inert annotation block. It is spelled as an explicit
+#: opt-out precisely so
 #: that an unrecognised key WITHOUT it can be treated as the typo it almost
 #: always is, instead of being dropped in silence.
 ADVICE_INERT_KEY_PREFIX = "_"

@@ -157,9 +157,9 @@ loader REFUSES, naming what was wrong:
 | `{"propose": "..."}` | **accepted** — sparse advice is legal |
 
 To carry a note the agents must never read, prefix its key with `_`, which
-declares it deliberately inert (`gate2_smoke_advice.json` uses `_meta` to
-record why that artifact exists). This is an explicit opt-out; an
-unrecognised key *without* it is treated as the typo it almost always is.
+declares it deliberately inert. For example, `_meta` may record why an
+artifact exists. This is an explicit opt-out; an unrecognised key *without*
+it is treated as the typo it almost always is.
 
 **Why this is a refusal and not a warning.** The artifact's sha256 is pinned
 into the run-invariants lock as the run's treatment identity, distributed to
