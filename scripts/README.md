@@ -31,7 +31,7 @@ The durable operator surface:
 | `rebuild_per_file_best.py` | rebuild the per-partition best-of table from records |
 | `record_wave_summary.py` · `build_diagnostic_summary.py` | wave/diagnostic summary builders |
 | `validate_path_component.py` | path-component hygiene used by launchers |
-| `campaign_admission.py` · `campaign_spend.py` · `runtime_campaign.py` · `runtime_bootstrap.py` · `runtime_replay/` | resumable-campaign bookkeeping and runtime-control operations |
+| `campaign_admission.py` · `campaign_spend.py` · `runtime_campaign.py` · `runtime_replay/` | resumable-campaign bookkeeping and runtime-control operations |
 | `bg_gpu_sampler.sh` | background GPU utilisation sampler |
 
 Everything else — `fcnet_*`, `investigate_*`, `score_tidmad_official_*`,

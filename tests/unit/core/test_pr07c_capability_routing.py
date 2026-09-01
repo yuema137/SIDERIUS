@@ -87,24 +87,10 @@ class TestGenericRuntimeControlNamesNoTaskDataset:
         assert hits
 
 
-class TestTheTaskAwareLauncherSuppliesTheCapability:
-    """The other half: a parameter nobody passes is a boundary, not a fix."""
-
-    def test_the_bootstrap_script_resolves_and_passes_one(self):
-        source = (REPO_ROOT / "scripts" / "runtime_bootstrap.py").read_text(encoding="utf-8")
-        assert "resolve_tidmad_measurement_capability" in source
-        assert "measurement_capability=resolve_tidmad_measurement_capability(" in source
-
+class TestGenericRuntimeDependenciesAcceptTaskCapability:
     def test_production_dependencies_accepts_one_rather_than_resolving_it(self):
         import inspect
 
         from core.runtime_control.bootstrap import production_dependencies
 
         assert "measurement_capability" in inspect.signature(production_dependencies).parameters
-
-    def test_the_launcher_forwards_its_data_dir_override(self):
-        """`--data-dir` must reach the resolver, or the operator flag that
-        exists for pointing at another copy of the data silently does
-        nothing for the readiness verdict."""
-        source = (REPO_ROOT / "scripts" / "runtime_bootstrap.py").read_text(encoding="utf-8")
-        assert "resolve_tidmad_measurement_capability(args.data_dir)" in source

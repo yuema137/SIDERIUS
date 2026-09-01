@@ -7,7 +7,7 @@ when the probe is told WHICH device to account for.
 
 PR C threaded the device identity through the tuner path and stopped there.
 `core/runtime_control/bootstrap.py` is a second, production-supported probe
-entry (`scripts/runtime_bootstrap.py`), and it called `run_bounded_probe`
+entry, and its historical task-aware launcher called `run_bounded_probe`
 without an identity. So on that path every measurement came back
 `measurement_validity=None` and fell back to the conservative pre-PR-C rule:
 a stable neighbour would still deny it blocking authority, and PR C's rule
