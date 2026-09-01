@@ -38,7 +38,7 @@ Everything else — `fcnet_*`, `investigate_*`, `score_tidmad_official_*`,
 `c2_prephase_validation.py`,
 `c12_stamp_failure_class.py`, `checkpoint_*`,
 `step12_pr12a_gate2_evaluate.py`,
-`finalize_recovered_diagnostic_round.py`, `render_*`,
+`render_*`,
 `verify_iter005_estimator.py`,
 `inspection_cost_study/`, `pr3_l2_calibration/` — is **point-in-time**: each
 was written for a dated investigation, campaign or gate whose evidence lives

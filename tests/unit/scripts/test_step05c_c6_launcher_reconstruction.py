@@ -28,10 +28,7 @@ from tests.unit.execute_tools.test_step05c_c0_deliverable_baseline import (
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # OD-05c-3: production launcher + canonical reconstruction/validation.
-MIGRATED_SCRIPTS = (
-    "scripts/finalize_recovered_diagnostic_round.py",
-    "scripts/pregate_runtime_control_validation.py",
-)
+MIGRATED_SCRIPTS = ("scripts/pregate_runtime_control_validation.py",)
 
 
 def _executed_string_constants(source: str) -> list[str]:

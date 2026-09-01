@@ -8,12 +8,10 @@ actually carries).
 
 Why this module exists
 ----------------------
-Three consumers read artifacts whose producing run is long gone — the
-dashboard, ``build_diagnostic_summary`` and
-``finalize_recovered_diagnostic_round`` — and all three must answer the same
-question: *given these record dicts, which order may I rank them in, if any?*
-Written once here rather than three times, because three copies of a
-fail-closed rule are three chances for one of them to quietly stop failing.
+Persisted-artifact consumers must answer the same question: *given these
+record dicts, which order may I rank them in, if any?* Written once here
+rather than at each consumer, because repeated copies of a fail-closed rule
+are repeated chances for one of them to quietly stop failing.
 
 What it is NOT
 --------------
@@ -135,9 +133,8 @@ def _notify(message: str) -> None:
     """Emit a human-facing diagnostic on STDERR.
 
     Never stdout: callers of this module include scripts whose stdout is a
-    machine-readable artifact — ``finalize_recovered_diagnostic_round`` writes
-    a JSON document there, and ``rebuild_per_file_best --print-only`` has a
-    byte-exact stdout contract. A diagnostic line on stdout corrupts them.
+    machine-readable artifact; ``rebuild_per_file_best --print-only`` has a
+    byte-exact stdout contract. A diagnostic line on stdout corrupts it.
     The notice is for a human; stdout is for a program.
     """
     print(message, file=sys.stderr)

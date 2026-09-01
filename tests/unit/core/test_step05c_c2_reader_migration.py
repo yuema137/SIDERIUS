@@ -208,10 +208,8 @@ def test_watchdog_cleanup_follows_an_injected_renamed_naming(tmp_path):
 def test_sandbox_defaults_to_the_shipped_naming(tmp_path):
     """A caller that predates 05c gets the TIDMAD naming, not ``None``.
 
-    Every existing construction site — ``run_comparison.py``,
-    ``pregate_runtime_control_validation.py``, ``c2_prephase_validation.py``,
-    ``finalize_recovered_diagnostic_round.py`` and every test — omits the new
-    kwarg. If the default were left unresolved the watchdog branch would raise
+    Existing compatibility construction sites and tests omit the new kwarg.
+    If the default were left unresolved the watchdog branch would raise
     ``AttributeError`` on the kill path only: a failure that never appears
     until something has already gone wrong.
     """
