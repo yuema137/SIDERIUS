@@ -31,13 +31,18 @@ from core.runtime_control.session import (
     WatchdogConfig,
 )
 from core.sandbox_executor import _watchdog_deadline_provider
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.two_family_profile import make_two_family_profile
 
 # ── the V19 launch constants these fixtures pin ─────────────────────────────
 FORMAL_BUDGET_S = 7200.0  # --formal_time_budget_minutes 120
 FORMAL_SAFETY = 2.0
 WATCHDOG_FACTOR = 3.5
 WATCHDOG_FLOOR_S = 120.0
+PROFILE = make_two_family_profile(
+    num_files=1,
+    psd_segment_length=40_000,
+    segments_per_file=1,
+)
 
 _STORAGE = {
     "dataset_root": "/data",
@@ -276,7 +281,7 @@ class TestTimeEvalGateParity:
             sample_set={"0": [0]},
             time_budget_minutes=10.0,
             inference_per_psd_seg_ms_hint=hint,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
 
     def test_under_budget_is_feasible(self, monkeypatch):
