@@ -252,11 +252,11 @@ class TestAnUncomposedRunIsUnchanged:
 
         Fails as: the fix changed legacy TIDMAD deliverable names.
         """
-        from execute_tools.dataset_config import resolve_dataset_profile
+        from execute_tools.dataset_config import TIDMAD_PROFILE
         from execute_tools.deliverable_spec import derive_run_deliverable_spec
         from execute_tools.inference_single import _derive_spec_under_declared_naming
 
-        profile = resolve_dataset_profile()
+        profile = TIDMAD_PROFILE
         assert _derive_spec_under_declared_naming(profile, None) == derive_run_deliverable_spec(
             profile
         )
@@ -333,7 +333,6 @@ def _score_task_owned(tmp_path, *, deliverable):
     Returns the parsed ``--output_json`` the child emitted.
     """
     from execute_tools import denoising_score_single
-    from execute_tools.dataset_config import resolve_dataset_profile
     from tests.fixtures import fcov8_declared_naming_task as fixture
     from tests.helpers.composed_manifest import write_complete_manifest
     from workflows.task_composition import compose_metric_from_manifest
@@ -411,9 +410,11 @@ def _score_task_owned(tmp_path, *, deliverable):
 
         declared = compose_deliverable_naming_from_manifest(str(manifest))
 
+    from workflows.task_composition import compose_run_task_bindings
+
     denoising_score_single._emit_task_owned_score(
         args,
-        resolve_dataset_profile(),
+        compose_run_task_bindings(str(manifest)).dataset_profile,
         compose_metric_from_manifest(str(manifest)),
         declared_naming=declared,
     )
