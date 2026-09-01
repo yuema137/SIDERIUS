@@ -42,9 +42,11 @@ from core.runtime_control.gpu_measurement_worker_main import (
     validate_candidate_configs,
 )
 from core.runtime_control.gpu_requirement import CandidateMeasurementRequest
+from tests.helpers.two_family_profile import make_two_family_profile
 
 MODEL_TYPE = "c2probe"
 UUID = "GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef"
+WORKER_PROFILE = make_two_family_profile()
 
 
 class _ProbeConfig(BaseModel):
@@ -87,14 +89,15 @@ def _patch_bounded_loader(monkeypatch):
     describing production.
     """
     import core.runtime_control.gpu_measurement_data as data_mod
-    from execute_tools.dataset_config import TIDMAD_PROFILE, tidmad_topology
+    from execute_tools.dataset_config import tidmad_topology
 
     def _bounded(*, data_dir, batch_size, segment_length, profile=None):
+        assert profile is not None, "the worker omitted its declared dataset profile"
         return data_mod.BoundedProbeBatch(
             tensor=torch.randint(0, 256, (batch_size, segment_length), dtype=torch.long),
             evidence=data_mod.BoundedReadEvidence(
                 source_file="fixture.h5",
-                channel=tidmad_topology(profile or TIDMAD_PROFILE).channels.input_channel,
+                channel=tidmad_topology(profile).channels.input_channel,
                 segment_count=batch_size,
                 segment_length=segment_length,
                 first_sample=0,
@@ -130,6 +133,7 @@ def _spec(tmp_path, data_dir: str | None, **over) -> GpuMeasurementSpec:
         result_path=str(tmp_path / "result.json"),
         journal_path=str(tmp_path / "phases.ndjson"),
         worker_memory_limit_bytes=8 * 1024**3,
+        dataset_profile=WORKER_PROFILE,
     )
     payload.update(over)
     return GpuMeasurementSpec(**payload)  # type: ignore[arg-type]
