@@ -53,6 +53,7 @@ from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from core.hardware_context import HardwareContext
+from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
     PROPOSAL_COMMIT_PROMPT,
@@ -191,6 +192,13 @@ def pin_environment(tmp_path, monkeypatch) -> str:
 @pytest.fixture
 def pinned_env(tmp_path, monkeypatch) -> str:
     return pin_environment(tmp_path, monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _bind_golden_profile():
+    """Render the historical golden under its explicit captured profile."""
+    with bind_dataset_profile(TIDMAD_PROFILE):
+        yield
 
 
 def fixture_interpretation() -> dict:
