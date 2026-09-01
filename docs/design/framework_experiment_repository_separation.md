@@ -1125,11 +1125,13 @@ forecast's existing budget comparison and keeps executing-device verification
 record-only. An unavailable selected source refuses rather than falling back.
 The runtime watchdog remains an independent last-resort safety mechanism.
 
-Implementation is in progress on `refactor/retire-real-task-assets`. The first
-focused carrier, policy, reachability, and adjacent regression cohort passes 108
-tests. The external launchers for TIDMAD, Pets, DAVIS, Cancer, and Gold now
-declare `measured` explicitly, pending the committed framework revision and
-exact dependency-pin update.
+The generic wall-time authority landed on
+`refactor/retire-real-task-assets` at
+`dc0c946f6c34351ed5f7793efb6d924e8c3897f0`. The focused carrier, policy,
+reachability, and adjacent regression cohort passes 108 tests. The external
+launchers for TIDMAD, Pets, DAVIS, Cancer, and Gold declare `measured`
+explicitly. The consumer pin is advanced only after the final framework
+documentation checkpoint so the executable pair remains exact.
 
 A read-only campaign audit against SIDERIUS `571202ed` and `siderius-exp`
 `8eabcc0` established two current Gold launch defects and one partially stale
@@ -1152,6 +1154,45 @@ winner checkpoint, execute the proven task-owned inference path over the full
 and only then compute the canonical full-scope score. It must not reinterpret a
 20-segment search deliverable as a final result, retrain the winner, or add a
 second inference implementation.
+
+The external implementation now makes `--data_dir` a required first-class
+Gold launch input and forwards its canonical absolute path through the
+campaign entrypoint, Stage 1, each band child, and Stage 2. A real Stage-1
+dry-run shows the same path exactly once on the child `run_chain.sh` argv,
+alongside `formal_eval_portion=0.1`, measured Trial/Formal wall-time admission,
+40/40-GiB VRAM treatment, the 40,000 segmentation rule, literature review ON,
+and the approved advice digest. The framework's stale machine-local fallback
+comments and CLI help now state the explicit caller-owned root contract.
+
+Composed Best now selects the Health-valid Formal winner in each band, requires
+its persisted model/loss/inference configuration, verifies the completion
+sentinel and checkpoint SHA-256, stages the checkpoint and run-scoped plugins,
+and invokes the existing task-owned inference executor over all 200 segments
+of each source-band file. It validates declared naming, storage, file identity,
+and the complete sample count before pooling. The same explicit data root feeds
+both replay inference and the canonical single scoring call. Stage-1 partial
+deliverables are no longer read as final inputs, no retraining path was added,
+and Stage-2 execution was not changed. A direct import that registered the
+external TIDMAD data path under a second module identity was caught during
+focused validation and removed; the final path consumes only the task-owned
+profile decoder plus the already composed generic data-path binding.
+
+Focused external evidence at the current worktree passes 136 Stage-3 tests and
+101 Gold launcher/treatment tests. Counterfactuals prove that a 20-segment
+deliverable refuses, a complete 200-segment deliverable proceeds, a missing or
+post-selection-mutated checkpoint refuses before inference, Stage-1 partial
+artifacts are ignored, the production path reaches checkpoint replay, the data
+root remains identical through inference and scoring, and the shared Strict
+Best/terminal composer behavior remains covered. Shell syntax, Ruff, format,
+and diff-integrity checks remain part of final exact-head validation.
+
+Framework delta validation passes 11 explicit data-root portability and
+resolution tests plus the one affected runner parser witness. A deliberately
+broader runner-module probe produced 96 passes and five pre-existing restore
+fixture failures because those fixtures invoke resume without the now-required
+task profile binding. They do not touch this documentation/help-only framework
+delta and are not treated as green evidence; restoring an implicit scientific
+default to satisfy them is explicitly rejected.
 
 The audit's `cache_state` finding is accepted as real but remains outside this
 repair slice: composed task scopes currently make it `unknown`, and process I/O

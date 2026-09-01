@@ -108,13 +108,9 @@ ADVICE=""
 ADVICE_SHA256=""
 PLAN_OVERRIDES=""
 WORKFLOW_PARAMETER_RULES=""          # JSON ParameterRules; empty = workflow unconstrained
-# DATA_DIR: unset by default. The TIDMAD data directory used for training,
-# inference, and scoring is resolved by the Python config layer
-# (execute_tools/data_paths.py -> tidmad_data_config.yaml), so the chain does
-# not need this value to locate data and stays portable across servers.
-# --data_dir only feeds evaluate_time_skill's optional real-dataset wall-time
-# warmup; when empty the time skill uses its static formula. Operators may
-# still pass --data_dir to enable warmup against a specific directory.
+# DATA_DIR is caller-owned physical execution provenance. The generic chain
+# has no task, machine, environment-variable, or repository fallback; Python
+# startup refuses an omitted or unreadable root before any expensive work.
 DATA_DIR=""
 TRIAL_TIME_BUDGET_MINUTES=""        # §3.2: empty == omit == Python None
 FORMAL_TIME_BUDGET_MINUTES=""       # §3.2: empty == omit == Python None

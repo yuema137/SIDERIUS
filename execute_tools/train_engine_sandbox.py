@@ -1875,7 +1875,7 @@ def main():
         "--data_dir",
         type=str,
         default=None,
-        help="Directory with TIDMAD training files. Default: from tidmad_data_config.json.",
+        help="Caller-selected physical dataset directory. No implicit fallback.",
     )
     parser.add_argument("--sandbox_dir", type=str, default=None, help="Sandbox output directory.")
     parser.add_argument("--file_index", type=int, default=6)

@@ -2926,11 +2926,8 @@ def main():
 
     # --- Dataset-directory resolution preflight -------------------------
     # Resolve WHERE the data physically lives ONCE, here, before anything
-    # expensive. `--data_dir` is the operator override; otherwise the
-    # machine-local `tidmad_data_config.yaml` answers, which is the
-    # precedence `probe_production.py` already documents as F-1a and the
-    # chain-shell portability test already assumes ("the Python config
-    # layer resolves the data directory").
+    # expensive. `--data_dir` is an explicit caller-owned input; the generic
+    # framework never selects a task or machine-local fallback.
     #
     # Before this existed nothing on the launch path performed that
     # resolution, so a chain launched without `--data_dir` carried

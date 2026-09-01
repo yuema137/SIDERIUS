@@ -61,8 +61,9 @@ pair.
   authority `workflows/task_composition.py`.
 - What each health field means →
   [`execute_tools/health_checks/`](../execute_tools/health_checks/README.md).
-- Machine-local paths (`tidmad_data_config.yaml`, `dashboard_config.yaml`,
-  `.env`) — gitignored siblings at the repository root, not here.
+- Machine-local dashboards and secrets (`dashboard_config.yaml`, `.env`) —
+  gitignored siblings at the repository root, not here. Physical dataset
+  roots are explicit caller inputs (`--data_dir`), never framework config.
 
 ## Extension points
 
