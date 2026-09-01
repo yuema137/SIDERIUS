@@ -23,7 +23,6 @@ decide *which* model runs (the agents do) or *how* training executes
 | `plugin_loader.py` | `extend_registries` (scan the resolved plugin dirs) · `register_model_in_memory(plugin_path)` (single file) · `preload_global_models()` (startup absorption of the global library) · `get_output_type` |
 | `loss_models_sandbox.py` | `LOSS_REGISTRY` / `LOSS_CONFIG_REGISTRY` · `register_loss_in_memory` · `preload_global_losses` · built-ins `FocalLoss1D` / `FocalLoss1DCW` · `get_criterion`, `get_target_torch_dtype` |
 | `model_descriptions.py` | `get_model_description(model_type)` — resolves `description.md` from built-ins → legacy global → `${SIDERIUS_CHAIN_WORKSPACE}/plugins/*` (newest first); raises naming every searched path |
-| `legacy_baseline_configs.json` | **the paper-spec source of truth** for baseline hyperparameters |
 | `{model}/description.md` | one prompt-facing description per built-in |
 
 ## Inputs
@@ -102,9 +101,8 @@ from each other's generated candidates (recorded product gap; see
 ## Files normally edited
 
 A new built-in model: module + config schema + registry rows + its
-`description.md`. **`legacy_baseline_configs.json` only with a paper citation
-in the commit message** (train.py line / network.py class / paper section) —
-it is the paper-spec source of truth (CLAUDE.md).
+`description.md`. Scientific baseline configurations belong to the external
+task package, not this framework module.
 
 ## Files normally NOT edited
 

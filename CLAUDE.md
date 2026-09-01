@@ -606,34 +606,6 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   inside `score_vector`.
 - **Design doc**: `docs/design/pluggable_health_checks.md`.
 
-## Baseline Configs — TIDMAD Paper Alignment
-
-**`ml_models/legacy_baseline_configs.json` is the source of truth for
-paper-spec baseline configurations.** Cross-referenced verbatim against
-`/home/tidmad/TIDMAD/train.py` and `/home/tidmad/TIDMAD/network.py` (class
-`FocalLoss1D`).
-
-Aligned parameters (as of commit `3e119c6`):
-- **Learning rate**: `lr = 5e-4` for every model (paper:
-  `torch.optim.Adam(..., lr=0.0005)`). Was `1e-3` before the fix.
-- **Wavenet focal alpha**: `alpha = 0.5` (paper: `FocalLoss1D()` default). Was
-  `0.25` before the fix. Punet/transformer/rnn/gated_fno already matched at
-  `alpha=0.5`.
-- **Epochs (Phase 1 baseline)**: hardcoded to `--max_epochs 1` in
-  `scripts/run_comparison.py::run_baseline_trial` (paper authors, direct
-  communication).
-
-Structural discrepancies known and NOT addressed by config alone:
-- Paper trains 4 separate models per architecture (frequency-band split via
-  `ifile_checkpoint = [0, 4, 10, 15, 20]` in `train.py`); SIDERIUS trains a
-  single generalist model on all 20 files.
-- Paper re-initializes the optimizer per-file (`optimizer = ...` inside the
-  `for ifile` loop); SIDERIUS uses a single optimizer.
-
-The `FocalLoss1D` implementation itself
-(`ml_models/loss_models_sandbox.py`, class `FocalLoss1D`) is line-for-line
-identical to TIDMAD's `network.py:FocalLoss1D`.
-
 ## Subsystem Invariants (Read Before Touching)
 
 - **`score_vector` is pure scoring** (2-tuple return: `(file_vector, scalar)`)
@@ -660,10 +632,6 @@ identical to TIDMAD's `network.py:FocalLoss1D`.
   the id. Losses are NOT metrics — but that boundary is TYPED, not lexical: since Step 12 / PR-12a C5 closed D16, **`MetricSpec.id` is an OPAQUE identity** and `log_loss` is as declarable as `accuracy`. What enforces the boundary is the contract (a deliverable, an aggregation, an executable `ScoreabilityContract`), `_compose_metric`'s `EvaluationMetric` type check, and `extra="forbid"` plus zero loss-named fields on the record-facing types.
   Records carry the additive `metric_result` / `metric_refusal`; the frozen
   `denoising_score` / `file_vector` / `score_table` names are unchanged (D1).
-- **`ml_models/legacy_baseline_configs.json` is the paper-spec source of
-  truth.** Any edit here must cite the corresponding paper source (train.py
-  line, network.py class, or paper section). Do not tune these values away
-  from paper spec without a written justification in the commit message.
 - **RLIMIT_AS for inference subprocess = 60 GiB**
   (`core/sandbox_executor.py:_ROLE_DEFAULT_RSS_GB["inference"] = 60`).
   Training uses 40 GiB, scoring uses 24 GiB. The inference bump (commit
