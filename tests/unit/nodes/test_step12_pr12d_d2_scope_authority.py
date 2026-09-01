@@ -46,12 +46,12 @@ import pytest
 from execute_tools.dataset_config import (
     NUM_FILES,
     SEGMENTS_PER_FILE,
+    TIDMAD_PROFILE,
     ChannelIdentity,
     DatasetConfig,
     DatasetProfile,
     ValueEncoding,
     declares_tidmad_topology,
-    resolve_dataset_profile,
     tidmad_topology,
 )
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
@@ -91,7 +91,7 @@ class TestProjectionAuthority:
     """One projection; a MISS is a membership test, not an exception to catch."""
 
     def test_a_tidmad_profile_yields_its_physical_dataset(self):
-        facts = project_attempt_topology_facts(resolve_dataset_profile())
+        facts = project_attempt_topology_facts(TIDMAD_PROFILE)
         assert facts.declares_physical_geometry
         assert isinstance(facts.physical_dataset, DatasetConfig)
 
@@ -115,7 +115,7 @@ class TestProjectionAuthority:
             project_attempt_topology_facts(profile)
 
     def test_the_predicate_and_the_decoder_agree_on_TIDMAD(self):
-        profile = resolve_dataset_profile()
+        profile = TIDMAD_PROFILE
         assert declares_tidmad_topology(profile)
         assert tidmad_topology(profile).dataset is not None
 
@@ -244,7 +244,7 @@ class TestDifferentialOracleUnderTidmad:
     """
 
     def test_the_physical_dataset_is_the_same_object_the_decode_produced(self):
-        profile = resolve_dataset_profile()
+        profile = TIDMAD_PROFILE
         assert (
             project_attempt_topology_facts(profile).physical_dataset
             == tidmad_topology(profile).dataset
@@ -253,7 +253,7 @@ class TestDifferentialOracleUnderTidmad:
     def test_the_legacy_segment_count_is_unchanged(self):
         from nodes.ml_hyperparameter_tune_agent.planning import _psd_segment_counts
 
-        profile = resolve_dataset_profile()
+        profile = TIDMAD_PROFILE
         facts = project_attempt_topology_facts(profile)
         train, evaluation = _psd_segment_counts(None, None, facts)
         expected = tidmad_topology(profile).dataset.segments_per_file
@@ -262,7 +262,7 @@ class TestDifferentialOracleUnderTidmad:
     def test_a_built_sample_set_still_reports_what_it_holds(self):
         from nodes.ml_hyperparameter_tune_agent.planning import _psd_segment_counts
 
-        facts = project_attempt_topology_facts(resolve_dataset_profile())
+        facts = project_attempt_topology_facts(TIDMAD_PROFILE)
         assert _psd_segment_counts({0: [1, 2], 3: [0]}, {5: [4]}, facts) == (3, 1)
 
     def test_the_full_scope_reference_volume_is_unchanged(self):
@@ -271,7 +271,7 @@ class TestDifferentialOracleUnderTidmad:
             render_full_scope_segments_token,
         )
 
-        dataset = tidmad_topology(resolve_dataset_profile()).dataset
+        dataset = tidmad_topology(TIDMAD_PROFILE).dataset
         value = render_full_scope_segments(dataset)
         assert value == NUM_FILES * SEGMENTS_PER_FILE
         assert render_full_scope_segments_token(value) == str(value)
@@ -287,7 +287,7 @@ class TestDifferentialOracleUnderTidmad:
             derive_tidmad_deliverable_spec,
         )
 
-        profile = resolve_dataset_profile()
+        profile = TIDMAD_PROFILE
         assert derive_run_deliverable_spec(profile) == derive_tidmad_deliverable_spec(profile)
 
     def test_run_metric_resolution_refuses_an_unbound_run(self):
@@ -396,5 +396,5 @@ class TestFailClosed:
         remove.
         """
         assert set(AttemptTopologyFacts.model_fields) == {"physical_dataset"}
-        assert isinstance(tidmad_topology(resolve_dataset_profile()).channels, ChannelIdentity)
-        assert isinstance(tidmad_topology(resolve_dataset_profile()).encoding, ValueEncoding)
+        assert isinstance(tidmad_topology(TIDMAD_PROFILE).channels, ChannelIdentity)
+        assert isinstance(tidmad_topology(TIDMAD_PROFILE).encoding, ValueEncoding)
