@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import ExpertAdvice
 from agent.schemas.proposal import ProposalOutput
-from execute_tools.dataset_config import TIDMAD
+from execute_tools.dataset_config import TIDMAD, TIDMAD_PROFILE, bind_dataset_profile
 
 
 @pytest.fixture
@@ -23,6 +23,13 @@ def expert_advice():
         suggested_directions=["try focal gamma=2"],
         rationale="x",
     )
+
+
+@pytest.fixture(autouse=True)
+def _bind_baseline_profile():
+    """Exercise the dated baseline rules under their explicit task profile."""
+    with bind_dataset_profile(TIDMAD_PROFILE):
+        yield
 
 
 def _make_output(expert_advice, **baseline_overrides):
