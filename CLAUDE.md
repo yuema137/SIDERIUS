@@ -17,11 +17,21 @@
   ownership, validation evidence, and unresolved findings.
 
 ## Environment
-- **Always use the project virtualenv**: every Python command must use the
-  repo's `.venv/bin/python` (e.g. `/workspace/REPO/SIDERIUS/.venv/bin/python`
-  on the H100 box, `/home/yuema137/SIDERIUS/.venv/bin/python` on lilab) or
-  activate `.venv/bin/activate` first. Never use the system `python` or `python3` — they are Python 3.8 and
-  will fail on f-strings and other modern syntax.
+- **Every checkout owns one frozen virtualenv.** From the exact SIDERIUS
+  checkout that will be tested or executed, run
+  `uv sync --group dev --frozen`, then use that checkout's
+  `.venv/bin/python` for every Python command. This is the shared environment
+  rule for local tests, hardware qualification, and formal campaigns.
+- **Never borrow another checkout's environment.** Do not copy or reuse a
+  different checkout's `.venv`, editable install, `site-packages`, or source
+  path through `PYTHONPATH`. Those shortcuts can import code from a different
+  revision while reporting the current checkout's Git SHA. The system
+  `python` / `python3` is also unsupported.
+- A container image may be used by a deployment, but it must be built from
+  the same committed `uv.lock` and execute the selected checkout/package
+  revisions. A container is an isolation mechanism, not a second dependency
+  authority. Datasets, workspaces, and machine-owned secrets remain external
+  mounts or runtime inputs.
 - **`run_comparison.py` lives at `scripts/run_comparison.py`** (moved from repo
   root in commit `13c34fa`). If you see a `SIDERIUS_ROOT` bug where subprocess
   paths resolve to `scripts/nodes/...` instead of `nodes/...`, that's the
