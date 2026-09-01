@@ -39,7 +39,7 @@ The durable operator surface:
 | `bg_gpu_sampler.sh` | background GPU utilisation sampler |
 
 Everything else — `fcnet_*`, `investigate_*`, `score_tidmad_official_*`,
-`official_paper_health_scan.py`, `legacy_fcnet_timing.py`,
+`official_paper_health_scan.py`,
 `phase2_diagnostic_no_dynamic_search.py`, `pregate_runtime_control_validation.py`,
 `vram_preflight_validation.py`, `c2_prephase_validation.py`,
 `c12_stamp_failure_class.py`, `checkpoint_*`, `step10_p3_gate1.py`,
