@@ -43,13 +43,19 @@ from execute_tools.data_paths import (
     bind_physical_data_root,
     resolve_physical_data_root,
 )
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import bind_dataset_profile
+from tests.helpers.two_family_profile import make_two_family_profile
 
 MODEL_CFG = {"model_type": "fcnet", "segmentation_size": 10000, "latent_dims": [100, 10]}
 TRAIN_CFG = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cpu"}
 LOSS_CFG = {"loss_type": "ce"}
 EXP_ID = "c4_exp"
 RUN_NAME = "c4_run"
+PROFILE = make_two_family_profile(
+    num_files=1,
+    psd_segment_length=10_000,
+    segments_per_file=2,
+)
 
 
 def _flag_value(cmd: list[str], flag: str) -> str | None:
@@ -135,7 +141,7 @@ def _bind_synthetic_task_config():
         "task_description": "Synthetic transport fixture.",
         "forward_contract": {},
     }
-    with bind_task_config(values), bind_dataset_profile(TIDMAD_PROFILE):
+    with bind_task_config(values), bind_dataset_profile(PROFILE):
         yield
 
 
