@@ -198,7 +198,7 @@ class TestRenderedProseIsUnchanged:
             ms_per_step=10.0,
             seg_size=100_000,
             batch_size=8,
-            psd_segment_length=resolve_tidmad_topology().dataset.psd_segment_length,
+            psd_segment_length=tidmad_topology(TIDMAD_PROFILE).dataset.psd_segment_length,
         )
         assert message == (
             "Raise segmentation_size to the next valid divisor of 10,000,000 "
@@ -243,7 +243,8 @@ class TestReferenceArtifactFileCount:
         ]
         assert code == [], f"loader still builds the index tuple at import: {code}"
 
-        assert len(reference._fine_indices()) == TIDMAD.num_files
+        with bind_dataset_profile(TIDMAD_PROFILE):
+            assert len(reference._fine_indices()) == TIDMAD.num_files
         with bind_dataset_profile(
             TIDMAD_PROFILE.model_copy(
                 update={
