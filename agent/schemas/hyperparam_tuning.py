@@ -2843,6 +2843,14 @@ class HyperparamTuningInput(BaseModel):
             "ambient environment; it is never a second authority for them."
         ),
     )
+    workflow_parameter_rules: ParameterRules | None = Field(
+        default=None,
+        description=(
+            "Workflow-owned constraints on resolved model, training, or loss "
+            "parameters. None leaves the workflow unconstrained. These rules "
+            "are enforced together with, and may only narrow, task-owned rules."
+        ),
+    )
 
     @field_validator("plan_overrides")
     @classmethod

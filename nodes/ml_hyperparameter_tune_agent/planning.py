@@ -25,7 +25,11 @@ from agent.schemas.hyperparam_tuning import (
     TrialConfig,
 )
 from agent.schemas.ordering import resolve_ordering
-from agent.schemas.parameter_rules import ParameterRuleError, apply_parameter_rules
+from agent.schemas.parameter_rules import (
+    ParameterRuleError,
+    ParameterRules,
+    apply_parameter_rules,
+)
 from execute_tools.health_checks.candidate_eligibility import (
     is_valid_candidate,
 )
@@ -94,6 +98,7 @@ def _apply_effective_parameter_rules(
     plan: ExperimentPlan,
     *,
     composition_ref: TaskCompositionRef | None,
+    workflow_rules: ParameterRules | None,
     epoch_cap: EpochCapResolution,
 ) -> ExperimentPlan:
     """Apply task rules without bypassing other effective-plan authorities.
@@ -104,12 +109,14 @@ def _apply_effective_parameter_rules(
     authorities.
     """
     task_rules = composition_ref.parameter_rules if composition_ref is not None else None
+    declared_rules = tuple(rules for rules in (task_rules, workflow_rules) if rules is not None)
     if (
         composition_ref is not None
         and composition_ref.objective is not None
-        and task_rules is not None
         and any(
-            path == "loss_config" or path.startswith("loss_config.") for path in task_rules.rules
+            path == "loss_config" or path.startswith("loss_config.")
+            for rules in declared_rules
+            for path in rules.rules
         )
     ):
         raise ParameterRuleError(
@@ -117,7 +124,11 @@ def _apply_effective_parameter_rules(
             "an authoritative objective; the objective is the sole owner of loss semantics"
         )
 
-    effective = apply_parameter_rules(plan, task_rules=task_rules)
+    effective = apply_parameter_rules(
+        plan,
+        task_rules=task_rules,
+        workflow_rules=workflow_rules,
+    )
     if epoch_cap.cap is not None and effective.train_cfg.get("epochs", 1) > epoch_cap.cap:
         raise ParameterRuleError(
             "parameter_rules resolved train_config.epochs above the active "
@@ -518,6 +529,7 @@ def prepare_attempt(
     plan = _apply_effective_parameter_rules(
         plan,
         composition_ref=agent_input.task_composition_ref,
+        workflow_rules=agent_input.workflow_parameter_rules,
         epoch_cap=epoch_cap,
     )
     resolution.record(plan, "parameter_rules")

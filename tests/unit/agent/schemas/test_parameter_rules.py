@@ -169,6 +169,7 @@ def test_planning_boundary_applies_the_composed_exact_lock() -> None:
     effective = _apply_effective_parameter_rules(
         _plan(batch_size=8),
         composition_ref=_composition_ref(rules),
+        workflow_rules=None,
         epoch_cap=EpochCapResolution(cap=None, source=None),
     )
 
@@ -185,6 +186,7 @@ def test_planning_boundary_preserves_objective_and_epoch_authorities() -> None:
                 loss_rules,
                 objective=LossConfig(loss_type="ce"),
             ),
+            workflow_rules=None,
             epoch_cap=EpochCapResolution(cap=None, source=None),
         )
 
@@ -193,5 +195,43 @@ def test_planning_boundary_preserves_objective_and_epoch_authorities() -> None:
         _apply_effective_parameter_rules(
             _plan(epochs=1),
             composition_ref=_composition_ref(epoch_rules),
+            workflow_rules=None,
             epoch_cap=EpochCapResolution(cap=2, source="max_epochs"),
+        )
+
+
+def test_planning_boundary_applies_workflow_rules_beside_task_rules() -> None:
+    """Catches workflow constraints being accepted by schema but skipped by planning."""
+    task_rules = ParameterRules.model_validate(
+        {"model_config.segmentation_size": {"range": {"min": 20_000, "max": 50_000}}}
+    )
+    workflow_rules = ParameterRules.model_validate(
+        {"model_config.segmentation_size": {"exact": 40_000}}
+    )
+
+    effective = _apply_effective_parameter_rules(
+        _plan(segmentation_size=20_000),
+        composition_ref=_composition_ref(task_rules),
+        workflow_rules=workflow_rules,
+        epoch_cap=EpochCapResolution(cap=None, source=None),
+    )
+
+    assert effective.model_cfg["segmentation_size"] == 40_000
+
+
+def test_workflow_loss_rule_cannot_bypass_a_task_owned_objective() -> None:
+    """Catches workflow constraints becoming a second owner of loss semantics."""
+    workflow_rules = ParameterRules.model_validate(
+        {"loss_config.loss_type": {"exact": "smooth_l1"}}
+    )
+
+    with pytest.raises(ParameterRuleError, match="sole owner of loss semantics"):
+        _apply_effective_parameter_rules(
+            _plan(),
+            composition_ref=_composition_ref(
+                ParameterRules(),
+                objective=LossConfig(loss_type="ce"),
+            ),
+            workflow_rules=workflow_rules,
+            epoch_cap=EpochCapResolution(cap=None, source=None),
         )
