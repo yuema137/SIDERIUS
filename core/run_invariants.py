@@ -296,6 +296,10 @@ class RunInvariants(BaseModel):
     # Omitted from the serialized lock at 1.0 (see `write_run_invariants`), so
     # every legacy and every full-eval lock file stays byte-identical.
     formal_eval_portion: float = 1.0
+    # Workflow-owned parameter rules change the effective plan and therefore
+    # the scientific treatment. Store their canonical validated JSON shape;
+    # None is the unconstrained legacy state.
+    workflow_parameter_rules: dict[str, Any] | None = None
     created_at: str | None = None
     # Step 11 C3 (R-11-6) — the per-role subprocess memory ceilings this
     # run executed under, plus their provenance. RECORDED, never compared.
@@ -384,6 +388,7 @@ class RunInvariants(BaseModel):
         # `resolved_data_scope`'s sibling one axis over (see the field's
         # declaration for the five-row table and the legacy-lock consequence).
         "formal_eval_portion",
+        "workflow_parameter_rules",
     )
 
     #: Fields RECORDED for audit and never compared (Step 11 C3, R-11-6).
@@ -657,6 +662,8 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
     # the residual this accepts).
     if payload.get("formal_eval_portion") == 1.0:
         payload.pop("formal_eval_portion", None)
+    if payload.get("workflow_parameter_rules") is None:
+        payload.pop("workflow_parameter_rules", None)
     fd, tmp_path = tempfile.mkstemp(dir=workspace, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
@@ -807,6 +814,7 @@ class LockLaunchIdentity(BaseModel):
     #: arrive ambiently. The default is the framework's own full-eval value,
     #: so a caller that omits it gets a byte-identical lock.
     formal_eval_portion: float = 1.0
+    workflow_parameter_rules: dict[str, Any] | None = None
 
 
 #: The unlabelled default — module-level so call sites can splat a shared
@@ -975,6 +983,7 @@ def build_run_invariants(
             advice_path=_launch_identity.advice_path,
             # F-SCANF-1 — CANONICAL, threaded explicitly like the six above.
             formal_eval_portion=_launch_identity.formal_eval_portion,
+            workflow_parameter_rules=_launch_identity.workflow_parameter_rules,
             # Step 11 C3 (R-11-6) — stamped at the SAME shared builder, for
             # the same reason C9d is: every entry point then records the
             # ceilings its children actually ran under. Provenance, never

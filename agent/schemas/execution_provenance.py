@@ -71,7 +71,7 @@ AUTHORITY_DESCRIPTIONS: dict[str, str] = {
     "operator_plan_overrides": "operator plan_overrides lock",
     "round_mode_override_chain": "round-mode override chain (trial lockout / formal inheritance)",
     "task_declared_objective": "task-declared objective",
-    "parameter_rules": "composition-declared parameter rules",
+    "parameter_rules": "task/workflow-declared parameter rules",
     "partial_scope_strategy_normalization": "partial data scope normalization",
     "max_epochs_bound": "--max_epochs bound",
     "forced_model_type": "forced model type",

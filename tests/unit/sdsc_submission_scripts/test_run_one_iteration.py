@@ -181,6 +181,40 @@ class TestArgparseSurface:
         # Legacy attr removed after normalisation.
         assert not hasattr(normalized, "iteration_legacy")
 
+    def test_workflow_parameter_rules_are_validated_at_launch(self):
+        """Catches the CLI forwarding unvalidated JSON into planning."""
+        raw = '{"model_config.segmentation_size":{"exact":40000}}'
+        args = runner.build_parser().parse_args(
+            self._minimal_argv(
+                "--start_iteration",
+                "1",
+                "--workflow_parameter_rules",
+                raw,
+            )
+        )
+
+        normalized = runner.normalize_args(args)
+
+        rule = normalized.workflow_parameter_rules.rules["model_config.segmentation_size"]
+        assert rule.exact == 40_000
+
+    def test_invalid_workflow_parameter_rules_refuse_at_launch(self, capsys):
+        """Catches malformed rule declarations surviving until an LLM round."""
+        raw = '{"model_config.segmentation_size":{"exact":40000,"allowed":[40000]}}'
+        args = runner.build_parser().parse_args(
+            self._minimal_argv(
+                "--start_iteration",
+                "1",
+                "--workflow_parameter_rules",
+                raw,
+            )
+        )
+
+        with pytest.raises(SystemExit):
+            runner.normalize_args(args)
+
+        assert "--workflow_parameter_rules is invalid" in capsys.readouterr().err
+
     def test_legacy_iteration_alias_works_with_deprecation_warning(self):
         args = runner.build_parser().parse_args(self._minimal_argv("--iteration", "2"))
         with warnings.catch_warnings(record=True) as caught:

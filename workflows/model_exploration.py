@@ -1869,6 +1869,11 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
         # launch config the tuner child receives it from, so the chain lock
         # and the tuner sub-workspace lock cannot disagree.
         formal_eval_portion=launch.formal_eval_portion,
+        workflow_parameter_rules=(
+            None
+            if launch.workflow_parameter_rules is None
+            else launch.workflow_parameter_rules.model_dump(mode="json", exclude_none=True)
+        ),
     )
 
 

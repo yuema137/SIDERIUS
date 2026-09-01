@@ -66,6 +66,7 @@ from dotenv import load_dotenv
 
 from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
 from agent.schemas.ordering import ResolvedOrdering, parse_file_order_cli
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import OutputTypeName
 from agent.schemas.telemetry import LLMBridgeContextError
 from agent.skills.evaluate_vram_skill.preflight_adapter import PREFLIGHT_EXECUTION_MODE
@@ -1600,6 +1601,17 @@ def build_parser() -> argparse.ArgumentParser:
         'E.g. \'{"trial_portion": 0.2, "train_portion": 1.0}\'. '
         "Keys must be valid ExperimentPlan fields.",
     )
+    parser.add_argument(
+        "--workflow_parameter_rules",
+        type=str,
+        default=None,
+        help=(
+            "JSON object using the same ParameterRules schema as a task manifest. "
+            "Omitted leaves the workflow unconstrained; exact rules lock values, "
+            "while range, allowed, and registered predicate rules validate the "
+            "agent's proposal."
+        ),
+    )
     # --- Workflow-level CLI flags (Phase 6.8 Commit 11) ---
     parser.add_argument(
         "--llm_config",
@@ -2536,6 +2548,11 @@ def compute_expected_invariants(
             # pre-flight and `run_workflow`'s own lock for this workspace
             # cannot contradict each other.
             formal_eval_portion=args.formal_eval_portion,
+            workflow_parameter_rules=(
+                None
+                if args.workflow_parameter_rules is None
+                else args.workflow_parameter_rules.model_dump(mode="json", exclude_none=True)
+            ),
         ),
     )
     return invariants
@@ -2643,6 +2660,14 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
         args.plan_overrides = json.loads(args.plan_overrides)
     else:
         args.plan_overrides = None
+    try:
+        args.workflow_parameter_rules = (
+            ParameterRules.model_validate_json(args.workflow_parameter_rules)
+            if args.workflow_parameter_rules
+            else None
+        )
+    except ValueError as exc:
+        parser.error(f"--workflow_parameter_rules is invalid: {exc}")
 
     # DS7 — deprecated no-op strategy flags (removal tracked as FU-2).
     if args.trial_strategy != "snapshot" or args.target_files is not None:
@@ -3336,6 +3361,7 @@ def main():
                     human_advice_tune=args.human_advice_tune,
                     human_advice_mindset=args.human_advice_mindset,
                     plan_overrides=args.plan_overrides,
+                    workflow_parameter_rules=args.workflow_parameter_rules,
                     exploration_mode=args.exploration_mode,
                     minimum_boldness=args.minimum_boldness,
                     max_impl_attempts=args.max_impl_attempts,

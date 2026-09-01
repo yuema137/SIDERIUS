@@ -107,6 +107,7 @@ ADVICE=""
 # child's argv is then byte-identical to a pre-feature chain.
 ADVICE_SHA256=""
 PLAN_OVERRIDES=""
+WORKFLOW_PARAMETER_RULES=""          # JSON ParameterRules; empty = workflow unconstrained
 # DATA_DIR: unset by default. The TIDMAD data directory used for training,
 # inference, and scoring is resolved by the Python config layer
 # (execute_tools/data_paths.py -> tidmad_data_config.yaml), so the chain does
@@ -310,6 +311,7 @@ parse_chain_args() {
         --advice)                 ADVICE="$2"; shift 2 ;;
         --advice_sha256)          ADVICE_SHA256="$2"; shift 2 ;;
         --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
+        --workflow_parameter_rules) WORKFLOW_PARAMETER_RULES="$2"; shift 2 ;;
         --llm_config)             LLM_CONFIG="$2"; shift 2 ;;
         --required_runtime_profile_path) REQUIRED_RUNTIME_PROFILE_PATH="$2"; shift 2 ;;
         --required_runtime_profile) REQUIRED_RUNTIME_PROFILE="$2"; shift 2 ;;
@@ -586,6 +588,9 @@ build_app_args() {
     fi
     if [ -n "$PLAN_OVERRIDES" ]; then
         APP_ARGS+=(--plan_overrides "$PLAN_OVERRIDES")
+    fi
+    if [ -n "$WORKFLOW_PARAMETER_RULES" ]; then
+        APP_ARGS+=(--workflow_parameter_rules "$WORKFLOW_PARAMETER_RULES")
     fi
     if [ -n "$DATA_DIR" ]; then
         APP_ARGS+=(--data_dir "$DATA_DIR")

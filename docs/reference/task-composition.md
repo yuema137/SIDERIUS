@@ -203,6 +203,30 @@ Notes:
   `loss_config`, and a parameter rule targeting that subtree is refused.
   The independent epoch ceiling remains a safety authority: a rule that would
   raise `train_config.epochs` above it is refused rather than weakening it.
+- A workflow may add a second rule set through
+  `--workflow_parameter_rules '<json>'`, using the same shape. Task and
+  workflow rules are enforced together: the workflow may narrow a task rule
+  but cannot escape or overwrite it. Omission keeps the workflow
+  unconstrained. For example, a campaign can lock a task-supported window
+  size without changing the static task package:
+
+  ```bash
+  --workflow_parameter_rules \
+    '{"model_config.segmentation_size":{"exact":40000}}'
+  ```
+
+  A different workflow can leave the value agent-controlled while enforcing
+  an admissible set:
+
+  ```bash
+  --workflow_parameter_rules \
+    '{"model_config.segmentation_size":{"allowed":[20000,40000,50000]}}'
+  ```
+
+  The validated canonical rule set is part of the workspace run identity, so
+  changing it requires a fresh workspace. This is deterministic enforcement,
+  not prompt advice: `exact` controls the executed value; `range`, `allowed`,
+  and `predicate` reject a non-conforming proposal.
 - `dynamic_observables` / `static_observables` are the two **observable**
   families (`R-OBS-1`, `D-BUD-16`). The split is a **type**, not a naming
   convention: an implementation subclasses either

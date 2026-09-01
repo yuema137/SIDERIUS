@@ -46,6 +46,9 @@
 #                        binds the task's data path, dataset profile, metric,
 #                        declared secondaries, Health family and task config for
 #                        the whole run. Shipped example: configs/task_composition/quickstart.yaml
+#   --workflow_parameter_rules JSON
+#                        optional workflow-owned exact/range/allowed/predicate
+#                        constraints using the task manifest's ParameterRules shape
 #
 # Usage examples:
 #

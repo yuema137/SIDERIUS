@@ -671,4 +671,6 @@ class TestCensusDLegacyLockKeySet:
             "advice_sha256",
             # F-SCANF-1 — the declared delta documented above.
             "formal_eval_portion",
+            # Workflow rules determine the executed plan and are compared.
+            "workflow_parameter_rules",
         )
