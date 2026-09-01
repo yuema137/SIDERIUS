@@ -116,7 +116,6 @@
   "tests/unit/ml_models/test_step12_pr12d_dp_plugin_binding.py": 2.231,
   "tests/unit/nodes/test_node_public_boundary.py": 1.572,
   "tests/unit/scripts/test_c12b_legacy_fidelity.py": 2.503,
-  "tests/unit/scripts/test_c2_prephase_validation.py": 1.479,
   "tests/unit/scripts/test_chain_consistency.py": 1.333,
   "tests/unit/scripts/test_chain_wrapper_run_name.py": 0.534,
   "tests/unit/scripts/test_inspection_cost_study.py": 3.466,

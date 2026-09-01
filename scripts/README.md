@@ -34,7 +34,7 @@ The durable operator surface:
 | `bg_gpu_sampler.sh` | background GPU utilisation sampler |
 
 Everything else — `fcnet_*`, `investigate_*`, `score_tidmad_official_*`,
-`phase2_diagnostic_no_dynamic_search.py`, `c2_prephase_validation.py`,
+`phase2_diagnostic_no_dynamic_search.py`,
 `c12_stamp_failure_class.py`, `checkpoint_*`,
 `step12_pr12a_gate2_evaluate.py`,
 `render_*`,

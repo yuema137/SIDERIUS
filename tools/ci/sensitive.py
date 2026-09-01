@@ -51,12 +51,6 @@ SENSITIVE_FILES: MappingProxyType[str, str] = MappingProxyType(
         "tests/unit/agent/evaluate_vram_skill/test_isolated_preflight.py": (
             "`elapsed < 45.0` (:120), asserting the memory bound fires well before the deadline."
         ),
-        "tests/unit/core/test_formal_stability_controller.py": (
-            "deadline-poll loop (:412-416): waits up to 5.0 s for a watcher "
-            'thread, then asserts "the watcher thread never polled". Under '
-            "saturation that message is a false accusation. The only "
-            "deadline-loop shape of its kind in the suite."
-        ),
         "tests/unit/core/test_gpu_measurement_runner.py": (
             "ORDERING race, not an upper bound — `test_the_watch_is_open_before_"
             "the_first_phase_begins` asserts `run.samples[0].at <= "

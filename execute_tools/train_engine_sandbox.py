@@ -450,42 +450,6 @@ def build_sequential_indices(
 # ==========================================
 
 
-def _stability_log():
-    """The validation-only step log, or ``None`` in every production run.
-
-    V20 PR C2. Returns ``None`` unless ``SIDERIUS_C2_FORMAL_STABILITY``
-    describes a channel — no file is opened, no event is written and no
-    stop signal is read, so the training loop is byte-for-byte the loop it
-    was. There is deliberately no CLI flag and no config key: the absence
-    of the log is the disabled state, which cannot be half-configured.
-
-    A malformed channel is reported rather than ignored. Silently dropping
-    it would run a Gate with no stability evidence and no warning, at the
-    full cost of the run.
-    """
-    from core.runtime_control.formal_stability import StepEventLog, channel_from_environment
-
-    channel = channel_from_environment()
-    return None if channel is None else StepEventLog(channel)
-
-
-def _synchronize_for_stability(device) -> bool:
-    """Complete outstanding CUDA work so the event follows the step.
-
-    CUDA is asynchronous: without this the event can be written while the
-    step's kernels are still queued, and the parent would credit memory
-    readings to work that had not finished — exactly the correlation error
-    the stability rule depends on not making.
-    """
-    try:
-        if getattr(device, "type", None) == "cuda" or str(device).startswith("cuda"):
-            torch.cuda.synchronize()
-            return True
-    except Exception:  # pragma: no cover - driver-shape guard
-        return False
-    return False
-
-
 def build_training_optimizer(model, train_cfg: TrainConfig):
     """The optimizer production trains with, in one place.
 
@@ -986,23 +950,8 @@ def run_experiment(
     # Optimizer Setup
     optimizer = build_training_optimizer(model, train_cfg)
 
-    # V20 PR C2, validation only. `None` -- and wholly inert -- unless
-    # SIDERIUS_C2_FORMAL_STABILITY names a channel, which production never
-    # does. There is no CLI flag and no config key: the absence of the log
-    # IS the disabled state.
-    #
-    # It exists so a Gate's formal arm stops when the driver-visible peak
-    # has demonstrably settled ON THE MACHINE UNDER TEST, instead of after
-    # a step count copied from another card. The trainer only emits
-    # evidence and obeys a signal -- it cannot see its own process tree's
-    # driver-visible memory, so the parent owns the decision.
-    stability_log = _stability_log()
-    stability_stopped = False
-
     history = []
     for ep in range(train_cfg.epochs):
-        if stability_stopped:
-            break
         model.train()
         batch_losses = []
         for input_batch, target_batch in tqdm(data_loader, desc=f"Epoch {ep}", file=sys.stdout):
@@ -1034,27 +983,6 @@ def run_experiment(
             loss.backward()
             optimizer.step()
             batch_losses.append(loss.item())
-
-            # V20 PR C2, validation only. Emitted HERE and nowhere else:
-            # forward, backward and the optimizer update have all returned,
-            # so this is a COMPLETED step. An event written earlier would
-            # let the stable-step count advance on work that had not
-            # happened -- the one way this rule could certify a moving peak
-            # as settled.
-            #
-            # The stop is checked only BETWEEN steps, so the trainer never
-            # halts part-way through an update and never leaves the model in
-            # a state no production run could produce.
-            if stability_log is not None and stability_log.observe_completed_step(
-                synchronized=_synchronize_for_stability(device)
-            ):
-                stability_stopped = True
-                print(
-                    f"[stability] parent signalled stop after "
-                    f"{stability_log.completed_steps} completed steps",
-                    flush=True,
-                )
-                break
 
         refuse_zero_optimizer_steps(
             len(batch_losses),
@@ -1304,21 +1232,6 @@ def run_experiment_streaming(
 
     # Deterministic base seed for reproducible per-epoch subsampling
     base_seed = train_base_seed if train_base_seed is not None else hash(exp_id) % (2**31)
-
-    # V20 PR C2, validation only. `None` -- and wholly inert -- unless
-    # SIDERIUS_C2_FORMAL_STABILITY names a channel, which production never
-    # does. The parent watches the driver-visible peak and signals; this
-    # loop only emits completed steps and obeys, because it cannot see its
-    # own process tree's driver memory (D-C2-13).
-    #
-    # THIS is the path every Gate arm takes. The first wiring landed in
-    # `run_experiment` alone -- the legacy single-file mode reached only
-    # when `sample_set is None` -- so no formal arm would have emitted a
-    # single event and every phase would have run to its backstop with the
-    # stop rule silently inert. The structural test meant to catch that
-    # walked the whole module instead of this function, so it passed.
-    stability_log = _stability_log()
-    stability_stopped = False
 
     # VALIDATION POSTURE, None in every production campaign. The Gate's
     # workload envelope, applied where the epoch is BUILT: the dataset
@@ -1668,30 +1581,6 @@ def run_experiment_streaming(
                     if rejected_mid_epoch:
                         break
 
-            # V20 PR C2, validation only. Emitted HERE and nowhere else:
-            # forward, backward and the optimizer update have all returned,
-            # so this is a COMPLETED step. An event written earlier would
-            # let the stable-step count advance on work that had not
-            # happened -- the one way this rule could certify a moving peak
-            # as settled.
-            #
-            # The stop is read only BETWEEN steps, so the trainer never
-            # halts part-way through an update and never leaves the model in
-            # a state no production run could produce. The break falls
-            # through to the normal end-of-epoch path, so the checkpoint and
-            # the summary are written exactly as an epoch that ran to its
-            # end -- the formal arm's inference phase needs that checkpoint.
-            if stability_log is not None and stability_log.observe_completed_step(
-                synchronized=_synchronize_for_stability(device)
-            ):
-                stability_stopped = True
-                print(
-                    f"[stability] parent signalled stop after "
-                    f"{stability_log.completed_steps} completed steps",
-                    flush=True,
-                )
-                break
-
         if verifier is not None:
             # Epoch-0 loader exhausted before a verdict: resolve from the
             # evidence collected. With a single epoch the training work is
@@ -1760,13 +1649,6 @@ def run_experiment_streaming(
             if validation_verifier is not None and validation_verifier.is_terminal:
                 _finish_validation_verification()
             print(f"Epoch {ep} | Validation Loss: {r3:.6f} ({n_val} ML segments)")
-
-        # The stop ends the PHASE, not just the epoch. Continuing into
-        # epoch 1 would keep executing after the parent concluded the peak
-        # had settled, and the arm's measured time would include work the
-        # decision had already excluded.
-        if stability_stopped:
-            break
 
     if runtime_session is not None and t_train_start is not None:
         # The training ACTUAL spans admission → last optimizer step. It
