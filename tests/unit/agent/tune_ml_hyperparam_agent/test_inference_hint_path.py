@@ -27,8 +27,14 @@ import pytest
 
 from agent.skills.evaluate_time_skill import wrapper as ts
 from agent.skills.inference_skill import estimator as _inf_est
-from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.two_family_profile import make_two_family_profile
+
+PHYSICAL_SEGMENT_LENGTH = 1_600_000
+PROFILE = make_two_family_profile(
+    num_files=20,
+    psd_segment_length=PHYSICAL_SEGMENT_LENGTH,
+    segments_per_file=20,
+)
 
 
 class FakeSandbox:
@@ -46,7 +52,7 @@ def _base_kwargs(**overrides) -> dict:
         "time_budget_minutes": 60.0,
         # Step 05b: the run-bound topology is a REQUIRED kwarg — the skill
         # no longer resolves one of its own.
-        "dataset_profile": TIDMAD_PROFILE,
+        "dataset_profile": PROFILE,
     }
     kw.update(overrides)
     return kw
@@ -154,7 +160,7 @@ class TestHintBranch:
             inference_per_psd_seg_ms_hint=hint,
         )
         inf_batch = _inf_est.inference_batch_for("rnn")
-        ml_per_psd = max(PSD_SEGMENT_LENGTH // seg_size, 1)
+        ml_per_psd = max(PHYSICAL_SEGMENT_LENGTH // seg_size, 1)
         expected = hint * inf_batch / ml_per_psd
         assert capture["inference_ms_per_step"] == pytest.approx(expected)
         # Sanity: the inverted formula would be enormously larger.
