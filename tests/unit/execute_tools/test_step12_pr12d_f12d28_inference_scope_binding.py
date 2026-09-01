@@ -4,13 +4,13 @@ path but never BOUND it, so it deserialized the scope with the wrong task.
 Design: ``docs/design/generic_framework_upgrade/step_12_external_extensibility_graduation/
 pr_12d_contrast_subprocess_closure.md`` §Q D-12d-53.
 
-**The defect, from a REAL composed Pets run:**
+**The defect, first observed in a real composed external-task run:**
 
 ```text
 File "execute_tools/inference_single.py", line 743, in main
 File "execute_tools/scope_artifact.py", line 249, in load_transported_scope
 File "execute_tools/tidmad_data_path.py", line 467, in deserialize_scope
-ValueError: scope payload declares kind 'pets_scope_v1', not 'tidmad_scope_v1'
+ValueError: scope payload declares a kind owned by another task
   — the binding and the scope object must come from the same task.
 ```
 
@@ -37,31 +37,24 @@ import pathlib
 import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-PETS_MANIFEST = str(REPO_ROOT / "configs" / "task_composition" / "pets.yaml")
-
-PETS_DATA = "/home/klz/Data/OXFORD_IIIT_PET/images"
+QUICKSTART_MANIFEST = str(REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml")
 
 
 @pytest.fixture
-def pets_scope_artifact(tmp_path):
-    """A REAL transported Pets scope, serialized by production's own codec.
+def task_scope_artifact(tmp_path):
+    """A transported synthetic scope, serialized by production's own codec.
 
-    An earlier draft hand-wrote `{"kind": "pets_scope_v1", "rows": [1,2,3]}`
-    and the real `PetsItem` validator rejected it — correctly. Guessing the
-    payload shape would have tested a fiction; building it through
+    An earlier draft hand-wrote an assumed external scope payload and the
+    task validator rejected it — correctly. Guessing the payload shape would
+    have tested a fiction; building it through
     `build_training_scope` + `serialize_scope` means these bytes are exactly
     what the parent writes and the child must read.
     """
-    import os
-
-    if not os.path.isdir(PETS_DATA):
-        pytest.skip(f"Pets data root not present on this machine: {PETS_DATA}")
-
     from execute_tools.task_data_path import ScopeBuildRequest, active_task_data_path
     from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
-    composition = compose_run_task_bindings(PETS_MANIFEST)
-    with bind_run_task_composition(composition, physical_data_root=PETS_DATA):
+    composition = compose_run_task_bindings(QUICKSTART_MANIFEST)
+    with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
         tdp = active_task_data_path()
         scope = tdp.build_training_scope(
             ScopeBuildRequest(
@@ -75,39 +68,39 @@ def pets_scope_artifact(tmp_path):
     return str(path), hashlib.sha256(raw).hexdigest()
 
 
-def _pets_data_path():
+def _task_data_path():
     from workflows.task_composition import resolve_child_task_data_path
 
     return resolve_child_task_data_path(
-        "oxford_iiit_pet", identity=None, manifest_path=PETS_MANIFEST
+        "quickstart_tabular", identity=None, manifest_path=QUICKSTART_MANIFEST
     )
 
 
 class TestTheScopeDeserializesUnderTheTaskThatWroteIt:
-    def test_binding_makes_the_pets_scope_load(self, pets_scope_artifact):
+    def test_binding_makes_the_task_scope_load(self, task_scope_artifact):
         """THE regression: with the task bound, the composed payload is
         decoded by the implementation that wrote it."""
         from execute_tools.scope_artifact import load_transported_scope
         from execute_tools.task_data_path import bind_task_data_path
 
-        ref, digest = pets_scope_artifact
-        with bind_task_data_path(_pets_data_path()):
+        ref, digest = task_scope_artifact
+        with bind_task_data_path(_task_data_path()):
             scope = load_transported_scope(ref, digest, leg="training")
-        assert type(scope).__name__ == "PetsScope"
+        assert type(scope).__name__ == "QuickstartScope"
 
-    def test_without_a_binding_it_does_NOT_silently_succeed(self, pets_scope_artifact):
+    def test_without_a_binding_it_does_NOT_silently_succeed(self, task_scope_artifact):
         """The other half of the contract: an unbound load must REFUSE, never
         decode a composed payload under a foreign task. If this ever passes
-        silently, the pairing guard has been removed and a Pets run could be
-        scored against TIDMAD's scope semantics."""
+        silently, the pairing guard has been removed and an external run could
+        execute under another task's scope semantics."""
         from execute_tools.scope_artifact import load_transported_scope
         from execute_tools.task_data_path import TaskDataPathResolutionError
 
-        ref, digest = pets_scope_artifact
+        ref, digest = task_scope_artifact
         # BOTH named refusals are correct, and which one fires depends on
-        # whether the legacy TIDMAD implementation happens to be registered in
-        # this process: registered -> TIDMAD's `deserialize_scope` rejects the
-        # foreign `kind` (ValueError, what the real child hit); not registered
+        # whether a legacy compatibility implementation happens to be registered
+        # in this process: registered -> its `deserialize_scope` rejects the
+        # foreign `kind` (ValueError); not registered
         # -> regime-A resolution refuses first. Naming both is precise;
         # `Exception` would also pass on an ImportError or a typo.
         with pytest.raises((ValueError, TaskDataPathResolutionError)):
@@ -134,7 +127,7 @@ class TestTheInferenceChildBindsBeforeDeserializing:
         )
 
     def test_an_uncomposed_run_takes_the_nullcontext(self):
-        """Boundary: a TIDMAD run has task_data_path_id None and must not
+        """Boundary: an uncomposed run has task_data_path_id None and must not
         acquire a binding it never had."""
         import inspect
 
