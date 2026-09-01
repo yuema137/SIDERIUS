@@ -33,7 +33,6 @@ from execute_tools.dataset_config import (
     DatasetProfile,
     ValueEncoding,
     load_dataset_profile,
-    resolve_dataset_profile,
     tidmad_topology,
 )
 
@@ -121,9 +120,7 @@ class TestConfigFileRoundTrip:
 
 
 class TestFailClosedVersusRegimeA:
-    """*"The flag is present but the file is broken"* must never fall back.
-    *"An old caller has never heard of the flag"* must not be broken.
-    """
+    """A supplied profile path is authoritative and always fails closed."""
 
     def test_a_missing_profile_path_fails_closed(self, tmp_path):
         with pytest.raises(ValueError) as exc:
@@ -154,12 +151,6 @@ class TestFailClosedVersusRegimeA:
             path.write_text(content)
         with pytest.raises(ValueError):
             load_dataset_profile(str(path))
-
-    def test_an_absent_flag_keeps_regime_a(self):
-        """No flag, no binding — the shipped profile, exactly as before the
-        transport existed."""
-        assert resolve_dataset_profile() is TIDMAD_PROFILE
-
 
 # ---------------------------------------------------------------------------
 # The child actually CONSUMES what crossed the boundary

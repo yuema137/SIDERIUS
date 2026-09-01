@@ -39,16 +39,15 @@ import pytest
 from pydantic import ValidationError
 
 from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
     ValueEncoding,
-    resolve_dataset_profile,
-    resolve_tidmad_topology,
     tidmad_topology,
 )
 from execute_tools.deliverable_spec import (
     DeliverableStorage,
     derive_tidmad_deliverable_spec,
 )
-from execute_tools.inference_single import _is_complete_trial_output, _persisted_storage
+from execute_tools.inference_single import _is_complete_trial_output
 from tests.unit.execute_tools.test_step05c_c0_deliverable_baseline import (
     INPUT_SAMPLES,
     TARGET_SAMPLES,
@@ -57,7 +56,7 @@ from tests.unit.execute_tools.test_step05c_c0_deliverable_baseline import (
 
 _INFERENCE_SOURCE = Path(__file__).resolve().parents[3] / "execute_tools" / "inference_single.py"
 
-TIDMAD_STORAGE = derive_tidmad_deliverable_spec(resolve_dataset_profile()).storage
+TIDMAD_STORAGE = derive_tidmad_deliverable_spec(TIDMAD_PROFILE).storage
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +87,7 @@ def test_the_full_encode_decode_round_trip_is_value_exact():
     """
     stored = np.asarray(INPUT_SAMPLES, dtype=np.int8)
 
-    decoded = stored.astype(np.int16) + resolve_tidmad_topology().encoding.value_offset
+    decoded = stored.astype(np.int16) + tidmad_topology(TIDMAD_PROFILE).encoding.value_offset
     re_encoded = (decoded - TIDMAD_STORAGE.value_offset).astype(TIDMAD_STORAGE.storage_dtype)
 
     assert re_encoded.tolist() == stored.tolist()
@@ -103,7 +102,7 @@ def test_the_offset_derives_from_the_profile_rather_than_matching_it():
     Under a contrast encoding the two must still be one value; two literals
     that merely agree under TIDMAD would diverge here.
     """
-    live = resolve_dataset_profile()
+    live = TIDMAD_PROFILE
     contrast = live.model_copy(
         update={
             "encoding": ValueEncoding(
@@ -151,11 +150,11 @@ def test_process_batch_subtracts_the_contract_offset():
 
     tidmad_args = SimpleNamespace(
         denoising_model="punet",
-        _deliverable_spec=derive_tidmad_deliverable_spec(resolve_dataset_profile()),
+        _deliverable_spec=derive_tidmad_deliverable_spec(TIDMAD_PROFILE),
     )
     contrast_args = SimpleNamespace(
         denoising_model="punet",
-        _deliverable_spec=derive_tidmad_deliverable_spec(resolve_dataset_profile()).model_copy(
+        _deliverable_spec=derive_tidmad_deliverable_spec(TIDMAD_PROFILE).model_copy(
             update={
                 "storage": DeliverableStorage(
                     input_channel_group="channel0001",
@@ -177,17 +176,6 @@ def test_process_batch_subtracts_the_contract_offset():
     # argmax picks class 200; TIDMAD returns it shifted back by 128.
     assert tidmad_denoised.tolist() == [72, 72, 72, 72]
     assert contrast_denoised.tolist() == [200, 200, 200, 200]
-
-
-def test_persisted_storage_defaults_when_no_spec_was_carried():
-    """A caller that never set ``args._deliverable_spec`` gets the shipped value.
-
-    Mirrors the ``_model_io`` two-case rule on this same boundary: absent keeps
-    Regime A. Without it, ``test_gpu_milestone_trace``'s direct
-    ``process_batch`` call — which builds its own ``SimpleNamespace`` — would
-    raise, and every legacy caller would too.
-    """
-    assert _persisted_storage(SimpleNamespace(denoising_model="punet")) == TIDMAD_STORAGE
 
 
 def test_the_reuse_check_reads_the_contract_channels_and_dtype(tmp_path):
