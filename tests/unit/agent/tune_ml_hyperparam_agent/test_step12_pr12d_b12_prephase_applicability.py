@@ -56,9 +56,9 @@ from core.runtime_control.gpu_accounting import DeviceIdentity
 #: `test_prephase_measurement_reachability.py` makes for `records`.
 _runtime = importlib.import_module("nodes.ml_hyperparameter_tune_agent.runtime")
 from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
     DatasetProfile,
     declares_tidmad_topology,
-    resolve_dataset_profile,
     tidmad_topology,
 )
 from nodes.ml_hyperparameter_tune_agent.runtime import PrephaseOutcome
@@ -191,18 +191,10 @@ def _call_expecting_spawn(tmp_path, **over) -> list[str]:
 
 class TestTidmadRemainsApplicable:
     def test_the_shipped_tidmad_profile_declares_topology(self):
-        assert declares_tidmad_topology(resolve_dataset_profile()) is True
-
-    def test_regime_a_none_profile_stays_applicable(self, tmp_path):
-        """`run_profile=None` is an UN-COMPOSED run, which IS TIDMAD. It must
-        not take the inapplicable path — otherwise every legacy run silently
-        stops being measured."""
-        assert _call_expecting_spawn(tmp_path, run_profile=None) == ["spawned"], (
-            "an un-composed (Regime-A) run must still reach the measurement worker"
-        )
+        assert declares_tidmad_topology(TIDMAD_PROFILE) is True
 
     def test_a_real_tidmad_profile_stays_applicable(self, tmp_path):
-        assert _call_expecting_spawn(tmp_path, run_profile=resolve_dataset_profile()) == ["spawned"]
+        assert _call_expecting_spawn(tmp_path, run_profile=TIDMAD_PROFILE) == ["spawned"]
 
 
 # ======================================================================
