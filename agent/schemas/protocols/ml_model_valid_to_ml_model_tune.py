@@ -29,6 +29,7 @@ from agent.schemas.hyperparam_tuning import (
     serialize_expert_advice,
 )
 from agent.schemas.ordering import OrderStrategy
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorOutput
@@ -133,6 +134,7 @@ def local_validated_model(
     baseline_isolation: bool = False,
     max_retries: int | None = None,
     plan_overrides: dict[str, Any] | None = None,
+    workflow_parameter_rules: ParameterRules | None = None,
     # --- Time-budget gate (evaluate_time_skill, Phase I two-budget split) ---
     trial_time_budget_minutes: float | None = None,
     formal_time_budget_minutes: float | None = None,
@@ -308,6 +310,7 @@ def local_validated_model(
         # field-mapping layer, so the projection crosses the edge here rather
         # than the tuner rediscovering it from the ambient environment.
         task_composition_ref=task_composition_ref,
+        workflow_parameter_rules=workflow_parameter_rules,
         # DS6b — None normalizes to the full scope here (not in the schema)
         # so the input always carries an explicit DataScope object.
         data_scope=data_scope if data_scope is not None else DataScope.default(),

@@ -25,6 +25,7 @@ Tests cover:
 import pytest
 
 from agent.schemas.hyperparam_tuning import ExpertAdvice, HyperparamTuningInput
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import (
     database_validated_model,
@@ -110,6 +111,21 @@ class TestLocalValidatedModel:
         assert "VRAM < 8 GB" in result.expert_advice.constraints
         assert result.storage.local.workspace == "/tmp/tune_test"
         assert result.storage.local.run_name == "r2"
+
+    def test_workflow_parameter_rules_cross_the_protocol_boundary(
+        self, validator_output, proposal_output, storage
+    ):
+        """Catches validated workflow rules being dropped before tuner planning."""
+        rules = ParameterRules.model_validate({"model_config.segmentation_size": {"exact": 40_000}})
+
+        result = local_validated_model(
+            validator_output,
+            proposal_output,
+            storage,
+            workflow_parameter_rules=rules,
+        )
+
+        assert result.workflow_parameter_rules == rules
 
     @pytest.mark.parametrize(
         "attr, expected_default",

@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from dataclasses import fields as dataclass_fields
 
 from agent.schemas.hyperparam_tuning import HealthGateMode, ResultAuthority
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import OutputTypeName
 from core.runtime_control.admission import AdmissionEnforcement
 from workflows.strategy_modes import ExplorationMode, FormalRoundStrategy, StrategyMode
@@ -114,6 +115,7 @@ class WorkflowLaunchConfig:
     # grants NO extension (the schema default's safety semantics).
     bypass_formal_time_budget_minutes: float | None = None
     plan_overrides: dict | None = None
+    workflow_parameter_rules: ParameterRules | None = None
     trial_time_budget_minutes: float | None = None
     formal_time_budget_minutes: float | None = None
     gpu_admission_measurement_source: str | None = None

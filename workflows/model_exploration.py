@@ -3177,6 +3177,7 @@ def run_workflow(
             # the edge on the INPUT, beside every other run-scoped decision
             # this protocol already maps.
             task_composition_ref=build_task_composition_ref(bindings.task_composition),
+            workflow_parameter_rules=launch.workflow_parameter_rules,
             data_scope=bindings.data_scope,
             health_gate_enabled=bindings.health_gate_enabled,
             health_gate_files=(
