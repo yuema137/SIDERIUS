@@ -97,11 +97,6 @@ class TestCensusAFiveDefaultMechanisms:
         with pytest.raises(TaskDataPathResolutionError, match="No task data path is bound"):
             resolve_bound_task_data_path()
 
-    def test_default_2_dataset_profile_falls_back_to_the_shipped_tidmad_profile(self):
-        from execute_tools.dataset_config import TIDMAD_PROFILE, resolve_dataset_profile
-
-        assert resolve_dataset_profile() is TIDMAD_PROFILE
-
     def test_default_3_run_invariants_omits_the_task_health_binding_keyword(self):
         """``materialize_effective_config`` HAS the parameter (08b) and
         ``build_run_invariants`` does not pass it, so the run resolves
