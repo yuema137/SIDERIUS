@@ -28,8 +28,14 @@ from typing import ClassVar
 import pytest
 
 import nodes.ml_hyperparameter_tune_agent as tuner
-from execute_tools.dataset_config import TIDMAD_PROFILE
 from tests.helpers.tuner_source import tuner_node_source
+from tests.helpers.two_family_profile import make_two_family_profile
+
+_PROFILE = make_two_family_profile(
+    num_files=2,
+    psd_segment_length=1_600_000,
+    segments_per_file=20,
+)
 
 
 class TestResolvedEpochs:
@@ -205,7 +211,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
             {"batch_size": 1},
             1.0,
             model_type="punet",
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         ten = tuner._resolve_guardrail_steps(
             self._SAMPLE,
@@ -213,7 +219,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
             {"batch_size": 1, "epochs": 10},
             1.0,
             model_type="punet",
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         one = tuner._resolve_guardrail_steps(
             self._SAMPLE,
@@ -221,7 +227,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
             {"batch_size": 1, "epochs": 1},
             1.0,
             model_type="punet",
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert absent == ten
         assert absent == 10 * one
@@ -234,7 +240,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
             {"batch_size": 1, "epochs": 1},
             1.0,
             model_type="punet",
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         declared = tuner._resolve_guardrail_steps(
             self._SAMPLE,
@@ -242,7 +248,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
             {"batch_size": 1, "epochs": 1},
             1.0,
             model_type="punet",
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         old_literal = tuner._resolve_guardrail_steps(
             self._SAMPLE,
@@ -250,7 +256,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
             {"batch_size": 1, "epochs": 1},
             1.0,
             model_type="punet",
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert absent == declared
         assert absent != old_literal
@@ -264,7 +270,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
                 {"batch_size": 1},
                 1.0,
                 model_type="never_registered_xyz",
-                dataset_profile=TIDMAD_PROFILE,
+                dataset_profile=_PROFILE,
             )
             is not None
         )
@@ -292,7 +298,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
                     bad_train,
                     1.0,
                     model_type="punet",
-                    dataset_profile=TIDMAD_PROFILE,
+                    dataset_profile=_PROFILE,
                 )
                 is None
             )
@@ -300,7 +306,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
     def test_a_missing_sample_set_still_returns_None(self):
         assert (
             tuner._resolve_guardrail_steps(
-                None, {}, {}, 1.0, model_type="punet", dataset_profile=TIDMAD_PROFILE
+                None, {}, {}, 1.0, model_type="punet", dataset_profile=_PROFILE
             )
             is None
         )
