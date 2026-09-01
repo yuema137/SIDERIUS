@@ -7,9 +7,8 @@ select against the ambient one. The tuner now resolves the run's profile
 ONCE and supplies it to both construction sites.
 
 The question this module answers is *"is the explicit hop LIVE?"* — not
-*"does a different topology work?"*, which is B4's question. Using a
-non-TIDMAD contrast here would smuggle Stage B into Stage A, so every
-profile below is TIDMAD-**equivalent**.
+*"does a different topology work?"*, which is B4's question. The explicit
+and ambient routes therefore use the same neutral synthetic profile.
 
 The proof technique is the one the design asks for: **ambient resolution is
 made to FAIL if consulted.** A merely decorative parameter would fall
@@ -29,18 +28,18 @@ import pytest
 
 from execute_tools import sample_set_builder
 from execute_tools.dataset_config import (
-    NUM_FILES,
-    TIDMAD_PROFILE,
     DataScope,
     DatasetProfile,
     bind_dataset_profile,
-    tidmad_topology,
 )
 from execute_tools.sample_set_builder import build_sample_set
+from tests.helpers.two_family_profile import make_two_family_profile
 
-# Equal to TIDMAD but a DISTINCT object, so a test cannot pass merely
-# because the builder happened to reach the same singleton by another route.
-TIDMAD_EQUIVALENT = TIDMAD_PROFILE.model_copy(deep=True)
+# A neutral profile with enough partitions for every selection shape below.
+# The deep copy is distinct, so singleton identity cannot make either route pass.
+EXPLICIT_PROFILE = make_two_family_profile(
+    num_files=12, psd_segment_length=1_000, segments_per_file=20
+).model_copy(deep=True)
 
 SELECTIONS = [
     {"is_trial": True, "trial_strategy": "snapshot", "trial_portion": 0.05, "seed": 42},
@@ -87,7 +86,7 @@ class TestExplicitProfileIsLive:
     def test_selection_succeeds_with_ambient_disabled(self, kwargs):
         """The sharpest available proof the parameter is not decorative."""
         with _ambient_disabled() as ambient:
-            result = build_sample_set(profile=TIDMAD_EQUIVALENT, **kwargs)
+            result = build_sample_set(profile=EXPLICIT_PROFILE, **kwargs)
         assert result, "explicit profile produced an empty SampleSet"
         ambient.assert_not_called()
 
@@ -100,16 +99,16 @@ class TestExplicitProfileIsLive:
         routes*, which no digest can express because only one route existed
         when they were captured.
         """
-        with bind_dataset_profile(TIDMAD_EQUIVALENT):
+        with bind_dataset_profile(EXPLICIT_PROFILE):
             ambient_result = build_sample_set(**kwargs)
         with _ambient_disabled():
-            explicit_result = build_sample_set(profile=TIDMAD_EQUIVALENT, **kwargs)
+            explicit_result = build_sample_set(profile=EXPLICIT_PROFILE, **kwargs)
         assert explicit_result == ambient_result
 
     def test_absent_argument_delegates_to_the_binding_authority(self):
         """A missing argument asks the one binding authority, never a local default."""
         with patch.object(
-            sample_set_builder, "resolve_dataset_profile", return_value=TIDMAD_EQUIVALENT
+            sample_set_builder, "resolve_dataset_profile", return_value=EXPLICIT_PROFILE
         ) as ambient:
             result = build_sample_set(is_trial=True, trial_portion=0.05, seed=42)
         assert result
@@ -129,7 +128,7 @@ class TestProfileIsConsumedNotRederived:
         # Built through the WIRE form: since B2 the topology is an opaque
         # payload, so mutating a decoded VIEW would be discarded — the
         # variant has to be declared, not patched onto a temporary.
-        narrow_wire = TIDMAD_PROFILE.to_wire()
+        narrow_wire = EXPLICIT_PROFILE.to_wire()
         narrow_wire["dataset"]["segments_per_file"] = 7
         narrow = DatasetProfile.model_validate(narrow_wire)
         with _ambient_disabled():
@@ -139,7 +138,7 @@ class TestProfileIsConsumedNotRederived:
         )
 
     def test_builder_declares_no_topology_constant(self):
-        """No TIDMAD constant may reappear in the selection module.
+        """No physical-topology constant may reappear in the selection module.
 
         `ANCHOR_FILES` is deliberately exempt — it is 02c's group
         declaration, not 02b's to migrate.
