@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -156,6 +156,14 @@ class RuntimeControlPolicy(BaseModel):
         default=None,
         gt=0.0,
         description="Wall-clock budget for the attempt. None → record-only (no enforcement).",
+    )
+    time_admission_source: Literal["forecast", "measured"] = Field(
+        default="measured",
+        description=(
+            "The single authority selected for wall-time admission. This is "
+            "attempt provenance; enforcement is represented by "
+            "operator_budget_seconds."
+        ),
     )
     safety_factor: float = Field(
         default=1.0,

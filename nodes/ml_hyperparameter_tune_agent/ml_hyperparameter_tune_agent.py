@@ -567,6 +567,8 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
         # F-SCANF-1 — the formal round's evaluation FRACTION, CANONICAL, so
         # it is threaded explicitly here rather than read ambiently.
         formal_eval_portion=agent_input.formal_eval_portion,
+        trial_time_admission_source=agent_input.trial_time_admission_source,
+        formal_time_admission_source=agent_input.formal_time_admission_source,
     )
 
 

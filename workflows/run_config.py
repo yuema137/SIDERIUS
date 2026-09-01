@@ -46,7 +46,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from dataclasses import fields as dataclass_fields
 
-from agent.schemas.hyperparam_tuning import HealthGateMode, ResultAuthority
+from agent.schemas.hyperparam_tuning import (
+    HealthGateMode,
+    ResultAuthority,
+    TimeAdmissionSource,
+)
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import OutputTypeName
 from core.runtime_control.admission import AdmissionEnforcement
@@ -118,6 +122,8 @@ class WorkflowLaunchConfig:
     workflow_parameter_rules: ParameterRules | None = None
     trial_time_budget_minutes: float | None = None
     formal_time_budget_minutes: float | None = None
+    trial_time_admission_source: TimeAdmissionSource = "measured"
+    formal_time_admission_source: TimeAdmissionSource = "measured"
     gpu_admission_measurement_source: str | None = None
     gpu_admission_enforcement: AdmissionEnforcement = "observe_only"
     gpu_pair_ceiling_gib: float | None = None

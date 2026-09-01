@@ -152,6 +152,13 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     "vram_probe_step_timeout_seconds": 180.0,
     "vram_preflight_total_timeout_seconds": 900.0,
     "vram_preflight_host_memory_limit_gb": None,
+    # Unified workflow parameter rules (2026-09-01). The validated rules are
+    # transit-only here; the planner owns their semantics and run identity.
+    "workflow_parameter_rules": None,
+    # One admission authority per candidate role. These fields are pure
+    # workflow-to-tuner transport; the runtime policy owns enforcement.
+    "trial_time_admission_source": "measured",
+    "formal_time_admission_source": "measured",
 }
 
 

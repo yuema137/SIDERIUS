@@ -246,6 +246,27 @@ class TestLocalValidatedModel:
         omitted = local_validated_model(validator_output, proposal_output, storage)
         assert omitted.bypass_formal_time_budget_minutes is None
 
+    def test_trial_and_formal_time_authorities_do_not_collapse_in_protocol(
+        self,
+        validator_output,
+        proposal_output,
+        storage,
+    ):
+        """The protocol must preserve two independent role decisions.
+
+        This fails if a single shared field or a dropped kwarg makes Trial's
+        forecast selection overwrite Formal's measured selection.
+        """
+        result = local_validated_model(
+            validator_output,
+            proposal_output,
+            storage,
+            trial_time_admission_source="forecast",
+            formal_time_admission_source="measured",
+        )
+        assert result.trial_time_admission_source == "forecast"
+        assert result.formal_time_admission_source == "measured"
+
     def test_trial_mode_snapshot_kwargs_fan_out(
         self,
         validator_output,

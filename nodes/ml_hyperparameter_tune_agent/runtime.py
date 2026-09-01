@@ -644,6 +644,27 @@ def _run_time_preflight(
     )
 
 
+def apply_forecast_time_authority(time_check: dict) -> None:
+    """Make the completed forecast the attempt's sole admission decision.
+
+    ``evaluate_time_skill`` also reports the shared evidence-policy verdict,
+    which deliberately treats static estimates as advisory.  A workflow that
+    explicitly selects forecast admission has made a different trade-off: it
+    accepts that rough estimate as authoritative so it can avoid executing-
+    device measurement.  The raw budget comparison is already computed once
+    by the skill as ``over_effective_budget``; this boundary only selects that
+    existing result and never recomputes estimator arithmetic.
+    """
+    breakdown = time_check.get("breakdown")
+    over_budget = breakdown.get("over_effective_budget") if isinstance(breakdown, dict) else None
+    if not isinstance(over_budget, bool):
+        raise RuntimeEvidenceChannelError(
+            "forecast wall-time admission did not produce a boolean over_effective_budget decision"
+        )
+    time_check["feasible"] = not over_budget
+    breakdown["selected_admission_authority"] = "forecast"
+
+
 def _resolve_time_check_probe_request(
     time_check: dict,
     *,
@@ -1237,12 +1258,19 @@ def _build_admission_policy(agent_input, *, is_trial: bool, device_identity: Any
 
 
 def _build_runtime_policy(
-    agent_input, *, chosen_time_budget: float | None, is_trial: bool, base_dir: str
+    agent_input,
+    *,
+    chosen_time_budget: float | None,
+    admission_source: str = "measured",
+    is_trial: bool,
+    base_dir: str,
 ) -> dict:
     """Assemble the attempt's RuntimeControlPolicy dict (RT2-G/RT6).
 
-    Formal rounds enforce the operator budget; trial rounds run
-    record-only (None budget). Operator-visible policy values —
+    ``measured`` rounds enforce the operator budget from executing-device
+    evidence; ``forecast`` rounds keep in-process verification record-only so
+    the advance forecast remains the single admission authority. Trial and
+    Formal select this posture independently. Operator-visible policy values —
     safety factor and watchdog enable/floor — come from the input
     schema (Gate 2 wiring, 2026-07-24); watchdog grace/poll keep
     their WatchdogConfig schema defaults (10 s / 1 s), which the
@@ -1268,8 +1296,11 @@ def _build_runtime_policy(
     )
     return {
         "operator_budget_seconds": (
-            chosen_time_budget * 60.0 if (not is_trial and chosen_time_budget is not None) else None
+            chosen_time_budget * 60.0
+            if admission_source == "measured" and chosen_time_budget is not None
+            else None
         ),
+        "time_admission_source": admission_source,
         # VALIDATION POSTURE, None in every campaign. The Gate workload
         # envelope: the trainer builds a smaller epoch, so the bound is
         # spent before execution rather than enforced by killing a run.

@@ -291,16 +291,18 @@ def test_an_ordinary_run_ships_neither_bound(tmp_path):
     assert validated.watchdog.max_phase_seconds is None
 
 
-def test_a_trial_round_still_ships_no_operator_budget(tmp_path):
-    """Why the fuse had to be a WATCHDOG field.
+def test_forecast_trial_keeps_measured_runtime_record_only(tmp_path):
+    """Forecast admission must not gain a second measured refusal authority.
 
-    On a trial round the operator budget is None, so every remaining
-    deadline candidate is forecast-derived — there is no operator-owned
-    wall clock to lean on. Routing the fuse through the budget instead
-    would also have fed ADMISSION, which rejects rather than bounds.
+    The selected advance forecast owns admission. The in-process verifier may
+    still record evidence, but its operator budget must remain absent.
     """
     policy = _build_runtime_policy(
-        _input(tmp_path), chosen_time_budget=5.0, is_trial=True, base_dir=str(tmp_path)
+        _input(tmp_path),
+        chosen_time_budget=5.0,
+        admission_source="forecast",
+        is_trial=True,
+        base_dir=str(tmp_path),
     )
 
     assert policy["operator_budget_seconds"] is None

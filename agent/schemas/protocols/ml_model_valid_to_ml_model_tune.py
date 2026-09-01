@@ -26,6 +26,7 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
     ResultAuthority,
     TaskCompositionRef,
+    TimeAdmissionSource,
     serialize_expert_advice,
 )
 from agent.schemas.ordering import OrderStrategy
@@ -138,6 +139,8 @@ def local_validated_model(
     # --- Time-budget gate (evaluate_time_skill, Phase I two-budget split) ---
     trial_time_budget_minutes: float | None = None,
     formal_time_budget_minutes: float | None = None,
+    trial_time_admission_source: TimeAdmissionSource = "measured",
+    formal_time_admission_source: TimeAdmissionSource = "measured",
     data_dir: str | None = None,
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K two-budget split) ---
     gpu_admission_measurement_source: str | None = None,
@@ -364,6 +367,8 @@ def local_validated_model(
         plan_overrides=plan_overrides or {},
         trial_time_budget_minutes=trial_time_budget_minutes,
         formal_time_budget_minutes=formal_time_budget_minutes,
+        trial_time_admission_source=trial_time_admission_source,
+        formal_time_admission_source=formal_time_admission_source,
         data_dir=data_dir,
         gpu_admission_measurement_source=gpu_admission_measurement_source,
         gpu_admission_enforcement=gpu_admission_enforcement,

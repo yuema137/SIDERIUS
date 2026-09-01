@@ -1114,3 +1114,48 @@ Every migration PR or operational step governed by this design must update this 
 - any amendment to the migration plan.
 
 Completed checkboxes without a commit, PR, or reproducible evidence reference are planning statements, not completion evidence.
+
+## 14. 2026-09-01 wall-time authority and Gold Stage-3 audit amendment
+
+The operator selected one mutually exclusive wall-time admission authority per
+candidate role. Trial and Formal independently choose `measured` or `forecast`;
+both default to `measured`. The selected source is the only admission authority:
+`measured` skips advance forecast admission, while `forecast` accepts the
+forecast's existing budget comparison and keeps executing-device verification
+record-only. An unavailable selected source refuses rather than falling back.
+The runtime watchdog remains an independent last-resort safety mechanism.
+
+Implementation is in progress on `refactor/retire-real-task-assets`. The first
+focused carrier, policy, reachability, and adjacent regression cohort passes 108
+tests. The external launchers for TIDMAD, Pets, DAVIS, Cancer, and Gold now
+declare `measured` explicitly, pending the committed framework revision and
+exact dependency-pin update.
+
+A read-only campaign audit against SIDERIUS `571202ed` and `siderius-exp`
+`8eabcc0` established two current Gold launch defects and one partially stale
+finding:
+
+- `--data_dir` is required by framework startup and Gold preflight but is not a
+  first-class Gold launcher argument. It must become required and be forwarded
+  explicitly; the stale `_chain_common.sh` comment describing a removed
+  machine-local TIDMAD fallback must also be corrected.
+- Stage 2 already overrides `formal_eval_portion` to `1.0`, so the audit's claim
+  that Strict Best receives 20-segment deliverables is superseded.
+- Stage-1 Formal remains intentionally bounded at `formal_eval_portion=0.1`.
+  Composed Best nevertheless requests all 200 segments from those 20-segment
+  deliverables, so the current Stage-3 path is invalid.
+
+The operator approved the Stage-3 correction: Stage 1 remains a bounded search
+and its treatment does not change. Stage 3 must load each selected Stage-1
+winner checkpoint, execute the proven task-owned inference path over the full
+200 segments per file, verify full-scope deliverable completeness and identity,
+and only then compute the canonical full-scope score. It must not reinterpret a
+20-segment search deliverable as a final result, retrain the winner, or add a
+second inference implementation.
+
+The audit's `cache_state` finding is accepted as real but remains outside this
+repair slice: composed task scopes currently make it `unknown`, and process I/O
+counters are unreliable on FUSE/virtiofs. A future generic repair must obtain
+task-owned scoped storage observations rather than add TIDMAD branches. The
+explicit do-not-fix items remain unchanged: `storage_class`, retention policy,
+and Q-07c-6/watchdog calibration are not modified before this campaign.

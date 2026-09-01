@@ -125,13 +125,19 @@ replace Trial/Formal wall-time budgets or change the VRAM ceiling. A timeout or
 host-memory stop is an inconclusive measurement, never evidence that the model
 is too large for the GPU.
 
-The advance wall-time forecast is a separate legacy TIDMAD facility. It runs
-only when an attempt supplies the complete physical ``SampleSet`` consumed by
-its training, inference, and scoring estimators. A composed task that carries
-an opaque task-owned scope does not enter that partial forecast, even when its
-dataset profile includes TIDMAD topology. Its Formal time budget is still
-enforced by the in-subprocess runtime policy against measured execution. This
-is an applicability boundary, not a silent fallback or an unlimited run.
+Trial and Formal independently select one wall-time admission authority with
+``--trial_time_admission_source`` and
+``--formal_time_admission_source``. Both default to ``measured``: the advance
+forecast does not admit or refuse, and executing-device verification enforces
+the declared role budget. Select ``forecast`` only when avoiding measurement
+cost is more important; then the advance workload forecast is the sole
+admission authority and in-process measurement is record-only. A forecast
+requires a supported complete workload description and refuses if that
+evidence is unavailable. There is no silent fallback and no hybrid mode.
+
+The runtime watchdog is a separate last-resort safety mechanism. Selecting
+either admission authority does not disable it or turn it into a second
+admission decision.
 
 ## Failures and refusals
 

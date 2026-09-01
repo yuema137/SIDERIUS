@@ -61,6 +61,14 @@ HealthGateMode = Literal["blocking", "observe_only"]
 #:     observe_only + scientific  -> REFUSED, a contradiction
 ResultAuthority = Literal["scientific", "diagnostic"]
 
+#: The single wall-time admission authority selected for one candidate role.
+#:
+#: ``forecast`` uses the advance workload forecast and leaves in-process
+#: measurements observational. ``measured`` skips advance forecast admission
+#: and lets the executing-device measurement enforce the configured budget.
+#: There is intentionally no hybrid value: one budget must have one authority.
+TimeAdmissionSource = Literal["forecast", "measured"]
+
 
 # ---------------------------------------------------------------------------
 # Expert advice — two protocols
@@ -2031,6 +2039,15 @@ class HyperparamTuningInput(BaseModel):
             "estimates."
         ),
     )
+    trial_time_admission_source: TimeAdmissionSource = Field(
+        default="measured",
+        description=(
+            "Single wall-time admission authority for Trial rounds. "
+            "'forecast' uses the advance workload forecast; 'measured' uses "
+            "executing-device in-process evidence. The unselected authority "
+            "may record observations but cannot reject the attempt."
+        ),
+    )
     formal_time_budget_minutes: float | None = Field(
         default=None,
         description=(
@@ -2040,6 +2057,15 @@ class HyperparamTuningInput(BaseModel):
             "at startup and skips the time check for formal rounds. Sized "
             "independently from the trial budget because formal runs use the "
             "full dataset and have a wall-time scale 50-100× longer."
+        ),
+    )
+    formal_time_admission_source: TimeAdmissionSource = Field(
+        default="measured",
+        description=(
+            "Single wall-time admission authority for Formal rounds. "
+            "'forecast' uses the advance workload forecast; 'measured' uses "
+            "executing-device in-process evidence. The unselected authority "
+            "may record observations but cannot reject the attempt."
         ),
     )
 

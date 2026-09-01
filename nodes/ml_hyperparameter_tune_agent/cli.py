@@ -240,26 +240,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Delete denoised HDF5 files after scoring each round to save disk space.",
     )
 
-    # evaluate_time_skill gate (Phase E1, Phase I two-budget split). Each
-    # default is None, which keeps that mode's gate off — matches the
-    # chain-runner CLI defaults.
+    # Trial and Formal own independent budgets and authority selections.
     parser.add_argument(
         "--trial_time_budget_minutes",
         type=float,
         default=None,
-        help="Wall-time budget (minutes) for the evaluate_time_skill "
-        "gate on rounds where plan.is_trial=True. None disables "
-        "the trial gate.",
+        help="Trial wall-time budget in minutes. None disables Trial time admission.",
     )
     parser.add_argument(
         "--formal_time_budget_minutes",
         type=float,
         default=None,
-        help="Wall-time budget (minutes) for the evaluate_time_skill "
-        "gate on rounds where plan.is_trial=False. None disables "
-        "the formal gate. Sized independently from the trial "
-        "budget because formal runs use the full dataset and "
-        "are 50-100x longer.",
+        help="Formal wall-time budget in minutes. None disables Formal time admission.",
     )
     parser.add_argument(
         "--data_dir",
@@ -284,6 +276,26 @@ def build_parser() -> argparse.ArgumentParser:
             "scope only 'snapshot' sampling is legal and "
             "--health_gate_files is required when gates are enabled. "
             "See docs/design/enable_partial_file_list.md."
+        ),
+    )
+    parser.add_argument(
+        "--trial_time_admission_source",
+        choices=("forecast", "measured"),
+        default="measured",
+        help=(
+            "Single Trial wall-time admission authority. Forecast skips "
+            "executing-device enforcement; measured skips advance forecast "
+            "admission."
+        ),
+    )
+    parser.add_argument(
+        "--formal_time_admission_source",
+        choices=("forecast", "measured"),
+        default="measured",
+        help=(
+            "Single Formal wall-time admission authority. Forecast skips "
+            "executing-device enforcement; measured skips advance forecast "
+            "admission."
         ),
     )
     parser.add_argument(
@@ -668,6 +680,8 @@ def build_agent_input(
         input_dict["trial_time_budget_minutes"] = args.trial_time_budget_minutes
     if args.formal_time_budget_minutes is not None:
         input_dict["formal_time_budget_minutes"] = args.formal_time_budget_minutes
+    input_dict["trial_time_admission_source"] = args.trial_time_admission_source
+    input_dict["formal_time_admission_source"] = args.formal_time_admission_source
     if args.max_epochs is not None:
         input_dict["max_epochs"] = args.max_epochs
     # D-BUD-6 — forwarded only when set, so an unset per-mode cap leaves the

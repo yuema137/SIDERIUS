@@ -1824,13 +1824,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--trial_time_budget_minutes",
         type=float,
         default=None,
-        help="Wall-time budget (minutes) for trial-mode time gate. None disables.",
+        help="Trial wall-time budget in minutes. None disables Trial time admission.",
     )
     parser.add_argument(
         "--formal_time_budget_minutes",
         type=float,
         default=None,
-        help="Wall-time budget (minutes) for formal-mode time gate. None disables.",
+        help="Formal wall-time budget in minutes. None disables Formal time admission.",
+    )
+    parser.add_argument(
+        "--trial_time_admission_source",
+        choices=("forecast", "measured"),
+        default="measured",
+        help=(
+            "Single Trial wall-time admission authority. 'forecast' uses the "
+            "advance workload forecast; 'measured' uses executing-device evidence."
+        ),
+    )
+    parser.add_argument(
+        "--formal_time_admission_source",
+        choices=("forecast", "measured"),
+        default="measured",
+        help=(
+            "Single Formal wall-time admission authority. 'forecast' uses the "
+            "advance workload forecast; 'measured' uses executing-device evidence."
+        ),
     )
     # --- Runtime-control operator surface (RT6, runtime design §4/§5) ---
     # The chain is the OPERATIONAL surface: §5 provisional defaults live
@@ -2552,6 +2570,8 @@ def compute_expected_invariants(
                 if args.workflow_parameter_rules is None
                 else args.workflow_parameter_rules.model_dump(mode="json", exclude_none=True)
             ),
+            trial_time_admission_source=args.trial_time_admission_source,
+            formal_time_admission_source=args.formal_time_admission_source,
         ),
     )
     return invariants
@@ -3330,6 +3350,8 @@ def main():
                     bypass_formal_time_budget_minutes=args.bypass_formal_time_budget_minutes,
                     trial_time_budget_minutes=args.trial_time_budget_minutes,
                     formal_time_budget_minutes=args.formal_time_budget_minutes,
+                    trial_time_admission_source=args.trial_time_admission_source,
+                    formal_time_admission_source=args.formal_time_admission_source,
                     data_dir=args.data_dir,
                     gpu_admission_measurement_source=args.gpu_admission_measurement_source,
                     gpu_admission_enforcement=args.gpu_admission_enforcement,

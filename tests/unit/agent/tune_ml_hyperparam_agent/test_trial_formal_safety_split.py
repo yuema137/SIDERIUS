@@ -77,7 +77,7 @@ class TestPhaseResolution:
             )
         )
         assert policy.safety_factor == 2.0
-        assert policy.operator_budget_seconds is None  # trials stay record-only
+        assert policy.operator_budget_seconds == pytest.approx(1200.0)
 
     def test_formal_falls_back_to_legacy_factor(self, posture_input):
         policy = RuntimeControlPolicy(

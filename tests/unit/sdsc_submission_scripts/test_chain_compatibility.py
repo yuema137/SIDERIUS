@@ -34,6 +34,21 @@ def test_bypass_ceiling_is_typed_and_omitted_when_absent() -> None:
     assert "--bypass_formal_time_budget_minutes" not in _build(*base)
 
 
+def test_time_admission_authorities_are_independent_chain_arguments() -> None:
+    tokens = _build(
+        "--workspace",
+        "/tmp/workspace",
+        "--run_name",
+        "test",
+        "--trial_time_admission_source",
+        "forecast",
+        "--formal_time_admission_source",
+        "measured",
+    )
+    assert tokens[tokens.index("--trial_time_admission_source") + 1] == "forecast"
+    assert tokens[tokens.index("--formal_time_admission_source") + 1] == "measured"
+
+
 def test_optional_llm_config_is_not_emitted_as_an_empty_flag() -> None:
     tokens = _build("--workspace", "/tmp/workspace", "--run_name", "test")
     assert "--llm_config" not in tokens

@@ -131,6 +131,8 @@ def _run(tmp_path, *, formal_check, bypass_minutes, bypass_delta=0.0, trial_chec
             progress_bar=False,
             trial_time_budget_minutes=20.0,
             formal_time_budget_minutes=120.0,
+            trial_time_admission_source="forecast",
+            formal_time_admission_source="forecast",
             bypass_formal_time_budget_minutes=bypass_minutes,
             bypass_formal_time_budget_min_delta=bypass_delta,
             # DS5 waiver: disabled HealthGate mode stamps records

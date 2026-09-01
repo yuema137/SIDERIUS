@@ -1874,6 +1874,8 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
             if launch.workflow_parameter_rules is None
             else launch.workflow_parameter_rules.model_dump(mode="json", exclude_none=True)
         ),
+        trial_time_admission_source=launch.trial_time_admission_source,
+        formal_time_admission_source=launch.formal_time_admission_source,
     )
 
 
@@ -3232,6 +3234,8 @@ def run_workflow(
             plan_overrides=frozen_portion_overrides(launch),
             trial_time_budget_minutes=launch.trial_time_budget_minutes,
             formal_time_budget_minutes=launch.formal_time_budget_minutes,
+            trial_time_admission_source=launch.trial_time_admission_source,
+            formal_time_admission_source=launch.formal_time_admission_source,
             data_dir=launch.data_dir,
             gpu_admission_measurement_source=launch.gpu_admission_measurement_source,
             gpu_admission_enforcement=launch.gpu_admission_enforcement,

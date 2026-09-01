@@ -118,6 +118,8 @@ WORKFLOW_PARAMETER_RULES=""          # JSON ParameterRules; empty = workflow unc
 DATA_DIR=""
 TRIAL_TIME_BUDGET_MINUTES=""        # §3.2: empty == omit == Python None
 FORMAL_TIME_BUDGET_MINUTES=""       # §3.2: empty == omit == Python None
+TRIAL_TIME_ADMISSION_SOURCE="measured"
+FORMAL_TIME_ADMISSION_SOURCE="measured"
 FORMAL_EVAL_PORTION=1.0             # Phase R §13: eval-side scope for formal training; default 1.0 = production full-clone (lower for smoke/CI)
 GPU_ADMISSION_MEASUREMENT_SOURCE="" # B-G3: reference, never a figure; empty == omit
 GPU_ADMISSION_ENFORCEMENT=""        # B-G3/D-B4: empty == omit == observe_only
@@ -325,6 +327,8 @@ parse_chain_args() {
         --data_dir)               DATA_DIR="$2"; shift 2 ;;
         --trial_time_budget_minutes) TRIAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
         --formal_time_budget_minutes) FORMAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
+        --trial_time_admission_source) TRIAL_TIME_ADMISSION_SOURCE="$2"; shift 2 ;;
+        --formal_time_admission_source) FORMAL_TIME_ADMISSION_SOURCE="$2"; shift 2 ;;
         --max_steps_per_attempt)  MAX_STEPS_PER_ATTEMPT="$2"; shift 2 ;;
         --min_formal_batch_size)  MIN_FORMAL_BATCH_SIZE="$2"; shift 2 ;;
         --allow_extreme_steps)    ALLOW_EXTREME_STEPS=1; shift ;;
@@ -601,6 +605,8 @@ build_app_args() {
     if [ -n "$FORMAL_TIME_BUDGET_MINUTES" ]; then
         APP_ARGS+=(--formal_time_budget_minutes "$FORMAL_TIME_BUDGET_MINUTES")
     fi
+    APP_ARGS+=(--trial_time_admission_source "$TRIAL_TIME_ADMISSION_SOURCE")
+    APP_ARGS+=(--formal_time_admission_source "$FORMAL_TIME_ADMISSION_SOURCE")
     # RT6 runtime-control surface: numeric flags always cross explicitly.
     # The Formal-only batch floor defaults to 0 (disabled), preserving
     # Trial/Formal parity unless a task or campaign opts in.
@@ -795,7 +801,7 @@ print_chain_header() {
         echo "    Pseudo-mode    : off (production)"
     fi
     if [ -n "$TRIAL_TIME_BUDGET_MINUTES" ] || [ -n "$FORMAL_TIME_BUDGET_MINUTES" ]; then
-        echo "    Time budgets   : trial=${TRIAL_TIME_BUDGET_MINUTES:-(none)}min, formal=${FORMAL_TIME_BUDGET_MINUTES:-(none)}min, eval_portion=$FORMAL_EVAL_PORTION"
+        echo "    Time budgets   : trial=${TRIAL_TIME_BUDGET_MINUTES:-(none)}min (${TRIAL_TIME_ADMISSION_SOURCE}), formal=${FORMAL_TIME_BUDGET_MINUTES:-(none)}min (${FORMAL_TIME_ADMISSION_SOURCE}), eval_portion=$FORMAL_EVAL_PORTION"
     fi
     if [ -n "$TRIAL_VRAM_BUDGET_GB" ] || [ -n "$FORMAL_VRAM_BUDGET_GB" ]; then
         echo "    VRAM budgets   : trial=${TRIAL_VRAM_BUDGET_GB:-(auto)}GB, formal=${FORMAL_VRAM_BUDGET_GB:-(auto)}GB"
