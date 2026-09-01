@@ -44,7 +44,7 @@ Everything else — `fcnet_*`, `investigate_*`, `score_tidmad_official_*`,
 `c12_stamp_failure_class.py`, `checkpoint_*`, `step10_p3_gate1.py`,
 `step12_pr12a_gate1.py` / `step12_pr12a_gate2_evaluate.py`,
 `finalize_recovered_diagnostic_round.py`, `render_*`, `v18_wave_summary.py`,
-`verify_iter005_estimator.py`, `fcnet_full_file_scan.py`,
+`verify_iter005_estimator.py`,
 `inspection_cost_study/`, `pr3_l2_calibration/` — is **point-in-time**: each
 was written for a dated investigation, campaign or gate whose evidence lives
 in `docs/design/` ledgers or `reports/`. They are kept because the evidence

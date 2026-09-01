@@ -42,7 +42,6 @@ MIGRATED_SCRIPTS = (
 # OD-05c-3: historical replay + diagnostic-only. These read artifacts written
 # BEFORE this PR and must keep matching the names already on disk.
 HISTORICAL_SCRIPTS = (
-    "scripts/fcnet_full_file_scan.py",
     "scripts/fcnet_diversity_pearson_scan.py",
     "scripts/investigate_pearson_feasibility.py",
 )
