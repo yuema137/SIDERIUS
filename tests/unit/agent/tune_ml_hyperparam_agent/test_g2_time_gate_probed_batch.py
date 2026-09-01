@@ -18,10 +18,11 @@ Two test families:
      the corrected forecast rejects (a false admission is removed).
 
    Fixed arithmetic (hardcoded, independent of the code under test):
-   seg 16000 → ml_per_psd = 625; 400 PSDs → total_ml = 250_000;
+   seg 16000 → ml_per_physical_segment = 100; 400 physical segments →
+   total_ml = 40_000;
    warmup 10 ms/step × 2.7 = 27 ms/step;
-   steps(25)=10_000 → 270 s; steps(64)=3_907 → 105.489 s;
-   steps(4)=62_500 → 1_687.5 s; training stub 600 s + scoring stub 60 s.
+   steps(25)=1_600 → 43.2 s; steps(64)=625 → 16.875 s;
+   steps(4)=10_000 → 270 s; training stub 600 s + scoring stub 60 s.
 
 2. **Transport pins** on ``_run_time_preflight`` (the tuner seam): the
    probed batch present in ``active_params`` reaches the time-skill
@@ -49,7 +50,13 @@ _tuner_runtime = importlib.import_module("nodes.ml_hyperparameter_tune_agent.run
 # implementation module — the same object _run_time_preflight lives in.
 import nodes.ml_hyperparameter_tune_agent as tuner_mod
 from agent.skills.evaluate_time_skill import wrapper as ts
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.two_family_profile import make_two_family_profile
+
+PROFILE = make_two_family_profile(
+    num_files=20,
+    psd_segment_length=1_600_000,
+    segments_per_file=20,
+)
 
 
 class FakeSandbox:
@@ -68,7 +75,7 @@ def _base_kwargs(**overrides) -> dict:
         "train_portion": 1.0,
         # Step 05b: the run-bound topology is a REQUIRED kwarg — the skill
         # no longer resolves one of its own.
-        "dataset_profile": TIDMAD_PROFILE,
+        "dataset_profile": PROFILE,
     }
     kw.update(overrides)
     return kw
@@ -134,10 +141,10 @@ def _run(monkeypatch, *, budget_min: float, inference_batch: int | None):
 
 class TestVerdictFlipsBothDirections:
     def test_b_above_25_old_rejects_corrected_accepts(self, monkeypatch):
-        """Budget 14 min sits strictly between the corrected forecast
-        (600+105.489+60 = 765.489 s ≈ 12.76 min at probed B=64) and the
-        old fallback-25 forecast (600+270+60 = 930 s = 15.5 min)."""
-        old = _run(monkeypatch, budget_min=14.0, inference_batch=None)
+        """Budget 11.5 min sits strictly between the corrected forecast
+        (600+16.875+60 = 676.875 s ≈ 11.28 min at probed B=64) and the
+        old fallback-25 forecast (600+43.2+60 = 703.2 s = 11.72 min)."""
+        old = _run(monkeypatch, budget_min=11.5, inference_batch=None)
         assert old["phase_breakdown"]["inference"]["breakdown"]["inference_batch"] == 25
         assert old["breakdown"]["over_effective_budget"] is True
         assert old["feasible"] is False, (
@@ -145,7 +152,7 @@ class TestVerdictFlipsBothDirections:
             "workload and reject it — the §0.R.10 false skipped_time_risk."
         )
 
-        new = _run(monkeypatch, budget_min=14.0, inference_batch=64)
+        new = _run(monkeypatch, budget_min=11.5, inference_batch=64)
         assert new["phase_breakdown"]["inference"]["breakdown"]["inference_batch"] == 64
         assert new["breakdown"]["over_effective_budget"] is False
         assert new["feasible"] is True, (
@@ -154,10 +161,10 @@ class TestVerdictFlipsBothDirections:
         )
 
     def test_b_below_25_old_accepts_corrected_rejects(self, monkeypatch):
-        """Budget 20 min sits strictly between the old forecast (930 s =
-        15.5 min at fallback 25) and the corrected forecast
-        (600+1687.5+60 = 2347.5 s ≈ 39.1 min at probed B=4)."""
-        old = _run(monkeypatch, budget_min=20.0, inference_batch=None)
+        """Budget 13 min sits strictly between the old forecast (703.2 s =
+        11.72 min at fallback 25) and the corrected forecast
+        (600+270+60 = 930 s = 15.5 min at probed B=4)."""
+        old = _run(monkeypatch, budget_min=13.0, inference_batch=None)
         assert old["phase_breakdown"]["inference"]["breakdown"]["inference_batch"] == 25
         assert old["breakdown"]["over_effective_budget"] is False
         assert old["feasible"] is True, (
@@ -165,7 +172,7 @@ class TestVerdictFlipsBothDirections:
             "workload and wrongly admits it — the §0.R.10a false admission."
         )
 
-        new = _run(monkeypatch, budget_min=20.0, inference_batch=4)
+        new = _run(monkeypatch, budget_min=13.0, inference_batch=4)
         assert new["phase_breakdown"]["inference"]["breakdown"]["inference_batch"] == 4
         assert new["breakdown"]["over_effective_budget"] is True
         assert new["feasible"] is False, (
@@ -199,7 +206,7 @@ class TestTunerTransport:
             data_dir=None,
             memory_history=[],
             is_trial=True,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
         assert captured["skill"] == "evaluate_time_skill"
         return captured["params"]
