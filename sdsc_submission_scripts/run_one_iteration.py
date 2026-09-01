@@ -3199,6 +3199,11 @@ def main():
             current_iter=args.start_iteration,
             seed_paths=resolved_seeds,
             expected_invariants=expected_invariants,
+            dataset_partition_count=(
+                run_composition.dataset_profile.partition_count
+                if run_composition is not None
+                else resolve_dataset_profile().partition_count
+            ),
         )
     except (ResumeError, RunInvariantsViolation) as e:
         print(f"FAIL: restore_prior_state refused to chain: {e}")

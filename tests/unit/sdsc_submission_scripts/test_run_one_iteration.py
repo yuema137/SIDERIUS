@@ -23,6 +23,7 @@ tests called out in design doc §3.5 Commit 8 live in the wiring layer.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import pathlib
@@ -1499,6 +1500,12 @@ class TestComputeExpectedInvariants:
         assert inv.health_gate_enabled is True
         assert inv.health_config_sha256 is not None
         assert os.path.isfile(os.path.join(str(tmp_path), "health_checks_effective.yaml"))
+
+    def test_resume_receives_the_resolved_task_partition_count(self):
+        """The iteration runner must not make resume rediscover task state."""
+        source = inspect.getsource(runner.main)
+        assert "dataset_partition_count=(" in source
+        assert "run_composition.dataset_profile.partition_count" in source
 
     def test_disabled_gates_null_sha_no_file(self, tmp_path):
         args = _normalized("--no-health_gate_enabled", "--data_scope", "0-1")

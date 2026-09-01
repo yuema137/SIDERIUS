@@ -1441,6 +1441,7 @@ def restore_prior_state(
     current_iter: int,
     seed_paths: Sequence[str],
     expected_invariants: RunInvariants | None = None,
+    dataset_partition_count: int | None = None,
 ) -> RestoredState:
     """Restore every prior iter's plugin classes and assemble the
     source-paths list for ``run_workflow``.
@@ -1465,6 +1466,10 @@ def restore_prior_state(
             its DataScope CLI lands — DS6c). Seed-path contents are NOT
             parsed here and are validated by ``run_workflow``'s pre-flight
             instead.
+        dataset_partition_count: Number of partitions declared by the run's
+            resolved dataset profile. The chain runner supplies this value
+            explicitly because resume occurs before task-composition
+            activation. ``None`` preserves the legacy bound-profile lookup.
 
     Returns:
         :class:`RestoredState` with ``resolved_source_paths``,
@@ -1596,10 +1601,16 @@ def restore_prior_state(
                 # the sibling call site (`model_exploration.py:1857`) had
                 # already been composition-aware for a milestone: a composed
                 # resume compared its records against TIDMAD's file count.
-                # `resolve_dataset_profile()` honours a bound profile and
-                # otherwise returns the shipped one, so an un-composed
-                # resume is unchanged.
-                full_scope=list(range(resolve_dataset_profile().partition_count)),
+                # The chain supplies the already-resolved partition count.
+                # Older programmatic callers may instead activate an
+                # explicit profile binding before invoking resume.
+                full_scope=list(
+                    range(
+                        dataset_partition_count
+                        if dataset_partition_count is not None
+                        else resolve_dataset_profile().partition_count
+                    )
+                ),
                 source=f"restored iter {iter_idx:03d} run_output {output_path}",
             )
 
