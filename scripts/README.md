@@ -37,8 +37,8 @@ The durable operator surface:
 Everything else — `fcnet_*`, `investigate_*`, `score_tidmad_official_*`,
 `phase2_diagnostic_no_dynamic_search.py`, `pregate_runtime_control_validation.py`,
 `vram_preflight_validation.py`, `c2_prephase_validation.py`,
-`c12_stamp_failure_class.py`, `checkpoint_*`, `step10_p3_gate1.py`,
-`step12_pr12a_gate1.py` / `step12_pr12a_gate2_evaluate.py`,
+`c12_stamp_failure_class.py`, `checkpoint_*`,
+`step12_pr12a_gate2_evaluate.py`,
 `finalize_recovered_diagnostic_round.py`, `render_*`, `v18_wave_summary.py`,
 `verify_iter005_estimator.py`,
 `inspection_cost_study/`, `pr3_l2_calibration/` — is **point-in-time**: each
@@ -98,8 +98,9 @@ ledger names it), so the old evidence keeps pointing at what actually ran.
 
 ## Files normally NOT edited
 
-`_gate2_health_stage.py` binding semantics (explicit, keyword-only, no
-default); anything a design ledger cites as gate evidence.
+Anything a design ledger cites as historical gate evidence is preserved in
+the experiment provenance archive rather than treated as a current framework
+operator surface.
 
 ## Minimal example
 
@@ -109,6 +110,6 @@ default); anything a design ledger cites as gate evidence.
 
 ## Related tests
 
-`tests/unit/scripts/` (inspector, comparison harness, campaign admission,
-calibration preflight), plus the example-pack suites that pin the two D14
-harness declarations.
+`tests/unit/scripts/` (inspector, campaign admission, and calibration
+preflight), plus the minimal-example suites that exercise supported framework
+contracts.
