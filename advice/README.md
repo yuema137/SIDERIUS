@@ -54,22 +54,12 @@ JSON with **multiple top-level keys**, one per agent in the 5-agent chain
 ```
 
 Partial files are supported and remain fully legal — an omitted key simply
-means "no advice for that agent" (e.g. `chain_v2_proposer_advice.json` ships
-only `propose` + `implement`, and `tidmad_collapse_advice.json` ships only
-`tune`). What is NOT legal is a key that is *present* and carries nothing;
-see "The key set is closed" below.
+means "no advice for that agent". What is NOT legal is a key that is *present*
+and carries nothing; see "The key set is closed" below.
 
-Current contents:
-
-| file | shape | purpose |
-|---|---|---|
-| `human_advice_chain_test.json` | all 5 keys | Smoke-test chain — tiny architectures, < 5 epoch budgets |
-| `human_advice_chain_formal.json` | all 5 keys | Real research chain — wavenet-anchored, full budgets |
-| `explore_novel_v{1..4}.json` | `mindset`/`propose`/`implement`/`tune` | Exploration lane — paradigm-shift architectures |
-| `exploit_cnn_v{1..4}.json` | `mindset`/`propose`/`implement`/`tune` | Exploit lane — hybridize on proven TCN/CNN backbones |
-| `exploration_adaptive_v{1,3}.json` | `propose`/`implement`/`tune` | Adaptive proposer (regime-aware) |
-| `chain_v2_proposer_advice.json` | `propose`/`implement` | Proposer hints for inheritance-aware chain runs |
-| `chain_v3_proposer_advice_time_sens.json` | `propose`/`implement`/`tune` | Time-sensitive proposer hints |
+SIDERIUS intentionally ships no active advice artifact. Advice is caller-owned
+experiment input and belongs beside the task or workflow that selects it. This
+document specifies the supported format only.
 
 ---
 
