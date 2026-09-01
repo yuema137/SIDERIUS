@@ -27,6 +27,7 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.helpers.experiment_plans import make_scope_plan
 from tests.helpers.scoring_stubs import stub_scoring
 from tests.unit.agent.tune_ml_hyperparam_agent.test_tuning_agent import (
     FAKE_PLAN_WITH_TRIAL,
@@ -213,9 +214,7 @@ class TestF14ModeBoundaryPropagation:
 
     @staticmethod
     def _plan(**kw):
-        from tests.unit.agent.tune_ml_hyperparam_agent.test_formal_sample_set import _make_plan
-
-        return _make_plan(**kw)
+        return make_scope_plan(**kw)
 
     @staticmethod
     def _agent_input(tmp_path, **kw):
@@ -300,10 +299,9 @@ class TestF14ReviewBlockers:
             _apply_plan_overrides,
             _resolve_sample_set_cfg,
         )
-        from tests.unit.agent.tune_ml_hyperparam_agent.test_formal_sample_set import _make_plan
 
         inp = _input(tmp_path, is_trial=False, plan_overrides={"trial_portion": 0.5})
-        plan = _apply_plan_overrides(_make_plan(trial_portion=0.1), inp.plan_overrides)
+        plan = _apply_plan_overrides(make_scope_plan(trial_portion=0.1), inp.plan_overrides)
         cfg = _resolve_sample_set_cfg("single_file", inp, plan)
         assert cfg["trial_portion"] == 0.5, "single_file must read the OVERRIDDEN value"
 
@@ -317,10 +315,9 @@ class TestF14ReviewBlockers:
         replaced key outside the set."""
         from agent.schemas.hyperparam_tuning import TRIAL_SCOPED_OVERRIDE_KEYS
         from nodes.ml_hyperparameter_tune_agent.policy import _resolve_sample_set_cfg
-        from tests.unit.agent.tune_ml_hyperparam_agent.test_formal_sample_set import _make_plan
 
         inp = _input(tmp_path, max_rounds=3)
-        cfg = _resolve_sample_set_cfg("formal", inp, _make_plan())
+        cfg = _resolve_sample_set_cfg("formal", inp, make_scope_plan())
         # SRI-3 (review NOTE-a): the subset relation is VACUOUSLY true on an
         # empty cfg — assert the population, or "no violations" and
         # "nothing to look at" are indistinguishable.
