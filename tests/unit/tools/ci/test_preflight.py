@@ -285,14 +285,13 @@ class TestExternalResources:
         assert r.outcome is pf.Outcome.OK
         assert "thing=absent" in r.detail
 
-    def test_the_declared_resources_carry_measured_skip_counts(self):
-        """The counts are CP-8's evidence; an unmeasured entry is a guess.
+    def test_framework_ci_declares_no_scientific_resources(self):
+        """Framework CI must not silently depend on an experiment dataset.
 
-        Fails as: a resource is declared without the measurement that justifies
-        listing it, and the contract drifts back to assertion.
+        Fails as: a real task path or environment override is added back to the
+        framework's default parity profile.
         """
-        assert pf.DECLARED_RESOURCES, "the parity profile must declare its external-resource axis"
-        assert all(r.gates_skips > 0 for r in pf.DECLARED_RESOURCES)
+        assert pf.DECLARED_RESOURCES == ()
 
 
 class TestManagedNodeStrategy:
