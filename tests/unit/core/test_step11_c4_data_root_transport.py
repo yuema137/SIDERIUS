@@ -43,6 +43,7 @@ from execute_tools.data_paths import (
     bind_physical_data_root,
     resolve_physical_data_root,
 )
+from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
 
 MODEL_CFG = {"model_type": "fcnet", "segmentation_size": 10000, "latent_dims": [100, 10]}
 TRAIN_CFG = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cpu"}
@@ -134,7 +135,7 @@ def _bind_synthetic_task_config():
         "task_description": "Synthetic transport fixture.",
         "forward_contract": {},
     }
-    with bind_task_config(values):
+    with bind_task_config(values), bind_dataset_profile(TIDMAD_PROFILE):
         yield
 
 
