@@ -121,7 +121,7 @@ def test_a_not_scoreable_refusal_is_described_as_such_not_as_a_crash(monkeypatch
                 ScoreabilityFailure(
                     requirement="required_attrs",
                     input_identity=4,
-                    detail="attr 'voltage_range_mV' missing on group timeseries/channel0001",
+                    detail="attr 'unit_scale' missing on group predictions/output",
                 ),
             ),
         ),
@@ -133,7 +133,7 @@ def test_a_not_scoreable_refusal_is_described_as_such_not_as_a_crash(monkeypatch
     memory = record["memory"]
     assert "not scoreable" in memory["conclusion"]
     assert "required_attrs[file 4]" in memory["conclusion"]
-    assert "voltage_range_mV" in memory["conclusion"]
+    assert "unit_scale" in memory["conclusion"]
     assert "synthetic_deliverable_contract" in memory["conclusion"]
     assert "crash" not in memory["conclusion"].lower()
     assert "No scorer arithmetic was reached" in memory["discovery"]
