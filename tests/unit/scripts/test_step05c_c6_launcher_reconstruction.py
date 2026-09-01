@@ -45,7 +45,6 @@ MIGRATED_SCRIPTS = (
 HISTORICAL_SCRIPTS = (
     "scripts/score_tidmad_official_banded.py",
     "scripts/score_tidmad_official_wavenet.py",
-    "scripts/fcnet_health_metrics_scan.py",
     "scripts/fcnet_full_file_scan.py",
     "scripts/fcnet_diversity_pearson_scan.py",
     "scripts/investigate_pearson_feasibility.py",
