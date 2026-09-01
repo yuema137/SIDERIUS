@@ -25,26 +25,23 @@ import pytest
 
 from execute_tools import train_engine_sandbox
 from execute_tools.dataset_config import (
-    TIDMAD_PROFILE,
     DatasetConfig,
     DatasetProfile,
     bind_dataset_profile,
 )
+from tests.helpers.two_family_profile import make_two_family_profile
 
 
 def _profile_with_pattern(pattern: str) -> DatasetProfile:
-    """TIDMAD's profile declaring a different training-file pattern.
+    """A neutral indexed profile declaring a different training pattern.
 
     UPGRADED at Step 12 / PR-12bc B2. These probes used to
     ``monkeypatch.setattr(TIDMAD, "training_file_pattern", ...)``, which
-    worked only because ``TIDMAD_PROFILE.dataset`` WAS the ``TIDMAD``
-    singleton — patching one patched the other. B2 makes the topology an
-    opaque payload, so that aliasing is gone and a monkeypatch on the
-    singleton would silently probe nothing. Declaring the pattern and BINDING
-    the profile exercises the production resolution path instead, which is
-    what the claim was always about.
+    B2 makes topology opaque, so mutating an unrelated module constant would
+    silently probe nothing. Declaring the pattern and binding the profile
+    exercises the production resolution path instead.
     """
-    wire = TIDMAD_PROFILE.to_wire()
+    wire = make_two_family_profile().to_wire()
     wire["dataset"]["training_file_pattern"] = pattern
     return DatasetProfile.model_validate(wire)
 
@@ -91,6 +88,8 @@ def test_sample_set_loader_path_follows_the_configured_pattern(tmp_path, capsys)
     warning = capsys.readouterr().out
     assert "run_02.hdf5" in warning
     assert "abra_training_" not in warning
+
+
 # ---- no dataset-specific literal survives in the engine ----
 
 
