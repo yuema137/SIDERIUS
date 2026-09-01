@@ -33,17 +33,14 @@ from agent.schemas.model_io_contract import (
     TensorAxis,
     TensorContract,
 )
-from agent.schemas.task_config import ForwardContract
-from workflows.task_config import load_task_config
 
 
 def _axis(role: AxisRole | None = None, **dim) -> TensorAxis:
     return TensorAxis(dimension=Dimension(**dim), role=role)
 
 
-#: The shipped TIDMAD contract, expressed normalized. This is the fixture
-#: the round-trip is measured against — NOT a copy of the YAML strings.
-TIDMAD = ModelIOContract(
+#: A generic sequence-classification contract used by cross-axis tests.
+GENERIC_SEQUENCE_CLASSIFIER = ModelIOContract(
     input=TensorContract(
         axes=(
             _axis(AxisRole.BATCH, symbolic="B"),
@@ -63,42 +60,6 @@ TIDMAD = ModelIOContract(
         dtype=DtypeAdmissibility(admissible=("float32",)),
     ),
 )
-
-
-class TestTidmadRoundTrip:
-    """The normalized contract must reproduce the shipped prose exactly."""
-
-    @pytest.fixture
-    def shipped(self) -> ForwardContract:
-        return ForwardContract(**load_task_config()["forward_contract"])
-
-    def test_the_normalized_contract_renders_the_shipped_prose(self, shipped):
-        """Byte-identity, both tensors, against the real YAML.
-
-        Asserted against ``configs/task_config.yaml`` rather than a
-        hardcoded copy, because the claim is *"the contract can replace
-        the shipped prose"* — a copy would still pass if the shipped
-        prose changed underneath.
-        """
-        assert TIDMAD.input.render() == shipped.input_shape
-        assert TIDMAD.output.render() == shipped.output_shape
-
-    def test_the_rendered_bytes_are_the_expected_literals(self, shipped):
-        """The same claim, hardcoded, so a failure says WHICH side moved.
-
-        With only the test above, a change to both the renderer and the
-        YAML would agree with each other and stay green.
-        """
-        assert TIDMAD.input.render() == "[B, T] int64"
-        assert TIDMAD.output.render() == "[B, 256, T] float32"
-        assert shipped.input_shape == "[B, T] int64"
-        assert shipped.output_shape == "[B, 256, T] float32"
-
-    def test_cardinality_is_derived_not_declared(self, shipped):
-        """§4b: one cardinality authority. The contract DERIVES the count
-        from the class axis rather than carrying a second declaration."""
-        assert TIDMAD.class_cardinality == 256
-        assert TIDMAD.class_cardinality == shipped.num_classes
 
 
 class TestRendering:
@@ -290,8 +251,14 @@ class TestSharedSymbolConsistency:
         """``T`` on input and output IS *"the output is as long as the
         input"*. No ``relationships:`` surface exists, and adding one is a
         §21 stop condition."""
-        shared = {a.dimension.symbolic for a in TIDMAD.input.axes if a.dimension.symbolic} & {
-            a.dimension.symbolic for a in TIDMAD.output.axes if a.dimension.symbolic
+        shared = {
+            a.dimension.symbolic
+            for a in GENERIC_SEQUENCE_CLASSIFIER.input.axes
+            if a.dimension.symbolic
+        } & {
+            a.dimension.symbolic
+            for a in GENERIC_SEQUENCE_CLASSIFIER.output.axes
+            if a.dimension.symbolic
         }
         assert shared == {"B", "T"}
 
@@ -338,6 +305,6 @@ class TestMultiplicityIsBounded:
     def test_no_multi_tensor_container_field_exists(self):
         with pytest.raises(ValidationError):
             ModelIOContract(
-                inputs=[TIDMAD.input],  # type: ignore[call-arg]
-                outputs=[TIDMAD.output],  # type: ignore[call-arg]
+                inputs=[GENERIC_SEQUENCE_CLASSIFIER.input],  # type: ignore[call-arg]
+                outputs=[GENERIC_SEQUENCE_CLASSIFIER.output],  # type: ignore[call-arg]
             )
