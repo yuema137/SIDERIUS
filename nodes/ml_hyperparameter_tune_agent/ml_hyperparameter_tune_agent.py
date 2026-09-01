@@ -1121,6 +1121,9 @@ class HyperparamTuningAgent:
             "vram_preflight_total_timeout_seconds": (
                 agent_input.vram_preflight_total_timeout_seconds
             ),
+            "vram_preflight_host_memory_limit_gb": (
+                agent_input.vram_preflight_host_memory_limit_gb
+            ),
             # DataScope + HealthGate subsystem stamps (DS5).
             "resolved_data_scope": resolved_data_scope,
             "health_gate_enabled": agent_input.health_gate_enabled,

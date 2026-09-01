@@ -374,6 +374,7 @@ def run_admission_preflight(
         loss_dir=sandbox.loss_dir,
         probe_step_timeout_seconds=(bindings.agent_input.vram_probe_step_timeout_seconds),
         deadline_seconds=(bindings.agent_input.vram_preflight_total_timeout_seconds),
+        host_memory_limit_gb=(bindings.agent_input.vram_preflight_host_memory_limit_gb),
         task_probe_data=build_task_probe_data(
             task_composition_ref=agent_input.task_composition_ref,
             task_scopes=prepared.task_scopes,

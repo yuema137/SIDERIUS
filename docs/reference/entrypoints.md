@@ -129,10 +129,13 @@ trial / formal time and VRAM budgets.
 
 The generic chain also accepts
 `--vram_probe_step_timeout_seconds` (default `180`) and
-`--vram_preflight_total_timeout_seconds` (default `900`). The first bounds one
+`--vram_preflight_total_timeout_seconds` (default `900`), plus
+`--vram_preflight_host_memory_limit_gb` (omission preserves the deployment
+default, normally `24`). The first bounds one
 training-mode or inference footprint forward; the second bounds the complete
-isolated preflight worker. They are workflow safeguards, not task declarations,
-training-step counts, or Trial/Formal runtime budgets. See
+isolated preflight worker; the third bounds resident host memory for that
+worker's process tree. They are workflow safeguards, not task declarations,
+training-step counts, GPU VRAM ceilings, or Trial/Formal runtime budgets. See
 [`operating-a-run.md`](../guides/operating-a-run.md#vram-preflight-watchdogs).
 
 > The header comment inside `run_chain.sh` lists `--seed_paths` under "Required

@@ -2026,6 +2026,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--vram_preflight_host_memory_limit_gb",
+        type=float,
+        default=None,
+        help=(
+            "Maximum resident host memory in GiB for the complete isolated "
+            "VRAM-preflight process tree. Omission preserves the deployment "
+            "default, normally 24 GiB. Independent of the GPU VRAM ceiling."
+        ),
+    )
+    parser.add_argument(
         "--attempts_per_round",
         type=int,
         default=3,
@@ -3306,6 +3316,7 @@ def main():
                     vram_preflight_total_timeout_seconds=(
                         args.vram_preflight_total_timeout_seconds
                     ),
+                    vram_preflight_host_memory_limit_gb=(args.vram_preflight_host_memory_limit_gb),
                     attempts_per_round=args.attempts_per_round,
                     attempts_per_formal_round=args.attempts_per_formal_round,
                     max_fail_rounds=args.max_fail_rounds,

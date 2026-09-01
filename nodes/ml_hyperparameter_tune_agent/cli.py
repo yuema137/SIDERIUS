@@ -394,6 +394,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=("Maximum wall time for the complete isolated VRAM preflight worker (default 900)."),
     )
     parser.add_argument(
+        "--vram_preflight_host_memory_limit_gb",
+        type=float,
+        default=None,
+        help=(
+            "Maximum resident host memory in GiB for the complete isolated "
+            "VRAM-preflight process tree. Omission preserves the deployment "
+            "default, normally 24 GiB. This is not the GPU VRAM ceiling."
+        ),
+    )
+    parser.add_argument(
         "--trial_max_epochs",
         type=int,
         default=None,
@@ -675,6 +685,7 @@ def build_agent_input(
         input_dict["formal_vram_budget_gb"] = args.formal_vram_budget_gb
     input_dict["vram_probe_step_timeout_seconds"] = args.vram_probe_step_timeout_seconds
     input_dict["vram_preflight_total_timeout_seconds"] = args.vram_preflight_total_timeout_seconds
+    input_dict["vram_preflight_host_memory_limit_gb"] = args.vram_preflight_host_memory_limit_gb
 
     # Phase L (§11) — per-round attempt budget. Always forwarded so a CLI
     # invocation matches the workflow path. Schema validators enforce ge=1.

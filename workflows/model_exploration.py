@@ -3234,6 +3234,7 @@ def run_workflow(
             formal_vram_budget_gb=launch.formal_vram_budget_gb,
             vram_probe_step_timeout_seconds=launch.vram_probe_step_timeout_seconds,
             vram_preflight_total_timeout_seconds=(launch.vram_preflight_total_timeout_seconds),
+            vram_preflight_host_memory_limit_gb=(launch.vram_preflight_host_memory_limit_gb),
             formal_strategy=launch.formal_strategy,
             formal_portion=launch.formal_portion,
             formal_train_portion=launch.formal_train_portion,

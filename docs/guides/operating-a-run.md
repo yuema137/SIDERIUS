@@ -114,12 +114,16 @@ forward, and inference-batch search may inspect multiple candidate batch sizes.
 |---|---:|---|
 | `--vram_probe_step_timeout_seconds` | `180` | one training-mode or inference footprint forward |
 | `--vram_preflight_total_timeout_seconds` | `900` | the complete isolated preflight worker |
+| `--vram_preflight_host_memory_limit_gb` | deployment default (normally `24`) | resident host memory for the complete isolated process tree |
 
 Choose these values for the execution cost of one task-valid batch. A full
 graph, long sequence, or expensive task plugin may need more time than a small
-image batch. These watchdogs do not replace Trial/Formal wall-time budgets and
-do not change the VRAM ceiling. Expiry is an inconclusive measurement, never
-evidence that the model is too large.
+image batch. The host-memory limit is separately configurable because decoded
+video, graph, and other task-valid batches can have materially different CPU
+memory footprints. It is not the GPU VRAM ceiling. These safeguards do not
+replace Trial/Formal wall-time budgets or change the VRAM ceiling. A timeout or
+host-memory stop is an inconclusive measurement, never evidence that the model
+is too large for the GPU.
 
 ## Failures and refusals
 

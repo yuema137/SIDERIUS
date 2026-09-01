@@ -123,6 +123,7 @@ class WorkflowLaunchConfig:
     formal_vram_budget_gb: float | None = None
     vram_probe_step_timeout_seconds: float = 180.0
     vram_preflight_total_timeout_seconds: float = 900.0
+    vram_preflight_host_memory_limit_gb: float | None = None
     formal_strategy: StrategyMode = "snapshot"
     formal_portion: float = 0.1
     formal_train_portion: float = 1.0

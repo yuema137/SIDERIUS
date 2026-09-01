@@ -110,11 +110,10 @@ def default_worker_memory_limit_bytes() -> int:
         + ~1 GiB              the two parent processes
         = ~53 GiB of 61.8     leaving ~8.8 GiB headroom
 
-    24 GiB also sits far above any legitimate candidate: the 323 M-parameter
-    baseline pre-flight completed in 6.79 s well inside it. A worker that
-    reaches 24 GiB is pathological, which is exactly what this is for.
-
-    Overridable per deployment; never inferred silently from free memory,
+    This remains the compatibility default, not a universal statement about
+    valid task workloads. A workflow can declare a different explicit limit
+    when task-valid decoded batches or model inspection have a different host
+    memory footprint. The value is never inferred silently from free memory,
     because a transient reading would make the bound irreproducible.
     """
     raw = os.environ.get("SIDERIUS_PREFLIGHT_WORKER_MEM_GIB")

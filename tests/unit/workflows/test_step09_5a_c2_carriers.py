@@ -151,6 +151,7 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     # production adapter's 180 s per-forward and 900 s worker deadlines.
     "vram_probe_step_timeout_seconds": 180.0,
     "vram_preflight_total_timeout_seconds": 900.0,
+    "vram_preflight_host_memory_limit_gb": None,
 }
 
 

@@ -279,13 +279,50 @@ class TestWorkflowOwnedProbeBudgets:
             loss_dir=None,
             probe_step_timeout_seconds=321.0,
             deadline_seconds=987.0,
+            host_memory_limit_gb=42.5,
         )
 
         spec = captured["spec"]
         assert isinstance(spec, IsolatedProbeSpec)
         assert spec.probe_budgets.single_probe_seconds == 321.0
         assert spec.probe_budgets.preflight_total_seconds == 987.0
+        assert spec.worker_memory_limit_bytes == int(42.5 * 1024**3)
         assert captured["deadline_seconds"] == 987.0
+
+    def test_omission_preserves_the_existing_deployment_default(self, tmp_path, monkeypatch):
+        """A new workflow field must not silently disable the legacy override."""
+        from agent.skills.evaluate_vram_skill.isolated_probe import IsolatedProbeResult
+
+        captured: dict[str, object] = {}
+
+        def _capture(spec, *, deadline_seconds, **_kwargs):
+            captured["spec"] = spec
+            return IsolatedProbeResult(label=spec.label, outcome="COMPLETED_MEASUREMENT")
+
+        monkeypatch.setattr(adapter, "run_isolated_preflight", _capture)
+        monkeypatch.setattr(adapter, "build_hardware_snapshot", lambda _ctx: None)
+        monkeypatch.setattr(
+            adapter,
+            "default_worker_memory_limit_bytes",
+            lambda: 31 * 1024**3,
+        )
+
+        adapter.run_production_preflight(
+            model_type="synthetic_model",
+            model_config={},
+            train_config={},
+            loss_config={},
+            vram_budget_gb=None,
+            hardware_context=None,
+            workspace=tmp_path,
+            label="deployment_default",
+            plugin_dir=None,
+            loss_dir=None,
+        )
+
+        spec = captured["spec"]
+        assert isinstance(spec, IsolatedProbeSpec)
+        assert spec.worker_memory_limit_bytes == 31 * 1024**3
 
 
 class TestNoSilentFallback:

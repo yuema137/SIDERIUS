@@ -228,6 +228,7 @@ def run_production_preflight(
     loss_dir: str | None,
     deadline_seconds: float = 900.0,
     probe_step_timeout_seconds: float = 180.0,
+    host_memory_limit_gb: float | None = None,
     model_io_contract: ModelIOContract | None = None,
     task_probe_data: TaskProbeDataSpec | None = None,
 ) -> dict[str, Any]:
@@ -265,6 +266,10 @@ def run_production_preflight(
     Both are workflow-owned execution safeguards. The existing
     ``deadline_seconds`` name is retained for caller compatibility; the public
     workflow surface gives it the more explicit total-timeout name.
+    ``host_memory_limit_gb`` bounds resident host memory for the complete
+    isolated process tree. ``None`` preserves the existing deployment default.
+    It is independent of the GPU VRAM ceiling and a breach remains inconclusive
+    rather than evidence that the model is too large for the GPU.
     """
     snapshot = build_hardware_snapshot(hardware_context)
     workdir = Path(workspace) / "preflight_workers"
@@ -280,7 +285,11 @@ def run_production_preflight(
         loss_config=dict(loss_config or {}),
         vram_budget_gb=vram_budget_gb,
         result_path=str(workdir / f"{label}.json"),
-        worker_memory_limit_bytes=default_worker_memory_limit_bytes(),
+        worker_memory_limit_bytes=(
+            default_worker_memory_limit_bytes()
+            if host_memory_limit_gb is None
+            else int(host_memory_limit_gb * 1024**3)
+        ),
         hardware=snapshot,
         model_io_contract=model_io_contract,
         plugin_dir=plugin_dir,

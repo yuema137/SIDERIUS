@@ -2238,6 +2238,18 @@ class HyperparamTuningInput(BaseModel):
             "measurement. Independent of Trial/Formal training budgets."
         ),
     )
+    vram_preflight_host_memory_limit_gb: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Optional maximum resident host memory in GiB for the complete isolated "
+            "VRAM-preflight process tree. This is a workflow-owned safety "
+            "limit, not a GPU VRAM ceiling or a model-capacity verdict. "
+            "Task-valid batches and model inspection can have different host "
+            "memory costs across task types. None preserves the deployment "
+            "default, normally 24 GiB."
+        ),
+    )
     data_dir: str | None = Field(
         default=None,
         description=(

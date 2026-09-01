@@ -525,10 +525,12 @@ class TestVramBudgetFanOut:
             storage,
             vram_probe_step_timeout_seconds=321.0,
             vram_preflight_total_timeout_seconds=987.0,
+            vram_preflight_host_memory_limit_gb=42.5,
         )
 
         assert result.vram_probe_step_timeout_seconds == 321.0
         assert result.vram_preflight_total_timeout_seconds == 987.0
+        assert result.vram_preflight_host_memory_limit_gb == 42.5
         assert result.trial_vram_budget_gb is None
         assert result.formal_vram_budget_gb is None
         assert result.trial_time_budget_minutes is None

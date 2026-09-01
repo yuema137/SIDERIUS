@@ -50,10 +50,13 @@ def test_vram_preflight_watchdogs_reach_each_iteration() -> None:
         "321",
         "--vram_preflight_total_timeout_seconds",
         "987",
+        "--vram_preflight_host_memory_limit_gb",
+        "42.5",
     )
 
     assert tokens[tokens.index("--vram_probe_step_timeout_seconds") + 1] == "321"
     assert tokens[tokens.index("--vram_preflight_total_timeout_seconds") + 1] == "987"
+    assert tokens[tokens.index("--vram_preflight_host_memory_limit_gb") + 1] == "42.5"
 
 
 def test_retention_suppresses_cleanup_without_leaking_a_chain_only_flag() -> None:
