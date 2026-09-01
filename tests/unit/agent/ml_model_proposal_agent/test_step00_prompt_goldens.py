@@ -110,7 +110,7 @@ def fixture_score_table() -> dict:
     ``linear_weight`` is deliberately omitted: the Sigma-weight validator skips
     when no sampled row declares one, so the fixture stays minimal.
     """
-    from execute_tools.dataset_config import resolve_dataset_profile
+    from execute_tools.dataset_config import TIDMAD_PROFILE
 
     return {
         "rows": [
@@ -122,7 +122,7 @@ def fixture_score_table() -> dict:
                 "gain_vs_raw": 0.29,
                 "headroom_vs_gt": 2.91,
             }
-            for i in range(resolve_dataset_profile().partition_count)
+            for i in range(TIDMAD_PROFILE.partition_count)
         ],
         "aggregate": {
             "raw_baseline_scalar": -3.2,

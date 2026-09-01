@@ -76,9 +76,9 @@ def _fixture_score_rows() -> list[dict]:
     the fixture honest without 20 hand-written literals, and the values are a
     fixed arithmetic ramp so the dump is byte-stable across runs.
     """
-    from execute_tools.dataset_config import resolve_dataset_profile
+    from execute_tools.dataset_config import TIDMAD_PROFILE
 
-    num_files = resolve_dataset_profile().partition_count
+    num_files = TIDMAD_PROFILE.partition_count
     # Sigma linear_weight must round-trip to 1.0 within 1e-9 (score_table.py:256-280).
     weight = 1.0 / num_files
     return [
