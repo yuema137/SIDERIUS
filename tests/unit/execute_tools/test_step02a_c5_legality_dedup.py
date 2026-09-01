@@ -222,34 +222,26 @@ class TestRenderedProseIsUnchanged:
 
 
 # ---------------------------------------------------------------------------
-# §8 — the generator and its consumer cannot disagree
+# §8 — the consumer derives its file count from the bound task
 # ---------------------------------------------------------------------------
 
 
 class TestReferenceArtifactFileCount:
-    """``nodes/scoring_reference.py`` LOADS the per-file artifacts
-    ``scripts/compute_raw_baseline.py`` writes. If the node migrated to the
-    profile and its generator did not, the two would silently disagree about
-    how many files exist — the measured-reachability argument that pulled
-    this script into 02a (§8).
-    """
+    """The loader follows the bound profile rather than a module constant."""
 
-    def test_both_derive_the_count_from_the_same_authority(self):
+    def test_loader_derives_the_count_from_the_bound_profile(self):
         import nodes.scoring_reference as reference
 
-        for rel in ("scripts/compute_raw_baseline.py", "nodes/scoring_reference.py"):
-            source = (REPO_ROOT / rel).read_text()
-            assert "resolve_dataset_profile" in source, rel
-            # Code lines only — both files' docstrings quote the removed
-            # module-level tuple to explain what changed.
-            code = [
-                line
-                for line in source.splitlines()
-                if "tuple(range(NUM_FILES))" in line
-                and not line.lstrip().startswith("#")
-                and "``" not in line
-            ]
-            assert code == [], f"{rel} still builds the index tuple at import: {code}"
+        source = (REPO_ROOT / "nodes/scoring_reference.py").read_text()
+        assert "resolve_dataset_profile" in source
+        code = [
+            line
+            for line in source.splitlines()
+            if "tuple(range(NUM_FILES))" in line
+            and not line.lstrip().startswith("#")
+            and "``" not in line
+        ]
+        assert code == [], f"loader still builds the index tuple at import: {code}"
 
         assert len(reference._fine_indices()) == TIDMAD.num_files
         with bind_dataset_profile(

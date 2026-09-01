@@ -28,9 +28,8 @@ def _fine_indices() -> tuple[int, ...]:
 
     Was a module-level ``tuple(range(NUM_FILES))`` evaluated at import, which
     fixed this node to TIDMAD's 20 files no matter what a task declared. It
-    is now derived per call from the resolved Dataset Profile, so this node
-    and its generator (``scripts/compute_raw_baseline.py``) cannot silently
-    disagree about how many files exist.
+    is now derived per call from the resolved Dataset Profile. Scientific
+    reference-data generators live in the external task package.
     """
     return tuple(range(resolve_dataset_profile().partition_count))
 
