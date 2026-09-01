@@ -127,6 +127,14 @@ F-PROFILE-WIRE-1, forwarded only when
 typed, so an undeclared launch's child argv is byte-identical), and the
 trial / formal time and VRAM budgets.
 
+The generic chain also accepts
+`--vram_probe_step_timeout_seconds` (default `180`) and
+`--vram_preflight_total_timeout_seconds` (default `900`). The first bounds one
+training-mode or inference footprint forward; the second bounds the complete
+isolated preflight worker. They are workflow safeguards, not task declarations,
+training-step counts, or Trial/Formal runtime budgets. See
+[`operating-a-run.md`](../guides/operating-a-run.md#vram-preflight-watchdogs).
+
 > The header comment inside `run_chain.sh` lists `--seed_paths` under "Required
 > flags". That comment is stale — `_chain_common.sh:403-406` documents the
 > opposite and omits the flag entirely for a cold start. Cold start is in fact

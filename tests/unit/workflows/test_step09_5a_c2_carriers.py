@@ -146,6 +146,11 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     # for every run that declares no advice.
     "advice_path": None,
     "advice_sha256": None,
+    # Generic VRAM-preflight watchdogs (2026-09-01). Pure transit from the
+    # workflow to the isolated worker; defaults preserve the pre-feature
+    # production adapter's 180 s per-forward and 900 s worker deadlines.
+    "vram_probe_step_timeout_seconds": 180.0,
+    "vram_preflight_total_timeout_seconds": 900.0,
 }
 
 

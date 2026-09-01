@@ -39,6 +39,23 @@ def test_optional_llm_config_is_not_emitted_as_an_empty_flag() -> None:
     assert "--llm_config" not in tokens
 
 
+def test_vram_preflight_watchdogs_reach_each_iteration() -> None:
+    """A chain-level override must not stop at the shell wrapper."""
+    tokens = _build(
+        "--workspace",
+        "/tmp/workspace",
+        "--run_name",
+        "test",
+        "--vram_probe_step_timeout_seconds",
+        "321",
+        "--vram_preflight_total_timeout_seconds",
+        "987",
+    )
+
+    assert tokens[tokens.index("--vram_probe_step_timeout_seconds") + 1] == "321"
+    assert tokens[tokens.index("--vram_preflight_total_timeout_seconds") + 1] == "987"
+
+
 def test_retention_suppresses_cleanup_without_leaking_a_chain_only_flag() -> None:
     tokens = _build(
         "--workspace",

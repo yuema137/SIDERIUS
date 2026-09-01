@@ -2217,6 +2217,27 @@ class HyperparamTuningInput(BaseModel):
             "use larger batch sizes or full-dataset sampling."
         ),
     )
+    vram_probe_step_timeout_seconds: float = Field(
+        default=180.0,
+        gt=0.0,
+        description=(
+            "Maximum wall time for one training-mode or inference VRAM "
+            "footprint forward. This is not an epoch, optimizer step, or "
+            "candidate-runtime budget. The workflow owns this safeguard "
+            "because one task-valid batch may have very different execution "
+            "cost across task types."
+        ),
+    )
+    vram_preflight_total_timeout_seconds: float = Field(
+        default=900.0,
+        gt=0.0,
+        description=(
+            "Maximum wall time for the complete isolated VRAM preflight "
+            "worker, including model construction, training-footprint "
+            "measurement, inference-batch search, and inference-footprint "
+            "measurement. Independent of Trial/Formal training budgets."
+        ),
+    )
     data_dir: str | None = Field(
         default=None,
         description=(

@@ -378,6 +378,22 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--vram_probe_step_timeout_seconds",
+        type=float,
+        default=180.0,
+        help=(
+            "Maximum wall time for one training-mode or inference VRAM "
+            "footprint forward (default 180). It is not a training-step or "
+            "epoch budget."
+        ),
+    )
+    parser.add_argument(
+        "--vram_preflight_total_timeout_seconds",
+        type=float,
+        default=900.0,
+        help=("Maximum wall time for the complete isolated VRAM preflight worker (default 900)."),
+    )
+    parser.add_argument(
         "--trial_max_epochs",
         type=int,
         default=None,
@@ -657,6 +673,8 @@ def build_agent_input(
         input_dict["trial_vram_budget_gb"] = args.trial_vram_budget_gb
     if args.formal_vram_budget_gb is not None:
         input_dict["formal_vram_budget_gb"] = args.formal_vram_budget_gb
+    input_dict["vram_probe_step_timeout_seconds"] = args.vram_probe_step_timeout_seconds
+    input_dict["vram_preflight_total_timeout_seconds"] = args.vram_preflight_total_timeout_seconds
 
     # Phase L (§11) — per-round attempt budget. Always forwarded so a CLI
     # invocation matches the workflow path. Schema validators enforce ge=1.

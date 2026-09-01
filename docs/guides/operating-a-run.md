@@ -101,6 +101,26 @@ By default, Formal does not impose a batch-size floor beyond the task and
 candidate contracts. A caller may declare an explicit rule when its scientific
 treatment requires one.
 
+## VRAM preflight watchdogs
+
+VRAM preflight measures a candidate before expensive execution. One training
+footprint probe materializes one task-valid batch, runs the model in training
+mode, computes the declared loss, and records the tensors autograd would retain.
+It does not call `backward()`, update the optimizer, train an epoch, or establish
+the candidate's scientific quality. An inference probe similarly runs a bounded
+forward, and inference-batch search may inspect multiple candidate batch sizes.
+
+| Flag | Default | Bounds |
+|---|---:|---|
+| `--vram_probe_step_timeout_seconds` | `180` | one training-mode or inference footprint forward |
+| `--vram_preflight_total_timeout_seconds` | `900` | the complete isolated preflight worker |
+
+Choose these values for the execution cost of one task-valid batch. A full
+graph, long sequence, or expensive task plugin may need more time than a small
+image batch. These watchdogs do not replace Trial/Formal wall-time budgets and
+do not change the VRAM ceiling. Expiry is an inconclusive measurement, never
+evidence that the model is too large.
+
 ## Failures and refusals
 
 Interpret terminal evidence by responsibility:

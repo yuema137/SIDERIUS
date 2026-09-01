@@ -47,6 +47,7 @@ from agent.skills.evaluate_vram_skill.isolated_probe import (
     default_worker_memory_limit_bytes,
     run_isolated_preflight,
 )
+from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.model_io_contract import ModelIOContract
@@ -226,6 +227,7 @@ def run_production_preflight(
     plugin_dir: str | None,
     loss_dir: str | None,
     deadline_seconds: float = 900.0,
+    probe_step_timeout_seconds: float = 180.0,
     model_io_contract: ModelIOContract | None = None,
     task_probe_data: TaskProbeDataSpec | None = None,
 ) -> dict[str, Any]:
@@ -256,9 +258,20 @@ def run_production_preflight(
     task-owned training scope. The isolated worker verifies and materializes
     it through the existing task-data contract; this parent never constructs
     the candidate model or transfers a large tensor over JSON.
+
+    ``probe_step_timeout_seconds`` bounds one training-mode or inference
+    footprint forward. It does not bound an epoch, optimizer step, or complete
+    candidate run. ``deadline_seconds`` bounds the isolated worker end to end.
+    Both are workflow-owned execution safeguards. The existing
+    ``deadline_seconds`` name is retained for caller compatibility; the public
+    workflow surface gives it the more explicit total-timeout name.
     """
     snapshot = build_hardware_snapshot(hardware_context)
     workdir = Path(workspace) / "preflight_workers"
+    budgets = ProbeBudgets(
+        single_probe_seconds=probe_step_timeout_seconds,
+        preflight_total_seconds=deadline_seconds,
+    )
     spec = IsolatedProbeSpec(
         label=label,
         model_type=model_type,
@@ -273,11 +286,15 @@ def run_production_preflight(
         plugin_dir=plugin_dir,
         loss_dir=loss_dir,
         task_probe_data=task_probe_data,
+        probe_budgets=budgets,
     )
     # No try/except around this call: a worker failure is already a typed
     # PROBE_INFRASTRUCTURE_FAILURE, and catching it to retry in-process is
     # exactly the silent fallback this module forbids.
-    probe = run_isolated_preflight(spec, deadline_seconds=deadline_seconds)
+    probe = run_isolated_preflight(
+        spec,
+        deadline_seconds=budgets.preflight_total_seconds,
+    )
     result = adapt_result(probe.model_dump())
     result["effective_vram_limit_gb"] = spec.effective_cap_gb()
     result["effective_limit_source"] = spec.effective_limit_source()

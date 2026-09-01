@@ -51,6 +51,7 @@ from typing import Any, Literal, get_args
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.model_io_contract import ModelIOContract
+from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
 from core.runtime_control.process_group import (
     process_group_alive,
     signal_group,
@@ -227,6 +228,9 @@ class IsolatedProbeSpec(BaseModel):
     #: worker so the loss sees one task-valid training batch. ``None`` keeps
     #: the legacy shape-and-dtype synthetic probe unchanged.
     task_probe_data: TaskProbeDataSpec | None = None
+    #: Per-operation watchdog budgets selected by the workflow. The complete
+    #: typed object crosses IPC so the worker never reads mutable module state.
+    probe_budgets: ProbeBudgets = Field(default_factory=ProbeBudgets)
 
     def effective_cap_gb(self) -> float | None:
         """The cap the worker must apply: the LOWER of the operator ceiling

@@ -234,8 +234,9 @@ Resolution (preset + dataset cross-check) already happened inside
 `load_task_config`; nothing here re-resolves.
 
 A task declaring no `model_io` binds `None`, and every consumer takes its
-legacy no-contract path. **No new CLI argument and no new config field** —
-both values are runtime transport, not configuration.
+legacy no-contract path. Model-I/O itself adds no CLI argument or config
+field; the separately documented preflight watchdogs are workflow execution
+configuration and do not alter the model-I/O declaration.
 
 One behavioural consequence, stated because it is a change: binding the
 contract at startup makes an unreadable `configs/task_config.yaml` fatal
@@ -251,6 +252,8 @@ expression — and failing before any GPU work is the fail-closed direction.
 | `formal_time_budget_minutes` | `float \| None` | No | `None` | Wall-time budget against which `evaluate_time_skill` gates rounds where the planner picks formal mode. `None` = formal time-gate disabled. |
 | `trial_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates trial rounds. `None` = trial VRAM-gate disabled. |
 | `formal_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates formal rounds. `None` = formal VRAM-gate disabled. |
+| `vram_probe_step_timeout_seconds` | `float` | No | `180.0` | Watchdog for one training-mode or inference footprint forward during VRAM preflight. It runs no optimizer update and does not bound an epoch or candidate run. |
+| `vram_preflight_total_timeout_seconds` | `float` | No | `900.0` | End-to-end watchdog for the isolated VRAM preflight worker, including model construction, footprint measurement, and inference-batch search. Independent of Trial/Formal training budgets. |
 | `data_dir` | `str \| None` | No | `None` | Caller-selected physical dataset root forwarded to runtime measurement and child execution. Supported composed launches require an explicit root; the framework never substitutes a scientific-task or machine-local default. |
 | `measurement_capability` | `ResolvedMeasurementCapability \| None` | No | `None` | Caller-resolved measurement identity and availability. The workflow transports this typed value through the validator-to-tuner protocol so tuning and calibration never infer a scientific task identity from `data_dir`. `None` records an unavailable measurement path and cannot authorize a formal scientific decision that requires measured evidence. |
 

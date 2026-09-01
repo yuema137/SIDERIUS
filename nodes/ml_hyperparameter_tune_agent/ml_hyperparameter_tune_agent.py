@@ -1117,6 +1117,10 @@ class HyperparamTuningAgent:
             "health_feedback_history_max_entries_per_model": (
                 agent_input.health_feedback_history_max_entries_per_model
             ),
+            "vram_probe_step_timeout_seconds": (agent_input.vram_probe_step_timeout_seconds),
+            "vram_preflight_total_timeout_seconds": (
+                agent_input.vram_preflight_total_timeout_seconds
+            ),
             # DataScope + HealthGate subsystem stamps (DS5).
             "resolved_data_scope": resolved_data_scope,
             "health_gate_enabled": agent_input.health_gate_enabled,

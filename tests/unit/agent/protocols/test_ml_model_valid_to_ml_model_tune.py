@@ -515,6 +515,25 @@ class TestVramBudgetFanOut:
         assert result.trial_vram_budget_gb is None
         assert result.formal_vram_budget_gb is None
 
+    def test_preflight_watchdogs_are_independent_workflow_values(
+        self, validator_output, proposal_output, storage
+    ):
+        """A workflow override must survive without changing other budgets."""
+        result = local_validated_model(
+            validator_output,
+            proposal_output,
+            storage,
+            vram_probe_step_timeout_seconds=321.0,
+            vram_preflight_total_timeout_seconds=987.0,
+        )
+
+        assert result.vram_probe_step_timeout_seconds == 321.0
+        assert result.vram_preflight_total_timeout_seconds == 987.0
+        assert result.trial_vram_budget_gb is None
+        assert result.formal_vram_budget_gb is None
+        assert result.trial_time_budget_minutes is None
+        assert result.formal_time_budget_minutes is None
+
 
 # ---------------------------------------------------------------------------
 # Per-round attempt-budget fan-out (Phase L, §11.5)

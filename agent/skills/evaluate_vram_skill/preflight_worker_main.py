@@ -253,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[worker] effective VRAM limit {budget} GB (source: {limit_source})", flush=True)
 
     try:
+        from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
         from agent.skills.evaluate_vram_skill.wrapper import run_skill
 
         print(f"[worker] pre-flight for {spec['model_type']}", flush=True)
@@ -290,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
             max_inference_batch_size=(
                 (spec.get("task_probe_data") or {}).get("max_inference_batch_size")
             ),
+            probe_budgets=ProbeBudgets.model_validate(spec.get("probe_budgets") or {}),
         )
     except BaseException as exc:
         from agent.skills.evaluate_vram_skill.probe_budgets import (

@@ -143,6 +143,8 @@ def local_validated_model(
     gpu_pair_ceiling_gib: float | None = None,
     trial_vram_budget_gb: float | None = None,
     formal_vram_budget_gb: float | None = None,
+    vram_probe_step_timeout_seconds: float = 180.0,
+    vram_preflight_total_timeout_seconds: float = 900.0,
     # --- Formal-mode training levers (Phase M) + eval-scope (Phase R) ---
     formal_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
     formal_portion: float = 0.1,
@@ -233,6 +235,10 @@ def local_validated_model(
         proposer-side gate is deferred per §10.17. Resource info reaches
         the planner via the prompt block only (single-channel rule, §10.3).
         See docs/resource_estimator_implement.md §10.9.
+      - vram_probe_step_timeout_seconds / vram_preflight_total_timeout_seconds :
+        workflow-owned watchdogs for one footprint forward and the complete
+        isolated preflight, respectively. They do not change training epochs,
+        optimizer steps, or Trial/Formal runtime budgets.
       - formal_strategy / formal_portion / formal_train_portion :
         operator-configurable training-side sample-set knobs for any round
         promoted to formal (Phase M). Defaults snapshot / 0.1 / 1.0.
@@ -359,6 +365,8 @@ def local_validated_model(
         gpu_pair_ceiling_gib=gpu_pair_ceiling_gib,
         trial_vram_budget_gb=trial_vram_budget_gb,
         formal_vram_budget_gb=formal_vram_budget_gb,
+        vram_probe_step_timeout_seconds=vram_probe_step_timeout_seconds,
+        vram_preflight_total_timeout_seconds=vram_preflight_total_timeout_seconds,
         formal_strategy=formal_strategy,
         formal_portion=formal_portion,
         formal_train_portion=formal_train_portion,

@@ -123,6 +123,8 @@ GPU_ADMISSION_ENFORCEMENT=""        # B-G3/D-B4: empty == omit == observe_only
 GPU_PAIR_CEILING_GIB=""             # B-G3: empty == omit == defer to env/default
 TRIAL_VRAM_BUDGET_GB=""             # §3.2: empty == omit == Python None
 FORMAL_VRAM_BUDGET_GB=""            # §3.2: empty == omit == Python None
+VRAM_PROBE_STEP_TIMEOUT_SECONDS=180  # one training-mode/inference footprint forward
+VRAM_PREFLIGHT_TOTAL_TIMEOUT_SECONDS=900 # complete isolated preflight worker
 # §3.2 — Runtime-control operator surface (RT6, runtime design §4/§5).
 # Defaults synced to run_one_iteration.py (§5 provisional operational
 # values); 0 disables a numeric guardrail; booleans forwarded when 1.
@@ -343,6 +345,8 @@ parse_chain_args() {
         --gpu_pair_ceiling_gib)   GPU_PAIR_CEILING_GIB="$2"; shift 2 ;;
         --trial_vram_budget_gb)   TRIAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
         --formal_vram_budget_gb)  FORMAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
+        --vram_probe_step_timeout_seconds) VRAM_PROBE_STEP_TIMEOUT_SECONDS="$2"; shift 2 ;;
+        --vram_preflight_total_timeout_seconds) VRAM_PREFLIGHT_TOTAL_TIMEOUT_SECONDS="$2"; shift 2 ;;
         --exploration_mode)       EXPLORATION_MODE="$2"; shift 2 ;;
         --minimum_boldness)       MINIMUM_BOLDNESS="$2"; shift 2 ;;
         --mode)                   MODE="$2"; shift 2 ;;
@@ -705,6 +709,8 @@ build_app_args() {
     if [ -n "$FORMAL_VRAM_BUDGET_GB" ]; then
         APP_ARGS+=(--formal_vram_budget_gb "$FORMAL_VRAM_BUDGET_GB")
     fi
+    APP_ARGS+=(--vram_probe_step_timeout_seconds "$VRAM_PROBE_STEP_TIMEOUT_SECONDS")
+    APP_ARGS+=(--vram_preflight_total_timeout_seconds "$VRAM_PREFLIGHT_TOTAL_TIMEOUT_SECONDS")
     if [ -n "$DEGENERATE_PENALTY_SCORE" ]; then
         APP_ARGS+=(--degenerate_penalty_score "$DEGENERATE_PENALTY_SCORE")
     fi

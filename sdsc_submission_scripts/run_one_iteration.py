@@ -2007,6 +2007,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Per-mode VRAM ceiling (GB) for formal rounds. None uses free×0.8.",
     )
     parser.add_argument(
+        "--vram_probe_step_timeout_seconds",
+        type=float,
+        default=180.0,
+        help=(
+            "Maximum wall time for one training-mode or inference VRAM "
+            "footprint forward (default: 180). This is not an epoch, "
+            "optimizer step, or candidate-runtime budget."
+        ),
+    )
+    parser.add_argument(
+        "--vram_preflight_total_timeout_seconds",
+        type=float,
+        default=900.0,
+        help=(
+            "Maximum wall time for the complete isolated VRAM preflight "
+            "worker (default: 900), independent of Trial/Formal runtime budgets."
+        ),
+    )
+    parser.add_argument(
         "--attempts_per_round",
         type=int,
         default=3,
@@ -3283,6 +3302,10 @@ def main():
                     gpu_pair_ceiling_gib=args.gpu_pair_ceiling_gib,
                     trial_vram_budget_gb=args.trial_vram_budget_gb,
                     formal_vram_budget_gb=args.formal_vram_budget_gb,
+                    vram_probe_step_timeout_seconds=args.vram_probe_step_timeout_seconds,
+                    vram_preflight_total_timeout_seconds=(
+                        args.vram_preflight_total_timeout_seconds
+                    ),
                     attempts_per_round=args.attempts_per_round,
                     attempts_per_formal_round=args.attempts_per_formal_round,
                     max_fail_rounds=args.max_fail_rounds,
