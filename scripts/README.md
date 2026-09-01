@@ -27,15 +27,11 @@ The durable operator surface:
 
 | script | role |
 |---|---|
-| `run_comparison.py` | ⚠ TIDMAD-only baseline/agent comparison harness (imports TIDMAD's dataset and sandbox directly; no `--task_composition`) |
 | `inspect_run_state.py` | the auto-resume inspector — `--next-iter` reports the first incomplete iteration from each `iter_NNN/manifest.json`; one of the three callers of the shared manifest-verification predicate |
-| `run_pets_gate2.py` · `run_davis_gate2.py` | the D14 direct-execution harnesses for the two contrast packs (real training/inference/scoring in-process; the historical Gate-2 evidence path that predates the composed chain reaching those tasks) |
-| `_gate2_health_stage.py` | the ONE shared Health evidence stage both D14 runners call (explicit binding, every selected gate persisted) |
 | `rebuild_per_file_best.py` | rebuild the per-partition best-of table from records |
 | `record_wave_summary.py` · `build_diagnostic_summary.py` | wave/diagnostic summary builders |
 | `validate_path_component.py` | path-component hygiene used by launchers |
 | `campaign_admission.py` · `campaign_spend.py` · `runtime_campaign.py` · `runtime_bootstrap.py` · `runtime_replay/` | resumable-campaign bookkeeping and runtime-control operations |
-| `run_all_models.sh` · `run_all_models_trial.sh` | screen-based group orchestration of `run_comparison.py` across the five built-in TIDMAD models |
 | `bg_gpu_sampler.sh` | background GPU utilisation sampler |
 
 Everything else — `fcnet_*`, `investigate_*`, `score_tidmad_official_*`,
@@ -67,8 +63,6 @@ write full run workspaces.
   chain launcher trusts; its manifest verdicts come from the shared
   `core/iteration_manifest.py` predicate, so "trustworthy" has one
   definition everywhere.
-- `run_comparison.py` owns the paper-aligned baseline launch (its
-  `--max_epochs 1` posture is the TIDMAD paper spec).
 
 ## Non-owned semantics
 
@@ -94,8 +88,7 @@ workspaces; the campaign tools append manifests under their campaign roots.
 
 `inspect_run_state.py` reports a manifest problem verbatim from the shared
 predicate (a tampered or hash-less completed manifest is named, not
-admitted); `run_comparison.py` refuses non-TIDMAD use by construction —
-it has no composition entrypoint.
+admitted).
 
 ## Files normally edited
 
