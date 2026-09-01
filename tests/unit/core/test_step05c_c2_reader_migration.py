@@ -32,6 +32,7 @@ import pytest
 
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.data_paths import bind_physical_data_root
+from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
 from execute_tools.deliverable_spec import DeliverableNaming, default_deliverable_naming
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _build_denoised_filename,
@@ -58,11 +59,14 @@ RENAMED = DeliverableNaming(prefix="step05c_renamed")
 @pytest.fixture(autouse=True)
 def _bind_synthetic_task_config():
     """Exercise the reader seam without reviving an implicit scientific task."""
-    with bind_task_config(
-        {
-            "task_description": "Synthetic deliverable-reader fixture.",
-            "forward_contract": {},
-        }
+    with (
+        bind_task_config(
+            {
+                "task_description": "Synthetic deliverable-reader fixture.",
+                "forward_contract": {},
+            }
+        ),
+        bind_dataset_profile(TIDMAD_PROFILE),
     ):
         yield
 
