@@ -323,10 +323,6 @@ MIGRATED_TO_THE_ORDER_AUTHORITY = (
     ),
     ("dashboard/data_sources/base.py", "ranked by denoising_score descending (higher is better)"),
     (
-        "scripts/build_diagnostic_summary.py",
-        'max(valid, key=lambda record: record["denoising_score"])',
-    ),
-    (
         "scripts/finalize_recovered_diagnostic_round.py",
         'max(valid, key=lambda item: item["denoising_score"])',
     ),
@@ -344,7 +340,6 @@ MIGRATED_TO_THE_ORDER_AUTHORITY = (
 #: ASSERTED property rather than becoming an unchecked exemption.
 _AUTHORITY_MARKERS: dict[str, str] = {
     "dashboard/data_sources/local_json.py": "persisted_ranking",
-    "scripts/build_diagnostic_summary.py": "persisted_ranking",
     "scripts/finalize_recovered_diagnostic_round.py": "persisted_ranking",
     # A prose-only row: an abstract method's docstring, which names no
     # authority because it executes nothing. What must be true of it is that
