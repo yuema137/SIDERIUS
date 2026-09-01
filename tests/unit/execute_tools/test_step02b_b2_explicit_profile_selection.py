@@ -33,6 +33,7 @@ from execute_tools.dataset_config import (
     TIDMAD_PROFILE,
     DataScope,
     DatasetProfile,
+    bind_dataset_profile,
     tidmad_topology,
 )
 from execute_tools.sample_set_builder import build_sample_set
@@ -99,23 +100,20 @@ class TestExplicitProfileIsLive:
         routes*, which no digest can express because only one route existed
         when they were captured.
         """
-        ambient_result = build_sample_set(**kwargs)
+        with bind_dataset_profile(TIDMAD_EQUIVALENT):
+            ambient_result = build_sample_set(**kwargs)
         with _ambient_disabled():
             explicit_result = build_sample_set(profile=TIDMAD_EQUIVALENT, **kwargs)
         assert explicit_result == ambient_result
 
-    def test_absent_profile_still_resolves_ambiently(self):
-        """Regime-A preserved: un-migrated callers must not break (§1a-F).
-
-        `scripts/run_comparison.py` and `agent/utils/proposer_preflight.py`
-        have no profile in scope and deliberately keep this path.
-        """
+    def test_absent_argument_delegates_to_the_binding_authority(self):
+        """A missing argument asks the one binding authority, never a local default."""
         with patch.object(
             sample_set_builder, "resolve_dataset_profile", return_value=TIDMAD_EQUIVALENT
         ) as ambient:
             result = build_sample_set(is_trial=True, trial_portion=0.05, seed=42)
         assert result
-        assert ambient.called, "the None default stopped falling back to Regime-A"
+        ambient.assert_called_once_with()
 
 
 class TestProfileIsConsumedNotRederived:

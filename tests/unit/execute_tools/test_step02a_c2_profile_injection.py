@@ -142,7 +142,8 @@ class TestInjectionReachability:
 
     def test_geometry_consumer_follows_the_declared_psd_length(self):
         # TIDMAD: 10,000,000 / 10 = 1,000,000 ML segments per PSD segment.
-        assert _workload_ml_per_psd() == 1_000_000
+        with bind_dataset_profile(TIDMAD_PROFILE):
+            assert _workload_ml_per_psd() == 1_000_000
         with bind_dataset_profile(_profile(psd_segment_length=1_000)):
             assert _workload_ml_per_psd() == 100
 
@@ -152,12 +153,14 @@ class TestInjectionReachability:
         ids=["scoring_reference", "sample_set_builder"],
     )
     def test_file_count_consumers_follow_the_declaration(self, probe):
-        assert probe() == 20
+        with bind_dataset_profile(TIDMAD_PROFILE):
+            assert probe() == 20
         with bind_dataset_profile(_profile(num_files=7)):
             assert probe() == 7
 
     def test_segment_count_consumer_follows_the_declaration(self):
-        assert _sample_set_builder_segments() == 200
+        with bind_dataset_profile(TIDMAD_PROFILE):
+            assert _sample_set_builder_segments() == 200
         with bind_dataset_profile(_profile(segments_per_file=13)):
             assert _sample_set_builder_segments() == 13
 
@@ -165,40 +168,12 @@ class TestInjectionReachability:
         """A leaked contrast profile would surface as an unrelated failure in
         whatever test ran next — the reason binding is a ContextVar and not
         module state."""
-        with pytest.raises(RuntimeError):
-            with bind_dataset_profile(_profile(num_files=3)):
-                assert resolve_tidmad_topology().dataset.num_files == 3
-                raise RuntimeError("boom")
-        assert resolve_dataset_profile() is TIDMAD_PROFILE
-
-
-# ---------------------------------------------------------------------------
-# Class 3 — Regime-A compatibility
-# ---------------------------------------------------------------------------
-
-
-class TestRegimeACompatibility:
-    def test_nothing_bound_resolves_the_shipped_tidmad_profile(self):
-        """§5c: a caller that predates the transport must be unaffected.
-
-        Distinct from "a supplied profile is broken", which fails closed —
-        that rule arrives with the transport in C3.
-        """
-        assert resolve_dataset_profile() is TIDMAD_PROFILE
-
-    def test_the_adapter_is_documented_as_an_adapter_at_the_code_site(self):
-        """§6.2 acceptance: Regime-A semantics must be stated in code, not
-        merely implied by a default value. A future reader who takes these
-        for universal generic defaults is the failure this guards."""
-        import inspect
-
-        import execute_tools.dataset_config as dc
-
-        source = inspect.getsource(dc)
-        _, _, after = source.partition("TIDMAD_PROFILE = DatasetProfile(")
-        preamble = source[: len(source) - len(after)]
-        assert "REGIME-A COMPATIBILITY ADAPTER" in preamble
-        assert "not a universal framework default" in preamble
+        with bind_dataset_profile(TIDMAD_PROFILE):
+            with pytest.raises(RuntimeError):
+                with bind_dataset_profile(_profile(num_files=3)):
+                    assert resolve_tidmad_topology().dataset.num_files == 3
+                    raise RuntimeError("boom")
+            assert resolve_dataset_profile() is TIDMAD_PROFILE
 
 
 # ---------------------------------------------------------------------------
@@ -216,15 +191,16 @@ class TestTopologyRepresentability:
     """
 
     def test_a_file_index_legal_only_under_a_contrast_topology_is_accepted(self):
-        with pytest.raises(ValidationError, match="outside the declared topology"):
-            PerFileRow(
-                file_index=25,
-                raw_baseline=None,
-                ground_truth=None,
-                model=None,
-                gain_vs_raw=None,
-                headroom_vs_gt=None,
-            )
+        with bind_dataset_profile(TIDMAD_PROFILE):
+            with pytest.raises(ValidationError, match="outside the declared topology"):
+                PerFileRow(
+                    file_index=25,
+                    raw_baseline=None,
+                    ground_truth=None,
+                    model=None,
+                    gain_vs_raw=None,
+                    headroom_vs_gt=None,
+                )
         with bind_dataset_profile(_profile(num_files=30)):
             row = PerFileRow(
                 file_index=25,
