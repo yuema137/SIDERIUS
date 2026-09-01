@@ -64,7 +64,7 @@ OWNED_PRODUCTION_FILES = (
 # ``deliverable_spec.naming`` (guarded by
 # ``tests/unit/execute_tools/test_step06_c3_subprocess_route.py``), so it left
 # this list; the historical scripts stay.
-OUT_OF_RUNG_FILES = ("scripts/score_tidmad_official_banded.py",)
+OUT_OF_RUNG_FILES: tuple[str, ...] = ()
 
 TIDMAD_PREFIX = "abra_validation_denoised"
 
