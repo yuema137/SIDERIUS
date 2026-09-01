@@ -23,10 +23,7 @@ import hashlib
 import pytest
 import torch
 
-from execute_tools.dataset_config import (
-    DatasetProfile,
-    tidmad_topology,
-)
+from execute_tools.dataset_config import DatasetProfile
 from execute_tools.probe_batch import build_bounded_probe_batch
 from execute_tools.training_history import stamp_comparability
 from ml_models.models_format_sandbox import LossConfig
@@ -34,7 +31,7 @@ from tests.helpers.two_family_profile import make_two_family_profile, write_two_
 
 SEG = 32
 BATCH = 3
-DECLARED_CHANNELS = tidmad_topology(make_two_family_profile()).channels
+DECLARED_CHANNELS = make_two_family_profile().to_wire()["channels"]
 
 
 def _profile_with(base: DatasetProfile, **overrides) -> DatasetProfile:
@@ -71,9 +68,9 @@ def _identity_projection(profile: DatasetProfile) -> dict[str, str]:
     from core.runtime_control.registry_schemas import MeasurementIdentity
 
     shape_class = (
-        f"psd{tidmad_topology(profile).dataset.psd_segment_length}"
-        f"_seg{tidmad_topology(profile).dataset.segments_per_file}"
-        f"_files{tidmad_topology(profile).dataset.num_files}"
+        f"psd{profile.to_wire()['dataset']['psd_segment_length']}"
+        f"_seg{profile.to_wire()['dataset']['segments_per_file']}"
+        f"_files{profile.to_wire()['dataset']['num_files']}"
     )
     identity = MeasurementIdentity(
         measurement_kind="gpu_requirement",
@@ -133,8 +130,8 @@ class TestB07c1TheMeasurementDataFeedingAxis:
             (
                 "other_channel",
                 {
-                    "channels.input_channel": DECLARED_CHANNELS.target_channel,
-                    "channels.target_channel": DECLARED_CHANNELS.input_channel,
+                    "channels.input_channel": DECLARED_CHANNELS["target_channel"],
+                    "channels.target_channel": DECLARED_CHANNELS["input_channel"],
                 },
             ),
             # NON-INT8 storage. The fixture holds int8 payloads, so reading
@@ -222,10 +219,10 @@ class TestTheFileFamilyComesFromTheDeclarationToo:
             batch_size=BATCH,
             segment_length=SEG,
         )
-        assert result.evidence.source_file == tidmad_topology(
-            contrast.profile
-        ).dataset.training_file_name(0)
-        assert result.evidence.channel == tidmad_topology(contrast.profile).channels.input_channel
+        dataset = contrast.profile.to_wire()["dataset"]
+        channels = contrast.profile.to_wire()["channels"]
+        assert result.evidence.source_file == dataset["training_file_pattern"].format(file_index=0)
+        assert result.evidence.channel == channels["input_channel"]
 
 
 class TestTheBatchIsStillWellFormed:
@@ -236,8 +233,8 @@ class TestTheBatchIsStillWellFormed:
         for overrides in (
             {"encoding.value_offset": 200, "encoding.num_classes": 328},
             {
-                "channels.input_channel": DECLARED_CHANNELS.target_channel,
-                "channels.target_channel": DECLARED_CHANNELS.input_channel,
+                "channels.input_channel": DECLARED_CHANNELS["target_channel"],
+                "channels.target_channel": DECLARED_CHANNELS["input_channel"],
             },
         ):
             variant = _profile_with(contrast.profile, **overrides)
