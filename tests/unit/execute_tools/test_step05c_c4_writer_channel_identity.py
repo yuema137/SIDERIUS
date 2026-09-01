@@ -20,13 +20,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from execute_tools.array2h5 import create_abra_file
-from execute_tools.dataset_config import TIDMAD_PROFILE, ChannelIdentity, bind_dataset_profile
+from execute_tools.dataset_config import TIDMAD_PROFILE
 from execute_tools.deliverable_spec import (
     DeliverableStorage,
-    default_deliverable_storage,
     derive_tidmad_deliverable_spec,
 )
 from tests.unit.execute_tools.test_step05c_c0_deliverable_baseline import (
@@ -56,25 +54,9 @@ def _write(tmp_path, storage=None, array2=TARGET_SAMPLES):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "storage",
-    [None, "derived"],
-    ids=["no_spec_supplied", "derived_from_profile"],
-)
-def test_tidmad_artifact_is_logically_identical_to_the_c0_golden(tmp_path, storage):
-    """Both call shapes reproduce the pre-05c file EXACTLY.
-
-    ``None`` is the backward-compat path every caller predating 05c takes;
-    the derived storage is what production now supplies. A single differing
-    attr, dtype, shape or sample value is failure class 2 — the deliverable is
-    scientific evidence and a byte change is not a refactor — so this compares
-    the whole canonical inspection, not a spot check.
-    """
-    resolved = (
-        None
-        if storage is None
-        else derive_tidmad_deliverable_spec(TIDMAD_PROFILE).storage
-    )
+def test_tidmad_artifact_is_logically_identical_to_the_c0_golden(tmp_path):
+    """The explicitly derived storage reproduces the pre-05c file exactly."""
+    resolved = derive_tidmad_deliverable_spec(TIDMAD_PROFILE).storage
 
     inspection = canonical_h5_inspection(_write(tmp_path, resolved))
 
@@ -106,7 +88,8 @@ def test_single_channel_write_is_unchanged(tmp_path):
     must not gain an empty second group, and the target identity must simply
     go unused rather than resolve to something.
     """
-    inspection = canonical_h5_inspection(_write(tmp_path, None, array2=None))
+    storage = derive_tidmad_deliverable_spec(TIDMAD_PROFILE).storage
+    inspection = canonical_h5_inspection(_write(tmp_path, storage, array2=None))
 
     assert inspection["groups"] == ["timeseries", "timeseries/channel0001"]
     assert list(inspection["datasets"]) == ["timeseries/channel0001/timeseries"]
@@ -137,7 +120,8 @@ def test_a_contrast_channel_identity_moves_the_group_names_and_nothing_else(tmp_
 
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
-    tidmad = canonical_h5_inspection(_write(tmp_path / "a", None))
+    baseline = derive_tidmad_deliverable_spec(TIDMAD_PROFILE).storage
+    tidmad = canonical_h5_inspection(_write(tmp_path / "a", baseline))
     moved = canonical_h5_inspection(_write(tmp_path / "b", contrast))
 
     assert moved["groups"] == ["timeseries", "timeseries/sensor_a", "timeseries/sensor_b"]
@@ -186,38 +170,3 @@ def test_the_deliberately_unowned_writer_facts_stay_literal():
     assert 'attrs["sampling_frequency"] = 10000000' in source
     assert "N = 2000000000" in source
     assert 'f"{os.path.splitext(file_name)[0]}_{i}.h5"' in source
-
-
-def test_default_storage_equals_the_derived_tidmad_storage():
-    """The no-argument path and the production path resolve the same value.
-
-    If these ever diverged, a caller predating 05c would write a *different*
-    file from the one production writes — the two-authorities defect this
-    contract exists to remove, reappearing as a default.
-    """
-    assert (
-        default_deliverable_storage()
-        == derive_tidmad_deliverable_spec(TIDMAD_PROFILE).storage
-    )
-
-
-def test_the_derivation_follows_a_bound_profile(tmp_path):
-    """``default_deliverable_storage`` honours a bound profile, not a constant.
-
-    It resolves through Step 02's ``resolve_dataset_profile`` seam, so a task
-    that binds a profile gets ITS channel identity. A hardcoded TIDMAD fallback
-    would pass every other test in this module and silently write the wrong
-    groups for a bound task.
-    """
-    live = TIDMAD_PROFILE
-    bound = live.model_copy(
-        update={"channels": ChannelIdentity(input_channel="bound_in", target_channel="bound_out")}
-    )
-
-    with bind_dataset_profile(bound):
-        assert default_deliverable_storage().input_channel_group == "bound_in"
-        assert canonical_h5_inspection(_write(tmp_path, None))["groups"] == [
-            "timeseries",
-            "timeseries/bound_in",
-            "timeseries/bound_out",
-        ]

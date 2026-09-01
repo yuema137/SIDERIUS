@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
 from execute_tools.health_checks._regime_a_facts import derive_health_facts, resolve_health_facts
 from execute_tools.health_checks.schemas import (
     APPLICABLE,
@@ -258,7 +258,8 @@ class TestRegimeADerivation:
         assert derive_health_facts(TIDMAD_PROFILE).value_scale_unit is None
 
     def test_resolved_facts_match_the_explicit_derivation(self):
-        assert resolve_health_facts() == derive_health_facts(TIDMAD_PROFILE)
+        with bind_dataset_profile(TIDMAD_PROFILE):
+            assert resolve_health_facts() == derive_health_facts(TIDMAD_PROFILE)
 
     def test_derived_tidmad_facts_satisfy_the_int8_family_declaration(self):
         """Ties the derivation to the parity claim rather than to a literal."""
