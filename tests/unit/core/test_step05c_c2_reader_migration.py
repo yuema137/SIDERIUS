@@ -344,13 +344,9 @@ MIGRATED_CONSUMERS = (
 # below stays forbidden.
 STEP06_CONSUMERS = ("execute_tools/denoising_score_single.py",)
 
-# Sites the census deliberately EXCLUDES. This half never grows: it is the
-# frozen scorer arithmetic and the historical-artifact readers, and it is what
-# turns a progress check into a scope guard.
-FORBIDDEN_CONSUMERS = (
-    "execute_tools/scoring_utils.py",
-    "scripts/investigate_pearson_feasibility.py",
-)
+# Sites the census deliberately EXCLUDES. Historical artifact readers have
+# moved to the external task package; the frozen scorer arithmetic remains.
+FORBIDDEN_CONSUMERS = ("execute_tools/scoring_utils.py",)
 
 
 def test_only_the_censused_sites_consume_the_deliverable_spec():
@@ -361,10 +357,8 @@ def test_only_the_censused_sites_consume_the_deliverable_spec():
 
     * a **dead seam** — a site reverting to its own literal while a
       spec-level test keeps passing because the spec is still correct;
-    * a **scope breach** — the scorer or a historical-artifact reader
-      acquiring the producer contract. Migrating a historical reader is not a
-      neutral tidy-up: those scripts must keep matching names that files
-      already on disk carry, and Step 06, not 05c, owns the scorer.
+    * a **scope breach** — the frozen scorer arithmetic acquiring the producer
+      contract. Step 06, not 05c, owns that scorer.
     """
     repo_root = Path(__file__).resolve().parents[3]
 

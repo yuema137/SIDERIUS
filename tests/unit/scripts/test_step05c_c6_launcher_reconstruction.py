@@ -3,15 +3,10 @@
 Design: ``docs/design/generic_framework_upgrade/
 step_05c_tuner_execution_contracts.md`` C6, §0.1, OD-05c-3.
 
-**The split these tests defend.** A script that *reconstructs or validates a
-run* must agree with the producer, or a renamed deliverable silently breaks
-recovery and baseline scoring. A script that *analyses historical files* must
-keep matching the names those files already carry — migrating it would be
-actively wrong, not merely unnecessary.
-
-So the assertions come in pairs: the migrated tools resolve through the
-contract, and the excluded ones are still literal. Only the pair states the
-rule; either half alone would read as an arbitrary inventory.
+Framework scripts that *reconstruct or validate a run* must agree with the
+producer, or a renamed deliverable silently breaks recovery and baseline
+scoring. Historical-file diagnostics now live with their task in the external
+experiment repository, where they retain the old artifact names deliberately.
 """
 
 from __future__ import annotations
@@ -37,12 +32,6 @@ MIGRATED_SCRIPTS = (
     "scripts/finalize_recovered_diagnostic_round.py",
     "scripts/pregate_runtime_control_validation.py",
     "scripts/v18_wave_summary.py",
-)
-
-# OD-05c-3: historical replay + diagnostic-only. These read artifacts written
-# BEFORE this PR and must keep matching the names already on disk.
-HISTORICAL_SCRIPTS = (
-    "scripts/investigate_pearson_feasibility.py",
 )
 
 
@@ -96,24 +85,6 @@ def test_reconstruction_tooling_holds_no_inlined_deliverable_template(relative):
     )
     assert "default_deliverable_naming" in source, (
         f"{relative} must resolve deliverable names through the contract"
-    )
-
-
-@pytest.mark.parametrize("relative", HISTORICAL_SCRIPTS)
-def test_historical_readers_are_deliberately_left_literal(relative):
-    """The excluded scripts still carry their own literal — on purpose.
-
-    This is the other half of OD-05c-3's rule, and it fails in the direction
-    people actually get wrong: a later tidy-up "finishing the migration" would
-    point these at the current contract, and they would stop matching the
-    official-paper and diagnostic artifacts already on disk. Their correctness
-    condition is agreement with history, not with the producer.
-    """
-    source = (_REPO_ROOT / relative).read_text()
-
-    assert "abra_validation_denoised" in source
-    assert "deliverable_spec" not in source, (
-        f"{relative} reads HISTORICAL artifacts and must not follow the current contract"
     )
 
 
