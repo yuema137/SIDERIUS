@@ -41,8 +41,8 @@ _RAW_SCALAR_FILE = "scalar_anchor_normalized.json"
 _GT_SCALAR_FILE = "ceiling_anchor_normalized.json"
 
 _REGEN_HINT = (
-    "Regenerate with `python scripts/compute_raw_baseline.py` and "
-    "`python scripts/compute_ground_truth.py` (both under the project venv)."
+    "Regenerate with the scientific task's own reference-data tools using "
+    "explicit input and output paths."
 )
 
 
