@@ -115,6 +115,11 @@ def _run_inference_child(tmp_path, monkeypatch, *, deliverable):
         },
         deliverable=deliverable,
     )
+    from workflows.task_composition import compose_run_task_bindings
+
+    composition = compose_run_task_bindings(str(manifest))
+    profile_ref = tmp_path / "dataset_profile.json"
+    profile_ref.write_text(composition.dataset_profile.model_dump_json(indent=2), encoding="utf-8")
 
     # A REAL transported scope, serialized by the task's OWN codec — the bytes
     # the parent writes and the child must read. Hand-writing the payload would
@@ -156,6 +161,7 @@ def _run_inference_child(tmp_path, monkeypatch, *, deliverable):
             "--run_name", "run1",
             "--output_dir", str(out_dir),
             "--data_dir", str(tmp_path),
+            "--dataset_profile_json", str(profile_ref),
             "--task_manifest", str(manifest),
             "--task_data_path_id", fixture.TASK_ID,
             "--task_eval_scope_ref", str(scope_ref),
