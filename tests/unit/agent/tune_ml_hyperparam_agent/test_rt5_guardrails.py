@@ -13,11 +13,17 @@ from __future__ import annotations
 import pytest
 
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningInput
-from execute_tools.dataset_config import TIDMAD_PROFILE
 from nodes.ml_hyperparameter_tune_agent import (
     _build_guardrail_rejection_record,
     _evaluate_step_guardrails,
     _resolve_guardrail_steps,
+)
+from tests.helpers.two_family_profile import make_two_family_profile
+
+PROFILE = make_two_family_profile(
+    num_files=1,
+    psd_segment_length=800_000,
+    segments_per_file=2,
 )
 
 _BASE = dict(
@@ -80,20 +86,20 @@ class TestGuardrailMatrix:
 
 class TestStepResolution:
     def test_resolves_via_production_resolver(self):
-        # 2 PSD × (10M // 10000) = 2000 samples // bs 8 = 250 steps.
+        # 2 physical segments × (800k // 10k) = 160 samples // bs 8 = 20 steps.
         steps = _resolve_guardrail_steps(
             {"0": [0, 1]},
             {"segmentation_size": 10_000},
             {"batch_size": 8, "epochs": 1},
             None,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
-        assert steps == 250
+        assert steps == 20
 
     def test_resolver_failure_returns_none(self):
         assert (
             _resolve_guardrail_steps(
-                {"0": [0]}, {"segmentation_size": 0}, {}, None, dataset_profile=TIDMAD_PROFILE
+                {"0": [0]}, {"segmentation_size": 0}, {}, None, dataset_profile=PROFILE
             )
             is None
         )
