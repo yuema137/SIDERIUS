@@ -31,6 +31,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from core.sandbox_executor import TidmadSandbox
+from execute_tools.data_paths import bind_physical_data_root
 from execute_tools.deliverable_spec import DeliverableNaming, default_deliverable_naming
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _build_denoised_filename,
@@ -49,8 +50,21 @@ from tests.unit.execute_tools.test_step05c_c0_deliverable_baseline import (
     GOLDEN_RUN_NAME,
     GOLDEN_SAMPLE_SET_NAME,
 )
+from workflows.task_config import bind_task_config
 
 RENAMED = DeliverableNaming(prefix="step05c_renamed")
+
+
+@pytest.fixture(autouse=True)
+def _bind_synthetic_task_config():
+    """Exercise the reader seam without reviving an implicit scientific task."""
+    with bind_task_config(
+        {
+            "task_description": "Synthetic deliverable-reader fixture.",
+            "forward_contract": {},
+        }
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +156,8 @@ def test_watchdog_cleanup_deletes_the_c0_set_and_spares_the_survivors(tmp_path):
     not a naming refactor.
     """
     _seed(tmp_path, SEEDED_FILES)
-    sandbox = TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path), progress_bar=False)
+    with bind_physical_data_root(str(tmp_path), purpose="watchdog cleanup test"):
+        sandbox = TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path), progress_bar=False)
 
     outcome = _run_killed_inference(sandbox)
 
@@ -173,19 +188,20 @@ def test_watchdog_cleanup_follows_an_injected_renamed_naming(tmp_path):
     tidmad_file = "abra_validation_denoised_fcnet_c0run_c0exp_0000.h5"
     _seed(tmp_path, (*renamed_files, tidmad_file))
 
-    sandbox = TidmadSandbox(
-        run_name=RUN_NAME,
-        workspace=str(tmp_path),
-        progress_bar=False,
-        deliverable_naming=RENAMED,
-    )
+    with bind_physical_data_root(str(tmp_path), purpose="renamed cleanup test"):
+        sandbox = TidmadSandbox(
+            run_name=RUN_NAME,
+            workspace=str(tmp_path),
+            progress_bar=False,
+            deliverable_naming=RENAMED,
+        )
     _run_killed_inference(sandbox)
 
     remaining = {p for p in os.listdir(str(tmp_path)) if p.endswith(".h5")}
     assert remaining == {tidmad_file}
 
 
-def test_sandbox_defaults_to_the_shipped_naming():
+def test_sandbox_defaults_to_the_shipped_naming(tmp_path):
     """A caller that predates 05c gets the TIDMAD naming, not ``None``.
 
     Every existing construction site — ``run_comparison.py``,
@@ -195,7 +211,8 @@ def test_sandbox_defaults_to_the_shipped_naming():
     ``AttributeError`` on the kill path only: a failure that never appears
     until something has already gone wrong.
     """
-    sandbox = TidmadSandbox(run_name=RUN_NAME, workspace="/tmp/step05c-default-check")
+    with bind_physical_data_root(str(tmp_path), purpose="default naming test"):
+        sandbox = TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path))
     assert sandbox.deliverable_naming == default_deliverable_naming()
 
 

@@ -34,7 +34,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # OD-05c-3: production launcher + canonical reconstruction/validation.
 MIGRATED_SCRIPTS = (
-    "scripts/run_comparison.py",
     "scripts/finalize_recovered_diagnostic_round.py",
     "scripts/pregate_runtime_control_validation.py",
     "scripts/v18_wave_summary.py",
@@ -89,10 +88,9 @@ def _executed_string_constants(source: str) -> list[str]:
 def test_reconstruction_tooling_holds_no_inlined_deliverable_template(relative):
     """No run-reconstructing script re-states the producer's template.
 
-    ``run_comparison.py`` is the sharpest case: it rebuilds the baseline
-    deliverable path the producer wrote and then scores it. A renamed
-    deliverable would break baseline scoring with nothing catching it — the
-    launcher would simply find no files and report a missing baseline.
+    Each surviving framework-owned reconstruction tool must follow the current
+    naming contract. Task launchers that moved to the experiment repository are
+    outside this framework-source inventory.
     """
     source = (_REPO_ROOT / relative).read_text()
 
