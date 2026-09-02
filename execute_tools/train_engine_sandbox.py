@@ -57,6 +57,7 @@ from execute_tools.task_data_path import (
     TrainingScopeError,
     bind_task_data_path,
     resolve_bound_task_data_path,
+    resolve_storage_read_scope,
 )
 from execute_tools.task_data_path import (
     ValidationScopeError as ValidationScopeError,
@@ -1027,7 +1028,12 @@ def run_experiment(
 
 
 def _setup_storage_provenance(
-    data_dir: str, sample_set: dict | None, profile: DatasetProfile
+    data_dir: str,
+    sample_set: dict | None,
+    profile: DatasetProfile,
+    *,
+    data_path: TaskDataPath | None = None,
+    task_scope: object = None,
 ) -> dict:
     """RT2-B storage provenance for the measured setup window.
 
@@ -1043,7 +1049,20 @@ def _setup_storage_provenance(
     ``F-12-2`` already made the runtime ESTIMATE honest: skip the term, never
     guess it.
     """
-    if sample_set is None or not declares_tidmad_topology(profile):
+    if sample_set is None:
+        task_read_scope = (
+            resolve_storage_read_scope(data_path, data_dir, task_scope)
+            if data_path is not None and task_scope is not None
+            else None
+        )
+        if task_read_scope is not None:
+            return capture_storage_provenance(
+                data_dir,
+                list(task_read_scope.file_paths),
+                scoped_bytes=task_read_scope.expected_on_disk_bytes,
+            )
+        return capture_storage_provenance(data_dir, [])
+    if not declares_tidmad_topology(profile):
         # No legacy SampleSet means no per-file scope to enumerate — the same
         # answer, and for the same reason, as a profile that declares no
         # TIDMAD topology: report the dataset ROOT and make no per-file claim.
@@ -1056,11 +1075,18 @@ def _setup_storage_provenance(
         os.path.join(data_dir, dataset.training_file_name(int(k)))
         for k in sorted(sample_set.keys(), key=int)
     ]
-    # Scoped read volume (pre-Gate F2): the setup reads only the scope's PSD
-    # slices — ch1 int8 + ch2 int16 = 3 bytes/sample.
-    n_psd_scoped = sum(len(v) for v in sample_set.values())
+    # Estimate bytes on the same on-disk (compressed) ruler as /proc/self/io.
+    # The prior logical ``samples * 3`` value was incommensurable with the
+    # block-layer counter and labelled genuinely cold gzip reads as warm.
+    scoped_on_disk_bytes = 0
+    for key, segments in sample_set.items():
+        path = os.path.join(data_dir, dataset.training_file_name(int(key)))
+        if os.path.isfile(path):
+            scoped_on_disk_bytes += round(
+                os.path.getsize(path) * len(segments) / dataset.segments_per_file
+            )
     return capture_storage_provenance(
-        data_dir, file_paths, scoped_bytes=n_psd_scoped * dataset.psd_segment_length * 3
+        data_dir, file_paths, scoped_bytes=scoped_on_disk_bytes
     )
 
 
@@ -1468,7 +1494,13 @@ def run_experiment_streaming(
             # deterministic per epoch, so every epoch runs the same count.
             steps_per_epoch = len(loader)
             runtime_session.complete_setup(
-                storage_provenance=_setup_storage_provenance(data_dir, sample_set, profile),
+                storage_provenance=_setup_storage_provenance(
+                    data_dir,
+                    sample_set,
+                    profile,
+                    data_path=data_path,
+                    task_scope=task_scope,
+                ),
                 training_workload=ResolvedPhaseWorkload(
                     phase="training",
                     unit="optimizer_step",

@@ -342,7 +342,11 @@ class RuntimeVerificationSession:
             if (io_after is not None and self._io_bytes_at_start is not None)
             else None
         )
-        cache_state = classify_cache_state(bytes_read, storage_provenance.get("expected_raw_bytes"))
+        cache_state = classify_cache_state(
+            bytes_read,
+            storage_provenance.get("expected_raw_bytes"),
+            filesystem_type=storage_provenance.get("filesystem_type"),
+        )
         self._storage = {
             **storage_provenance,
             "bytes_read_from_storage": bytes_read,

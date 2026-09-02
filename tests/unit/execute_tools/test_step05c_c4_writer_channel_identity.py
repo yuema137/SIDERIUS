@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from execute_tools.array2h5 import create_abra_file
 from execute_tools.dataset_config import TIDMAD_PROFILE
@@ -79,6 +80,36 @@ def test_tidmad_artifact_is_logically_identical_to_the_c0_golden(tmp_path):
             "timeseries/channel0002": dict(FROZEN_CHANNEL_ATTRS),
         },
     }
+
+
+def test_deliverable_is_published_with_completion_sentinel(tmp_path):
+    """A successful writer publishes the final name only after HDF5 close."""
+    resolved = derive_tidmad_deliverable_spec(TIDMAD_PROFILE).storage
+    output = Path(_write(tmp_path, resolved))
+
+    assert output.is_file()
+    assert Path(f"{output}.complete").read_text(encoding="utf-8") == "complete\n"
+    assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_failed_write_does_not_publish_a_partial_deliverable(monkeypatch, tmp_path):
+    """A failed HDF5 write must leave neither a final file nor success marker."""
+    import h5py
+
+    output = tmp_path / "deliverable.h5"
+    original = h5py.Group.create_dataset
+
+    def fail_first_dataset(self, *args, **kwargs):
+        raise OSError("synthetic write failure")
+
+    monkeypatch.setattr(h5py.Group, "create_dataset", fail_first_dataset)
+    with pytest.raises(OSError, match="synthetic write failure"):
+        _write(tmp_path, derive_tidmad_deliverable_spec(TIDMAD_PROFILE).storage)
+    monkeypatch.setattr(h5py.Group, "create_dataset", original)
+
+    assert not output.exists()
+    assert not Path(f"{output}.complete").exists()
+    assert list(tmp_path.glob(".*.tmp")) == []
 
 
 def test_single_channel_write_is_unchanged(tmp_path):

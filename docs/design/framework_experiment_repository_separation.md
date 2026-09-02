@@ -1249,3 +1249,39 @@ Ruff, shell syntax, and diff-integrity checks pass. The next operational
 checkpoint is to pin one exact framework/experiment SHA pair, configure the
 H100's permanent machine-local role ceilings outside both repositories, and
 rerun Pets, DAVIS, and MTG Cancer from fresh workspaces.
+
+## 16. 2026-09-01 Nebius launch-readiness repair ledger
+
+Request B was re-verified against SIDERIUS `cc3866dc` and `siderius-exp`
+`8b004bbe`; the older `606b73bf` / `007fa535` locations are not treated as
+current authority. The active implementation preserves the explicit do-not-
+change boundary: retention, `storage_class`, the H100 watchdog overlay, and
+the unbounded provider retry policy are untouched.
+
+The first framework slice addresses two independent integrity gaps. HDF5
+deliverables are now written to a same-directory temporary name, closed and
+flushed, atomically renamed, and followed by an fsynced completion sentinel.
+A forced mid-write exception proves that neither the final name nor sentinel
+is published. Storage provenance now compares process read counters with a
+task-owned estimate of the scoped on-disk bytes rather than decompressed
+logical bytes. The optional `TaskStorageReadScope` capability keeps opaque
+scope interpretation outside generic code; filesystems whose backing reads
+are invisible to the process counter (`virtiofs` and FUSE) report `unknown`
+rather than a false warm-cache result.
+
+Focused framework evidence passes 57 writer/provenance/session tests and 39
+adjacent task-contract/synthetic-E2E tests; Ruff and diff-integrity checks
+pass. Local Pyright remains unavailable because the installed Pyright bundle
+requires a newer Node runtime than this host provides; no remote-green claim
+is made.
+
+The external campaign worktree currently contains additive one-host/multi-GPU
+and four-host/single-GPU Stage-1 device selection, selected-band R3 staging,
+the recovered authoritative 40-file Q3 checksum manifest, scoring-ruler
+presence checks, real campaign workspace identity, blind-arm preflight, and a
+state-integrity resume mode. Stage 3 now rejects non-full-scope pooled
+deliverables, and Strict Best reuses the existing full-scope checkpoint replay
+path instead of scoring Stage-2's bounded search artifacts. These external
+changes remain uncommitted until the framework slice supplies an exact SHA;
+the exp dependency will then be bumped and its isolated environment rebuilt
+before cross-repository validation.

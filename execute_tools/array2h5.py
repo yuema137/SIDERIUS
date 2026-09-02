@@ -1,4 +1,6 @@
 import os
+import uuid
+from contextlib import suppress
 
 import h5py
 
@@ -68,8 +70,30 @@ def create_abra_file(
         if not indexed:
             indexed_file_name = f"{os.path.splitext(file_name)[0]}.h5"  # NEW
 
-        # Create HDF5 file
-        with h5py.File(indexed_file_name, "w") as f:
+        _write_abra_file_atomic(
+            indexed_file_name,
+            array1[start_idx:end_idx],
+            None if array2 is None else array2[start_idx:end_idx],
+            channels,
+        )
+        print(f"HDF5 file '{indexed_file_name}' created successfully.")
+
+
+def _write_abra_file_atomic(
+    destination: str,
+    input_values,
+    target_values,
+    channels: DeliverableStorage,
+) -> None:
+    """Write one deliverable completely before publishing its final name."""
+    parent = os.path.dirname(os.path.abspath(destination))
+    os.makedirs(parent, exist_ok=True)
+    token = uuid.uuid4().hex
+    temporary = os.path.join(parent, f".{os.path.basename(destination)}.{token}.tmp")
+    marker = f"{destination}.complete"
+    marker_tmp = f"{marker}.{token}.tmp"
+    try:
+        with h5py.File(temporary, "w") as f:
             # Create timeseries group
             timeseries_group = f.create_group("timeseries")
 
@@ -83,10 +107,10 @@ def create_abra_file(
 
             # Save array1 to channel0001/timeseries dataset
             channel0001_group.create_dataset(
-                "timeseries", data=array1[start_idx:end_idx], chunks=True
+                "timeseries", data=input_values, chunks=True
             )
 
-            if array2 is not None:
+            if target_values is not None:
                 # Create the TARGET channel subgroup if it is a calibration dataset
                 channel0002_group = timeseries_group.create_group(channels.target_channel_group)
                 channel0002_group.attrs["file_first_sample_index"] = 100000000000000
@@ -97,7 +121,17 @@ def create_abra_file(
 
                 # Save array2 to channel0002/timeseries dataset
                 channel0002_group.create_dataset(
-                    "timeseries", data=array2[start_idx:end_idx], chunks=True
+                    "timeseries", data=target_values, chunks=True
                 )
-
-            print(f"HDF5 file '{indexed_file_name}' created successfully.")
+            f.flush()
+        os.replace(temporary, destination)
+        with open(marker_tmp, "x", encoding="utf-8") as handle:
+            handle.write("complete\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(marker_tmp, marker)
+    except BaseException:
+        for path in (temporary, marker_tmp):
+            with suppress(FileNotFoundError):
+                os.unlink(path)
+        raise

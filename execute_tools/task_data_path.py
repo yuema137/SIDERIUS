@@ -51,6 +51,7 @@ and it is never an operator-facing selection knob.
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import sys
 from collections.abc import Iterator, Mapping
@@ -67,7 +68,7 @@ from typing import (
     runtime_checkable,
 )
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 if TYPE_CHECKING:  # torch is heavyweight; the seam only names the type
     from torch.utils.data import Dataset
@@ -541,6 +542,47 @@ class TaskInferenceBatching(Protocol):
     def max_inference_batch_size(self) -> int:
         """Return the inclusive task-semantic inference batch ceiling."""
         ...
+
+
+class StorageReadScope(BaseModel):
+    """Task-owned description of the physical bytes read during setup.
+
+    Paths and byte volume are physical provenance, not scientific semantics.
+    The task computes them because only the task can interpret its opaque
+    scope; the framework records the validated result without inspecting the
+    scope itself.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    file_paths: tuple[str, ...]
+    expected_on_disk_bytes: int = Field(ge=0)
+
+    @field_validator("file_paths")
+    @classmethod
+    def require_absolute_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not os.path.isabs(path) for path in value):
+            raise ValueError("storage provenance file paths must be absolute")
+        return value
+
+
+@runtime_checkable
+class TaskStorageReadScope(Protocol):
+    """Optional capability for provenance over an opaque task scope."""
+
+    def storage_read_scope(self, data_dir: str, scope: object) -> StorageReadScope:
+        """Describe the files and on-disk byte volume setup will read."""
+        ...
+
+
+def resolve_storage_read_scope(
+    impl: object, data_dir: str, scope: object
+) -> StorageReadScope | None:
+    """Resolve optional task-owned storage provenance without reading scope internals."""
+    method = getattr(impl, "storage_read_scope", None)
+    if not callable(method):
+        return None
+    return StorageReadScope.model_validate(method(data_dir, scope))
 
 
 def declares_inference_batching(impl: object) -> TypeGuard[TaskInferenceBatching]:

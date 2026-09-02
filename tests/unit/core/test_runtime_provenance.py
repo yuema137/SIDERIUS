@@ -15,6 +15,9 @@ from core.runtime_control.provenance import (
     read_process_read_bytes,
     read_process_rss_bytes,
 )
+from execute_tools.dataset_config import DatasetProfile
+from execute_tools.task_data_path import StorageReadScope
+from execute_tools.train_engine_sandbox import _setup_storage_provenance
 
 
 class TestEnvironmentProvenance:
@@ -56,6 +59,37 @@ class TestStorageProvenance:
         assert prov["dataset_root"] == str(tmp_path)
         assert isinstance(prov["filesystem_type"], str)
 
+    def test_opaque_task_scope_uses_task_owned_physical_read_description(self, tmp_path):
+        """Composed tasks must not degrade to an empty storage claim."""
+        source = tmp_path / "source.bin"
+        source.write_bytes(b"x" * 80)
+
+        class DataPath:
+            def storage_read_scope(self, data_dir, scope):
+                assert scope == object_scope
+                return StorageReadScope(
+                    file_paths=(str(source),),
+                    expected_on_disk_bytes=20,
+                )
+
+        object_scope = object()
+        observed = _setup_storage_provenance(
+            str(tmp_path),
+            None,
+            DatasetProfile(
+                partition_count=1,
+                anchor_selection_files=[0],
+                health_peek_files=[0],
+            ),
+            data_path=DataPath(),
+            task_scope=object_scope,
+        )
+
+        assert observed["file_count"] == 1
+        assert observed["files_present"] == 1
+        assert observed["total_file_bytes"] == 80
+        assert observed["expected_raw_bytes"] == 20
+
 
 class TestCacheStateClassification:
     def test_unknown_when_counters_missing(self):
@@ -70,3 +104,7 @@ class TestCacheStateClassification:
     def test_warm_when_read_negligible(self):
         assert classify_cache_state(0, 100) == "warm_page_cache"
         assert classify_cache_state(10, 100) == "warm_page_cache"
+
+    def test_unknown_when_process_counter_cannot_observe_backing_reads(self):
+        assert classify_cache_state(0, 100, filesystem_type="fuse.s3fs") == "unknown"
+        assert classify_cache_state(0, 100, filesystem_type="virtiofs") == "unknown"
