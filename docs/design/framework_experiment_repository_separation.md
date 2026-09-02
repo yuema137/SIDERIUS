@@ -1275,13 +1275,41 @@ pass. Local Pyright remains unavailable because the installed Pyright bundle
 requires a newer Node runtime than this host provides; no remote-green claim
 is made.
 
-The external campaign worktree currently contains additive one-host/multi-GPU
-and four-host/single-GPU Stage-1 device selection, selected-band R3 staging,
-the recovered authoritative 40-file Q3 checksum manifest, scoring-ruler
-presence checks, real campaign workspace identity, blind-arm preflight, and a
-state-integrity resume mode. Stage 3 now rejects non-full-scope pooled
-deliverables, and Strict Best reuses the existing full-scope checkpoint replay
-path instead of scoring Stage-2's bounded search artifacts. These external
-changes remain uncommitted until the framework slice supplies an exact SHA;
-the exp dependency will then be bumped and its isolated environment rebuilt
-before cross-repository validation.
+The framework slice landed as `a34776f1` and was pushed to
+`origin/refactor/retire-real-task-assets`. The experiment dependency,
+`SIDERIUS_REVISION`, and committed `uv.lock` were advanced together, and the
+isolated experiment environment passed `uv sync --group dev --frozen`.
+
+The external campaign slice landed as `siderius-exp` commit `20f00c0`. Device
+selection now supports both four hosts with one local device each and the
+historical one-host multi-GPU fallback in Stage 1 and the dormant Stage-2
+builder. R3 stages and hashes only the selected band's two raw input families,
+using the recovered authoritative 40-file Q3 checksum manifest, and requires
+the scoring ruler. Preflight resolves the real `v015` workspace, supports both
+Gold and Blind arm authority, substitutes state-integrity checks for the empty
+workspace rule in resume mode, and accepts a caller-owned free-space threshold.
+The X9 four-chain VRAM and host-RAM thresholds are no longer misreported as
+Gold single-band evidence.
+
+Stage 3 now refuses pooled files without the task-owned full-scope shape and
+storage contract or the atomic completion sentinel. Strict Best reuses the
+same full-scope checkpoint replay mechanism already used by Composed Best,
+while Stage 1 remains a 10-percent search. Terminal evaluation remains a
+standalone caller-owned CLI; its supplied deliverable directories pass through
+the same shared full-scope scoreability boundary. During adversarial review,
+the full-inference candidate was found to use `model_config` both as Pydantic
+class configuration and as candidate data; Pydantic silently discarded the
+candidate field. The external slice now uses an aliased
+`resolved_model_config` field and a literal regression expectation.
+
+External evidence passes 139 Stage-3 tests, 92 focused topology/preflight/task-
+scope tests, and 333 adjacent Gold/campaign/startup tests. Shell syntax,
+diff-integrity, frozen dependency sync, and fatal/static Ruff checks pass. The
+full existing Ruff profile reports pre-existing style debt in the migrated
+campaign suite and was not rewritten in this launch-readiness change. The
+absolute paths inside `fcnet_band_references.json` are historical provenance
+metadata: no production resolver reads `provenance.anchor_map`; executable
+anchor resolution uses the task-owned committed artifact or explicit input.
+The stale `_chain_common.sh` data-directory comment no longer reproduces on
+the current framework line. Retention, `storage_class`, the certified H100
+watchdog overlay, and unbounded provider retry remain untouched as required.
