@@ -175,6 +175,7 @@ CONTRACT_FLAGS = [
     # passed explicitly by launch configs; defaults schema-mirroring.
     "runtime_safety_factor",
     "runtime_watchdog_floor_seconds",
+    "runtime_verification_max_wall_seconds",
     # Wave-1A safety split (2026-07-24) — phase-specific factors; shell ""
     # ≡ Python None (forwarded only when set), precedence: phase-specific
     # → legacy runtime_safety_factor → schema default.

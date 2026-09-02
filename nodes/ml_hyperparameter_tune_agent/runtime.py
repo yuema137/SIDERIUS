@@ -1291,7 +1291,7 @@ def _build_runtime_policy(
     effective_safety = (
         phase_specific if phase_specific is not None else agent_input.runtime_safety_factor
     )
-    return {
+    policy: dict[str, Any] = {
         "operator_budget_seconds": (
             chosen_time_budget * 60.0
             if admission_source == "measured" and chosen_time_budget is not None
@@ -1328,6 +1328,14 @@ def _build_runtime_policy(
             "max_phase_seconds": agent_input.validation_max_phase_seconds,
         },
     }
+    verification_window_seconds = getattr(
+        agent_input, "runtime_verification_max_wall_seconds", None
+    )
+    if verification_window_seconds is not None:
+        policy["verification"] = {
+            "max_wall_ms": verification_window_seconds * 1000.0,
+        }
+    return policy
 
 
 def _check_and_record_guardrail_skip(

@@ -144,6 +144,7 @@ RUNTIME_TRIAL_SAFETY_FACTOR=""      # §3.2: empty == omit == Python None; effec
 RUNTIME_FORMAL_SAFETY_FACTOR=""     # §3.2: empty == omit == Python None
 RUNTIME_WATCHDOG_SAFETY_FACTOR=""   # §3.2: empty == omit == Python None; V19 split — watchdog-only multiplier (5090 posture 3.5)
 RUNTIME_WATCHDOG_FLOOR_SECONDS=""   # arXiv #261: empty == omit == profile floor (legacy 60.0 when uncalibrated); explicit value overrides; V18 posture 120
+RUNTIME_VERIFICATION_MAX_WALL_SECONDS="" # empty == omit == adaptive verifier default; explicit value supports slow-step workloads
 EXPLORATION_MODE="auto"             # §3.2: matches Python default
 MINIMUM_BOLDNESS="0.05"             # §3.2: matches Python default
 # §3.2 — Adaptive-tuning brakes (default-synced to run_one_iteration.py)
@@ -342,6 +343,7 @@ parse_chain_args() {
         --runtime_formal_safety_factor) RUNTIME_FORMAL_SAFETY_FACTOR="$2"; shift 2 ;;
         --runtime_watchdog_safety_factor) RUNTIME_WATCHDOG_SAFETY_FACTOR="$2"; shift 2 ;;
         --runtime_watchdog_floor_seconds) RUNTIME_WATCHDOG_FLOOR_SECONDS="$2"; shift 2 ;;
+        --runtime_verification_max_wall_seconds) RUNTIME_VERIFICATION_MAX_WALL_SECONDS="$2"; shift 2 ;;
         --formal_eval_portion)       FORMAL_EVAL_PORTION="$2"; shift 2 ;;
         --gpu_admission_measurement_source) GPU_ADMISSION_MEASUREMENT_SOURCE="$2"; shift 2 ;;
         --gpu_admission_enforcement) GPU_ADMISSION_ENFORCEMENT="$2"; shift 2 ;;
@@ -623,6 +625,9 @@ build_app_args() {
     # pinning the legacy 60.0 as a field-level override.
     if [ -n "$RUNTIME_WATCHDOG_FLOOR_SECONDS" ]; then
         APP_ARGS+=(--runtime_watchdog_floor_seconds "$RUNTIME_WATCHDOG_FLOOR_SECONDS")
+    fi
+    if [ -n "$RUNTIME_VERIFICATION_MAX_WALL_SECONDS" ]; then
+        APP_ARGS+=(--runtime_verification_max_wall_seconds "$RUNTIME_VERIFICATION_MAX_WALL_SECONDS")
     fi
     if [ "$ALLOW_EXTREME_STEPS" -eq 1 ]; then
         APP_ARGS+=(--allow_extreme_steps)

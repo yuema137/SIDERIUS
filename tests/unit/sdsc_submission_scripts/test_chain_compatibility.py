@@ -74,6 +74,24 @@ def test_vram_preflight_watchdogs_reach_each_iteration() -> None:
     assert tokens[tokens.index("--vram_preflight_host_memory_limit_gb") + 1] == "42.5"
 
 
+def test_runtime_verification_window_reaches_each_iteration() -> None:
+    """A slow-step workload must receive its explicit verifier window."""
+    tokens = _build(
+        "--workspace",
+        "/tmp/workspace",
+        "--run_name",
+        "test",
+        "--runtime_verification_max_wall_seconds",
+        "420",
+    )
+
+    index = tokens.index("--runtime_verification_max_wall_seconds")
+    assert tokens[index + 1] == "420"
+
+    defaults = _build("--workspace", "/tmp/workspace", "--run_name", "test")
+    assert "--runtime_verification_max_wall_seconds" not in defaults
+
+
 def test_retention_suppresses_cleanup_without_leaking_a_chain_only_flag() -> None:
     tokens = _build(
         "--workspace",

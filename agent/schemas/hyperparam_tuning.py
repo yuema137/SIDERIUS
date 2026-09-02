@@ -2175,6 +2175,17 @@ class HyperparamTuningInput(BaseModel):
             "launch configuration."
         ),
     )
+    runtime_verification_max_wall_seconds: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Optional wall-time ceiling for adaptive in-subprocess runtime "
+            "verification. None preserves AdaptiveVerificationConfig's "
+            "default. Increase this for workloads whose individual optimizer "
+            "steps are too slow for the default window to observe steady "
+            "state; this does not change the Trial or Formal run budget."
+        ),
+    )
 
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K) ---
     # Mirrors the trial/formal split of the time gate. The tuner picks the

@@ -138,6 +138,11 @@ worker's process tree. They are workflow safeguards, not task declarations,
 training-step counts, GPU VRAM ceilings, or Trial/Formal runtime budgets. See
 [`operating-a-run.md`](../guides/operating-a-run.md#vram-preflight-watchdogs).
 
+`--runtime_verification_max_wall_seconds` is an optional pass-through for the
+adaptive in-subprocess verifier. It is omitted by default, preserving the
+framework verifier default; slow-step workloads may set it explicitly without
+changing their Trial or Formal budgets.
+
 > The header comment inside `run_chain.sh` lists `--seed_paths` under "Required
 > flags". That comment is stale — `_chain_common.sh:403-406` documents the
 > opposite and omits the flag entirely for a cold start. Cold start is in fact

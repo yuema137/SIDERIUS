@@ -508,6 +508,13 @@ def build_parser() -> argparse.ArgumentParser:
         "(schema-mirroring); V18 production posture is 120.0.",
     )
     parser.add_argument(
+        "--runtime_verification_max_wall_seconds",
+        type=float,
+        default=None,
+        help="Maximum wall time for adaptive in-subprocess runtime verification. "
+        "Omit to preserve the verifier default.",
+    )
+    parser.add_argument(
         "--enable_chain_incumbent_formal_gates",
         action="store_true",
         help="V19 PR 1: consumption-only switch. When set, the two "
@@ -716,6 +723,7 @@ def build_agent_input(
     input_dict["runtime_trial_safety_factor"] = args.runtime_trial_safety_factor
     input_dict["runtime_formal_safety_factor"] = args.runtime_formal_safety_factor
     input_dict["runtime_watchdog_floor_seconds"] = args.runtime_watchdog_floor_seconds
+    input_dict["runtime_verification_max_wall_seconds"] = args.runtime_verification_max_wall_seconds
 
     # Step 12 / PR-12d D8a. `run_composition` is the SAME object `main()`
     # binds around `.run()` — passed in rather than re-composed here, so

@@ -135,6 +135,13 @@ admission authority and in-process measurement is record-only. A forecast
 requires a supported complete workload description and refuses if that
 evidence is unavailable. There is no silent fallback and no hybrid mode.
 
+For workloads with unusually slow optimizer steps,
+`--runtime_verification_max_wall_seconds` can extend the adaptive verifier's
+observation window. Omit it to preserve the verifier default. This setting is
+not a Trial or Formal budget: verification observes the first production
+training steps and needs enough wall time to establish steady state before it
+can extrapolate the complete workload.
+
 The runtime watchdog is a separate last-resort safety mechanism. Selecting
 either admission authority does not disable it or turn it into a second
 admission decision.

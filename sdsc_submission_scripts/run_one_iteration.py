@@ -1923,6 +1923,14 @@ def build_parser() -> argparse.ArgumentParser:
         "(schema-mirroring); V18 production posture 120.0.",
     )
     parser.add_argument(
+        "--runtime_verification_max_wall_seconds",
+        type=float,
+        default=None,
+        help="Maximum wall time for adaptive in-subprocess runtime verification. "
+        "Omit to preserve the verifier default. The verification steps are "
+        "the first production steps, not a separate probe workload.",
+    )
+    parser.add_argument(
         "--execution_regime",
         type=str,
         choices=sorted(get_args(ExecutionRegime)),
@@ -2779,6 +2787,7 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
         "runtime_watchdog_enabled": watchdog_policy.enabled,
         "runtime_watchdog_safety_factor": watchdog_policy.safety_factor,
         "runtime_watchdog_floor_seconds": watchdog_policy.floor_seconds,
+        "runtime_verification_max_wall_seconds": (args.runtime_verification_max_wall_seconds),
         "runtime_watchdog_provenance": watchdog_policy.provenance,
         # F-H100-WD-1-PRETAG — the DECLARED requirement, recorded whether or
         # not it was made, so "no binding was declared" is an observable
@@ -3377,6 +3386,9 @@ def main():
                     runtime_formal_safety_factor=args.runtime_formal_safety_factor,
                     runtime_watchdog_safety_factor=args.runtime_watchdog_safety_factor,
                     runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
+                    runtime_verification_max_wall_seconds=(
+                        args.runtime_verification_max_wall_seconds
+                    ),
                     human_advice_interpret=args.human_advice_interpret,
                     human_advice_propose=args.human_advice_propose,
                     human_advice_implement=args.human_advice_implement,

@@ -185,6 +185,7 @@ def local_validated_model(
     runtime_formal_safety_factor: float | None = None,
     runtime_watchdog_safety_factor: float | None = None,
     runtime_watchdog_floor_seconds: float = 60.0,
+    runtime_verification_max_wall_seconds: float | None = None,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -397,6 +398,7 @@ def local_validated_model(
         runtime_formal_safety_factor=runtime_formal_safety_factor,
         runtime_watchdog_safety_factor=runtime_watchdog_safety_factor,
         runtime_watchdog_floor_seconds=runtime_watchdog_floor_seconds,
+        runtime_verification_max_wall_seconds=runtime_verification_max_wall_seconds,
     )
 
 
