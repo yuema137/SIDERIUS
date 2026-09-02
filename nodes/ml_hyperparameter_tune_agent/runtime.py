@@ -209,6 +209,7 @@ def _handle_prephase_gpu_measurement(
     attempt_in_round: int,
     run_profile: Any = None,
     run_model_io: Any = None,
+    task_probe_data: Any = None,
 ) -> PrephaseOutcome:
     """Measure this candidate on this card before a formal GPU launch.
 
@@ -233,20 +234,13 @@ def _handle_prephase_gpu_measurement(
     to take a driver-visible reading from, and admission has nothing to
     decide. Unchanged behaviour there, not a refusal.
 
-    *A task declaring no TIDMAD topology has no batch this probe can build.*
-    Step 12 / PR-12d, **B12 / F-12d-25**, operator-ruled 2026-08-24
-    (option B). The worker's batch builder
-    (`probe_batch.build_bounded_probe_batch`) has a TIDMAD-SPECIFIC INPUT
-    CONTRACT -- `abra_training_????.h5`, `tidmad_topology(...).channels`,
-    h5py group layout -- and deliberately refuses synthetic data (F-1a).
-    Pets and DAVIS have no semantically valid input to that legacy probe, so
-    applicability must REFUSE TO RUN IT rather than fabricate a TIDMAD input;
-    reporting `STOP_INFRASTRUCTURE_FAILURE` (what happened before this rule)
-    claimed the ENVIRONMENT was broken when it was healthy. This is the same
-    correction Step 08a made when it introduced `CheckVerdict.inapplicable`
-    instead of "passed=True with prose", and applicability is decided HERE,
-    before the worker is spawned, so an inapplicable measurement opens no
-    artifact.
+    *A composed task must provide its task-owned probe batch.* The same typed
+    projection used by the isolated VRAM preflight is carried into this
+    authoritative measurement. A non-TIDMAD task without that projection is
+    still inapplicable rather than measured against fabricated array data.
+    The legacy physical-array loader remains available for un-composed runs.
+    Applicability is decided HERE, before the worker is spawned, so a composed
+    run missing its task projection opens no artifact.
 
     **This rule is a MEMBERSHIP TEST, never a caught exception, and the
     distinction is load-bearing.** `declares_tidmad_topology` asks whether
@@ -268,9 +262,8 @@ def _handle_prephase_gpu_measurement(
     ALREADY-SUPPORTED state, not a new one: `sandbox_executor.py:552-565`
     returns `(None, None)` when no requirement table was attached.
 
-    **Option A -- making bounded probe-batch construction fully
-    task-composable so arbitrary topologies can be measured -- is recorded as
-    explicit post-Step-12 debt and is deliberately NOT absorbed here.**
+    The task projection is opaque to this coordinator. Dataset vocabulary and
+    materialization remain owned by the bound TaskDataPath implementation.
     """
     if is_trial:
         return PrephaseOutcome.PROCEED
@@ -293,11 +286,14 @@ def _handle_prephase_gpu_measurement(
     # TIDMAD topology reaches the inapplicable path.
     from execute_tools.dataset_config import DatasetProfile, declares_tidmad_topology
 
-    if isinstance(run_profile, DatasetProfile) and not declares_tidmad_topology(run_profile):
+    if (
+        isinstance(run_profile, DatasetProfile)
+        and not declares_tidmad_topology(run_profile)
+        and task_probe_data is None
+    ):
         print(
             "  Pre-phase GPU measurement NOT APPLICABLE: this task declares no "
-            "TIDMAD topology, and the bounded probe batch is TIDMAD-physical "
-            "(h5 training family / declared input channel). No measured "
+            "TIDMAD topology, and no task-owned probe batch was supplied. No measured "
             "requirement is attached for this run; the VRAM capacity gate is "
             "unaffected. This is an applicability decision, not a probe failure."
         )
@@ -357,6 +353,7 @@ def _handle_prephase_gpu_measurement(
         # the shipped TIDMAD declaration. The tuner already holds the object
         # (`RunBindings.run_profile`); nothing is resolved here.
         dataset_profile=run_profile,
+        task_probe_data=task_probe_data,
         # 07c C3. Same reason, for the dtype authority's input. A task that
         # declares no `model_io` passes `None`, which is Regime-A parity.
         model_io_contract=run_model_io,

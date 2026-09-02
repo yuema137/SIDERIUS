@@ -45,6 +45,7 @@ from core.runtime_control.gpu_requirement import (
     MeasuredPhase,
 )
 from execute_tools.dataset_config import DatasetProfile
+from execute_tools.task_data_path import TaskProbeDataSpec
 
 #: How the worker as a whole ended. Distinct from a *phase* status: a
 #: worker can complete while the phase inside it OOMed, and the parent
@@ -122,6 +123,12 @@ class GpuMeasurementSpec(BaseModel):
     #: Optional so a spec serialized before the transport existed still
     #: validates and still runs; `None` means Regime-A at the call site.
     dataset_profile: DatasetProfile | None = None
+
+    #: A composed task's exact training scope and sampling request. When
+    #: present, the worker materializes its batch through TaskDataPath instead
+    #: of the legacy physical-array loader. This is the same typed projection
+    #: used by the isolated VRAM preflight.
+    task_probe_data: TaskProbeDataSpec | None = None
 
     #: The task's Model-I/O contract, which decides the dtype the model is
     #: handed at the measurement boundary (Step 07 / PR 07c C3).

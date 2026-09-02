@@ -1201,3 +1201,51 @@ counters are unreliable on FUSE/virtiofs. A future generic repair must obtain
 task-owned scoped storage observations rather than add TIDMAD branches. The
 explicit do-not-fix items remain unchanged: `storage_class`, retention policy,
 and Q-07c-6/watchdog calibration are not modified before this campaign.
+
+## 15. 2026-09-01 external measurement and Cancer size-treatment amendment
+
+The synchronized Cancer replay exposed two separate facts. First, the
+authoritative pre-Formal GPU measurement still treated a composed non-TIDMAD
+task as not applicable, so admission proceeded without measured evidence.
+Second, the H100 training process inherited host-memory ceilings calibrated for
+the RTX 5090 host. CUDA allocation failures occurred while driver telemetry
+still reported ample free VRAM. Per-attempt telemetry did not prove the host
+ceiling caused each allocation failure, so failure attribution correctly
+remained unknown; no task-specific downsizing advice or guessed attribution was
+added.
+
+The framework repair is generic:
+
+- `TaskProbeDataSpec` is owned by the public task-data-path contract;
+- one shared loader verifies the task-composition fingerprint, rehydrates the
+  task-owned training scope, and materializes one real batch through
+  `TaskDataPath`;
+- the lightweight VRAM preflight and authoritative Formal measurement consume
+  that same projection;
+- legacy un-composed execution retains its existing physical-array path;
+- `SIDERIUS_SUBPROCESS_RSS_GB` remains one caller-owned host-calibration layer,
+  accepting either one global integer or one complete
+  `training=N,inference=N,scoring=N` mapping. Defaults remain 40/60/24 GiB and a
+  malformed or partial mapping refuses.
+
+Focused framework evidence passes 76 execution-calibration/sandbox tests, 202
+authoritative-measurement/admission tests, and 125 isolated-preflight tests.
+Ruff and diff-integrity checks pass on the touched framework surface. Two stale
+sandbox fixtures were repaired to bind the framework-owned quickstart
+composition explicitly; no implicit scientific default was restored.
+
+The operator also narrowed the Cancer qualification question. The experiment
+must measure data exposure only, not cross-network generalization. Trial and
+Formal therefore use the same complete `mtg` graph. Trial activates
+deterministic 25% subsets inside the task-owned training and validation masks;
+Formal activates the complete masks. Features, graph topology, split ownership,
+model contract, task-owned objective, and mean validation AUPRC are unchanged.
+The sampling rule never moves a node between train, validation, and test.
+
+External package evidence passes eight focused Cancer contract tests, including
+a synthetic HDF5 witness that proves identical graph shape, reduced Trial mask
+cardinality, complete Formal mask cardinality, and train/validation non-overlap.
+Ruff, shell syntax, and diff-integrity checks pass. The next operational
+checkpoint is to pin one exact framework/experiment SHA pair, configure the
+H100's permanent machine-local role ceilings outside both repositories, and
+rerun Pets, DAVIS, and MTG Cancer from fresh workspaces.

@@ -597,13 +597,20 @@ The tuner calls `_handle_prephase_gpu_measurement` and reads only the
 disposition; identity comparison, classification, authority validation and
 admission all live in `core/runtime_control/prephase_admission.py`.
 
-**When it does NOT run**, and these are the only three cases:
+**When it does NOT run**, and these are the only two cases:
 
 | Condition | Behaviour |
 |---|---|
 | trial round | not measured — O-7 governs formal execution, and trial admission already proceeds while recording what it could not prove |
 | `sandbox.device_identity` is not a `DeviceIdentity` | not measured — no card means nothing to measure and nothing for admission to decide, the same conclusion `_admission_refusal` reaches. CPU and pseudo runs are unaffected. |
-| the run's task declares no TIDMAD topology (**Step 12 / PR-12d, B12 / F-12d-25**, operator-ruled 2026-08-24 option B) | not measured — the isolated worker's bounded probe-batch builder has a TIDMAD-specific input contract (`abra_training_????.h5`, TIDMAD channel layout) and cannot build a batch for a Pets or DAVIS profile. Resolves to `PrephaseOutcome.PROCEED` (no measured requirement attached; the VRAM capacity gate is unaffected) — never `STOP_INFRASTRUCTURE_FAILURE`, which would misreport a healthy environment as broken. A **membership test** (`declares_tidmad_topology`), not a caught exception: a malformed TIDMAD profile still measures and still fails closed. An un-composed run (`run_profile is None`) is Regime A — always TIDMAD — and stays applicable, bit-for-bit unchanged. Making the probe batch task-composable (option A) is recorded as post-Step-12 debt, not attempted here. |
+
+A composed external task supplies a typed `TaskProbeDataSpec`. The isolated
+worker verifies the task-composition fingerprint, rehydrates the task-owned
+training scope, and obtains one real batch through `TaskDataPath`. The same
+projection feeds both the lightweight VRAM preflight and this authoritative
+Formal measurement. Legacy un-composed runs keep their existing physical-array
+loader. A composed task with an invalid or unavailable projection fails closed;
+it is never silently measured with TIDMAD data or a synthetic batch.
 
 There is **no flag**. It is not optional on a formal attempt with a real
 device.

@@ -28,7 +28,7 @@ semantics live here.
 The resolution ladder is exactly two layers, and a third is forbidden
 (§9.3 finding 14)::
 
-    SIDERIUS_SUBPROCESS_RSS_GB   (global; when set, wins for EVERY role)
+    SIDERIUS_SUBPROCESS_RSS_GB   (global integer or explicit role mapping)
         ->
     the role's declared default
 """
@@ -155,8 +155,12 @@ def resolve_role_ceiling_gb(role: str, *, environ: Mapping[str, str] | None = No
     Resolution order — exactly two layers, and **no third** (§9.3
     finding 14, R-11-5):
 
-    1. :data:`RSS_OVERRIDE_ENV_VAR` — global; when set it wins for every
-       role, preserving compatibility with the pre-role variable.
+    1. :data:`RSS_OVERRIDE_ENV_VAR` — either one integer for every role, or
+       an explicit comma-separated mapping such as
+       ``training=0,inference=96,scoring=24``. The mapping remains one
+       caller-owned calibration layer while allowing GPU hosts with different
+       CUDA virtual-address footprints to disable or raise training without
+       weakening scoring.
     2. The role's declared default from :data:`ROLE_CEILINGS`.
 
     Special values:
@@ -196,18 +200,39 @@ def resolve_role_ceiling_gb(role: str, *, environ: Mapping[str, str] | None = No
     raw = env.get(RSS_OVERRIDE_ENV_VAR)
     if raw is None:
         return ROLE_CEILINGS[role].gib
+    selected = raw
+    if "=" in raw:
+        values: dict[str, str] = {}
+        for item in raw.split(","):
+            key, separator, value = item.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if separator != "=" or key not in ROLE_CEILINGS or not value or key in values:
+                raise MalformedCeilingOverride(
+                    f"{RSS_OVERRIDE_ENV_VAR}={raw!r} is not a complete unique role mapping. "
+                    "Use one non-negative integer, or "
+                    "training=N,inference=N,scoring=N with every role present."
+                )
+            values[key] = value
+        if set(values) != set(ROLE_CEILINGS):
+            raise MalformedCeilingOverride(
+                f"{RSS_OVERRIDE_ENV_VAR}={raw!r} must name exactly "
+                f"{sorted(ROLE_CEILINGS)}; got {sorted(values)}."
+            )
+        selected = values[role]
     try:
-        value = int(raw)
+        value = int(selected)
     except ValueError:
         raise MalformedCeilingOverride(
-            f"{RSS_OVERRIDE_ENV_VAR}={raw!r} is not an integer number of GiB. "
-            f"Set a non-negative integer, or 0 to disable the ceiling. "
+            f"{RSS_OVERRIDE_ENV_VAR}={raw!r} is not an integer number of GiB "
+            f"for role {role!r}. Set a non-negative integer, 0 to disable every role, "
+            "or a complete training=N,inference=N,scoring=N mapping. "
             f"It is NOT ignored: a silently-ignored override is how a run "
             f"comes to execute under limits nobody chose."
         ) from None
     if value < 0:
         raise MalformedCeilingOverride(
-            f"{RSS_OVERRIDE_ENV_VAR}={raw!r} is negative. "
+            f"{RSS_OVERRIDE_ENV_VAR}={raw!r} selects a negative value for {role!r}. "
             f"Use 0 to disable the ceiling; a negative ceiling has no meaning."
         )
     return value

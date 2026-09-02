@@ -61,6 +61,7 @@ from execute_tools.dataset_config import (
     declares_tidmad_topology,
     tidmad_topology,
 )
+from execute_tools.task_data_path import EpochSamplingParams, TaskProbeDataSpec
 from nodes.ml_hyperparameter_tune_agent.runtime import PrephaseOutcome
 
 DEVICE = DeviceIdentity(uuid="GPU-b12test", physical_index=0)
@@ -219,6 +220,23 @@ class TestContrastTasksAreNotApplicable:
         out = capsys.readouterr().out
         assert "NOT APPLICABLE" in out
         assert "not a probe failure" in out
+
+
+class TestComposedTasksWithProbeDataAreApplicable:
+    def test_task_owned_probe_data_reaches_the_measurement_worker(self, tmp_path):
+        """Losing the task projection would restore policy_unavailable Formal runs."""
+        probe = TaskProbeDataSpec(
+            manifest_path="/task/composition.yaml",
+            semantic_fingerprint="a" * 64,
+            training_scope_payload='{"kind":"synthetic"}',
+            sampling=EpochSamplingParams(data_dir="/task/data", train_portion=0.25),
+            max_inference_batch_size=1,
+        )
+        assert _call_expecting_spawn(
+            tmp_path,
+            run_profile=_contrast_profile(),
+            task_probe_data=probe,
+        ) == ["spawned"]
 
 
 # ======================================================================

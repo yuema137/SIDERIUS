@@ -368,6 +368,14 @@ def run_admission_preflight(
     # exactly how the original defect would return, on the
     # exception paths nobody watches.
     # See docs/design/v20_priorities/pr_a_isolated_preflight_wiring.md
+    task_probe_data = build_task_probe_data(
+        task_composition_ref=agent_input.task_composition_ref,
+        task_scopes=prepared.task_scopes,
+        data_dir=time_data_dir,
+        epoch_seed=trial_config.train_base_seed,
+        train_portion=trial_config.train_portion,
+        max_samples=agent_input.validation_max_train_samples,
+    )
     resource_check = run_production_preflight(
         model_type=active_params["model_type"],
         model_config=active_params["model_config"],
@@ -394,14 +402,7 @@ def run_admission_preflight(
         probe_step_timeout_seconds=(bindings.agent_input.vram_probe_step_timeout_seconds),
         deadline_seconds=(bindings.agent_input.vram_preflight_total_timeout_seconds),
         host_memory_limit_gb=(bindings.agent_input.vram_preflight_host_memory_limit_gb),
-        task_probe_data=build_task_probe_data(
-            task_composition_ref=agent_input.task_composition_ref,
-            task_scopes=prepared.task_scopes,
-            data_dir=time_data_dir,
-            epoch_seed=trial_config.train_base_seed,
-            train_portion=trial_config.train_portion,
-            max_samples=agent_input.validation_max_train_samples,
-        ),
+        task_probe_data=task_probe_data,
     )
     if resource_check.get("status") == "error":
         raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
@@ -810,6 +811,7 @@ def run_admission_preflight(
         attempt_in_round=attempt_in_round,
         run_profile=run_profile,
         run_model_io=run_model_io,
+        task_probe_data=task_probe_data,
     )
     if _prephase is PrephaseOutcome.TERMINAL_INFRASTRUCTURE_FAILURE:
         # The measurement could not be established. Retrying

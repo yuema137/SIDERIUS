@@ -21,9 +21,8 @@ process:
 ```text
 parent validates a LIGHTWEIGHT config      (never builds the model)
   -> launches ONE worker per candidate, own process group
-     -> worker applies its own RLIMIT_AS BEFORE constructing anything
      -> worker builds, inspects, probes, writes a bounded JSON result
-  -> parent samples worker-tree RSS and the deadline
+  -> parent samples worker-tree RSS and enforces the host-RSS budget + deadline
      -> TERM process group -> bounded grace -> KILL
   -> parent reaps descendants and classifies a TYPED disposition
 ```
@@ -58,7 +57,7 @@ from core.runtime_control.process_group import (
     tree_rss_bytes,
 )
 from core.subprocess_env import subprocess_env
-from execute_tools.task_data_path import EpochSamplingParams
+from execute_tools.task_data_path import TaskProbeDataSpec
 
 #: Terminal dispositions. Each names WHAT was established, so that
 #: authority to reject a candidate — or to tell an agent to shrink it —
@@ -155,18 +154,6 @@ class HardwareSnapshot(BaseModel):
     hardware_fingerprint: str = Field(min_length=1)
     device_index: int = Field(default=0, ge=0)
     cuda_visible_devices: str | None = None
-
-
-class TaskProbeDataSpec(BaseModel):
-    """Run-bound task data needed to materialize one training probe batch."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    manifest_path: str = Field(min_length=1)
-    semantic_fingerprint: str = Field(min_length=1)
-    training_scope_payload: str = Field(min_length=1)
-    sampling: EpochSamplingParams
-    max_inference_batch_size: int | None = Field(default=None, ge=1)
 
 
 class IsolatedProbeSpec(BaseModel):
@@ -548,9 +535,8 @@ def run_isolated_preflight(
         rss = _worker_tree_rss_bytes(pgid)
         peak_rss = max(peak_rss, rss)
 
-        # Belt and braces: RLIMIT_AS bounds the ADDRESS SPACE inside the
-        # worker, but a tree of descendants can still grow resident memory
-        # past the intended ceiling, so the parent watches the tree too.
+        # The worker may create descendants, so enforce the host-memory budget
+        # against the complete process tree from the parent.
         if rss >= spec.worker_memory_limit_bytes:
             host_exceeded = True
         if host_exceeded or elapsed >= deadline_seconds:

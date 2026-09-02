@@ -194,6 +194,18 @@ class EpochSamplingParams(BaseModel):
     max_samples: int | None = Field(default=None, ge=1)
 
 
+class TaskProbeDataSpec(BaseModel):
+    """Run-bound task data needed to materialize one resource-probe batch."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    manifest_path: str = Field(min_length=1)
+    semantic_fingerprint: str = Field(min_length=1)
+    training_scope_payload: str = Field(min_length=1)
+    sampling: EpochSamplingParams
+    max_inference_batch_size: int | None = Field(default=None, ge=1)
+
+
 class EvalMaterializationParams(BaseModel):
     """Knobs for ``validation_dataset`` (``train_engine_sandbox.py:905-935``).
 
