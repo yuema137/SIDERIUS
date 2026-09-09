@@ -22,6 +22,7 @@ import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
+
 def _production_files() -> list[str]:
     out = subprocess.run(
         ["git", "ls-files", "*.py"], cwd=REPO_ROOT, capture_output=True, text=True

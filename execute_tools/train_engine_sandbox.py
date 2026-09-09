@@ -1085,9 +1085,7 @@ def _setup_storage_provenance(
             scoped_on_disk_bytes += round(
                 os.path.getsize(path) * len(segments) / dataset.segments_per_file
             )
-    return capture_storage_provenance(
-        data_dir, file_paths, scoped_bytes=scoped_on_disk_bytes
-    )
+    return capture_storage_provenance(data_dir, file_paths, scoped_bytes=scoped_on_disk_bytes)
 
 
 def run_experiment_streaming(

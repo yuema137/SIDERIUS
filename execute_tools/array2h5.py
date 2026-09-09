@@ -106,9 +106,7 @@ def _write_abra_file_atomic(
             channel0001_group.attrs["voltage_range_mV"] = 80
 
             # Save array1 to channel0001/timeseries dataset
-            channel0001_group.create_dataset(
-                "timeseries", data=input_values, chunks=True
-            )
+            channel0001_group.create_dataset("timeseries", data=input_values, chunks=True)
 
             if target_values is not None:
                 # Create the TARGET channel subgroup if it is a calibration dataset
@@ -120,9 +118,7 @@ def _write_abra_file_atomic(
                 channel0002_group.attrs["voltage_range_mV"] = 80
 
                 # Save array2 to channel0002/timeseries dataset
-                channel0002_group.create_dataset(
-                    "timeseries", data=target_values, chunks=True
-                )
+                channel0002_group.create_dataset("timeseries", data=target_values, chunks=True)
             f.flush()
         os.replace(temporary, destination)
         with open(marker_tmp, "x", encoding="utf-8") as handle:

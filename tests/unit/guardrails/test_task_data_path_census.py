@@ -57,9 +57,7 @@ class TestNoDualPath:
         inference = ast.parse(
             (_REPO_ROOT / "execute_tools/inference_single.py").read_text(encoding="utf-8")
         )
-        assert (
-            _count_calls(inference, "resolve_child_task_data_path") >= 1
-        )
+        assert _count_calls(inference, "resolve_child_task_data_path") >= 1
         assert _count_calls(inference, "write_deliverable") >= 1
 
         scoring = ast.parse(

@@ -188,6 +188,7 @@ class TestEnvironmentRouteIsClosed:
         assert not injected, f"environment-injected tokens on the child argv: {injected}"
         assert "/tmp/evil_plan.json" not in argv
 
+
 class TestFlagRouteStillWorks:
     def test_the_declared_flag_still_reaches_the_child_argv(self):
         """Discrimination: the entry condition closes an injection route,

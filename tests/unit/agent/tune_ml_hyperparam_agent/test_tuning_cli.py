@@ -164,9 +164,7 @@ class TestTaskCompositionCLI:
         ]
 
     @patch("nodes.ml_hyperparameter_tune_agent.HyperparamTuningAgent")
-    def test_required_manifest_populates_the_ref(
-        self, mock_agent_cls, tmp_path
-    ):
+    def test_required_manifest_populates_the_ref(self, mock_agent_cls, tmp_path):
         """The shared helper supplies the required Quickstart declaration."""
         mock_agent = MagicMock()
         mock_agent_cls.return_value = mock_agent

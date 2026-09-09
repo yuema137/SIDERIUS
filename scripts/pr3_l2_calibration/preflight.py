@@ -101,6 +101,7 @@ def run_arm(scenario: str, arm: str) -> dict:
         local_full_context,
     )
     from agent.schemas.storage import LocalStorageConfig, StorageConfig
+    from execute_tools.dataset_config import bind_dataset_profile
     from execute_tools.metric_order import MetricOrder
     from nodes.ml_model_proposal_agent import MLModelProposalAgent
     from nodes.result_interpretation_agent import (
@@ -109,9 +110,12 @@ def run_arm(scenario: str, arm: str) -> dict:
         tuning_output_to_model_run_summary,
     )
     from scripts.pr3_l2_calibration.fixtures import MODEL_DESCRIPTIONS, SCENARIOS
-    from workflows.task_config import get_task_description, load_task_config
+    from workflows.task_composition import compose_run_task_bindings
+    from workflows.task_config import get_task_description
 
     spec = SCENARIOS[scenario]
+    composition = compose_run_task_bindings(str(REPO / "configs/task_composition/quickstart.yaml"))
+    task_config = composition.task_config_values()
     interp_on, proposer_on = arm in ("T", "D"), arm == "T"
     tmp = tempfile.mkdtemp(prefix=f"p3l2p_preflight_{scenario}_{arm}_")
 
@@ -135,7 +139,7 @@ def run_arm(scenario: str, arm: str) -> dict:
         iteration=spec["iteration"],
         enable_structured_health_feedback=interp_on,
         collapse_fingerprint_history=spec["carried_history"](),
-        task_description=get_task_description(load_task_config()),
+        task_description=get_task_description(task_config),
     )
     with patch("nodes.result_interpretation_agent.LLMBridge") as MB:
         MB.return_value.generate.side_effect = _interp_dispatch
@@ -162,7 +166,7 @@ def run_arm(scenario: str, arm: str) -> dict:
             ],
         ),
     )
-    _cfg = load_task_config()
+    _cfg = task_config
     propose_input.task_description = get_task_description(_cfg)
     propose_input.forward_contract = ForwardContract(**_cfg["forward_contract"])
 
@@ -171,7 +175,8 @@ def run_arm(scenario: str, arm: str) -> dict:
     proposer = MLModelProposalAgent(
         provider="openai", model_id="preflight", bridge_factory=lambda **kw: mb
     )
-    proposer.run(propose_input)
+    with bind_dataset_profile(composition.dataset_profile):
+        proposer.run(propose_input)
     stage_prompts = []
     proposing_prompt = ""
     for c in mb.generate.call_args_list:

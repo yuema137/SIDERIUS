@@ -52,9 +52,12 @@ QUICKSTART = Path(__file__).resolve().parents[3] / "configs/task_composition/qui
 @pytest.fixture
 def sandbox(tmp_path):
     composition = compose_run_task_bindings(str(QUICKSTART))
-    with bind_physical_data_root(str(tmp_path), purpose="sandbox ceiling test"), bind_run_task_composition(
-        composition,
-        physical_data_root=str(tmp_path),
+    with (
+        bind_physical_data_root(str(tmp_path), purpose="sandbox ceiling test"),
+        bind_run_task_composition(
+            composition,
+            physical_data_root=str(tmp_path),
+        ),
     ):
         yield TidmadSandbox(
             run_name=RUN_NAME,

@@ -75,7 +75,6 @@ def _required_cli_args() -> list[str]:
     ]
 
 
-
 def _minimal_input(**overrides) -> HyperparamTuningInput:
     return HyperparamTuningInput(
         model_type="punet",

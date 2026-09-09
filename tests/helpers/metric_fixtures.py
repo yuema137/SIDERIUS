@@ -48,9 +48,7 @@ def direction_only_spec(profile=None) -> MetricSpec:
     difference in behaviour cannot be attributed to anything but the declared
     direction.
     """
-    return shipped_spec(profile).model_copy(
-        update={"id": DIRECTION_ONLY_ID, "direction": "lower"}
-    )
+    return shipped_spec(profile).model_copy(update={"id": DIRECTION_ONLY_ID, "direction": "lower"})
 
 
 class _FixtureMetric(EvaluationMetric):

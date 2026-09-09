@@ -562,8 +562,7 @@ def scoreability_contract_from_declaration(
             contract_type, ScoreabilityContract
         ):
             raise TypeError(
-                f"scoreability contract {declared_id!r} must be a "
-                "ScoreabilityContract subclass"
+                f"scoreability contract {declared_id!r} must be a ScoreabilityContract subclass"
             )
         # The active task declaration is the execution authority. A legacy
         # framework type with the same id may remain temporarily for persisted
@@ -575,8 +574,7 @@ def scoreability_contract_from_declaration(
     contract_cls = contract_types.get(str(contract_id))
     if contract_cls is None:
         raise UnknownScoreabilityContractError(
-            f"unknown scoreability contract_id {contract_id!r}; known: "
-            f"{sorted(contract_types)}"
+            f"unknown scoreability contract_id {contract_id!r}; known: {sorted(contract_types)}"
         )
     return contract_cls.model_validate(payload)
 
