@@ -44,7 +44,7 @@ import inspect
 import math
 import signal
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import psutil
 import torch
@@ -123,13 +123,13 @@ _BUDGETS = ProbeBudgets()
 class ForwardPassTimeoutError(Exception):
     """One named footprint operation exceeded its workflow watchdog."""
 
-    def __init__(self, message: str, *, operation: ProbeOperation) -> None:
+    def __init__(self, message: str, *, operation: str) -> None:
         super().__init__(message)
         self.operation = operation
 
 
 @contextmanager
-def _forward_pass_timeout(seconds: float, label: ProbeOperation):
+def _forward_pass_timeout(seconds: float, label: str):
     """SIGALRM-based watchdog around a forward-pass probe call.
 
     On Linux, installs a SIGALRM handler that raises
@@ -1046,7 +1046,7 @@ def run_skill(sandbox, **kwargs):
         }
     except ForwardPassTimeoutError as e:
         record = ProbeTimeoutRecord(
-            operation=e.operation,
+            operation=cast(ProbeOperation, e.operation),
             budget_seconds=probe_budgets.single_probe_seconds,
             elapsed_seconds=probe_budgets.single_probe_seconds,
             model_identity=model_type,
