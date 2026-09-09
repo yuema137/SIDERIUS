@@ -33,14 +33,30 @@ from agent.schemas.score_table import (
     ScoreComparisonTable,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from execute_tools.dataset_config import bind_dataset_profile
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 from tests.helpers.metric_fixtures import shipped_spec
+from tests.helpers.two_family_profile import make_two_family_profile
+
+_SCORE_TABLE_PROFILE = make_two_family_profile(num_files=20)
+
+
+@pytest.fixture(autouse=True)
+def _bind_interpretation_profile():
+    """Run profile-sensitive interpreter code under an explicit test topology."""
+    with bind_dataset_profile(_SCORE_TABLE_PROFILE):
+        yield
 
 
 def _make_score_table(fv):
     """Build a fixture ScoreComparisonTable from a length-20 list of
     per-file model scores. Reference columns are constant placeholders —
     tests only exercise the model column (and derived columns)."""
+    with bind_dataset_profile(_SCORE_TABLE_PROFILE):
+        return _make_score_table_bound(fv)
+
+
+def _make_score_table_bound(fv):
     rows = [
         PerFileRow(
             file_index=i,
@@ -510,30 +526,31 @@ _ENRICHED_FORMAL_FV = [
     0.9,
 ]
 
-ENRICHED_SUMMARY = ModelRunSummary(
-    model_type="punet",
-    run_name="v1",
-    status="completed",
-    completed_rounds=3,
-    best_denoising_score=1.8,
-    worst_denoising_score=0.5,
-    best_config={"model_config": {"depth": 4}, "train_config": {"lr": 1e-4}},
-    round_scores=[0.5, 1.2, 1.8],
-    round_conclusions=["Baseline.", "Improved.", "Best."],
-    # Per-file performance — raw primitive retained per §7.2 scope note.
-    best_file_vector=_ENRICHED_BEST_FV,
-    formal_score=1.6,
-    formal_file_vector=_ENRICHED_FORMAL_FV,
-    # Per-file performance — enriched (Phase 4) — what downstream agents read.
-    best_score_table=_make_score_table(_ENRICHED_BEST_FV),
-    formal_score_table=_make_score_table(_ENRICHED_FORMAL_FV),
-    best_model_params=55000,
-    training_psd_segments=200,
-    eval_psd_segments=200,
-    trial_portion=0.05,
-    round_trial_portions=[0.05, 0.05, 0.1],
-    round_model_params=[55000, 55000, 55000],
-)
+with bind_dataset_profile(_SCORE_TABLE_PROFILE):
+    ENRICHED_SUMMARY = ModelRunSummary(
+        model_type="punet",
+        run_name="v1",
+        status="completed",
+        completed_rounds=3,
+        best_denoising_score=1.8,
+        worst_denoising_score=0.5,
+        best_config={"model_config": {"depth": 4}, "train_config": {"lr": 1e-4}},
+        round_scores=[0.5, 1.2, 1.8],
+        round_conclusions=["Baseline.", "Improved.", "Best."],
+        # Per-file performance — raw primitive retained per §7.2 scope note.
+        best_file_vector=_ENRICHED_BEST_FV,
+        formal_score=1.6,
+        formal_file_vector=_ENRICHED_FORMAL_FV,
+        # Per-file performance — enriched (Phase 4) — what downstream agents read.
+        best_score_table=_make_score_table(_ENRICHED_BEST_FV),
+        formal_score_table=_make_score_table(_ENRICHED_FORMAL_FV),
+        best_model_params=55000,
+        training_psd_segments=200,
+        eval_psd_segments=200,
+        trial_portion=0.05,
+        round_trial_portions=[0.05, 0.05, 0.1],
+        round_model_params=[55000, 55000, 55000],
+    )
 
 
 # ---------------------------------------------------------------------------

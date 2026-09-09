@@ -32,13 +32,10 @@ per_file_best / dashboard) are still debt and still hold their literals.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
-
-from tests.unit.scripts.test_step05c_c6_launcher_reconstruction import (
-    _executed_string_constants,
-)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_DIRS = (
@@ -63,6 +60,27 @@ ORDER_MODULE = "execute_tools/metric_order.py"
 def _production_files():
     for d in PRODUCTION_DIRS:
         yield from sorted((REPO_ROOT / d).rglob("*.py"))
+
+
+def _executed_string_constants(source: str) -> list[str]:
+    """Return executed string literals while excluding module docstrings."""
+    tree = ast.parse(source)
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+        and isinstance(node.body[0].value.value, str)
+    }
+    return [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+    ]
 
 
 def _executed(path: Path) -> list[str]:

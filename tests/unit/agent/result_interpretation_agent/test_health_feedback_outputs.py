@@ -57,6 +57,7 @@ def _collapse_summary():
             _record("wavenet_iter_002_002", denoising_score=1.1, health_gate_results=[]),
         ),
         order=_STEP09A_ORDER,
+        required_gate_ids=frozenset(),
     )
 
 
@@ -118,7 +119,7 @@ class TestHealthyPath:
         assert inp.enable_structured_health_feedback is False
         output = _healthy_agent().run(inp)
         assert output.per_model_round_health_counts == {
-            "wavenet": {"valid": 0, "invalid": 1, "unknown": 1}
+            "wavenet": {"valid": 1, "invalid": 1, "unknown": 0}
         }
         [fp] = output.per_model_collapse_fingerprints["wavenet"]
         assert fp.signature == SIGNATURE
@@ -141,7 +142,7 @@ class TestHealthyPath:
     def test_stats_cache_carries_health_facts(self, tmp_path):
         output = _healthy_agent().run(_make_input(tmp_path))
         stats = output.model_knowledge_cache["wavenet"]["_stats"]
-        assert stats["round_health_counts"] == {"valid": 0, "invalid": 1, "unknown": 1}
+        assert stats["round_health_counts"] == {"valid": 1, "invalid": 1, "unknown": 0}
         assert stats["collapse_fingerprints"][0]["signature"] == SIGNATURE
 
 

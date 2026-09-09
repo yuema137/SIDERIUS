@@ -1313,3 +1313,49 @@ anchor resolution uses the task-owned committed artifact or explicit input.
 The stale `_chain_common.sh` data-directory comment no longer reproduces on
 the current framework line. Retention, `storage_class`, the certified H100
 watchdog overlay, and unbounded provider retry remain untouched as required.
+
+## 17. 2026-09-09 implicit test-science closeout
+
+The canonical PR CI, after Ruff and Pyright had passed, found eight unit-test
+nodes that could not even be collected after implicit dataset-profile
+selection was retired. The common cause was test scaffolding, not production
+fallback behavior: interpreter and proposer fixtures constructed
+profile-sensitive Pydantic score tables at module or parametrization import
+time without declaring a profile. Two Health-feedback witnesses also let the
+candidate classifier consult the ambient scientific gate set instead of
+stating that their synthetic run declared no required gates.
+
+The repair keeps fail-closed production behavior intact. The affected fixtures
+now bind the neutral two-family synthetic profile at their own construction and
+execution boundaries, including helper calls made while pytest is collecting a
+module. Health-feedback fixtures pass an explicit empty required-gate set, so a
+successful finite-score synthetic round is valid by its declared test setup
+rather than by whatever task Health config happens to be present. No Quickstart
+or real task became a framework default.
+
+The same CI shard exposed a separate collection coupling: the Step-06 metric
+authority test imported an AST helper from a historical reconstruction test
+whose helper had been removed with task-owned tooling. The surviving authority
+test now owns its small source-literal scanner locally; it no longer imports
+implementation support from another test module.
+
+Why earlier checks missed this is now explicit. Focused validation covered the
+changed runtime-calibration and type-checking surfaces, but pytest does not
+import unrelated historical modules during such a selection. These failures
+therefore existed only at the full repository collection boundary. The
+automatic exact-head PR CI was the first check with that breadth and caught
+them correctly; the mistake was treating focused green evidence as if it also
+said something about repository-wide collection. Future status reports must
+keep those claims separate: focused tests prove the changed authority, while
+only the canonical automatic PR suite can make the merge-ready claim. A broad
+new static ban on module-level Pydantic fixtures is deliberately not added:
+module-level immutable fixtures are valid when their dependencies are explicit,
+and a syntactic prohibition would be noisy rather than protect the actual
+boundary.
+
+Focused evidence at the worktree checkpoint passes 146 tests with one
+historical skip across all eight previously failing CI nodes. Ruff, formatting,
+and diff-integrity checks pass on the seven repaired test modules. Production
+source, task composition, dataset-profile resolution, Health policy, scoring,
+and scientific treatment are unchanged. Final acceptance remains the automatic
+PR CI at the committed exact head.

@@ -32,6 +32,7 @@ from core.run_invariants import (
     RunInvariantsViolation,
     ensure_run_invariants,
 )
+from execute_tools.dataset_config import bind_dataset_profile
 from execute_tools.metric_order import MetricOrder
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import _build_reasoning_prompt
 from nodes.result_interpretation_agent import (
@@ -39,6 +40,7 @@ from nodes.result_interpretation_agent import (
     tuning_output_to_model_run_summary,
 )
 from tests.helpers.metric_fixtures import shipped_spec
+from tests.helpers.two_family_profile import make_two_family_profile
 from tests.unit.agent.result_interpretation_agent.test_interpretation_agent import (
     _llm_dispatch,
 )
@@ -72,6 +74,15 @@ POLICY = {
     "max_entries_per_model": 8,
 }
 
+_WORKSPACE_PROFILE = make_two_family_profile(num_files=20)
+
+
+@pytest.fixture(autouse=True)
+def _bind_workspace_profile():
+    """Run the composed workspace witness under an explicit test topology."""
+    with bind_dataset_profile(_WORKSPACE_PROFILE):
+        yield
+
 
 def _invariants(ws, *, on: bool) -> RunInvariants:
     return RunInvariants(
@@ -96,6 +107,7 @@ def _collapse_summary(exp_prefix: str):
             _record(f"{exp_prefix}_002", denoising_score=1.1),
         ),
         order=_STEP09A_ORDER,
+        required_gate_ids=frozenset(),
     )
 
 

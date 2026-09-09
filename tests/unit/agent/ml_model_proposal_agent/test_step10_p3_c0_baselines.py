@@ -45,10 +45,11 @@ import pytest
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ReasoningPipelineConfig
 from agent.schemas.proposer_evidence import build_proposer_evidence
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import bind_dataset_profile
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from tests.helpers.golden import assert_golden
 from tests.helpers.metric_fixtures import accuracy_like_spec, error_like_spec
+from tests.helpers.two_family_profile import make_two_family_profile
 from tests.unit.agent.ml_model_proposal_agent.test_step00_prompt_goldens import (
     _CannedProposerBridge,
     _LegacyCommitRecorder,
@@ -57,12 +58,13 @@ from tests.unit.agent.ml_model_proposal_agent.test_step00_prompt_goldens import 
 )
 
 GOLDENS = Path(__file__).parent / "goldens"
+_GOLDEN_PROFILE = make_two_family_profile(num_files=20)
 
 
 @pytest.fixture(autouse=True)
 def _bind_golden_profile():
-    """Render the historical full-coverage baseline under its profile."""
-    with bind_dataset_profile(TIDMAD_PROFILE):
+    """Render the historical full-coverage baseline under an explicit profile."""
+    with bind_dataset_profile(_GOLDEN_PROFILE):
         yield
 
 
@@ -85,9 +87,7 @@ def _fixture_score_rows() -> list[dict]:
     the fixture honest without 20 hand-written literals, and the values are a
     fixed arithmetic ramp so the dump is byte-stable across runs.
     """
-    from execute_tools.dataset_config import TIDMAD_PROFILE
-
-    num_files = TIDMAD_PROFILE.partition_count
+    num_files = _GOLDEN_PROFILE.partition_count
     # Sigma linear_weight must round-trip to 1.0 within 1e-9 (score_table.py:256-280).
     weight = 1.0 / num_files
     return [
@@ -121,7 +121,7 @@ def production_whitelist_keys() -> tuple[str, ...]:
     return INTERPRETATION_SUMMARY_KEYS
 
 
-def full_coverage_interpretation() -> dict:
+def _full_coverage_interpretation_bound() -> dict:
     """Every proposer-read field populated, dumped from the REAL schema.
 
     Populating all 18 whitelist keys is the point: the seven prediction keys
@@ -278,6 +278,12 @@ def full_coverage_interpretation() -> dict:
         },
     )
     return output.model_dump(mode="json")
+
+
+def full_coverage_interpretation() -> dict:
+    """Build the schema fixture under its explicit synthetic topology."""
+    with bind_dataset_profile(_GOLDEN_PROFILE):
+        return _full_coverage_interpretation_bound()
 
 
 def legacy_absence_interpretation() -> dict:

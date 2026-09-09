@@ -27,10 +27,12 @@ from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ProposalInput, ReasoningPipelineConfig
 from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from execute_tools.dataset_config import bind_dataset_profile
 from nodes.ml_model_proposal_agent.evidence_rendering import (
     render_legacy_interpretation_section,
 )
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import _build_reasoning_prompt
+from tests.helpers.two_family_profile import make_two_family_profile
 from tests.unit.agent.ml_model_proposal_agent.test_step00_prompt_goldens import (
     fixture_proposal_input,
 )
@@ -38,6 +40,15 @@ from tests.unit.agent.ml_model_proposal_agent.test_step10_p3_c0_baselines import
     full_coverage_interpretation,
     legacy_absence_interpretation,
 )
+
+_INTERPRETATION_PROFILE = make_two_family_profile(num_files=20)
+
+
+@pytest.fixture(autouse=True)
+def _bind_interpretation_profile():
+    """Validate nested score tables against an explicit synthetic topology."""
+    with bind_dataset_profile(_INTERPRETATION_PROFILE):
+        yield
 
 
 def _legacy_input(tmp_path, evidence) -> ProposalInput:
