@@ -129,7 +129,7 @@ class ForwardPassTimeoutError(Exception):
 
 
 @contextmanager
-def _forward_pass_timeout(seconds: float, label: str):
+def _forward_pass_timeout(seconds: float, label: ProbeOperation):
     """SIGALRM-based watchdog around a forward-pass probe call.
 
     On Linux, installs a SIGALRM handler that raises
