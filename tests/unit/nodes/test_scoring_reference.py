@@ -287,3 +287,6 @@ class TestLoadReferenceScoresCache:
 
         with pytest.raises(FileNotFoundError):
             load_reference_scores(**kwargs)
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

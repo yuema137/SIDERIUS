@@ -22,6 +22,7 @@ from execute_tools.dataset_config import (
     DatasetConfig,
     DatasetProfile,
     ValueEncoding,
+    resolve_dataset_profile,
     tidmad_topology,
 )
 
@@ -89,6 +90,7 @@ def make_two_family_profile(
     num_files: int = 3,
     psd_segment_length: int = 2000,
     segments_per_file: int = 4,
+    sampling_frequency: float = 1000.0,
 ) -> DatasetProfile:
     """Build a neutral two-family profile with varied count and geometry.
 
@@ -105,6 +107,7 @@ def make_two_family_profile(
             "psd_segment_length": psd_segment_length,
             "segments_per_file": segments_per_file,
             "num_files": num_files,
+            "sampling_frequency": sampling_frequency,
         }
     )
     payload["anchor_selection_files"] = list(range(min(num_files, 3)))
@@ -121,6 +124,24 @@ def _write_file(path: str, profile: DatasetProfile, n_samples: int, seed: int) -
         ts = f.create_group("timeseries")
         ts.create_group(ch.input_channel).create_dataset("timeseries", data=a)
         ts.create_group(ch.target_channel).create_dataset("timeseries", data=b)
+
+
+def write_bound_timeseries(
+    path: str | os.PathLike[str],
+    input_values: np.ndarray,
+    target_values: np.ndarray | None = None,
+) -> None:
+    """Write channels named by the explicitly bound synthetic profile."""
+    channels = tidmad_topology(resolve_dataset_profile()).channels
+    with h5py.File(path, "w") as handle:
+        timeseries = handle.create_group("timeseries")
+        timeseries.create_group(channels.input_channel).create_dataset(
+            "timeseries", data=input_values, chunks=True
+        )
+        if target_values is not None:
+            timeseries.create_group(channels.target_channel).create_dataset(
+                "timeseries", data=target_values, chunks=True
+            )
 
 
 def write_two_family_fixture(

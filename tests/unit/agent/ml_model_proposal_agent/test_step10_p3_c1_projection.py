@@ -502,3 +502,6 @@ class TestProposalInputCarriesTheEvidence:
             }
         )
         assert inp.interpretation_evidence == evidence
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

@@ -161,3 +161,6 @@ class TestFixture134ADescriptionAxis:
                 f"{token!r} missing from the alternative-description variant — the "
                 f"contract channel moved when only the description was varied"
             )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

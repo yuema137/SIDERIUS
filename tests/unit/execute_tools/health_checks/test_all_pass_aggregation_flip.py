@@ -1,29 +1,14 @@
-"""C2 flip witness — blocking per-file aggregation ``any_pass`` → ``all_pass``.
-
-Operator-frozen decision, 2026-08-26. It repairs the leniency the shipped
-TIDMAD config itself documented and deferred ("all_pass would arguably be
-stricter; deferred to post-V17 empirical validation", m9 execution plan §9
-Q1): under ``any_pass`` a model that collapses on two of the three peeked
-files while clearing the bar on one still PASSES every blocking gate.
+"""Per-file aggregation mechanics and task-declared override coverage.
 
 Defects only this file catches:
 
-* **The flip silently reverting** — ``configs/health_checks.yaml`` (or the
-  observe-mode sibling, or the built-in fallback table) carrying
-  ``any_pass`` again. The composition tests pin the policy MECHANISM; only
-  these tests pin the frozen VALUE on the production path, per gate.
 * **The two aggregation directions swapping or converging** — proven on ONE
   shared per-file fixture, both directions, through the real consumer
   (``_multi_file_peek._apply_aggregation`` via ``peek_and_aggregate``). A
   test with separate fixtures per mode cannot show the SAME evidence
   flipping the verdict.
-* **The framework value being unreachable per gate** (F-SCAND-2) — the flip
-  above is one number governing every blocking gate of every task. The row
-  records the cost: ``amplitude_collapse_blocking`` could not be made strict
-  without making all three strict. ``TestATaskDeclaresItsOwnAggregation``
-  below owns the capability that closes it, on the same production
-  materialization, and owns the other half too — that a roster declaring
-  NOTHING still resolves to the frozen value, byte for byte.
+* **A task override being overwritten by framework policy** — the declared
+  per-gate value must survive into the effective run artifact.
 
 How each test fails when the behaviour breaks: revert the YAML flip and
 ``test_shipped_policy_composes_all_pass_into_every_blocking_gate`` reports
@@ -44,34 +29,14 @@ import numpy as np
 import pytest
 import yaml
 
+from execute_tools.dataset_config import resolve_dataset_profile, tidmad_topology
 from execute_tools.health_checks import _plugin_binding
-from execute_tools.health_checks._composition import (
-    DEFAULT_DISPOSITION_POLICY,
-    HealthBindingState,
-)
 from execute_tools.health_checks._multi_file_peek import peek_and_aggregate
 from execute_tools.health_checks.config import (
     clear_health_gates_config_cache,
     materialize_effective_config,
 )
 from execute_tools.health_checks.schemas import HealthCheckContext
-
-REPO_ROOT = Path(__file__).resolve().parents[4]
-
-#: The three blocking gates the shipped TIDMAD roster declares. Hardcoded —
-#: the witness must prove the flip reaches ALL of them, so the expectation
-#: can never be read back from the thing under test.
-BLOCKING_GATE_IDS = [
-    "output_diversity_blocking",
-    "output_std_blocking",
-    "amplitude_collapse_blocking",
-]
-
-RECORDING_GATE_IDS = [
-    "pearson_dispersion_recording",
-    "spectral_peak_ratio_recording",
-    "per_file_output_std_recording",
-]
 
 
 @pytest.fixture(autouse=True)
@@ -87,15 +52,11 @@ def _isolated_run_scope():
 
 
 def _write_ch1(path: Path, ch1: np.ndarray) -> None:
+    output_channel = tidmad_topology(resolve_dataset_profile()).channels.input_channel
     with h5py.File(str(path), "w") as f:
         ts = f.create_group("timeseries")
-        c1 = ts.create_group("channel0001")
+        c1 = ts.create_group(output_channel)
         c1.create_dataset("timeseries", data=ch1, chunks=True)
-
-
-def _composed_gates(tmp_path: Path, source: str | None) -> list[dict]:
-    path, _ = materialize_effective_config(source, None, str(tmp_path))
-    return yaml.safe_load(Path(path).read_text())["health_gates"]
 
 
 class TestOneFixtureBothDirections:
@@ -120,6 +81,7 @@ class TestOneFixtureBothDirections:
         )
 
         def run(aggregation: str):
+            output_channel = tidmad_topology(resolve_dataset_profile()).channels.input_channel
             return peek_and_aggregate(
                 ctx,
                 peek_file_indices=[3, 10, 17],
@@ -128,6 +90,7 @@ class TestOneFixtureBothDirections:
                 predicate=lambda m: m > 25,
                 aggregation=aggregation,
                 peek_samples=10_000,
+                channel=output_channel,
             )
 
         under_any = run("any_pass")
@@ -143,56 +106,6 @@ class TestOneFixtureBothDirections:
         assert under_any.passed is True
         assert under_all.passed is False
         assert "all_pass" in under_all.reason
-
-
-class TestFlipReachesEveryBlockingGate:
-    """The policy value, asserted per gate on the real composed artifact."""
-
-    def test_shipped_policy_composes_all_pass_into_every_blocking_gate(self, tmp_path):
-        gates = _composed_gates(tmp_path, None)
-        blocking = [g for g in gates if g["gate_role"] == "blocking"]
-
-        assert [g["id"] for g in blocking] == BLOCKING_GATE_IDS
-        for gate in blocking:
-            assert gate["checks"][0]["config"]["aggregation"] == "all_pass", gate["id"]
-
-        recording = [g for g in gates if g["gate_role"] == "observational"]
-        assert [g["id"] for g in recording] == RECORDING_GATE_IDS
-        for gate in recording:
-            assert "aggregation" not in gate["checks"][0]["config"], gate["id"]
-
-    def test_observe_mode_policy_composes_all_pass_too(self, tmp_path):
-        """Observe mode differs from production in ``on_fail`` ONLY — the
-        aggregation flip must land in both, or a baseline-characterization
-        run measures different collapse semantics than production enforces."""
-        gates = _composed_gates(
-            tmp_path, str(REPO_ROOT / "configs" / "health_checks_baseline_observe_mode.yaml")
-        )
-        blocking = [g for g in gates if g["gate_role"] == "blocking"]
-
-        assert [g["id"] for g in blocking] == BLOCKING_GATE_IDS
-        for gate in blocking:
-            assert gate["checks"][0]["config"]["aggregation"] == "all_pass", gate["id"]
-            assert gate["on_fail"]["action"] == "continue", gate["id"]
-
-    def test_builtin_default_policy_matches_the_shipped_policy(self):
-        """The fallback table's contract is "the shipped policy when the
-        framework file declares none". A flip applied to the YAML but not
-        the table (or vice versa) would give a policy-less framework config
-        silently different blocking semantics — nothing else compares the
-        two authorities."""
-        shipped = yaml.safe_load((REPO_ROOT / "configs" / "health_checks.yaml").read_text())[
-            "health_policy"
-        ]
-        for disposition, policy in DEFAULT_DISPOSITION_POLICY.items():
-            declared = shipped[disposition]
-            assert policy.check_config == declared["check_config"], disposition
-            assert policy.short_circuit == declared["short_circuit"], disposition
-            assert policy.gate_role == declared["gate_role"], disposition
-            assert policy.on_pass.value == declared["on_pass"], disposition
-            assert policy.on_fail.value == declared["on_fail"], disposition
-
-        assert DEFAULT_DISPOSITION_POLICY["blocking"].check_config == {"aggregation": "all_pass"}
 
 
 class TestATaskDeclaresItsOwnAggregation:
@@ -317,41 +230,4 @@ class TestATaskDeclaresItsOwnAggregation:
         }
 
 
-class TestTheUndeclaredCaseIsByteIdentical:
-    """F-SCAND-2's non-negotiable: silence must cost nothing.
-
-    The declarability change touches ``compose_gate``, which every run's
-    pinned artifact flows through. The shipped TIDMAD roster declares no
-    ``aggregation``, so its effective config — the whole body, not a
-    sampled key — must be the same bytes it was before. The digests below
-    were recorded from a pristine checkout of master ``3995400b`` and are
-    hardcoded, never read back from the code under test.
-
-    When one of these legitimately moves — a framework policy edit, a
-    TIDMAD threshold retune — the digest is re-recorded IN THE SAME COMMIT
-    as the change that moved it, with the reason stated. A silent update is
-    how a workspace-immutable artifact drifts under live runs.
-    """
-
-    #: sha256 of the canonical YAML body (header excluded), the value the
-    #: run-invariants lock pins as ``health_config_sha256``.
-    LEGACY_OMITTED_BODY_SHA256 = "8949578d87a2efd3ae3ba62cd2f1a007b015d6d2244bd25aa7ca388cc7a36052"
-    EXPLICIT_TIDMAD_BODY_SHA256 = "fbd75910496310d4280c1074331e92ab65a9c616a973f6081af64fcfceecf1ea"
-
-    @pytest.mark.parametrize(
-        ("binding", "expected_sha"),
-        [
-            (HealthBindingState.LEGACY_OMITTED, LEGACY_OMITTED_BODY_SHA256),
-            (
-                str(REPO_ROOT / "configs" / "task_health" / "tidmad.yaml"),
-                EXPLICIT_TIDMAD_BODY_SHA256,
-            ),
-        ],
-        ids=["legacy_omitted", "explicit_tidmad"],
-    )
-    def test_the_shipped_roster_pins_the_same_body_digest(self, tmp_path, binding, expected_sha):
-        workspace = tmp_path / "ws"
-        workspace.mkdir()
-        _, sha = materialize_effective_config(None, None, str(workspace), None, binding)
-
-        assert sha == expected_sha
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

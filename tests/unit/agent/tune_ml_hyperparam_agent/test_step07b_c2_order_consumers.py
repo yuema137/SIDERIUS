@@ -63,10 +63,21 @@ HIGHER = MetricOrder(shipped_spec())
 LOWER = MetricOrder(direction_only_spec())
 
 CORPUS = _decode(json.loads(_CORPUS_PATH.read_text(encoding="utf-8")))["histories"]
+REQUIRED_GATE_IDS = frozenset({"output_diversity"})
 
 
 def _history(case_id: str) -> list:
     return CORPUS[case_id]["records"]
+
+
+def _winner(records: list, *, order: MetricOrder) -> dict | None:
+    """Select against the gate roster declared by this synthetic fixture."""
+    return _best_trial_winner(records, order=order, required_gate_ids=REQUIRED_GATE_IDS)
+
+
+def _tracks(records: list, *, order: MetricOrder):
+    """Project best tracks under this synthetic fixture's explicit gate roster."""
+    return _select_best_records(records, order=order, required_gate_ids=REQUIRED_GATE_IDS)
 
 
 def _valid(exp_id: str, score: float, *, is_trial: bool = True, time_mode: str = "trial") -> dict:
@@ -99,19 +110,40 @@ class TestTrialWinnerInverts:
     )
     def test_argmax_becomes_argmin(self, case_id, higher_id, lower_id):
         records = _history(case_id)
-        assert _best_trial_winner(records, order=HIGHER)["exp_id"] == higher_id
-        assert _best_trial_winner(records, order=LOWER)["exp_id"] == lower_id
+        assert (
+            _best_trial_winner(records, order=HIGHER, required_gate_ids=REQUIRED_GATE_IDS)["exp_id"]
+            == higher_id
+        )
+        assert (
+            _best_trial_winner(records, order=LOWER, required_gate_ids=REQUIRED_GATE_IDS)["exp_id"]
+            == lower_id
+        )
 
     @pytest.mark.parametrize("order", [HIGHER, LOWER], ids=["higher", "lower"])
     def test_empty_and_no_success_histories_have_no_winner(self, order):
-        assert _best_trial_winner(_history("h_empty"), order=order) is None
-        assert _best_trial_winner(_history("h_no_successes"), order=order) is None
+        assert (
+            _best_trial_winner(
+                _history("h_empty"), order=order, required_gate_ids=REQUIRED_GATE_IDS
+            )
+            is None
+        )
+        assert (
+            _best_trial_winner(
+                _history("h_no_successes"),
+                order=order,
+                required_gate_ids=REQUIRED_GATE_IDS,
+            )
+            is None
+        )
 
     @pytest.mark.parametrize("order", [HIGHER, LOWER], ids=["higher", "lower"])
     def test_a_tie_at_the_extreme_keeps_the_first_record(self, order):
         """Which config the forced-formal round inherits depends on this."""
         tied = [_valid("first", 1.0), _valid("second", 1.0)]
-        assert _best_trial_winner(tied, order=order)["exp_id"] == "first"
+        assert (
+            _best_trial_winner(tied, order=order, required_gate_ids=REQUIRED_GATE_IDS)["exp_id"]
+            == "first"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -126,33 +158,33 @@ class TestGateOrientationInverts:
         winner = [self.WINNER]
         # higher: -2.5 is WORSE than -2.0 -> skip; better than -3.0 -> run.
         assert _should_skip_formal(
-            _best_trial_winner(winner, order=HIGHER),
+            _winner(winner, order=HIGHER),
             threshold=-2.0,
             gates_enabled=True,
             order=HIGHER,
         )
         assert not _should_skip_formal(
-            _best_trial_winner(winner, order=HIGHER),
+            _winner(winner, order=HIGHER),
             threshold=-3.0,
             gates_enabled=True,
             order=HIGHER,
         )
         # lower: the verdicts swap on the SAME numbers.
         assert not _should_skip_formal(
-            _best_trial_winner(winner, order=LOWER),
+            _winner(winner, order=LOWER),
             threshold=-2.0,
             gates_enabled=True,
             order=LOWER,
         )
         assert _should_skip_formal(
-            _best_trial_winner(winner, order=LOWER),
+            _winner(winner, order=LOWER),
             threshold=-3.0,
             gates_enabled=True,
             order=LOWER,
         )
 
     def test_bypass_clears_on_the_better_side_and_admits_the_tie(self):
-        winner = _best_trial_winner([self.WINNER], order=HIGHER)
+        winner = _winner([self.WINNER], order=HIGHER)
         assert _should_bypass_formal_time_budget(winner, threshold=-2.5, order=HIGHER)
         assert _should_bypass_formal_time_budget(winner, threshold=-3.0, order=HIGHER)
         assert not _should_bypass_formal_time_budget(winner, threshold=-2.0, order=HIGHER)
@@ -167,7 +199,7 @@ class TestGateOrientationInverts:
         ``lower`` they change places, and a sentinel left literal would leave
         the skip gate permanently armed and the bypass permanently disabled.
         """
-        winner = _best_trial_winner([self.WINNER], order=order)
+        winner = _winner([self.WINNER], order=order)
         assert not _should_skip_formal(
             winner, threshold=order.worst_sentinel, gates_enabled=True, order=order
         )
@@ -319,8 +351,8 @@ _TRACK_RECORDS = [
 
 class TestBestTracksInvert:
     def test_every_track_is_the_argmax_then_the_argmin(self):
-        higher = _select_best_records(_TRACK_RECORDS, order=HIGHER)
-        lower = _select_best_records(_TRACK_RECORDS, order=LOWER)
+        higher = _tracks(_TRACK_RECORDS, order=HIGHER)
+        lower = _tracks(_TRACK_RECORDS, order=LOWER)
         assert (
             higher.top["exp_id"],
             higher.formal["exp_id"],
@@ -338,7 +370,7 @@ class TestBestTracksInvert:
 
     @pytest.mark.parametrize("order", [HIGHER, LOWER], ids=["higher", "lower"])
     def test_all_tracks_are_none_when_nothing_succeeded(self, order):
-        tracks = _select_best_records(_history("h_no_successes"), order=order)
+        tracks = _tracks(_history("h_no_successes"), order=order)
         assert (
             tracks.top,
             tracks.formal,
@@ -368,8 +400,8 @@ class TestInvalidatedResultsNeverWin:
             "failure_reason": "amplitude_collapse",
         }
         records = [collapsed, _valid("healthy", -2.5)]
-        assert _best_trial_winner(records, order=order)["exp_id"] == "healthy"
-        tracks = _select_best_records(records, order=order)
+        assert _winner(records, order=order)["exp_id"] == "healthy"
+        tracks = _tracks(records, order=order)
         assert tracks.top["exp_id"] == "healthy"
         assert tracks.valid["exp_id"] == "healthy"
         assert tracks.valid_trial["exp_id"] == "healthy"
@@ -403,7 +435,7 @@ class TestInvalidatedResultsNeverWin:
             "health_gate_enabled": True,
             "health_gate_results": [
                 {
-                    "gate_name": "output_diversity_blocking",
+                    "gate_name": "output_diversity",
                     "execution_status": "passed",
                     "check_passed": False,
                     "would_invalidate_under_production_policy": True,
@@ -412,8 +444,8 @@ class TestInvalidatedResultsNeverWin:
             "memory": {"time_mode": "trial"},
         }
         records = [cheater, _valid("healthy", -2.5)]
-        assert _best_trial_winner(records, order=order)["exp_id"] == "healthy"
-        tracks = _select_best_records(records, order=order)
+        assert _winner(records, order=order)["exp_id"] == "healthy"
+        tracks = _tracks(records, order=order)
         assert tracks.valid["exp_id"] == "healthy"
         assert tracks.valid_trial["exp_id"] == "healthy"
         # ...but the UNFILTERED `top` track deliberately still admits it: that
@@ -427,8 +459,8 @@ class TestInvalidatedResultsNeverWin:
         ``lower``. Both are filtered as non-finite before ordering."""
         case = "h_pos_inf" if order is HIGHER else "h_neg_inf"
         records = _history(case)
-        assert _best_trial_winner(records, order=order)["exp_id"] == "t_ok"
-        assert _select_best_records(records, order=order).top["exp_id"] == "t_ok"
+        assert _winner(records, order=order)["exp_id"] == "t_ok"
+        assert _tracks(records, order=order).top["exp_id"] == "t_ok"
 
 
 # ---------------------------------------------------------------------------
@@ -515,3 +547,6 @@ def test_no_bare_extremum_over_the_golden_metric_survives_in_the_tuner():
     # ...and the same-loss LOSS ordering is still a bare ascending sort,
     # because a loss is lower-is-better by definition and must NOT migrate.
     assert "sorted_finals = sorted(all_same_loss_finals)" in _TUNER_SOURCE
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

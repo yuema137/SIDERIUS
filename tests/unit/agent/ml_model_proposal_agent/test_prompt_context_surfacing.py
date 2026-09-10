@@ -568,3 +568,6 @@ class TestDataScopeBlock:
         prompt = _build_reasoning_prompt(scoped)
         assert "[DATA SCOPE]" in prompt
         assert "[4, 5, 6]" in prompt
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

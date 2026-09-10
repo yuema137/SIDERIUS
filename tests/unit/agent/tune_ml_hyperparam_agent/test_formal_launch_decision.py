@@ -138,7 +138,11 @@ def _launch(
         gates_enabled=gates_enabled,
         order=HIGHER_ORDER,
     )
-    winner = _best_trial_winner(records, order=HIGHER_ORDER)
+    winner = _best_trial_winner(
+        records,
+        order=HIGHER_ORDER,
+        required_gate_ids=frozenset(BLOCKING_IDS),
+    )
     skip = _should_skip_formal(
         winner, threshold=skip_t, gates_enabled=gates_enabled, order=HIGHER_ORDER
     )
@@ -404,7 +408,11 @@ class TestTheWinnerIsResolvedOnce:
     ]
 
     def test_skip_bypass_and_inheritance_all_judge_the_same_record(self):
-        winner = _best_trial_winner(self.RECORDS, order=HIGHER_ORDER)
+        winner = _best_trial_winner(
+            self.RECORDS,
+            order=HIGHER_ORDER,
+            required_gate_ids=frozenset(BLOCKING_IDS),
+        )
         assert winner is not None and winner["exp_id"] == "real_winner"
 
         from agent.schemas.hyperparam_tuning import ExperimentPlan
@@ -497,7 +505,11 @@ class TestTheWinnerIsResolvedOnce:
         `_best_trial_winner`'s filter. Appending formal records must
         therefore leave the winner identical.
         """
-        before = _best_trial_winner(self.RECORDS, order=HIGHER_ORDER)
+        before = _best_trial_winner(
+            self.RECORDS,
+            order=HIGHER_ORDER,
+            required_gate_ids=frozenset(BLOCKING_IDS),
+        )
         formal_attempt = {
             "exp_id": "formal_attempt_1",
             "status": "success",
@@ -506,7 +518,11 @@ class TestTheWinnerIsResolvedOnce:
             "health_gate_results": [],
             "memory": {"time_mode": "formal", "round_index": 2},
         }
-        after = _best_trial_winner([*self.RECORDS, formal_attempt], order=HIGHER_ORDER)
+        after = _best_trial_winner(
+            [*self.RECORDS, formal_attempt],
+            order=HIGHER_ORDER,
+            required_gate_ids=frozenset(BLOCKING_IDS),
+        )
         assert after is before
 
     def test_the_production_site_resolves_the_winner_exactly_once(self):
@@ -712,6 +728,10 @@ def _run_one_formal_round(tmp_path, *, seeded_trial: dict, gates_enabled: bool) 
     with (
         patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
         patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
+        patch(
+            "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent._resolve_run_gate_ids",
+            return_value=frozenset(BLOCKING_IDS),
+        ),
         patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_mock_run_skill),
         patch(
             "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
@@ -809,3 +829,6 @@ def test_production_with_the_gates_disabled_the_round_still_runs(tmp_path):
     )
 
     assert _formal_records(records), "the gates-disabled path must be unchanged by D-C3"
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

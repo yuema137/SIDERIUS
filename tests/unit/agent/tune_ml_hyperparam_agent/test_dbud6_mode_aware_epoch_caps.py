@@ -378,3 +378,6 @@ class TestPromptDisclosure:
         src = inspect.getsource(planning)
         assert "agent_input.resolve_epoch_cap(is_trial=True).cap" in src
         assert "agent_input.resolve_epoch_cap(is_trial=False).cap" in src
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

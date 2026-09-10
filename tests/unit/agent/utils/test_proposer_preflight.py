@@ -30,6 +30,21 @@ from agent.utils.proposer_preflight import (
     _synthesise_default_sample_set,
     estimate_proposal_time,
 )
+from execute_tools.dataset_config import bind_dataset_profile
+from tests.helpers.two_family_profile import make_two_family_profile
+
+
+@pytest.fixture(scope="module")
+def resource_estimator_profile():
+    """Explicit large synthetic geometry for the historical overshoot witness."""
+    profile = make_two_family_profile(
+        num_files=20,
+        psd_segment_length=10_000_000,
+        segments_per_file=200,
+    )
+    with bind_dataset_profile(profile):
+        yield
+
 
 # ---------------------------------------------------------------------------
 # Config factories — shapes mirror the live proposer/tuner output.
@@ -532,3 +547,6 @@ class TestScopedSynthesis:
         )
         # 6 of 20 files → strictly cheaper estimate.
         assert scoped["estimated_minutes"] < full["estimated_minutes"]
+
+
+pytestmark = pytest.mark.usefixtures("resource_estimator_profile")

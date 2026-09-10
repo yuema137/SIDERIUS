@@ -651,3 +651,6 @@ class TestSecondaryBlock:
         )
         md = render_comparison_table(tbl)
         assert "### Sampled files re-ranked by Impact_Score" not in md
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

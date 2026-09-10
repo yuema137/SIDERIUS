@@ -8,7 +8,6 @@ docs/design/paper_and_collapse_reference_baselines.md §6.3).
 
 from __future__ import annotations
 
-import h5py
 import numpy as np
 import pytest
 
@@ -18,15 +17,11 @@ from execute_tools.health_checks._composition import (
 )
 from execute_tools.health_checks.pearson_dispersion import PearsonDispersionCheck
 from execute_tools.health_checks.schemas import HealthCheckContext
+from tests.helpers.two_family_profile import write_bound_timeseries
 
 
 def _write_two_channel(path, ch1: np.ndarray, ch2: np.ndarray) -> None:
-    with h5py.File(str(path), "w") as f:
-        ts = f.create_group("timeseries")
-        c1 = ts.create_group("channel0001")
-        c1.create_dataset("timeseries", data=ch1, chunks=True)
-        c2 = ts.create_group("channel0002")
-        c2.create_dataset("timeseries", data=ch2, chunks=True)
+    write_bound_timeseries(path, ch1, ch2)
 
 
 def _ctx(**overrides) -> HealthCheckContext:
@@ -182,3 +177,6 @@ class TestPearsonDispersionCheck:
         r = PearsonDispersionCheck().run(ctx, config=_cfg())
         assert r.passed is True
         assert "no files in context" in r.reason
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

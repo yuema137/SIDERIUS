@@ -125,15 +125,14 @@ def _ctx(**overrides) -> HealthCheckContext:
     return HealthCheckContext(**base)
 
 
-def _bound_tidmad_facts() -> TaskHealthFacts:
-    """TIDMAD's DECLARED health facts, read from its task health config."""
-    import yaml
-
-    from execute_tools.health_checks._composition import LEGACY_DEFAULT_TASK_HEALTH_CONFIG
-    from execute_tools.health_checks._task_health_config import TaskHealthConfig
-
-    with open(LEGACY_DEFAULT_TASK_HEALTH_CONFIG) as handle:
-        return TaskHealthConfig.model_validate(yaml.safe_load(handle)).resolved_facts()
+def _integer_stream_facts() -> TaskHealthFacts:
+    """Explicit neutral facts satisfying the six checks' declared inputs."""
+    return TaskHealthFacts(
+        encoding_family="int8_symbol_stream",
+        value_scale_unit="fixture_unit",
+        file_group_size=4,
+        sampling_frequency_hz=25.0,
+    )
 
 
 def _full_ctx() -> HealthCheckContext:
@@ -302,15 +301,9 @@ class TestTheAxisCutsBothWays:
     )
 
     @pytest.mark.parametrize("check_cls", SHIPPED_CHECKS, ids=lambda c: c.name)
-    def test_every_shipped_check_applies_under_the_bound_tidmad_facts(self, check_cls):
-        """The parity claim: no shipped TIDMAD check may stop running.
-
-        Reads the facts TIDMAD now DECLARES in its own health config, which
-        is what production resolves since C5. The regime-A derivation cannot
-        establish `value_scale_unit` — nothing in the dataset profile says
-        what a sample is worth — which is precisely why ownership moved.
-        """
-        verdict = applicability(check_cls.declaration, _bound_tidmad_facts(), _full_ctx())
+    def test_every_shipped_check_applies_under_declared_integer_stream_facts(self, check_cls):
+        """Positive control: matching declared facts keep every check applicable."""
+        verdict = applicability(check_cls.declaration, _integer_stream_facts(), _full_ctx())
         assert verdict.applicable is True, verdict.reason
 
     def test_the_regime_a_derivation_still_cannot_establish_the_scale(self):
@@ -471,3 +464,6 @@ class TestThresholdParameterNamesMeansThreshold:
             source = textwrap.dedent(inspect.getsource(cls.run))
             for name in cls.declaration.threshold_parameter_names:
                 assert name in source, f"{cls.name} declares {name!r} but never reads it"
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

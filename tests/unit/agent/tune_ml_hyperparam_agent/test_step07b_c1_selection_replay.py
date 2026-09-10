@@ -55,7 +55,7 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _should_skip_formal,
 )
 from tests.helpers.golden import assert_json_golden
-from tests.helpers.metric_fixtures import shipped_spec
+from tests.helpers.metric_fixtures import accuracy_like_spec
 from tests.helpers.step00_pseudo_iteration import run_bounded_pseudo_iteration
 
 HERE = Path(__file__).parent
@@ -63,6 +63,7 @@ GOLDENS = HERE / "goldens"
 FIXTURES = HERE / "fixtures"
 _CORPUS_PATH = FIXTURES / "sel1_histories.json"
 _PREFLIGHT_FIXTURE = FIXTURES / "step00_preflight_results.json"
+REPLAY_REQUIRED_GATE_IDS = frozenset({"output_diversity"})
 
 # The corpus cases the design (§5 / C1 goal) requires. Hardcoded here rather
 # than derived from the fixture: deriving the checklist from the thing it
@@ -183,19 +184,23 @@ def test_corpus_covers_every_required_case(corpus):
 def project_gate_helpers(corpus: dict, order: MetricOrder | None = None) -> dict:
     """Drive the gate helpers over the whole corpus, projected for JSON.
 
-    ``order`` defaults to the SHIPPED TIDMAD (``higher``) order. At C1 the
+    ``order`` defaults to a neutral ``higher``-is-better fixture. At C1 the
     helpers took no order at all; from C2 they route through the run's one
     authority, and passing the shipped order here is precisely the replay
     claim: the production default must reproduce the pre-07b goldens byte for
     byte. The C2 rung passes the ``lower`` order to the same projection and
     asserts the inversion against separate expectations.
     """
-    order = order or MetricOrder(shipped_spec())
+    order = order or MetricOrder(accuracy_like_spec())
     projected: dict = {"winners": {}, "gates": {}, "thresholds": {}}
 
     for case_id, case in sorted(corpus["histories"].items()):
         records = case["records"]
-        winner = _best_trial_winner(records, order=order)
+        winner = _best_trial_winner(
+            records,
+            order=order,
+            required_gate_ids=REPLAY_REQUIRED_GATE_IDS,
+        )
         projected["winners"][case_id] = {
             "exp_id": winner["exp_id"] if winner else None,
             "denoising_score": _encode_float(winner["denoising_score"]) if winner else None,
@@ -335,3 +340,6 @@ def test_run_branch_count_not_increased():
         "run() gained branching — 07b authorises sequencing calls only "
         f"(baseline {RUN_BRANCH_NODE_BASELINE} at f17bbdb8)"
     )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

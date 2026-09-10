@@ -248,3 +248,6 @@ class TestStubParity:
         )
         assert out["status"] == "success"
         assert out["runtime_verification"] is None
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

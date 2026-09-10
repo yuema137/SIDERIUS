@@ -248,3 +248,6 @@ class TestEndToEndPseudoChain:
         for oid in ids:
             rec = registry.load_observation(oid)
             assert rec.realized_model["parameter_count"] == 256 * 8 + (8 * 256 + 256)
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

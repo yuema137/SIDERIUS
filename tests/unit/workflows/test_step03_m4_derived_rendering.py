@@ -229,3 +229,6 @@ class TestResolutionIsWiredAtTheEntryPoint:
 
         with pytest.raises(DatasetContradictionError):
             load_task_config(self._write(tmp_path, preset="sequence", class_dim=10))
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

@@ -326,3 +326,6 @@ class TestBelowBaselineRelabel:
         # And the scalars themselves are untouched by the render guard.
         assert agg.model_scalar == -7.5
         assert agg.raw_baseline_scalar == ref.raw_scalar_full
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

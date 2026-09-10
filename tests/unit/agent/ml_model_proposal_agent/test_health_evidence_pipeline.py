@@ -11,6 +11,8 @@ NOT accepted for the production-pipeline claim; nothing here touches it.
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from agent.schemas.proposal import ProposalInput, ReasoningPipelineConfig, ReasoningStage
 from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
@@ -151,3 +153,6 @@ class TestPipelineFlagOff:
         prompts = _run_pipeline_capture(_pipeline_input(tmp_path, on=True, interp=legacy))
         final = _proposing_prompt(prompts)
         assert "[HEALTHGATE EVIDENCE]" not in final  # no invented block
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

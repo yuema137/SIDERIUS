@@ -634,3 +634,6 @@ class TestOneAuthorityForFourSurfaces:
             )
         )
         assert TIMING_ATTRIBUTION_NOTE.strip() in block
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

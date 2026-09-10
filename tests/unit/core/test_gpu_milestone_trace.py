@@ -569,3 +569,6 @@ class TestTheProductionPathIsUnchangedWithoutATrace:
         assert post_forward.output_shape == (1, 256, 8)
         assert post_forward.input_shape == (1, 8)
         assert post_forward.model_mode == "eval"
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

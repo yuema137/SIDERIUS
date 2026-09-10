@@ -430,3 +430,6 @@ class TestTheDeltaIsConfinedToD1D2D3:
             "a renderer compares the direction declaration itself instead of "
             f"asking MetricOrder: {offenders}"
         )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

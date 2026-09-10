@@ -1139,3 +1139,6 @@ class TestBackwardCompatibleLoading:
         assert record.memory.time_estimate_minutes is None
         assert record.memory.vram_estimate_gb is None
         assert record.memory.inference_batch_uncalibrated is None
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

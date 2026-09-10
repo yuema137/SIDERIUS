@@ -511,3 +511,6 @@ def test_validator_code_review_passes_with_true():
     assert review.spec_alignment is True
     assert review.trainability_concerns == []
     assert review.implementation_issues == []
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

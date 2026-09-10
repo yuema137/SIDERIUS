@@ -72,6 +72,7 @@ LOWER = MetricOrder(direction_only_spec())
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 _PREFLIGHT_FIXTURE = _FIXTURES / "step00_preflight_results.json"
+REQUIRED_GATES = frozenset({"range_check", "variance_check"})
 
 
 def _trial(
@@ -154,7 +155,7 @@ class TestNoBudgetRegression:
             "health_gate_enabled": True,
             "health_gate_results": [
                 {
-                    "gate_name": "output_diversity_blocking",
+                    "gate_name": "range_check",
                     "execution_status": "passed",
                     "check_passed": False,
                     "would_invalidate_under_production_policy": True,
@@ -165,6 +166,7 @@ class TestNoBudgetRegression:
             [collapsed],
             formal_skipped_for_no_valid_winner=True,
             healthgate_mode="blocking",
+            required_gate_ids=REQUIRED_GATES,
         )
         assert feedback is not None
         assert feedback.trial_records_considered == 1
@@ -260,7 +262,7 @@ class TestRoleFiltersUnchanged:
                     "health_gate_enabled": True,
                     "health_gate_results": [
                         {
-                            "gate_name": "output_diversity_blocking",
+                            "gate_name": "range_check",
                             "execution_status": "passed",
                             "check_passed": False,
                             "would_invalidate_under_production_policy": True,
@@ -274,7 +276,14 @@ class TestRoleFiltersUnchanged:
         """Every one of these is scored to win under at least one direction
         and none carries a ``time_mode``. The old rule excluded them twice
         over; only the candidate-validity half may survive."""
-        assert _best_trial_winner([record], order=order) is None, label
+        assert (
+            _best_trial_winner(
+                [record],
+                order=order,
+                required_gate_ids=REQUIRED_GATES,
+            )
+            is None
+        ), label
 
 
 # ---------------------------------------------------------------------------
@@ -387,3 +396,6 @@ class TestPersistedRecords:
         assert _best_trial_winner(round_tripped[:1], order=HIGHER)["exp_id"] == "legacy_with_mode"
         assert _best_trial_winner(round_tripped[1:2], order=HIGHER)["exp_id"] == "new_without_mode"
         assert _best_trial_winner(round_tripped[2:], order=HIGHER) is None
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

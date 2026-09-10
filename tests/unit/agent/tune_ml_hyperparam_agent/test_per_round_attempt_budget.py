@@ -602,3 +602,6 @@ class TestFormalBudgetDistinctFromTrial:
             "skipped_oom_risk",
             "success",
         ]
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

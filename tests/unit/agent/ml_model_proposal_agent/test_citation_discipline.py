@@ -327,3 +327,6 @@ class TestCitationDisciplinePipelineIntegration:
             n for n in output.memo_consistency_notes if "CITATION_NOT_REFERENCED" in n
         ]
         assert violation_notes == []
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

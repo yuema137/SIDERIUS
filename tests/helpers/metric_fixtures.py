@@ -77,6 +77,11 @@ def accuracy_like_spec(metric_id: str = "fixture_accuracy") -> MetricSpec:
     )
 
 
+def accuracy_like_metric(metric_id: str = "fixture_accuracy") -> EvaluationMetric:
+    """An inert metric handle for run-binding tests on a neutral scale."""
+    return _FixtureMetric(accuracy_like_spec(metric_id))
+
+
 def error_like_spec(metric_id: str = "fixture_mse") -> MetricSpec:
     """A ``lower``-is-better metric near 0 — an MSE-shaped scale."""
     return MetricSpec(

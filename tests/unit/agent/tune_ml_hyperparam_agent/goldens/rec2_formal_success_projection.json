@@ -1,22 +1,122 @@
 {
   "_captured_at": {
-    "commit": "5b64d0b01eddeb3f3a708666b3281e9e6338aa25",
-    "note": "UPDATED at Step 07 / PR 07c C6 by a targeted single-key text edit, not a regeneration (design \u00a717 rule 3; tests never write goldens). TrainingHistory gained the ADDITIVE validation_requested_samples_before_limit (Q-07c-9), whose value is null whenever no validation_max_samples ceiling is configured \u2014 i.e. every production campaign. EXACTLY ONE content line was added; every pre-existing key and value is byte-identical, which is the property this whole-object golden exists to prove. Previous capture: 83987b216dd35d4dbc6132f5221bbdd68729099e (Step 07a C3). Ledger: docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07c_tuner_measurement.md \u00a717 (C6)"
+    "commit": "worktree-pr422",
+    "note": "DECLARED DELTA: REC-2 now runs under an explicitly bound neutral synthetic dataset profile and metric. The prior golden encoded TIDMAD geometry, score-table references, and scoreability; the replacement preserves every record field and production-decision value while the undeclared comparison table is correctly absent."
   },
-  "attempt_index": null,
-  "candidate_id": null,
-  "counts_toward_attempt_budget": true,
-  "counts_toward_completed_rounds": null,
-  "denoising_score": 0.65,
-  "eval_portion": null,
-  "eval_psd_segments": 4000,
-  "eval_strategy": null,
+  "record_type": "experiment",
   "exp_id": "<present>",
-  "failure_attribution": null,
-  "failure_reason": null,
+  "status": "success",
+  "model_type": "pe_wavenet_delta",
+  "candidate_id": null,
+  "timestamp": "<present>",
+  "file_index": 6,
+  "params": {
+    "exp_id": "<present>",
+    "run_name": "<present>",
+    "model_type": "pe_wavenet_delta",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 128
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "inference_batch": 64
+  },
+  "logical_round": null,
+  "attempt_index": null,
   "failure_stage": null,
   "failure_type": null,
-  "file_index": 6,
+  "proposed_config": null,
+  "gpu_evidence": null,
+  "failure_attribution": null,
+  "traceback_summary": null,
+  "counts_toward_completed_rounds": null,
+  "counts_toward_attempt_budget": true,
+  "final_loss": 0.5712,
+  "loss_history": [
+    1.532,
+    1.041,
+    0.812,
+    0.6431,
+    0.5712
+  ],
+  "model_params": 98432,
+  "training_history": {
+    "cadence": "per_epoch",
+    "objective_kind": "focal",
+    "objective_config_fingerprint": "f90b6486db93809357e3edd4cc7022a2a31542a3e74b2945bd1dc944e411fc05",
+    "objective_reduction": "mean",
+    "epoch_statistic": "sample_count_weighted_mean_of_batch_criterion",
+    "comparability": "established",
+    "comparability_reason": null,
+    "epochs_planned": 5,
+    "epochs_completed": 5,
+    "train_objective": [
+      1.532,
+      1.041,
+      0.812,
+      0.6431,
+      0.5712
+    ],
+    "validation_objective": [
+      1.68,
+      1.15,
+      0.9,
+      0.72,
+      0.65
+    ],
+    "validation_requested_samples": 40,
+    "validation_samples": 40,
+    "validation_requested_samples_before_limit": null,
+    "validation_seconds": [
+      0.22,
+      0.21,
+      0.2,
+      0.2,
+      0.2
+    ],
+    "observations": {}
+  },
+  "training_diagnosis": {
+    "state": "ok",
+    "validation_state": "present",
+    "comparability": "established",
+    "epochs_planned": 5,
+    "epochs_completed": 5,
+    "truncated": false,
+    "train_first": 1.532,
+    "train_last": 0.5712,
+    "train_min": 0.5712,
+    "train_min_epoch": 4,
+    "validation_first": 1.68,
+    "validation_last": 0.65,
+    "validation_min": 0.65,
+    "best_validation_epoch": 4,
+    "validation_degradation_verdict": "observed",
+    "final_vs_best_validation_degradation": 0,
+    "final_vs_best_validation_degradation_rel": 0,
+    "validation_degraded_after_best": false,
+    "train_validation_gap_final": 0.07879999999999998,
+    "train_validation_gap_final_rel": 0.1212307692307692,
+    "train_trend": "decreasing",
+    "validation_trend": "decreasing",
+    "flat_rel_tol": 0.01
+  },
+  "static_observations": {},
+  "denoising_score": 0.65,
   "file_vector": [
     0.45,
     0.45,
@@ -39,88 +139,75 @@
     0.85,
     0.85
   ],
-  "final_loss": 0.5712,
+  "score_table": null,
+  "failure_reason": null,
   "gate_action": null,
-  "gpu_evidence": null,
-  "health_gate_enabled": false,
   "health_gate_results": [],
-  "is_trial": false,
-  "logical_round": null,
-  "loss_history": [
-    1.532,
-    1.041,
-    0.812,
-    0.6431,
-    0.5712
-  ],
+  "scientific_authority": {
+    "healthgate_mode": null,
+    "declared_result_authority": null,
+    "formal_validity": "valid",
+    "blocking_reasons": [
+      "legacy_authority_unknown"
+    ],
+    "authoritative": false,
+    "primary_basis": "legacy_authority_unknown",
+    "enters_incumbent_selection": false,
+    "enters_scientific_aggregation": false
+  },
+  "training_psd_segments": 20,
+  "eval_psd_segments": 80,
+  "timing": {
+    "train_time_s": "<present>",
+    "validation_time_s": "<present>",
+    "inference_time_s": "<present>",
+    "scoring_time_s": "<present>"
+  },
   "memory": {
-    "attempt_in_round": "<present>",
-    "conclusion": "<present>",
-    "discovery": "<present>",
     "expert_advice_followed": "<present>",
     "hypothesis": "<present>",
-    "inference_batch_uncalibrated": null,
-    "inference_ms_source": null,
-    "inference_n_timed_files": "<present>",
-    "inference_per_psd_seg_ms_measured": null,
-    "inference_process_startup_ms": null,
-    "inference_warmup_aggregator": null,
-    "inference_warmup_fraction": "<present>",
+    "conclusion": "<present>",
     "key_factor": "<present>",
+    "discovery": "<present>",
     "memory_update": "<present>",
-    "round_index": "<present>",
-    "time_budget_minutes": null,
     "time_estimate_minutes": null,
+    "time_budget_minutes": null,
     "time_mode": null,
+    "vram_estimate_gb": null,
     "vram_budget_gb": null,
-    "vram_estimate_gb": null
+    "inference_batch_uncalibrated": null,
+    "inference_per_psd_seg_ms_measured": null,
+    "inference_warmup_aggregator": null,
+    "inference_n_timed_files": "<present>",
+    "inference_warmup_fraction": "<present>",
+    "inference_process_startup_ms": null,
+    "inference_ms_source": null,
+    "round_index": "<present>",
+    "attempt_in_round": "<present>"
   },
-  "metric_refusal": null,
-  "metric_result": {
-    "direction": "higher",
-    "metric_id": "tidmad_denoising_score",
-    "per_sample": null,
-    "references_used": [],
-    "scalar": 0.65
-  },
-  "model_params": 98432,
-  "model_type": "pe_wavenet_delta",
-  "ordering_proposal_rejected": false,
-  "ordering_proposal_rejection_reason": null,
-  "ordering_resolution_source": "default",
-  "override_file_order": null,
-  "override_order_strategy": null,
-  "params": {
-    "exp_id": "<present>",
-    "inference_batch": 64,
-    "loss_config": {
-      "loss_type": "ce",
-      "reduction": "mean",
-      "use_class_weights": false
+  "is_trial": false,
+  "trial_strategy": null,
+  "trial_portion": null,
+  "eval_strategy": null,
+  "eval_portion": null,
+  "train_portion": null,
+  "target_files": null,
+  "validation_workload_ceiling": {
+    "enabled": false,
+    "configured_ceiling": null,
+    "planned": {
+      "trial_portion": 0.1,
+      "train_portion": 1,
+      "eval_portion": 1
     },
-    "model_config": {
-      "batch_size": 1,
-      "hidden_dim": 128,
-      "model_type": "pe_wavenet_delta",
-      "segmentation_size": 1000
-    },
-    "model_type": "pe_wavenet_delta",
-    "run_name": "<present>",
-    "train_config": {
-      "batch_size": 1,
-      "device": "cuda",
-      "epochs": 1,
-      "lr": 0.0001,
-      "optimizer_type": "adamw",
-      "weight_decay": 1e-05
+    "resolved": {
+      "trial_portion": 0.1,
+      "train_portion": 1,
+      "eval_portion": 1
     }
   },
-  "planned_eval_strategy": null,
-  "planned_trial_strategy": null,
-  "proposed_config": null,
-  "proposed_file_order": null,
-  "proposed_order_strategy": null,
-  "record_type": "experiment",
+  "task_composition_fingerprint": null,
+  "experiment_arm": null,
   "resolved_data_scope": [
     0,
     1,
@@ -143,329 +230,28 @@
     18,
     19
   ],
-  "resolved_file_order": null,
-  "resolved_order_strategy": "shuffle",
-  "scientific_authority": {
-    "authoritative": false,
-    "blocking_reasons": [
-      "legacy_authority_unknown"
-    ],
-    "declared_result_authority": null,
-    "enters_incumbent_selection": false,
-    "enters_scientific_aggregation": false,
-    "formal_validity": "valid",
-    "healthgate_mode": null,
-    "primary_basis": "legacy_authority_unknown"
-  },
-  "score_table": {
-    "aggregate": {
-      "ground_truth_scalar": 10.113400947352815,
-      "model_scalar": 0.65,
-      "num_sampled_files": 20,
-      "percent_of_ceiling_log": 0.0642711589685503,
-      "raw_baseline_scalar": 1.0006820423449074
-    },
-    "linear_weight_total": 1.0,
-    "reference_source": "reference_data/raw_and_ground_score.md",
-    "rendered_markdown": "### Per-file performance (log-space, all three columns on global s_max)\n\n| file | raw_baseline | ground_truth | **model** | gain vs raw | headroom vs gt | Impact | Weight % |\n|-----:|-------------:|-------------:|----------:|------------:|---------------:|-------:|---------:|\n|    0 |     \u221211.4402 |      \u22128.2610 |   \u22120.4804 |     10.9597 |         0.0000 | 0.0000 |     3.3% |\n|    1 |     \u221211.9486 |      \u22129.3737 |   \u22120.4804 |     11.4682 |         0.0000 | 0.0000 |     3.3% |\n|    2 |     \u221210.3080 |      \u22124.6847 |   \u22120.4804 |      9.8276 |         0.0000 | 0.0000 |     3.3% |\n|    3 |      \u22126.6794 |       0.0919 |   \u22120.4804 |      6.1990 |         0.5724 | 0.0304 |     3.3% |\n|    4 |      \u22122.9261 |       4.9414 |   \u22120.4804 |      2.4456 |         5.4218 | 3.3644 |     3.3% |\n|    5 |      \u22121.8656 |       7.4617 |   \u22120.2592 |      1.6064 |         7.7209 | 5.8825 |     4.7% |\n|    6 |      \u22120.4838 |       6.5623 |   \u22120.2592 |      0.2246 |         6.8215 | 4.9833 |     4.7% |\n|    7 |      \u22120.0084 |       6.9212 |   \u22120.2592 |     \u22120.2508 |         7.1804 | 5.3421 |     4.7% |\n|    8 |       0.2964 |       7.7324 |   \u22120.2592 |     \u22120.5556 |         7.9916 | 6.1532 |     4.7% |\n|    9 |       0.4708 |       8.1803 |   \u22120.2592 |     \u22120.7300 |         8.4395 | 6.6011 |     4.7% |\n|   10 |       0.6754 |       8.6519 |   \u22120.2592 |     \u22120.9346 |         8.9111 | 7.0727 |     4.7% |\n|   11 |      \u22120.0654 |       8.8088 |   \u22120.0978 |     \u22120.0324 |         8.9066 | 7.2296 |     6.2% |\n|   12 |       0.3610 |      10.1165 |   \u22120.0978 |     \u22120.4588 |        10.2143 | 8.5373 |     6.2% |\n|   13 |       1.3150 |       9.7085 |   \u22120.0978 |     \u22121.4128 |         9.8063 | 8.1293 |     6.2% |\n|   14 |       1.6727 |      10.1949 |   \u22120.0978 |     \u22121.7704 |        10.2927 | 8.6157 |     6.2% |\n|   15 |       1.5108 |      10.3205 |   \u22120.0978 |     \u22121.6086 |        10.4183 | 8.7413 |     6.2% |\n|   16 |       1.5429 |      10.7090 |   \u22120.0978 |     \u22121.6407 |        10.8067 | 9.1298 |     6.2% |\n|   17 |       1.8326 |      11.2213 |   \u22120.0978 |     \u22121.9304 |        11.3190 | 9.6421 |     6.2% |\n|   18 |       1.7314 |      11.0215 |   \u22120.0978 |     \u22121.8291 |        11.1193 | 9.4423 |     6.2% |\n|   19 |       1.0027 |      10.5676 |   \u22120.0978 |     \u22121.1005 |        10.6654 | 8.9884 |     6.2% |\n\n### Aggregated scalar (log space, global s_max)\n\nSingle number per row \u2014 the `final_scalar` returned by `score_vector()` for each source. This is the only aggregation in the pipeline.\n\n| metric               | log scalar |\n|----------------------|-----------:|\n| ground_truth ceiling |    10.1134 |\n| **model**            | **0.6500** |\n| raw baseline         |     1.0007 |\n\nRecovery: < 0% (Model performance is below raw baseline).\n\n### Sampled files re-ranked by Impact_Score (descending)\n\nHighest-impact rows first \u2014 the marginal log-scalar gain available if each file were lifted to its ground-truth ceiling. Use this column to pick the next-iteration lever.\n\n| file | Impact | Weight % | headroom vs gt | model |\n|-----:|-------:|---------:|---------------:|------:|\n|   17 | 9.6421 |     6.2% |        11.3190 | \u22120.0978 |\n|   18 | 9.4423 |     6.2% |        11.1193 | \u22120.0978 |\n|   16 | 9.1298 |     6.2% |        10.8067 | \u22120.0978 |\n|   19 | 8.9884 |     6.2% |        10.6654 | \u22120.0978 |\n|   15 | 8.7413 |     6.2% |        10.4183 | \u22120.0978 |\n|   14 | 8.6157 |     6.2% |        10.2927 | \u22120.0978 |\n|   12 | 8.5373 |     6.2% |        10.2143 | \u22120.0978 |\n|   13 | 8.1293 |     6.2% |         9.8063 | \u22120.0978 |\n|   11 | 7.2296 |     6.2% |         8.9066 | \u22120.0978 |\n|   10 | 7.0727 |     4.7% |         8.9111 | \u22120.2592 |\n|    9 | 6.6011 |     4.7% |         8.4395 | \u22120.2592 |\n|    8 | 6.1532 |     4.7% |         7.9916 | \u22120.2592 |\n|    5 | 5.8825 |     4.7% |         7.7209 | \u22120.2592 |\n|    7 | 5.3421 |     4.7% |         7.1804 | \u22120.2592 |\n|    6 | 4.9833 |     4.7% |         6.8215 | \u22120.2592 |\n|    4 | 3.3644 |     3.3% |         5.4218 | \u22120.4804 |\n|    3 | 0.0304 |     3.3% |         0.5724 | \u22120.4804 |\n|    0 | 0.0000 |     3.3% |         0.0000 | \u22120.4804 |\n|    1 | 0.0000 |     3.3% |         0.0000 | \u22120.4804 |\n|    2 | 0.0000 |     3.3% |         0.0000 | \u22120.4804 |",
-    "rows": [
-      {
-        "file_index": 0,
-        "gain_vs_raw": 10.95974030705049,
-        "ground_truth": -8.260971502899364,
-        "headroom_vs_gt": 0.0,
-        "impact_score": 0.0,
-        "linear_weight": 0.03260869565217391,
-        "model": -0.48044110036057064,
-        "raw_baseline": -11.44018140741106
-      },
-      {
-        "file_index": 1,
-        "gain_vs_raw": 11.468176847986452,
-        "ground_truth": -9.373732984874882,
-        "headroom_vs_gt": 0.0,
-        "impact_score": 0.0,
-        "linear_weight": 0.03260869565217391,
-        "model": -0.48044110036057064,
-        "raw_baseline": -11.948617948347023
-      },
-      {
-        "file_index": 2,
-        "gain_vs_raw": 9.82757784398186,
-        "ground_truth": -4.684699065264205,
-        "headroom_vs_gt": 0.0,
-        "impact_score": 0.0,
-        "linear_weight": 0.03260869565217391,
-        "model": -0.48044110036057064,
-        "raw_baseline": -10.30801894434243
-      },
-      {
-        "file_index": 3,
-        "gain_vs_raw": 6.198969680377101,
-        "ground_truth": 0.09191762649534234,
-        "headroom_vs_gt": 0.5723587268559129,
-        "impact_score": 0.030395306391962473,
-        "linear_weight": 0.03260869565217391,
-        "model": -0.48044110036057064,
-        "raw_baseline": -6.679410780737672
-      },
-      {
-        "file_index": 4,
-        "gain_vs_raw": 2.445613100534289,
-        "ground_truth": 4.941370563632354,
-        "headroom_vs_gt": 5.421811663992925,
-        "impact_score": 3.3643507546161464,
-        "linear_weight": 0.03260869565217391,
-        "model": -0.48044110036057064,
-        "raw_baseline": -2.92605420089486
-      },
-      {
-        "file_index": 5,
-        "gain_vs_raw": 1.606381368713065,
-        "ground_truth": 7.461660298695126,
-        "headroom_vs_gt": 7.720851060668132,
-        "impact_score": 5.882498705249278,
-        "linear_weight": 0.04710144927536232,
-        "model": -0.25919076197300633,
-        "raw_baseline": -1.8655721306860713
-      },
-      {
-        "file_index": 6,
-        "gain_vs_raw": 0.2246132652441215,
-        "ground_truth": 6.562305361173452,
-        "headroom_vs_gt": 6.821496123146459,
-        "impact_score": 4.983256272998393,
-        "linear_weight": 0.04710144927536232,
-        "model": -0.25919076197300633,
-        "raw_baseline": -0.48380402721712784
-      },
-      {
-        "file_index": 7,
-        "gain_vs_raw": -0.2507897829969572,
-        "ground_truth": 6.921165512569271,
-        "headroom_vs_gt": 7.1803562745422775,
-        "impact_score": 5.342051271772455,
-        "linear_weight": 0.04710144927536232,
-        "model": -0.25919076197300633,
-        "raw_baseline": -0.008400978976049108
-      },
-      {
-        "file_index": 8,
-        "gain_vs_raw": -0.5556258823665652,
-        "ground_truth": 7.7323832419060645,
-        "headroom_vs_gt": 7.991574003879071,
-        "impact_score": 6.153209859431983,
-        "linear_weight": 0.04710144927536232,
-        "model": -0.25919076197300633,
-        "raw_baseline": 0.2964351203935588
-      },
-      {
-        "file_index": 9,
-        "gain_vs_raw": -0.7299520409313136,
-        "ground_truth": 8.180288847136051,
-        "headroom_vs_gt": 8.439479609109057,
-        "impact_score": 6.601104572459529,
-        "linear_weight": 0.04710144927536232,
-        "model": -0.25919076197300633,
-        "raw_baseline": 0.4707612789583073
-      },
-      {
-        "file_index": 10,
-        "gain_vs_raw": -0.9346325931906088,
-        "ground_truth": 8.651924521071505,
-        "headroom_vs_gt": 8.911115283044511,
-        "impact_score": 7.072734891454444,
-        "linear_weight": 0.04710144927536232,
-        "model": -0.25919076197300633,
-        "raw_baseline": 0.6754418312176024
-      },
-      {
-        "file_index": 11,
-        "gain_vs_raw": -0.032395827411581965,
-        "ground_truth": 8.808778170918506,
-        "headroom_vs_gt": 8.906561540680842,
-        "impact_score": 7.229587455835067,
-        "linear_weight": 0.06159420289855072,
-        "model": -0.09778336976233545,
-        "raw_baseline": -0.06538754235075349
-      },
-      {
-        "file_index": 12,
-        "gain_vs_raw": -0.4587550609011223,
-        "ground_truth": 10.116534257425393,
-        "headroom_vs_gt": 10.214317627187729,
-        "impact_score": 8.53734051609943,
-        "linear_weight": 0.06159420289855072,
-        "model": -0.09778336976233545,
-        "raw_baseline": 0.36097169113878685
-      },
-      {
-        "file_index": 13,
-        "gain_vs_raw": -1.4128218043894798,
-        "ground_truth": 9.708503403725546,
-        "headroom_vs_gt": 9.806286773487882,
-        "impact_score": 8.129310039356358,
-        "linear_weight": 0.06159420289855072,
-        "model": -0.09778336976233545,
-        "raw_baseline": 1.3150384346271444
-      },
-      {
-        "file_index": 14,
-        "gain_vs_raw": -1.770434749853687,
-        "ground_truth": 10.194889450431186,
-        "headroom_vs_gt": 10.292672820193522,
-        "impact_score": 8.615695661665352,
-        "linear_weight": 0.06159420289855072,
-        "model": -0.09778336976233545,
-        "raw_baseline": 1.6726513800913516
-      },
-      {
-        "file_index": 15,
-        "gain_vs_raw": -1.6086216618847797,
-        "ground_truth": 10.32048652097345,
-        "headroom_vs_gt": 10.418269890735786,
-        "impact_score": 8.74129266794932,
-        "linear_weight": 0.06159420289855072,
-        "model": -0.09778336976233545,
-        "raw_baseline": 1.5108382921224444
-      },
-      {
-        "file_index": 16,
-        "gain_vs_raw": -1.6407223652302285,
-        "ground_truth": 10.708954927248902,
-        "headroom_vs_gt": 10.806738297011238,
-        "impact_score": 9.12976094254909,
-        "linear_weight": 0.06159420289855072,
-        "model": -0.09778336976233545,
-        "raw_baseline": 1.5429389954678931
-      },
-      {
-        "file_index": 17,
-        "gain_vs_raw": -1.930359862709658,
-        "ground_truth": 11.221261756675732,
-        "headroom_vs_gt": 11.319045126438068,
-        "impact_score": 9.642067688778628,
-        "linear_weight": 0.06159420289855072,
-        "model": -0.09778336976233545,
-        "raw_baseline": 1.8325764929473227
-      },
-      {
-        "file_index": 18,
-        "gain_vs_raw": -1.8291373655662662,
-        "ground_truth": 11.02153354568228,
-        "headroom_vs_gt": 11.119316915444616,
-        "impact_score": 9.442339502172178,
-        "linear_weight": 0.06159420289855072,
-        "model": -0.09778336976233545,
-        "raw_baseline": 1.7313539958039308
-      },
-      {
-        "file_index": 19,
-        "gain_vs_raw": -1.1005009396413037,
-        "ground_truth": 10.567642717789957,
-        "headroom_vs_gt": 10.665426087552293,
-        "impact_score": 8.988448771514804,
-        "linear_weight": 0.06159420289855072,
-        "model": -0.09778336976233545,
-        "raw_baseline": 1.0027175698789683
-      }
-    ],
-    "s_max_global": 295715680.14248306
-  },
-  "secondary_metric_errors": {},
-  "secondary_metric_refusals": [],
-  "secondary_metric_results": [],
-  "status": "success",
+  "health_gate_enabled": false,
+  "planned_trial_strategy": null,
+  "planned_eval_strategy": null,
   "strategy_normalization_reason": null,
-  "target_files": null,
-  "task_composition_fingerprint": null,
-  "experiment_arm": null,
-  "timestamp": "<present>",
-  "timing": {
-    "inference_time_s": "<present>",
-    "scoring_time_s": "<present>",
-    "train_time_s": "<present>",
-    "validation_time_s": "<present>"
+  "proposed_order_strategy": null,
+  "proposed_file_order": null,
+  "ordering_proposal_rejected": false,
+  "ordering_proposal_rejection_reason": null,
+  "override_order_strategy": null,
+  "override_file_order": null,
+  "resolved_order_strategy": "shuffle",
+  "resolved_file_order": null,
+  "ordering_resolution_source": "default",
+  "metric_result": {
+    "metric_id": "fixture_accuracy",
+    "direction": "higher",
+    "scalar": 0.65,
+    "per_sample": null,
+    "references_used": []
   },
-  "traceback_summary": null,
-  "train_portion": null,
-  "training_diagnosis": {
-    "best_validation_epoch": 4,
-    "comparability": "established",
-    "epochs_completed": 5,
-    "epochs_planned": 5,
-    "final_vs_best_validation_degradation": 0.0,
-    "final_vs_best_validation_degradation_rel": 0.0,
-    "flat_rel_tol": 0.01,
-    "state": "ok",
-    "train_first": 1.532,
-    "train_last": 0.5712,
-    "train_min": 0.5712,
-    "train_min_epoch": 4,
-    "train_trend": "decreasing",
-    "train_validation_gap_final": 0.07879999999999998,
-    "train_validation_gap_final_rel": 0.1212307692307692,
-    "truncated": false,
-    "validation_degradation_verdict": "observed",
-    "validation_degraded_after_best": false,
-    "validation_first": 1.68,
-    "validation_last": 0.65,
-    "validation_min": 0.65,
-    "validation_state": "present",
-    "validation_trend": "decreasing"
-  },
-  "static_observations": {},
-  "training_history": {
-    "cadence": "per_epoch",
-    "comparability": "established",
-    "comparability_reason": null,
-    "epoch_statistic": "sample_count_weighted_mean_of_batch_criterion",
-    "epochs_completed": 5,
-    "epochs_planned": 5,
-    "objective_config_fingerprint": "f90b6486db93809357e3edd4cc7022a2a31542a3e74b2945bd1dc944e411fc05",
-    "objective_kind": "focal",
-    "objective_reduction": "mean",
-    "observations": {},
-    "train_objective": [
-      1.532,
-      1.041,
-      0.812,
-      0.6431,
-      0.5712
-    ],
-    "validation_objective": [
-      1.68,
-      1.15,
-      0.9,
-      0.72,
-      0.65
-    ],
-    "validation_requested_samples": 40,
-    "validation_requested_samples_before_limit": null,
-    "validation_samples": 40,
-    "validation_seconds": [
-      0.22,
-      0.21,
-      0.2,
-      0.2,
-      0.2
-    ]
-  },
-  "training_psd_segments": 400,
-  "trial_portion": null,
-  "trial_strategy": null,
-  "validation_workload_ceiling": {
-    "configured_ceiling": null,
-    "enabled": false,
-    "planned": {
-      "eval_portion": 1.0,
-      "train_portion": 1.0,
-      "trial_portion": 0.1
-    },
-    "resolved": {
-      "eval_portion": 1.0,
-      "train_portion": 1.0,
-      "trial_portion": 0.1
-    }
-  }
+  "metric_refusal": null,
+  "secondary_metric_results": [],
+  "secondary_metric_refusals": [],
+  "secondary_metric_errors": {}
 }

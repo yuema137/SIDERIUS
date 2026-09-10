@@ -399,3 +399,6 @@ class TestF14ReviewBlockers:
         assert "'trial_strategy'" in line and "'eval_portion'" in line
         assert "'trial_portion'" not in line, "trial_portion APPLIES in single_file"
         assert "SINGLE_FILE" in line
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

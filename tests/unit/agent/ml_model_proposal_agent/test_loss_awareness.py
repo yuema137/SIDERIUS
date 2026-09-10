@@ -383,3 +383,6 @@ def _minimal_pipeline_input(tmp_path: Path, expert_advice: ExpertAdvice):
             local=LocalStorageConfig(workspace=str(tmp_path), run_name="t"),
         ),
     )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

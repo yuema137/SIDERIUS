@@ -36,8 +36,10 @@ from typing import Any
 
 import h5py
 import numpy as np
+import pytest
 
 from execute_tools.array2h5 import create_abra_file
+from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
 
 # ---------------------------------------------------------------------------
 # The fixture array. Boundary values are deliberate: -128 and 127 are the int8
@@ -58,6 +60,13 @@ FROZEN_CHANNEL_ATTRS: dict[str, int] = {
     "sampling_frequency": 10000000,
     "voltage_range_mV": 80,
 }
+
+
+@pytest.fixture(scope="module")
+def captured_artifact_profile():
+    """Bind the named profile under which this dated byte oracle was captured."""
+    with bind_dataset_profile(TIDMAD_PROFILE):
+        yield TIDMAD_PROFILE
 
 
 def canonical_h5_inspection(path: str) -> dict[str, Any]:
@@ -271,3 +280,6 @@ def test_c0_path_builder_agrees_with_the_producer_filename_golden():
     )
 
     assert path == os.path.join("/step05c/workspace", GOLDEN_SAMPLE_SET_NAME)
+
+
+pytestmark = pytest.mark.usefixtures("captured_artifact_profile")

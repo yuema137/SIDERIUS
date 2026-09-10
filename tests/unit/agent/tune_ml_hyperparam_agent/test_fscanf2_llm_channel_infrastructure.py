@@ -372,3 +372,6 @@ class TestTheProviderSurfaceIsDeclaredByItsOwner:
         )
 
         assert disposition.status == INFRASTRUCTURE_FAILURE_STATUS
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

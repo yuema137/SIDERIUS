@@ -308,3 +308,6 @@ class TestBoldnessEnforcement:
 
         assert isinstance(output, ProposalOutput)
         assert mock.generate.call_count == 3  # no boldness retry
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

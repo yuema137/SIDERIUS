@@ -479,3 +479,6 @@ class TestBytesToGbConversion:
             cleanup()
         gb = output.physical_rejections[0].dominant_layer_gb
         assert abs(gb - 2.3283) < 1e-4
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

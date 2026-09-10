@@ -333,3 +333,6 @@ def test_join_render_is_byte_stable_across_fresh_processes():
         )
         digests.append(proc.stdout.strip())
     assert digests[0] == digests[1], f"render is not byte-stable: {digests}"
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

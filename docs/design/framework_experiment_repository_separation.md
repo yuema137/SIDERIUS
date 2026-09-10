@@ -1359,3 +1359,64 @@ and diff-integrity checks pass on the seven repaired test modules. Production
 source, task composition, dataset-profile resolution, Health policy, scoring,
 and scientific treatment are unchanged. Final acceptance remains the automatic
 PR CI at the committed exact head.
+
+The subsequent full-CI diagnostic widened this closeout from eight collection
+nodes to the legacy execution cohort. The framework test root now provides
+three **opt-in**, module-scoped authorities: a neutral two-family indexed-data
+profile, the framework-owned task-config example, and an accuracy-like primary
+metric. None is autouse. Every legacy module that still exercises a
+profile-sensitive or composed-run boundary names the authority it needs via a
+fixture argument or `pytestmark`; a module that declares only a profile does
+not acquire task prose or a metric, and a module that needs the complete run
+surface asks for all three. This is intentionally visible test composition,
+not a replacement ambient scientific default.
+
+Within that cohort, expected values were separated from obsolete science:
+
+- HDF5 fixtures write channel names from the explicitly bound synthetic
+  declaration, so changing a task's storage contract cannot make a test open a
+  hardcoded legacy channel by accident.
+- sample-selection tests derive partition and segment counts from the bound
+  profile; old 20-by-200 selection digests were retired rather than disguised
+  as generic builder behavior;
+- Health scope tests use a local synthetic roster and retain the pure
+  monitored-file transform, partial-scope refusal, materialization reuse, and
+  source/operator drift failure classes. They no longer require the framework
+  policy file to contain a real task's six-gate roster;
+- selection, Formal-launch, forecast-versus-measurement, candidate-validity,
+  metric-direction, and secondary-metric fixtures now state their metric and
+  gate authorities explicitly. Three prompt/record goldens were deliberately
+  migrated to the neutral metric and gate vocabulary after field-by-field
+  review; production renderers did not change;
+- the pre-refactor Step-09a whole-prompt oracle and its two task-science
+  goldens were retired. Its deterministic digest still reproduced, but its
+  system-prompt hashes required a task configuration that has correctly left
+  this repository. Restoring that configuration merely to reproduce obsolete
+  hashes would reverse the repository boundary; current interpreter semantics
+  remain owned by the focused contract tests.
+
+Two dated capture-first artifact/resource oracles remain explicit rather than
+pretending to be synthetic: they bind the named profile under which their
+historical bytes were captured. This removes ambient selection but does not
+complete their physical ownership migration; the Phase-4 source/provenance
+census must either externalize them with matching evidence or replace their
+failure classes before deletion. They are not evidence of a framework default.
+
+Adversarial review added a cheap repository-wide collection gate before
+commit. The first run collected 12,250 nodes but found three additional
+module-import failures in old pseudo/real scientific smokes that had not been
+selected by the modified-file cohort. Those files constructed twenty-row
+task-specific score tables before pytest could activate any fixture: two were
+real-API scientific smokes and the third duplicated a currently owned protocol
+edge. All three were retired instead of acquiring a synthetic label over real
+task content. The repeated repository-wide collection then succeeded with all
+12,250 remaining nodes discoverable and no collection error.
+
+The resulting modified-file cohort passes 1,333 tests. Its core/execution/
+Health/workflow partition passes 497 tests and its agent partition passes 836
+tests. Ruff, formatting, and diff integrity pass after the final edits. These
+are local focused and collection claims only. The exact committed head must
+still pass the canonical automatic PR workflow before this branch is described
+as repository-wide green or merge-ready. No production module, public schema,
+runtime decision, scientific threshold, task declaration, or campaign
+treatment changed in this closeout.

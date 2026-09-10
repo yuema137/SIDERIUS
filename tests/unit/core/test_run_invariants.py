@@ -314,3 +314,6 @@ class TestValidateStampedInvariants:
             full_scope=FULL_SCOPE,
             source="record x",
         )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

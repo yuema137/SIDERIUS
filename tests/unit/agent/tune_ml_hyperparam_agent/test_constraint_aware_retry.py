@@ -376,3 +376,6 @@ class TestTunerSchemaViolationBehavior:
         # can reason about the rule, not just the rejected values.
         assert "nondecreasing" in r["memory"]["memory_update"]
         assert "DO NOT" in r["memory"]["memory_update"].upper()
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

@@ -338,3 +338,5 @@ class TestScoreVector:
 # ``docs/design/pluggable_health_checks.md`` §14 — health checks now run
 # tuner-side via ``evaluate_gate``. The equivalent testing lives in the
 # tuner's gate-integration tests (added in commit-5b).
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

@@ -630,3 +630,6 @@ class TestDisallowedPatternsSubBlock:
             "scan_over_T",
             "dense_attention_over_T",
         }
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

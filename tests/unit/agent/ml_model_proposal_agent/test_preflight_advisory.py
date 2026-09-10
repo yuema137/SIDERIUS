@@ -28,6 +28,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agent.schemas.proposal import (
     ProposalInput,
     ReasoningPipelineConfig,
@@ -494,3 +496,6 @@ class TestStructuralRetriesUnchanged:
 
         assert bridge.generate.call_count == 4  # 2 reasoning + 2 proposing
         assert out.model_name == "spectral_wavenet"
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

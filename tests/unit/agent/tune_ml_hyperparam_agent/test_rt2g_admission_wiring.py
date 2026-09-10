@@ -384,3 +384,6 @@ class TestWatchdogTimeoutRouting:
         # Partial observation of the killed attempt is store evidence
         # (§6c keeps it OUT of calibration; the ledger keeps it visible).
         assert len(observations) == 1
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

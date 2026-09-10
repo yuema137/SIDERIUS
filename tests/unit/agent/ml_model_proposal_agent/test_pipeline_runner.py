@@ -719,18 +719,17 @@ class TestSegmentationSizeRetryIntegration:
         return out
 
     def test_invalid_segmentation_size_triggers_retry_then_succeeds(self, tmp_path):
-        """16384 is the exact value the production runs failed on. 16000 is the
-        nearest valid divisor of 10_000_000 and is mentioned in the recovery hint."""
+        """A non-divisor retries, then a valid synthetic-profile divisor succeeds."""
         mock_bridge = MagicMock()
         mock_bridge.generate.side_effect = [
             FAKE_COMPARISON_OUTPUT,
             FAKE_REASONING_OUTPUT,
-            self._with_seg(16384),  # attempt 1: invalid (power of 2, not a divisor)
-            self._with_seg(16000),  # attempt 2: valid divisor
+            self._with_seg(16384),  # not a divisor of the bound 200,000-sample extent
+            self._with_seg(20000),  # valid divisor declared by the synthetic profile
         ]
         output = self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
 
-        assert output.baseline_config["model_config"]["segmentation_size"] == 16000
+        assert output.baseline_config["model_config"]["segmentation_size"] == 20000
         # comparison(1) + causal_reasoning(1) + proposing(2)
         assert mock_bridge.generate.call_count == 4
 
@@ -743,7 +742,7 @@ class TestSegmentationSizeRetryIntegration:
             FAKE_COMPARISON_OUTPUT,
             FAKE_REASONING_OUTPUT,
             self._with_seg(16384),
-            self._with_seg(16000),
+            self._with_seg(20000),
         ]
         self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
 
@@ -1525,3 +1524,6 @@ class TestStagePromptSizeBudget:
             f"5-candidate={len(small)} chars, 10-candidate={len(large)} chars "
             f"(ratio={len(large) / len(small):.2f}x)."
         )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")
