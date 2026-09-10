@@ -12,9 +12,10 @@
   not scientific defaults, benchmarks, or campaign templates.
 - During the active repository-separation work, after any conversation
   compaction, reread
-  `docs/design/framework_experiment_repository_separation.md` before taking
-  another task action. Keep that work ledger current with decisions, changed
-  ownership, validation evidence, and unresolved findings.
+  `docs/design/framework_experiment_repository_separation.md` for separation
+  history before taking another task action. Current P0 decisions, ownership,
+  validation and unresolved findings belong in the P0 work plan linked below;
+  do not maintain a second active P0 ledger in that historical document.
 
 ## Planning documents
 
@@ -583,9 +584,9 @@ Orchestrator  (LLM-powered, goal-driven, selects skills autonomously)
   the long-term target.
 
 **Current naming convention**: `agent/skills/` holds atomic tools (training,
-inference, etc.) used internally by agents. This will be renamed to
-`agent/tools/` after the first demo, to reserve "skill" for the universal
-contract. See `docs/architecture.md` for the full plan.
+inference, etc.) used internally by agents. The earlier `agent/tools/` rename
+was a proposal, not a landed path or a current instruction. P0 preserves
+`agent/skills/`; see `docs/architecture.md` for the conceptual design.
 
 ## HealthGate System (Pluggable Health Checks)
 
@@ -701,9 +702,20 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   module.
 - Prioritize modern, PEP 8, and modular standards for SIDERIUS.
 
-## Current State (as of 2026-07-23)
+## Historical state records (original heading: Current State, 2026-07-23)
 
-*Ephemeral section — update as work progresses.*
+The dated entries below preserve incident evidence and decisions at their named
+revisions. Their `NEXT`, active-branch, pending-work, shipped-path and capability
+statements are historical, not current execution instructions. Preserve the
+recorded invariants and incident evidence; verify present capability from source
+and Git before acting on an old status. This bounded correction does not claim
+that every historical passage or subsystem description has been re-audited.
+
+Current P0 scope and progress: [P0 overview](.structured-coding/plans/infra-exp-p0/overall.md)
+and its linked work plan. Current source/navigation audit:
+[repository map](docs/repository-map.md). In particular, real task packages now
+live in exp, and the current tuner reaches the composed Health phase; the old
+PR-12d zero-Health statement below records that earlier revision.
 
 - **STEP 12 / PR-12d — COMPLETE / MERGED (2026-08-24)**: PR #274, squash
   **`84d74280`**; exact-head CI SUCCESS (12,941 passed / 48 skipped / 0

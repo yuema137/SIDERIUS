@@ -16,7 +16,7 @@ Scope and scientific invariants are unchanged; merge remains unauthorized.
 Implementation base: `docs/organizing-cleanup-plan` at
 `2091acdfcb24eb9c8d3953ee7ba1e3ba99926aa0` (recheck before execution).
 Execution contract: the section below in this same document.
-Lifecycle: IMPLEMENTING / C1 COMPLETE; C2 NEXT.
+Lifecycle: IMPLEMENTING / C1 AND C2 COMPLETE; C3 NEXT.
 Fresh implementation started 2026-09-10; the operator explicitly confirmed
 p0-docs-v2 publication authority in this session. Existing planning edits
 were preserved. C1 implementation, selected checks and logic review are complete.
@@ -214,29 +214,29 @@ that consumers are absent.
    passages; depends on C1's current source map. No broad history rewrite,
    archive migration or production cleanup.
 3. **Implementation:**
-   - [ ] In the model README, describe `bind_generated_library_to_workspace`,
+   - [x] In the model README, describe `bind_generated_library_to_workspace`,
      the unbound home-library default, and the unbound legacy read fallback;
      do not claim every standalone call has workflow isolation.
-   - [ ] In the advice README, remove nonexistent file inventories and retired
+   - [x] In the advice README, remove nonexistent file inventories and retired
      `scripts/run_comparison.py` invocations; keep the six-key validation
      contract from `load_advice_artifact`. New advice belongs to the caller.
-   - [ ] Mark CLAUDE's dated "Current State" entries as history with a pointer
+   - [x] Mark CLAUDE's dated "Current State" entries as history with a pointer
      to the P0 ledger. Correct only audited obsolete current instructions;
      preserve incident evidence and binding invariants. Do not promote the
      entire 1,400-line document to a newly audited current specification.
    - [x] Point new plans to `.structured-coding/plans/<effort>/` without
      duplicating standing rules (planning-location correction below).
 4. **Validation:**
-   - [ ] Check changed prose against source and existing doc/rule guards.
-   - [ ] Confirm runtime/config/test/pin/scientific artifact diff remains empty.
+   - [x] Check changed prose against source and existing doc/rule guards.
+   - [x] Confirm runtime/config/test/pin/scientific artifact diff remains empty.
 5. **Acceptance:** documented paths and guarantees match existing behavior;
    historical instructions cannot masquerade as current execution requirements.
 6. **Edges:** explicit overrides differ from defaults; preserving history does
    not mean recommending retired commands; don't fix behavior through prose.
 7. **Commands/evidence:** existing doc/rule checks below, with actual outcomes.
 8. **Boundary/review:**
-   - [ ] Review for overstated guarantees or accidental new policy.
-   - [ ] Record findings, staged paths and commit only authorized C2 scope.
+   - [x] Review for overstated guarantees or accidental new policy.
+   - [x] Record findings, staged paths and commit only authorized C2 scope.
 
 ## C3 — Minimal entry checks and P0 handoff
 
@@ -657,3 +657,36 @@ claims of complete task-neutral source, wheel-only readiness, a current-pair
 real training qualification and physical relocation. C1's commit groups its
 five user-doc paths with the pre-existing CLAUDE planning conventions and the
 four live effort documents. The staged diff contains documentation only.
+
+### C2 — implemented, validated and reviewed
+
+C1 committed as `efbef63e`. C2 changes only `advice/README.md`,
+`ml_models/README.md`, targeted CLAUDE passages and synchronized live records.
+Advice now describes the actual six-key loader, sparse/nonempty text,
+underscore-prefixed inert metadata, digest binding and flag precedence;
+nonexistent inventories and retired infra comparison commands are removed.
+The retained rejection table is unchanged. The external comparison reader was
+verified at `tasks/tidmad/tools/run_comparison.py` and remains distinct.
+
+Model docs now follow `core/generated_library.py`,
+`plugin_loader.py::_resolve_plugin_dirs`, `loss_plugin_loader.py::_resolve_loss_dirs`
+and `model_descriptions.py::get_model_description`: bound workspace library,
+unbound override/home default, unbound-only legacy reads, model-root selection
+versus loss-directory union, and actual description order/baseline isolation.
+No loader was modified. A search initially assumed `_iteration_advice.py`;
+file discovery established the actual inline authority in `run_one_iteration.py`.
+
+CLAUDE marks dated status as history, preserves its entire historical body
+byte-for-byte, marks the unlanded `agent/tools/` rename as a proposal, and
+reconciles the old separation-ledger pointer with the existing P0 planning
+rule. Incident invariants are preserved; this is no whole-document recertification.
+
+Validation: baseline docs/rule/hygiene command plus
+`tests/unit/core/test_generated_library.py`, with bytecode/cache writes disabled
+and `timeout 60`: **40 passed in 2.65 seconds**, exit 0, own infra venv,
+CPU-only. Source comparison confirms the historical status body is byte-identical
+and the complete diff from `2091acdf` is Markdown-only. No runtime, test, config,
+exp pin or scientific artifact changed. Link/mirror/whitespace checks passed.
+Logic review checked override versus default, model versus loss precedence,
+unbound callers versus supported entrypoints, and historical authority versus
+current instructions. No new policy or runtime guarantee was inferred.

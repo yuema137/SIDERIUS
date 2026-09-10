@@ -1,129 +1,34 @@
-# `advice/`
+# `advice/` — caller-owned human advice
 
-> **Historical archive, not a framework default.** These files record advice
-> used by dated development and validation runs. SIDERIUS does not select any
-> of them implicitly, they are excluded from the Python distribution, and new
-> scientific tasks or experiments must keep active advice in their own
-> workspace or consumer repository. They remain here only while historical
-> tests and design ledgers cite their exact bytes.
+Only this README is tracked here. There are no shipped `single_agent/`,
+`workflow/` or `gate/` directories or advice JSON artifacts. Keep active advice
+in the task/experiment repository or an explicit workspace selected by its
+caller. Historical documents may cite retired advice paths; those citations
+do not make the files available or select them for a new run.
 
-Operator-written JSON advice files passed to SIDERIUS agents at run time.
-Two levels exist and the distinction matters — they have different schemas
-and different injection points in the graph.
+## Chain entry and format
 
----
-
-## `advice/single_agent/`
-
-JSON with **one top-level key**, naming the single agent the advice
-targets. Used when invoking one agent in isolation (typically the tuner
-via `scripts/run_comparison.py --human_advice_file …`).
-
-```json
-{ "tune": "Aggressively explore the static_v gate vector ..." }
-```
-
-Current contents — all `gated_fno`-family tuner explorations targeting
-the `static_v` gate spectrum:
-
-| file | target agent |
-|---|---|
-| `gated_fno_explore_static_v.json` | `tune` |
-| `gated_fno_explore_static_v_linear_closed.json` | `tune` |
-| `gated_fno_explore_static_v_linear_open.json` | `tune` |
-| `gated_fno_explore_static_v_step02.json` | `tune` |
-| `gated_fno_freq_band_aware_v1.json` | `tune` |
-
----
-
-## `advice/workflow/`
-
-JSON with **multiple top-level keys**, one per agent in the 5-agent chain
-(`interpret`, `propose`, `implement`, `validate`, `tune`) — plus an optional
-`mindset` preamble used by the proposer. Used by chain workflows
-(`sdsc_submission_scripts/run_chain.sh`).
+Pass an explicit JSON path with `--human_advice_file` or `--advice` to the
+chain/iteration entrypoint. `--advice` takes precedence when both are supplied.
+The source authority is
+[`run_one_iteration.py::load_advice_artifact`](../sdsc_submission_scripts/run_one_iteration.py),
+with `render_advice_value` shared by validation and argument normalization.
+The five agent keys target interpretation, proposal, implementation, validation
+and tuning; `mindset` supplies the proposer's preamble.
 
 ```json
 {
-  "interpret": "...",
-  "propose": "...",
-  "implement": "...",
-  "validate": "...",
-  "tune": "..."
+  "propose": "Explain which existing evidence supports the proposed change.",
+  "tune": ["Use the declared task objective.", "Record what each attempt tested."],
+  "_meta": "An illustrative format, not a scientific treatment or Gate preset."
 }
 ```
 
-Partial files are supported and remain fully legal — an omitted key simply
-means "no advice for that agent". What is NOT legal is a key that is *present*
-and carries nothing; see "The key set is closed" below.
+Sparse advice is valid: omitted keys mean no advice for those agents. Present
+keys must carry readable text. The loader reads, hashes and parses the same
+bytes; a supplied digest must match the observed digest.
 
-SIDERIUS intentionally ships no active advice artifact. Advice is caller-owned
-experiment input and belongs beside the task or workflow that selects it. This
-document specifies the supported format only.
-
----
-
-## `advice/gate/`
-
-Same 4-key shape as `advice/workflow/` (`mindset`, `propose`, `implement`,
-`tune`), but a different **purpose**, and the distinction is the point:
-
-```text
-workflow/  advice for a run whose goal is a better model
-gate/      advice for a run whose goal is proving the plumbing still works
-```
-
-A Gate run is a **capability / wiring validation fixture, not a scientific
-campaign**. Its files say so explicitly, because a proposer that is not told
-this will do the sensible scientific thing — propose an ambitious model — and
-the Gate then spends its attempts on pre-flight VRAM refusals instead of on the
-code path under test. The Gate standard names the cost directly:
-
-> **be generous on GPU VRAM, stingy on wall time** — a VRAM-gate rejection
-> wastes a whole Gate attempt.
-
-Every `gate/` file therefore carries, at minimum:
-
-* a `mindset` stating that scientific quality is NOT under test — a low score,
-  a collapsed model or a failed HealthGate does not make the run wrong;
-* a `propose` block bounding model size in the proposer's own terms
-  (parameter count AND the VRAM allowance the run actually enforces);
-* a `tune` block saying "conservative hyperparameters, this is a wiring
-  validation".
-
-**Binding for Gate 1 and Gate 2 (operator decision, 2026-08-16): each model is
-limited to 4 GiB of GPU VRAM.** Both halves are required or the constraint is
-unreachable — the run enforces it with
-`--trial_vram_budget_gb 4 --formal_vram_budget_gb 4`, and the advice states the
-same number so the proposer can aim at it rather than discover it by refusal.
-
-| file | purpose |
-|---|---|
-| `gate_pr_a_classifier_advice.json` | PR A Gate — classifier output contract + built-in loss |
-| `gate_pr_a_regressor_advice.json` | PR A Gate — regressor output contract + `smooth_l1` |
-| `gate_pr_c_regressor_advice.json` | PR C Gate — regressor lane |
-| `gate_07b_structural_refactor_advice.json` | Step 07 PR 07b — tuner structural-decomposition validation; 4 GiB hard allowance, shallow conv denoiser, no novelty |
-
-Passed with `--advice <path>` (which takes precedence over
-`--human_advice_file`); see `sdsc_submission_scripts/run_one_iteration.py`
-`--advice`, where list-of-lines values are normalised to newline-joined strings.
-
----
-
-## Adding a new advice file
-
-* If your advice targets **one agent** only, put it in `single_agent/` with
-  a single top-level key matching that agent's name (`interpret`, `propose`,
-  `implement`, `validate`, or `tune`).
-* If it spans **multiple agents in a chain**, put it in `workflow/` with
-  one key per agent. Omit keys you don't need.
-* File names follow the convention `{purpose}_v{N}.json` for versioned
-  experiment lanes, or `{descriptor}.json` for one-off runs.
-
-The CLI flag is `--human_advice_file` (chain workflows) or
-`--human_advice_file` (single-agent runs of `scripts/run_comparison.py`).
-
-### The key set is closed
+## The key set is closed
 
 `sdsc_submission_scripts/run_one_iteration.py::load_advice_artifact` refuses
 an advice artifact that could not inject anything (F-SCHED-5). The recognised
@@ -159,6 +64,17 @@ says advice artifact X was used while every agent received nothing derived
 from it. Certification answers *which bytes*; it cannot answer whether those
 bytes reached a prompt.
 
-Note that `scripts/run_comparison.py` has its own, separate
-`--human_advice_file` reader which requires a `tune` key. The two loaders are
-not unified.
+
+## Other callers and historical Gate advice
+
+Standalone node inputs follow their own [node contracts](../docs/agent-reference/README.md#nodes).
+The external TIDMAD baseline tool now lives at
+`siderius-exp/tasks/tidmad/tools/run_comparison.py`; its separate advice reader
+requires a `tune` key. It is not the chain loader described here. See the
+[external-consumer map](../docs/repository-map.md#external-consumer-and-evidence)
+for the inspected repository and revision.
+
+Historical Gate advice is validation evidence, not a new scientific default.
+Its model/VRAM constraints belong to the specific approved Gate contract and
+[Gate standard](../docs/gates/gate_testing_standard.md), not to this format
+README. No new run or advice artifact is selected by this document.

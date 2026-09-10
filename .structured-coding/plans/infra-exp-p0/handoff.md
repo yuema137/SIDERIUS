@@ -1,7 +1,7 @@
 # P0 implementation handoff
 
 Status: `p0-docs-v2` DESIGN FROZEN; fresh implementation session initialized.
-Current checkpoint: C1 implemented, checked (24 passed, 2.57s) and reviewed; C2 next.
+Current checkpoint: C1 committed (`efbef63e`); C2 implemented and reviewed; C3 next.
 This is not an implementation-complete or merge-ready handoff.
 Updated 2026-09-10.
 
@@ -36,8 +36,8 @@ the actual frozen offline sync audited 95 packages without rebuilding.
 Process view contains only this session and its diagnostic; host campaigns are
 not visible/audited and none were launched or stopped.
 
-Next: commit the reviewed C1 documentation checkpoint, then implement C2
-and C3. C1 link/source audit passed 235 relative links, 20 roots and six classes. Update this continuation at each milestone, commit coherent changes,
+Next: commit C2 (40 focused checks passed), then execute C3 entry checks.
+C1 link/source audit passed 235 relative links, 20 roots and six classes. Update this continuation at each milestone, commit coherent changes,
 push and open/update the PR, repair in-scope validation failures and continue
 to PR READY FOR OPERATOR REVIEW with exact-candidate evidence (approved local
 CI fallback if remote billing prevents CI). Do not merge or enable auto-merge.
@@ -206,14 +206,14 @@ base is `2091acdf`; later checkpoint commits are recorded in implementation evid
 
 | File | SHA-256 |
 | --- | --- |
-| `CLAUDE.md` | `6e8d87c33a532e57bc9742fbc519ab83b5221cfb7ca09ea64e81fb90ea8ce081` |
+| `CLAUDE.md` | `232510f4bf1a484f0ac8c246446800b3b6b5d1f0fab487de0a42dcbf1e1d5fd4` |
 | `README.md` | `1986ae7ddd9e538a138f45d21a9de57ce2d542474839a97160d29f459b86b787` |
 | `docs/README.md` | `3e880bd3a3f682db201e04ab714435afe57023e143b55f527267aa8f34f371b9` |
 | `docs/agent-reference/README.md` | `5b2ea2b81b2abe2881a26b02bc003e57e0046383a45a9715ae9eda84ada43bd6` |
 | `examples/README.md` | `d434eb122298c44a89df23d87184d5b37a33f177b302dfd52e9f63584bb5865b` |
 | `docs/repository-map.md` | `3b5f9fd2942a3de6b8428f4cf59f486d4257914eb93cc415a390dedcb53e41cb` |
-| `advice/README.md` | `c7924812b8423c78301a0db5a916fc5ae67ce910e10015cd137035c5b25eb958` |
-| `ml_models/README.md` | `f7a89e627ffa449da5fa55b364373e403752e22bb2b836bb25158416680ab0e7` |
-| `.structured-coding/plans/infra-exp-p0/overall.md` | `4a1d134de3d4bdad61df93476b658b42edb349ad4a5458f55711af0d84c9d7c7` |
-| `.structured-coding/plans/infra-exp-p0/step-01-user-map.md` | `40f3dc8cd53fb5f29160eaa3d571ac372a9c77394821e9d56eb4bbc0445b08af` |
-| `.structured-coding/plans/infra-exp-p0/step-01-user-map_zh.md` | `536a00ca55b3a570aa2c25f6be148e141e42bf29e710f8aced3012303c51b4c1` |
+| `advice/README.md` | `79cec162f6a26ada0612496ce4bc23b3415a91829342cd94f9b13717c8485b1d` |
+| `ml_models/README.md` | `8b3831d645e2edbdc018bc7fbb8cf3ac2c429d1b6af94bde33eadf3c803204f1` |
+| `.structured-coding/plans/infra-exp-p0/overall.md` | `537e3df5723fc538092de5da25971ba31cbd7a794358eb09a0fc599ce5d7f07f` |
+| `.structured-coding/plans/infra-exp-p0/step-01-user-map.md` | `e5c255f912f8f77de634b729411e6f91c4d15086c7c3c8cf645e7dfad6d539a0` |
+| `.structured-coding/plans/infra-exp-p0/step-01-user-map_zh.md` | `eb50b6b188f5ac8f7f5be72738647ee7cdb178fd4f1f6c0029fa2b2f02065187` |

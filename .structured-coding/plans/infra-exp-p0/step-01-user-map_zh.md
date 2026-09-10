@@ -5,7 +5,7 @@
 不能拿这份中文去指挥代码修改。
 
 同步日期：2026-09-10。
-对应英文文件的 SHA-256：`40f3dc8cd53fb5f29160eaa3d571ac372a9c77394821e9d56eb4bbc0445b08af`。
+对应英文文件的 SHA-256：`e5c255f912f8f77de634b729411e6f91c4d15086c7c3c8cf645e7dfad6d539a0`。
 这个指纹只是用来确认“翻译的是哪一版”，不代表你已经批准实施。
 
 ## DESIGN FROZEN
@@ -21,9 +21,9 @@
 起点是 `docs/organizing-cleanup-plan` 的
 `2091acdfcb24eb9c8d3953ee7ba1e3ba99926aa0`，实施前再核对。
 实施约定就在本文件后文。
-当前状态：**IMPLEMENTING / C1 COMPLETE; C2 NEXT。**
+当前状态：**IMPLEMENTING / C1 AND C2 COMPLETE; C3 NEXT。**
 2026-09-10 新实施会话已开始，你在本会话明确确认 v2 发布权限。原规划修改已保留，
-C1 的文档修改、针对性验证和逻辑审查都已完成，接下来做 C2。
+C1 的文档修改、针对性验证和逻辑审查都已完成，C2 也已完成，接下来做 C3。
 范围来自 [P0 总计划](overall.md)，已经按你在 2026-09-10 的要求收窄。
 这份 step 同时承担本 PR 的详细设计和工作记录，不另存一份重复计划，也不安排后续 PR。
 
@@ -201,27 +201,27 @@ SIDERIUS (navigation, not physical directories)
    `CLAUDE.md` 中查实需要改的段落。先有 C1 地图，再改这些说明。
    不重写历史、不迁移档案、不顺手清理生产代码。
 3. **具体怎么做：**
-   - [ ] 模型 README 讲清 `bind_generated_library_to_workspace` 的作用，
+   - [x] 模型 README 讲清 `bind_generated_library_to_workspace` 的作用，
      没绑定时的用户目录默认值，以及旧目录的读取 fallback。
      不能说“随便单独调哪个函数，都自动拥有 workflow 的隔离”。
-   - [ ] Advice README 去掉不存在的文件清单和已退休的
+   - [x] Advice README 去掉不存在的文件清单和已退休的
      `scripts/run_comparison.py` 用法；保留 `load_advice_artifact` 的六键验证规则。
      新 advice 归调用方管，不往 infra 塞。
-   - [ ] CLAUDE 中有日期的旧 “Current State” 标成历史，指向 P0 当前记录。
+   - [x] CLAUDE 中有日期的旧 “Current State” 标成历史，指向 P0 当前记录。
      只改源码已经证实过期的操作说明，保留事故证据和有效规则。
      不能改几段，就声称整份 1,400 行文档已经重新审清楚了。
    - [x] 新计划指向 `.structured-coding/plans/<effort>/`，不重复抄一份规则。
      这项是之前调整计划目录时做完的，具体证据见后文。
 4. **怎么验证：**
-   - [ ] 改过的说明逐条对源码，再跑现有文档/规则检查。
-   - [ ] 确认 runtime、配置、测试、pin、科学资产都没有 diff。
+   - [x] 改过的说明逐条对源码，再跑现有文档/规则检查。
+   - [x] 确认 runtime、配置、测试、pin、科学资产都没有 diff。
 5. **啥样算完成：** 路径和承诺符合当前代码；历史说明不会被误读成今天的操作要求。
 6. **注意这块儿：** 显式 override 和默认行为不是一回事；保留历史，不等于推荐旧命令；
    不能用改文字代替修行为。
 7. **用什么检查：** 下方已有文档/规则检查，记录真实结果。
 8. **提交前再看一遍：**
-   - [ ] 查有没有夸大承诺，或者无意中增加新规则。
-   - [ ] 记下发现和 staged 文件，只提交获准的 C2 范围。
+   - [x] 查有没有夸大承诺，或者无意中增加新规则。
+   - [x] 记下发现和 staged 文件，只提交获准的 C2 范围。
 
 ## C3：查最小入口，然后交账
 
@@ -605,3 +605,30 @@ commit、push、PR，直到可审阅。范围和科学约束照旧，不 merge�
 实际代码负责人模块 → 外部凭据。没有把源码说成彻底 task-neutral，没有宣称
 wheel-only 就绪、当前版本真实训练通过或实际目录已搬迁。
 C1 提交合并这五份用户文档、原有 CLAUDE 规划约定和四份 effort 文件，staged 只有文档。
+
+### C2：已实现、验证并审查
+
+C1 已提交为 `efbef63e`。C2 只改 `advice/README.md`、`ml_models/README.md`、
+CLAUDE 的指定段落，以及同步的工作记录。
+Advice 现在说明真实六键 loader、稀疏但非空文本、下划线开头的 inert metadata、
+摘要绑定和参数优先级；去掉不存在的清单和退休的 infra comparison 命令。
+原拒绝案例表保留。外部 `tasks/tidmad/tools/run_comparison.py` 的独立读取规则已核对，
+没说成跟 chain 是同一个 loader。
+
+模型说明逐条对了 `core/generated_library.py`、
+`plugin_loader.py::_resolve_plugin_dirs`、`loss_plugin_loader.py::_resolve_loss_dirs`、
+`model_descriptions.py::get_model_description`：绑定后用 workspace，未绑定时用
+显式 override 或 home 默认目录，只有未绑定才允许读旧 checkout；model 选择目录和
+loss 合并目录分别说明，description 顺序及 baseline isolation 也对齐了。没改 loader。
+搜索时先猜了 `_iteration_advice.py`，按文件查清后确认实际逻辑就在 `run_one_iteration.py`。
+
+CLAUDE 把旧状态标成历史，整个历史正文逐字节保留；没落地的 `agent/tools/` 重命名
+标成提案，旧 separation ledger 入口按现有 P0 规划规则对齐。
+事故约束保留，没有声称整份 CLAUDE 重新审过。
+
+验证：前文 docs/rule/hygiene 命令再加 `tests/unit/core/test_generated_library.py`，
+禁用 bytecode/cache 写入，`timeout 60`：**40 passed，2.65 秒，exit 0**，
+infra 自己的 venv，CPU-only。历史状态正文逐字节一致，从 `2091acdf` 起完整 diff
+只有 Markdown；runtime、test、config、exp pin 和科学资产没改。
+链接、镜像、空白检查通过。逻辑审查专门区分 override/default、model/loss 优先级、
+未绑定调用/正式入口、历史记录/当前说明，没有凭文字加新规则或夸大运行保证。
