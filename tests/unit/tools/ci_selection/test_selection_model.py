@@ -34,8 +34,10 @@ from tools.ci_selection.resolver import (
     REPO_ROOT,
     _tracked_repository_files,
     build_edges,
+    build_source_edges,
     gates_required,
     select,
+    transitive_test_owners,
 )
 
 
@@ -171,6 +173,69 @@ def test_every_unit_test_module_is_reachable() -> None:
         "selective run would never choose them. Add them to ALWAYS_ON if they "
         "scan the tree, or declare what they read:\n  " + "\n  ".join(unreachable)
     )
+
+
+class TestAffectedCallerCoverage:
+    def test_two_hop_callers_are_selected_and_cycles_terminate(self):
+        """A direct-only model misses tests importing an affected caller.
+
+        Fails as: changing `pkg/base.py` omits `test_top.py`; the A↔B cycle
+        also proves the fixed-point traversal terminates without losing B's
+        direct owner.
+        """
+        source_edges = {
+            "pkg/base.py": set(),
+            "pkg/middle.py": {"pkg/base.py", "pkg/top.py"},
+            "pkg/top.py": {"pkg/middle.py"},
+        }
+        test_edges = {
+            "tests/unit/test_base.py": {"pkg/base.py"},
+            "tests/unit/test_top.py": {"pkg/top.py"},
+            "tests/unit/test_other.py": {"pkg/other.py"},
+        }
+        assert transitive_test_owners({"pkg/base.py"}, test_edges, source_edges) == {
+            "tests/unit/test_base.py",
+            "tests/unit/test_top.py",
+        }
+
+    def test_computed_helper_declaration_reaches_its_importers(self):
+        """A DIRECTORY_SCANS helper owner is not itself a runnable test.
+
+        Fails as: the declaration adds only `tests/helpers/tuner_source.py`,
+        expansion drops that helper, and its importing tests never run.
+        """
+        result = select(["nodes/ml_hyperparameter_tune_agent/policy.py"])
+        assert not result.full_suite
+        assert "tests/unit/core/test_admission.py" in result.modules
+        assert (
+            "tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c2_order_consumers.py"
+            in result.modules
+        )
+
+    def test_area_ownership_is_additive_to_a_direct_edge(self):
+        """One visible importer cannot hide the rest of the owning area.
+
+        Fails as: changing a directly imported core module omits an unrelated
+        core test that may consume it through dynamic test infrastructure.
+        """
+        result = select(["core/sandbox_executor.py"])
+        assert not result.full_suite
+        assert "tests/unit/core/test_calibration_quarantine.py" in result.modules
+
+    def test_real_transitive_owner_outside_the_changed_directory(self):
+        """The repository graph, not directory spelling, finds callers.
+
+        Fails as: a source-import hop is removed from the production graph and
+        the named agent regression disappears from selection.
+        """
+        changed = "core/inference_defaults.py"
+        result = select([changed])
+        assert not result.full_suite
+        assert (
+            "tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c3_scale_rules.py"
+            in result.modules
+        ), result.describe()
+        assert changed in build_source_edges()
 
 
 def test_every_manifest_path_still_resolves() -> None:
