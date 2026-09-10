@@ -23,8 +23,15 @@
   `.structured-coding/plans/<effort>/`. Keep the overall plan, step/PR design
   and any handoff together, with one authority per plan; do not put new plans
   at the repository root or in `docs/plan/`.
+- **Local only (operator ruling, 2026-09-10):** `.structured-coding/` must
+  remain ignored and untracked. Never commit, push or force-add its contents.
+  This overrides upstream guidance suggesting plans be committed. Keep local
+  plans intact when removing them from the Git index. A fresh clone will not
+  contain them: obtain the applicable plan from the operator before resuming
+  its work, rather than inventing its scope or approval. Public user-facing
+  documentation still belongs in the tracked README/docs tree.
 - Current P0 scope and progress start at
-  [the P0 overview](.structured-coding/plans/infra-exp-p0/overall.md).
+  the local `.structured-coding/plans/infra-exp-p0/overall.md` (not shipped).
   Existing `docs/design/` records remain historical evidence, not the active
   P0 ledger. After compaction during P0, reread the overview and its linked
   work plan before continuing.
@@ -711,7 +718,7 @@ recorded invariants and incident evidence; verify present capability from source
 and Git before acting on an old status. This bounded correction does not claim
 that every historical passage or subsystem description has been re-audited.
 
-Current P0 scope and progress: [P0 overview](.structured-coding/plans/infra-exp-p0/overall.md)
+Current P0 scope and progress: local `.structured-coding/plans/infra-exp-p0/overall.md`
 and its linked work plan. Current source/navigation audit:
 [repository map](docs/repository-map.md). In particular, real task packages now
 live in exp, and the current tuner reaches the composed Health phase; the old

@@ -83,8 +83,9 @@ Counts refer to the audited base, before this documentation addition.
 Root files such as [`pyproject.toml`](../pyproject.toml),
 [`uv.lock`](../uv.lock), [`Makefile`](../Makefile) and
 [`CONTRIBUTING.md`](../CONTRIBUTING.md) own packaging, dependencies and developer
-entry instructions. [`.structured-coding/plans/infra-exp-p0/`](../.structured-coding/plans/infra-exp-p0/overall.md)
-holds this work's plan and evidence, separately from user documentation.
+entry instructions. `.structured-coding/` holds local planning and session
+records; it is ignored, untracked and absent from fresh clones. Published
+documentation stays in README/docs; review evidence is recorded in the PR.
 Ignored `.venv`, caches, local workspaces and old `agent_generated/` content
 are not shipped capabilities. This inventory removes none of them.
 
@@ -215,11 +216,13 @@ paths. Any future physical move needs its own caller/path audit and validation.
 
 ## Minimal entry checks
 
-The [P0 work record](../.structured-coding/plans/infra-exp-p0/step-01-user-map.md)
-owns reproducible commands and dated outcomes: docs/rule guards, library
-resolution tests, six workspace-isolated external manifest compositions and
-one TIDMAD external launcher dry-run. Consult its implementation evidence to
-distinguish fresh results from the planning baseline.
+The [Step 01 review record](https://github.com/Galileo-Sandbox/SIDERIUS/pull/426)
+records dated validation outcomes: docs/rule guards, library-resolution tests,
+six workspace-isolated external manifest compositions and one TIDMAD external
+launcher dry-run. Its candidate and CI identifiers distinguish fresh results
+from the planning baseline. Detailed working plans are maintained locally and
+are not shipped with the repository. For supported entry commands, follow the
+[Quickstart](../README.md#quickstart) and the selected external task's launcher.
 
 These checks establish source/environment identity, manifest resolution and
 command construction. They do not establish HDF5 content validity, successful

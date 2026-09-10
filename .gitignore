@@ -41,6 +41,9 @@ reference_data/lit_review_pilot_cache/
 .DS_Store
 .claude/
 
+# Local planning/session records; never commit or force-add this directory.
+.structured-coding/
+
 # Notebooks
 notebooks/
 
