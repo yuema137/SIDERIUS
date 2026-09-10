@@ -14,6 +14,7 @@ confident green — so the same reasoning binds this wrapper.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -59,6 +60,17 @@ def _expand(root: Path, modules: Iterable[str], universe: Sequence[str]) -> list
     return sorted(selected)
 
 
+def load_changed_paths(path: Path) -> list[str]:
+    """Read the CLI's JSON handoff, accepting the legacy newline format."""
+    text = path.read_text(encoding="utf-8")
+    if not text.lstrip().startswith("["):
+        return [line.strip() for line in text.splitlines() if line.strip()]
+    value = json.loads(text)
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
+        raise ValueError("changed-path JSON must be a list of non-empty strings")
+    return list(dict.fromkeys(value))
+
+
 def resolve_selection(root: Path, changed: Sequence[str] | None) -> Selection:
     """Ask the existing authority which files this run should execute.
 
@@ -85,7 +97,7 @@ def resolve_selection(root: Path, changed: Sequence[str] | None) -> Selection:
         )
 
     if result.full_suite or not result.modules:
-        return Selection(tuple(universe), True, "selector chose the full suite")
+        return Selection(tuple(universe), True, result.describe())
 
     files = _expand(root, result.modules, universe)
     if not files:
@@ -93,6 +105,12 @@ def resolve_selection(root: Path, changed: Sequence[str] | None) -> Selection:
         # is exactly the "run nothing" answer its docstring calls the one
         # failure mode worse than having no selector.
         return Selection(
-            tuple(universe), True, "selection expanded to zero test files — failing closed"
+            tuple(universe),
+            True,
+            result.describe() + "\nselection expanded to zero test files — failing closed",
         )
-    return Selection(tuple(files), False, f"selected {len(files)} of {len(universe)} test files")
+    return Selection(
+        tuple(files),
+        False,
+        result.describe() + f"\nexpanded to {len(files)} of {len(universe)} tracked test files",
+    )

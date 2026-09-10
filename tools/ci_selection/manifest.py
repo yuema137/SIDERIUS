@@ -5,7 +5,8 @@ it exists, and a reason is the part that rots first when it lives in a data file
 nobody reads. `tests/unit/tools/ci_selection/` asserts every path here still
 resolves, so a rename cannot orphan a rule silently.
 
-**This is not wired into CI.** See `resolver.py`.
+Pull-request CI consumes these declarations through `resolver.py`; changes to
+this selector package remain full-suite triggers.
 """
 
 from __future__ import annotations
@@ -13,15 +14,16 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 # 1. ALWAYS-ON — cheaper to run unconditionally than to reason about
 # ---------------------------------------------------------------------------
-#: Their INPUT is the repository. `test_no_hardcoded_device_literals` scans
-#: `core/`, `agent/`, `nodes/`; the launcher and self-reference guards scan
-#: `tests/` itself; `test_gate_standard_contract` reads a doc. Selecting them
-#: is not possible in principle, and at ~134 cases they are cheaper than the
-#: logic that would try. Two of them scan `tests/`, which is why ANY test-file
-#: change also runs this block — a property this list gives for free.
+#: Their INPUT is the repository. Some scan source or tests, while the two
+#: documentation readers derive their subjects from Git's tracked-file set.
+#: Those dynamic censuses cannot be represented by literal AST edges. Keeping
+#: the cheap readers here makes every tracked Markdown change observable rather
+#: than pretending an ordinary document has no consumers.
 ALWAYS_ON: tuple[str, ...] = (
     "tests/unit/guardrails/",
     "tests/unit/test_repo_hygiene.py",
+    "tests/unit/tools/test_md_links.py",
+    "tests/unit/tools/test_user_contract_docs_census.py",
     "tests/unit/ml_models/test_registry_population_is_self_healing.py",
     "tests/unit/agent/llm_bridge/test_all_calls_labeled.py",
     "tests/unit/nodes/test_node_public_boundary.py",
@@ -83,9 +85,9 @@ DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
     ),
     "tests/unit/agent/llm_bridge/test_all_calls_labeled.py": ("nodes/",),
     # Step 12 / PR-12e -- the presentation-layer ordering census. It derives NO
-    # import edge (its subjects are `.js` and `.html`), and the selector's
-    # `_production_files()` indexes only py/md/txt/sh/json/jsonl/yaml, so its
-    # literal path references resolve to nothing either. Without this entry the
+    # import edge (its subjects are `.js` and `.html`). The repository inventory
+    # indexes the files, but literal-path extraction still finds no reference.
+    # Without this entry the
     # census is unreachable: a change to `app.js` would NOT run the guard whose
     # entire purpose is to constrain `app.js`.
     #

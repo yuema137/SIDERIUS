@@ -1,9 +1,9 @@
 """The selection model must be honest before anything is allowed to trust it.
 
-Phase C. `tools/ci_selection/` is **not wired into CI** — the full unit suite
-still runs on every push, so nothing here can currently cause a test to be
-skipped. These tests exist so the model is proven correct *before* that changes,
-which is the only order in which a selector is safe to adopt.
+These tests began before `tools/ci_selection/` was wired into CI. Pull requests
+now consume it through `tools.ci`, so the reachability, freshness and independent
+oracle checks below are live protections against under-selection. Master,
+scheduled runs and ambiguous changes still run the full suite.
 
 Three tests, each naming a defect only it catches:
 
@@ -30,7 +30,16 @@ from pathlib import Path
 import pytest
 
 from tools.ci_selection import manifest as mf
-from tools.ci_selection.resolver import REPO_ROOT, build_edges, gates_required, select
+from tools.ci_selection.__main__ import parse_name_status_z
+from tools.ci_selection.resolver import (
+    REPO_ROOT,
+    _tracked_repository_files,
+    build_edges,
+    build_source_edges,
+    gates_required,
+    select,
+    transitive_test_owners,
+)
 
 
 class TestTheModelIsFailClosed:
@@ -69,18 +78,19 @@ class TestTheModelIsFailClosed:
             assert result.full_suite or result.modules, f"{diff} selected nothing"
 
     def test_a_doc_nothing_reads_selects_no_extra_suites(self):
-        """Operator ruling: a docs-only change must NEVER trigger the full
-        suite. A `.md` cannot be imported, so a literal path read is the only
-        way a test reaches it — and the AST pass finds every one of those.
-        "No edge" for a doc is knowledge, not ignorance."""
+        """An ordinary doc runs only cheap repository/document readers.
+
+        Fails as: an ordinary doc falls back to FULL, or an unrelated feature
+        suite is pulled in despite having no document edge.
+        """
         # Built by concatenation, NOT a literal: written plainly, THIS file
         # becomes a literal-path reader of the doc and the resolver -- correctly
         # -- selects this module as an owner. The first draft did exactly that
         # and failed; the edge system caught its own test.
         result = select(["docs/arch" + "itecture.md"])
         assert not result.full_suite, "a doc nothing reads triggered the full suite"
-        # Only the always-on guard block runs (two of its scanners read docs
-        # and the whole tree respectively).
+        # Only the always-on block runs; its explicit document censuses cover
+        # dynamic tracked-file reads that literal AST edges cannot derive.
         assert all(any(m == a or m.startswith(a) for a in mf.ALWAYS_ON) for m in result.modules), (
             result.modules
         )
@@ -95,6 +105,27 @@ class TestTheModelIsFailClosed:
         assert not result.full_suite, "an area-owned module triggered the full suite"
         assert any(m.startswith("tests/unit/dash" + "board/") for m in result.modules)
 
+    def test_root_readme_selects_its_dynamic_document_readers(self):
+        """The root README was absent from the old directory inventory.
+
+        Fails as: a tracked root doc is called unknown, or either whole-tree
+        reader can change its verdict without being scheduled.
+        """
+        result = select(["READ" + "ME.md"])
+        assert not result.full_suite
+        assert result.modules
+        assert "tests/unit/tools/test_md_links.py" in result.modules
+        assert "tests/unit/tools/test_user_contract_docs_census.py" in result.modules
+
+    def test_tracked_root_documents_come_from_git_inventory(self):
+        """A hand-maintained directory list can silently omit another root doc.
+
+        Fails as: any currently tracked root Markdown document is absent from
+        the selector's candidate-commit inventory.
+        """
+        tracked = _tracked_repository_files()
+        assert {"AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "README.md"} <= tracked
+
     def test_docs_are_inputs_not_inert(self):
         """`paths-ignore: ['**.md']` is the first optimisation anyone reaches
         for, and it would skip CI on a change that breaks
@@ -102,7 +133,26 @@ class TestTheModelIsFailClosed:
         result = select(["docs/gates/gate_testing_standard.md"])
         assert result.full_suite or result.modules
         if not result.full_suite:
-            assert any("guardrails" in m for m in result.modules)
+            assert "tests/unit/guardrails/test_gate_standard_contract.py" in result.modules
+
+    def test_an_absent_or_ignored_doc_still_fails_closed(self):
+        """The tracked-doc rule must not bless deleted or local scratch files.
+
+        Fails as: an absent before-state or ignored local plan is treated as an
+        ordinary inert document and narrows without a proven reader inventory.
+        """
+        for changed in ("docs/no_such_contract.md", ".structured-coding/local.md"):
+            result = select([changed])
+            assert result.full_suite, result.describe()
+
+    def test_a_document_cannot_hide_a_hub_in_the_same_diff(self):
+        """Classification is additive; a cheap doc never suppresses FULL.
+
+        Fails as: the selector returns a narrow document set when the same PR
+        changes a shared schema hub.
+        """
+        result = select(["README.md", "agent/schemas/hyperparam_tuning.py"])
+        assert result.full_suite, result.describe()
 
 
 def test_every_unit_test_module_is_reachable() -> None:
@@ -124,6 +174,97 @@ def test_every_unit_test_module_is_reachable() -> None:
         "selective run would never choose them. Add them to ALWAYS_ON if they "
         "scan the tree, or declare what they read:\n  " + "\n  ".join(unreachable)
     )
+
+
+class TestAffectedCallerCoverage:
+    def test_two_hop_callers_are_selected_and_cycles_terminate(self):
+        """A direct-only model misses tests importing an affected caller.
+
+        Fails as: changing `pkg/base.py` omits `test_top.py`; the A↔B cycle
+        also proves the fixed-point traversal terminates without losing B's
+        direct owner.
+        """
+        source_edges = {
+            "pkg/base.py": set(),
+            "pkg/middle.py": {"pkg/base.py", "pkg/top.py"},
+            "pkg/top.py": {"pkg/middle.py"},
+        }
+        test_edges = {
+            "tests/unit/test_base.py": {"pkg/base.py"},
+            "tests/unit/test_top.py": {"pkg/top.py"},
+            "tests/unit/test_other.py": {"pkg/other.py"},
+        }
+        assert transitive_test_owners({"pkg/base.py"}, test_edges, source_edges) == {
+            "tests/unit/test_base.py",
+            "tests/unit/test_top.py",
+        }
+
+    def test_computed_helper_declaration_reaches_its_importers(self):
+        """A DIRECTORY_SCANS helper owner is not itself a runnable test.
+
+        Fails as: the declaration adds only `tests/helpers/tuner_source.py`,
+        expansion drops that helper, and its importing tests never run.
+        """
+        result = select(["nodes/ml_hyperparameter_tune_agent/policy.py"])
+        assert not result.full_suite
+        assert "tests/unit/core/test_admission.py" in result.modules
+        assert (
+            "tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c2_order_consumers.py"
+            in result.modules
+        )
+
+    def test_area_ownership_is_additive_to_a_direct_edge(self):
+        """One visible importer cannot hide the rest of the owning area.
+
+        Fails as: changing a directly imported core module omits an unrelated
+        core test that may consume it through dynamic test infrastructure.
+        """
+        result = select(["core/sandbox_executor.py"])
+        assert not result.full_suite
+        assert "tests/unit/core/test_calibration_quarantine.py" in result.modules
+
+    def test_real_transitive_owner_outside_the_changed_directory(self):
+        """The repository graph, not directory spelling, finds callers.
+
+        Fails as: a source-import hop is removed from the production graph and
+        the named agent regression disappears from selection.
+        """
+        changed = "core/inference_defaults.py"
+        result = select([changed])
+        assert not result.full_suite
+        assert (
+            "tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c3_scale_rules.py"
+            in result.modules
+        ), result.describe()
+        assert changed in build_source_edges()
+
+
+class TestGitChangedPathParsing:
+    def test_add_modify_delete_rename_and_copy_records(self):
+        """Rename/copy records carry two paths; ordinary records carry one.
+
+        Fails as: the before-path is dropped or the following record is shifted
+        and interpreted as a status token.
+        """
+        data = (
+            b"A\0added.py\0M\0changed.py\0D\0deleted.py\0"
+            b"R100\0old.py\0new.py\0C087\0source.py\0copy.py\0"
+        )
+        assert parse_name_status_z(data) == [
+            "added.py",
+            "changed.py",
+            "deleted.py",
+            "old.py",
+            "new.py",
+            "source.py",
+            "copy.py",
+        ]
+
+    @pytest.mark.parametrize("data", [b"R100\0old.py\0", b"Q\0unknown.py\0", b"M\0\0"])
+    def test_malformed_name_status_refuses(self, data: bytes):
+        """Malformed change discovery must reach FULL, never a partial list."""
+        with pytest.raises(ValueError):
+            parse_name_status_z(data)
 
 
 def test_every_manifest_path_still_resolves() -> None:
@@ -283,10 +424,26 @@ class TestTheWorkflowActuallyConsumesTheSelector:
         green run. One computation, written once, consumed by both.
         """
         wf = self._workflow()
-        assert wf.count("git diff --name-only") == 1, (
+        diff_commands = [
+            line.strip() for line in wf.splitlines() if line.strip().startswith("git diff ")
+        ]
+        assert len(diff_commands) == 1, (
             "the changed-file list is derived more than once; the selector's verdict "
             "and the executed set could diverge"
         )
+        assert diff_commands[0].startswith("git diff --name-status -z ")
+
+    def test_rename_discovery_reaches_both_selector_and_harness(self):
+        """The one diff preserves rename before/after paths through execution.
+
+        Fails as: workflow discovery reverts to name-only, omits NUL-safe rename
+        parsing, or the harness consumes a different path file.
+        """
+        wf = self._workflow()
+        assert "git diff --name-status -z" in wf
+        assert "--name-status-z" in wf
+        assert '--write-paths-json "$CHANGED_JSON"' in wf
+        assert "--changed-from $RUNNER_TEMP/ci_changed_files.json" in wf
 
     def test_the_execution_step_is_not_a_hardcoded_suite(self):
         """The exact unwiring this class was written to prevent.

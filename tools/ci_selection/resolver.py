@@ -1,11 +1,9 @@
 """Which unit-test modules a set of changed paths can affect.
 
-Phase C of the test-architecture work
-(`docs/design/pruning_test_rule.md`). **Nothing here is wired into CI yet, and
-that is deliberate**: CI continues to run the whole unit suite, so this module
-cannot skip anything. It exists so the ownership model is checked in, executable
-and kept honest *before* anything depends on it. Flipping PR CI to consume it is
-a separate, later decision (Q5).
+Originated in Phase C of the test-architecture work
+(`docs/design/pruning_test_rule.md`). Pull-request CI now consumes this authority
+through `tools.ci`; master, scheduled runs, selector changes and unresolved
+impact still run the full unit suite.
 
 Never imported by production — same rule as `tools/example_packs/`.
 
@@ -36,6 +34,9 @@ only empty selection is for an empty diff.
 from __future__ import annotations
 
 import ast
+import subprocess
+from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -157,21 +158,36 @@ def _literal_path_references(tree: ast.AST, known_files: frozenset[str]) -> set[
     return out
 
 
-@lru_cache(maxsize=1)
-def _production_files() -> frozenset[str]:
+def _resolved_import_paths(
+    tree: ast.AST, own_module: str, known_files: AbstractSet[str]
+) -> set[str]:
+    """Tracked Python files imported by one parsed module."""
     out: set[str] = set()
-    for pkg in sorted(REPO_PACKAGES):
-        root = REPO_ROOT / pkg
-        if not root.is_dir():
-            continue
-        for p in root.rglob("*"):
-            if p.is_file() and p.suffix in {".py", ".sh", ".md", ".yaml", ".yml", ".json"}:
-                out.add(_rel(p))
-    for extra in ("docs", "configs", "reference_data", "reports", "llm_configs", "advice"):
-        root = REPO_ROOT / extra
-        if root.is_dir():
-            out.update(_rel(p) for p in root.rglob("*") if p.is_file())
-    return frozenset(out)
+    for dotted in _imported_targets(tree, own_module):
+        as_module = dotted.replace(".", "/") + ".py"
+        as_package = dotted.replace(".", "/") + "/__init__.py"
+        if as_module in known_files:
+            out.add(as_module)
+        if as_package in known_files:
+            out.add(as_package)
+    return out
+
+
+@lru_cache(maxsize=1)
+def _tracked_repository_files() -> frozenset[str]:
+    """Repository inputs present in the candidate commit.
+
+    Git is the inventory authority for the same reason it is in the execution
+    harness: a filesystem walk admits ignored scratch files and misses tracked
+    root documents when its directory list drifts. A failed inventory raises;
+    both public wrappers convert that failure to the full suite.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
+        capture_output=True,
+        check=True,
+    )
+    return frozenset(item.decode("utf-8") for item in result.stdout.split(b"\0") if item)
 
 
 @lru_cache(maxsize=1)
@@ -193,7 +209,7 @@ def _build_edges_uncached() -> dict[str, set[str]]:
     Import targets are recorded as dotted names AND as the file they resolve
     to, so a caller can match either form.
     """
-    known = _production_files()
+    known = _tracked_repository_files()
     edges: dict[str, set[str]] = {}
     for path in sorted(TESTS_ROOT.rglob("test_*.py")):
         try:
@@ -201,18 +217,80 @@ def _build_edges_uncached() -> dict[str, set[str]]:
         except SyntaxError:  # pragma: no cover - a broken test fails collection
             continue
         rel = _rel(path)
-        targets: set[str] = set()
-        for dotted in _imported_targets(tree, _module_name(path)):
-            as_module = dotted.replace(".", "/") + ".py"
-            as_package = dotted.replace(".", "/") + "/__init__.py"
-            if as_module in known:
-                targets.add(as_module)
-            if as_package in known:
-                targets.add(as_package)
-            targets.add(dotted)
+        dotted_targets = _imported_targets(tree, _module_name(path))
+        targets = _resolved_import_paths(tree, _module_name(path), known)
+        targets.update(dotted_targets)
         targets |= _literal_path_references(tree, known)
         edges[rel] = targets
     return edges
+
+
+@lru_cache(maxsize=1)
+def _build_source_edges_cached() -> tuple[tuple[str, frozenset[str]], ...]:
+    return tuple((source, frozenset(targets)) for source, targets in _build_source_edges().items())
+
+
+def build_source_edges() -> dict[str, set[str]]:
+    """``{production file -> directly imported production files}``."""
+    return {source: set(targets) for source, targets in _build_source_edges_cached()}
+
+
+def _build_source_edges() -> dict[str, set[str]]:
+    """Build the small static import graph used for affected-caller closure.
+
+    This intentionally models only explicit Python imports. Dynamic/plugin and
+    computed-path relationships remain manifest declarations; an AST is not
+    presented as proof of every runtime dependency.
+    """
+    known = _tracked_repository_files()
+    sources = sorted(
+        rel for rel in known if rel.endswith(".py") and rel.split("/", 1)[0] in REPO_PACKAGES
+    )
+    edges: dict[str, set[str]] = {}
+    for rel in sources:
+        path = REPO_ROOT / rel
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError) as exc:
+            raise RuntimeError(f"cannot derive imports for {rel}: {exc}") from exc
+        edges[rel] = _resolved_import_paths(tree, _module_name(path), known)
+    return edges
+
+
+def transitive_test_owners(
+    changed: AbstractSet[str],
+    test_edges: Mapping[str, AbstractSet[str]],
+    source_edges: Mapping[str, AbstractSet[str]],
+) -> set[str]:
+    """Tests importing a changed source directly or through source callers.
+
+    The fixed-point traversal is deliberately independent of repository I/O so
+    its two-hop and cycle behavior can be proved with a tiny hand-built graph.
+    """
+    affected = set(changed)
+    while True:
+        callers = {source for source, targets in source_edges.items() if targets & affected}
+        expanded = affected | callers
+        if expanded == affected:
+            break
+        affected = expanded
+    return {module for module, targets in test_edges.items() if targets & affected}
+
+
+def _derived_owners(
+    changed: str,
+    test_edges: Mapping[str, AbstractSet[str]],
+    source_edges: Mapping[str, AbstractSet[str]],
+) -> set[str]:
+    """Import-derived owners, preserving the package-prefix over-approximation."""
+    owners = transitive_test_owners({changed}, test_edges, source_edges)
+    dotted = changed.removesuffix(".py").replace("/", ".")
+    owners |= {
+        module
+        for module, targets in test_edges.items()
+        if any(target == dotted or dotted.startswith(target + ".") for target in targets)
+    }
+    return owners
 
 
 def select(changed_paths: list[str]) -> Selection:
@@ -239,7 +317,8 @@ def select(changed_paths: list[str]) -> Selection:
         return Selection(frozenset(), full_suite=True, reasons=tuple(reasons))
 
     edges = build_edges()
-    known_production = _production_files()
+    source_edges = build_source_edges()
+    known_production = _tracked_repository_files()
     selected: set[str] = set()
 
     for always in mf.ALWAYS_ON:
@@ -271,48 +350,37 @@ def select(changed_paths: list[str]) -> Selection:
                 reasons=(f"{changed}: no inbound edge and no manifest rule — failing closed",),
             )
 
-        direct = {m for m, targets in edges.items() if changed in targets}
-        dotted = changed.removesuffix(".py").replace("/", ".")
-        direct |= {
-            m
-            for m, targets in edges.items()
-            if any(t == dotted or dotted.startswith(t + ".") for t in targets)
-        }
+        direct = _derived_owners(changed, edges, source_edges)
         for owner, scanned in mf.DIRECTORY_SCANS.items():
             if any(changed == s or changed.startswith(s) for s in scanned):
                 direct.add(owner)
                 direct |= {m for m, t in edges.items() if owner in t}
-        if not direct:
-            # A file with no DERIVED edge is not automatically unknown.
-            if changed.endswith(mf.NON_IMPORTABLE_SUFFIXES):
-                # It cannot be imported, so a literal path read is the only way
-                # a test could reach it — and the AST pass finds every one of
-                # those. No edge here is KNOWLEDGE: nothing can be affected.
-                # Running everything would be noise, and noise is what gets a
-                # selector switched off.
-                reasons.append(f"{changed}: not importable and read by no test — no suites")
-                continue
-            area = next(
-                (tests for prefix, tests in mf.AREA_OWNERS if changed.startswith(prefix)),
-                None,
-            )
-            if area is None:
-                return Selection(
-                    frozenset(),
-                    full_suite=True,
-                    reasons=(f"{changed}: no edge and no area owner — failing closed",),
-                )
-            # Nothing imports it, but its AREA still has an owning suite.
-            direct = {m for m in edges if any(m.startswith(t) for t in area)}
-            if not direct:
+        # Area ownership is additive. One derived edge is not evidence that no
+        # other test in the changed module's owning area exercises it through a
+        # fixture, registry, subprocess, or computed path.
+        area = next(
+            (tests for prefix, tests in mf.AREA_OWNERS if changed.startswith(prefix)),
+            None,
+        )
+        if area is not None:
+            area_modules = {m for m in edges if any(m.startswith(t) for t in area)}
+            if not area_modules:
                 return Selection(
                     frozenset(),
                     full_suite=True,
                     reasons=(f"{changed}: area owner {area} matched no modules — failing closed",),
                 )
-            reasons.append(f"{changed}: no direct edge; area owner -> {len(direct)} modules")
-            selected |= direct
-            continue
+            direct |= area_modules
+            reasons.append(f"{changed}: additive area owner -> {len(area_modules)} modules")
+        if not direct:
+            if changed.endswith(mf.NON_IMPORTABLE_SUFFIXES):
+                reasons.append(f"{changed}: not importable and read by no test — no suites")
+                continue
+            return Selection(
+                frozenset(),
+                full_suite=True,
+                reasons=(f"{changed}: no edge and no area owner — failing closed",),
+            )
         selected |= direct
         reasons.append(f"{changed}: {len(direct)} owning modules")
 

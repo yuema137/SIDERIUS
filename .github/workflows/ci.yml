@@ -100,9 +100,11 @@ jobs:
           fi
           git fetch --no-tags origin "${{ github.base_ref }}" \
             || full "could not fetch the base ref"
-          CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD") \
+          CHANGED_RAW="$RUNNER_TEMP/ci_changed_name_status.z"
+          CHANGED_JSON="$RUNNER_TEMP/ci_changed_files.json"
+          git diff --name-status -z "origin/${{ github.base_ref }}...HEAD" > "$CHANGED_RAW" \
             || full "could not diff against the base ref"
-          if [ -z "$CHANGED" ]; then
+          if [ ! -s "$CHANGED_RAW" ]; then
             full "empty diff"
           fi
           # SINGLE SOURCE. The diff is computed exactly once and written here;
@@ -112,8 +114,9 @@ jobs:
           # Every `full` path above exits before this line, so the file is
           # absent for a full-suite run — which the harness reads as "no
           # changed-file input", its own fail-closed full suite.
-          printf '%s\n' "$CHANGED" > "$RUNNER_TEMP/ci_changed_files.txt"
-          printf '%s\n' "$CHANGED" | uv run python -m tools.ci_selection \
+          uv run python -m tools.ci_selection \
+            --name-status-z \
+            --write-paths-json "$CHANGED_JSON" < "$CHANGED_RAW" \
             || full "the selector exited non-zero"
           grep -q '^pytest_args=' "$GITHUB_OUTPUT" \
             || full "the selector produced no pytest_args"
@@ -147,8 +150,8 @@ jobs:
           # fail-closes to the full suite on a missing file.
           CHANGED_ARG=""
           if [ "${{ steps.selection.outputs.full_suite }}" != "true" ] \
-             && [ -s "$RUNNER_TEMP/ci_changed_files.txt" ]; then
-            CHANGED_ARG="--changed-from $RUNNER_TEMP/ci_changed_files.txt"
+             && [ -s "$RUNNER_TEMP/ci_changed_files.json" ]; then
+            CHANGED_ARG="--changed-from $RUNNER_TEMP/ci_changed_files.json"
           fi
           uv run python -m tools.ci bulk \
             --root . \
