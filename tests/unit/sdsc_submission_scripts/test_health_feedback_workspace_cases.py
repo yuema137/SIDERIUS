@@ -39,7 +39,7 @@ from nodes.result_interpretation_agent import (
     ResultInterpretationAgent,
     tuning_output_to_model_run_summary,
 )
-from tests.helpers.metric_fixtures import shipped_spec
+from tests.helpers.metric_fixtures import accuracy_like_spec
 from tests.helpers.two_family_profile import make_two_family_profile
 from tests.unit.agent.result_interpretation_agent.test_interpretation_agent import (
     _llm_dispatch,
@@ -62,11 +62,11 @@ def load_latest_fingerprint_history(workspace, current_iter, committed_iters):
 
 
 #: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
-#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
+#: REQUIRED keyword. The explicit synthetic metric is `higher`, so every expectation in
 #: this file is unchanged; the direction is now stated instead of assumed.
-_STEP09A_ORDER = MetricOrder(shipped_spec())
+_STEP09A_ORDER = MetricOrder(accuracy_like_spec())
 
-SIG = "output_diversity_blocking:n_unique_int8_values=1"
+SIG = "synthetic_stability_blocking:dispersion=1"
 
 POLICY = {
     "enable_structured_health_feedback": True,
@@ -101,8 +101,15 @@ def _collapse_summary(exp_prefix: str):
                 status="failed_mode_collapse",
                 denoising_score=None,
                 gate_action="invalidate_round",
-                failure_reason="[output_diversity_blocking] unique=1",
-                health_gate_results=[_gate_result()],
+                failure_reason="[synthetic_stability_blocking] dispersion=1",
+                health_gate_results=[
+                    _gate_result(
+                        name="synthetic_stability_blocking",
+                        metric="dispersion",
+                        unit="count",
+                        worst=1.0,
+                    )
+                ],
             ),
             _record(f"{exp_prefix}_002", denoising_score=1.1),
         ),
@@ -123,8 +130,8 @@ def _run_interp(ws, iteration, *, on: bool, history=None, scratch_tag="s"):
     inp = InterpretationInput(
         summaries=[_collapse_summary(f"wavenet_iter_{iteration:03d}")],
         # Step 09a C2 — a score-bearing interpretation REQUIRES the run's bound
-        # MetricSpec. TIDMAD is `higher`, so this fixture's behaviour is unchanged.
-        metric_spec=shipped_spec(),
+        # MetricSpec. The synthetic metric is `higher`, so this fixture's behaviour is unchanged.
+        metric_spec=accuracy_like_spec(),
         storage={
             "backend": "local",
             "local": {"workspace": os.path.join(ws, f"scratch_{scratch_tag}"), "run_name": "r"},

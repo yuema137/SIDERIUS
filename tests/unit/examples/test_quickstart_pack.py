@@ -63,16 +63,53 @@ def _load_pack_module() -> Any:
 
 
 def _shipped_manifest_variant(tmp_path: Path, transform) -> Path:
-    """Write a variant of the SHIPPED manifest with checkout-absolute refs.
+    """Write a separately registered variant of the shipped synthetic task.
 
     The shipped refs are ``../../``-rooted against its own directory;
-    rewriting them absolute lets a variant live in ``tmp_path`` while still
-    resolving this checkout's pack files.
+    external refs resolve the checkout's unchanged model/config assets. The
+    task adapter itself is copied with a distinct fixture id: rebinding the
+    shipped id through an absolute plugin ref would conflict with an inherited
+    relative-ref registration before the model/config rule under test runs.
+    Registry refusal remains intact; this variant is explicitly a separate task.
     """
     text = SHIPPED_MANIFEST.read_text(encoding="utf-8").replace("../../", f"{REPO_ROOT}/")
+    adapter = tmp_path / "quickstart_variant_task.py"
+    adapter.write_text(
+        (PACK / "plugins" / "_quickstart_task.py")
+        .read_text(encoding="utf-8")
+        .replace(
+            'QUICKSTART_TASK_ID = "quickstart_tabular"',
+            'QUICKSTART_TASK_ID = "quickstart_variant_fixture"',
+        ),
+        encoding="utf-8",
+    )
+    text = text.replace(
+        f"{REPO_ROOT}/examples/quickstart/plugins/_quickstart_task.py", adapter.name
+    ).replace("id: quickstart_tabular", "id: quickstart_variant_fixture")
     variant = tmp_path / "quickstart_variant.yaml"
     variant.write_text(transform(text), encoding="utf-8")
     return variant
+
+
+def test_variant_preserves_an_inherited_shipped_registration(tmp_path: Path) -> None:
+    """An existing task must not mask the variant's actual model/config checks."""
+    from execute_tools.task_data_path import registered_content_identity
+
+    with run_registration_scope():
+        shipped = compose_run_task_bindings(str(SHIPPED_MANIFEST))
+        identity = registered_content_identity("quickstart_tabular")
+        repeated = compose_run_task_bindings(str(SHIPPED_MANIFEST))
+        assert repeated.semantic_fingerprint == shipped.semantic_fingerprint
+        variant = _shipped_manifest_variant(
+            tmp_path, lambda text: text.replace("train_shards: [0, 1]", "train_shards: [0]")
+        )
+        composed = compose_run_task_bindings(str(variant))
+        assert composed.task_data_path_id == "quickstart_variant_fixture"
+        scope = composed.task_data_path.build_training_scope(
+            ScopeBuildRequest(round_kind="formal", selection_strategy="snapshot", portion=1.0)
+        )
+        assert {row.shard for row in scope.rows} == {0}
+        assert registered_content_identity("quickstart_tabular") == identity
 
 
 @pytest.fixture(scope="module")

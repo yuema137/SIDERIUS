@@ -1754,3 +1754,61 @@ accumulated migration, its reproduced failures and #425's necessary direct fix.
 Next: commit the candidate, fetch/check master, run its complete canonical CI,
 and report the exact verdict before merge. These focused results alone are not
 merge approval.
+
+#### Canonical candidate replay and remaining failure batch
+
+Candidate `655bcd25` was committed clean and pushed to PR #422. Exp `fd4ed28`
+then pinned that exact revision in its manifest, dependency and generated lock;
+its own frozen installed environment passed the 40-test migration cohort and
+37 pin/startup/six-task package-contract checks. Exact reproduction commands
+and the explicit importlib collection mode are retained in exp
+`provenance/validation/2026-09-09_pr422_candidate_pin.md`. No campaign or other
+dependency changed. Default-import collection of equally named external test
+modules is not certified by that invocation.
+
+Canonical CI run `34435561158` completed with lint, format, full Pyright and
+the isolated sensitive lane passing, but bulk tests FAILED. The complete
+failure batch is ten cases in three modules: seven Health-feedback assertions
+and three Quickstart composition assertions. Logs and JUnit were downloaded
+to `/tmp/pr422-ci-34435561158`; focused green is not substituted for this red
+verdict. Two agents own the distinct root-cause repairs and another performs
+independent adversarial review. No merge or issue-closure claim is made.
+
+Current-scope issue disposition was also rechecked: #416 has an implemented
+single-authority budget repair and regression coverage, pending the final CI
+verdict before closure. #388 remains open because its promised discriminating
+external replay is incomplete. #419 remains partial because on-disk scoped
+byte reporting alone does not satisfy all of its classifier evidence and
+genericity requirements. These are not silently waived to close this PR.
+
+Independent JUnit accounting for that run: bulk 11,562 passed, 10 failed,
+21 skipped; sensitive 184 passed. Total 11,746 passed, 10 failed, 21 skipped,
+zero errors. GitHub executed its clean synthetic PR merge checkout
+`fec81339`, with the full 697-file suite selected, not the earlier local
+collection command. Those populations are not interchangeable counts.
+
+The ten failures resolve to test wiring, not changed scientific execution.
+The shared Health fixture had already become synthetic while two consumers
+still authored the old signature/prior, so the real merger correctly kept
+two distinct histories. Those consumers now state matching independent
+synthetic literals and explicit gate arguments. Exact occurrence counts,
+iteration buckets, degraded-result preservation, recording-only behavior and
+proposer prompt assertions remain; their adjacent cohort passes 43 tests and
+lost-history mutations fail.
+
+Quickstart variants rewrote the task plugin reference from relative to
+absolute while retaining the shipped task id. An inherited registration
+therefore correctly refused the different logical plugin identity before the
+intended model/config check. The synthetic variant now has its own fixture
+adapter id, retaining the real model/config assets and all precise refusal
+assertions. A deliberate same-process inherited-registration control checks
+repeat composition identity, constructor-config reachability, and preservation
+of the original registration. No registry clearing, identity relaxation or
+production code change is made in this repair batch.
+
+Quickstart's actual CI predecessor modules plus the repaired pack pass 84
+tests in their original order. Restoring the old variant helper in memory
+makes the new inherited-registration witness fail at the original conflict.
+The primary agent's combined repaired-module/scoreability replay passes 40;
+full Ruff/format and diff checks pass. Independent review approves this
+bounded test-only batch, not a waiver of the next clean-candidate CI.
