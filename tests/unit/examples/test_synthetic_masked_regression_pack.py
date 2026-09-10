@@ -409,7 +409,7 @@ def test_resource_worker_accepts_a_task_valid_batch_and_refuses_an_oversized_one
     assert tuple(inputs.shape) == (8, 3)
     assert tuple(supervision.shape) == (8, 2)
     assert set(supervision[:, 1].tolist()) == {0.0, 1.0}
-    with pytest.raises(ValueError, match="cannot produce one full VRAM probe batch of size 64"):
+    with pytest.raises(ValueError, match="cannot produce one full resource probe batch of size 64"):
         _task_probe_batch(spec.model_dump(), batch_size=64)
 
 

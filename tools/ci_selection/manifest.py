@@ -70,6 +70,9 @@ FULL_SUITE_TRIGGERS: tuple[str, ...] = (
 #: `Path(__file__).resolve().parents[2] / "nodes" / "ml_hyperparameter_tune_agent"`,
 #: which 31 modules / 838 cases depend on. Declared, because derivation cannot.
 DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
+    "tests/unit/agent_generated/test_stub_plugin_template_loads.py": (
+        "tests/fixtures/generated_capabilities/",
+    ),
     "tests/unit/guardrails/test_no_hardcoded_device_literals.py": ("core/", "agent/", "nodes/"),
     "tests/unit/guardrails/test_no_model_name_branches.py": (
         "agent/skills/evaluate_vram_skill/",
@@ -173,7 +176,6 @@ GATE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
 #: no derived edge, is genuinely unmapped and runs everything.
 AREA_OWNERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("dashboard/", ("tests/unit/dashboard/",)),
-    ("tools/example_packs/", ("tests/unit/examples/", "tests/unit/tools/")),
     ("tools/claude_hooks/", ("tests/unit/tools/claude_hooks/",)),
     ("examples/", ("tests/unit/examples/",)),
     ("sdsc_submission_scripts/", ("tests/unit/sdsc_submission_scripts/",)),

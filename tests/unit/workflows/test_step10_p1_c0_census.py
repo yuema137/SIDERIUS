@@ -668,4 +668,6 @@ class TestCensusDLegacyLockKeySet:
             "formal_eval_portion",
             # Workflow rules determine the executed plan and are compared.
             "workflow_parameter_rules",
+            "trial_time_admission_source",
+            "formal_time_admission_source",
         )

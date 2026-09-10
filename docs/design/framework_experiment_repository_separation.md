@@ -1420,3 +1420,120 @@ still pass the canonical automatic PR workflow before this branch is described
 as repository-wide green or merge-ready. No production module, public schema,
 runtime decision, scientific threshold, task declaration, or campaign
 treatment changed in this closeout.
+
+### PR #422 bounded test closeout — 2026-09-09
+
+The operator reconfirmed small-step repair, validation and adversarial review,
+with autonomous progression between bounded slices. PR #422 targets framework
+master and already contains the accumulated repository-separation line. Its
+remaining scope is the reproduced test failures from CI run 34423312633 and
+directly broken test references exposed by repairing that cohort. This is not
+authorization for a new repository-wide test rewrite or new production features.
+
+Each slice must name the old dependency, the generic behavior it protects,
+the replacement assertion or external owner, and its focused result. Tests
+may not acquire an autouse scientific default, lose meaningful assertions to
+turn green, or silently skip a broken supported contract. Unrelated defects
+are recorded for a separate issue/PR. A production behavior change or new
+architectural/scientific decision requires a separate scope decision.
+
+Merge acceptance is: zero repository collection errors; passing affected tests
+and adjacent semantic regressions; no lost failure class for removed tests;
+lint/format/type and structural checks applicable to the changes; followed by
+the canonical PR suite on the committed candidate. If remote CI is unavailable,
+the operator-approved local equivalent must be recorded explicitly. Focused
+green is never described as full-suite green. No extra real-task campaign is
+required solely for changing test fixtures; evidence requirements change if a
+production execution boundary changes. Final PR text must distinguish the
+accumulated migration from this last test repair and list remaining blockers.
+
+The first slice repairs the Step-00 interpretation module's import from the
+retired Health prompt parity module. Its structured-user-prompt failure classes
+(gate action/signature, counts, disabled flag and absent evidence) are owned by
+test_health_prompt_rendering. System prompts now use explicitly supplied
+synthetic guidance; the flag test checks that enabling Health adds exactly the
+instructions while retaining guidance. Synthesis, dedup and cache-consolidation
+byte-level oracles are retained. No production file was modified by this slice.
+
+Validation: interpretation/Health cohort 27 passed; adjacent task-declaration
+and task-config tests 22 passed; all 25 then-modified test modules 456 passed.
+Repository-wide collection discovered 12,109 tests with zero errors. Three
+in-memory adversarial mutations (remove Health instructions, remove per-model
+guidance, remove synthesis guidance) each failed the corresponding repaired
+test. Ruff check, formatting and diff integrity passed on the modified Python
+files. Logs: `/tmp/pr422-collection.log`, `/tmp/pr422-affected.log` (local
+diagnostics, not release artifacts).
+
+The bounded replay of the prior CI failure cohort selected 62 formerly failing
+modules, of which 54 still exist. It reported 936 passed, 93 failed and 32
+setup errors; this is explicitly NOT merge-ready. Dominant causes are absent
+task-data-path bindings, absent physical roots, absent task configuration,
+missing required CLI arguments, retired scientific fixtures, and outdated
+source-layout assertions. These remain the closeout inventory, not permission
+to broaden production behavior. Log: `/tmp/pr422-ci-cohort.log`.
+
+A second slice repairs `test_gpu_admission_wiring.py`: parser-only invocations
+now declare the Quickstart manifest and a clearly parser-only data path; the
+executor constructor test opts into an empty temporary physical root. The
+admission, Trial/Formal and forwarding assertions are unchanged. All 64 tests
+pass. The previous cohort failure counts predate this repair and are retained
+as a dated diagnostic, not recomputed by subtraction. No real data, GPU or LLM
+was used, and no production runtime or external experiment changed.
+
+#### Final integration and review order (operator confirmed 2026-09-09)
+
+Keep the accumulated migration in PR #422; do not reorder or split its history
+as a substitute for validating it. Freeze the remaining scope to the known
+failure inventory, broken references and necessary directly related repairs.
+Every deleted test needs a named replacement failure-class witness or an
+external owner; unrelated features and refactors go to separate issues/PRs.
+
+Finish grouped validation and adversarial checks, then commit the candidate
+and run complete CI from a clean tree. Fetch master again before integration;
+if it advances, integrate its changes and revalidate the affected behavior even
+when Git reports no textual conflict. Record evidence against the resulting
+candidate, never an earlier head.
+
+Once that candidate is fixed, the operator authorizes independent subagent
+reviews of (1) infra/exp ownership and migration completeness, (2) training,
+scoring, Health, budgets and resume behavior, (3) test deletion/replacement and
+coverage, and (4) package/dependency/documentation/reproduction consistency.
+Each finding must identify code, a trigger and a concrete failure consequence.
+The main agent verifies findings, repairs confirmed defects and requests
+targeted re-review. Reviews complement executable evidence; reviewer agreement
+is not a correctness proof. Merge only with no unresolved blocking findings,
+validation for the final code, and a current PR description explaining actual
+behavior changes and deferred issues. Return to bounded small PRs afterwards.
+
+#### Subsequent bounded slices
+
+- Planner table/source-excerpt tests now use the existing neutral task-render
+  fixture instead of importing a historical task-bound renderer from another
+  test module. The truncated VRAM diagnostic witness uses the real validated
+  input schema instead of an incomplete namespace. Combined regression: 83
+  passed; existing omission/order/rejection assertions are preserved.
+- CLI tests supply required explicit task/data inputs. The run-name dry-run
+  cohort passes 3 tests. Wrapper forwarding and watchdog-policy cohorts pass
+  51 tests. Historical record-only verification is now requested explicitly
+  with forecast admission; it is not inferred from Trial identity, consistent
+  with the already-approved independent admission sources. Runtime code and
+  watchdog configuration did not change.
+- Model-dtype tests replace removed real-task declarations with synthetic
+  integer and float contracts at ranks 2/4/5. Retained witnesses cover builtin
+  precedence with/without a contract, admissible preference, unsupported dtype
+  refusal, constructor delegation and serialization: 23 passed. The unused
+  phase parameter duplicated identical resolver calls and is removed; this
+  suite does not claim execution-phase integration coverage.
+- Transit/default and comparability-key tests now explicitly include the
+  already-landed verification-window and admission-source fields. The probe
+  refusal oracle matches the shared resource-probe diagnostic. CI selection
+  declares the moved synthetic template directory and removes the deleted
+  example-tool area; its fail-closed checks remain intact. Combined regression:
+  78 passed. This changes the selection manifest, not the resolver algorithm.
+- Two node CLI line citations in the reference README were stale after prior
+  source changes. Corrected from the actual function definitions; all 6 node
+  documentation contract tests pass, with their assertions unchanged.
+
+These are focused results only. The remaining trainer/task-data-path migration
+and legacy source/argv oracles are still open; no final-candidate or merge-ready
+claim is made.

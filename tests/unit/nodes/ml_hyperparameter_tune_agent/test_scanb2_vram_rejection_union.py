@@ -35,7 +35,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent.schemas.hyperparam_tuning import PhysicalRejection
+from agent.schemas.hyperparam_tuning import HyperparamTuningInput, PhysicalRejection
 from agent.skills.evaluate_vram_skill.preflight_worker_main import _bounded_rich_fields
 from nodes.ml_hyperparameter_tune_agent.contracts import (
     AdmissionOutcome,
@@ -148,7 +148,10 @@ def _drive_admission(monkeypatch, payload: dict):
     monkeypatch.setattr(execution, "_check_and_record_guardrail_skip", lambda **kwargs: False)
 
     bindings = SimpleNamespace(
-        agent_input=SimpleNamespace(
+        agent_input=HyperparamTuningInput(
+            model_type="synthetic_model",
+            run_name="scanb2",
+            workspace="/tmp/scanb2-unused",
             candidate_id=None,
             experiment_arm=None,
             task_composition_ref=None,

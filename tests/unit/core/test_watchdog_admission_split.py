@@ -215,7 +215,11 @@ class TestCompatibilityAndWiring:
         assert d["watchdog"]["safety_factor"] == V19_WATCHDOG_FACTOR
         assert d["operator_budget_seconds"] == 7200.0
         d_trial = _build_runtime_policy(
-            agent_input, is_trial=True, chosen_time_budget=20.0, base_dir="/tmp/x"
+            agent_input,
+            is_trial=True,
+            chosen_time_budget=20.0,
+            admission_source="forecast",
+            base_dir="/tmp/x",
         )
         assert d_trial["safety_factor"] == V18_TRIAL_FACTOR
         assert d_trial["operator_budget_seconds"] is None

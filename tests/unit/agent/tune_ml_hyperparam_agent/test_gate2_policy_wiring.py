@@ -20,6 +20,8 @@ No real LLM, no training — parser + schema + policy assembly only.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
@@ -27,8 +29,15 @@ from core.runtime_control.session import RuntimeControlPolicy
 from nodes.ml_hyperparameter_tune_agent import _build_runtime_policy
 from sdsc_submission_scripts.run_one_iteration import build_parser
 
-# The approved Scenario A command's flag list, verbatim (minus paths).
+# Preserve the historical numeric fixture with today's explicit task and
+# admission-source declarations; this is not a scientific campaign launcher.
 SCENARIO_A_ARGV = [
+    "--task_composition",
+    str(Path(__file__).resolve().parents[4] / "configs/task_composition/quickstart.yaml"),
+    "--data_dir",
+    "/parser-only/synthetic-data",
+    "--trial_time_admission_source",
+    "forecast",
     "--workspace",
     "/tmp/gate2_rc",
     "--run_name",
@@ -140,6 +149,7 @@ class TestScenarioACommandResolution:
         policy_dict = _build_runtime_policy(
             agent_input,
             chosen_time_budget=a.trial_time_budget_minutes,
+            admission_source=a.trial_time_admission_source,
             is_trial=True,
             base_dir="/tmp/gate2_rc",
         )

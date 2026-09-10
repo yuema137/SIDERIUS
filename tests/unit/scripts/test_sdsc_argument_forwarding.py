@@ -266,6 +266,10 @@ class TestPythonIsTheSingleValidator:
                 "--run_name",
                 "r",
                 "--totally_unknown_flag",
+                "--task_composition",
+                str(REPO_ROOT / "configs/task_composition/quickstart.yaml"),
+                "--data_dir",
+                "/parser-only/synthetic-data",
             ],
             capture_output=True,
             text=True,
@@ -306,7 +310,16 @@ class TestLilabSdscParity:
             spec.loader.exec_module(module)
         except SystemExit:  # pragma: no cover
             pass
-        required = ["--workspace", "/tmp/ws", "--run_name", "r"]
+        required = [
+            "--workspace",
+            "/tmp/ws",
+            "--run_name",
+            "r",
+            "--task_composition",
+            str(REPO_ROOT / "configs/task_composition/quickstart.yaml"),
+            "--data_dir",
+            "/parser-only/synthetic-data",
+        ]
         dest = flag.lstrip("-")
 
         lilab = module.build_parser().parse_args([*required, flag, value])
