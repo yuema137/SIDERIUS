@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 
 from tools.ci_selection import manifest as mf
+from tools.ci_selection.__main__ import parse_name_status_z
 from tools.ci_selection.resolver import (
     REPO_ROOT,
     _tracked_repository_files,
@@ -238,6 +239,34 @@ class TestAffectedCallerCoverage:
         assert changed in build_source_edges()
 
 
+class TestGitChangedPathParsing:
+    def test_add_modify_delete_rename_and_copy_records(self):
+        """Rename/copy records carry two paths; ordinary records carry one.
+
+        Fails as: the before-path is dropped or the following record is shifted
+        and interpreted as a status token.
+        """
+        data = (
+            b"A\0added.py\0M\0changed.py\0D\0deleted.py\0"
+            b"R100\0old.py\0new.py\0C087\0source.py\0copy.py\0"
+        )
+        assert parse_name_status_z(data) == [
+            "added.py",
+            "changed.py",
+            "deleted.py",
+            "old.py",
+            "new.py",
+            "source.py",
+            "copy.py",
+        ]
+
+    @pytest.mark.parametrize("data", [b"R100\0old.py\0", b"Q\0unknown.py\0", b"M\0\0"])
+    def test_malformed_name_status_refuses(self, data: bytes):
+        """Malformed change discovery must reach FULL, never a partial list."""
+        with pytest.raises(ValueError):
+            parse_name_status_z(data)
+
+
 def test_every_manifest_path_still_resolves() -> None:
     """Freshness. A rename orphans a rule, the rule matches nothing, and the
     model quietly stops covering what it claims to. This repo renames often —
@@ -395,10 +424,26 @@ class TestTheWorkflowActuallyConsumesTheSelector:
         green run. One computation, written once, consumed by both.
         """
         wf = self._workflow()
-        assert wf.count("git diff --name-only") == 1, (
+        diff_commands = [
+            line.strip() for line in wf.splitlines() if line.strip().startswith("git diff ")
+        ]
+        assert len(diff_commands) == 1, (
             "the changed-file list is derived more than once; the selector's verdict "
             "and the executed set could diverge"
         )
+        assert diff_commands[0].startswith("git diff --name-status -z ")
+
+    def test_rename_discovery_reaches_both_selector_and_harness(self):
+        """The one diff preserves rename before/after paths through execution.
+
+        Fails as: workflow discovery reverts to name-only, omits NUL-safe rename
+        parsing, or the harness consumes a different path file.
+        """
+        wf = self._workflow()
+        assert "git diff --name-status -z" in wf
+        assert "--name-status-z" in wf
+        assert '--write-paths-json "$CHANGED_JSON"' in wf
+        assert "--changed-from $RUNNER_TEMP/ci_changed_files.json" in wf
 
     def test_the_execution_step_is_not_a_hardcoded_suite(self):
         """The exact unwiring this class was written to prevent.

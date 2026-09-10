@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import ClassVar
 
@@ -78,6 +80,129 @@ class TestExpansion:
         harness tries to run it.
         """
         assert sel._expand(REPO, ["tests/unit/ghost/test_q.py"], ["tests/unit/a/test_x.py"]) == []
+
+    def test_wrapper_preserves_the_resolvers_full_suite_reason(self):
+        """A FULL verdict must still say which shared owner forced it.
+
+        Fails as: the harness replaces causal selector evidence with a generic
+        'full suite' summary, leaving CI operators unable to audit the choice.
+        """
+        result = sel.resolve_selection(REPO, ["agent/schemas/hyperparam_tuning.py"])
+        assert result.full_suite
+        assert "declared hub (agent/schemas/)" in result.reason
+
+
+class TestChangedPathTransport:
+    def test_json_handoff_preserves_rename_before_and_after_paths(self, tmp_path):
+        """The harness must consume both sides of a rename.
+
+        Fails as: JSON transport drops the deleted before-path and qualifies a
+        rename only from its destination.
+        """
+        path = tmp_path / "changed.json"
+        path.write_text('["old/name.py", "new/name.py", "old/name.py"]', encoding="utf-8")
+        assert sel.load_changed_paths(path) == ["old/name.py", "new/name.py"]
+
+    def test_legacy_newline_handoff_remains_readable(self, tmp_path):
+        path = tmp_path / "changed.txt"
+        ordinary = "docs/arch" + "itecture.md"
+        path.write_text(f"README.md\n{ordinary}\n", encoding="utf-8")
+        assert sel.load_changed_paths(path) == ["README.md", ordinary]
+
+    def test_real_cli_and_wrapper_agree_on_named_readme_owners(self, tmp_path):
+        """Exercise the actual subprocess boundary, not only helper functions.
+
+        Fails as: the CLI parses a different changed set than the harness or
+        either boundary drops a named document reader.
+        """
+        import json
+        import os
+
+        output = tmp_path / "github_output"
+        changed = tmp_path / "changed.json"
+        env = {**os.environ, "GITHUB_OUTPUT": str(output)}
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tools.ci_selection",
+                "--name-status-z",
+                "--write-paths-json",
+                str(changed),
+            ],
+            cwd=REPO,
+            env=env,
+            input=b"M\0README.md\0",
+            capture_output=True,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr.decode()
+        assert json.loads(changed.read_text(encoding="utf-8")) == ["README.md"]
+        cli_output = output.read_text(encoding="utf-8")
+        wrapper = sel.resolve_selection(REPO, sel.load_changed_paths(changed))
+        for owner in (
+            "tests/unit/tools/test_md_links.py",
+            "tests/unit/tools/test_user_contract_docs_census.py",
+        ):
+            assert owner in cli_output
+            assert owner in wrapper.files
+        assert not wrapper.full_suite
+        assert "README.md:" in wrapper.reason
+
+    def test_malformed_cli_input_emits_full_without_a_partial_handoff(self, tmp_path):
+        """A truncated rename record must increase coverage, not crash CI."""
+        import os
+
+        output = tmp_path / "github_output"
+        changed = tmp_path / "changed.json"
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tools.ci_selection",
+                "--name-status-z",
+                "--write-paths-json",
+                str(changed),
+            ],
+            cwd=REPO,
+            env={**os.environ, "GITHUB_OUTPUT": str(output)},
+            input=b"R100\0old.py\0",
+            capture_output=True,
+            check=False,
+        )
+        assert proc.returncode == 0
+        assert "full_suite=true" in output.read_text(encoding="utf-8")
+        assert "failing closed" in proc.stderr.decode()
+        assert not changed.exists()
+
+    def test_harness_invalid_json_runs_the_full_plan(self, tmp_path):
+        """The execution seam must fail closed when its handoff is corrupt."""
+        import json
+
+        changed = tmp_path / "changed.json"
+        changed.write_text("[not-json", encoding="utf-8")
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tools.ci",
+                "plan",
+                "--root",
+                str(REPO),
+                "--changed-from",
+                str(changed),
+                "--by-count",
+                "--shards",
+                "1",
+            ],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert json.loads(proc.stdout)["full_suite"] is True
+        assert "changed-file input raised" in proc.stderr
 
 
 class TestOneAuthority:

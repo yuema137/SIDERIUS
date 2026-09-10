@@ -20,7 +20,7 @@ from pathlib import Path
 from tools.ci.execution import _reject_workdir_inside, run_bulk, run_shard
 from tools.ci.preflight import ExecutionRoot, run_preflight
 from tools.ci.provenance import build_manifest
-from tools.ci.selection import resolve_selection
+from tools.ci.selection import Selection, load_changed_paths, resolve_selection
 from tools.ci.sensitive import SENSITIVE_FILES, sensitive_paths
 from tools.ci.shards import plan_shards, verify_plan
 from tools.ci.weights import DEFAULT_WEIGHT, load_splits, load_weights
@@ -140,16 +140,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    changed = (
-        [
-            ln.strip()
-            for ln in args.changed_from.read_text(encoding="utf-8").splitlines()
-            if ln.strip()
-        ]
-        if args.changed_from and args.changed_from.is_file()
-        else None
-    )
+    changed_error: str | None = None
+    try:
+        changed = (
+            load_changed_paths(args.changed_from)
+            if args.changed_from and args.changed_from.is_file()
+            else None
+        )
+    except (OSError, ValueError) as exc:
+        changed = None
+        changed_error = f"changed-file input raised {type(exc).__name__}: {exc} — failing closed"
     chosen = resolve_selection(root, changed)
+    if changed_error:
+        chosen = Selection(chosen.files, True, changed_error)
     print(f"selection: {chosen.reason}", file=sys.stderr)
     files = list(chosen.files)
     # Weighted by default: by-count balancing reported imbalance 1.004 and still
