@@ -30,7 +30,13 @@ from pathlib import Path
 import pytest
 
 from tools.ci_selection import manifest as mf
-from tools.ci_selection.resolver import REPO_ROOT, build_edges, gates_required, select
+from tools.ci_selection.resolver import (
+    REPO_ROOT,
+    _tracked_repository_files,
+    build_edges,
+    gates_required,
+    select,
+)
 
 
 class TestTheModelIsFailClosed:
@@ -69,18 +75,19 @@ class TestTheModelIsFailClosed:
             assert result.full_suite or result.modules, f"{diff} selected nothing"
 
     def test_a_doc_nothing_reads_selects_no_extra_suites(self):
-        """Operator ruling: a docs-only change must NEVER trigger the full
-        suite. A `.md` cannot be imported, so a literal path read is the only
-        way a test reaches it — and the AST pass finds every one of those.
-        "No edge" for a doc is knowledge, not ignorance."""
+        """An ordinary doc runs only cheap repository/document readers.
+
+        Fails as: an ordinary doc falls back to FULL, or an unrelated feature
+        suite is pulled in despite having no document edge.
+        """
         # Built by concatenation, NOT a literal: written plainly, THIS file
         # becomes a literal-path reader of the doc and the resolver -- correctly
         # -- selects this module as an owner. The first draft did exactly that
         # and failed; the edge system caught its own test.
         result = select(["docs/arch" + "itecture.md"])
         assert not result.full_suite, "a doc nothing reads triggered the full suite"
-        # Only the always-on guard block runs (two of its scanners read docs
-        # and the whole tree respectively).
+        # Only the always-on block runs; its explicit document censuses cover
+        # dynamic tracked-file reads that literal AST edges cannot derive.
         assert all(any(m == a or m.startswith(a) for a in mf.ALWAYS_ON) for m in result.modules), (
             result.modules
         )
@@ -95,6 +102,27 @@ class TestTheModelIsFailClosed:
         assert not result.full_suite, "an area-owned module triggered the full suite"
         assert any(m.startswith("tests/unit/dash" + "board/") for m in result.modules)
 
+    def test_root_readme_selects_its_dynamic_document_readers(self):
+        """The root README was absent from the old directory inventory.
+
+        Fails as: a tracked root doc is called unknown, or either whole-tree
+        reader can change its verdict without being scheduled.
+        """
+        result = select(["READ" + "ME.md"])
+        assert not result.full_suite
+        assert result.modules
+        assert "tests/unit/tools/test_md_links.py" in result.modules
+        assert "tests/unit/tools/test_user_contract_docs_census.py" in result.modules
+
+    def test_tracked_root_documents_come_from_git_inventory(self):
+        """A hand-maintained directory list can silently omit another root doc.
+
+        Fails as: any currently tracked root Markdown document is absent from
+        the selector's candidate-commit inventory.
+        """
+        tracked = _tracked_repository_files()
+        assert {"AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "README.md"} <= tracked
+
     def test_docs_are_inputs_not_inert(self):
         """`paths-ignore: ['**.md']` is the first optimisation anyone reaches
         for, and it would skip CI on a change that breaks
@@ -102,7 +130,26 @@ class TestTheModelIsFailClosed:
         result = select(["docs/gates/gate_testing_standard.md"])
         assert result.full_suite or result.modules
         if not result.full_suite:
-            assert any("guardrails" in m for m in result.modules)
+            assert "tests/unit/guardrails/test_gate_standard_contract.py" in result.modules
+
+    def test_an_absent_or_ignored_doc_still_fails_closed(self):
+        """The tracked-doc rule must not bless deleted or local scratch files.
+
+        Fails as: an absent before-state or ignored local plan is treated as an
+        ordinary inert document and narrows without a proven reader inventory.
+        """
+        for changed in ("docs/no_such_contract.md", ".structured-coding/local.md"):
+            result = select([changed])
+            assert result.full_suite, result.describe()
+
+    def test_a_document_cannot_hide_a_hub_in_the_same_diff(self):
+        """Classification is additive; a cheap doc never suppresses FULL.
+
+        Fails as: the selector returns a narrow document set when the same PR
+        changes a shared schema hub.
+        """
+        result = select(["README.md", "agent/schemas/hyperparam_tuning.py"])
+        assert result.full_suite, result.describe()
 
 
 def test_every_unit_test_module_is_reachable() -> None:

@@ -36,6 +36,7 @@ only empty selection is for an empty diff.
 from __future__ import annotations
 
 import ast
+import subprocess
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -158,20 +159,20 @@ def _literal_path_references(tree: ast.AST, known_files: frozenset[str]) -> set[
 
 
 @lru_cache(maxsize=1)
-def _production_files() -> frozenset[str]:
-    out: set[str] = set()
-    for pkg in sorted(REPO_PACKAGES):
-        root = REPO_ROOT / pkg
-        if not root.is_dir():
-            continue
-        for p in root.rglob("*"):
-            if p.is_file() and p.suffix in {".py", ".sh", ".md", ".yaml", ".yml", ".json"}:
-                out.add(_rel(p))
-    for extra in ("docs", "configs", "reference_data", "reports", "llm_configs", "advice"):
-        root = REPO_ROOT / extra
-        if root.is_dir():
-            out.update(_rel(p) for p in root.rglob("*") if p.is_file())
-    return frozenset(out)
+def _tracked_repository_files() -> frozenset[str]:
+    """Repository inputs present in the candidate commit.
+
+    Git is the inventory authority for the same reason it is in the execution
+    harness: a filesystem walk admits ignored scratch files and misses tracked
+    root documents when its directory list drifts. A failed inventory raises;
+    both public wrappers convert that failure to the full suite.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
+        capture_output=True,
+        check=True,
+    )
+    return frozenset(item.decode("utf-8") for item in result.stdout.split(b"\0") if item)
 
 
 @lru_cache(maxsize=1)
@@ -193,7 +194,7 @@ def _build_edges_uncached() -> dict[str, set[str]]:
     Import targets are recorded as dotted names AND as the file they resolve
     to, so a caller can match either form.
     """
-    known = _production_files()
+    known = _tracked_repository_files()
     edges: dict[str, set[str]] = {}
     for path in sorted(TESTS_ROOT.rglob("test_*.py")):
         try:
@@ -239,7 +240,7 @@ def select(changed_paths: list[str]) -> Selection:
         return Selection(frozenset(), full_suite=True, reasons=tuple(reasons))
 
     edges = build_edges()
-    known_production = _production_files()
+    known_production = _tracked_repository_files()
     selected: set[str] = set()
 
     for always in mf.ALWAYS_ON:
