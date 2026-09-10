@@ -32,11 +32,10 @@
   revisions. A container is an isolation mechanism, not a second dependency
   authority. Datasets, workspaces, and machine-owned secrets remain external
   mounts or runtime inputs.
-- **`run_comparison.py` lives at `scripts/run_comparison.py`** (moved from repo
-  root in commit `13c34fa`). If you see a `SIDERIUS_ROOT` bug where subprocess
-  paths resolve to `scripts/nodes/...` instead of `nodes/...`, that's the
-  double-dirname fix from commit `6789e29` — verify that fix is on disk before
-  running.
+- **Scientific baseline comparison is external.** The former
+  `scripts/run_comparison.py` now belongs to siderius-exp at
+  `tasks/tidmad/tools/run_comparison.py`. Do not invoke the retired path from
+  this checkout or restore a scientific default to make it work.
 - **Generic chain dry-run**:
   ```bash
   bash sdsc_submission_scripts/run_chain.sh \

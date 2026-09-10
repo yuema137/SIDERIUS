@@ -51,7 +51,16 @@ ADMISSION_FLAGS = ("--gpu_admission_measurement_source", "--gpu_pair_ceiling_gib
 
 #: The parser's own required arguments, so a parse test exercises the
 #: flag under test rather than tripping over an unrelated requirement.
-REQUIRED_ARGS = ["--workspace", "/tmp/w", "--run_name", "r"]
+REQUIRED_ARGS = [
+    "--workspace",
+    "/tmp/w",
+    "--run_name",
+    "r",
+    "--task_composition",
+    str(REPO_ROOT / "configs/task_composition/quickstart.yaml"),
+    "--data_dir",
+    "/parser-only/synthetic-data",
+]
 
 
 def code_only(path: Path) -> str:
@@ -183,7 +192,7 @@ class TestTheSandboxAndGateAcceptIt:
     def test_the_sandbox_takes_an_admission_policy(self):
         assert "admission_policy" in inspect.signature(TidmadSandbox.__init__).parameters
 
-    def test_omitting_it_preserves_pre_bg3_behaviour(self, tmp_path):
+    def test_omitting_it_preserves_pre_bg3_behaviour(self, tmp_path, synthetic_physical_data_root):
         sandbox = TidmadSandbox(run_name="r", workspace=str(tmp_path))
         assert sandbox.admission_policy is None
 

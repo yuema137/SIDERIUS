@@ -11,14 +11,14 @@ def test_forward_shape():
     config = PLUGIN_CONFIG_CLASS()
     model = PLUGIN_MODEL_CLASS(config)
     model.eval()
-    x = torch.randint(0, 256, (2, config.segmentation_size))
+    x = torch.randint(0, 7, (2, config.segmentation_size))
     with torch.no_grad():
         out = model(x)
     # Expected shape follows the plugin's DECLARED contract, so a regressor
     # is not judged against the classifier shape (V21 PR A3). The class count
     # is rendered from the task's Model-I/O contract (Step 04a), not fixed.
     expected = (
-        (2, 256, config.segmentation_size)
+        (2, 7, config.segmentation_size)
         if PLUGIN_OUTPUT_TYPE == "classifier"
         else (2, config.segmentation_size)
     )
@@ -29,7 +29,7 @@ def test_forward_no_nan():
     config = PLUGIN_CONFIG_CLASS()
     model = PLUGIN_MODEL_CLASS(config)
     model.eval()
-    x = torch.randint(0, 256, (1, config.segmentation_size))
+    x = torch.randint(0, 7, (1, config.segmentation_size))
     with torch.no_grad():
         out = model(x)
     assert not torch.isnan(out).any(), "Forward pass produced NaN values"

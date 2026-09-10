@@ -19,6 +19,7 @@ Two asymmetries are deliberate and are what these tests protect:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -26,12 +27,10 @@ from core.scientific_authority import ScientificAuthority
 from execute_tools.health_checks.candidate_eligibility import formal_validity_of
 from tests.helpers.tuner_source import tuner_node_source
 
-BLOCKING = "configs/health_checks.yaml"
-SCIENTIFIC_GATES = (
-    "output_diversity_blocking",
-    "output_std_blocking",
-    "amplitude_collapse_blocking",
+BLOCKING = str(
+    Path(__file__).resolve().parents[3] / "fixtures" / "health" / "one_blocking_gate.yaml"
 )
+SCIENTIFIC_GATES = ("synthetic_stability_blocking",)
 
 
 def _record(*, passed: bool = True, gates: bool = True) -> dict:

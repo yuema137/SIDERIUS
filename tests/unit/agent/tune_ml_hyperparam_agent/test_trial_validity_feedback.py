@@ -37,11 +37,7 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
 )
 from tests.helpers.tuner_source import tuner_node_source
 
-BLOCKING_IDS = (
-    "output_diversity_blocking",
-    "output_std_blocking",
-    "amplitude_collapse_blocking",
-)
+BLOCKING_IDS = ("synthetic_stability_blocking",)
 
 
 def _trial(exp_id, *, status="success", passed=None, metrics=None, gates=True):
@@ -73,7 +69,10 @@ def _trial(exp_id, *, status="success", passed=None, metrics=None, gates=True):
 
 def _build(records, *, skipped=False, mode="blocking"):
     return _build_trial_validity_feedback(
-        records, formal_skipped_for_no_valid_winner=skipped, healthgate_mode=mode
+        records,
+        formal_skipped_for_no_valid_winner=skipped,
+        healthgate_mode=mode,
+        required_gate_ids=frozenset(BLOCKING_IDS),
     )
 
 
@@ -190,7 +189,7 @@ class TestTheFactsAreTransportedUnchanged:
 
     def test_measured_metrics_are_passed_through_namespaced(self):
         result = _build([_trial("t", passed=False, metrics={"mode_fraction": 0.994})])
-        assert result.outcomes[0].key_metrics["output_diversity_blocking.mode_fraction"] == 0.994
+        assert result.outcomes[0].key_metrics["synthetic_stability_blocking.mode_fraction"] == 0.994
 
     def test_nothing_task_specific_is_synthesised(self):
         """MUTATION TARGET: baking task remediation advice into the
@@ -306,7 +305,7 @@ class TestTheRenderedBlock:
         assert "1 execution failure" in text
         assert "SKIPPED because no valid trial winner existed" in text
         assert "not because of the time budget" in text
-        assert "output_diversity_blocking" in text
+        assert "synthetic_stability_blocking" in text
         assert "mode_fraction=0.994" in text
         assert "EVIDENCE ABSENT" in text
 
@@ -416,7 +415,7 @@ class TestBothPromptPathsCarryTheBlock:
         )
 
 
-# ---------------------------------------------------------------------------
+# Preserved pre-08a oracle; only fixture gate and metric identifiers changed.
 # Step 08a C3 — the LLM-facing rendering is byte-stable
 # ---------------------------------------------------------------------------
 
@@ -436,14 +435,14 @@ def _step08a_gate(
         "would_invalidate_under_production_policy": would_invalidate,
         "resolved_action": "continue",
         "failure_reason": reason,
-        "key_metrics": {"unique_int8": 1} if reason else {},
+        "key_metrics": {"dispersion": 1} if reason else {},
     }
 
 
 _STEP08A_REQUIRED = [
-    "output_diversity_blocking",
-    "output_std_blocking",
-    "amplitude_collapse_blocking",
+    "synthetic_stability_blocking",
+    "synthetic_range_blocking",
+    "synthetic_shape_blocking",
 ]
 
 _STEP08A_RECORD_SETS = {
@@ -523,6 +522,7 @@ def test_trial_validity_feedback_is_byte_identical_to_pre_step08a():
                 records,
                 formal_skipped_for_no_valid_winner=skipped,
                 healthgate_mode="enforce",
+                required_gate_ids=frozenset(_STEP08A_REQUIRED),
             )
             rendered[f"{name}__skipped_{skipped}"] = (
                 None if block is None else block.model_dump(mode="json")

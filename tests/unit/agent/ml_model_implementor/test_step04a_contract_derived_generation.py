@@ -87,7 +87,7 @@ def test_a_regressor_task_documents_the_continuous_form(tmp_path):
     source = _assemble_plugin(inp, CODE_BY_OUTPUT_TYPE["regressor"])
 
     assert "input [B, T] int64 → output [B, T] float32" in source
-    assert "[B, T] → continuous waveform regression" in source
+    assert "[B, T] → continuous [B, T] output" in source
     ast.parse(source)
 
 
@@ -103,7 +103,7 @@ def test_a_regressor_candidate_under_a_categorical_task_drops_the_class_axis(tmp
         "regressor", tidmad_model_io(), load_implementor_task_blocks()
     )
     assert forward == "input [B, T] int64 → output [B, T] float32"
-    assert output_type == "[B, T] → continuous waveform regression"
+    assert output_type == "[B, T] → continuous [B, T] output"
 
 
 def test_a_classifier_candidate_under_a_continuous_task_fails_closed():
@@ -127,28 +127,6 @@ def test_an_unrecognised_output_type_still_raises():
         _render_output_contract("hybrid", tidmad_model_io())
     with pytest.raises(ValueError, match="Unknown output_type"):
         _render_output_contract("hybrid", None)
-
-
-def test_the_legacy_path_renders_the_shipped_strings_verbatim():
-    """§15.1 row 1: no contract -> today's exact text.
-
-    Fails when: the derived rendering and the shipped strings disagree for
-    TIDMAD — the parity property, asserted between the two paths so that
-    drifting both together cannot hide it.
-
-    Step 12 / PR-12a C7-4: the derived path now takes the continuous phrase
-    from the task's declaration, so the parity is asserted with TIDMAD's own
-    blocks supplied — which is what the composition root hands a legacy run.
-    The property is unchanged and slightly stronger: it now proves the
-    DECLARED phrase reproduces the tabulated legacy bytes.
-    """
-    blocks = load_implementor_task_blocks()
-    assert _render_output_contract("classifier", None) == _render_output_contract(
-        "classifier", tidmad_model_io(), blocks
-    )
-    assert _render_output_contract("regressor", None) == _render_output_contract(
-        "regressor", regressor_model_io(), blocks
-    )
 
 
 # ---------------------------------------------------------------------------

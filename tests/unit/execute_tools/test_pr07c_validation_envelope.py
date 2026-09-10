@@ -10,6 +10,15 @@ deadline is). And it is a bound that can DEFEAT its own Gate: clamp validation
 hard enough and the counterfactual stops separating, which §4.1 records as
 INCONCLUSIVE rather than PASS.
 
+This suite protects the retained explicit scope utility and history contract,
+not implicit scope construction by the trainer. After repository separation,
+the task adapter owns scope selection; the engine consumes a declared scope
+and refuses legacy eval SampleSets. The old five subprocess cases depended on
+that retired implicit path. Their generic training-history, exact count,
+comparability and unequal-batch weighting behaviours remain covered by
+``test_step07a_c1_validation_pass``. Real-task geometry belongs to siderius-exp,
+not this arithmetic fixture. No runtime clamp wiring is claimed here.
+
 The clamp applies to the REQUESTED scope. That is not a preference: 07a's
 `TrainingHistory` fails closed when `validation_samples !=
 validation_requested_samples`, so a ceiling applied after materialization would
@@ -20,10 +29,6 @@ from __future__ import annotations
 
 import pytest
 
-from execute_tools.dataset_config import (
-    TIDMAD_PROFILE,
-    tidmad_topology,
-)
 from execute_tools.train_engine_sandbox import ValidationScopeError, clamp_validation_scope
 from execute_tools.training_history import TrainingHistory
 
@@ -319,208 +324,6 @@ class TestItIsNotPlannerVisible:
 
         assert "validation_requested_samples_before_limit" not in _PLANNER_HIDDEN_RECORD_KEYS
         assert "training_history" in _PLANNER_HIDDEN_RECORD_KEYS
-
-
-class TestTheProfileGeometryIsRealistic:
-    def test_the_tidmad_geometry_makes_the_fixture_numbers_meaningful(self):
-        """The clamp's granularity is `psd_segment_length // seg_size`, so the
-        rounding behaviour above is not a fixture artefact — under TIDMAD at
-        seg 40 000 one PSD segment is 250 ML rows, and a ceiling of 100 is
-        genuinely unsatisfiable."""
-        psd = tidmad_topology(TIDMAD_PROFILE).dataset.psd_segment_length
-        assert psd // 40_000 == 250
-        with pytest.raises(ValidationScopeError, match="below one PSD segment"):
-            clamp_validation_scope({0: [0, 1]}, max_samples=100, ml_segs_per_psd=psd // 40_000)
-
-
-def _wavenet_cfg(seg_size: int) -> dict:
-    return {
-        "model_type": "wavenet",
-        "segmentation_size": seg_size,
-        "input_channels": 4,
-        "residual_channels": 8,
-        "gate_channels": 8,
-        "skip_channels": 8,
-        "kernel_size": 2,
-        "num_blocks": 1,
-    }
-
-
-@pytest.mark.allow_real_subprocess
-class TestTheClampInARealRun:
-    """The REAL `train_engine_sandbox.py` subprocess, CPU, seconds.
-
-    The unit tests above prove the clamp arithmetic. Only a real run proves
-    that the clamped scope MATERIALIZES — which is the half 07a's fail-closed
-    validator would reject if the ceiling were applied a moment too late.
-    """
-
-    @staticmethod
-    def _run(tmp_path, monkeypatch, *, name: str, runtime_policy: dict, batch_size: int = 2):
-        import core.sandbox_executor as sandbox_module
-        from core.sandbox_executor import TidmadSandbox
-        from execute_tools.dataset_config import bind_dataset_profile
-        from tests.helpers.two_family_profile import write_two_family_fixture
-
-        (tmp_path / "data").mkdir(parents=True, exist_ok=True)
-        fx = write_two_family_fixture(tmp_path / "data")
-        real_launch = sandbox_module._run_observed_subprocess
-
-        def launch_with_data_dir(cmd, **kwargs):
-            return real_launch([*cmd, "--data_dir", fx.data_dir], **kwargs)
-
-        monkeypatch.setattr(sandbox_module, "_run_observed_subprocess", launch_with_data_dir)
-        with bind_dataset_profile(fx.profile):
-            sb = TidmadSandbox(run_name=name, workspace=str(tmp_path / "ws"), progress_bar=False)
-            out = sb.execute_training(
-                f"pr07c_{name}",
-                name,
-                "wavenet",
-                _wavenet_cfg(fx.seg_size),
-                {
-                    "lr": 1e-3,
-                    "epochs": 1,
-                    "batch_size": batch_size,
-                    "optimizer_type": "adam",
-                    "device": "cpu",
-                },
-                {"loss_type": "focal"},
-                sample_set={0: [0, 1, 2, 3], 1: [0, 1, 2, 3], 2: [0, 1, 2, 3]},
-                eval_sample_set=fx.full_sample_set(),
-                train_base_seed=5,
-                runtime_policy=runtime_policy,
-            )
-        assert out["status"] == "success", out.get("message")
-        from execute_tools.training_history import interpret_training_results
-
-        history = interpret_training_results(out["results"], expected_validation=True).history
-        assert history is not None
-        return history, sb, fx
-
-    def test_no_ceiling_is_exact_parity(self, tmp_path, monkeypatch):
-        history, _sb, _fx = self._run(tmp_path, monkeypatch, name="c6none", runtime_policy={})
-        assert history.validation_samples == NATURAL_ROWS
-        assert history.validation_requested_samples == NATURAL_ROWS
-        assert history.validation_requested_samples_before_limit is None
-
-    def test_a_binding_ceiling_clamps_and_still_materializes_exactly(self, tmp_path, monkeypatch):
-        """07a's `validation_samples == validation_requested_samples` validator
-        must never fire. It would if the ceiling were applied to the
-        materialized rows instead of the request — every clamped run raising is
-        the failure mode this ordering exists to prevent."""
-        history, _sb, _fx = self._run(
-            tmp_path, monkeypatch, name="c6clamp", runtime_policy={"validation_max_samples": 10}
-        )
-        assert history.validation_samples == 10
-        assert history.validation_requested_samples == 10
-        assert history.validation_requested_samples_before_limit == NATURAL_ROWS
-        # The provenance the effective count alone cannot recover.
-        assert (
-            history.validation_requested_samples_before_limit > history.validation_requested_samples
-        )
-
-    def test_a_non_binding_ceiling_records_before_limit_equal_not_greater(
-        self, tmp_path, monkeypatch
-    ):
-        """The ambiguous case, on a real run: the ceiling is configured but did
-        not bind, and `was_limited` must read False."""
-        history, _sb, _fx = self._run(
-            tmp_path, monkeypatch, name="c6loose", runtime_policy={"validation_max_samples": 1000}
-        )
-        assert history.validation_samples == NATURAL_ROWS
-        assert history.validation_requested_samples_before_limit == NATURAL_ROWS
-
-    def test_comparability_is_unchanged_by_the_clamp(self, tmp_path, monkeypatch):
-        """Same `LossConfig`, same stamp — with and without a binding ceiling.
-        The rev-3 retraction, on real runs rather than constructed models."""
-        clamped, _sb_a, _fx_a = self._run(
-            tmp_path / "a",
-            monkeypatch,
-            name="c6cmpA",
-            runtime_policy={"validation_max_samples": 10},
-        )
-        unclamped, _sb_b, _fx_b = self._run(
-            tmp_path / "b", monkeypatch, name="c6cmpB", runtime_policy={}
-        )
-        assert clamped.comparability == unclamped.comparability == "established"
-        assert clamped.comparability_reason == unclamped.comparability_reason is None
-        assert clamped.objective_config_fingerprint == unclamped.objective_config_fingerprint
-
-    def test_r3_over_a_partial_final_batch_is_sample_count_weighted(self, tmp_path, monkeypatch):
-        """rev-2 blocker 5. A ceiling is exactly what CREATES a partial final
-        batch, and that is precisely when the sample-count-weighted mean and
-        the unweighted mean-of-batch-means diverge.
-
-        10 clamped rows at batch 4 gives batches of 4, 4, 2. The epoch
-        statistic 07a pins is
-        `sample_count_weighted_mean_of_batch_criterion`, so R3 must be
-        Σ n_i·L_i / Σ n_i — and must NOT be (L1+L2+L3)/3.
-        """
-        import os
-
-        import torch
-        from torch.utils.data import DataLoader
-
-        import execute_tools.train_engine_sandbox as tes
-        from execute_tools.dataset_config import bind_dataset_profile
-        from ml_models.loss_models_sandbox import get_criterion
-        from ml_models.models_format_sandbox import LossConfig
-        from ml_models.models_sandbox import MODEL_REGISTRY
-
-        history, sb, fx = self._run(
-            tmp_path,
-            monkeypatch,
-            name="c6weight",
-            runtime_policy={"validation_max_samples": 10},
-            batch_size=4,
-        )
-        assert history.validation_samples == 10  # 4 + 4 + 2
-
-        # Recompute both statistics over the SAME clamped scope and the saved
-        # model, and record both numbers so the test is known to discriminate.
-        clamped_scope = tes.clamp_validation_scope(
-            fx.full_sample_set(), max_samples=10, ml_segs_per_psd=ML_PER_PSD
-        )
-        state = torch.load(
-            os.path.join(sb.dirs["models"], "model_wavenet_pr07c_c6weight_agent.pth")
-        )
-        model = MODEL_REGISTRY["wavenet"](
-            tes.get_config_class("wavenet")(**_wavenet_cfg(fx.seg_size))
-        )
-        model.load_state_dict(state)
-        model.eval()
-        criterion = get_criterion(LossConfig(loss_type="focal"), None)
-
-        with bind_dataset_profile(fx.profile):
-            dataset = tes.TIDMADEpochDataset(
-                fx.data_dir,
-                {str(k): v for k, v in clamped_scope.items()},
-                fx.seg_size,
-                train_portion=None,
-                profile=fx.profile,
-                file_family="validation",  # type: ignore[arg-type]
-            )
-        assert len(dataset) == 10
-        batch_losses: list[tuple[float, int]] = []
-        with torch.no_grad():
-            for x, y in DataLoader(dataset, batch_size=4, shuffle=False, drop_last=False):
-                loss = float(criterion(model(x.to(torch.long)), y.to(torch.long)).item())
-                batch_losses.append((loss, int(x.shape[0])))
-        assert [n for _loss, n in batch_losses] == [4, 4, 2], "no partial final batch was created"
-
-        weighted = sum(loss * n for loss, n in batch_losses) / sum(n for _l, n in batch_losses)
-        unweighted = sum(loss for loss, _n in batch_losses) / len(batch_losses)
-        print(
-            f"[C6] r3={history.validation_objective[-1]!r} weighted={weighted!r} "
-            f"unweighted={unweighted!r}"
-        )
-
-        assert history.validation_objective is not None
-        assert history.validation_objective[-1] == pytest.approx(weighted, abs=1e-5)
-        assert weighted != pytest.approx(unweighted, abs=1e-9), (
-            "the two statistics coincide on this data, so the test cannot "
-            "discriminate — choose a scope where the batch losses differ"
-        )
 
 
 class TestTheOperatorSurface:

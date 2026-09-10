@@ -47,8 +47,9 @@ trusting one against current source.
 
 ## Inputs
 
-Workspace paths, run names and data roots as CLI arguments; several scripts
-read the machine-local `tidmad_data_config.yaml`.
+Workspace paths, run names and data roots are explicit CLI inputs. The active
+framework launch does not load the retired task-specific machine path config;
+dated investigation scripts are not an alternative launch authority.
 
 ## Outputs
 

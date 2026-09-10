@@ -37,6 +37,8 @@ from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
 from tests.unit.workflows.test_step10_p1_c0_census import capture_uncomposed_child_argv
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
+pytestmark = pytest.mark.usefixtures("synthetic_physical_data_root")
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FOURTH_MANIFEST = (
     REPO_ROOT / "tests" / "fixtures" / "step10_p1" / "fourth_task" / "composition.yaml"

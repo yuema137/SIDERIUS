@@ -17,18 +17,25 @@ from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
 from execute_tools.metric_order import MetricOrder
-from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
-from tests.helpers.metric_fixtures import shipped_spec
+from nodes.result_interpretation_agent import (
+    tuning_output_to_model_run_summary as _build_summary,
+)
+from tests.helpers.metric_fixtures import accuracy_like_spec
 
-#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
-#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
-#: this file is unchanged; the direction is now stated instead of assumed.
-_STEP09A_ORDER = MetricOrder(shipped_spec())
+#: The migrated ordering consumers take the run's MetricOrder as a required
+#: keyword. This module declares a neutral higher-is-better metric explicitly.
+_STEP09A_ORDER = MetricOrder(accuracy_like_spec())
+_REQUIRED_GATES = frozenset({"synthetic_stability_blocking"})
+
+
+def tuning_output_to_model_run_summary(output, *, order):
+    """Bind this module's explicit synthetic scientific roster."""
+    return _build_summary(output, order=order, required_gate_ids=_REQUIRED_GATES)
 
 
 def _gate_result(
-    name="output_diversity_blocking",
-    metric="n_unique_int8_values",
+    name="synthetic_stability_blocking",
+    metric="dispersion",
     unit="count",
     worst=1.0,
 ):
@@ -90,7 +97,7 @@ def test_gated_collapse_round_carries_evidence_and_fingerprint():
                 status="failed_mode_collapse",
                 denoising_score=None,
                 gate_action="invalidate_round",
-                failure_reason="[output_diversity_blocking] collapse",
+                failure_reason="[synthetic_stability_blocking] collapse",
                 health_gate_results=[_gate_result()],
             )
         ),
@@ -101,10 +108,10 @@ def test_gated_collapse_round_carries_evidence_and_fingerprint():
     assert health.exp_id == "r1"
     assert health.gate_action == "invalidate_round"
     assert health.health_validity == "invalid"  # status != success
-    assert [o.gate_name for o in health.gate_outcomes] == ["output_diversity_blocking"]
+    assert [o.gate_name for o in health.gate_outcomes] == ["synthetic_stability_blocking"]
     assert health.fingerprint is not None
-    assert health.fingerprint.signature == ("output_diversity_blocking:n_unique_int8_values=1")
-    assert health.fingerprint.metrics == {"n_unique_int8_values": 1}
+    assert health.fingerprint.signature == ("synthetic_stability_blocking:dispersion=1")
+    assert health.fingerprint.metrics == {"dispersion": 1}
 
 
 def test_v17_skip_record_empty_list_is_not_evaluated_not_legacy():
@@ -144,7 +151,7 @@ def test_mid_vintage_round_fields_only_preserved_verbatim_no_fingerprint():
                 status="failed_mode_collapse",
                 denoising_score=None,
                 gate_action="invalidate_round",
-                failure_reason="[output_diversity_blocking] unique=1",
+                failure_reason="[synthetic_stability_blocking] dispersion=1",
             )
         ),
         order=_STEP09A_ORDER,
@@ -152,7 +159,7 @@ def test_mid_vintage_round_fields_only_preserved_verbatim_no_fingerprint():
     [health] = summary.round_health
     assert health.provenance == "round_fields_only"
     assert health.gate_action == "invalidate_round"
-    assert health.failure_reason == "[output_diversity_blocking] unique=1"
+    assert health.failure_reason == "[synthetic_stability_blocking] dispersion=1"
     assert health.gate_outcomes == []
     assert health.fingerprint is None
 
@@ -295,7 +302,7 @@ def test_summary_round_trips_through_json():
     restored = ModelRunSummary.model_validate_json(summary.model_dump_json())
     assert restored.round_health == summary.round_health
     assert restored.round_health[0].fingerprint.signature == (
-        "output_diversity_blocking:n_unique_int8_values=1"
+        "synthetic_stability_blocking:dispersion=1"
     )
 
 

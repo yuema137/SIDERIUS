@@ -221,20 +221,13 @@ The workflow itself, runnable directly. Accepts `--task_composition`,
 `--max_proposal_attempts` (default `3`), `--target_score`, LLM routing flags and
 advice flags.
 
-## `scripts/run_comparison.py` — baseline comparison
+## Task-specific baseline comparison — external consumer
 
-⚠ **TIDMAD-only by construction.** It imports TIDMAD's dataset, file count,
-sandbox and data directory directly, and it does **not** accept
-`--task_composition`. It is a useful baseline harness for TIDMAD and is not a
-general task runner.
-
-```bash
-python scripts/run_comparison.py --model punet --is_trial
-```
-
-Key flags: `--model` (required, single-valued), `--is_trial`, `--max_rounds`
-(default `50`), `--provider` / `--model_id` and the `--reflect_*` split,
-`--data_scope`, `--health_checks_config`.
+`scripts/run_comparison.py` is no longer a framework entrypoint. Its task-owned
+successor is `tasks/tidmad/tools/run_comparison.py` in `siderius-exp`.
+Use that repository's documented environment and task inputs; invoking the
+old path from a SIDERIUS checkout will not work. Generic framework runs use
+the declared-composition workflow entrypoints above.
 
 ## Data scope
 

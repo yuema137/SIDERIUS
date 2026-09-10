@@ -74,7 +74,6 @@
   "tests/unit/execute_tools/health_checks/test_c12p_cp12_composition_cache_authority.py": 9.071,
   "tests/unit/execute_tools/health_checks/test_step10_p4_c3_fourth_task_evidence.py": 0.505,
   "tests/unit/execute_tools/test_d14_synthetic_e2e.py": 2.428,
-  "tests/unit/execute_tools/test_d14_tidmad_parity.py": 3.238,
   "tests/unit/execute_tools/test_failure_honesty_zero_optimizer_steps.py": 1.521,
   "tests/unit/execute_tools/test_inference_checkpoint_loading.py": 0.59,
   "tests/unit/execute_tools/test_ordering_engine.py": 4.964,

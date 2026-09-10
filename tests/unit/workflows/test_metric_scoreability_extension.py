@@ -54,7 +54,7 @@ class ExternalMetric(EvaluationMetric):
         encoding="utf-8",
     )
 
-    metric, _, plugin_ref = _compose_metric(
+    metric, _, plugins = _compose_metric(
         {
             "declaration": declaration.name,
             "implementation": {"file": plugin.name, "symbol": "ExternalMetric"},
@@ -70,7 +70,7 @@ class ExternalMetric(EvaluationMetric):
 
     assert metric.spec.scoreability.contract_id == "external_semantic_output"
     assert metric.spec.scoreability.required_marker == 7
-    assert plugin_ref is not None
+    assert {ref.symbol for ref in plugins} == {"ExternalMetric", "ExternalScoreability"}
 
 
 def test_metric_plugin_overrides_a_legacy_framework_contract_id(tmp_path) -> None:

@@ -50,12 +50,14 @@ from execute_tools.observables import (
     bind_run_observables,
     resolve_bound_run_observables,
 )
+from execute_tools.task_data_path import bind_task_data_path
 from execute_tools.training_history import (
     STATIC_OBSERVATIONS_KEY,
     TRAINING_HISTORY_KEY,
     interpret_training_results,
 )
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, WaveNetConfig
+from tests.helpers.synthetic_training_data_path import TwoFamilyDataPath
 from tests.helpers.two_family_profile import TwoFamilyFixture, write_two_family_fixture
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -116,7 +118,12 @@ def _run(
     # guard. Binding here is what `main()` does through
     # `child_observables_binding`, so these tests drive the production wiring
     # rather than a shape production does not have.
-    with bind_dataset_profile(fx.profile), bind_run_observables(observables or RunObservables()):
+    data_path = TwoFamilyDataPath(fx)
+    with (
+        bind_dataset_profile(fx.profile),
+        bind_task_data_path(data_path),
+        bind_run_observables(observables or RunObservables()),
+    ):
         summary = tes.run_experiment_streaming(
             _tiny_model_cfg(fx.seg_size),
             TrainConfig(lr=1e-3, epochs=epochs, batch_size=2, optimizer_type="adam", device="cpu"),
@@ -127,7 +134,10 @@ def _run(
             exp_id=name,
             train_base_seed=123,
             profile=fx.profile,
-            eval_sample_set={"1": [0, 1]} if eval_sample_set is _DEFAULT_EVAL else eval_sample_set,
+            **data_path.scope_kwargs(
+                fx.full_sample_set(),
+                {"1": [0, 1]} if eval_sample_set is _DEFAULT_EVAL else eval_sample_set,
+            ),
         )
     assert summary is not None
     return summary
@@ -521,6 +531,8 @@ class TestTheChildComposesTheTransportedManifest:
             str(cfg_dir / "ess.json"),
             "--task_manifest",
             manifest,
+            "--task_data_path_id",
+            "quickstart_tabular",
         ]
         monkeypatch.setattr(sys, "argv", argv)
         with bind_dataset_profile(two_family.profile):
@@ -533,11 +545,18 @@ class TestTheChildComposesTheTransportedManifest:
     def test_without_a_manifest_the_child_forwards_NO_observables(
         self, tmp_path, monkeypatch, two_family
     ):
-        """The un-composed leg, unchanged.
+        """A child with a registered data path but no manifest has no observables.
 
-        A legacy child receives no manifest and must not acquire observables
-        from anywhere — there is no default set and no fallback task.
+        No task-less training default is restored by testing absence of the
+        optional observation declaration.
         """
+        import workflows.task_composition as composition
+
+        monkeypatch.setattr(
+            composition,
+            "resolve_child_task_data_path",
+            lambda *a, **k: TwoFamilyDataPath(two_family),
+        )
         seen: dict = {}
 
         def fake_stream(*args, **kwargs):
@@ -572,6 +591,8 @@ class TestTheChildComposesTheTransportedManifest:
                 "legacy",
                 "--sample_set_json",
                 str(cfg_dir / "ss.json"),
+                "--task_data_path_id",
+                TwoFamilyDataPath.task_data_path_id,
             ],
         )
         with bind_dataset_profile(two_family.profile):

@@ -114,9 +114,9 @@ must equal the implementation's own declared id, and a mismatch is refused.
 
 ```yaml
 task_data_path:
-  module: execute_tools.tidmad_data_path      # or `file:`
-  symbol: TidmadTaskDataPath
-  id: tidmad                                   # optional
+  file: ./plugins/my_data_path.py
+  symbol: MyTaskDataPath
+  id: my_task                                  # optional
 
 dataset_profile:
   config: ./declared/dataset_profile.json
@@ -124,8 +124,8 @@ dataset_profile:
 metric:
   declaration: ./declared/metric_spec.json
   implementation:
-    module: execute_tools.evaluation_metric    # or `file:`
-    symbol: TidmadDenoisingMetric
+    file: ./plugins/my_metrics.py
+    symbol: MyMetric
 
 secondary_metrics:                             # optional; ORDER IS SEMANTIC
   - declaration: ./declared/metric_macro_f1.json
@@ -297,6 +297,21 @@ run declared but can never drop it.
 
 ## What happens at composition time
 
+Custom scoreability checks are part of task identity, not just executable
+helpers. A metric's `scoreability_contracts` mapping selects the classes that
+decide whether an artifact may be scored. Changing a selected implementation,
+its file contents, or which metric/contract uses it must change the composition
+fingerprint. Primary and secondary metrics follow the same rule; relocating
+the whole task package without changing its logical bindings or contents does
+not change that identity. Importable `module:` bindings remain subject to the
+existing pinned-environment contract rather than a recursive dependency hash.
+
+**Compatibility correction (#425):** older framework revisions omitted custom
+scoreability implementations from the fingerprint. Affected old run records
+must not be re-stamped to match the corrected identity. Start a fresh workspace
+and rerun; no automatic old-result migration is provided. Tasks with no custom
+scoreability mapping retain their previous fingerprint through this correction.
+
 1. The manifest is read; unknown keys refuse; required keys are checked.
 2. Each section resolves — files loaded, symbols imported or executed by path,
    types checked.
@@ -307,8 +322,9 @@ run declared but can never drop it.
 5. `verify_composition_is_bound` asserts the bindings are actually live. A
    half-composed run is fatal, not degraded.
 
-If no manifest is supplied, none of this happens and the run takes the ⚠ legacy
-un-composed path with byte-identical child argv.
+The supported chain/iteration launch requires an explicit task composition and
+physical data directory. Do not omit the manifest expecting a scientific task
+or a legacy child command to be selected automatically.
 
 ## Worked example
 

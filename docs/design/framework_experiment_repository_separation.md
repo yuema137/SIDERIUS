@@ -1537,3 +1537,220 @@ behavior changes and deferred issues. Return to bounded small PRs afterwards.
 These are focused results only. The remaining trainer/task-data-path migration
 and legacy source/argv oracles are still open; no final-candidate or merge-ready
 claim is made.
+
+#### Parallel closeout evidence and uncovered migration gaps
+
+The operator explicitly authorized parallel test migration. Independent slices
+now cover actual CPU trainer execution (45 passed), child-process scope,
+validation-pricing and watchdog/root/naming transport (90 passed), and the
+remaining live source-wiring guards (142 passed). These are overlapping focused
+cohorts, not a sum or a full-suite verdict. Ordering/invariant regressions pass
+19 tests. The original failure inventory is being replayed after integration.
+
+The trainer fixtures now implement an explicit synthetic task data path. Parent
+and real child processes compose the same manifest and scoped selection; neither
+borrows a real scientific default nor injects another revision with PYTHONPATH.
+Validation state/RNG preservation, sample-weighted loss, live-sidecar persistence,
+observable absence, runtime accounting, and killed-checkpoint cleanup remain
+executable assertions. In-memory mutations suppressing the mid-pass callback,
+retaining a killed checkpoint, ignoring naming, or dropping the live preflight
+budget/hardware/device-identity arguments all fail their corresponding witnesses.
+
+Deletion review found that source-string cleanup guards were not equivalent to
+the old filesystem survivor assertions. A new generic cleanup suite exercises
+both real cleanup call sites and checks the entire deleted/surviving file set.
+The generated-plugin full-byte/determinism oracle is also retained using an
+explicit synthetic contract; its expected text was edited by fixture value,
+not regenerated from the renderer. Together with adjacent naming tests these
+pass 16 cases, and widened-glob/changed-output mutations fail.
+
+Two retired comparison-launcher tests now belong to the experiment repository:
+`tests/tasks/tidmad/test_comparison_ordering_boundary.py`, exp commit `b70b7a4`
+(pushed to its existing recovery PR branch). Both pass against that checkout;
+they protect conditional override forwarding and baseline non-interference.
+No framework dependency pin or scientific configuration changed.
+
+The audit also exposed unfinished migration, which is NOT waived by focused
+green: the immutable D14 task-byte oracle and task-specific validation
+materialization negative cases still need external ownership; the generic
+cold/warm Health cache-authority suite must retain its independent failure
+classes. These repairs remain in the frozen coverage-preservation scope.
+
+One confirmed external defect is tracked as siderius-exp issue #30: the TIDMAD
+data-path scope builder ignores the caller's `validation_max_samples` ceiling,
+although the generic scope acquisition boundary forwards it correctly. The old
+engine clamp was retired during composition migration; synthetic exception
+propagation is not evidence that the task-owned clamp survived. No currently
+inspected Gold configuration enables that optional ceiling, and no campaign
+default change is claimed. No production fix was made in this test slice;
+final review must explicitly disposition the compatibility gap rather than
+quietly call its deleted tests redundant.
+
+The integrated modified-module replay now passes 791 tests across 44 modules
+(`/tmp/pr422-integrated-modified.log`); the separate 30-module prior-failure
+replay passes 607 (`/tmp/pr422-parallel-cohort.log`). Both preceded the last
+Health coverage restorations. A fresh fetch still shows zero commits behind
+framework master. These remain local focused results, not final CI.
+
+Coverage ownership recovered during review:
+
+| Retired or reshaped infra family | Actual surviving owner and protected failure |
+| --- | --- |
+| D14 helper/test/immutable manifest | exp `test_d14_tidmad_parity.py` plus historical fixture/helper and unchanged manifest: six raw-file hashes, seeds 5/6 by full/half portion, validation ranges/stream, complete deliverable hash; 2 passed, ignoring portion mutation fails |
+| Step05c C0/C4/C5 task writer/encoding | exp `test_deliverable_encoding_parity.py`: full logical artifact including every sample/attribute, single channel, indexed naming, invalid extension, contrast channels/dtype, streamed decode/write and reuse refusal |
+| Step07a scientific exact materialization | exp `test_validation_materialization_boundary.py`: missing/foreign/out-of-range/zero-row selection and per-file mismatch; generic trainer retains first/later-pass refusal propagation |
+| Historical scientific-role and honest-label SHA oracle | exp `test_health_legacy_compatibility.py` and byte-identical historical config capture: exact hashes and genuine role-less fallback, with empty-map mutation; 3 passed |
+| Step05c cleanup filesystem safety | infra `test_cleanup_scope_preservation.py`: same-attempt versus same-experiment deletion, complete survivor sets, disabled/undeclared naming paths |
+| Step04a generated artifact baseline | infra explicit synthetic full-text/determinism oracle, retaining independently edited expected text |
+| Health default-cache incident | restored generic cache suite: explicit binding, same-binding hit, reset/new-family miss, cold/warm child-process guard; retired automatic default scientific binding is not restored |
+| Health persisted execution status | restored generic evaluation suite: all 27 old status combinations, every check verdict, applied aggregation and absent-rule honesty |
+| Scientific role versus enforcement | infra `test_role_resolution_boundary.py`: observe-only still invalidates candidate eligibility, unknown role-less config is not guessed, missing/malformed input produces no historical SHA |
+
+The two exp materialization/encoding modules plus adjacent streamed persistence
+pass 15 tests against exp's own installed pin. Interior-sample corruption and
+omitting the per-file count check are both detected. The D14 and historical
+Health tests together pass 5. These task-specific expectations are not replaced
+by generic exception mocks. Full pinned and final-candidate qualification are
+distinct claims; these results currently establish the former only.
+
+Infra issue #423 records the remaining historical scientific Health-role
+compatibility map. It is live executable authority for old role-less records,
+so this PR must not claim that every scientific compatibility declaration has
+already disappeared. Removing it would change historical resume semantics;
+this test closeout preserves and externalizes its evidence instead. No fresh
+campaign treatment is changed. Exp also permits a directly constructed wholly
+empty selection `{}` to materialize zero rows, although the historical
+`{0: []}` refusal is preserved; that narrower direct-scope edge is separate
+from the original regression and remains to be dispositioned.
+
+The external migration cohort now passes 37 tests in exp's own installed-pin
+environment. P4 threshold/per-file/fingerprint/key-metric expectations for three
+tasks are retained in `tests/tasks/test_health_evidence_parity.py`; the historical
+TIDMAD declaration and policy are byte-preserved from `d44f6f6a`, not substituted
+for current Gold treatment. The eight expected literal tables are unchanged.
+Deleting threshold or fingerprint production evidence fails the witnesses.
+Missing default wheel policy resources required explicit historical policy
+input here; this is tracked separately as infra #424, not hidden by borrowing
+a checkout. Direct wholly-empty task validation scope is exp #31.
+
+Independent package/docs review found stale active installation and comparison
+entrypoint instructions. Those now point to explicit data/workspace inputs and
+the external comparison owner; no runtime behavior was changed. Legacy Slurm
+checkout/PYTHONPATH authority remains a deployment boundary already within the
+machine-path follow-up area, not fixed by this test closeout.
+
+**Merge blocker found by independent production review: infra #425.** Custom
+metric scoreability plugin refs are discarded by
+`_compose_scoreability_contract_types`, so their code identity never enters the
+composition fingerprint. Both reviewer and primary agent independently composed
+a temporary external task, changed only its scoreability plugin from permit to
+refuse, and observed `True -> False` scoreability with identical fingerprints.
+The live resume check compares that fingerprint and cannot distinguish the
+changed validity authority. The extension entered this PR; this is not an
+unrelated pre-existing issue. No production fix or identity rewrite has been
+made. Operator decision is required on compatibility for affected existing runs
+before adding these refs to the identity; recommended treatment is explicit
+fresh-workspace qualification rather than silently re-stamping old evidence.
+Tasks with no custom scoreability plugin should retain unchanged identity.
+
+The final deletion audit also retains these unfinished coverage items: dated
+interpreter user-prompt full-byte oracles (substring checks are insufficient),
+actual external child-process inference-to-persisted-artifact coverage, and
+generic deliverable inverse parsing/custom prefix validator cases. Thus current
+coverage must also restore the pre-check-verdicts Trial feedback eight-case
+full-JSON oracle; individual field checks do not establish that equivalence.
+The actual retired cross-process writer witness was Step05c's integration
+module, not C7's accessor/source checks. Its old dual-channel representation
+must not be silently asserted as the current task writer contract; the current
+streamed writer's explicitly tested single-channel output and process transport
+are separate claims. Historical HC1 resolved-policy bytes are not fully covered
+by P4's threshold/fingerprint oracle, so no full-HC1 parity claim is made.
+Current
+focused pass counts do NOT establish deletion completeness. Final clean-candidate
+CI and merge have not run; PR #422 is not ready to merge. The identity decision
+is a material compatibility checkpoint, not a routine pause for more scope.
+
+#### Operator decision and resumed closeout
+
+The operator approved fixing #425 correctly without migrating historical
+results. Affected compositions receive their corrected identity; old records
+are not re-stamped or silently adopted. Fresh workspaces/reruns are the
+accepted path. Keep no-custom-scoreability tasks unchanged and test that
+property, plus primary/secondary bindings and plugin code/selection changes.
+This authorizes the narrow provenance repair, not unrelated runtime redesign.
+
+Three subagents are working independently on the identity repair, the two
+dated prompt/feedback oracle restorations, and true external child-process
+inference/persistence coverage. The primary agent owns naming inverse/unsafe
+prefix coverage, integration, documentation and final validation. Exp's prior
+37-test migration checkpoint is committed and pushed as `b874072` on its
+existing PR branch; neither its framework pin nor scientific parameters moved.
+
+Correction to the preceding review note: a single-channel *test case* does not
+establish that the current streamed writer is single-channel. Source inspection
+of exp `_persist_file` shows prediction and target channels. The new real-child
+witness will establish their actual persisted values; no representation change
+is authorized or inferred from a review summary.
+
+#### Candidate closeout checkpoint
+
+#425 now preserves custom scoreability file refs through primary and secondary
+metric composition. A nonempty-only fingerprint field records the metric role,
+contract id and selected file/module/symbol; file bytes retain the existing
+plugin digest mechanism. This also detects exchanging two gates between metric
+roles. No recursive module-dependency hashing or old-result migration is added.
+Real composition tests exercise changed paths/contents, primary/secondary,
+module/symbol changes, role swaps, relocation and actual run-lock refusal.
+Independent fresh-process comparisons against pre-fix HEAD confirm an ordinary
+Quickstart's fingerprint is unchanged. Dropping file refs or binding selections
+causes the intended adversarial failures.
+
+Independent review found and closed one newly introduced null-opposite-key
+edge: the identity projection now uses the same non-None file/module choice as
+the loader. Both `file + module:null` and `module + file:null` have executable
+controls. Final independent identity/extension replay: 13 passed, no unresolved
+finding in that reviewed change. Targeted Pyright has zero errors (one existing
+yaml source warning) with Node 20.11.1; the system Node 10 cannot run Pyright.
+
+The remaining coverage ledger is closed as follows:
+
+- Interpreter's two full user-prompt byte oracles are restored with an explicit
+  synthetic roster/metric; original expected text is byte-identical. The retired
+  implicit-science system prompt is not revived.
+- Trial feedback's pre-check-verdicts eight-case full JSON oracle is restored
+  with only explicit synthetic identifiers substituted. Combined prompt and
+  feedback cohorts pass, including mutations of architecture text and feedback
+  mode.
+- Naming inverse parsing, both name shapes, renamed accessor agreement,
+  foreign-prefix/suffix/width refusal and custom whitespace/wildcard validators
+  are exercised. Replacing the inverse with None and removing the actual
+  Pydantic custom validator both fail. Cleanup/root/naming cohort: 20 passed.
+- Exp `test_child_inference_deliverable_boundary.py` runs a genuine CPU Python
+  child from an unrelated cwd with explicit manifest/scope and no PYTHONPATH.
+  It checks the filename and all 2,000 prediction/target values in both channels.
+  Re-signing a wrong selected segment still produces an artifact but fails its
+  expected values. Thus the child boundary is not replaced by in-process main().
+- Exp `test_historical_health_composition_parity.py` retains the distinct HC1
+  and pre-C5 historical captures, without changing current campaign treatment.
+  HC1 checks the full resolved body; pre-C5 preserves the original executable
+  field projection. Its old reason-hash metadata was not an asserted oracle;
+  no new undocumented hash rule is invented. Historical short-circuit mutations
+  fail both witnesses.
+
+The integrated 48-module modified cohort passes 817 tests; the subsequent null
+edge has its separate 34-test adjacent and independent 13-test replay. Full
+repository collection had zero errors (12,121 tests before the two null cases).
+Ruff and format pass for the full checkout. Exp's migration/child/snapshot cohort
+passes 40 tests on its own frozen installed pin; `8229dff` commits that final
+external coverage group after `b874072`. No raw data or run outputs are tracked.
+
+Independent reviewers covered task ownership/deletion evidence, selected
+high-risk runtime/scoring/Health/resume paths, and packaging/docs/environment
+entrypoints. Their concrete findings and rechecks are recorded above; they did
+not claim to read every line of all accumulated commits. Known follow-ups
+#423/#424 and exp #30/#31 remain explicit limitations, not newly hidden defaults
+or a claim of full release readiness. The current PR remains bounded to the
+accumulated migration, its reproduced failures and #425's necessary direct fix.
+Next: commit the candidate, fetch/check master, run its complete canonical CI,
+and report the exact verdict before merge. These focused results alone are not
+merge approval.

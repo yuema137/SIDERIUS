@@ -20,7 +20,8 @@
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone git@github.com:Galileo-Sandbox/SIDERIUS.git && cd SIDERIUS
-uv sync && source .venv/bin/activate
+uv sync --group dev --frozen
+source .venv/bin/activate
 ```
 
 > Always use the project virtualenv (`.venv/bin/python`). Never the system
@@ -50,20 +51,17 @@ not this page, owns the deeper answer.
 
 ## Machine-local configuration
 
-Two config files are gitignored because they hold paths specific to your machine.
-Copy the templates and edit them:
+Declare the physical dataset root with `--data_dir` and the run-output root
+with `--workspace`. Both are caller-owned locations outside the checkout;
+the framework does not recover them from a task-specific machine config.
+Choose the task with `--task_composition`. See [Your first run](first-run.md)
+for a complete Quickstart command.
+
+The optional dashboard has its own gitignored path configuration:
 
 ```bash
-cp tidmad_data_config.example.yaml tidmad_data_config.yaml
 cp dashboard_config.example.yaml   dashboard_config.yaml
 ```
-
-`tidmad_data_config.yaml` holds two paths:
-
-| key | meaning |
-|---|---|
-| `tidmad_data_dir` | where raw TIDMAD `.h5` files live |
-| `siderius_data_dir` | where run outputs are written |
 
 Task-specific scoring references, including TIDMAD anchor maps, belong to the external task package.
 
@@ -96,13 +94,15 @@ checkout is sound.
 
 This is config-only — no code changes:
 
-1. `uv sync`
-2. set the two paths in `tidmad_data_config.yaml` and stage the data there
-3. put your API keys in `.env`
+1. In this exact checkout, run `uv sync --group dev --frozen`.
+2. Stage the task's inputs outside the checkout and pass their location via
+   `--data_dir`; select a persistent external `--workspace`.
+3. Supply the machine's API credentials without committing them.
+4. Select the task composition and budgets explicitly for that experiment.
 
-The GPU is detected at runtime and the VRAM budget scales to it, so a different
-card needs no configuration. On a multi-GPU node, select one externally with
-`CUDA_VISIBLE_DEVICES`.
+The GPU is detected at runtime; verify that the chosen experiment budgets fit
+the new device rather than assuming a hardware move preserves its operating
+envelope. On a multi-GPU node, select one externally with `CUDA_VISIBLE_DEVICES`.
 
 Optionally, per-server scoring wall-time calibration lives in
 `core/server_configs/{hostname}.py`. An unknown host falls back to a default with

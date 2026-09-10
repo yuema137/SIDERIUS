@@ -35,6 +35,7 @@ import h5py
 import numpy as np
 import pytest
 
+from execute_tools.data_paths import bind_physical_data_root
 from execute_tools.dataset_config import (
     bind_dataset_profile,
     resolve_dataset_profile,
@@ -208,6 +209,20 @@ def synthetic_run_authorities(synthetic_task_config):
     metric = accuracy_like_metric()
     with bind_run_metric(metric):
         yield metric
+
+
+@pytest.fixture(scope="module")
+def synthetic_physical_data_root(tmp_path_factory):
+    """Bind an empty, caller-owned data root for executor plumbing tests.
+
+    The directory is intentionally empty: tests using this fixture exercise
+    command construction, persistence, or a stub executor and must not read a
+    scientific dataset.  A test that needs bytes must create its own declared
+    fixture and bind the corresponding task data-path implementation instead.
+    """
+    root = tmp_path_factory.mktemp("explicit_physical_data_root")
+    with bind_physical_data_root(str(root)):
+        yield root
 
 
 @pytest.fixture(autouse=True, scope="session")

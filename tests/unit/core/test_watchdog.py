@@ -186,6 +186,7 @@ class TestDeadlineFormula:
         assert deadline == pytest.approx(120.0)  # near-zero estimate floored (§4)
 
 
+@pytest.mark.usefixtures("synthetic_run_authorities", "synthetic_physical_data_root")
 class TestExecutorKillHandling:
     def test_training_kill_cleans_partials_and_reports(self, tmp_path, monkeypatch):
         sandbox = TidmadSandbox(run_name="rt4", workspace=str(tmp_path))

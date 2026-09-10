@@ -18,11 +18,7 @@ HIGHER_ORDER = MetricOrder(shipped_spec())
 LOWER_ORDER = MetricOrder(direction_only_spec())
 
 
-BLOCKING_IDS = (
-    "output_diversity_blocking",
-    "output_std_blocking",
-    "amplitude_collapse_blocking",
-)
+BLOCKING_IDS = frozenset({"synthetic_stability_blocking"})
 
 
 def _gates(*, passed: bool) -> list[dict]:
@@ -69,14 +65,23 @@ def _plan() -> ExperimentPlan:
 
 def test_valid_lower_score_beats_collapsed_higher_score() -> None:
     winner = _best_trial_winner(
-        [_trial("collapsed", 9.0, healthy=False), _trial("healthy", -0.5)], order=HIGHER_ORDER
+        [_trial("collapsed", 9.0, healthy=False), _trial("healthy", -0.5)],
+        order=HIGHER_ORDER,
+        required_gate_ids=BLOCKING_IDS,
     )
     assert winner is not None
     assert winner["exp_id"] == "healthy"
 
 
 def test_no_valid_trial_returns_none() -> None:
-    assert _best_trial_winner([_trial("collapsed", 9.0, healthy=False)], order=HIGHER_ORDER) is None
+    assert (
+        _best_trial_winner(
+            [_trial("collapsed", 9.0, healthy=False)],
+            order=HIGHER_ORDER,
+            required_gate_ids=BLOCKING_IDS,
+        )
+        is None
+    )
 
 
 def test_trial_winner_uses_the_run_scoped_health_roster() -> None:
@@ -110,7 +115,7 @@ def _skip(records, *, threshold, gates_enabled=True, order=HIGHER_ORDER) -> bool
     never open a gate" an assertion rather than an assumption.
     """
     return _should_skip_formal(
-        _best_trial_winner(records, order=order),
+        _best_trial_winner(records, order=order, required_gate_ids=BLOCKING_IDS),
         threshold=threshold,
         gates_enabled=gates_enabled,
         order=order,
@@ -120,7 +125,9 @@ def _skip(records, *, threshold, gates_enabled=True, order=HIGHER_ORDER) -> bool
 def _bypass(records, *, threshold, order=HIGHER_ORDER) -> bool:
     """Records → winner → gate. See :func:`_skip`."""
     return _should_bypass_formal_time_budget(
-        _best_trial_winner(records, order=order), threshold=threshold, order=order
+        _best_trial_winner(records, order=order, required_gate_ids=BLOCKING_IDS),
+        threshold=threshold,
+        order=order,
     )
 
 
@@ -171,7 +178,7 @@ def test_failed_and_nontrial_records_are_excluded() -> None:
         _trial("failed", 5.0, status="error"),
         _trial("formal", 4.0, is_trial=False),
     ]
-    assert _best_trial_winner(records, order=HIGHER_ORDER) is None
+    assert _best_trial_winner(records, order=HIGHER_ORDER, required_gate_ids=BLOCKING_IDS) is None
 
 
 def test_forced_formal_inherits_best_valid_trial() -> None:
@@ -186,7 +193,9 @@ def test_forced_formal_inherits_best_valid_trial() -> None:
         # FU-D-6: the winner is resolved once and supplied, exactly as the
         # tuner does — the collapsed 9.0 is still excluded by the real
         # resolver, which is the defect this test protects.
-        trial_winner=_best_trial_winner(history, order=HIGHER_ORDER),
+        trial_winner=_best_trial_winner(
+            history, order=HIGHER_ORDER, required_gate_ids=BLOCKING_IDS
+        ),
     )
     assert plan.is_trial is False
     assert plan.model_cfg == {"depth": 2}
@@ -204,7 +213,9 @@ def test_forced_formal_with_no_valid_trial_preserves_planner_config() -> None:
         force_formal_round=True,
         formal_round_strategy="inherit_best_trial",
         memory_history=history,
-        trial_winner=_best_trial_winner(history, order=HIGHER_ORDER),
+        trial_winner=_best_trial_winner(
+            history, order=HIGHER_ORDER, required_gate_ids=BLOCKING_IDS
+        ),
     )
     assert result.is_trial is False
     assert result.model_cfg == original_model_cfg

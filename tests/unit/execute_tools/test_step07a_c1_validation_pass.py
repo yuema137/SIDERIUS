@@ -19,9 +19,8 @@ Families, each naming the defect only it catches:
       dataset is released;
   (k) STATE census before/after each pass; objective-state mutation →
       `ObjectiveStateMutationError`; mode restore under exception;
-  (l) exact validation-scope MATERIALIZATION (missing file / index out of
-      range / zero rows / disk changed mid-run) — fail closed BEFORE epoch 0,
-      while the TRAINING path keeps its legacy skip;
+  (l) task-owned exact-materialization refusal propagates on the first or a
+      later validation pass, with no successful model/results persisted;
   (m) comparability stamping through the trainer for `reduction="sum"`.
 """
 
@@ -29,6 +28,7 @@ from __future__ import annotations
 
 import contextlib
 import gc
+import hashlib
 import json
 import os
 import random
@@ -42,10 +42,8 @@ from torch.utils.data import DataLoader
 
 import execute_tools.train_engine_sandbox as tes
 from core.runtime_control.session import RuntimeVerificationSession
-from execute_tools.dataset_config import (
-    bind_dataset_profile,
-    tidmad_topology,
-)
+from execute_tools.dataset_config import bind_dataset_profile
+from execute_tools.task_data_path import EvalMaterializationParams, bind_task_data_path
 from execute_tools.training_history import (
     COMPARABILITY_REASON_SUM,
     LEGACY_TRAINING_RESULT_KEYS,
@@ -55,6 +53,7 @@ from execute_tools.training_history import (
 from ml_models.loss_models_sandbox import get_criterion
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, WaveNetConfig
 from ml_models.models_sandbox import MODEL_REGISTRY
+from tests.helpers.synthetic_training_data_path import TwoFamilyDataPath
 from tests.helpers.two_family_profile import TwoFamilyFixture, write_two_family_fixture
 
 _REAL_WAVENET = MODEL_REGISTRY["wavenet"]  # bound at import: the fixtures below re-register the key
@@ -110,7 +109,8 @@ def _run(
     """One in-process streaming run on the fixture; fixed seeds by default."""
     if seed:
         _seed_everything()
-    with bind_dataset_profile(fx.profile):
+    data_path = TwoFamilyDataPath(fx)
+    with bind_dataset_profile(fx.profile), bind_task_data_path(data_path):
         summary = tes.run_experiment_streaming(
             _tiny_model_cfg(fx.seg_size),
             TrainConfig(
@@ -124,7 +124,7 @@ def _run(
             train_base_seed=123,
             profile=fx.profile,
             runtime_session=runtime_session,
-            eval_sample_set=eval_sample_set,
+            **data_path.scope_kwargs(sample_set or fx.full_sample_set(), eval_sample_set),
         )
     assert summary is not None
     return summary
@@ -268,15 +268,11 @@ class TestComparabilityUnequalLastBatch:
         model.load_state_dict(_saved_state(tmp_path, "cmp"))
         model.eval()
         criterion = get_criterion(LossConfig(), None)
-        with bind_dataset_profile(fx.profile):
-            ds = tes.TIDMADEpochDataset(
-                fx.data_dir,
-                eval_set,
-                fx.seg_size,
-                train_portion=None,
-                profile=fx.profile,
-                file_family="validation",
-            )
+        data_path = TwoFamilyDataPath(fx)
+        ds = data_path.validation_dataset(
+            data_path.scope(eval_set, family="validation"),
+            EvalMaterializationParams(data_dir=fx.data_dir),
+        )
         per_sample = []
         with torch.no_grad():
             for x, y in DataLoader(ds, batch_size=1, shuffle=False):
@@ -323,10 +319,17 @@ class TestEvalSampleSetArg:
     def test_main_forwards_the_flag_to_the_streaming_engine(
         self, tmp_path, monkeypatch, two_family
     ):
-        """Reachability: the argv value must arrive as `eval_sample_set=` on
-        `run_experiment_streaming`; a `main()` that parsed but dropped it
-        would leave the design's transport dead at the child."""
+        """The child must deserialize and forward the explicit evaluation scope.
+
+        The obsolete sample-set-only path is intentionally no longer runnable;
+        the same transport failure class now lives at the opaque scope boundary.
+        """
+        import workflows.task_composition as composition
+
         seen: dict = {}
+        data_path = TwoFamilyDataPath(two_family)
+        scope_args = data_path.scope_kwargs({"0": [0]}, {"1": [0, 1]})
+        monkeypatch.setattr(composition, "resolve_child_task_data_path", lambda *a, **k: data_path)
 
         def fake_stream(*args, **kwargs):
             seen.update(kwargs)
@@ -341,7 +344,6 @@ class TestEvalSampleSetArg:
         )
         (cfg_dir / "l.json").write_text(json.dumps(LossConfig().model_dump()))
         (cfg_dir / "ss.json").write_text(json.dumps({"0": [0]}))
-        (cfg_dir / "ess.json").write_text(json.dumps({"1": [0, 1]}))
         argv = [
             "prog",
             "--model_cfg",
@@ -358,13 +360,30 @@ class TestEvalSampleSetArg:
             "reach",
             "--sample_set_json",
             str(cfg_dir / "ss.json"),
-            "--eval_sample_set_json",
-            str(cfg_dir / "ess.json"),
+            "--task_data_path_id",
+            data_path.task_data_path_id,
+            "--validation_requested_rows",
+            "4",
         ]
+        for name in ("task_scope", "task_eval_scope"):
+            payload = data_path.serialize_scope(scope_args[name])
+            path = cfg_dir / f"{name}.json"
+            path.write_text(payload)
+            argv.extend(
+                [
+                    f"--{name}_ref",
+                    str(path),
+                    f"--{name}_digest",
+                    hashlib.sha256(payload.encode()).hexdigest(),
+                ]
+            )
         monkeypatch.setattr(sys, "argv", argv)
         with bind_dataset_profile(two_family.profile):
             tes.main()
-        assert seen["eval_sample_set"] == {"1": [0, 1]}
+        assert seen["task_eval_scope"] == scope_args["task_eval_scope"]
+        assert seen["task_scope"] == scope_args["task_scope"]
+        assert seen["validation_requested_rows"] == 4
+        assert seen["eval_sample_set"] is None
         assert seen["sample_set"] == {"0": [0]}
 
 
@@ -378,12 +397,10 @@ class TestLegacySingleFile:
         self, two_family, tmp_path
     ):
         with bind_dataset_profile(two_family.profile):
-            ds = tes.TIDMADDataset(
-                two_family.data_dir,
-                [tidmad_topology(two_family.profile).dataset.training_file_name(0)],
-                two_family.seg_size,
-                sample_size=1,  # the fixture file holds 8 × seg_size samples
-                profile=two_family.profile,
+            data_path = TwoFamilyDataPath(two_family)
+            ds = data_path.validation_dataset(
+                data_path.scope({"0": list(range(two_family.segments_per_file))}),
+                EvalMaterializationParams(data_dir=two_family.data_dir),
             )
             loader = DataLoader(ds, batch_size=2, shuffle=True, drop_last=True)
             _seed_everything()
@@ -497,21 +514,23 @@ class TestTransientValidationDataset:
     ):
         alive_training: weakref.WeakSet = weakref.WeakSet()
         events: list[str] = []
-        orig_init = tes.TIDMADEpochDataset.__init__
+        train = TwoFamilyDataPath.training_dataset
+        validate = TwoFamilyDataPath.validation_dataset
 
-        def recording_init(self, *args, **kwargs):
-            family = kwargs.get("file_family", "training")
-            if family == "validation":
-                gc.collect()
-                assert len(alive_training) == 0, (
-                    "validation dataset built beside a live training dataset"
-                )
-            orig_init(self, *args, **kwargs)
-            if family == "training":
-                alive_training.add(self)
-            events.append(family)
+        def training(self, *args):
+            dataset = train(self, *args)
+            alive_training.add(dataset)
+            events.append("training")
+            return dataset
 
-        monkeypatch.setattr(tes.TIDMADEpochDataset, "__init__", recording_init)
+        def validation(self, *args):
+            gc.collect()
+            assert len(alive_training) == 0, "validation dataset beside live training dataset"
+            events.append("validation")
+            return validate(self, *args)
+
+        monkeypatch.setattr(TwoFamilyDataPath, "training_dataset", training)
+        monkeypatch.setattr(TwoFamilyDataPath, "validation_dataset", validation)
         _run(two_family, tmp_path, name="mem", eval_sample_set=two_family.full_sample_set())
         assert events == ["training", "validation"] * 3
 
@@ -636,72 +655,45 @@ class TestStateCensus:
 
 
 # ---------------------------------------------------------------------------
-# (l) exact validation-scope materialization — fail closed BEFORE epoch 0
+# (l) task-owned materialization failures cannot become successful training
 # ---------------------------------------------------------------------------
 
 
 class TestExactMaterialization:
-    def _assert_failed_before_epoch_0(self, tmp_path, name: str, monkeypatch) -> None:
-        # No training dataset was ever built, no optimizer step ran, no results/model exist.
-        assert not os.path.exists(
-            os.path.join(str(tmp_path / name / "m"), f"model_wavenet_{name}_agent.pth")
-        )
-
-    def test_a_missing_validation_file_fails_closed_before_epoch_0_while_training_still_skips(
-        self, two_family, tmp_path, monkeypatch
+    @pytest.mark.parametrize(
+        "successful_passes,reason",
+        [
+            (0, "task cannot materialize the declared scope"),
+            (1, "data changed between epochs"),
+        ],
+    )
+    def test_task_refusal_propagates_without_success_artifacts(
+        self, two_family, tmp_path, monkeypatch, successful_passes, reason
     ):
-        constructions = {"n": 0}
-        orig_init = tes.TIDMADEpochDataset.__init__
+        """The task validates its own files; the engine must not swallow its refusal.
 
-        def counting(self, *a, **k):
-            constructions["n"] += 1
-            orig_init(self, *a, **k)
+        Old filesystem/topology checks belonged to the removed scientific data
+        adapter. At the generic boundary those causes are the same typed
+        refusal; the distinct engine states are before any validation result
+        and after a real successful pass. Both must fail without artifacts.
+        """
+        original = TwoFamilyDataPath.validation_dataset
+        calls = []
+        failure = tes.ValidationScopeError(reason)
 
-        monkeypatch.setattr(tes.TIDMADEpochDataset, "__init__", counting)
-        os.remove(two_family.validation_path(2))  # 3 files requested, 2 materializable
-        with pytest.raises(tes.ValidationScopeError, match="does not exist"):
-            _run(two_family, tmp_path, name="miss", eval_sample_set=two_family.full_sample_set())
-        assert constructions["n"] == 0  # pre-flight: no epoch dataset was built at all
-        self._assert_failed_before_epoch_0(tmp_path, "miss", monkeypatch)
+        def refusing(self, scope, params):
+            calls.append(scope)
+            if len(calls) > successful_passes:
+                raise failure
+            return original(self, scope, params)
 
-        # Side by side: the TRAINING path keeps its legacy skip for a missing TRAINING file.
-        os.remove(two_family.training_path(2))
-        summary = _run(two_family, tmp_path, name="trainskip", eval_sample_set=None)
-        assert len(summary["loss_history"]) == 3  # trained on files 0,1 only; no error
-
-    def test_an_index_beyond_the_file_fails_closed_before_epoch_0(self, two_family, tmp_path):
-        bad = two_family.full_sample_set()
-        bad["1"] = [0, 1, 2, 3, 4]  # the file holds 4 PSD segments (0..3)
-        with pytest.raises(tes.ValidationScopeError, match="holds only 4"):
-            _run(two_family, tmp_path, name="oor", eval_sample_set=bad)
-
-    def test_a_zero_row_scope_fails_closed_never_nan(self, two_family, tmp_path):
-        with pytest.raises(tes.ValidationScopeError, match="zero ML rows"):
-            _run(two_family, tmp_path, name="zero", eval_sample_set={"0": []})
-
-    def test_a_scope_outside_the_declared_topology_fails_at_pre_flight(self, two_family, tmp_path):
-        with pytest.raises(tes.ValidationScopeError, match="does not exist"):
-            _run(two_family, tmp_path, name="topo", eval_sample_set={"7": [0]})  # num_files == 3
-
-    def test_the_disk_changing_mid_run_is_caught_by_the_per_epoch_check(
-        self, two_family, tmp_path, monkeypatch
-    ):
-        """Pre-flight passed; a validation file disappears after epoch 0's pass
-        → epoch 1's pass materializes fewer rows than requested → fail closed
-        (never a shrunk R3)."""
-        real_pass = tes._validation_pass
-        calls = {"n": 0}
-
-        def vanishing(**kwargs):
-            out = real_pass(**kwargs)
-            calls["n"] += 1
-            if calls["n"] == 1:
-                os.remove(two_family.validation_path(1))
-            return out
-
-        monkeypatch.setattr(tes, "_validation_pass", vanishing)
-        with pytest.raises(tes.ValidationScopeError, match="materialized 16 ML rows"):
-            _run(two_family, tmp_path, name="vanish", eval_sample_set=two_family.full_sample_set())
+        monkeypatch.setattr(TwoFamilyDataPath, "validation_dataset", refusing)
+        with pytest.raises(tes.ValidationScopeError) as caught:
+            _run(two_family, tmp_path, name="refused", eval_sample_set=two_family.full_sample_set())
+        assert caught.value is failure
+        assert len(calls) == successful_passes + 1
+        assert list((tmp_path / "refused" / "m").iterdir()) == []
+        assert list((tmp_path / "refused" / "r").iterdir()) == []
 
 
 # ---------------------------------------------------------------------------

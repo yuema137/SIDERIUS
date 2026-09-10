@@ -12,8 +12,10 @@ from agent.prompt_templates.interpretation.rendering import (
 )
 from agent.schemas.interpretation import InterpretationInput
 from execute_tools.metric_order import MetricOrder
-from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
-from tests.helpers.metric_fixtures import shipped_spec
+from nodes.result_interpretation_agent import (
+    tuning_output_to_model_run_summary as _build_summary,
+)
+from tests.helpers.metric_fixtures import accuracy_like_spec
 from tests.unit.agent.result_interpretation_agent.test_round_health_summary import (
     _gate_result,
     _output,
@@ -23,9 +25,16 @@ from tests.unit.agent.result_interpretation_agent.test_round_health_summary impo
 #: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
 #: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
 #: this file is unchanged; the direction is now stated instead of assumed.
-_STEP09A_ORDER = MetricOrder(shipped_spec())
+_STEP09A_ORDER = MetricOrder(accuracy_like_spec())
+_REQUIRED_GATES = frozenset({"synthetic_stability_blocking"})
 
-SIG = "output_diversity_blocking:n_unique_int8_values=1"
+
+def tuning_output_to_model_run_summary(output, *, order):
+    """Bind this module's explicit synthetic scientific roster."""
+    return _build_summary(output, order=order, required_gate_ids=_REQUIRED_GATES)
+
+
+SIG = "synthetic_stability_blocking:dispersion=1"
 
 
 def _collapse_output(model_type="wavenet"):
@@ -36,7 +45,7 @@ def _collapse_output(model_type="wavenet"):
             status="failed_mode_collapse",
             denoising_score=None,
             gate_action="invalidate_round",
-            failure_reason="[output_diversity_blocking] unique=1",
+            failure_reason="[synthetic_stability_blocking] dispersion=1",
             health_gate_results=[_gate_result()],
         ),
         _record(f"{model_type}_iter_001_002", model_type=model_type, denoising_score=1.25),
@@ -79,7 +88,7 @@ class TestTrajectoryLabels:
                     status="failed_mode_collapse",
                     denoising_score=None,
                     gate_action="invalidate_round",
-                    failure_reason="[output_diversity_blocking] unique=1",
+                    failure_reason="[synthetic_stability_blocking] dispersion=1",
                 )
             ),
             order=_STEP09A_ORDER,
@@ -87,7 +96,7 @@ class TestTrajectoryLabels:
         prompt = _render(summary)
         assert (
             "Round 1: score=invalidated "
-            "[GATE invalidate_round — [output_diversity_blocking] unique=1]"
+            "[GATE invalidate_round — [synthetic_stability_blocking] dispersion=1]"
         ) in prompt
 
 
@@ -141,8 +150,8 @@ class TestHealthGateSummarySection:
             _collapse_output("wavenet"), order=_STEP09A_ORDER
         )
         punet_gate = _gate_result(
-            name="amplitude_collapse_blocking",
-            metric="dominant_mode_fraction",
+            name="synthetic_range_blocking",
+            metric="range_fraction",
             unit="fraction",
             worst=0.97,
         )
@@ -163,8 +172,8 @@ class TestHealthGateSummarySection:
         wavenet_prompt = _render(wavenet)
         punet_prompt = _render(punet)
         assert SIG in wavenet_prompt and SIG not in punet_prompt
-        assert "amplitude_collapse_blocking" in punet_prompt
-        assert "amplitude_collapse_blocking" not in wavenet_prompt
+        assert "synthetic_range_blocking" in punet_prompt
+        assert "synthetic_range_blocking" not in wavenet_prompt
 
 
 class TestSystemPromptInstructions:

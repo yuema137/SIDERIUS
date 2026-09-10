@@ -54,7 +54,7 @@ TRAINER = REPO_ROOT / "execute_tools" / "train_engine_sandbox.py"
 
 
 class TestParentAndChildDeriveTheSamePaths:
-    def test_the_parent_uses_the_authority(self, tmp_path):
+    def test_the_parent_uses_the_authority(self, tmp_path, synthetic_physical_data_root):
         sb = TidmadSandbox(run_name="r", workspace=str(tmp_path))
         assert sb.dirs["models"] == sandbox_models_dir(sb.base_dir)
         assert sb.dirs["records"] == sandbox_records_dir(sb.base_dir)

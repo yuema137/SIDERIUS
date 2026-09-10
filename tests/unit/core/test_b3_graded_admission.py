@@ -211,7 +211,7 @@ class TestThresholdParityAcrossTheThreeRules:
 
 
 class TestTheThresholdReachesTheProductionBudget:
-    """§5.1 reachability — the wiring, not just the rule.
+    """§5.1 threshold transport, including the retained low-level probe helper.
 
     Added after mutations Q1/Q2/Q3 all SURVIVED. Every earlier test in
     this module asserted the *policy* and the *parity*; none drove the
@@ -219,8 +219,11 @@ class TestTheThresholdReachesTheProductionBudget:
     changed nothing visible. That is the §0.1 defect reproduced inside my
     own test suite: a correct rule that nobody calls.
 
-    These capture the `RuntimeBudget` the production helper actually
-    builds.
+    The direct helper tests capture its `RuntimeBudget`; they do not claim
+    the tuner still calls REQUEST_PROBE. Since independent wall-time source
+    selection, the live VRAM route is the isolated preflight adapter. The
+    last test checks that route's budget source, and the parity family above
+    proves the worker applies the physical veto as well as the operator cap.
     """
 
     @staticmethod
@@ -304,31 +307,29 @@ class TestTheThresholdReachesTheProductionBudget:
         assert self._drive(monkeypatch, 12.0)["budget"].time_seconds == pytest.approx(3600.0)
 
     def test_the_production_call_site_passes_the_EFFECTIVE_threshold(self):
-        """The one thing `_drive` cannot cover: which value `run()` chooses.
+        """Q2: the selected role's budget must reach the live adapter.
 
-        Added after mutations Q2 and Q3 survived. `_drive` supplies
-        `vram_threshold_gb` itself, so it proves the helper uses whatever
-        it is given — not that the orchestrator gives it the right thing.
-        The call site lives inside the 2,400-line `run()` and cannot be
-        driven in isolation, so this is asserted on source, as B1b's clamp
-        guard is.
-
-        Two distinct regressions are covered:
-          Q2 the call site stops passing a threshold at all;
-          Q3 it passes the RAW operator budget instead of the effective
-             one, which differs exactly in the PHYSICAL VETO regime.
+        The adapter freezes BOTH the operator budget and physical snapshot;
+        IsolatedProbeSpec.effective_cap_gb owns their minimum (Q3), covered
+        by the physical-veto counterexample above. Restoring a second probe
+        after forecast admission would violate the selected-source contract.
         """
-        import inspect
-
-        import nodes.ml_hyperparameter_tune_agent as tuner
+        import ast
 
         src = tuner_node_source()
-        assert 'vram_threshold_gb=(resource_check or {}).get("limit_gb")' in src, (
-            "the probe call site no longer passes the effective admission "
-            "threshold; the S3 rule is armed by this and nothing else"
-        )
-        assert 'vram_threshold_gb=(resource_check or {}).get("vram_budget_gb")' not in src, (
-            "the call site passes the RAW operator budget. That is not the "
-            "effective threshold: under PHYSICAL VETO the operator budget "
-            "exceeds the card and min(physical, budget) is what admission uses"
+        tree = ast.parse(src)
+        calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "run_production_preflight"
+        ]
+        assert calls, "the tuner no longer reaches isolated VRAM preflight"
+        for call in calls:
+            keywords = {kw.arg: ast.unparse(kw.value) for kw in call.keywords}
+            assert keywords.get("vram_budget_gb") == "chosen_vram_budget"
+            assert keywords.get("hardware_context") == "hardware_context"
+        assert (
+            "chosen_vram_budget = trial_vram_budget if plan.is_trial else formal_vram_budget" in src
         )

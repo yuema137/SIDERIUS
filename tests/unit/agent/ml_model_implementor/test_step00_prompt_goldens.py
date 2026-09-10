@@ -24,8 +24,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
-from agent.schemas.implementor import ImplementorInput
+from agent.schemas.implementor import ImplementorInput, ImplementorTaskBlocks
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.task_config import ForwardContract
 from nodes.ml_model_implementor.ml_model_implementor import (
@@ -80,19 +79,21 @@ def fixture_input(**overrides) -> ImplementorInput:
     """All-optional-sections-ON input: one golden pins the full section
     order (Expert < Human < Reference < PreviousFailure).
 
-    Step 12 / PR-12a C7-4: the PB goldens pin the LEGACY un-composed prompt
-    surface, so this fixture resolves the bounded Regime-A adapter exactly as
-    the composition root does for a run with no manifest. The goldens are
-    therefore unchanged — which is the property C7-4 had to preserve.
+    Task prose is explicitly test-owned. The old no-path task-block loader
+    correctly supplies no science after separation; it cannot provide this
+    fixture's role specialism. Byte oracles continue to protect section order,
+    code constraints and repair history, not an ambient scientific default.
     """
     base = dict(
-        implementor_blocks=load_implementor_task_blocks(),
+        implementor_blocks=ImplementorTaskBlocks(
+            science_domain="synthetic sequence reconstruction"
+        ),
         model_name="step00_fixture_model",
         model_description="Fixture description: a gated residual 1-D denoiser.",
         mathematical_definition="y = x + f(x) with f a dilated conv stack (fixture math).",
         baseline_config={
             "model_config": {"channels": 64, "depth": 2},
-            "train_config": {"batch_size": 1, "segmentation_size": 40000},
+            "train_config": {"batch_size": 1, "segmentation_size": 64},
             "loss_config": {"loss_type": "focal"},
         },
         task_description="Step-00 fixture task: denoise a synthetic 1-D int8 series.",

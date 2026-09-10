@@ -40,8 +40,10 @@ import execute_tools.train_engine_sandbox as tes
 from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from execute_tools.dataset_config import bind_dataset_profile
+from execute_tools.task_data_path import bind_task_data_path
 from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY, LossConfig, TrainConfig
 from ml_models.models_sandbox import MODEL_REGISTRY
+from tests.helpers.synthetic_training_data_path import TwoFamilyDataPath
 from tests.helpers.two_family_profile import write_two_family_fixture
 
 MODEL_TYPE = "pr07c_sidecar_observer"
@@ -136,7 +138,8 @@ def observed_run(tmp_path):
         policy=RuntimeControlPolicy(verification=_FAST_VERIFICATION),
     )
     try:
-        with bind_dataset_profile(fx.profile):
+        data_path = TwoFamilyDataPath(fx)
+        with bind_dataset_profile(fx.profile), bind_task_data_path(data_path):
             summary = tes.run_experiment_streaming(
                 _ObserverConfig(segmentation_size=fx.seg_size),
                 TrainConfig(lr=1e-3, epochs=1, batch_size=1, optimizer_type="adam", device="cpu"),
@@ -151,7 +154,7 @@ def observed_run(tmp_path):
                 train_base_seed=123,
                 profile=fx.profile,
                 runtime_session=session,
-                eval_sample_set=fx.full_sample_set(),
+                **data_path.scope_kwargs(fx.full_sample_set(), fx.full_sample_set()),
             )
     finally:
         MODEL_REGISTRY.pop(MODEL_TYPE, None)

@@ -1,0 +1,13 @@
+health_gates:
+  - id: synthetic_stability_blocking
+    gate_role: blocking
+    after_round: every
+    short_circuit: true
+    checks:
+      - name: synthetic_stability_check
+        config: {}
+    on_pass:
+      action: continue
+    on_fail:
+      action: invalidate_round
+    reason: Synthetic fixture for generic candidate-eligibility tests.
