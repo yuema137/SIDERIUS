@@ -4,8 +4,10 @@
 **Purpose**: get from an intent to the 1–3 documents that let you work safely,
 without reading the 170,000-line design archive.
 
-**Reflects landed `master` at `23276743`.** Where a mechanism is in flight, the
-document says so and names the owner.
+The mechanism index was established at `23276743`. The
+[repository map](../repository-map.md) records the P0 source audit at `2091acdf`,
+including current ownership and remaining exceptions. Adding this navigation
+does not re-audit every linked mechanism document.
 
 ---
 
@@ -25,6 +27,7 @@ document says so and names the owner.
 | I want to… | read |
 |---|---|
 | understand what SIDERIUS is | [concepts/overview](../concepts/overview.md) |
+| locate current modules, entrypoints and the external consumer | [repository map](../repository-map.md) |
 | add or change a task's declarations | [reference/task-composition](../reference/task-composition.md) → [mechanisms/composition](mechanisms/composition.md) |
 | add a new evaluation metric | [mechanisms/metrics](mechanisms/metrics.md) → [mechanisms/plugins](mechanisms/plugins.md) |
 | add a health check | [mechanisms/health-gates](mechanisms/health-gates.md) → [mechanisms/plugins](mechanisms/plugins.md) |

@@ -40,10 +40,11 @@ surfacing recent papers as soft priors.
 
 ![What you declare versus what SIDERIUS provides](docs/assets/ownership-split.svg)
 
-Nothing about your task is hardcoded in framework source. A **task package** is
+A **task package** declares your task through
 one YAML manifest — thirteen possible sections, five required — plus whatever small
 amount of Python the framework cannot supply generically for your data. A package
-can live entirely outside this repository.
+can live entirely outside this repository. Remaining scientific compatibility
+helpers are listed in the [repository map](docs/repository-map.md#retained-and-mixed-material).
 
 → [What a task must provide](docs/concepts/task-package.md) ·
 [the full section table](docs/reference/task-composition.md)
@@ -68,22 +69,20 @@ collapse before it burns GPU-hours.
 
 ## What has actually been demonstrated
 
-SIDERIUS is contract-driven rather than modality-limited — nothing in its source
-branches on a task name. Three example tasks exist as evidence of tested breadth,
-**at deliberately different maturity**:
+Two synthetic packages ship as executable framework specifications:
 
-| example | shape | status |
-|---|---|---|
-| **TIDMAD** | 1-D scientific signal denoising (SQUID time series, axion dark-matter search) | ✅ runs the full agent loop end-to-end through the production chain |
-| **Oxford-IIIT Pet** | RGB image, 37-way breed classification | ✅ real data, training, inference and scoring through the **composed production chain** (single-round witness; `examples/oxford_iiit_pet/quickstart.sh`) |
-| **DAVIS 2017** | RGB spatiotemporal, 8→4 future-frame prediction | ✅ same, including a task-declared training objective overriding the planner |
+| package | contract coverage |
+|---|---|
+| [Quickstart](examples/quickstart/README.md) | caller-owned classification task, generated data and CPU lifecycle walkthrough |
+| [Synthetic masked regression](examples/synthetic_masked_regression/README.md) | continuous targets with validity masks, lower-is-better primary metric, secondary metric and task-owned Health |
 
-A fourth proof exists beyond the shipped examples: an external task package
-living entirely outside this repository ran the composed workflow with the
-production source byte-identical before and after. The remaining honest
-asymmetry is depth, and the docs state it where it matters: TIDMAD has run
-multi-iteration research chains; the contrast tasks have each executed one
-composed round, and health gates do not yet fire on the composed path.
+Real scientific packages, including TIDMAD, Oxford-IIIT Pet and DAVIS, now live
+in the external `siderius-exp` repository. Its retained run receipts describe
+their named revisions and workloads; they do not qualify today's checkout.
+The current tuner invokes the inference/scoring/Health phase for composed runs;
+which checks apply comes from task declarations and framework policy.
+See the [external-consumer map and evidence](docs/repository-map.md#external-consumer-and-evidence)
+for task locations, the inspected dependency pin and evidence limitations.
 
 → [Supported tasks and current maturity](docs/concepts/supported-tasks.md) —
 current state and target state in one table
@@ -93,14 +92,17 @@ current state and target state in one table
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone git@github.com:Galileo-Sandbox/SIDERIUS.git && cd SIDERIUS
-uv sync && source .venv/bin/activate
+uv sync --group dev --frozen
 
 cp dashboard_config.example.yaml   dashboard_config.yaml
 printf 'OPENAI_API_KEY=...\n' > .env
 
-python env_validation/test_agent_env.py     # environment + API reachability
-uv run pytest tests/unit/ -q                # no GPU, no API calls
+.venv/bin/python env_validation/test_agent_env.py  # optional; calls provider APIs
 ```
+
+Use this checkout's `.venv/bin/python`; do not reuse another checkout's venv
+or source through `PYTHONPATH`. The API diagnostic requires configured
+credentials. For a credential-free introduction, use the synthetic pack below.
 
 Then see what a real run would execute, without executing it:
 
@@ -168,23 +170,22 @@ Full map: [`docs/README.md`](docs/README.md). Glossary:
 
 ## Repository layout
 
+These are navigation groups; the physical root directories remain peers.
+The [repository map](docs/repository-map.md) lists every tracked root, source
+owners, launch paths, external data/workspaces and retained exceptions.
+
+```text
+SIDERIUS
+├── Start and operate: examples/, configs/, llm_configs/, sdsc_submission_scripts/, dashboard/
+├── Agents and composition: nodes/, agent/, workflows/
+├── Execution and extensions: core/, execute_tools/, ml_models/
+├── Development and validation: tests/, tools/, scripts/, env_validation/, .github/
+└── Documentation and retained material: docs/, advice/, reports/, reference_data/
 ```
-agent/          LLM transport (one gateway), schemas, typed protocols, atomic skills
-nodes/          the six workflow nodes, one directory each, each with its .md
-workflows/      deterministic graph traversals + task composition
-core/           sandbox executor, hardware context, resume, run invariants
-execute_tools/  training / inference / scoring subprocesses, data paths, metrics,
-                health checks
-ml_models/      built-in models + loss configs + plugin loader
-agent_generated/  LLM-written model and loss plugins (gitignored)
-configs/        task semantics and framework policy — see the configuration map
-examples/       the three example task packages
-sdsc_submission_scripts/  chain launchers (--mode lilab | sdsc)
-scripts/        standalone runners and baselines
-dashboard/      FastAPI + Plotly result browser
-docs/           documentation (see the map) + design history
-tests/          unit + integration tiers
-```
+
+`scripts/`, `execute_tools/` and `configs/` contain mixed material;
+`reference_data/` still has an executable reader. Generated libraries and
+runtime results belong to caller-owned storage, outside the source inventory.
 
 The major modules carry their own contract READMEs —
 [`workflows/`](workflows/README.md) · [`core/`](core/README.md) ·
@@ -212,14 +213,13 @@ Full standards: [`CLAUDE.md`](CLAUDE.md).
 
 ## Testing
 
-```bash
-uv run pytest tests/unit/ -q          # CI gate: mocked LLM, no GPU
-uv run pytest tests/integration/ -q   # full orchestration, predefined responses, ms
-```
-
-Real-API and real-training tiers are opt-in (`--real-api-call`,
-`--real-training`, `-m real_run`) and skip automatically without the required
-keys. They never run in CI.
+Use this checkout's `.venv/bin/python -m pytest` with the affected test files.
+Test ownership and bounded Gate requirements are defined in
+[`CLAUDE.md`](CLAUDE.md) and the [Gate standard](docs/gates/gate_testing_standard.md).
+Integration tests include pseudo and opt-in real execution; the whole directory
+is not a millisecond, credential-free smoke command. A tracked test is not
+evidence that it ran in CI. The [repository map](docs/repository-map.md#minimal-entry-checks)
+links the selected P0 checks and states what they establish.
 
 ## Contributing
 

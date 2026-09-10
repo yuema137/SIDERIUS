@@ -12,9 +12,45 @@
   not scientific defaults, benchmarks, or campaign templates.
 - During the active repository-separation work, after any conversation
   compaction, reread
-  `docs/design/framework_experiment_repository_separation.md` before taking
-  another task action. Keep that work ledger current with decisions, changed
-  ownership, validation evidence, and unresolved findings.
+  `docs/design/framework_experiment_repository_separation.md` for separation
+  history before taking another task action. Current P0 decisions, ownership,
+  validation and unresolved findings belong in the P0 work plan linked below;
+  do not maintain a second active P0 ledger in that historical document.
+
+## Planning documents
+
+- New planning efforts follow structured-coding v0.1.2's default:
+  `.structured-coding/plans/<effort>/`. Keep the overall plan, step/PR design
+  and any handoff together, with one authority per plan; do not put new plans
+  at the repository root or in `docs/plan/`.
+- **Local only (operator ruling, 2026-09-10):** `.structured-coding/` must
+  remain ignored and untracked. Never commit, push or force-add its contents.
+  This overrides upstream guidance suggesting plans be committed. Keep local
+  plans intact when removing them from the Git index. A fresh clone will not
+  contain them: obtain the applicable plan from the operator before resuming
+  its work, rather than inventing its scope or approval. Public user-facing
+  documentation still belongs in the tracked README/docs tree.
+- Current P0 scope and progress start at
+  the local `.structured-coding/plans/infra-exp-p0/overall.md` (not shipped).
+  Existing `docs/design/` records remain historical evidence, not the active
+  P0 ledger. After compaction during P0, reread the overview and its linked
+  work plan before continuing.
+- Markdown is authoritative; update any corresponding HTML rendering only
+  after the Markdown. This convention does not install hooks or authorize
+  later development or scientific experiments.
+- Every new or updated active step document (including a combined step/PR
+  design) has a same-directory Chinese reading mirror: `step-name_zh.md`
+  beside `step-name.md`. The English document remains the sole implementation
+  ground truth; the mirror is for operator review, not a second plan or ledger.
+  Update English first, then synchronize Chinese in the same change. Preserve
+  scope, decisions, checkboxes, acceptance, evidence, limitations and commands;
+  never introduce approval, requirements or completion claims in translation.
+- Use the [DongbeiGPT explanation approach](https://github.com/yuema137/DongbeiGPT)
+  for these explicitly requested mirrors: concrete actions, causal explanations
+  and restrained Dongbei rhythm, with exact technical identifiers retained.
+  Each mirror links its English source and records its source SHA-256 and sync
+  date. A mismatch means stale: consult English and resync before presenting it
+  as current. Existing archived plans need not be bulk-translated.
 
 ## Environment
 - **Every checkout owns one frozen virtualenv.** From the exact SIDERIUS
@@ -555,9 +591,9 @@ Orchestrator  (LLM-powered, goal-driven, selects skills autonomously)
   the long-term target.
 
 **Current naming convention**: `agent/skills/` holds atomic tools (training,
-inference, etc.) used internally by agents. This will be renamed to
-`agent/tools/` after the first demo, to reserve "skill" for the universal
-contract. See `docs/architecture.md` for the full plan.
+inference, etc.) used internally by agents. The earlier `agent/tools/` rename
+was a proposal, not a landed path or a current instruction. P0 preserves
+`agent/skills/`; see `docs/architecture.md` for the conceptual design.
 
 ## HealthGate System (Pluggable Health Checks)
 
@@ -673,9 +709,20 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   module.
 - Prioritize modern, PEP 8, and modular standards for SIDERIUS.
 
-## Current State (as of 2026-07-23)
+## Historical state records (original heading: Current State, 2026-07-23)
 
-*Ephemeral section — update as work progresses.*
+The dated entries below preserve incident evidence and decisions at their named
+revisions. Their `NEXT`, active-branch, pending-work, shipped-path and capability
+statements are historical, not current execution instructions. Preserve the
+recorded invariants and incident evidence; verify present capability from source
+and Git before acting on an old status. This bounded correction does not claim
+that every historical passage or subsystem description has been re-audited.
+
+Current P0 scope and progress: local `.structured-coding/plans/infra-exp-p0/overall.md`
+and its linked work plan. Current source/navigation audit:
+[repository map](docs/repository-map.md). In particular, real task packages now
+live in exp, and the current tuner reaches the composed Health phase; the old
+PR-12d zero-Health statement below records that earlier revision.
 
 - **STEP 12 / PR-12d — COMPLETE / MERGED (2026-08-24)**: PR #274, squash
   **`84d74280`**; exact-head CI SUCCESS (12,941 passed / 48 skipped / 0

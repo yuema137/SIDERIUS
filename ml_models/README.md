@@ -22,15 +22,39 @@ decide *which* model runs (the agents do) or *how* training executes
 | `models_format_sandbox.py` | the config schemas (`BaseConfig`, per-model configs, `LossConfig`, `TrainConfig`, `ExperimentConfig`) · `PLUGIN_CONFIG_REGISTRY` · `get_config_class` · `OutputSemantic` + the semantic/loss compatibility validators |
 | `plugin_loader.py` | `extend_registries` (scan the resolved plugin dirs) · `register_model_in_memory(plugin_path)` (single file) · `preload_global_models()` (startup absorption of the global library) · `get_output_type` |
 | `loss_models_sandbox.py` | `LOSS_REGISTRY` / `LOSS_CONFIG_REGISTRY` · `register_loss_in_memory` · `preload_global_losses` · built-ins `FocalLoss1D` / `FocalLoss1DCW` · `get_criterion`, `get_target_torch_dtype` |
-| `model_descriptions.py` | `get_model_description(model_type)` — resolves `description.md` from built-ins → legacy global → `${SIDERIUS_CHAIN_WORKSPACE}/plugins/*` (newest first); raises naming every searched path |
+| `model_descriptions.py` | `get_model_description(model_type, *, baseline_isolation=False)` — ordered description lookup described below; raises naming every searched path |
 | `{model}/description.md` | one prompt-facing description per built-in |
 
 ## Inputs
 
-Plugin directories via `SIDERIUS_PLUGIN_DIRS` / `SIDERIUS_LOSS_DIRS`
-(`os.pathsep`-separated). When set, **exactly those** dirs are scanned — no
-fallback; when unset, the legacy global `agent_generated/models` is the
-default.
+The generated-library location is resolved by
+[`core/generated_library.py`](../core/generated_library.py), at call time:
+
+- Supported workflow and node entrypoints call
+  `bind_generated_library_to_workspace(workspace)` before constructing consumers.
+  It selects `{workspace}/generated_library` and transports that selection through
+  `SIDERIUS_GENERATED_LIBRARY_DIR` and `SIDERIUS_CHAIN_WORKSPACE`.
+- An unbound low-level caller resolves `SIDERIUS_GENERATED_LIBRARY_DIR`, or
+  `~/.siderius/generated_library` when the override is empty/unset. A nonempty
+  relative override is refused; `~` is expanded. Setting an arbitrary library
+  override alone does not establish a workspace binding.
+- Workspace-bound readers exclude legacy checkout fallbacks. Unbound readers
+  may still read `agent_generated/models` or `agent_generated/losses` for
+  compatibility. Callers bypassing supported entrypoints must bind before
+  importing consumers if they need workspace isolation.
+
+Plugin directory selection has two different contracts (environment lists use
+`os.pathsep`; empty entries are filtered):
+
+| Loader | Actual resolution |
+| --- | --- |
+| `plugin_loader.py::_resolve_plugin_dirs` | Declared run model roots unioned with `SIDERIUS_PLUGIN_DIRS`; otherwise nonempty explicit env directories alone; otherwise generated-library models, plus legacy checkout models only when unbound |
+| `loss_plugin_loader.py::_resolve_loss_dirs` | `SIDERIUS_LOSS_DIRS` entries first, then generated-library losses; legacy checkout losses appended only when unbound. Explicit loss dirs do not remove the library |
+
+`get_model_description` searches built-ins → generated-library models → legacy
+checkout models (unbound only) → workspace `plugins/*` (newest registration
+first) → declared task-pack roots. `baseline_isolation=True` excludes the
+bundled description. An exhausted lookup reports the paths actually searched.
 
 ## Outputs
 
@@ -84,10 +108,13 @@ prompts.
 
 Registers loaded modules in `sys.modules` under `siderius_plugin_*` (so
 `inspect.getsource` works for prompt excerpts), rolled back on load failure.
-⚠ Reads — and the workflow *writes* — the checkout-level `agent_generated/`
-library and its capability index: runs on a shared checkout are not isolated
-from each other's generated candidates (recorded product gap; see
-[workspaces and resume](../docs/guides/workspaces-and-resume.md)).
+Promoted models, losses and `_capability_index.json` use the resolved generated
+library. Supported workspace-bound runs read and write their own library;
+production promotion does not write to checkout-level `agent_generated/`.
+Low-level unbound calls retain the home-library default and legacy read
+fallbacks described above. Resolution itself creates no directory; writers
+create storage when needed. See
+[workspaces and resume](../docs/guides/workspaces-and-resume.md).
 
 ## Failure modes
 
@@ -96,7 +123,7 @@ from each other's generated candidates (recorded product gap; see
 | plugin file missing a required `PLUGIN_*` symbol | the file is not a plugin — refused at load |
 | illegal `PLUGIN_OUTPUT_TYPE` | refused by name, never rewritten |
 | `UnknownOutputContractError` | no registry establishes an output contract for the model type |
-| `FileNotFoundError` from `get_model_description` | no `description.md` in any of the three search locations — the error lists them |
+| `FileNotFoundError` from `get_model_description` | no `description.md` in the applicable search locations — the error lists them |
 
 ## Files normally edited
 
