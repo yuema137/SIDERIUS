@@ -16,11 +16,13 @@ Scope and scientific invariants are unchanged; merge remains unauthorized.
 Implementation base: `docs/organizing-cleanup-plan` at
 `2091acdfcb24eb9c8d3953ee7ba1e3ba99926aa0` (recheck before execution).
 Execution contract: the section below in this same document.
-Lifecycle: IMPLEMENTING / C3 ENTRY CHECKS COMPLETE; TERMINAL VALIDATION/PUBLICATION NEXT.
+Lifecycle: C1/C2/C3 IMPLEMENTED AND REVIEWED; PR #426 PUBLISHED.
+Terminal CI verdict and final candidate SHA: PR #426 metadata (link below).
 Fresh implementation started 2026-09-10; the operator explicitly confirmed
 p0-docs-v2 publication authority in this session. Existing planning edits
 were preserved. C1/C2 are committed; C3 entry checks and local logic review
-are complete. Terminal candidate validation and PR publication remain.
+are complete. Local terminal checks passed and PR #426 is published;
+review readiness additionally requires the exact-candidate CI disposition.
 Binding scope: [P0 overview](overall.md), corrected by the operator 2026-09-10.
 This combines the step/PR design and live ledger; no later PR roadmap lives here.
 
@@ -267,7 +269,8 @@ that consumers are absent.
    evidence before editing; these checks cannot certify a changed lifecycle.
 8. **Boundary/review:**
    - [x] Review exact diff, exp impact and evidence limitations.
-   - [ ] Close P0 for review; do not advance into G0 or later development.
+   - [x] Close P0 implementation for review; final CI disposition is recorded
+     in PR #426 metadata. Do not advance into G0 or later development.
 
 ## Execution contract boundary
 
@@ -760,3 +763,53 @@ lifecycle. All 12 changed paths are Markdown. No physical root consolidation,
 new authority, experiment treatment, dependency or public path change occurred.
 C3 commit records the evidence in the existing step/mirror/overview/handoff;
 terminal checks and PR review state follow on the committed candidate.
+
+### Terminal local evidence and published review packet
+
+[PR #426](https://github.com/Galileo-Sandbox/SIDERIUS/pull/426) targets master
+from `docs/organizing-cleanup-plan`. C3 committed as `1d07826a`.
+At that clean committed candidate, the four-file docs/rule/hygiene/library
+command passed **40 tests in 2.68 seconds**, exit 0. Exact command:
+
+```bash
+env -u PYTHONPATH -u VIRTUAL_ENV CUDA_VISIBLE_DEVICES='' PYTHONDONTWRITEBYTECODE=1   timeout 60 .venv/bin/python -m pytest -p no:cacheprovider   tests/unit/docs/test_node_docs_contract.py   tests/unit/guardrails/test_gate_standard_contract.py   tests/unit/test_repo_hygiene.py   tests/unit/core/test_generated_library.py -q --tb=short
+```
+
+`timeout 60 .venv/bin/ruff check .`: PASS, exit 0.
+`timeout 60 .venv/bin/ruff format --check .`: PASS, exit 0, 1,187 files already
+formatted. Each completed in under one second. Local pyright: NOT RUN for the
+unsupported system Node; no Python source changed. Full local suite: NOT RUN.
+Selected local check execution remains below the 10-minute budget, including
+failed read diagnostics; compositions and launcher checks were not repeated.
+
+Final content review confirms 12 Markdown paths, all new map links/anchors,
+all 20 audited base roots, six public class/schema rows, preserved node CLI
+citations, identical English/Chinese command blocks and 28 checkbox states,
+matching mirror SHA and payload fingerprints, and clean whitespace. The final
+record update changes only the four effort documents. User documentation and
+all executable/test/config inputs remain byte-identical to `1d07826a`; evidence
+association to the final commit is subject to verifying that exact path diff.
+No new external task or package qualification is inferred.
+
+Publication inspection: PR file list matches the local diff, base is master,
+head was `1d07826a0b59962d108f38172941e74bb45fdcde` before this final record
+update. An initial `gh pr view --head` call was rejected as unsupported; using
+`gh pr view 426` resolved it without mutation. Automatic CI run `34525368657`
+actually started (dependency installation observed), so no billing block was
+established and no local-CI substitute is claimed. This record update triggers
+the final candidate's normal automatic CI; do not manually dispatch or treat
+the earlier head's result as final evidence.
+
+**Terminal result authority:** PR #426's body/check metadata records the final
+HEAD, actual CI run/verdict and clean-tree check after this record commit.
+Keeping those identifiers there avoids a self-referential SHA/CI documentation
+loop. The completed implementation/review checklist is not a claim of CI PASS.
+Until the final run is green (or the explicitly authorized billing fallback is
+actually applicable), remote validation remains unresolved and autonomous
+follow-through continues. No merge, auto-merge or direct master push is authorized.
+
+All planned local implementation, source audit, bounded validation and logic
+review are complete. Physical root consolidation and real scientific lifecycle
+qualification were not performed. #423/#424 and wheel-only resource packaging
+remain separate. The next action after the final CI disposition is operator
+review of this PR, not G0 or another development phase.

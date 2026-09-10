@@ -1,7 +1,7 @@
 # P0 — Existing infra and exp inventory and readiness
 
 Status: P0's bounded C1/C2/C3 documentation design is frozen on 2026-09-10;
-implementation is active (C1/C2 committed; C3 entry checks complete). No source relocation, later development
+C1/C2/C3 implementation and local review are complete; PR #426 is published. No source relocation, later development
 or scientific experiment is authorized here.
 Method: [structured-coding v0.1.2](https://github.com/yuema137/structured-coding/tree/v0.1.2),
 adapted to one bounded P0 work package.
@@ -114,10 +114,13 @@ experiments under this plan.
   dry-run); evidence and limitations are in the detailed work plan.
 - [x] Complete the bounded inventory, correct misleading current instructions.
 - [x] Verify minimal existing entrypoints and directly affected exp surfaces.
-- [ ] Review P0 evidence and hand off without advancing to later phases.
+- [x] Review P0 evidence and publish the review packet without advancing to
+  later phases; final candidate/CI disposition is recorded in PR #426.
 
 Current checkpoint: detailed docs-only design `p0-docs-v2` is frozen; its
-C1/C2 are committed; C3 entry checks and local review are complete, with terminal validation/publication pending. The baseline checks do not certify real training or
+C1/C2/C3 are committed, local terminal checks passed, and PR #426 is published.
+The final candidate SHA and CI verdict live in the PR metadata; an implementation
+checkbox is not a remote-CI pass. The baseline checks do not certify real training or
 wheel-only execution. Known remaining separation/package exceptions are named
 in the detailed plan; they are not silently absorbed into this PR. See
 [handoff](handoff.md) for the fresh-session entry and publication boundary.

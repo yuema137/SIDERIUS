@@ -1,19 +1,21 @@
 # P0 implementation handoff
 
-Status: `p0-docs-v2` DESIGN FROZEN / IMPLEMENTING.
-Updated 2026-09-10. C1/C2 committed; C3 minimal entry checks and local review
-complete. Next: commit C3 evidence, run terminal bounded checks, publish branch
-and open/inspect PR. Merge remains unauthorized.
+Status: `p0-docs-v2` implementation and review packet complete; PR #426 published.
+Updated 2026-09-10. C1/C2/C3 and local terminal checks complete.
+Final candidate SHA, exact CI disposition and terminal clean-tree verification
+are recorded in [PR #426](https://github.com/Galileo-Sandbox/SIDERIUS/pull/426)
+metadata after this record commit. Continue following actual CI until its
+required verdict is established. Merge remains unauthorized.
 
 ## Identity, authority and authorization
 
-- Project: one P0 inventory/navigation/minimal-entry documentation PR; no PR
-  number yet. Primary design/live ledger: [step-01-user-map.md](step-01-user-map.md).
+- Project: P0 inventory/navigation/minimal-entry documentation PR #426. Primary design/live ledger: [step-01-user-map.md](step-01-user-map.md).
 - Parents: [overall.md](overall.md), [CLAUDE](../../../CLAUDE.md), Paper
   `/home/yuema137/SIDERIUS-Paper/iclr/infra-exp-plan.md` Phase 0 and §21 P0.
 - Infra: `/home/yuema137/SIDERIUS`, `docs/organizing-cleanup-plan`;
   base/master `2091acdfcb24eb9c8d3953ee7ba1e3ba99926aa0`.
-  Last completed commit `49e23151`; C3 evidence is the current docs-only delta.
+  C1 `efbef63e`, C2 `49e23151`, C3 `1d07826a`; current delta is terminal
+  bookkeeping in the four effort documents only.
 - Exp: `/home/yuema137/siderius-exp-current`, clean recovery branch
   `recovery/persist-demo-run-records`, `ae12ae13abb6e2c1618f0f185ba468d669868399`.
   Pin `66d3edf2b2045eaf037fb5cc9ecb3dffee94523b`, tree-equal to infra base.
@@ -64,18 +66,22 @@ do not modify the selector or run a local full suite to conceal this.
 If remote CI is billing-blocked, use the explicitly approved bounded local
 fallback and state its limitations; never call it remote-green or full parity.
 Default pyright is unsupported on system Node v10.19.0 and Python is unchanged;
-report NOT RUN. Ruff is available. No CI result exists for this PR yet.
+report NOT RUN. Ruff is available. Automatic CI `34525368657` started on the first published head; no billing
+block was observed. The final record commit gets its own automatic CI.
+Local terminal checks at `1d07826a`: 40 passed in 2.68s, Ruff check PASS,
+format PASS (1,187 files), all exit 0. No user-doc or executable delta follows.
 
 ## Exact next actions and stop
 
-1. Commit C3 evidence and synchronized mirror after scope/fingerprint checks.
-2. Run terminal affected docs/rule/library tests and bounded static/document
-   checks on that candidate. Preserve actual results without repeating external
-   compositions/dry-run unless their executable inputs change.
-3. Push only this working branch and open a master-targeting PR; inspect changed
-   paths/body/head and actual CI state. Record any billing block and local fallback.
-4. Synchronize terminal evidence, review the final exact diff and finish with a
-   clean tree and PR READY FOR OPERATOR REVIEW. No merge or next phase.
+1. Commit/push this final bilingual evidence update; verify its diff is limited
+   to the four effort documents and the tested inputs are unchanged.
+2. Follow the final candidate automatic CI; record run/head/verdict in PR #426
+   metadata, not in another acceptance-affecting commit. Repair in-scope failures
+   if needed; the earlier run is not the final candidate evidence.
+3. Verify clean local/remote branch identity and PR diff/body. Once final CI
+   passes (or an observed billing block activates the approved fallback), report
+   PR READY FOR OPERATOR REVIEW / context CLOSED, awaiting operator action.
+   No merge, auto-merge, master push or next phase.
 
 ## Recovery content fingerprints
 
@@ -93,6 +99,6 @@ base is `2091acdf`; later checkpoint commits are recorded in implementation evid
 | `docs/repository-map.md` | `3b5f9fd2942a3de6b8428f4cf59f486d4257914eb93cc415a390dedcb53e41cb` |
 | `advice/README.md` | `79cec162f6a26ada0612496ce4bc23b3415a91829342cd94f9b13717c8485b1d` |
 | `ml_models/README.md` | `8b3831d645e2edbdc018bc7fbb8cf3ac2c429d1b6af94bde33eadf3c803204f1` |
-| `.structured-coding/plans/infra-exp-p0/overall.md` | `cc9903eea910c3cb4420ecc74757d13a5174b975c49a3ceade04e3815542a2f0` |
-| `.structured-coding/plans/infra-exp-p0/step-01-user-map.md` | `7543b183a51831447baae59427f7e4da0d508adc3b3f0d23e9579a608db4705d` |
-| `.structured-coding/plans/infra-exp-p0/step-01-user-map_zh.md` | `00f25b7c3176bbc58b52d903227078d0cd964de629fc8e14720448a23113d721` |
+| `.structured-coding/plans/infra-exp-p0/overall.md` | `2de7024e8a76cd85b75d50380f1e06b4db38b57e88c879829b7fea8637bcc3e2` |
+| `.structured-coding/plans/infra-exp-p0/step-01-user-map.md` | `a8ea76087b3993b5632426f18b890cc5a8fb610b730625fc91bc5878a4f53a03` |
+| `.structured-coding/plans/infra-exp-p0/step-01-user-map_zh.md` | `04387d82c657d18008233445c29bc4a33c377eab108974b61a6d78c2267aea75` |

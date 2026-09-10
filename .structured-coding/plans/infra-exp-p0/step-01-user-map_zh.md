@@ -5,7 +5,7 @@
 不能拿这份中文去指挥代码修改。
 
 同步日期：2026-09-10。
-对应英文文件的 SHA-256：`7543b183a51831447baae59427f7e4da0d508adc3b3f0d23e9579a608db4705d`。
+对应英文文件的 SHA-256：`a8ea76087b3993b5632426f18b890cc5a8fb610b730625fc91bc5878a4f53a03`。
 这个指纹只是用来确认“翻译的是哪一版”，不代表你已经批准实施。
 
 ## DESIGN FROZEN
@@ -21,9 +21,9 @@
 起点是 `docs/organizing-cleanup-plan` 的
 `2091acdfcb24eb9c8d3953ee7ba1e3ba99926aa0`，实施前再核对。
 实施约定就在本文件后文。
-当前状态：**IMPLEMENTING / C3 ENTRY CHECKS COMPLETE; TERMINAL VALIDATION/PUBLICATION NEXT。**
+当前状态：**C1/C2/C3 IMPLEMENTED AND REVIEWED; PR #426 PUBLISHED。**
 2026-09-10 新实施会话已开始，你在本会话明确确认 v2 发布权限。原规划修改已保留，
-C1 的文档修改、针对性验证和逻辑审查都已完成，C2 已提交，C3 最小入口检查和本地逻辑审查也完成；接下来验证最终候选并发布 PR。
+C1 的文档修改、针对性验证和逻辑审查都已完成，C2 已提交，C3 最小入口检查和本地逻辑审查也完成；本地终验通过，PR #426 已发布。最终候选 SHA 和 CI 结论记在 PR 元数据里；可审阅状态还需对应版本的 CI 结论。
 范围来自 [P0 总计划](overall.md)，已经按你在 2026-09-10 的要求收窄。
 这份 step 同时承担本 PR 的详细设计和工作记录，不另存一份重复计划，也不安排后续 PR。
 
@@ -249,7 +249,8 @@ SIDERIUS (navigation, not physical directories)
    若后面得修运行代码，先补验证要求，不能拿这两个旧检查担保新的训练行为。
 8. **提交前再看一遍：**
    - [x] 查实际 diff、exp 影响和证据不能证明的部分。
-   - [ ] P0 做完交你审阅，不接着开 G0 或后续开发。
+   - [x] P0 实施和审阅材料已完成；最终 CI 结论记在 PR #426 元数据，
+     不接着开 G0 或后续开发。
 
 ## 实施之前，权限和边界得说清楚
 
@@ -691,3 +692,43 @@ typecheck 要写 NOT RUN，不能说通过。Ruff 0.15.13 可用于最终静态�
 都不证明真实科学运行。全部 12 个改动路径都是 Markdown；没合并物理根目录，
 没新增 authority、实验 treatment、依赖或公开路径改动。
 C3 提交把证据记在既有 step/mirror/overview/handoff，之后在已提交候选上做最终检查并发布 PR。
+
+### 本地终验证据和已发布审阅材料
+
+[PR #426](https://github.com/Galileo-Sandbox/SIDERIUS/pull/426) 从
+`docs/organizing-cleanup-plan` 提向 master。C3 提交是 `1d07826a`。
+在这个干净、已提交的候选上，四文件 docs/rule/hygiene/library 检查
+**40 passed，2.68 秒，exit 0**。准确命令：
+
+```bash
+env -u PYTHONPATH -u VIRTUAL_ENV CUDA_VISIBLE_DEVICES='' PYTHONDONTWRITEBYTECODE=1   timeout 60 .venv/bin/python -m pytest -p no:cacheprovider   tests/unit/docs/test_node_docs_contract.py   tests/unit/guardrails/test_gate_standard_contract.py   tests/unit/test_repo_hygiene.py   tests/unit/core/test_generated_library.py -q --tb=short
+```
+
+`timeout 60 .venv/bin/ruff check .`：PASS，exit 0。
+`timeout 60 .venv/bin/ruff format --check .`：PASS，exit 0，1,187 个文件格式已正确。
+两项各不到一秒。本地 pyright 因系统 Node 不受支持而 NOT RUN；没改 Python 源码。
+本地全量测试 NOT RUN。包括失败读取诊断在内，本地检查仍未超过 10 分钟预算；
+composition 和 launcher 没重复跑。
+
+最终内容审查确认 12 个 Markdown 路径、地图的新链接/锚点、20 个 base 根目录、
+六个公开类/schema、原有 node CLI 引用，以及中英文代码块和 28 个 checkbox 状态。
+镜像 SHA、文件指纹和空白检查通过。最后这次记录更新只改四份 effort 文档；
+用户文档及全部 executable/test/config 输入与 `1d07826a` 逐字节相同，
+最终 commit 关联证据之前还要核对这份路径 diff。没推导出新的外部任务或打包资格。
+
+发布检查：PR 文件列表与本地 diff 一致，base 是 master，记录更新前 head 是
+`1d07826a0b59962d108f38172941e74bb45fdcde`。
+第一次 `gh pr view --head` 因参数不支持被拒，改用 `gh pr view 426` 后解决，没产生修改。
+自动 CI `34525368657` 已实际启动，观察到依赖安装，所以没证实 billing 阻塞，
+也没启用本地替代。这次最后记录更新会触发最终候选的正常自动 CI；不手动 dispatch，
+也不把旧 head 的结果当最终证据。
+
+**最终结果放哪儿：** PR #426 的正文/检查元数据记录最终 HEAD、实际 CI run/结论，
+以及记录提交之后的干净工作区检查。这样不用为了把 commit 自己的 SHA 写进文件，
+反复提交再跑 CI。实施/审阅清单已完成不代表 CI PASS。最终 run 通过之前，或获准的
+billing 替代确实适用之前，远程验证仍待定，agent 会继续跟进。
+不授权 merge、auto-merge 或直接 push master。
+
+计划内本地修改、源码核对、有界检查和逻辑审查都已完成。
+没合并物理根目录，没做真实科学运行资格验证；#423/#424 和 wheel-only 资源打包仍独立。
+最终 CI 有结论后，下一步是你审阅这个 PR，不是 G0 或后续开发。
