@@ -16,6 +16,34 @@
   another task action. Keep that work ledger current with decisions, changed
   ownership, validation evidence, and unresolved findings.
 
+## Planning documents
+
+- New planning efforts follow structured-coding v0.1.2's default:
+  `.structured-coding/plans/<effort>/`. Keep the overall plan, step/PR design
+  and any handoff together, with one authority per plan; do not put new plans
+  at the repository root or in `docs/plan/`.
+- Current P0 scope and progress start at
+  [the P0 overview](.structured-coding/plans/infra-exp-p0/overall.md).
+  Existing `docs/design/` records remain historical evidence, not the active
+  P0 ledger. After compaction during P0, reread the overview and its linked
+  work plan before continuing.
+- Markdown is authoritative; update any corresponding HTML rendering only
+  after the Markdown. This convention does not install hooks or authorize
+  later development or scientific experiments.
+- Every new or updated active step document (including a combined step/PR
+  design) has a same-directory Chinese reading mirror: `step-name_zh.md`
+  beside `step-name.md`. The English document remains the sole implementation
+  ground truth; the mirror is for operator review, not a second plan or ledger.
+  Update English first, then synchronize Chinese in the same change. Preserve
+  scope, decisions, checkboxes, acceptance, evidence, limitations and commands;
+  never introduce approval, requirements or completion claims in translation.
+- Use the [DongbeiGPT explanation approach](https://github.com/yuema137/DongbeiGPT)
+  for these explicitly requested mirrors: concrete actions, causal explanations
+  and restrained Dongbei rhythm, with exact technical identifiers retained.
+  Each mirror links its English source and records its source SHA-256 and sync
+  date. A mismatch means stale: consult English and resync before presenting it
+  as current. Existing archived plans need not be bulk-translated.
+
 ## Environment
 - **Every checkout owns one frozen virtualenv.** From the exact SIDERIUS
   checkout that will be tested or executed, run

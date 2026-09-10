@@ -2,6 +2,9 @@
 
 Two audiences, two paths through the same material. Pick yours.
 
+[Repository map](repository-map.md): current directories, six nodes, execution
+owners, infra/exp entrypoints and evidence boundaries.
+
 ---
 
 ## For humans
@@ -81,12 +84,14 @@ Node contracts:
 [validator](../nodes/ml_code_validator_agent/ml_code_validator_agent.md) ·
 [tuner](../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md)
 
-## Framework example
+## Framework examples
 
-[Quickstart](../examples/quickstart/README.md) is the only shipped example
-package. It is a small synthetic specification of public framework contracts,
-not a scientific benchmark or default task. Real scientific tasks and their
-campaigns live in external consumer repositories.
+[Quickstart](../examples/quickstart/README.md) and
+[synthetic masked regression](../examples/synthetic_masked_regression/README.md)
+are the two shipped packages. They specify public framework contracts using
+small synthetic inputs, with no scientific-performance claim. Real scientific
+tasks and campaigns live in external consumer repositories; see the
+[external-consumer map](repository-map.md#external-consumer-and-evidence).
 
 ## Design and decision history
 
