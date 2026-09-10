@@ -1,202 +1,81 @@
 # P0 implementation handoff
 
-Status: `p0-docs-v2` DESIGN FROZEN; fresh implementation session initialized.
-Current checkpoint: C1 committed (`efbef63e`); C2 implemented and reviewed; C3 next.
-This is not an implementation-complete or merge-ready handoff.
-Updated 2026-09-10.
+Status: `p0-docs-v2` DESIGN FROZEN / IMPLEMENTING.
+Updated 2026-09-10. C1/C2 committed; C3 minimal entry checks and local review
+complete. Next: commit C3 evidence, run terminal bounded checks, publish branch
+and open/inspect PR. Merge remains unauthorized.
 
-## Implementation continuation — 2026-09-10
+## Identity, authority and authorization
 
-The operator opened this fresh session to execute C1 -> C2 -> C3.
-Publication authorization was subsequently clarified explicitly: commit, push
-the scoped branch and open/update the PR autonomously; merge is not authorized.
-The earlier local-only endpoint is superseded by `p0-docs-v2` in the primary
-design. Preserve the startup evidence below; this amendment does not restart work.
-Read CLAUDE in full, this handoff, the full English design, overall.md and
-SIDERIUS-Paper `iclr/infra-exp-plan.md` Phase 0 and §21 P0 INFRA/EXP sections.
-Read all six pinned v0.1.2 resources in full through the manual route; no
-matching installed skill or enabled standards/hooks was found. Web retrieval
-returned cache misses and sandbox curl could not resolve DNS; approved read-only
-curl retrieved the pinned raw files. No read is represented by a summary.
+- Project: one P0 inventory/navigation/minimal-entry documentation PR; no PR
+  number yet. Primary design/live ledger: [step-01-user-map.md](step-01-user-map.md).
+- Parents: [overall.md](overall.md), [CLAUDE](../../../CLAUDE.md), Paper
+  `/home/yuema137/SIDERIUS-Paper/iclr/infra-exp-plan.md` Phase 0 and §21 P0.
+- Infra: `/home/yuema137/SIDERIUS`, `docs/organizing-cleanup-plan`;
+  base/master `2091acdfcb24eb9c8d3953ee7ba1e3ba99926aa0`.
+  Last completed commit `49e23151`; C3 evidence is the current docs-only delta.
+- Exp: `/home/yuema137/siderius-exp-current`, clean recovery branch
+  `recovery/persist-demo-run-records`, `ae12ae13abb6e2c1618f0f185ba468d669868399`.
+  Pin `66d3edf2b2045eaf037fb5cc9ecb3dffee94523b`, tree-equal to infra base.
+- The operator explicitly adopted v2 during this session and reaffirmed
+  semantic commit, scoped branch push, PR creation/update and in-scope repairs.
+  The earlier local-only endpoint is superseded. Do not ask per commit/PR.
+  No merge, auto-merge, direct push to master, G0 or source relocation.
 
-Git confirms branch/base/current HEAD `docs/organizing-cleanup-plan` /
-`2091acdfcb24eb9c8d3953ee7ba1e3ba99926aa0`; local master and origin/master
-match. PR #422 merge is in history; its tree equals pin `66d3edf2`.
-All four recovery fingerprints below matched before edits. Preserve those
-planning edits. Exp remains clean at `ae12ae13abb6e2c1618f0f185ba468d669868399`
-on `recovery/persist-demo-run-records`, not master.
+## Startup and completed milestones
 
-Approved scope/invariants: the primary design's C1 navigation, C2 bounded prose
-corrections, C3 existing-entry checks; preserve source/config/test behavior,
-task science, data, evidence, pins and public paths. No source relocation.
-Budget: CPU-only, <=60 seconds per diagnostic subprocess, <=10 minutes total
-check execution; no environment rebuild, GPU, metered LLM or campaigns.
-Infra `uv sync --group dev --frozen --offline --dry-run` reported no changes;
-the actual frozen offline sync audited 95 packages without rebuilding.
-Process view contains only this session and its diagnostic; host campaigns are
-not visible/audited and none were launched or stopped.
+This is the fresh implementation session required by the original kickoff.
+Read CLAUDE, handoff, full primary design and binding parents; fully read all
+six pinned upstream v0.1.2 resources through the manual route. Web cache misses
+and sandbox DNS failure were resolved by approved read-only curl. No installed
+matching skill, enabled standards or hooks. Initial branch/base and all four
+planning fingerprints matched. All pre-existing planning edits were preserved.
+The original planning/initialization handoff remains in C1 Git history;
+planning findings and baseline evidence remain in the primary design.
 
-Next: commit C2 (40 focused checks passed), then execute C3 entry checks.
-C1 link/source audit passed 235 relative links, 20 roots and six classes. Update this continuation at each milestone, commit coherent changes,
-push and open/update the PR, repair in-scope validation failures and continue
-to PR READY FOR OPERATOR REVIEW with exact-candidate evidence (approved local
-CI fallback if remote billing prevents CI). Do not merge or enable auto-merge.
-No G0. Commits and PR operations do not need per-operation operator approval.
+- C1 `efbef63e`: current repository map and five navigation pages (including
+  new map), preserved planning conventions and synchronized effort documents.
+  24 checks passed in 2.57s; 235 relative links/anchors, 20 base roots, six public
+  classes checked. Six node CLI citations unchanged. No physical source moves.
+- C2 `49e23151`: advice ownership/format, generated-library behavior and targeted
+  CLAUDE history/instruction correction. 40 checks passed in 2.65s. Historical
+  status body byte-identical; model/loss lookup differences documented.
+- C3: own-venv/source/pin checks PASS; six external compositions PASS, exit 0
+  within outer 60s bound (aggregate timing not measured); TIDMAD dry-run PASS,
+  0.37s, exactly two own-checkout child commands and workspace absent.
+  Exp unchanged; no blocking repair or pin bump needed. Detailed commands,
+  versions, lookup correction, N/A items and limitations are in the primary ledger.
 
-The planning history and original kickoff below are retained as provenance;
-their awaiting-session statements describe the preceding planning checkpoint.
+## Frozen boundaries and validation
 
-## Identity and authority
+C1 -> C2 -> C3 only. Preserve runtime, configs, tests, public paths, scientific
+settings, raw data, outputs and historical evidence. CPU-only diagnostics,
+<=60s per subprocess and <=10 minutes total check execution; no environment
+rebuild, GPU, LLM, training or campaign. Frozen offline sync made no changes
+(95 infra / 94 exp packages). No launched diagnostic remains running.
+The process view cannot audit host campaigns; none were launched or stopped.
 
-- Project / PR: P0 inventory/navigation/minimal existing-entry readiness; no
-  GitHub PR assigned for this new work.
-- Primary design and live ledger: [step-01-user-map.md](step-01-user-map.md).
-- Parent: [overall.md](overall.md); constraints from the Paper plan's P0
-  sections, not G0 or the main experiments.
-- Canonical repository: `/home/yuema137/SIDERIUS`.
-- Branch: `docs/organizing-cleanup-plan`; base and current HEAD: `2091acdf`.
-- Working tree: modified `CLAUDE.md` (planning location and reading-mirror
-  conventions), four untracked Markdown files in this effort directory.
-  No runtime/test/config edits.
-  The exact content fingerprints are recorded below after validation.
-- Exp read-only counterpart: `/home/yuema137/siderius-exp-current`,
-  `recovery/persist-demo-run-records` at `ae12ae1`; clean when checked.
-  Framework pin `66d3edf2` has the same tracked tree as infra master.
-- Runtime: all diagnostics launched in this planning turn have finished; no
-  GPU/LLM/training job launched or stopped. Existing campaigns were not audited.
+Gate 1 and Gate 2: NOT REQUIRED for docs-only. Training, inference, scoring,
+Health execution, iteration-2 feedback and wheel-only qualification: NOT RUN.
+Retained receipts do not qualify this pair today. #423/#424 remain deferred.
 
-## Completed work
+CI selector returns FULL SUITE because the new planning path has no mapping;
+do not modify the selector or run a local full suite to conceal this.
+If remote CI is billing-blocked, use the explicitly approved bounded local
+fallback and state its limitations; never call it remote-green or full parity.
+Default pyright is unsupported on system Node v10.19.0 and Python is unchanged;
+report NOT RUN. Ruff is available. No CI result exists for this PR yet.
 
-The primary plan records the 19 visible tracked roots, six public node classes,
-current deterministic authorities, exp task/experiment/evidence locations,
-confirmed stale documentation and already-open issues #423/#424. It also records
-40 passing checks, six workspace-isolated manifest compositions and one TIDMAD
-external dry-run. No scientific-lifecycle claim follows from these checks.
+## Exact next actions and stop
 
-2026-09-10 operator-reading addition: added
-[step-01-user-map_zh.md](step-01-user-map_zh.md), using the requested DongbeiGPT
-explanation style. English remains the sole implementation authority; the mirror
-adds no scope, approval or completion claim. CLAUDE now requires synchronized
-same-name `_zh.md` mirrors for new or updated active step documents.
-
-Validation of this documentation-only addition: English source fingerprint
-matches the mirror, all three command blocks are identical, all 28 checkbox
-states match in order, and relative links and whitespace checks pass. Semantic
-review preserved scope, acceptance, evidence limitations and publication
-boundaries. The existing docs/rule/hygiene command recorded in the English plan
-passed 24 tests in 2.60 seconds (exit 0, own venv, CPU-only; bytecode and pytest
-cache writes disabled). No runtime, exp, pin or scientific parameter changed.
-
-2026-09-10 scope clarification: operator emphasized a clean tree-shaped
-organization while preserving existing module functionality, not codebase
-refactoring. Added the structural objective and relocation/validation boundary
-to the English plan and synchronized its Chinese mirror and parent overview.
-The next layout proposal must distinguish conceptual navigation from physical
-paths and identify affected callers before any source move. No source layout
-was selected, no module moved, and no implementation checkbox advanced.
-Mirror fingerprint, command/checkbox parity, all plan links, whitespace and
-`git diff --check` passed after this amendment. No new runtime tests were run;
-the 24-test result above belongs to the preceding documentation change.
-
-2026-09-10 continuation checkpoint: added a concrete five-group navigation
-tree and before/after disposition table to the primary plan and Chinese mirror.
-All 20 tracked directory roots (19 visible plus `.github`) occur in the tree;
-the four fenced blocks and 28 checkbox states match across languages. Source
-fingerprint, all plan links/whitespace and `git diff --check` pass. No unit,
-GPU, LLM or scientific lifecycle run was repeated for this planning addition.
-
-Relocation impact was verified from `pyproject.toml`, sandbox child-script
-resolution and external TIDMAD/SuperNEMO callers. A blanket `src/siderius/`
-move is not cosmetic and is not selected. C1/C2/C3 retain their docs-only scope;
-physical root consolidation remains explicitly unperformed. Search mistakes
-and their resolved real paths are recorded in the primary plan.
-
-The pinned upstream working rules explicitly require a fresh implementation
-session. This planning context has not been relabeled as one. Operator approval
-to continue P0 is recorded, but the new tree is a recommendation, not a source
-move authorization. No implementation, commit, push or PR creation occurred.
-
-2026-09-10 freeze and kickoff: after confirming that v0.1.2 explicitly permits
-one combined step/PR document and filing upstream onboarding issue #25, the
-operator again authorized continuation. Recorded `p0-docs-v1` DESIGN FROZEN for
-the already-described local C1/C2/C3 documentation slice. No source-move,
-publication or merge approval is inferred. Corrected current parent/step status
-without rewriting the earlier planning history. Added all six pinned required
-entry/routing/prompt links, not only the three long prompts.
-
-Validation: English/mirror identities, four fenced blocks, 28 checkbox states,
-six upstream link destinations, local links and whitespace match/pass. The
-existing docs/rule/hygiene command passed 24 tests in 2.65 seconds (own infra
-venv, CPU-only, exit 0). `git diff --check` passed. No implementation file,
-exp pin, runtime, data or campaign changed; these are planning/docs checks.
-
-## Fresh-session kickoff
-
-2026-09-10 operator amendment: `p0-docs-v2` removes the agent-imposed local-only
-endpoint. Commit/push/PR operations are explicitly authorized; merge is not.
-The implementation session's initialization evidence above is preserved.
-The incorrect endpoint and propagation into handoff were reported as a second,
-distinct failure mode in [upstream issue #25](https://github.com/yuema137/structured-coding/issues/25#issuecomment-5624685515):
-rules had been supplied, but were applied incorrectly. Read receipts alone do
-not establish correct contract interpretation. English/mirror source identity,
-fenced-block/checkbox parity and whitespace checks passed for this amendment;
-no runtime test or implementation change is claimed by this planning update.
-
-Paste this in a new implementation session rooted at `/home/yuema137/SIDERIUS`:
-
-```text
-Execute the single P0 documentation PR, design revision p0-docs-v2.
-Read CLAUDE.md first, then this effort's handoff and the full authoritative design:
-.structured-coding/plans/infra-exp-p0/step-01-user-map.md
-Read overall.md in the same directory and the Paper plan's P0 sections.
-Use structured-coding v0.1.2: follow the six pinned entry/workflow/adaptation/
-prompt links in the design, reading applicable resources fully, not summaries.
-This is one combined step/PR document; do not create a duplicate PR design.
-Verify Git/base, preserve the current planning edits, and initialize this handoff
-for the implementation session before editing user documentation.
-Implement C1 -> C2 -> C3 with small-step validation and logic review.
-Keep the English ledger and its _zh.md reading mirror synchronized.
-Do not relocate source, change behavior or scientific settings, or launch campaigns.
-Commit coherent changes, push the scoped branch and open/update the PR.
-Continue in-scope validation/repair to PR READY FOR OPERATOR REVIEW; use the
-approved exact-candidate local CI fallback if remote billing prevents CI.
-Do not merge, enable auto-merge or push directly to master.
-Do not keep asking about already-approved scope or commit/PR operations.
-```
-
-This kickoff is a reading route and continuation instruction, not a second
-design authority. No read-attestation or enforcement hook was installed.
-
-## Next actions
-
-1. Verify the recorded `p0-docs-v2` freeze and explicit commit/push/PR authority.
-   Do not ask to approve the same scope or publication operations again.
-   Merge remains separately controlled by the operator.
-2. Fresh-session initialization is recorded above; do not start a duplicate
-   implementation. Reconcile the amended primary contract and parent, preserving
-   the existing six-resource onboarding and startup evidence.
-3. Recheck Git/base, both repositories' identities and the existing dirty docs;
-   do not discard them or switch to a historical worktree. Initialize this file
-   as the implementation continuation record after verifying the freeze.
-4. Execute C1 -> C2 -> C3 from the primary plan: inventory/navigation,
-   bounded instruction corrections, then minimal entry validation and handoff.
-   Reuse the audited commands, respecting each check's stated limitations.
-5. Complete authorized commits, branch publication and PR work, inspect the PR
-   and exact-candidate validation, then hand off at PR READY FOR OPERATOR REVIEW.
-   No merge without explicit approval.
-
-## Boundaries
-
-Use the frozen CPU-only validation contract in the primary design, not an
-example Gate budget from upstream. No raw data, secrets, generated artifacts or
-scientific parameter changes enter Git. No runtime rewrite, broad migration,
-package repair, new capability, G0 or main experiment setup belongs here. If a
-minimal entry truly requires a code repair, identify its first cause and amend
-the bounded design; stop for material behavior/architecture decisions.
-
-The repository map to be written under `docs/` is user documentation. All
-plans and this handoff stay together here. No hook has been installed; fresh
-session and compaction recovery are procedural obligations, not enforced hooks.
+1. Commit C3 evidence and synchronized mirror after scope/fingerprint checks.
+2. Run terminal affected docs/rule/library tests and bounded static/document
+   checks on that candidate. Preserve actual results without repeating external
+   compositions/dry-run unless their executable inputs change.
+3. Push only this working branch and open a master-targeting PR; inspect changed
+   paths/body/head and actual CI state. Record any billing block and local fallback.
+4. Synchronize terminal evidence, review the final exact diff and finish with a
+   clean tree and PR READY FOR OPERATOR REVIEW. No merge or next phase.
 
 ## Recovery content fingerprints
 
@@ -214,6 +93,6 @@ base is `2091acdf`; later checkpoint commits are recorded in implementation evid
 | `docs/repository-map.md` | `3b5f9fd2942a3de6b8428f4cf59f486d4257914eb93cc415a390dedcb53e41cb` |
 | `advice/README.md` | `79cec162f6a26ada0612496ce4bc23b3415a91829342cd94f9b13717c8485b1d` |
 | `ml_models/README.md` | `8b3831d645e2edbdc018bc7fbb8cf3ac2c429d1b6af94bde33eadf3c803204f1` |
-| `.structured-coding/plans/infra-exp-p0/overall.md` | `537e3df5723fc538092de5da25971ba31cbd7a794358eb09a0fc599ce5d7f07f` |
-| `.structured-coding/plans/infra-exp-p0/step-01-user-map.md` | `e5c255f912f8f77de634b729411e6f91c4d15086c7c3c8cf645e7dfad6d539a0` |
-| `.structured-coding/plans/infra-exp-p0/step-01-user-map_zh.md` | `eb50b6b188f5ac8f7f5be72738647ee7cdb178fd4f1f6c0029fa2b2f02065187` |
+| `.structured-coding/plans/infra-exp-p0/overall.md` | `cc9903eea910c3cb4420ecc74757d13a5174b975c49a3ceade04e3815542a2f0` |
+| `.structured-coding/plans/infra-exp-p0/step-01-user-map.md` | `7543b183a51831447baae59427f7e4da0d508adc3b3f0d23e9579a608db4705d` |
+| `.structured-coding/plans/infra-exp-p0/step-01-user-map_zh.md` | `00f25b7c3176bbc58b52d903227078d0cd964de629fc8e14720448a23113d721` |

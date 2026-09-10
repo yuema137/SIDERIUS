@@ -16,10 +16,11 @@ Scope and scientific invariants are unchanged; merge remains unauthorized.
 Implementation base: `docs/organizing-cleanup-plan` at
 `2091acdfcb24eb9c8d3953ee7ba1e3ba99926aa0` (recheck before execution).
 Execution contract: the section below in this same document.
-Lifecycle: IMPLEMENTING / C1 AND C2 COMPLETE; C3 NEXT.
+Lifecycle: IMPLEMENTING / C3 ENTRY CHECKS COMPLETE; TERMINAL VALIDATION/PUBLICATION NEXT.
 Fresh implementation started 2026-09-10; the operator explicitly confirmed
 p0-docs-v2 publication authority in this session. Existing planning edits
-were preserved. C1 implementation, selected checks and logic review are complete.
+were preserved. C1/C2 are committed; C3 entry checks and local logic review
+are complete. Terminal candidate validation and PR publication remain.
 Binding scope: [P0 overview](overall.md), corrected by the operator 2026-09-10.
 This combines the step/PR design and live ledger; no later PR roadmap lives here.
 
@@ -244,17 +245,17 @@ that consumers are absent.
 2. **Scope:** existing installation/import/launch paths and directly affected exp
    consumers. No new interfaces or experiment treatments.
 3. **Implementation:**
-   - [ ] Record actual interpreter, installed source and infra/exp revisions.
-   - [ ] Verify current minimal entry commands from an explicit workspace/data
+   - [x] Record actual interpreter, installed source and infra/exp revisions.
+   - [x] Verify current minimal entry commands from an explicit workspace/data
      root; separate no-execution dry-run from any actual lifecycle witness.
-   - [ ] Use the smallest existing-task check needed to expose an entry blocker,
+   - [x] Use the smallest existing-task check needed to expose an entry blocker,
      without running every task for two iterations as an unconditional gate.
-   - [ ] If a confirmed P0 blocker requires repair, record the exact owner,
+   - [x] If a confirmed P0 blocker requires repair, record the exact owner,
      smallest fix and affected exp counterpart before implementation.
-   - [ ] Update directly affected exp docs/callers and pin only when needed.
+   - [x] Update directly affected exp docs/callers and pin only when needed.
 4. **Validation:**
-   - [ ] Record commands, stages reached, runtime and PASS/FAIL/NOT RUN honestly.
-   - [ ] For a repair, add focused/adjoining regression evidence and a bounded
+   - [x] Record commands, stages reached, runtime and PASS/FAIL/NOT RUN honestly.
+   - [x] For a repair, add focused/adjoining regression evidence and a bounded
      paired check; do not infer successful training from a dry-run.
 5. **Acceptance:** reproducible entry/environment instructions, correct data and
    output authority, no unresolved blocker to the defined minimal P0 checks.
@@ -265,7 +266,7 @@ that consumers are absent.
    by either. If a source repair becomes necessary, specify its additional
    evidence before editing; these checks cannot certify a changed lifecycle.
 8. **Boundary/review:**
-   - [ ] Review exact diff, exp impact and evidence limitations.
+   - [x] Review exact diff, exp impact and evidence limitations.
    - [ ] Close P0 for review; do not advance into G0 or later development.
 
 ## Execution contract boundary
@@ -690,3 +691,72 @@ exp pin or scientific artifact changed. Link/mirror/whitespace checks passed.
 Logic review checked override versus default, model versus loss precedence,
 unbound callers versus supported entrypoints, and historical authority versus
 current instructions. No new policy or runtime guarantee was inferred.
+
+### C3 — minimal entry checks complete; publication pending
+
+C2 committed as `49e23151`; entry checks ran from that clean docs candidate.
+Exp remained clean at `ae12ae13abb6e2c1618f0f185ba468d669868399` before and after.
+Remote master was rechecked with `git ls-remote`: still `2091acdf`; no existing
+PR or remote branch for this effort was found. No executable delta from base.
+
+Environment/source checks PASS:
+
+| Property | Infra | Exp |
+| --- | --- | --- |
+| Interpreter | `/home/yuema137/SIDERIUS/.venv/bin/python`, Python 3.12.13 | `/home/yuema137/siderius-exp-current/.venv/bin/python`, Python 3.14.3 |
+| Imported `core` | `/home/yuema137/SIDERIUS/core/__init__.py` | exp `.venv/lib/python3.14/site-packages/core/__init__.py` |
+| Installed framework | editable `file:///home/yuema137/SIDERIUS` | Git install at `66d3edf2b2045eaf037fb5cc9ecb3dffee94523b` |
+| torch / Pydantic / pytest / NumPy | 2.10.0 / 2.12.5 / 9.0.2 / 2.4.3 | 2.13.0 / 2.13.5 / 9.1.1 / 2.5.2 |
+| Frozen offline sync | 95 packages audited, no change | 94 packages audited, no change |
+
+Each sync used `env -u PYTHONPATH -u VIRTUAL_ENV
+UV_CACHE_DIR=/tmp/siderius-p0-uv-cache timeout 60 uv sync --group dev --frozen
+--offline`; preceding `--dry-run` confirmed no rebuild. `sys.prefix`, import
+paths and installed `direct_url.json` were checked independently. From the infra
+root, metadata initially found local egg-info without `direct_url.json`; the
+unrelated `/tmp` cwd resolved installed metadata and proved the exact editable
+checkout. This was diagnostic lookup context, not a broken environment or a
+package repair. Exp pin/pyproject/lock/direct_url all agree. Source trees at
+base and pin match; distinct Python/dependency versions are not called parity.
+
+Six external compositions: **PASS, 6/6**, exit 0, using the exact isolated
+composition block above plus an outer `timeout 60` (each child still <=45s).
+All six task/metric/direction outputs match the baseline table. No unrelated
+ambient generated models loaded. Model-loader skips for declared loss/metric
+files are informational, not composition failures. This launch did not record
+a separate aggregate wall-time measurement; it completed inside the 60-second
+outer bound. Do not reuse the planning run's 10.24-second timing as this result.
+
+TIDMAD launcher: **PASS, 0.37 seconds**, exit 0. Used the exact launcher block
+above with a fresh `TemporaryDirectory` workspace, from an unrelated cwd,
+with `PYTHONPATH`/`VIRTUAL_ENV` and ambient `SIDERIUS_*` removed, GPU hidden and
+bytecode writes disabled. Assertions observed exactly two own-infra-interpreter
+iteration commands, the external bounded manifest and explicit data/workspace
+paths; the workspace remained absent. The existing `/home/klz/Data/TIDMAD`
+filename preflight passed. HDF5 contents and all training/inference/scoring/
+Health/feedback stages were NOT RUN. Temporary diagnostics were removed;
+existing data and results were untouched. Log: `/tmp/p0-tidmad-dry-run.log`
+(ephemeral); decisive observations and reproduction command are recorded here.
+
+Conditional repair/exp-update checklist items: **N/A, evaluated**. No blocker
+to these minimal entry checks was found; no source repair, additional repair
+regression, exp caller/doc edit or pin bump was required. Existing #423/#424
+remain outside the defined P0 acceptance. No campaign, GPU or LLM ran.
+
+Publication preflight found the actual CI selector returns **FULL SUITE** for
+`.structured-coding/plans/infra-exp-p0/handoff.md` (no inbound edge/manifest rule).
+The selector was invoked via `tools.ci_selection.resolver.select` over the exact
+`git diff --name-only 2091acdf HEAD` paths. No selector/CI change or local full
+suite is authorized by that finding. Under the explicitly approved billing
+fallback, terminal local evidence will comprise the affected docs/rule/library
+checks and document/source/diff checks; it must not be labeled full-CI parity.
+System Node is v10.19.0, so default local pyright is unsupported; Python source
+is unchanged and typecheck will be reported NOT RUN, not passed. Ruff 0.15.13
+is available for the terminal static check.
+
+Logic review: the six manifests establish composition, the TIDMAD wrapper
+establishes filename/argv/source binding, and neither establishes a scientific
+lifecycle. All 12 changed paths are Markdown. No physical root consolidation,
+new authority, experiment treatment, dependency or public path change occurred.
+C3 commit records the evidence in the existing step/mirror/overview/handoff;
+terminal checks and PR review state follow on the committed candidate.

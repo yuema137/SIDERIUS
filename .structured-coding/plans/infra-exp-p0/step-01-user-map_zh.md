@@ -5,7 +5,7 @@
 不能拿这份中文去指挥代码修改。
 
 同步日期：2026-09-10。
-对应英文文件的 SHA-256：`e5c255f912f8f77de634b729411e6f91c4d15086c7c3c8cf645e7dfad6d539a0`。
+对应英文文件的 SHA-256：`7543b183a51831447baae59427f7e4da0d508adc3b3f0d23e9579a608db4705d`。
 这个指纹只是用来确认“翻译的是哪一版”，不代表你已经批准实施。
 
 ## DESIGN FROZEN
@@ -21,9 +21,9 @@
 起点是 `docs/organizing-cleanup-plan` 的
 `2091acdfcb24eb9c8d3953ee7ba1e3ba99926aa0`，实施前再核对。
 实施约定就在本文件后文。
-当前状态：**IMPLEMENTING / C1 AND C2 COMPLETE; C3 NEXT。**
+当前状态：**IMPLEMENTING / C3 ENTRY CHECKS COMPLETE; TERMINAL VALIDATION/PUBLICATION NEXT。**
 2026-09-10 新实施会话已开始，你在本会话明确确认 v2 发布权限。原规划修改已保留，
-C1 的文档修改、针对性验证和逻辑审查都已完成，C2 也已完成，接下来做 C3。
+C1 的文档修改、针对性验证和逻辑审查都已完成，C2 已提交，C3 最小入口检查和本地逻辑审查也完成；接下来验证最终候选并发布 PR。
 范围来自 [P0 总计划](overall.md)，已经按你在 2026-09-10 的要求收窄。
 这份 step 同时承担本 PR 的详细设计和工作记录，不另存一份重复计划，也不安排后续 PR。
 
@@ -229,16 +229,16 @@ SIDERIUS (navigation, not physical directories)
 2. **查哪些：** 现有安装、导入、启动路径，以及直接受影响的 exp 调用方。
    不加接口，不改实验 treatment。
 3. **具体怎么做：**
-   - [ ] 记录实际 Python 解释器、安装源码位置、infra/exp 版本。
-   - [ ] 用明确传入的 workspace/data root 查最小启动命令。
+   - [x] 记录实际 Python 解释器、安装源码位置、infra/exp 版本。
+   - [x] 用明确传入的 workspace/data root 查最小启动命令。
      打印命令的 dry-run 和真的训练运行，分开记。
-   - [ ] 只用足够发现入口问题的最小既有任务检查，不硬性要求所有任务再跑两轮。
-   - [ ] 真发现 P0 阻塞问题，先记清具体负责人模块、最小修复和受影响的 exp 部分，
+   - [x] 只用足够发现入口问题的最小既有任务检查，不硬性要求所有任务再跑两轮。
+   - [x] 真发现 P0 阻塞问题，先记清具体负责人模块、最小修复和受影响的 exp 部分，
      然后才开始实现。
-   - [ ] 直接受影响的 exp 文档/调用方同步更新；确实需要时才动 pin。
+   - [x] 直接受影响的 exp 文档/调用方同步更新；确实需要时才动 pin。
 4. **怎么验证：**
-   - [ ] 老实记录命令、到了哪个阶段、耗时，以及 PASS/FAIL/NOT RUN。
-   - [ ] 真改代码的话，补针对性和相邻回归检查，再做有边界的 infra/exp 配对验证。
+   - [x] 老实记录命令、到了哪个阶段、耗时，以及 PASS/FAIL/NOT RUN。
+   - [x] 真改代码的话，补针对性和相邻回归检查，再做有边界的 infra/exp 配对验证。
      dry-run 过了不能算训练过了。
 5. **啥样算完成：** 安装和入口说明可复现，数据和输出位置归属正确，
    这次定义的最小 P0 检查没有未解决的阻塞问题。
@@ -248,7 +248,7 @@ SIDERIUS (navigation, not physical directories)
    Composition 就是按 task manifest 把所需实现装配起来。这两项都不证明新的真实训练。
    若后面得修运行代码，先补验证要求，不能拿这两个旧检查担保新的训练行为。
 8. **提交前再看一遍：**
-   - [ ] 查实际 diff、exp 影响和证据不能证明的部分。
+   - [x] 查实际 diff、exp 影响和证据不能证明的部分。
    - [ ] P0 做完交你审阅，不接着开 G0 或后续开发。
 
 ## 实施之前，权限和边界得说清楚
@@ -632,3 +632,62 @@ infra 自己的 venv，CPU-only。历史状态正文逐字节一致，从 `2091a
 只有 Markdown；runtime、test、config、exp pin 和科学资产没改。
 链接、镜像、空白检查通过。逻辑审查专门区分 override/default、model/loss 优先级、
 未绑定调用/正式入口、历史记录/当前说明，没有凭文字加新规则或夸大运行保证。
+
+### C3：最小入口检查完成，发布待做
+
+C2 提交为 `49e23151`，入口检查从这个干净文档候选运行。
+Exp 检查前后都在 `ae12ae13abb6e2c1618f0f185ba468d669868399`，工作区干净。
+`git ls-remote` 重新核对远程 master 仍是 `2091acdf`，本工作还没有 PR 或远程分支。
+相比 base，没有可执行文件变化。
+
+环境和源码归属检查 PASS：
+
+| 检查项 | Infra | Exp |
+| --- | --- | --- |
+| 解释器 | `/home/yuema137/SIDERIUS/.venv/bin/python`，Python 3.12.13 | `/home/yuema137/siderius-exp-current/.venv/bin/python`，Python 3.14.3 |
+| import 的 `core` | `/home/yuema137/SIDERIUS/core/__init__.py` | exp `.venv/lib/python3.14/site-packages/core/__init__.py` |
+| 安装的 framework | editable `file:///home/yuema137/SIDERIUS` | Git 安装 `66d3edf2b2045eaf037fb5cc9ecb3dffee94523b` |
+| torch / Pydantic / pytest / NumPy | 2.10.0 / 2.12.5 / 9.0.2 / 2.4.3 | 2.13.0 / 2.13.5 / 9.1.1 / 2.5.2 |
+| frozen offline sync | 检查 95 个包，无变化 | 检查 94 个包，无变化 |
+
+两边都用 `env -u PYTHONPATH -u VIRTUAL_ENV
+UV_CACHE_DIR=/tmp/siderius-p0-uv-cache timeout 60 uv sync --group dev --frozen
+--offline`；先做的 `--dry-run` 确认无需重建。另查了 `sys.prefix`、import 路径和
+安装包 `direct_url.json`。在 infra 根目录读取 metadata，最初找到本地 egg-info，
+它没有 `direct_url.json`；换到无关 `/tmp` 工作目录后读到真正安装信息，确认 exact
+editable checkout。这是诊断查找上下文的问题，不是环境坏了，也没修包。
+Exp 的 pin/pyproject/lock/direct_url 全部一致。Base 和 pin 的源码树相同，
+但 Python 和依赖版本不同，不能叫环境 parity。
+
+六个 external composition：**PASS，6/6，exit 0**。
+用前文完整隔离命令，外加 `timeout 60`，每个 child 仍最多 45 秒。
+六组 task/metric/direction 都与基线表一致，没读到环境里无关的生成模型。
+Loader 跳过 loss/metric 文件的提示不代表 composition 失败。
+这次没有单独记录总耗时，但在外层 60 秒上限内结束；不能挪用规划那轮的 10.24 秒。
+
+TIDMAD launcher：**PASS，0.37 秒，exit 0**。
+使用前文原命令，把 workspace 换成 `TemporaryDirectory` 内新路径，从无关目录启动，
+清除 `PYTHONPATH`/`VIRTUAL_ENV` 和原有 `SIDERIUS_*`，隐藏 GPU，禁止 bytecode 写入。
+断言看到正好两条使用 infra 自己解释器的 iteration 命令，以及外部 bounded manifest
+和明确的数据/workspace 路径；workspace 没创建。现有 `/home/klz/Data/TIDMAD`
+文件名预检查通过。HDF5 内容、训练、推理、评分、Health、feedback 都是 NOT RUN。
+临时诊断目录已清理，已有数据/结果没动。临时日志是 `/tmp/p0-tidmad-dry-run.log`；
+关键观察和复现命令已写在本文，不能只靠临时日志交接。
+
+有条件的修复/exp 更新项：**N/A，已经检查过适用性**。
+定义的最小入口检查没发现阻塞，所以无需改源码、补修复回归、改 exp 文档/调用方或 bump pin。
+已有 #423/#424 仍在本次验收之外。没跑 campaign、GPU 或 LLM。
+
+发布前查到：真实 CI selector 对 `.structured-coding/plans/infra-exp-p0/handoff.md`
+返回 **FULL SUITE**，因为没有 inbound edge/manifest rule。
+调用的是 `tools.ci_selection.resolver.select`，输入为真实
+`git diff --name-only 2091acdf HEAD`。这个发现不授权改 selector/CI，也不授权本地全量测试。
+按你明确批准的 billing 替代方案，最终本地证据用受影响的 docs/rule/library 和
+文档/源码/diff 检查；不能说成 full-CI parity。
+系统 Node 是 v10.19.0，默认本地 pyright 不受支持；这轮没改 Python 源码，
+typecheck 要写 NOT RUN，不能说通过。Ruff 0.15.13 可用于最终静态检查。
+
+逻辑审查：六个 manifest 证明装配，TIDMAD wrapper 证明文件名、参数和源码绑定，
+都不证明真实科学运行。全部 12 个改动路径都是 Markdown；没合并物理根目录，
+没新增 authority、实验 treatment、依赖或公开路径改动。
+C3 提交把证据记在既有 step/mirror/overview/handoff，之后在已提交候选上做最终检查并发布 PR。
