@@ -24,6 +24,8 @@ from core.run_invariants import (
     validate_run_invariants,
 )
 
+pytestmark = pytest.mark.usefixtures("synthetic_task_config")
+
 SCOPE = [4, 5, 6, 7, 8, 9]
 PERMUTATION = [4, 6, 5, 9, 7, 8]
 

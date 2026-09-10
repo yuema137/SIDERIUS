@@ -63,7 +63,7 @@ import os
 import posixpath
 import re
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -80,7 +80,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.task_config import ForwardContract
     from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
     from execute_tools.dataset_config import DatasetProfile
-    from execute_tools.evaluation_metric import EvaluationMetric
+    from execute_tools.evaluation_metric import EvaluationMetric, ScoreabilityContract
     from execute_tools.health_checks._composition import TaskHealthBinding
     from execute_tools.task_data_path import TaskDataPath
 
@@ -950,7 +950,7 @@ def _looks_like_instance(candidate: Any) -> bool:
 
 def _compose_metric(
     section: dict[str, Any], manifest_dir: str, where: str = "metric"
-) -> tuple[EvaluationMetric, dict[str, Any], ResolvedPluginRef | None]:
+) -> tuple[EvaluationMetric, dict[str, Any], tuple[ResolvedPluginRef, ...]]:
     """Declaration JSON → ``MetricSpec`` → the declared implementation.
 
     The spec comes from ``metric_spec_from_declaration`` — the ONE
@@ -975,14 +975,6 @@ def _compose_metric(
             f"{where} declaration at {declaration_path!r} must be a JSON "
             f"object; got {type(payload).__name__}."
         )
-    try:
-        spec = metric_spec_from_declaration(payload)
-    except Exception as exc:
-        raise TaskCompositionError(
-            f"{where} declaration at {declaration_path!r} is not a valid "
-            f"MetricSpec: {type(exc).__name__}: {exc}"
-        ) from exc
-
     implementation = section.get("implementation")
     if not isinstance(implementation, dict):
         raise TaskCompositionError(
@@ -990,6 +982,19 @@ def _compose_metric(
             f"EvaluationMetric to instantiate; got {implementation!r}."
         )
     metric_cls, plugin_ref = _load_symbol(implementation, manifest_dir, f"{where}.implementation")
+    scoreability_contract_types, scoreability_plugins = _compose_scoreability_contract_types(
+        section.get("scoreability_contracts"), manifest_dir, where
+    )
+    try:
+        spec = metric_spec_from_declaration(
+            payload,
+            scoreability_contract_types=scoreability_contract_types,
+        )
+    except Exception as exc:
+        raise TaskCompositionError(
+            f"{where} declaration at {declaration_path!r} is not a valid "
+            f"MetricSpec: {type(exc).__name__}: {exc}"
+        ) from exc
     try:
         metric = metric_cls(spec)
     except Exception as exc:
@@ -1032,7 +1037,77 @@ def _compose_metric(
             "declaration would name the science and the arithmetic would "
             "disagree with it, silently."
         )
-    return metric, payload, plugin_ref
+    plugins = (() if plugin_ref is None else (plugin_ref,)) + scoreability_plugins
+    return metric, payload, plugins
+
+
+def _compose_scoreability_contract_types(
+    declarations: Any, manifest_dir: str, where: str
+) -> tuple[dict[str, type[ScoreabilityContract]], tuple[ResolvedPluginRef, ...]]:
+    """Resolve scoreability behavior without discarding loaded file identities."""
+    from execute_tools.evaluation_metric import ScoreabilityContract
+
+    if declarations is None:
+        return {}, ()
+    if not isinstance(declarations, Mapping):
+        raise TaskCompositionError(f"{where}.scoreability_contracts must be a mapping")
+
+    resolved: dict[str, type[ScoreabilityContract]] = {}
+    plugins: list[ResolvedPluginRef] = []
+    for contract_id, plugin in declarations.items():
+        if not isinstance(contract_id, str) or not contract_id.strip():
+            raise TaskCompositionError(
+                f"{where}.scoreability_contracts keys must be non-empty strings"
+            )
+        if not isinstance(plugin, dict):
+            raise TaskCompositionError(
+                f"{where}.scoreability_contracts[{contract_id!r}] must be a plugin mapping"
+            )
+        contract_type, plugin_ref = _load_symbol(
+            plugin,
+            manifest_dir,
+            f"{where}.scoreability_contracts[{contract_id!r}]",
+        )
+        if not isinstance(contract_type, type) or not issubclass(
+            contract_type, ScoreabilityContract
+        ):
+            raise TaskCompositionError(
+                f"{where}.scoreability_contracts[{contract_id!r}] must resolve to a "
+                "ScoreabilityContract subclass"
+            )
+        resolved[contract_id] = contract_type
+        if plugin_ref is not None:
+            plugins.append(plugin_ref)
+    return resolved, tuple(plugins)
+
+
+def _scoreability_binding_identity(raw: dict[str, Any]) -> dict[str, Any]:
+    """Record validated gate selections separately from plugin code digests.
+
+    Module code is pinned by the framework revision, but module/symbol choice
+    is still task semantics. Metric roles and contract ids matter too: swapping
+    gates must not disappear when the plugin file identity list is sorted.
+    """
+    sections = [("metric", raw["metric"])] + [
+        (f"secondary_metrics[{index}]", section)
+        for index, section in enumerate(raw.get("secondary_metrics") or [])
+    ]
+    bindings = {}
+    for role, section in sections:
+        contracts = section.get("scoreability_contracts") or {}
+        if contracts:
+            bindings[role] = {
+                contract_id: {
+                    **(
+                        {"file": _normalized_ref(plugin["file"])}
+                        if plugin.get("file") is not None
+                        else {"module": plugin["module"]}
+                    ),
+                    "symbol": plugin["symbol"],
+                }
+                for contract_id, plugin in contracts.items()
+            }
+    return bindings
 
 
 def _compose_secondary_metrics(
@@ -1086,7 +1161,7 @@ def _compose_secondary_metrics(
                 f"{where} must be a mapping declaring 'declaration' and "
                 f"'implementation'; got {type(entry).__name__}."
             )
-        metric, declaration, plugin_ref = _compose_metric(entry, manifest_dir, where)
+        metric, declaration, metric_plugins = _compose_metric(entry, manifest_dir, where)
         metric_id = metric.spec.id
         if metric_id == primary_id:
             raise TaskCompositionError(
@@ -1108,8 +1183,7 @@ def _compose_secondary_metrics(
         seen[metric_id] = index
         metrics.append(metric)
         declarations.append(declaration)
-        if plugin_ref is not None:
-            plugins.append(plugin_ref)
+        plugins.extend(metric_plugins)
         declaration_paths.append(_resolve_path(_require(entry, "declaration", where), manifest_dir))
 
     return tuple(metrics), declarations, plugins, declaration_paths
@@ -1446,7 +1520,7 @@ def _refuse_ambiguous_objective(
     # different question than runtime asks is how a guard passes while the
     # thing it guards is broken.
     try:
-        from agent_generated._loss_loader import _resolve_loss_dirs
+        from ml_models.loss_plugin_loader import _resolve_loss_dirs
 
         search_roots = list(_resolve_loss_dirs())
     except Exception:  # pragma: no cover - loader absent in a trimmed checkout
@@ -1575,7 +1649,7 @@ def _compose_objective(raw: dict[str, Any], manifest_dir: str):
             f"naming the plugin file and the symbol it declares itself with; got "
             f"{implementation!r}."
         )
-    from agent_generated._loss_loader import REQUIRED_LOSS_PLUGIN_SYMBOLS
+    from ml_models.loss_plugin_loader import REQUIRED_LOSS_PLUGIN_SYMBOLS
 
     declared_name, resolved_ref = _load_symbol(
         implementation,
@@ -1833,6 +1907,7 @@ def compute_semantic_fingerprint(
     observable_declarations: list[dict[str, Any]] | None = None,
     builtin_objective_declaration: dict[str, Any] | None = None,
     parameter_rules: ParameterRules | None = None,
+    scoreability_bindings: dict[str, Any] | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -1884,6 +1959,8 @@ def compute_semantic_fingerprint(
     # secondaries is a different declaration, not the same one shuffled.
     if secondary_metric_declarations:
         payload["secondary_metric_declarations"] = secondary_metric_declarations
+    if scoreability_bindings:
+        payload["scoreability_bindings"] = scoreability_bindings
     # Step 11 C6 — a DECLARED naming is semantic: it decides deliverable file
     # identity, so two runs that name their outputs differently are not the
     # same run. Added only when declared, following the secondaries
@@ -2292,12 +2369,11 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
     source_paths["dataset_profile"] = profile_path
 
     metric_section = _section(raw, "metric", resolved_manifest)
-    metric, metric_declaration, metric_plugin = _compose_metric(metric_section, manifest_dir)
+    metric, metric_declaration, metric_plugins = _compose_metric(metric_section, manifest_dir)
     source_paths["metric_declaration"] = _resolve_path(
         _require(metric_section, "declaration", "metric"), manifest_dir
     )
-    if metric_plugin is not None:
-        plugins.append(metric_plugin)
+    plugins.extend(metric_plugins)
 
     # Step 10 / P2b — the OPTIONAL observational secondaries, resolved through
     # the same `_compose_metric` authority immediately beside the primary so
@@ -2474,6 +2550,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
             else None
         ),
         parameter_rules=parameter_rules,
+        scoreability_bindings=_scoreability_binding_identity(raw),
     )
 
     return RunTaskComposition(
@@ -2652,8 +2729,7 @@ def bind_run_task_composition(
     materialisation both happen before iteration 1 and both read the run's
     profile.
 
-    ``None`` activates only the bounded legacy TIDMAD compatibility adapter,
-    then yields ``None`` without setting a ContextVar. Real-task modules do
+    ``None`` is refused because supported runs require an explicit task declaration;
     not register merely because a composed child imported them.
 
     Every binding is token-reset through :class:`~contextlib.ExitStack`, so
@@ -2669,11 +2745,9 @@ def bind_run_task_composition(
     to arrive, which is the ambiguity this whole milestone removes.
     """
     if composition is None:
-        from execute_tools.task_data_path import bootstrap_legacy_tidmad_data_path
-
-        bootstrap_legacy_tidmad_data_path()
-        yield None
-        return
+        raise TaskCompositionError(
+            "a task composition is required; the framework does not select a scientific task"
+        )
 
     from execute_tools.data_paths import bind_physical_data_root
     from execute_tools.dataset_config import bind_dataset_profile
@@ -2757,7 +2831,10 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
         return
 
     from execute_tools.data_paths import active_physical_data_root
-    from execute_tools.dataset_config import resolve_dataset_profile
+    from execute_tools.dataset_config import (
+        DatasetProfileBindingError,
+        resolve_dataset_profile,
+    )
     from execute_tools.evaluation_metric import (
         resolve_bound_run_metric,
         resolve_bound_run_secondary_metrics,
@@ -2774,7 +2851,11 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
     # would silently resolve TIDMAD's import-time constant.
     if active_physical_data_root() is None:
         unbound.append("physical_data_root")
-    if resolve_dataset_profile() is not composition.dataset_profile:
+    try:
+        active_profile = resolve_dataset_profile()
+    except DatasetProfileBindingError:
+        active_profile = None
+    if active_profile is not composition.dataset_profile:
         unbound.append("dataset_profile")
     if resolve_bound_run_metric() is not composition.metric:
         unbound.append("metric")

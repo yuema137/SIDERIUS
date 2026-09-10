@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.skills.evaluate_vram_skill.isolated_probe import TaskProbeDataSpec
 from execute_tools.task_data_path import (
     EpochSamplingParams,
+    TaskProbeDataSpec,
     require_bound_task_data_path,
     resolve_max_inference_batch_size,
     resolve_task_scope_capability,
@@ -25,7 +25,8 @@ def build_task_probe_data(
 ) -> TaskProbeDataSpec | None:
     """Carry the run's resolved task scope to resource measurement.
 
-    Un-composed and single-file attempts retain the legacy synthetic probe.
+    Un-composed and single-file attempts retain the legacy bounded physical
+    probe batch.
     A composed attempt with a task-owned training scope must carry every value
     needed for the isolated worker to materialize one batch through the same
     ``TaskDataPath.training_dataset`` contract used by formal training.

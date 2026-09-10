@@ -1,6 +1,6 @@
 """F-SCANE-4 — the honest per-model fields travel; the mixed ones no longer travel alone.
 
-Frozen row: ``docs/campaign/official_campaign_decisions.yaml`` ``F-SCANE-4``::
+Historical regression boundary retained after campaign evidence moved to external ownership.
 
     finding: ModelRunSummary.best_valid_formal_score ... - the only per-model
     headline that is BOTH HealthGate-valid AND formal - has no production
@@ -60,9 +60,10 @@ from agent.prompt_templates.interpretation.rendering import _build_per_model_pro
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
 from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
-from tests.helpers.metric_fixtures import shipped_spec
+from tests.helpers.metric_fixtures import accuracy_like_spec
 
-ORDER = MetricOrder(shipped_spec())
+ORDER = MetricOrder(accuracy_like_spec())
+REQUIRED_GATES = frozenset({"synthetic_stability_blocking"})
 
 #: The exact sentence the renderer emits when no HealthGate-valid formal
 #: result exists. Hardcoded, not read back from the renderer.
@@ -120,7 +121,11 @@ def _summary(*records: dict, model_type: str = "punet"):
             "all_records": [ExperimentRecord.model_validate(r) for r in records],
         }
     )
-    return tuning_output_to_model_run_summary(output, order=ORDER)
+    return tuning_output_to_model_run_summary(
+        output,
+        order=ORDER,
+        required_gate_ids=REQUIRED_GATES,
+    )
 
 
 def _prompt(summary) -> str:

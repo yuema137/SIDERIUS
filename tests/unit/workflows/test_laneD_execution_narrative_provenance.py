@@ -15,9 +15,9 @@ The rule, and the whole point of this module::
     DOWNSTREAM NARRATIVE DESCRIBING A RUN MUST DERIVE FROM
     RESOLVED EXECUTION PROVENANCE, NOT FROM STALE PROPOSAL ASSUMPTIONS.
 
-**Why these tests can go RED.** The planted disagreement is REAL, not
-synthetic: DAVIS's shipped manifest declares an exact-L1 objective, and the
-planner in the witnessed runs chose ``smooth_l1`` — the same overrule, through
+**Why these tests can go RED.** The planted disagreement is executable, not
+hand-built: the synthetic masked-regression manifest declares a custom masked
+objective, and the planner chooses ``smooth_l1`` — the same overrule, through
 the same production authority (``_apply_declared_objective``), that produced
 F15. The positive witness fails if the narrative stops naming the executed
 objective. Its indispensable partner is
@@ -38,28 +38,30 @@ from typing import Any
 import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-DAVIS = str(REPO_ROOT / "configs" / "task_composition" / "davis.yaml")
+SYNTHETIC_TASK = str(
+    REPO_ROOT / "configs" / "task_composition" / "synthetic_masked_regression.yaml"
+)
 
 #: The prose the planner wrote, in the shape F15 witnessed. It names a loss and
 #: a beta that the declared objective is about to overrule.
 STALE_PROSE = "Using kernel_size=15 with custom Smooth L1 beta=0.5 for sharper edges."
 
 
-def _davis_objective_ref() -> Any:
+def _synthetic_objective_ref() -> Any:
     from workflows.task_composition import build_task_composition_ref, compose_run_task_bindings
 
-    return build_task_composition_ref(compose_run_task_bindings(DAVIS))
+    return build_task_composition_ref(compose_run_task_bindings(SYNTHETIC_TASK))
 
 
 def _metric_spec() -> Any:
-    """DAVIS's OWN declared spec — a real lower-is-better metric.
+    """The synthetic task's declared lower-is-better metric.
 
     Taken from the composition rather than hand-built, so this test cannot
     drift away from a spec shape production would refuse.
     """
     from workflows.task_composition import compose_run_task_bindings
 
-    return compose_run_task_bindings(DAVIS).metric.spec
+    return compose_run_task_bindings(SYNTHETIC_TASK).metric.spec
 
 
 def _planning():
@@ -90,7 +92,7 @@ def _resolved_through_production(plan: Any) -> Any:
     from nodes.ml_hyperparameter_tune_agent.provenance import ResolutionTracker
 
     tracker = ResolutionTracker(plan)
-    plan = _planning()._apply_declared_objective(plan, _davis_objective_ref())
+    plan = _planning()._apply_declared_objective(plan, _synthetic_objective_ref())
     tracker.record(plan, "task_declared_objective")
     return plan, tracker.finish(plan)
 
@@ -99,7 +101,7 @@ def _reflector_prompt(hypothesis: str, provenance: Any) -> str:
     from agent.prompts import get_reflector_user_prompt
 
     return get_reflector_user_prompt(
-        "davis_run_001",
+        "synthetic_run_001",
         hypothesis,
         {"denoising_score": 0.31, "final_loss": 0.017},
         {"current_loss_type": "custom"},
@@ -112,21 +114,21 @@ class TestPlantedDisagreementFollowsTheExecutedAuthority:
     """A REAL overrule is planted; the narrative surface must follow execution."""
 
     def test_the_production_authority_actually_overrules_the_prose(self):
-        """Precondition. If DAVIS ever stopped overruling `smooth_l1`, every
+        """Precondition. If the declared objective stopped overruling `smooth_l1`, every
         assertion below would pass vacuously — so the disagreement is proven to
         exist before anything is asserted about how it is narrated."""
         plan, provenance = _resolved_through_production(_plan())
         assert plan.loss_cfg["loss_type"] == "custom"
-        assert plan.loss_cfg["loss_name"] == "davis_exact_l1"
+        assert plan.loss_cfg["loss_name"] == "synthetic_masked_mse"
         assert provenance.diverged, "no disagreement was planted — the witness is vacuous"
 
     def test_the_narrative_names_the_executed_objective(self):
-        """THE witness. Pre-fix the reflector never saw `davis_exact_l1` at
+        """THE witness. Pre-fix the reflector never saw `synthetic_masked_mse` at
         all: the prompt carried the stale prose plus a `current_loss_type`
         ranking key. It now carries the executed identity."""
         _, provenance = _resolved_through_production(_plan())
         prompt = _reflector_prompt(STALE_PROSE, provenance)
-        assert "davis_exact_l1" in prompt
+        assert "synthetic_masked_mse" in prompt
 
     def test_the_stale_value_is_never_presented_as_what_ran(self):
         """The proposed value is not censored — it is DEMOTED. Every surviving
@@ -193,7 +195,7 @@ class TestNoDisagreementEmitsNothing:
         from agent.prompts import get_reflector_user_prompt
         from agent.schemas.execution_provenance import ExecutionProvenance
 
-        args = ("davis_run_001", STALE_PROSE, {"denoising_score": 0.31}, {})
+        args = ("synthetic_run_001", STALE_PROSE, {"denoising_score": 0.31}, {})
         for provenance in (None, ExecutionProvenance()):
             prompt = get_reflector_user_prompt(*args, execution_provenance=provenance)
             assert "RESOLVED EXECUTION AUTHORITY" not in prompt
@@ -208,7 +210,7 @@ class TestNoDisagreementEmitsNothing:
         from agent.prompts import get_reflector_user_prompt
         from agent.schemas.execution_provenance import ExecutionProvenance
 
-        args = ("davis_run_001", STALE_PROSE, {"denoising_score": 0.31}, {})
+        args = ("synthetic_run_001", STALE_PROSE, {"denoising_score": 0.31}, {})
         legacy = get_reflector_user_prompt(*args)
         empty = get_reflector_user_prompt(*args, execution_provenance=ExecutionProvenance())
         none = get_reflector_user_prompt(*args, execution_provenance=None)
@@ -219,7 +221,7 @@ class TestNoDisagreementEmitsNothing:
         test above would still pass."""
         from agent.prompts import get_reflector_user_prompt
 
-        args = ("davis_run_001", STALE_PROSE, {"denoising_score": 0.31}, {})
+        args = ("synthetic_run_001", STALE_PROSE, {"denoising_score": 0.31}, {})
         _, provenance = _resolved_through_production(_plan())
         assert get_reflector_user_prompt(*args) != get_reflector_user_prompt(
             *args, execution_provenance=provenance
@@ -359,7 +361,7 @@ class TestProductionActuallyRoutesThroughTheBoundary:
         _, provenance = _resolved_through_production(_plan())
         LLMBridge.reflect(
             _Spy(),
-            "davis_run_001",
+            "synthetic_run_001",
             STALE_PROSE,
             {"denoising_score": 0.31},
             {},
@@ -369,7 +371,7 @@ class TestProductionActuallyRoutesThroughTheBoundary:
             metric_spec=_metric_spec(),
             execution_provenance=provenance,
         )
-        assert "davis_exact_l1" in captured["user"]
+        assert "synthetic_masked_mse" in captured["user"]
 
     def test_the_reflection_call_forwards_the_prepared_value_unrebuilt(self):
         """The production reflect call must forward `prepared`'s OWN provenance.
@@ -398,7 +400,7 @@ class TestProductionActuallyRoutesThroughTheBoundary:
 
         invoke_reflection(
             _Brain(),
-            exp_id="davis_run_001",
+            exp_id="synthetic_run_001",
             prepared=_Prepared(),
             reflect_results={},
             reflection_context=None,
@@ -458,7 +460,7 @@ class TestTheBlockIsNotDilutedByDefaultMaterialization:
 
     Plan sub-configs are raw dicts, so a wholesale replacement swaps a partial
     authored dict for a full schema dump. The first working version of this
-    block rendered EIGHT lines for the DAVIS overrule, four of them
+    block rendered EIGHT lines for the objective overrule, four of them
     ``<absent> -> None``. Burying `loss_type` and `epochs` in default noise
     weakens exactly the instruction the reflector is meant to follow.
     """
@@ -476,7 +478,7 @@ class TestTheBlockIsNotDilutedByDefaultMaterialization:
         of what actually trained."""
         _, provenance = _resolved_through_production(_plan())
         by_path = {e.field_path: e for e in provenance.events}
-        assert by_path["loss_cfg.loss_name"].executed == "'davis_exact_l1'"
+        assert by_path["loss_cfg.loss_name"].executed == "'synthetic_masked_mse'"
 
     def test_the_two_values_f15_got_wrong_are_both_present(self):
         """The regression, named: F15 reported a Smooth L1 beta that did not
@@ -570,7 +572,7 @@ class TestTheProductionProducerEntryPointIsWitnessed:
 
         plan = _plan()
         tracker = ResolutionTracker(plan)
-        plan = _planning()._apply_declared_objective(plan, _davis_objective_ref())
+        plan = _planning()._apply_declared_objective(plan, _synthetic_objective_ref())
         tracker.record(plan, "task_declared_objective")
 
         provenance = tracker.finish_with_model(plan, executed_model_type=plan.model_type)

@@ -31,12 +31,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Machine-local files whose PRESENCE changes observable behaviour. Absence is
-# the parity default: `tidmad_data_config.yaml` suppresses a UserWarning that a
-# golden stderr comparison counted, which is how a green developer machine
-# produced a red CI run (audit §2.A).
+# Machine-local framework files whose presence changes observable behaviour.
+# Scientific task configuration belongs to the external task package and must
+# not become an implicit axis of framework CI.
 MACHINE_CONFIG_FILES: tuple[str, ...] = (
-    "tidmad_data_config.yaml",
     "dashboard_config.yaml",
     ".env",
 )
@@ -410,28 +408,9 @@ class ExternalResource(BaseModel):
     gates_skips: int = 0
 
 
-#: Measured at base 84d74280: hiding these and unsetting the overrides moved the
-#: suite from 5 skips to 48, matching CI exactly. See the audit's CP-8 section.
-DECLARED_RESOURCES: tuple[ExternalResource, ...] = (
-    ExternalResource(
-        name="legacy_tidmad_root",
-        default_path=Path("/home/tidmad/TIDMAD"),
-        env_var="SIDERIUS_LEGACY_TIDMAD_ROOT",
-        gates_skips=18,
-    ),
-    ExternalResource(
-        name="pets_images",
-        default_path=Path("/home/klz/Data/OXFORD_IIIT_PET/images"),
-        env_var="SIDERIUS_PETS_DATA_DIR",
-        gates_skips=17,
-    ),
-    ExternalResource(
-        name="davis_frames",
-        default_path=Path("/home/klz/Data/DAVIS_2017"),
-        env_var="SIDERIUS_DAVIS_DATA_DIR",
-        gates_skips=5,
-    ),
-)
+#: Framework CI has no task-owned dataset dependency. External qualification
+#: callers may pass their own declarations to :func:`check_external_resources`.
+DECLARED_RESOURCES: tuple[ExternalResource, ...] = ()
 
 
 def resource_state(resource: ExternalResource) -> ResourceState:

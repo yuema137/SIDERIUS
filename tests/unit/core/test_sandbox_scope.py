@@ -21,8 +21,10 @@ from unittest.mock import patch
 import pytest
 
 from core.sandbox_executor import StubSandbox, TidmadSandbox
+from execute_tools.data_paths import bind_physical_data_root
 from execute_tools.dataset_config import DataScope, ScopeViolationError
 from execute_tools.scoring_utils import validate_sample_set
+from tests.helpers.metric_fixtures import accuracy_like_metric
 
 # Minimal valid configs that pass Pydantic validation (mirrors
 # tests/unit/core/test_sandbox_executor.py).
@@ -33,18 +35,20 @@ EXP_ID = "scope_exp_001"
 RUN_NAME = "scope_run"
 
 SCOPE_4_9 = DataScope(file_indices=[4, 5, 6, 7, 8, 9])
-IN_SCOPE_SS = {4: [0, 1], 7: [5]}
-OUT_OF_SCOPE_SS = {2: [0, 1], 7: [5]}
+IN_SCOPE_SS = {4: [0, 1], 7: [2]}
+OUT_OF_SCOPE_SS = {2: [0, 1], 7: [2]}
 
 
 @pytest.fixture
 def sandbox(tmp_path):
-    return TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path), data_scope=SCOPE_4_9)
+    with bind_physical_data_root(str(tmp_path), purpose="sandbox scope test"):
+        yield TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path), data_scope=SCOPE_4_9)
 
 
 @pytest.fixture
 def stub(tmp_path):
-    return StubSandbox(run_name=RUN_NAME, workspace=str(tmp_path), data_scope=SCOPE_4_9)
+    with bind_physical_data_root(str(tmp_path), purpose="stub scope test"):
+        yield StubSandbox(run_name=RUN_NAME, workspace=str(tmp_path), data_scope=SCOPE_4_9)
 
 
 def _assert_scope_error_dict(result):
@@ -146,7 +150,11 @@ class TestProductionSandboxScope:
     def test_score_vector_out_of_scope_raises(self, sandbox):
         with pytest.raises(ScopeViolationError, match="outside the DataScope"):
             sandbox.score_vector(
-                OUT_OF_SCOPE_SS, anchor_map={}, s_max=1.0, denoised_filename_fn=lambda i: f"{i}.h5"
+                OUT_OF_SCOPE_SS,
+                anchor_map={},
+                s_max=1.0,
+                denoised_filename_fn=lambda i: f"{i}.h5",
+                metric=accuracy_like_metric(),
             )
 
     @patch("core.sandbox_executor._run_observed_subprocess")
@@ -177,7 +185,8 @@ class TestProductionSandboxScope:
 
     def test_default_scope_preserves_behavior(self, tmp_path):
         """No data_scope → complete dataset; formerly-valid sets still pass."""
-        sb = TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path))
+        with bind_physical_data_root(str(tmp_path), purpose="default scope test"):
+            sb = TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path))
         assert sb.data_scope == DataScope.default()
         assert validate_sample_set({2: [0]}, scope=sb.data_scope) == {2: [0]}
 
@@ -215,7 +224,11 @@ class TestStubSandboxScope:
     def test_score_vector_out_of_scope_raises(self, stub):
         with pytest.raises(ScopeViolationError):
             stub.score_vector(
-                OUT_OF_SCOPE_SS, anchor_map={}, s_max=1.0, denoised_filename_fn=lambda i: f"{i}.h5"
+                OUT_OF_SCOPE_SS,
+                anchor_map={},
+                s_max=1.0,
+                denoised_filename_fn=lambda i: f"{i}.h5",
+                metric=accuracy_like_metric(),
             )
 
     def test_in_scope_synthesis_still_works(self, stub):
@@ -234,6 +247,13 @@ class TestStubSandboxScope:
         )
         assert infer["status"] == "success"
         _vec, scalar = stub.score_vector(
-            IN_SCOPE_SS, anchor_map={}, s_max=1.0, denoised_filename_fn=lambda i: f"{i}.h5"
+            IN_SCOPE_SS,
+            anchor_map={},
+            s_max=1.0,
+            denoised_filename_fn=lambda i: f"{i}.h5",
+            metric=accuracy_like_metric(),
         )
         assert isinstance(scalar, float)
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

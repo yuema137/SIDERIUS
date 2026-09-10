@@ -42,9 +42,12 @@ from core.runtime_control.gpu_measurement_worker_main import (
     validate_candidate_configs,
 )
 from core.runtime_control.gpu_requirement import CandidateMeasurementRequest
+from execute_tools.task_data_path import EpochSamplingParams, TaskProbeDataSpec
+from tests.helpers.two_family_profile import make_two_family_profile
 
 MODEL_TYPE = "c2probe"
 UUID = "GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef"
+WORKER_PROFILE = make_two_family_profile()
 
 
 class _ProbeConfig(BaseModel):
@@ -87,14 +90,15 @@ def _patch_bounded_loader(monkeypatch):
     describing production.
     """
     import core.runtime_control.gpu_measurement_data as data_mod
-    from execute_tools.dataset_config import TIDMAD_PROFILE, tidmad_topology
 
     def _bounded(*, data_dir, batch_size, segment_length, profile=None):
+        assert profile is not None, "the worker omitted its declared dataset profile"
+        channels = profile.to_wire()["channels"]
         return data_mod.BoundedProbeBatch(
             tensor=torch.randint(0, 256, (batch_size, segment_length), dtype=torch.long),
             evidence=data_mod.BoundedReadEvidence(
                 source_file="fixture.h5",
-                channel=tidmad_topology(profile or TIDMAD_PROFILE).channels.input_channel,
+                channel=channels["input_channel"],
                 segment_count=batch_size,
                 segment_length=segment_length,
                 first_sample=0,
@@ -130,6 +134,7 @@ def _spec(tmp_path, data_dir: str | None, **over) -> GpuMeasurementSpec:
         result_path=str(tmp_path / "result.json"),
         journal_path=str(tmp_path / "phases.ndjson"),
         worker_memory_limit_bytes=8 * 1024**3,
+        dataset_profile=WORKER_PROFILE,
     )
     payload.update(over)
     return GpuMeasurementSpec(**payload)  # type: ignore[arg-type]
@@ -180,6 +185,40 @@ class TestThereIsNoCpuFallback:
         this result can never reach PR B as a requirement."""
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
         assert measure(_spec(tmp_path, registered, device="cuda")).observed_device_uuid is None
+
+
+class TestComposedTaskBatch:
+    def test_worker_uses_task_data_path_instead_of_physical_array_loader(
+        self, tmp_path, registered, monkeypatch
+    ):
+        """Dropping this branch makes generic Formal admission policy-unavailable."""
+        import execute_tools.task_probe_batch as task_probe_module
+
+        calls: list[int] = []
+
+        def _task_batch(_reference, batch_size):
+            calls.append(batch_size)
+            batch = torch.randint(0, 256, (batch_size, 8), dtype=torch.long)
+            return batch, batch.clone()
+
+        monkeypatch.setattr(task_probe_module, "load_task_probe_batch", _task_batch)
+        task_ref = TaskProbeDataSpec(
+            manifest_path="/task/composition.yaml",
+            semantic_fingerprint="a" * 64,
+            training_scope_payload='{"kind":"synthetic"}',
+            sampling=EpochSamplingParams(data_dir=registered),
+        )
+
+        components = build_production_components(
+            _spec(tmp_path, registered, task_probe_data=task_ref)
+        )()
+
+        assert calls == [2]
+        assert tuple(components.model_input.shape) == (2, 8)
+        assert components.bounded_read == {
+            "source": "task_data_path",
+            "semantic_fingerprint": "a" * 64,
+        }
 
 
 class TestTheDeviceIsVerifiedNotAssumed:

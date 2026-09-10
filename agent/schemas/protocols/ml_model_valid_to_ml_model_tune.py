@@ -26,13 +26,16 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
     ResultAuthority,
     TaskCompositionRef,
+    TimeAdmissionSource,
     serialize_expert_advice,
 )
 from agent.schemas.ordering import OrderStrategy
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import DataScope
 
 
@@ -42,6 +45,7 @@ def local_validated_model(
     storage: StorageConfig,
     max_rounds: int = 50,
     health_checks_config: str | None = None,
+    measurement_capability: ResolvedMeasurementCapability | None = None,
     # Step 12 / PR-12a (D-12a-1) — the run's task-composition PROJECTION.
     # Additive and default-None: an un-composed run passes nothing and the
     # tuner sees `None`, which is regime A byte-for-byte.
@@ -131,9 +135,12 @@ def local_validated_model(
     baseline_isolation: bool = False,
     max_retries: int | None = None,
     plan_overrides: dict[str, Any] | None = None,
+    workflow_parameter_rules: ParameterRules | None = None,
     # --- Time-budget gate (evaluate_time_skill, Phase I two-budget split) ---
     trial_time_budget_minutes: float | None = None,
     formal_time_budget_minutes: float | None = None,
+    trial_time_admission_source: TimeAdmissionSource = "measured",
+    formal_time_admission_source: TimeAdmissionSource = "measured",
     data_dir: str | None = None,
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K two-budget split) ---
     gpu_admission_measurement_source: str | None = None,
@@ -141,6 +148,9 @@ def local_validated_model(
     gpu_pair_ceiling_gib: float | None = None,
     trial_vram_budget_gb: float | None = None,
     formal_vram_budget_gb: float | None = None,
+    vram_probe_step_timeout_seconds: float = 180.0,
+    vram_preflight_total_timeout_seconds: float = 900.0,
+    vram_preflight_host_memory_limit_gb: float | None = None,
     # --- Formal-mode training levers (Phase M) + eval-scope (Phase R) ---
     formal_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
     formal_portion: float = 0.1,
@@ -175,6 +185,7 @@ def local_validated_model(
     runtime_formal_safety_factor: float | None = None,
     runtime_watchdog_safety_factor: float | None = None,
     runtime_watchdog_floor_seconds: float = 60.0,
+    runtime_verification_max_wall_seconds: float | None = None,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -231,6 +242,11 @@ def local_validated_model(
         proposer-side gate is deferred per §10.17. Resource info reaches
         the planner via the prompt block only (single-channel rule, §10.3).
         See docs/resource_estimator_implement.md §10.9.
+      - vram_probe_step_timeout_seconds / vram_preflight_total_timeout_seconds /
+        vram_preflight_host_memory_limit_gb : workflow-owned safeguards for one
+        footprint forward, the complete isolated preflight, and its process-tree
+        resident host memory, respectively. They do not change training epochs,
+        optimizer steps, Trial/Formal runtime budgets, or the GPU VRAM ceiling.
       - formal_strategy / formal_portion / formal_train_portion :
         operator-configurable training-side sample-set knobs for any round
         promoted to formal (Phase M). Defaults snapshot / 0.1 / 1.0.
@@ -293,10 +309,12 @@ def local_validated_model(
         file_index=file_index,
         max_rounds=max_rounds,
         health_checks_config=health_checks_config,
+        measurement_capability=measurement_capability,
         # Step 12 / PR-12a — mapped straight through. This protocol is the
         # field-mapping layer, so the projection crosses the edge here rather
         # than the tuner rediscovering it from the ambient environment.
         task_composition_ref=task_composition_ref,
+        workflow_parameter_rules=workflow_parameter_rules,
         # DS6b — None normalizes to the full scope here (not in the schema)
         # so the input always carries an explicit DataScope object.
         data_scope=data_scope if data_scope is not None else DataScope.default(),
@@ -350,12 +368,17 @@ def local_validated_model(
         plan_overrides=plan_overrides or {},
         trial_time_budget_minutes=trial_time_budget_minutes,
         formal_time_budget_minutes=formal_time_budget_minutes,
+        trial_time_admission_source=trial_time_admission_source,
+        formal_time_admission_source=formal_time_admission_source,
         data_dir=data_dir,
         gpu_admission_measurement_source=gpu_admission_measurement_source,
         gpu_admission_enforcement=gpu_admission_enforcement,
         gpu_pair_ceiling_gib=gpu_pair_ceiling_gib,
         trial_vram_budget_gb=trial_vram_budget_gb,
         formal_vram_budget_gb=formal_vram_budget_gb,
+        vram_probe_step_timeout_seconds=vram_probe_step_timeout_seconds,
+        vram_preflight_total_timeout_seconds=vram_preflight_total_timeout_seconds,
+        vram_preflight_host_memory_limit_gb=vram_preflight_host_memory_limit_gb,
         formal_strategy=formal_strategy,
         formal_portion=formal_portion,
         formal_train_portion=formal_train_portion,
@@ -375,6 +398,7 @@ def local_validated_model(
         runtime_formal_safety_factor=runtime_formal_safety_factor,
         runtime_watchdog_safety_factor=runtime_watchdog_safety_factor,
         runtime_watchdog_floor_seconds=runtime_watchdog_floor_seconds,
+        runtime_verification_max_wall_seconds=runtime_verification_max_wall_seconds,
     )
 
 

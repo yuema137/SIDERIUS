@@ -185,10 +185,10 @@ class _Sandbox:
 
 
 def _bindings(agent_input, configs_dir) -> RunBindings:
-    from execute_tools.evaluation_metric import derive_tidmad_metric
     from execute_tools.metric_order import MetricOrder
+    from tests.helpers.metric_fixtures import direction_only_metric
 
-    metric = derive_tidmad_metric(TIDMAD_PROFILE)
+    metric = direction_only_metric()
     return RunBindings(
         agent_input=agent_input,
         sandbox=_Sandbox(configs_dir),
@@ -258,6 +258,25 @@ def _prepare(impl, configs_dir):
             is_formal_round=False,
             formal_trial_winner=None,
         )
+
+
+def test_composed_physical_task_uses_only_its_task_owned_scopes(tmp_path):
+    """A composed physical task must not also receive legacy SampleSets.
+
+    Defect caught: after the training engine retired its task-specific
+    SampleSet interpretation, planning still produced both legacy SampleSets
+    and opaque task-owned scopes for a composed task whose profile declared
+    physical geometry.  The child then refused every attempt before epoch 0
+    because two scope authorities arrived together.
+    """
+    prepared = _prepare(_ScopeRecorder(), tmp_path)
+
+    assert prepared.task_scopes.training is not None
+    assert prepared.task_scopes.evaluation is not None
+    assert prepared.train_sample_set is None
+    assert prepared.eval_sample_set is None
+    assert prepared.active_params["sample_set"] is None
+    assert prepared.active_params["eval_sample_set"] is None
 
 
 def test_planner_history_uses_the_run_scientific_gate_set(tmp_path, monkeypatch):

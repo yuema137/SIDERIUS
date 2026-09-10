@@ -1,11 +1,10 @@
 """Lane F / F5 (fresh-user witness, 2026-08-26) — source-tree authority.
 
-``resolve_py_cmd`` selects an interpreter; with an editable install the
-venv's ``.pth`` finder ALSO selects which checkout's framework source
-executes. The repair: ``run_chain.sh`` pins framework source to the
-invoking checkout via PYTHONPATH, verifies the pin with the neutral-cwd
-import probe (``--tree-only``), and REFUSES the launch when the pin does
-not hold. Each test names the defect only it catches; the negative
+An editable install selects which checkout's framework source executes.
+The current repair requires the invoking checkout's own uv-managed virtualenv,
+removes ambient ``PYTHONPATH``, verifies the installed source binding with the
+neutral-cwd import probe (``--tree-only``), and REFUSES the launch when that
+binding does not hold. Each test names the defect only it catches; the negative
 control is operator-mandated ("a probe that only succeeds on the good
 environment without FAILING on the bad one is incomplete").
 
@@ -62,13 +61,12 @@ def _run_probe(neutral_cwd: Path, intended: Path, *, pythonpath: str | None) -> 
     return proc.returncode, proc.stdout + proc.stderr
 
 
-def test_pythonpath_pin_outranks_the_interpreter_environment(tmp_path):
-    """The repair's load-bearing property — the defect only this catches:
-    the pin losing to the venv's editable ``.pth`` finder (or any other
-    resolution source), which would make the run_chain guard's PASS a lie.
-    Mechanism: a fake framework tree, PYTHONPATH pinned to it, intended =
-    the fake tree; the SAME interpreter whose own environment resolves the
-    real checkout must import the FAKE module. Fails by: probe exit != 0."""
+def test_probe_accepts_resolution_inside_the_intended_tree(tmp_path):
+    """The probe must accept a module resolved inside its intended tree.
+
+    ``PYTHONPATH`` is used only to construct this isolated probe fixture; the
+    production launcher removes it before invoking the same probe.
+    """
     fake = _make_fake_framework_tree(tmp_path / "fake_checkout")
     neutral = tmp_path / "neutral"
     neutral.mkdir()
@@ -105,6 +103,16 @@ def _extract_guard(tmp_path: Path) -> Path:
     guard = tmp_path / "guard.sh"
     guard.write_text(text[start:end])
     return guard
+
+
+def _extract_resolver(tmp_path: Path) -> Path:
+    """Copy the production resolver function into an isolated shell harness."""
+    text = RUN_CHAIN.read_text()
+    start = text.index("resolve_py_cmd() {")
+    end = text.index("\n}", start) + 2
+    resolver = tmp_path / "resolver.sh"
+    resolver.write_text(text[start:end])
+    return resolver
 
 
 _HARNESS = """#!/bin/bash
@@ -154,8 +162,52 @@ def test_guard_passes_and_verifies_on_the_invoking_checkout(tmp_path):
     real chain start. Fails by: exit != 0 or the verified banner absent."""
     rc, out = _run_guard(tmp_path, REPO_ROOT)
     assert rc == 0, out
-    assert "PYTHONPATH-pinned, probe-verified" in out
+    assert "exact-venv, probe-verified" in out
     assert "GUARD_RC=0" in out
+
+
+def test_resolver_selects_the_checkout_venv_over_an_activated_foreign_venv(tmp_path):
+    """An activated environment must not change the selected interpreter."""
+    project = tmp_path / "checkout"
+    local_python = project / ".venv" / "bin" / "python"
+    local_python.parent.mkdir(parents=True)
+    local_python.write_text("#!/bin/sh\n")
+    local_python.chmod(0o755)
+    foreign = tmp_path / "foreign" / "bin" / "python"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text("#!/bin/sh\n")
+    foreign.chmod(0o755)
+    resolver = _extract_resolver(tmp_path)
+    command = (
+        f'PROJECT_DIR="{project}"; VIRTUAL_ENV="{foreign.parent.parent}"; '
+        f'source "{resolver}"; resolve_py_cmd; printf "%s\\n" "${{PY_CMD[0]}}"'
+    )
+    completed = subprocess.run(
+        ["bash", "-c", command],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert completed.stdout.strip() == str(local_python)
+
+
+def test_resolver_refuses_when_the_checkout_venv_is_missing(tmp_path):
+    """No activated, uv-run, or system-Python fallback may hide a missing env."""
+    project = tmp_path / "checkout"
+    project.mkdir()
+    resolver = _extract_resolver(tmp_path)
+    completed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'PROJECT_DIR="{project}"; VIRTUAL_ENV="/foreign"; source "{resolver}"; resolve_py_cmd',
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 1
+    assert "exact-checkout virtualenv is missing" in completed.stderr
+    assert "uv sync --group dev --frozen" in completed.stderr
 
 
 def test_guard_refuses_when_the_pin_cannot_hold(tmp_path):
@@ -201,18 +253,13 @@ def _make_depless_tree(root: Path) -> Path:
     return root
 
 
-def test_dry_run_allows_only_the_missing_deps_class(tmp_path):
-    """The regression the first CI run caught, RE-SCOPED after the
-    supervisor's stress-test — the defect only this catches: the guard
-    gating the quickstart's published pre-venv DRY-RUN flow (a
-    dependency-less interpreter), which cannot execute anything silently:
-    a framework call in that env fails loudly. Fails by: exit != 0, or the
-    deferred-verification notice absent."""
+def test_dry_run_does_not_relax_exact_environment_authority(tmp_path):
+    """Dry-run must not make a foreign or dependency-less checkout valid."""
     depless = _make_depless_tree(tmp_path / "depless_checkout")
     rc, out = _run_guard(tmp_path, depless, dry_run=True)
-    assert rc == 0, out
-    assert "interpreter lacks framework deps" in out
-    assert "GUARD_RC=0" in out
+    assert rc == 1, out
+    assert "SOURCE-TREE AUTHORITY REFUSED" in out
+    assert "GUARD_RC=0" not in out
 
 
 def test_dry_run_still_refuses_foreign_resolution_the_hole_closure(tmp_path):
@@ -241,15 +288,12 @@ def test_missing_dependencies_refuse_with_the_accurate_cause(tmp_path):
     ModuleNotFoundError, so the probe fails WITHOUT 'resolves OUTSIDE'.
     Fails by: the foreign-source text appearing, or the environment
     refusal missing."""
-    fake = tmp_path / "depless_checkout"
-    pkg = fake / "agent" / "schemas"
-    pkg.mkdir(parents=True)
-    (fake / "agent" / "__init__.py").write_text("")
-    (pkg / "__init__.py").write_text("")
-    (pkg / "hyperparam_tuning.py").write_text(
-        "raise ModuleNotFoundError(\"No module named 'pydantic'\")\n"
+    script_dir = tmp_path / "script_dir"
+    script_dir.mkdir()
+    (script_dir / "_import_resolution_probe.py").write_text(
+        "import sys\nprint('[import-probe] DEPS-UNAVAILABLE: missing dependency')\nsys.exit(3)\n"
     )
-    rc, out = _run_guard(tmp_path, fake)
+    rc, out = _run_guard(tmp_path, REPO_ROOT, script_dir=script_dir)
     assert rc == 1, out
     assert "LAUNCH ENVIRONMENT REFUSED" in out
     assert "SOURCE-TREE AUTHORITY REFUSED" not in out

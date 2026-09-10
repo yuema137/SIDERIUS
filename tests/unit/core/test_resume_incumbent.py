@@ -25,18 +25,18 @@ from core.iteration_manifest import (
     publish_iteration_manifest,
 )
 from core.resume import ReplayIntegrityError, restore_prior_state
-from execute_tools.evaluation_metric import TIDMAD_METRIC_ID
-from tests.helpers.metric_fixtures import shipped_spec
+from execute_tools.health_checks.config import materialize_effective_config
+from tests.helpers.metric_fixtures import accuracy_like_spec
 
 # ---------------------------------------------------------------------------
 # Workspace builders
 # ---------------------------------------------------------------------------
 
-_BLOCKING_IDS = (
-    "output_diversity_blocking",
-    "output_std_blocking",
-    "amplitude_collapse_blocking",
+_BLOCKING_IDS = ("synthetic_stability_blocking",)
+_HEALTH_CONFIG = (
+    pathlib.Path(__file__).resolve().parents[2] / "fixtures" / "health" / "one_blocking_gate.yaml"
 )
+_METRIC_SPEC = accuracy_like_spec("synthetic_resume_quality")
 
 
 def _passing_verdicts() -> list[dict]:
@@ -90,7 +90,7 @@ def _record(
     # tests/unit/execute_tools/test_step10_p2a_c2_resume_and_per_file.py.
     if status == "success" and isinstance(score, (int, float)):
         rec["metric_result"] = {
-            "metric_id": TIDMAD_METRIC_ID,
+            "metric_id": _METRIC_SPEC.id,
             "direction": "higher",
             "scalar": score,
         }
@@ -169,7 +169,7 @@ def _write_iter(
         # identity source resume builds its `MetricOrder` from; an output
         # without it is a NAMED refusal, never a re-derivation (parent §8).
         # A real post-09a output always carries it.
-        metric_spec=shipped_spec(),
+        metric_spec=_METRIC_SPEC,
     )
     output_path = os.path.join(model_dir, f"run_output_{run_name}.json")
     with open(output_path, "w") as f:
@@ -352,12 +352,10 @@ def test_legacy_rederivation_with_effective_policy(tmp_path):
     """No committed best_valid_formal_* fields; records carry persisted
     verdicts; the workspace's materialized effective policy (sha-matching
     the stamp) judges gate-set completeness."""
-    from execute_tools.health_checks.config import materialize_effective_config
-
     ws = str(tmp_path)
     model_dir = os.path.join(ws, "iter_001", "iteration_001", "punet")
     os.makedirs(model_dir, exist_ok=True)
-    _, sha = materialize_effective_config(None, None, model_dir)
+    _, sha = materialize_effective_config(str(_HEALTH_CONFIG), None, model_dir)
     _write_iter(
         ws,
         1,
@@ -401,8 +399,6 @@ def test_repo_policy_never_consulted(tmp_path, monkeypatch):
     thing it names. The `calls` assertion below is what makes that
     impossible to repeat.
     """
-    from execute_tools.health_checks.config import materialize_effective_config
-
     real = resume.resolve_scientific_gate_ids
     repo_config = str(
         pathlib.Path(resume.__file__).resolve().parents[1] / "configs" / "health_checks.yaml"
@@ -422,7 +418,7 @@ def test_repo_policy_never_consulted(tmp_path, monkeypatch):
     ws = str(tmp_path)
     model_dir = os.path.join(ws, "iter_001", "iteration_001", "punet")
     os.makedirs(model_dir, exist_ok=True)
-    _, sha = materialize_effective_config(None, None, model_dir)
+    _, sha = materialize_effective_config(str(_HEALTH_CONFIG), None, model_dir)
     _write_iter(
         ws,
         1,
@@ -669,12 +665,10 @@ class TestScientificAuthorityAdmission:
         gap is deliberately NOT treated as a contradiction (see
         `test_a_missing_policy_artifact_is_a_gap_not_a_contradiction`).
         """
-        from execute_tools.health_checks.config import materialize_effective_config
-
         ws = str(tmp_path)
         model_dir = os.path.join(ws, "iter_001", "iteration_001", "punet")
         os.makedirs(model_dir, exist_ok=True)
-        _, sha = materialize_effective_config(None, None, model_dir)
+        _, sha = materialize_effective_config(str(_HEALTH_CONFIG), None, model_dir)
 
         failing = [
             {

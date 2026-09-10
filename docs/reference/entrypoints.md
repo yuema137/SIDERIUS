@@ -16,27 +16,28 @@ the flags that decide *what a run is*.
 | you want to | use |
 |---|---|
 | run the full multi-iteration agent loop | `sdsc_submission_scripts/run_chain.sh` |
-| launch the official Gold campaign (stage 1 search / stage 2 strict retrain) | `sdsc_submission_scripts/run_gold_campaign.sh` (binds the frozen campaign values — including `--llm_config llm_configs/openai_tiered_pro.json` on every band and unit, refusing the launch if it cannot be resolved — and delegates to `run_chain.sh`; carries an OPERATOR-SUPPLIED VRAM ceiling via `--gold_trial_vram_budget_gb` / `--gold_formal_vram_budget_gb` — both or neither, no value defaulted, unsupplied is inert but recorded, D-HW-6; see `sdsc_submission_scripts/README.md` "Gold campaign" and `docs/campaign/stage_artifact_contract.md`) |
-| run one arm of the prior-art baseline experiment (arXiv X9) | `sdsc_submission_scripts/launch_prior_baseline_experiment.sh` |
+| launch a task-specific campaign | use the campaign entrypoint in the experiment repository; it delegates to this repository's `run_chain.sh` |
+| run one arm of a task-specific comparison | use that experiment repository's launcher with an explicit SIDERIUS checkout |
 | run exactly one iteration (or debug one) | `sdsc_submission_scripts/run_one_iteration.py` |
 | drive the workflow directly from Python | `workflows/model_exploration.py` |
-| compare a built-in TIDMAD model against baselines | `scripts/run_comparison.py` |
-| gate a campaign launch before running any of the above | `sdsc_submission_scripts/campaign_preflight.sh` (see below) |
+| compare a task model against baselines | use the task package's comparison entrypoint |
+| gate a campaign launch | use the campaign-owned preflight in the experiment repository |
 
 > Note the directory: the chain launchers live in `sdsc_submission_scripts/`,
 > **not** in `scripts/`. Several older documents said otherwise.
 
-## `campaign_preflight.sh` — the launch-blocking gate
+## Archived X9 preflight reference
+
+The X9 preflight and its executable documentation moved to
+`siderius-exp/campaigns/tidmad_x9`. The material below is historical design
+context only; none of the named campaign paths is a SIDERIUS entrypoint.
+
+### Historical launch-blocking gate
 
 One gate, rows `R1`…`R9`, each printing `PASS` / `FAIL` / `SKIP` / `INFO`
 with its evidence; any `FAIL` exits non-zero. Full row descriptions live in
 the script's own `--help` and in `sdsc_submission_scripts/README.md`. Two
 things about its output are worth knowing before you read a report.
-
-**A `SKIP` is not a `PASS`.** Rows bound to the X9 launcher (`R6`, `R7`) or
-to the X9 four-way co-residency posture (`R4`) are skipped by name under
-`--arm goldpod`. A row that the topology cannot exercise has proven
-nothing, and it does not count as a failure either.
 
 **R7 states which layers it actually compared.** The arm-symmetry row
 (#255, launch validity is conditioned on it) compares five layers, and not
@@ -94,18 +95,18 @@ bash sdsc_submission_scripts/run_chain.sh \
     --workspace /path/to/workspace \
     --run_name my_run_v1 \
     --num_iterations 5 \
-    --task_composition configs/task_composition/tidmad.yaml \
+    --task_composition configs/task_composition/quickstart.yaml \
     --data_dir /path/to/data \
     --max_rounds 5
 ```
 
 | flag | meaning |
 |---|---|
-| `--mode {lilab,sdsc}` | **the only flag the launcher validates as required.** `lilab` = foreground subprocess; `sdsc` = `sbatch` + `afterany` chain |
+| `--mode {lilab,sdsc}` | required `lilab` = foreground subprocess; `sdsc` = `sbatch` + `afterany` chain |
 | `--workspace DIR` | chain workspace root — required in practice |
 | `--run_name NAME` | pins the immutable run id — required in practice |
-| `--task_composition FILE` | the task manifest. **Omitted = the legacy un-composed run** with byte-identical child argv |
-| `--data_dir DIR` | physical data root. **Required for any composed run**; a composed run without it fails closed before any LLM or GPU work |
+| `--task_composition FILE` | the required task manifest; omission is refused |
+| `--data_dir DIR` | physical data root. required; a run without it fails closed before any LLM or GPU work |
 | `--num_iterations N` | default `2` |
 | `--seed_paths P [P…]` | prior run outputs to seed from. **Optional** — an empty list is a valid cold start |
 | `--auto_resume` / `--no_auto_resume` | default **ON**: pick up where a partial chain stopped. The inspector's captured value is VALIDATED (F-SCANB-4): only the exit-0 capture's last line, and only a bare non-negative integer, becomes `START_ITER`; anything else (e.g. plugin-loader stdout chatter with no trailing value line) refuses loudly and names the workaround below — never a silent default |
@@ -125,6 +126,22 @@ runtime-profile declaration (`--required_runtime_profile_path` /
 F-PROFILE-WIRE-1, forwarded only when
 typed, so an undeclared launch's child argv is byte-identical), and the
 trial / formal time and VRAM budgets.
+
+The generic chain also accepts
+`--vram_probe_step_timeout_seconds` (default `180`) and
+`--vram_preflight_total_timeout_seconds` (default `900`), plus
+`--vram_preflight_host_memory_limit_gb` (omission preserves the deployment
+default, normally `24`). The first bounds one
+training-mode or inference footprint forward; the second bounds the complete
+isolated preflight worker; the third bounds resident host memory for that
+worker's process tree. They are workflow safeguards, not task declarations,
+training-step counts, GPU VRAM ceilings, or Trial/Formal runtime budgets. See
+[`operating-a-run.md`](../guides/operating-a-run.md#vram-preflight-watchdogs).
+
+`--runtime_verification_max_wall_seconds` is an optional pass-through for the
+adaptive in-subprocess verifier. It is omitted by default, preserving the
+framework verifier default; slow-step workloads may set it explicitly without
+changing their Trial or Formal budgets.
 
 > The header comment inside `run_chain.sh` lists `--seed_paths` under "Required
 > flags". That comment is stale — `_chain_common.sh:403-406` documents the
@@ -152,8 +169,8 @@ Other flags that define a run:
 
 | flag | default |
 |---|---|
-| `--task_composition` | `None` (legacy un-composed) |
-| `--data_dir` | `None` |
+| `--task_composition` | required |
+| `--data_dir` | required |
 | `--data_scope` | `None` (full scope) |
 | `--health_gate_enabled` / `--no-health_gate_enabled` | enabled |
 | `--health_gate_files` | `None` |
@@ -162,7 +179,7 @@ Other flags that define a run:
 | `--max_epochs` | `1` (mode-agnostic epoch ceiling; must be >= 1) |
 | `--trial_max_epochs` / `--formal_max_epochs` | `None` — per-role epoch ceilings (D-BUD-6; frozen campaign posture trial 2 / formal 1). Precedence per round role: per-mode value → `--max_epochs` → no clamp; must be >= 1, refused at parse otherwise |
 | `--max_proposal_attempts` | `3` |
-| `--llm_config` | `None` — **omitting it does not fail.** Empty forwards nothing (`_chain_common.sh:78`), and the runner then falls back to `WorkflowLLMConfig.uniform("gemini", --llm_model)` whose `--llm_model` default is `gemini-3.1-pro-preview` (`run_one_iteration.py:943`), so every LLM role silently resolves to the deprecated all-Gemini default and the run still exits 0. Pass an explicit routing config on any run whose model matters; the Gold campaign path binds `llm_configs/openai_tiered_pro.json` for you and refuses to launch if it cannot (F-LLM-WIRE-1) |
+| `--llm_config` | `None` — **omitting it does not fail.** Empty forwards nothing (`_chain_common.sh:78`), and the runner then falls back to `WorkflowLLMConfig.uniform("gemini", --llm_model)` whose `--llm_model` default is `gemini-3.1-pro-preview` (`run_one_iteration.py:943`), so every LLM role silently resolves to the deprecated all-Gemini default and the run still exits 0. Pass an explicit routing config on any run whose model matters. Task-specific campaigns must bind and validate their own routing config. |
 | `--required_runtime_profile_path` | `None`. The **ABSOLUTE** path of the profile artifact this launch requires. Part of the declaration and never derived — this is the clause that closes `finding_1_invisible_default`: while the artifact was located by the ordinary discovery rule (`$SIDERIUS_CALIBRATION_DIR/runtime_profiles_<gpu_slug>.json`), a binding certified *what was found* but never *that the right file was consulted*, so an overlay was used because the directory happened to hold a file of that name. When declared, resolution reads THIS file and never consults discovery — a missing declared artifact REFUSES even when discovery would have certified successfully. A relative path is refused at declaration, because the consuming subprocess runs with a different working directory (`run_chain.sh` cd's before exec) |
 | `--required_runtime_profile` | `None` (undeclared → the legacy ladder: measured overlay > shipped > uncalibrated). Declares the runtime profile this launch REQUIRES, as `<gpu_slug>/<regime>` (e.g. `nvidia_h100_80gb_hbm3/single`), copied from a qualification run's recorded provenance. Must be declared together with `--required_runtime_profile_path` and `--required_runtime_profile_sha256`; any proper subset is refused, because half a binding is NO binding and resolving it as undeclared would leave the requirement silently unenforced. When declared, resolution is FAIL-CLOSED: a discovered device/regime that differs, a missing overlay, a digest mismatch, or a verified overlay lacking the row all REFUSE the launch instead of falling back (F-PROFILE-WIRE-1, mechanism F-H100-WD-1-PRETAG). Combining it with an explicit `--runtime_watchdog`/`--no-runtime_watchdog` also refuses — OPERATOR MODE never consults the profile, so the requirement would be unenforced |
 | `--required_runtime_profile_sha256` | `None`. The 64-char lowercase-hex sha256 of the DECLARED artifact's bytes, certified for this run (`sha256sum "${SIDERIUS_CALIBRATION_DIR:-$HOME/.siderius}/runtime_profiles_<gpu_slug>.json"`). Hashed over the exact bytes parsed — a single read, never re-opened — so the profile consumed is provably the one that was qualified. Consumption is observable: `runtime_watchdog_provenance` reads `bound:<path>#sha256=<hex>` exactly when certification ran, and the digest it records is the one OBSERVED from the bytes read — never an echo of the declared value |
@@ -204,118 +221,13 @@ The workflow itself, runnable directly. Accepts `--task_composition`,
 `--max_proposal_attempts` (default `3`), `--target_score`, LLM routing flags and
 advice flags.
 
-## `scripts/run_comparison.py` — baseline comparison
+## Task-specific baseline comparison — external consumer
 
-⚠ **TIDMAD-only by construction.** It imports TIDMAD's dataset, file count,
-sandbox and data directory directly, and it does **not** accept
-`--task_composition`. It is a useful baseline harness for TIDMAD and is not a
-general task runner.
-
-```bash
-python scripts/run_comparison.py --model punet --is_trial
-```
-
-Key flags: `--model` (required, single-valued), `--is_trial`, `--max_rounds`
-(default `50`), `--provider` / `--model_id` and the `--reflect_*` split,
-`--data_scope`, `--health_checks_config`.
-
-## `scripts/stage3/stage3_composed_best.py` — Stage-3 Composed Best (Gold campaign)
-
-Pools the four Stage-1 band winners' SOURCE-BAND deliverables and scores the
-composed 20-file set **exactly once** through the shared
-`scripts/stage3/stage3_common.compose_and_score` wrapper
-(`docs/campaign/stage_artifact_contract.md` §1/§3/§4). Emits one authoritative
-`denoising_score` plus an identity-only provenance JSON under
-`{workspace_root}/stage3/composed_best/{arm}/`. Read-only against Stage-1
-workspaces (the pooled input is a symlink farm in the stage3 namespace).
-
-```bash
-.venv/bin/python -m scripts.stage3.stage3_composed_best \
-    --workspace_root /path/to/campaign_root --arm gold
-```
-
-Flags (both required, no defaults): `--workspace_root` (the campaign's
-persistent root; band workspaces are `{workspace_root}/{arm}_band{BAND}`),
-`--arm` (opaque arm label; must match each workspace's invariants lock).
-
-Refusals (exit 2, message on stderr): missing/scope-mismatched/unverifiable
-workspaces, anomalous `is_trial` shapes, missing `metric_spec` stamps, missing
-winner deliverables (retention clause), and every `compose_and_score` refusal
-(missing/duplicate pooled file indices, swapped anchor artifact). **No
-per-band scalar appears in any output, log, or provenance field** — per-band
-information is expressed only as per-file vector entries (F-SCAND-1; pinned by
-an SRI-11 census test).
-
-`stage3_common.compose_and_score(deliverable_dirs, *, files=range(20),
-sample_set=None, reconciled_spec)` is the contract's §4 interface (as
-amended by the supervisor's local-gate Step-09a ruling, 2026-08-26): all
-three Stage-3 writers call it, none re-inlines `score_vector`, a partial
-`files` range or non-`None` `sample_set` is refused, and `reconciled_spec`
-is the caller's RECONCILED 09a `MetricSpec` stamp — required identity
-transport for refusal envelopes; the composer derives nothing.
-
-## `scripts/stage3/stage3_strict_best.py` — Stage-3 Strict Best (Gold campaign)
-
-Fail-closed finalization over the Stage-2 retrain matrix: verifies all 16
-units (`{workspace_root}/stage2/{design}_{band}/` with an atomic
-`COMPLETE.json`, `healthgate_valid: true`, strict §2 schema), pools each
-design's four band `deliverables/` dirs, obtains StrictScore(design) from
-**one** `compose_and_score` call at full 0..19 scope, and selects the best
-under `MetricOrder` (direction from the RECONCILED 09a `metric_spec`
-stamps persisted in the 16 units' chain workspaces, read through the
-manifest-verified loader and reconciled by the ONE authority — this module
-derives nothing and contains no `max`/`min`/`sorted`; AST-censused). ANY
-missing/malformed/invalid unit refuses the WHOLE finalization (one
-aggregated refusal naming every failing unit, zero composer calls, no
-selection, exit 2 — Q-S3-1 ruling A). The marker's own `denoising_score` is
-validated and never echoed.
-
-```bash
-.venv/bin/python -m scripts.stage3.stage3_strict_best \
-    --workspace_root /path/to/campaign_root \
-    --designs wavenetA,punetB,gatedfnoC,rnnD
-```
-
-Flags: `--workspace_root` (required), `--designs` (required; comma-separated
-ids of exactly 4 distinct frozen winner designs), `--out` (default
-`{workspace_root}/stage3/strict_best/strict_best_selection.json`, written by
-atomic rename, stamped `selection_rule =
-strict_best.fail_closed.one_composed_score_per_design.v1`).
-
-## `scripts/stage3/stage3_terminal_eval.py` — Stage-3 terminal re-evaluation (Gold campaign)
-
-The ONE terminal full-scope (100%) measurement of the selected champion,
-taken AFTER search freezes; the terminal number never feeds back into
-search. Everything it writes lives under the isolation namespace
-`{workspace_root}/stage3/terminal_eval/` (contract §3): output paths are
-validated against the namespace at construction, a champion without
-HealthGate-valid provenance is refused by name through
-`classify_under_pinned_policy` — against the gate set the champion's OWN
-workspace pinned, never the repo-current shipped config, and an
-unestablished roster is UNKNOWN and therefore a refusal —
-scoring goes through the shared `compose_and_score` exactly once, and the
-write path refuses band-shaped scalar fields. The module also ships the
-read-closure guard (`audit_terminal_read_closure` /
-`assert_terminal_read_closure`) proving no search-side consumer's input
-roots reach the namespace — including planted-artifact detection via the
-self-declared `artifact_namespace` marker.
-
-```bash
-.venv/bin/python -m scripts.stage3.stage3_terminal_eval \
-    --champion_json /path/to/champion.json \
-    --workspace_root /path/to/campaign_root
-```
-
-Flags (both required): `--champion_json` (a JSON file with the
-`TerminalChampion` shape — identity + `deliverable_dirs` +
-`provenance_records` + `metric_spec`, the champion's reconciled 09a stamp,
-required since the Step-09a gate ruling; a spec-less champion is a pre-09a
-shape and refuses at validation — plus `provenance_workspace`, the run
-workspace whose pinned `health_checks_effective.yaml` governs every
-provenance record, required since F-4 because the value it would otherwise
-default to is a different run's policy), `--workspace_root`. Refusals exit
-non-zero with the named reason on stderr — a refusal must never look like
-a successful terminal measurement.
+`scripts/run_comparison.py` is no longer a framework entrypoint. Its task-owned
+successor is `tasks/tidmad/tools/run_comparison.py` in `siderius-exp`.
+Use that repository's documented environment and task inputs; invoking the
+old path from a SIDERIUS checkout will not work. Generic framework runs use
+the declared-composition workflow entrypoints above.
 
 ## Data scope
 
@@ -344,6 +256,7 @@ different one fails at startup.
 | `run_chain.sh` | ✅ (forwards) |
 | `run_one_iteration.py` | ✅ |
 | `workflows/model_exploration.py` | ✅ |
+| `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` | ✅ (required) |
 | `scripts/run_comparison.py` | ❌ |
 
 ---

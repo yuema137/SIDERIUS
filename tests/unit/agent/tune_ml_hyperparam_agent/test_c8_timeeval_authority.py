@@ -23,7 +23,13 @@ from __future__ import annotations
 import pytest
 
 from agent.skills.evaluate_time_skill.wrapper import _gate_decision
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.two_family_profile import make_two_family_profile
+
+PROFILE = make_two_family_profile(
+    num_files=1,
+    psd_segment_length=40_000,
+    segments_per_file=1,
+)
 
 
 def _shape(*, minutes: float, source: str) -> dict:
@@ -151,7 +157,7 @@ class TestEvidenceChannelFailure:
             loss_config={"loss_type": "ce"},
             sample_set={"0": [0]},
             time_budget_minutes=10.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
         assert result["status"] == "error"
         assert "ABORT" in result["message"]

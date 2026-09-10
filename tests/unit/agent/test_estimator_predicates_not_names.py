@@ -27,9 +27,14 @@ from __future__ import annotations
 import pytest
 
 from agent.skills.training_skill.estimator import attention_shape
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.two_family_profile import make_two_family_profile
 
 _BUILTINS = ("punet", "fcnet", "transformer", "wavenet", "rnn", "gated_fno")
+PROFILE = make_two_family_profile(
+    num_files=2,
+    psd_segment_length=1_600_000,
+    segments_per_file=20,
+)
 
 
 class TestAttentionPredicate:
@@ -103,7 +108,7 @@ class TestAttentionPredicate:
                 sample,
                 ms_per_step=44.3,
                 num_params=10**6,
-                dataset_profile=TIDMAD_PROFILE,
+                dataset_profile=PROFILE,
             )
             explicit_t = train_time(
                 mt,
@@ -112,7 +117,7 @@ class TestAttentionPredicate:
                 sample,
                 ms_per_step=44.3,
                 num_params=10**6,
-                dataset_profile=TIDMAD_PROFILE,
+                dataset_profile=PROFILE,
             )
             assert absent_t["seconds"] == explicit_t["seconds"], mt
 
@@ -122,7 +127,7 @@ class TestAttentionPredicate:
                 sample,
                 inference_ms_per_step=1.0,
                 num_params=10**6,
-                dataset_profile=TIDMAD_PROFILE,
+                dataset_profile=PROFILE,
             )
             explicit_i = inf_time(
                 mt,
@@ -130,7 +135,7 @@ class TestAttentionPredicate:
                 sample,
                 inference_ms_per_step=1.0,
                 num_params=10**6,
-                dataset_profile=TIDMAD_PROFILE,
+                dataset_profile=PROFILE,
             )
             assert absent_i["seconds"] == explicit_i["seconds"], mt
 
@@ -160,7 +165,7 @@ class TestAttentionPredicate:
             sample,
             ms_per_step=10.0,
             num_params=10**6,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
         explicit = estimate_wall_time_seconds(
             "punet",
@@ -169,7 +174,7 @@ class TestAttentionPredicate:
             sample,
             ms_per_step=10.0,
             num_params=10**6,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
         assert absent["seconds"] == explicit["seconds"]
 
@@ -180,7 +185,7 @@ class TestAttentionPredicate:
             sample,
             ms_per_step=10.0,
             num_params=10**6,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
         assert absent["seconds"] == 10 * one["seconds"]
 

@@ -90,30 +90,11 @@ host has a modern Node.js, the stage runs in full locally.
 
 ### Git worktrees
 
-Linked worktrees (`git worktree add …`) have no `.venv` of their own. Two
-consequences:
-
-1. Point uv at your main checkout's environment:
-   `UV_PROJECT_ENVIRONMENT=/path/to/main-checkout/.venv make check`.
-2. Even then, expect the `test` stage to exit non-zero in a worktree — the
-   gate is **not** expected green there. The launch-surface suites execute
-   the real launch scripts, which resolve `<checkout>/.venv/bin/python`; that
-   venv exists only in a synced checkout (CI syncs one before testing and
-   runs these same suites green), so in a linked worktree they fail with
-   `No such file or directory` and its immediate downstream symptoms. On the
-   2026-08-25 witness run this was 52 tests in exactly six files, everything
-   else green:
-
-   - `tests/unit/scripts/test_sdsc_argument_forwarding.py`
-   - `tests/unit/sdsc_submission_scripts/test_campaign_admission.py`
-   - `tests/unit/sdsc_submission_scripts/test_multi_campaign_isolation.py`
-   - `tests/unit/sdsc_submission_scripts/test_v19_campaign_pinning.py`
-   - `tests/unit/sdsc_submission_scripts/test_v19_gate0_pair_runner.py`
-   - `tests/unit/sdsc_submission_scripts/test_v19_queue_runner.py`
-
-   A worktree run is therefore useful for everything except the launch
-   surface; the authoritative pre-PR `make check` belongs in a normal
-   checkout, where all of the above pass.
+Linked worktrees (`git worktree add …`) have no `.venv` of their own. Point
+commands at the project's established virtual environment explicitly, or set
+`UV_PROJECT_ENVIRONMENT` to that environment. Tests and entrypoint dry-runs
+must still resolve source from the worktree under test; sharing an interpreter
+must not silently import a different checkout.
 
 ### Before you open a PR
 

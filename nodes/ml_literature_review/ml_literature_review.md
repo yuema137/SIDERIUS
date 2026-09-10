@@ -16,7 +16,7 @@
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `experiment_history` | `InterpretationOutput` | Yes | — | Fresh interpretation output from this iteration. The synthesis prompt grounds every finding in one of `experiment_history.bottlenecks`; `key_findings` is PRIMARY input alongside bottlenecks. |
-| `root_papers` | `list[PaperSource]` | No | `[]` | Foundational papers always resolved at agent start. Loaded from `configs/lit_review_config.yaml` in production. Per-paper extracts cache under `{root_cache_dir}` for free re-use across runs. |
+| `root_papers` | `list[PaperSource]` | No | `[]` | Foundational papers always resolved at agent start. Supplied by the caller's task or experiment config. Per-paper extracts cache under `{root_cache_dir}` for free re-use across runs. |
 | `dynamic_search` | `DynamicSearchConfig` | No | `DynamicSearchConfig()` | Knobs for the per-iteration Semantic Scholar search loop (sub-fields: `enabled`, `max_rounds`, `initial_verbosity`, `escalation_allowed`, `results_per_query`, `max_escalations_per_round`). See Parameter Reference for details. |
 | `synthesis_config` | `SynthesisConfig` | No | `SynthesisConfig()` | Omission / transfer-tolerance knobs for the synthesis step (`transfer_tolerance` default `"moderate"`). |
 | `findings_verbosity` | `Literal[0, 1]` | No | `1` | Per-finding content format. `1` = three-part Markdown (`**Implication:**` / `**Mechanism:**` / `**Adaptation:**` + closing rationale); `0` = single-paragraph backward-compat. Does not affect finding count. |
@@ -58,13 +58,14 @@
     --workspace ./siderius_workspace \
     --run_name v1 \
     --experiment-history ./siderius_workspace/interpretation_v1.json \
+    --lit_review_config ./task/literature.yaml \
     --provider gemini \
     --model_id gemini-3.1-flash-lite-preview
 ```
 
 Run from the repo root (the task profile `configs/task_config.yaml` resolves relative to the CWD, exactly as in the sibling CLIs). `python -m nodes.ml_literature_review.ml_literature_review ...` is equivalent; the short package form `python -m nodes.ml_literature_review` does NOT work — the package `__init__.py`'s pre-existing `sys.modules` rebind (which keeps `mock.patch` semantics) leaves no `__path__` for a `__main__` lookup, and no node supports that form.
 
-The CLI reads the upstream `InterpretationOutput` (`--experiment-history`, defaulting to `{workspace}/interpretation_{run_name}.json` — the same persisted record the proposal agent's CLI reads), loads the node knobs from `configs/lit_review_config.yaml` with the same key mapping the workflow uses (`_build_lit_review_input`), resolves `task_description` from the canonical task profile via `get_task_description(load_task_config())`, builds a validated `LiteratureReviewInput`, runs the agent (the same `run()` the workflow calls — unchanged), and writes `{workspace}/ml_literature_review_{run_name}.json`.
+The CLI reads the upstream `InterpretationOutput` (`--experiment-history`, defaulting to `{workspace}/interpretation_{run_name}.json` — the same persisted record the proposal agent's CLI reads), loads the node knobs from the required `--lit_review_config` file with the same key mapping the workflow uses (`_build_lit_review_input`), resolves `task_description` from the active task declaration, builds a validated `LiteratureReviewInput`, runs the agent (the same `run()` the workflow calls), and writes `{workspace}/ml_literature_review_{run_name}.json`.
 
 **Ingestion refusals are loud and distinct** (`load_experiment_history`): a missing file raises `FileNotFoundError` naming the path and the upstream node to run; unparseable JSON raises `ValueError` ("not valid JSON") chaining the `JSONDecodeError`; valid JSON that is not a valid `InterpretationOutput` raises `ValueError` naming the schema, chaining the pydantic `ValidationError`. The CLI never silently degrades to an empty history.
 
@@ -75,7 +76,7 @@ The CLI reads the upstream `InterpretationOutput` (`--experiment-history`, defau
 | `--workspace` | `./siderius_workspace` | Root directory for reading the upstream interpretation output and writing this node's output JSON. |
 | `--run_name` | `v1` | Run identifier — reads `interpretation_{run_name}.json` (unless `--experiment-history` overrides), writes `ml_literature_review_{run_name}.json`. |
 | `--experiment-history` | `{workspace}/interpretation_{run_name}.json` | Explicit path to the upstream `InterpretationOutput` JSON. `--experiment_history` is accepted as an alias (repo flag style); the dashed form is the issue-#303 acceptance spelling. |
-| `--lit_review_config` | `configs/lit_review_config.yaml` | Node-knob YAML (`root_papers` / `dynamic_search` / `synthesis` / `confidence_rubric` / `findings_verbosity`) — same file and key mapping as the workflow. A relative path resolves against the repo root. The YAML's top-level `enabled:` key gates the **workflow** stage only and is ignored by the CLI — invoking the CLI is the enablement. |
+| `--lit_review_config` | required | Node-knob YAML (`root_papers` / `dynamic_search` / `synthesis` / `confidence_rubric` / `findings_verbosity`) — same file and key mapping as the workflow. A relative path resolves against the repo root. The YAML's top-level `enabled:` key gates the **workflow** stage only and is ignored by the CLI — invoking the CLI is the enablement. |
 | `--provider` | `gemini` | LLMBridge provider (`gemini` / `openai`) for compression + search-decision + synthesis. The CLI does not expose the optional `search_llm_*` split; the search-decision step falls back to this provider (schema semantics). |
 | `--model_id` | `gemini-3.1-flash-lite-preview` | LLMBridge model id. |
 
@@ -105,16 +106,16 @@ inp = LiteratureReviewInput(
     llm_provider="deepseek",
     llm_model_id="deepseek-v4-pro",
 )
-agent = MLLiteratureReviewAgent(root_cache_dir="reference_data/root_papers_cache")
+agent = MLLiteratureReviewAgent(root_cache_dir="/path/to/workspace/cache/literature/root_papers")
 output = agent.run(inp)  # -> LiteratureReviewOutput
 ```
 
-The `root_cache_dir` ctor arg controls where per-paper extracts cache (default `"reference_data/root_papers_cache"`). Pre-populated caches make subsequent runs (with the same `root_papers` set) skip both S2 resolve + LLM compression for free.
+The required `root_cache_dir` constructor argument controls where per-paper extracts cache. Supported workflow and standalone CLI entrypoints place it under the caller's workspace. Pre-populated caches make subsequent runs with the same `root_papers` set skip both S2 resolution and LLM compression.
 
 ## Storage outputs
 
 - **Output JSON**: `{storage.local.workspace}/ml_literature_review_{run_name}.json` — the validated `LiteratureReviewOutput`, written at the end of `run()`. This is an audit log; the workflow does NOT read this back — downstream nodes receive data through the protocol function in memory.
-- **Root-paper cache**: `{root_cache_dir}/{sanitized_paper_id}.json` — per-paper `RetrievedPaper` cache (default dir `reference_data/root_papers_cache/`). Hits skip S2 resolve + compression on subsequent runs; delete a file to force re-fetch + re-compression.
+- **Root-paper cache**: `{root_cache_dir}/{sanitized_paper_id}.json` — per-paper `RetrievedPaper` cache. Hits skip S2 resolve + compression on subsequent runs; delete a file to force re-fetch + re-compression.
 
 ## Key behavioral notes
 
@@ -222,7 +223,7 @@ The synthesis prompt requires every finding's **Implication** to ground in one o
 | Constant | Location | Value | Controls | Affects |
 |---|---|---|---|---|
 | `MAX_RAW_TEXT_CHARS` | `agent/prompt_templates/literature_review/__init__.py:185` | `120_000` (~30k tokens at 4 chars/token) | Hard cap on raw paper text fed to the compression prompt. Beyond is replaced with `[...TRUNCATED...]`. | extraction quality (truncated papers lose content) |
-| `DEFAULT_ROOT_CACHE_DIR` | `nodes/ml_literature_review/ml_literature_review.py:72` | `"reference_data/root_papers_cache"` | On-disk directory for root-paper extract cache. Override via `MLLiteratureReviewAgent(root_cache_dir=...)`. | cost (cache hit avoids re-resolve + re-compress) |
+| `root_cache_dir` | `MLLiteratureReviewAgent(...)` | required explicit path | On-disk directory for root-paper extracts. Supported entrypoints derive it from the caller's workspace. | cost (cache hit avoids re-resolve + re-compress) |
 | `S2_DEFAULT_TIMEOUT_S` / `S2_MIN_REQUEST_INTERVAL_S` / `S2_MAX_RETRIES` | `agent/skills/paper_resolver_skill/wrapper.py:46-51` | `30` / `1.1` / `3` | S2 network behavior. | extraction success rate |
 | `_AGENT_CARD.trust_level` | `nodes/ml_literature_review/ml_literature_review.py:100` | `"soft_prior"` | Machine-readable trust calibration emitted on every run, read by the proposer's synthesis rules (P-b + P-c). Three valid levels: `hard_limit` (non-negotiable — physics-style constraints), `strong_prior` (weight comparably to experiment data — human directives), `soft_prior` (inspirational priors requiring experiment validation — literature). Lit-review is `soft_prior` by design. **Override only by changing the constant in code** — per-run override would defeat the calibration's role as a stable signal. | proposal weighting |
 

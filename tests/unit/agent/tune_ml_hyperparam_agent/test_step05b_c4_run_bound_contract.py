@@ -35,14 +35,37 @@ the real production control flow. It is deliberately not claimed here.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
+import pytest
 import yaml
 
 from agent.schemas.model_io_contract import ModelIOContract
+from execute_tools.dataset_config import bind_dataset_profile, load_dataset_profile
 from tests.helpers.step04a_fixtures import tidmad_model_io
 from workflows.task_config import _clear_cache_for_tests, run_bound_model_io_contract
 
-SHIPPED_CONFIG = "configs/task_config.yaml"
+SHIPPED_CONFIG = Path(__file__).resolve().parents[4] / "configs" / "task_config.example.yaml"
+QUICKSTART_CONFIG = (
+    Path(__file__).resolve().parents[4]
+    / "examples"
+    / "quickstart"
+    / "declared"
+    / "task_config.yaml"
+)
+QUICKSTART_PROFILE = (
+    Path(__file__).resolve().parents[4]
+    / "examples"
+    / "quickstart"
+    / "declared"
+    / "dataset_profile.json"
+)
+
+
+@pytest.fixture(autouse=True)
+def _explicit_quickstart_profile():
+    with bind_dataset_profile(load_dataset_profile(str(QUICKSTART_PROFILE))):
+        yield
 
 
 def _task_config_without_model_io(tmp_path):
@@ -90,14 +113,12 @@ class TestOneAcquisitionPoint:
         )
 
     def test_the_bound_contract_is_the_shipped_declaration(self):
-        """Under TIDMAD the bound value IS the task's declaration, so C2's
-        equivalence proof (shipped contract reproduces the legacy tensor)
-        applies to what production actually passes."""
+        """The bound value is the explicitly selected synthetic declaration."""
         _clear_cache_for_tests()
-        contract = run_bound_model_io_contract()
+        contract = run_bound_model_io_contract(str(QUICKSTART_CONFIG))
         assert contract is not None
-        assert contract.output.render_shape() == "[B, 256, T]"
-        assert contract.class_cardinality == 256
+        assert contract.output.render_shape() == "[B, 2]"
+        assert contract.class_cardinality == 2
 
 
 class TestALegacyTaskYieldsNone:

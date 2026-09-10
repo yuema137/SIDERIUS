@@ -56,11 +56,12 @@ from core.runtime_control.gpu_accounting import DeviceIdentity
 #: `test_prephase_measurement_reachability.py` makes for `records`.
 _runtime = importlib.import_module("nodes.ml_hyperparameter_tune_agent.runtime")
 from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
     DatasetProfile,
     declares_tidmad_topology,
-    resolve_dataset_profile,
     tidmad_topology,
 )
+from execute_tools.task_data_path import EpochSamplingParams, TaskProbeDataSpec
 from nodes.ml_hyperparameter_tune_agent.runtime import PrephaseOutcome
 
 DEVICE = DeviceIdentity(uuid="GPU-b12test", physical_index=0)
@@ -191,18 +192,10 @@ def _call_expecting_spawn(tmp_path, **over) -> list[str]:
 
 class TestTidmadRemainsApplicable:
     def test_the_shipped_tidmad_profile_declares_topology(self):
-        assert declares_tidmad_topology(resolve_dataset_profile()) is True
-
-    def test_regime_a_none_profile_stays_applicable(self, tmp_path):
-        """`run_profile=None` is an UN-COMPOSED run, which IS TIDMAD. It must
-        not take the inapplicable path — otherwise every legacy run silently
-        stops being measured."""
-        assert _call_expecting_spawn(tmp_path, run_profile=None) == ["spawned"], (
-            "an un-composed (Regime-A) run must still reach the measurement worker"
-        )
+        assert declares_tidmad_topology(TIDMAD_PROFILE) is True
 
     def test_a_real_tidmad_profile_stays_applicable(self, tmp_path):
-        assert _call_expecting_spawn(tmp_path, run_profile=resolve_dataset_profile()) == ["spawned"]
+        assert _call_expecting_spawn(tmp_path, run_profile=TIDMAD_PROFILE) == ["spawned"]
 
 
 # ======================================================================
@@ -227,6 +220,23 @@ class TestContrastTasksAreNotApplicable:
         out = capsys.readouterr().out
         assert "NOT APPLICABLE" in out
         assert "not a probe failure" in out
+
+
+class TestComposedTasksWithProbeDataAreApplicable:
+    def test_task_owned_probe_data_reaches_the_measurement_worker(self, tmp_path):
+        """Losing the task projection would restore policy_unavailable Formal runs."""
+        probe = TaskProbeDataSpec(
+            manifest_path="/task/composition.yaml",
+            semantic_fingerprint="a" * 64,
+            training_scope_payload='{"kind":"synthetic"}',
+            sampling=EpochSamplingParams(data_dir="/task/data", train_portion=0.25),
+            max_inference_batch_size=1,
+        )
+        assert _call_expecting_spawn(
+            tmp_path,
+            run_profile=_contrast_profile(),
+            task_probe_data=probe,
+        ) == ["spawned"]
 
 
 # ======================================================================

@@ -50,7 +50,7 @@ from core.runtime_control.session import RuntimeControlPolicy
 from core.runtime_control.watchdog_deadline import (
     watchdog_deadline_provider as _build_watchdog_deadline_provider,
 )
-from execute_tools.data_paths import legacy_tidmad_data_dir, resolve_physical_data_root
+from execute_tools.data_paths import resolve_physical_data_root
 from execute_tools.dataset_config import (
     DataScope,
     ScopeViolationError,
@@ -62,7 +62,6 @@ from execute_tools.evaluation_metric import (
     MetricResult,
     NotScoreableError,
     NotScoreableResult,
-    derive_tidmad_metric,
 )
 from execute_tools.scope_artifact import task_scope_argv, validation_rows_argv
 
@@ -88,11 +87,6 @@ from ml_models.models_format_sandbox import (
     validate_output_loss_compatibility,
 )
 from ml_models.plugin_loader import UnknownOutputContractError
-
-
-def _tidmad_data_dir() -> str:
-    return legacy_tidmad_data_dir()
-
 
 # ---------------------------------------------------------------------------
 # Subprocess host-RAM hardening (Fix 1 of docs/optimize_inference_and_scoring.md)
@@ -2067,11 +2061,9 @@ class TidmadSandbox:
     ) -> tuple:
         """Anchor-normalised multi-file scoring — the pre-Step-06 2-tuple seam.
 
-        Kept for callers that predate the metric handle: the same arguments,
-        the same ``(file_vector, final_scalar_score)`` return. Since Step 06
-        it is a thin wrapper over :meth:`evaluate_metric`; ``metric=None``
-        (Regime A) resolves the TIDMAD instance from the run's profile, so a
-        legacy caller obtains exactly today's values through the handle.
+        Kept as the two-tuple adapter used by the tuner. The caller must pass
+        the metric selected by its active task composition; the generic
+        sandbox cannot manufacture scientific scoring semantics.
 
         Raises:
             ValueError: as :meth:`evaluate_metric`.
@@ -2079,9 +2071,13 @@ class TidmadSandbox:
                 contract refuses is a structured refusal, not an incidental
                 error from inside the scorer worker.
         """
-        handle = metric if metric is not None else derive_tidmad_metric(resolve_dataset_profile())
+        if metric is None:
+            raise ValueError(
+                "score_vector requires the evaluation metric selected by the active "
+                "task composition"
+            )
         result = self.evaluate_metric(
-            handle,
+            metric,
             sample_set,
             anchor_map,
             s_max,

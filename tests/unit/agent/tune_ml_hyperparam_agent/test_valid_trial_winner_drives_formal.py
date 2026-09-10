@@ -41,7 +41,6 @@ import pytest
 from agent.schemas.hyperparam_tuning import ExperimentPlan
 from execute_tools.health_checks.candidate_eligibility import (
     is_valid_candidate,
-    required_blocking_gate_ids,
 )
 from execute_tools.metric_order import MetricOrder
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
@@ -62,6 +61,7 @@ _GENERATED_MODEL = "c5a_generated_candidate_model"
 
 _WARNING_LINE = "no successful trial round is HealthGate-valid"
 _WINNER_LINE = "[FORMAL OVERRIDE] strategy="
+_REQUIRED_GATES = frozenset({"synthetic_stability_blocking"})
 
 
 def _passing_gate(gate_name: str) -> dict:
@@ -105,7 +105,7 @@ def _valid_trial_record(exp_id: str, score: float, *, batch_size: int, lr: float
             },
             "loss_config": {"loss_type": "focal"},
         },
-        "health_gate_results": [_passing_gate(g) for g in sorted(required_blocking_gate_ids())],
+        "health_gate_results": [_passing_gate(g) for g in sorted(_REQUIRED_GATES)],
     }
 
 
@@ -124,7 +124,7 @@ class TestTheConstructedTrialIsGenuinelyValid:
 
     def test_the_constructed_record_passes_the_real_predicate(self, winner_record):
         """Asserted against production's own predicate, not a local copy."""
-        assert is_valid_candidate(winner_record) is True
+        assert is_valid_candidate(winner_record, required_gate_ids=_REQUIRED_GATES) is True
 
     def test_a_failing_blocking_gate_makes_it_invalid(self, winner_record):
         """The fixture is valid for a REASON, not by accident.
@@ -134,14 +134,18 @@ class TestTheConstructedTrialIsGenuinelyValid:
         proving nothing about HealthGate validity.
         """
         winner_record["health_gate_results"][0]["check_passed"] = False
-        assert is_valid_candidate(winner_record) is False
+        assert is_valid_candidate(winner_record, required_gate_ids=_REQUIRED_GATES) is False
 
 
 class TestWinnerSelection:
     """`_best_trial_winner` — the first step of the head."""
 
     def test_the_highest_scoring_valid_trial_wins(self, winner_record, loser_record):
-        got = _best_trial_winner([loser_record, winner_record], order=HIGHER_ORDER)
+        got = _best_trial_winner(
+            [loser_record, winner_record],
+            order=HIGHER_ORDER,
+            required_gate_ids=_REQUIRED_GATES,
+        )
         assert got is not None
         assert got["exp_id"] == "c5a_iter_001_002"
 
@@ -154,14 +158,23 @@ class TestWinnerSelection:
         cheater = _valid_trial_record("c5a_cheater", 9.9, batch_size=1, lr=1.0)
         cheater["health_gate_results"][0]["check_passed"] = False
 
-        got = _best_trial_winner([loser_record, winner_record, cheater], order=HIGHER_ORDER)
+        got = _best_trial_winner(
+            [loser_record, winner_record, cheater],
+            order=HIGHER_ORDER,
+            required_gate_ids=_REQUIRED_GATES,
+        )
         assert got is not None
         assert got["exp_id"] == "c5a_iter_001_002"
 
     def test_no_valid_trial_yields_no_winner(self, winner_record):
         """The precondition of the :1798 pathology."""
         winner_record["health_gate_results"][0]["check_passed"] = False
-        assert _best_trial_winner([winner_record], order=HIGHER_ORDER) is None
+        assert (
+            _best_trial_winner(
+                [winner_record], order=HIGHER_ORDER, required_gate_ids=_REQUIRED_GATES
+            )
+            is None
+        )
 
 
 class TestTheWinnerDrivesTheFormalPlan:
@@ -188,7 +201,7 @@ class TestTheWinnerDrivesTheFormalPlan:
         prints it too. What distinguishes the states is which variant.
         """
         history = [loser_record, winner_record]
-        winner = _best_trial_winner(history, order=HIGHER_ORDER)
+        winner = _best_trial_winner(history, order=HIGHER_ORDER, required_gate_ids=_REQUIRED_GATES)
         plan = ExperimentPlan(
             model_type=_GENERATED_MODEL,
             train_cfg={"batch_size": 1, "lr": 1e-9, "epochs": 1, "optimizer": "adam"},
@@ -214,7 +227,7 @@ class TestTheWinnerDrivesTheFormalPlan:
         inheritance is real, they are replaced by the winner's.
         """
         history = [loser_record, winner_record]
-        winner = _best_trial_winner(history, order=HIGHER_ORDER)
+        winner = _best_trial_winner(history, order=HIGHER_ORDER, required_gate_ids=_REQUIRED_GATES)
         plan = ExperimentPlan(
             model_type=_GENERATED_MODEL,
             train_cfg={"batch_size": 1, "lr": 1e-9, "epochs": 1, "optimizer": "adam"},
@@ -251,7 +264,7 @@ class TestTheWinnerDrivesTheFormalPlan:
         opposite of the intended property.
         """
         history = [winner_record]
-        winner = _best_trial_winner(history, order=HIGHER_ORDER)
+        winner = _best_trial_winner(history, order=HIGHER_ORDER, required_gate_ids=_REQUIRED_GATES)
         plan = ExperimentPlan(
             model_type=_GENERATED_MODEL,
             train_cfg={"batch_size": 1, "lr": 1e-9, "epochs": 1, "optimizer": "adam"},

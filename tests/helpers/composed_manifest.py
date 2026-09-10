@@ -11,40 +11,22 @@ A fragment would still raise, so a negative test written against one passes
 **for the wrong reason**: it proves the required-section check fires, not
 the branch it claims to exercise.
 
-The shipped TIDMAD manifest is the base, with its relative refs rewritten to
-absolute so the copy resolves from ``tmp_path``. Derived from the current
-checkout — never a hardcoded path.
+The framework-owned Quickstart manifest is the base. The helper relocates the
+complete pack and preserves its relative references, so the copied manifest
+exercises the same portable package shape as an external consumer without
+creating a second identity for the original plugin path.
 """
 
 from __future__ import annotations
 
-import os
+import shutil
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BASE_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "tidmad.yaml"
-
-#: Keys whose values are refs the composer resolves relative to the manifest.
-_REF_KEYS = ("config", "declaration")
-
-
-def _absolutize(node: Any, base_dir: Path) -> Any:
-    if isinstance(node, dict):
-        out: dict[str, Any] = {}
-        for key, value in node.items():
-            if key in _REF_KEYS and isinstance(value, str):
-                out[key] = os.path.abspath(os.path.join(base_dir, value))
-            elif key == "file" and isinstance(value, str):
-                out[key] = os.path.abspath(os.path.join(base_dir, value))
-            else:
-                out[key] = _absolutize(value, base_dir)
-        return out
-    if isinstance(node, list):
-        return [_absolutize(item, base_dir) for item in node]
-    return node
+BASE_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 
 def write_complete_manifest(tmp_path: Path, **sections: Any) -> Path:
@@ -61,13 +43,14 @@ def write_complete_manifest(tmp_path: Path, **sections: Any) -> Path:
         The path to the written manifest.
     """
     raw = yaml.safe_load(BASE_MANIFEST.read_text(encoding="utf-8"))
-    raw = _absolutize(raw, BASE_MANIFEST.parent)
     for key, value in sections.items():
         if value is None:
             raw.pop(key, None)
         else:
             raw[key] = value
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    target = tmp_path / "manifest.yaml"
+    pack_target = tmp_path / "examples" / "quickstart"
+    shutil.copytree(REPO_ROOT / "examples" / "quickstart", pack_target)
+    target = tmp_path / "configs" / "task_composition" / "manifest.yaml"
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(yaml.safe_dump(raw, sort_keys=True), encoding="utf-8")
     return target

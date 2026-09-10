@@ -1,5 +1,5 @@
 """
-Unit tests for ``agent_generated/_loss_loader.py`` — loss plugin discovery + load.
+Unit tests for ``ml_models.loss_plugin_loader`` — loss plugin discovery + load.
 
 Coverage:
   * Stub template loads cleanly when copied (without ``_`` prefix) to ``losses/``
@@ -25,8 +25,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_generated import _loss_loader
-from agent_generated._loss_loader import (
+from ml_models import loss_plugin_loader as _loss_loader
+from ml_models.loss_plugin_loader import (
     _MODULE_NAME_PREFIX,
     _load_loss_plugin,
     _resolve_loss_dirs,
@@ -35,7 +35,13 @@ from agent_generated._loss_loader import (
 
 # Source path to the stub template — copied (without the leading ``_``) into
 # tmp_path/losses for tests that exercise the load path.
-_STUB_TEMPLATE = Path(__file__).resolve().parents[3] / "agent_generated" / "_stub_loss_template.py"
+_STUB_TEMPLATE = (
+    Path(__file__).resolve().parents[3]
+    / "tests"
+    / "fixtures"
+    / "generated_capabilities"
+    / "stub_loss_template.py"
+)
 
 
 @pytest.fixture
@@ -366,7 +372,7 @@ class TestI13TargetDtypeDeclaration:
     def test_explicit_long_declaration_registered(self, loss_dir: Path):
         """Plugin declaring ``PLUGIN_LOSS_TARGET_DTYPE = "long"`` is
         loaded with ``target_dtype == 'long'`` in the returned dict."""
-        from agent_generated._loss_loader import load_loss_plugin_from_path
+        from ml_models.loss_plugin_loader import load_loss_plugin_from_path
 
         plugin_path = _write_plugin(loss_dir, "long_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "long"')
         result = load_loss_plugin_from_path(str(plugin_path))
@@ -376,7 +382,7 @@ class TestI13TargetDtypeDeclaration:
     def test_explicit_float_declaration_registered(self, loss_dir: Path):
         """Plugin declaring ``PLUGIN_LOSS_TARGET_DTYPE = "float"`` is
         loaded with ``target_dtype == 'float'``."""
-        from agent_generated._loss_loader import load_loss_plugin_from_path
+        from ml_models.loss_plugin_loader import load_loss_plugin_from_path
 
         plugin_path = _write_plugin(loss_dir, "float_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "float"')
         result = load_loss_plugin_from_path(str(plugin_path))
@@ -387,7 +393,7 @@ class TestI13TargetDtypeDeclaration:
         """Back-compat — a plugin generated before I13 (no
         ``PLUGIN_LOSS_TARGET_DTYPE`` declaration) defaults to ``'long'``
         so it keeps receiving int64 targets per the classifier contract."""
-        from agent_generated._loss_loader import load_loss_plugin_from_path
+        from ml_models.loss_plugin_loader import load_loss_plugin_from_path
 
         plugin_path = _write_plugin(loss_dir, "no_decl_loss", dtype_line="")
         result = load_loss_plugin_from_path(str(plugin_path))
@@ -399,7 +405,7 @@ class TestI13TargetDtypeDeclaration:
     ):
         """Plugin with an invalid value (e.g. typo'd ``'int64'`` or
         ``'i64'``) — loader warns to stdout and clamps to ``'long'``."""
-        from agent_generated._loss_loader import load_loss_plugin_from_path
+        from ml_models.loss_plugin_loader import load_loss_plugin_from_path
 
         plugin_path = _write_plugin(loss_dir, "bad_decl_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "int64"')
         result = load_loss_plugin_from_path(str(plugin_path))
@@ -412,7 +418,7 @@ class TestI13TargetDtypeDeclaration:
     def test_get_loss_target_dtype_helper_default(self):
         """``get_loss_target_dtype(unknown_name)`` returns ``'long'`` —
         the documented fallback for unregistered loss names."""
-        from agent_generated._loss_loader import get_loss_target_dtype
+        from ml_models.loss_plugin_loader import get_loss_target_dtype
 
         # Pick a name that cannot collide with any registered plugin.
         assert get_loss_target_dtype("__unknown_loss_for_i13_test__") == "long"
@@ -421,7 +427,7 @@ class TestI13TargetDtypeDeclaration:
         """When a plugin is registered with ``register_loss_in_memory``
         (which populates LOSS_TARGET_DTYPE_REGISTRY), the helper returns
         the declared value."""
-        from agent_generated._loss_loader import (
+        from ml_models.loss_plugin_loader import (
             LOSS_TARGET_DTYPE_REGISTRY,
             get_loss_target_dtype,
         )
@@ -444,14 +450,18 @@ class TestI13StubTemplateDeclaresDtype:
     moment we want a regressor-style custom loss."""
 
     def test_stub_template_declares_target_dtype(self):
-        from agent_generated._loss_loader import LOSSES_DIR
+        from ml_models.loss_plugin_loader import LOSSES_DIR
 
         template_path = (
-            Path(__file__).resolve().parents[3] / "agent_generated" / "_stub_loss_template.py"
+            Path(__file__).resolve().parents[3]
+            / "tests"
+            / "fixtures"
+            / "generated_capabilities"
+            / "stub_loss_template.py"
         )
         text = template_path.read_text()
         assert 'PLUGIN_LOSS_TARGET_DTYPE = "long"' in text, (
-            "_stub_loss_template.py is missing the I13 declaration "
+            "stub_loss_template.py is missing the I13 declaration "
             "PLUGIN_LOSS_TARGET_DTYPE = 'long'. Without it, the L4 implementor's "
             "assembled plugins would silently default to 'long' — which is the "
             "correct value today but hides intent. Restore the declaration."

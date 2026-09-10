@@ -41,6 +41,7 @@ All node calls are mocked — these tests validate:
 import importlib
 import json
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -73,13 +74,23 @@ from workflows.model_exploration import (
     tuning_outputs_to_summaries,
 )
 from workflows.run_config import WorkflowLaunchConfig, launch_config_field_names
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+QUICKSTART = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 # ---------------------------------------------------------------------------
 # Fixtures — synthetic data
 # ---------------------------------------------------------------------------
 
 
-def _make_tuning_output(model_type="punet", run_name="v1", score=1.5, fingerprint=None):
+def _make_tuning_output(
+    model_type="punet",
+    run_name="v1",
+    score=1.5,
+    fingerprint=None,
+    metric_spec=None,
+):
     """A seed tuning output.
 
     ``fingerprint`` (Step 11 C8 / R-11-9) is the run's composition identity.
@@ -122,7 +133,7 @@ def _make_tuning_output(model_type="punet", run_name="v1", score=1.5, fingerprin
         # every output, and the workflow reconciles those stamps into the
         # interpreter's input. Without it here the interpreter would (correctly)
         # refuse this score-bearing fixture.
-        metric_spec=shipped_spec(),
+        metric_spec=metric_spec or shipped_spec(),
     )
 
 
@@ -197,16 +208,27 @@ def _make_validator_output(passed=True):
     )
 
 
-def _make_tune_output(model_type="gated_tcn", score=1.8):
-    return _make_tuning_output(model_type=model_type, run_name="explore_v1", score=score)
+def _make_tune_output(model_type="gated_tcn", score=1.8, **kwargs):
+    return _make_tuning_output(model_type=model_type, run_name="explore_v1", score=score, **kwargs)
 
 
-def _write_tuning_output(tmp_path, model_type="punet", run="v1", score=1.5, fingerprint=None):
+def _write_tuning_output(
+    tmp_path,
+    model_type="punet",
+    run="v1",
+    score=1.5,
+    fingerprint=None,
+    metric_spec=None,
+):
     """Write a fake tuning output to the expected directory structure."""
     agent_dir = tmp_path / "data" / model_type / run / "agent"
     agent_dir.mkdir(parents=True)
     output = _make_tuning_output(
-        model_type=model_type, run_name=run, score=score, fingerprint=fingerprint
+        model_type=model_type,
+        run_name=run,
+        score=score,
+        fingerprint=fingerprint,
+        metric_spec=metric_spec,
     )
     (agent_dir / f"run_output_{run}_agent.json").write_text(output.model_dump_json(indent=2))
 
@@ -336,10 +358,38 @@ class TestTuningOutputsToSummaries:
 
 
 @pytest.fixture
-def workflow_env(tmp_path):
+def workflow_env(tmp_path, monkeypatch):
     """Set up fake data dir and mocked nodes."""
-    _write_tuning_output(tmp_path, "punet")
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    original_make_tune_output = _make_tune_output
+
+    def make_composed_tune_output(*args, **kwargs):
+        kwargs.setdefault("fingerprint", composition.semantic_fingerprint)
+        kwargs.setdefault("metric_spec", composition.metric.spec)
+        return original_make_tune_output(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "tests.unit.workflows.test_model_exploration._make_tune_output",
+        make_composed_tune_output,
+    )
+    _write_tuning_output(
+        tmp_path,
+        "punet",
+        fingerprint=composition.semantic_fingerprint,
+        metric_spec=composition.metric.spec,
+    )
     workspace = str(tmp_path / "workflow_output")
+    data_root = str(tmp_path / "data")
+    original_run_workflow = run_workflow
+
+    def composed_run_workflow(*args, **kwargs):
+        kwargs.setdefault("task_composition", composition)
+        with bind_run_task_composition(composition, physical_data_root=data_root):
+            return original_run_workflow(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "tests.unit.workflows.test_model_exploration.run_workflow", composed_run_workflow
+    )
 
     with (
         patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp,
@@ -352,7 +402,10 @@ def workflow_env(tmp_path):
         MockPropose.return_value.run.return_value = _make_proposal_output()
         MockImpl.return_value.run.return_value = _make_implementor_output()
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
-        MockTune.return_value.run.return_value = _make_tune_output()
+        MockTune.return_value.run.return_value = _make_tune_output(
+            fingerprint=composition.semantic_fingerprint,
+            metric_spec=composition.metric.spec,
+        )
 
         yield {
             "data_dir": str(tmp_path / "data"),
@@ -362,6 +415,7 @@ def workflow_env(tmp_path):
             "impl": MockImpl,
             "valid": MockValid,
             "tune": MockTune,
+            "composition": composition,
         }
 
 
@@ -2073,7 +2127,7 @@ def l6c_global_losses_dir(tmp_path, monkeypatch):
     dir (arXiv P1) — to a tmp root, and point the legacy checkout member
     (``LOSSES_DIR``, read-only fallback) at a separate tmp dir so promotion
     tests touch neither real location."""
-    from agent_generated import _loss_loader
+    from ml_models import loss_plugin_loader as _loss_loader
 
     monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
     legacy = tmp_path / "legacy_losses"

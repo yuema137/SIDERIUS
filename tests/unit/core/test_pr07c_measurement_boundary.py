@@ -11,12 +11,11 @@ the constructor arity from ``construct_registered_model`` — the introspection
 promoted out of ``agent/skills/training_skill/estimator.py`` to sit beside the
 registry it reads.
 
-The load-bearing claim is PARITY: the model is handed exactly the tensor it was
-handed before, for every builtin, in both phases, with and without a
-transported contract. What the authorities buy is breadth, which is why the
-persistent tracks' declared contracts are exercised here too — DAVIS is the
-discriminating case, RGB float video being the furthest thing from int8 ADC
-codes.
+The load-bearing claim is dtype precedence for each builtin, with and without
+a transported contract. Synthetic declarations cover integer preference,
+float-only inputs at multiple ranks, and unsupported dtype refusal. The old
+phase parameter never reached the resolver and merely duplicated each call;
+execution-phase wiring belongs to the worker integration tests.
 """
 
 from __future__ import annotations
@@ -53,128 +52,67 @@ PRE_CHANGE_DTYPE: dict[str, torch.dtype] = {
 }
 
 
-@pytest.fixture(scope="module")
-def tidmad_contract():
-    from workflows.task_config import run_bound_model_io_contract
-
-    contract = run_bound_model_io_contract()
-    assert contract is not None, "the shipped task must declare a Model-I/O contract"
-    return contract
-
-
-def _declared_contract(track: str):
+def _contract(dtypes=("int64", "int32"), rank=2):
+    """A synthetic model boundary; no installed scientific task is consulted."""
     from agent.schemas.model_io_contract import ModelIOContract
 
-    path = REPO_ROOT / "examples" / track / "declared" / "model_io_contract.json"
-    return ModelIOContract(**json.loads(path.read_text(encoding="utf-8")))
+    axes = [{"role": "batch", "dimension": {"symbolic": "B"}}]
+    axes.extend({"dimension": {"fixed": 3}} for _ in range(rank - 1))
+    return ModelIOContract.model_validate(
+        {
+            "input": {"axes": axes, "dtype": {"admissible": list(dtypes)}},
+            "output": {
+                "axes": [
+                    {"role": "batch", "dimension": {"symbolic": "B"}},
+                    {"role": "class", "dimension": {"fixed": 2}},
+                ],
+                "dtype": {"admissible": ["float32"]},
+            },
+        }
+    )
+
+
+@pytest.fixture(scope="module")
+def integer_contract():
+    return _contract()
 
 
 class TestTheDtypeMatrixIsUnchanged:
-    """Checkpoint A. A dtype is not an identity component, so a change here
-    would not rename a store key — it would silently change the VALUES stored
-    under an unchanged one. That is why this is asserted per row."""
+    """Keep the historical builtin precedence matrix with explicit input."""
 
     @pytest.mark.parametrize("model_type", sorted(PRE_CHANGE_DTYPE))
-    @pytest.mark.parametrize("phase", ["training", "inference"])
-    def test_without_a_contract_every_builtin_keeps_its_dtype(self, model_type, phase):
-        """Regime A — a spec serialized before the transport, or an ad-hoc
-        caller. The model's own declaration answers where it has one; the site
-        preference answers otherwise."""
+    @pytest.mark.parametrize("with_contract", [False, True])
+    def test_builtin_dtype_precedence(self, model_type, with_contract):
+        contract = _contract() if with_contract else None
         assert (
-            resolve_input_dtype(model_type, None, site_preference=SITE_PREFERENCE)
+            resolve_input_dtype(model_type, contract, site_preference=SITE_PREFERENCE)
             == PRE_CHANGE_DTYPE[model_type]
         )
 
-    @pytest.mark.parametrize("model_type", sorted(PRE_CHANGE_DTYPE))
-    @pytest.mark.parametrize("phase", ["training", "inference"])
-    def test_with_the_tidmad_contract_every_builtin_keeps_its_dtype(
-        self, model_type, phase, tidmad_contract
-    ):
-        """The transported case. TIDMAD declares `('int64', 'int32')`, so the
-        site's `int32` preference is admissible and survives — which is the
-        whole reason Q-07c-8 fixed the preference at `int32` rather than
-        adopting a phase-correct one."""
-        assert (
-            resolve_input_dtype(model_type, tidmad_contract, site_preference=SITE_PREFERENCE)
-            == PRE_CHANGE_DTYPE[model_type]
-        )
 
-    def test_fcnet_is_float32_on_both_sides_of_the_transport(self, tidmad_contract):
-        """The one builtin that overrides the task contract. Its declaration
-        must win with AND without a contract, or the legacy autoencoder arm is
-        silently fed integers."""
-        assert resolve_input_dtype("fcnet", None, site_preference=SITE_PREFERENCE) == torch.float32
+class TestDeclaredDtypeResolution:
+    @pytest.mark.parametrize("rank", [2, 4, 5])
+    def test_float_contract_overrides_integer_preference_at_any_rank(self, rank):
         assert (
-            resolve_input_dtype("fcnet", tidmad_contract, site_preference=SITE_PREFERENCE)
+            resolve_input_dtype(
+                "synthetic_model",
+                _contract(("float32",), rank),
+                site_preference=SITE_PREFERENCE,
+            )
             == torch.float32
         )
 
-
-class TestThePersistentTracksResolveTheirOwnDtype:
-    """§2a.2 three-track breadth, at each track's CURRENT maturity.
-
-    No data is read, no model is built, no dataset adapter or `DatasetProfile`
-    is invented — those are D14. All this needs is the contract each track has
-    already declared, which is the whole point: the dtype authority's input is
-    a `ModelIOContract`, and both tracks have one today.
-    """
-
-    @pytest.mark.parametrize("track", ["oxford_iiit_pet", "davis_future_prediction"])
-    def test_a_declared_contract_resolves_what_it_declares(self, track):
-        contract = _declared_contract(track)
-        declared = contract.input.dtype.admissible
-        resolved = resolve_input_dtype(
-            "a_model_with_no_builtin_declaration", contract, site_preference=SITE_PREFERENCE
+    def test_admissible_site_preference_wins_over_declared_order(self):
+        assert (
+            resolve_input_dtype("synthetic_model", _contract(), site_preference=SITE_PREFERENCE)
+            == torch.int32
         )
-        assert str(resolved).replace("torch.", "") in declared
 
-    @pytest.mark.parametrize("track", ["oxford_iiit_pet", "davis_future_prediction"])
-    def test_it_does_not_resolve_to_tidmads_dtype(self, track, tidmad_contract):
-        """The assertion that would catch a hidden TIDMAD assumption. Both
-        tracks declare float32 only, so the `int32` site preference is NOT
-        admissible and must fall through to the contract's own answer — if the
-        site preference leaked through anyway, this is where it shows.
-        """
-        resolved = resolve_input_dtype(
-            "a_model_with_no_builtin_declaration",
-            _declared_contract(track),
-            site_preference=SITE_PREFERENCE,
-        )
-        tidmad_resolved = resolve_input_dtype(
-            "a_model_with_no_builtin_declaration",
-            tidmad_contract,
-            site_preference=SITE_PREFERENCE,
-        )
-        assert resolved == torch.float32
-        assert resolved != tidmad_resolved
-
-    def test_davis_is_the_discriminating_shape(self):
-        """Recorded because the design names DAVIS the valuable case: RGB
-        `[B, C, T, H, W]` float, five axes, nothing like int8 ADC codes. If the
-        contract path had a TIDMAD-shaped assumption about rank or encoding,
-        loading this declaration is where it would surface."""
-        contract = _declared_contract("davis_future_prediction")
-        assert len(contract.input.axes) == 5
-        assert contract.input.dtype.admissible == ("float32",)
-
-
-class TestItFailsClosedRatherThanCoercing:
-    def test_a_contract_admitting_nothing_runtime_supported_raises(self):
-        """Not a silent coercion to something plausible: a wrong dtype at the
-        model boundary is invisible to every prompt- and schema-level test and
-        surfaces only in real training."""
-        from agent.schemas.model_io_contract import ModelIOContract
-
-        payload = json.loads(
-            (
-                REPO_ROOT / "examples" / "oxford_iiit_pet" / "declared" / "model_io_contract.json"
-            ).read_text(encoding="utf-8")
-        )
-        payload["input"]["dtype"]["admissible"] = ["bfloat16"]
+    def test_unsupported_admissibility_refuses_instead_of_coercing(self):
         with pytest.raises(UnsupportedModelInputDtypeError, match="intersection is empty"):
             resolve_input_dtype(
-                "a_model_with_no_builtin_declaration",
-                ModelIOContract(**payload),
+                "synthetic_model",
+                _contract(("bfloat16",)),
                 site_preference=SITE_PREFERENCE,
             )
 
@@ -307,7 +245,7 @@ class TestTheSpecTransportStaysBackwardCompatible:
         assert reloaded.dataset_profile is None
         assert reloaded.model_io_contract is None
 
-    def test_a_transported_contract_round_trips_unchanged(self, tidmad_contract):
+    def test_a_transported_contract_round_trips_unchanged(self, integer_contract):
         """The transport is only worth having if the worker sees the SAME
         declaration the parent bound — a lossy round trip would resolve a
         different dtype without any error."""
@@ -333,7 +271,7 @@ class TestTheSpecTransportStaysBackwardCompatible:
             result_path="/tmp/r.json",
             journal_path="/tmp/j.ndjson",
             worker_memory_limit_bytes=1024,
-            model_io_contract=tidmad_contract,
+            model_io_contract=integer_contract,
         )
         reloaded = GpuMeasurementSpec(**json.loads(spec.model_dump_json()))
-        assert reloaded.model_io_contract == tidmad_contract
+        assert reloaded.model_io_contract == integer_contract

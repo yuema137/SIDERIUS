@@ -25,9 +25,11 @@ import ast
 from pathlib import Path
 
 import nodes.ml_hyperparameter_tune_agent as tuner
-from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
+from core.runtime_control.measurement_capability import (
+    ResolvedMeasurementCapability,
+    resolve_measurement_capability,
+)
 from core.runtime_control.probe_wiring import probe_runner_availability
-from execute_tools.data_paths import resolve_tidmad_measurement_capability
 from tests.helpers.tuner_source import tuner_node_source
 
 
@@ -55,18 +57,11 @@ class TestTheTunerResolvesACapability:
             "the measured-evidence path switches itself off"
         )
 
-    def test_it_resolves_through_the_task_owned_adapter(self):
-        """Generic code must not pick the dataset. The task layer does, and
-        the tuner is where the task is known."""
+    def test_it_consumes_the_caller_resolved_capability(self):
+        """Generic tuning must not pick the dataset or task identity."""
         source = tuner_node_source()
-        tree = ast.parse(source)
-        imported = {
-            f"{node.module}.{alias.name}"
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module
-            for alias in node.names
-        }
-        assert "execute_tools.data_paths.resolve_tidmad_measurement_capability" in imported
+        assert "measurement_capability" in source
+        assert "resolve_tidmad_measurement_capability" not in source
 
     def test_the_resolved_root_is_the_one_the_probe_will_use(self):
         """`data_dir` is already a parameter of the enclosing function, so
@@ -85,7 +80,12 @@ class TestAnUnavailableCapabilityExplainsItself:
         assert "no measurement capability was resolved" in detail
 
     def test_a_missing_dataset_root_reports_a_reason(self, tmp_path):
-        cap = resolve_tidmad_measurement_capability(dataset_root=str(tmp_path / "absent"))
+        cap = resolve_measurement_capability(
+            task_identity="fixture_task",
+            dataset_adapter="fixture_adapter",
+            data_shape_class="fixture_shape",
+            dataset_root=str(tmp_path / "absent"),
+        )
         assert cap.probe_available is False
         assert cap.unavailability_reason
         available, detail = probe_runner_availability(cap)
@@ -96,8 +96,13 @@ class TestAnUnavailableCapabilityExplainsItself:
         """ "We cannot measure tidmad_denoise" beats "we cannot measure": the
         record of WHY the path was off has to name what was being measured.
         """
-        cap = resolve_tidmad_measurement_capability(dataset_root=str(tmp_path / "absent"))
-        assert cap.task_identity == "tidmad_denoise"
+        cap = resolve_measurement_capability(
+            task_identity="fixture_task",
+            dataset_adapter="fixture_adapter",
+            data_shape_class="fixture_shape",
+            dataset_root=str(tmp_path / "absent"),
+        )
+        assert cap.task_identity == "fixture_task"
         assert cap.data_shape_class
 
     def test_the_tuner_records_the_reason_not_a_bare_false(self):
@@ -131,7 +136,12 @@ class TestTheBoundaryStaysGeneric:
         assert offenders == [], f"generic probe wiring imports task-owned modules: {offenders}"
 
     def test_the_capability_type_is_what_crosses_the_boundary(self):
-        cap = resolve_tidmad_measurement_capability(dataset_root=None)
+        cap = resolve_measurement_capability(
+            task_identity="fixture_task",
+            dataset_adapter="fixture_adapter",
+            data_shape_class="fixture_shape",
+            dataset_root=None,
+        )
         assert isinstance(cap, ResolvedMeasurementCapability)
 
 
@@ -258,7 +268,12 @@ class TestTheWorkflowIsSuppliedACapability:
         the failure that aborted a real launch while the dataset was in
         fact available.
         """
-        capability = resolve_tidmad_measurement_capability()
+        capability = resolve_measurement_capability(
+            task_identity="fixture_task",
+            dataset_adapter="fixture_adapter",
+            data_shape_class="fixture_shape",
+            dataset_root=None,
+        )
         available, detail = probe_runner_availability(capability)
 
         assert "no measurement capability was resolved" not in detail, (

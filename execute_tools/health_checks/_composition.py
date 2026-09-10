@@ -127,24 +127,6 @@ DISCOVERS the constants instead of listing them: a prose claim about "every
 sibling" is precisely the kind that stops being true with nobody noticing."""
 
 
-LEGACY_DEFAULT_TASK_HEALTH_CONFIG: str = os.path.join(
-    SIDERIUS_ROOT, "configs", "task_health", "tidmad.yaml"
-)
-"""Where state A (legacy omitted) finds its task Health config.
-
-**This is the bounded legacy compatibility path, not the extension
-mechanism** (§3.10 A). Before 08b, a caller that said nothing about a task
-binding got the roster baked into the framework YAML; that roster is now
-task-owned, so the same caller gets the same science from the file it moved
-into. Behaviour is preserved for every existing call site, which is the whole
-purpose.
-
-It is a CONSTANT, not a branch. There is no ``if task == …`` anywhere: one
-unconditional default, quarantined here and named by the census so it cannot
-quietly grow into a task registry. An external task passes its own path and
-never touches this."""
-
-
 class DispositionPolicy(BaseModel):
     """What the FRAMEWORK does for one disposition. Operator policy surface.
 

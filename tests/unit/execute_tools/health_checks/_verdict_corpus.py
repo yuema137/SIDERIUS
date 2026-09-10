@@ -43,6 +43,7 @@ from typing import Any
 import h5py
 import numpy as np
 
+from execute_tools.dataset_config import resolve_dataset_profile, tidmad_topology
 from execute_tools.health_checks.amplitude_collapse import AmplitudeCollapseCheck
 from execute_tools.health_checks.output_diversity import OutputDiversityCheck
 from execute_tools.health_checks.output_std import OutputStdCheck
@@ -75,6 +76,14 @@ def _write_channel(path: Path, channel: str, data: np.ndarray) -> None:
         ts = f.require_group("timeseries")
         grp = ts.require_group(channel)
         grp.create_dataset("timeseries", data=data, chunks=True)
+
+
+def _output_channel() -> str:
+    return tidmad_topology(resolve_dataset_profile()).channels.input_channel
+
+
+def _target_channel() -> str:
+    return tidmad_topology(resolve_dataset_profile()).channels.target_channel
 
 
 def _varied(n: int = _PEEK, seed: int = 42) -> np.ndarray:
@@ -120,12 +129,12 @@ def _peek_based_cases(
 
     def healthy(workdir: Path):
         p = workdir / f"{slug}_healthy.h5"
-        _write_channel(p, "channel0001", _varied())
+        _write_channel(p, _output_channel(), _varied())
         return check_factory(), _ctx(denoised_paths={0: str(p)}), dict(config)
 
     def collapsed(workdir: Path):
         p = workdir / f"{slug}_collapsed.h5"
-        _write_channel(p, "channel0001", _constant())
+        _write_channel(p, _output_channel(), _constant())
         return check_factory(), _ctx(denoised_paths={0: str(p)}), dict(config)
 
     def not_applicable(workdir: Path):
@@ -149,7 +158,7 @@ def _peek_based_cases(
 
     def partial_io_failed(workdir: Path):
         p = workdir / f"{slug}_collapsed.h5"
-        _write_channel(p, "channel0001", _constant())
+        _write_channel(p, _output_channel(), _constant())
         cfg = dict(config)
         cfg["peek_file_indices"] = [0, 1]
         ctx = _ctx(denoised_paths={0: str(p), 1: str(workdir / "absent_c.h5")})
@@ -167,7 +176,7 @@ def _peek_based_cases(
 def _per_file_output_std_cases() -> dict[str, CaseBuilder]:
     def measured(workdir: Path):
         p = workdir / "pfstd_varied.h5"
-        _write_channel(p, "channel0001", _varied())
+        _write_channel(p, _output_channel(), _varied())
         ctx = _ctx(denoised_paths={0: str(p)})
         return PerFileOutputStdCheck(), ctx, {"peek_samples": _PEEK}
 
@@ -187,7 +196,7 @@ def _per_file_output_std_cases() -> dict[str, CaseBuilder]:
 
     def partial_io_failed(workdir: Path):
         p = workdir / "pfstd_varied.h5"
-        _write_channel(p, "channel0001", _varied())
+        _write_channel(p, _output_channel(), _varied())
         ctx = _ctx(denoised_paths={0: str(p), 1: str(workdir / "absent_b.h5")})
         return PerFileOutputStdCheck(), ctx, {"peek_samples": _PEEK}
 
@@ -202,7 +211,7 @@ def _per_file_output_std_cases() -> dict[str, CaseBuilder]:
 def _spectral_peak_ratio_cases() -> dict[str, CaseBuilder]:
     def measured(workdir: Path):
         p = workdir / "spectral_sine.h5"
-        _write_channel(p, "channel0001", _sinusoid())
+        _write_channel(p, _output_channel(), _sinusoid())
         ctx = _ctx(denoised_paths={0: str(p)})
         return SpectralPeakRatioCheck(), ctx, {"peek_samples": _PEEK}
 
@@ -234,8 +243,8 @@ def _pearson_dispersion_cases() -> dict[str, CaseBuilder]:
     def _pair(workdir: Path, index: int, seed: int) -> tuple[str, str]:
         d = workdir / f"pearson_denoised_{index}.h5"
         t = workdir / f"pearson_target_{index}.h5"
-        _write_channel(d, "channel0001", _varied(seed=seed))
-        _write_channel(t, "channel0002", _varied(seed=seed + 100))
+        _write_channel(d, _output_channel(), _varied(seed=seed))
+        _write_channel(t, _target_channel(), _varied(seed=seed + 100))
         return str(d), str(t)
 
     def measured(workdir: Path):
@@ -250,7 +259,7 @@ def _pearson_dispersion_cases() -> dict[str, CaseBuilder]:
 
     def na_no_target_fn(workdir: Path):
         p = workdir / "pearson_denoised_only.h5"
-        _write_channel(p, "channel0001", _varied())
+        _write_channel(p, _output_channel(), _varied())
         # target_path_fn absent → the FIRST NA axis (a declared context
         # input is missing), distinct from "no files".
         return PearsonDispersionCheck(), _ctx(denoised_paths={0: str(p)}), {"peek_samples": _PEEK}

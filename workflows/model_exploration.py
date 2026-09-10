@@ -157,11 +157,7 @@ from workflows.task_composition import (
     compose_run_task_bindings,
     verify_composition_is_bound,
 )
-from workflows.task_config import (
-    default_task_config_path,
-    get_task_description,
-    load_task_config,
-)
+from workflows.task_config import get_task_description, load_task_config
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -438,8 +434,7 @@ def impl_attempt_storage(attempt_dir: str, run_name: str, impl_attempt: int) -> 
 
 
 def _snapshot_task_config(run_dir: str) -> None:
-    """Copy ``configs/task_config.yaml`` into ``run_dir`` as
-    ``task_config_snapshot.yaml`` for replay provenance.
+    """Persist the active task declaration for replay provenance.
 
     Called once during ``run_workflow`` setup, immediately after
     ``os.makedirs(run_dir, exist_ok=True)``. The "copy only if absent"
@@ -449,11 +444,8 @@ def _snapshot_task_config(run_dir: str) -> None:
     config that was active when iter 1 ran, even if the operator edits
     ``configs/task_config.yaml`` mid-chain.
 
-    The source path comes from :func:`default_task_config_path` — the ONE
-    SIDERIUS_ROOT-anchored resolution authority (F-SCANA-2) that also
-    serves ``load_task_config`` (the read) and ``task_config_file_sha256``
-    (the F-SCANH-1 lock pin) — so the snapshot, the read and the pinned
-    sha address the SAME file regardless of the process cwd.
+    The snapshot is rendered from :func:`load_task_config`, which reads the
+    active composition binding. No repository task file is selected.
 
     See ``docs/design/enable_global_task_config.md`` § "Run provenance —
     task config snapshot" + § Commit T1b for the design + chain-mode
@@ -461,7 +453,8 @@ def _snapshot_task_config(run_dir: str) -> None:
     """
     snapshot_path = os.path.join(run_dir, "task_config_snapshot.yaml")
     if not os.path.exists(snapshot_path):
-        shutil.copy2(default_task_config_path(), snapshot_path)
+        with open(snapshot_path, "w", encoding="utf-8") as stream:
+            yaml.safe_dump(load_task_config(), stream, sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -723,7 +716,7 @@ def resolve_lit_review_config_path(config_path: str) -> str:
     return os.path.join(SIDERIUS_ROOT, config_path)
 
 
-def lit_review_config_sha256(config_path: str, *, enabled: bool) -> str | None:
+def lit_review_config_sha256(config_path: str | None, *, enabled: bool) -> str | None:
     """sha256 of the resolved lit-review YAML bytes, or ``None`` when disabled.
 
     arXiv U1 (#253): the lock pins the lit-review CONFIG, not just the
@@ -738,6 +731,11 @@ def lit_review_config_sha256(config_path: str, *, enabled: bool) -> str | None:
     """
     if not enabled:
         return None
+    if config_path is None:
+        raise ValueError(
+            "literature review is enabled but no config was declared. Supply "
+            "the task or experiment config explicitly before launch."
+        )
     resolved = resolve_lit_review_config_path(config_path)
     try:
         with open(resolved, "rb") as f:
@@ -778,8 +776,8 @@ def _build_lit_review_input(
     pr_04b_task_description_single_source.md``.
 
     Args:
-        config: Parsed YAML dict from ``configs/lit_review_config.yaml`` (or
-            the operator-supplied path via ``--ml_lit_review_config``).
+        config: Parsed YAML dict from the caller-supplied path given through
+            ``--ml_lit_review_config``.
             Supplies the lit-review module's own knobs only — root papers,
             search, verbosity, synthesis, confidence rubric. A
             ``task_description`` key here is stale and is ignored.
@@ -799,8 +797,7 @@ def _build_lit_review_input(
     from agent.schemas.literature_review import LiteratureReviewInput
 
     # Step 04b — SINGLE SOURCE. The task description is resolved from the
-    # canonical §13 task profile (configs/task_config.yaml), NOT from the
-    # lit-review YAML, which no longer declares one. `config` is deliberately
+    # active task declaration, NOT from the lit-review YAML. `config` is deliberately
     # not consulted for this key: a stale operator copy that still carries
     # `task_description:` must be IGNORED, never merged or preferred, or the
     # duplicate authority this PR removed would return invisibly.
@@ -1165,40 +1162,31 @@ def refuse_builtin_proposal_under_isolation(
         )
 
 
-def refuse_shipped_lit_review_config_on_composed_run(
+def require_lit_review_config_when_enabled(
     *,
-    task_composition: Any,
     lit_review_enabled: bool,
-    lit_review_config_path: str,
+    lit_review_config_path: str | None,
 ) -> None:
-    """Keep composed runs from inheriting the shipped task-specific config.
+    """Require explicit literature-review configuration when enabled.
 
     Step 12 / PR-12a C7, D-12a-7 (Q-12-3, RATIFIED 2026-08-22).
 
-    The node and its four-channel proposer handoff are task-generic, and the
-    task description already resolves from the active composition. The shipped
-    default YAML is not generic: its root papers and confidence rubric are
-    TIDMAD-owned. A composed run may therefore enable literature review only
-    with an explicit non-default config. Un-composed compatibility is
-    unchanged.
+    The node and its four-channel proposer handoff are task-generic. Root
+    papers, search settings, and confidence criteria are task or experiment
+    inputs, so the framework never supplies a scientific default.
 
     Raises:
-        ValueError: composed and enabled while still selecting the shipped
-            default config, before any LLM or GPU spend.
+        ValueError: literature review is enabled without an explicit config,
+            before any LLM or GPU spend.
     """
-    if task_composition is None or not lit_review_enabled:
+    if not lit_review_enabled:
         return
-    default_path = os.path.abspath(resolve_lit_review_config_path("configs/lit_review_config.yaml"))
-    selected_path = os.path.abspath(resolve_lit_review_config_path(lit_review_config_path))
-    if selected_path != default_path:
+    if lit_review_config_path is not None:
         return
     raise ValueError(
-        "literature review is enabled on a COMPOSED run with the shipped "
-        "default configs/lit_review_config.yaml. That file contains "
-        "task-specific root papers and confidence criteria, so using it would "
-        "inject another task's literature framing into this run.\n"
-        "  Remediation: supply the composed task's own config through "
-        "--ml_lit_review_config, or launch without --ml_lit_review_enabled."
+        "literature review is enabled but no config was declared. Supply the "
+        "task or experiment config through --ml_lit_review_config, or launch "
+        "without --ml_lit_review_enabled."
     )
 
 
@@ -1472,9 +1460,9 @@ def _promote_loss_to_global(impl_output) -> None:
     if loss_prov is None or loss_prov.action != "generated":
         return
 
-    from agent_generated._loss_loader import LOSSES_DIR
-    from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+    from core.capability_registry import CapabilityMetadata, CapabilityRegistry
     from core.generated_library import generated_library_is_workspace_bound, generated_losses_dir
+    from ml_models.loss_plugin_loader import LOSSES_DIR
 
     src = loss_prov.loss_file_path
     if not src or not os.path.isfile(src):
@@ -1651,7 +1639,7 @@ def _promote_model_to_global(impl_output) -> None:
     if not model_file_path or not os.path.isfile(model_file_path):
         return  # Built-in / Branch B with no fresh codegen / defensive guard.
 
-    from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+    from core.capability_registry import CapabilityMetadata, CapabilityRegistry
     from core.generated_library import generated_library_is_workspace_bound, generated_models_dir
     from ml_models.plugin_loader import AGENT_GENERATED_DIR as LEGACY_MODELS_DIR
 
@@ -1881,6 +1869,13 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
         # launch config the tuner child receives it from, so the chain lock
         # and the tuner sub-workspace lock cannot disagree.
         formal_eval_portion=launch.formal_eval_portion,
+        workflow_parameter_rules=(
+            None
+            if launch.workflow_parameter_rules is None
+            else launch.workflow_parameter_rules.model_dump(mode="json", exclude_none=True)
+        ),
+        trial_time_admission_source=launch.trial_time_admission_source,
+        formal_time_admission_source=launch.formal_time_admission_source,
     )
 
 
@@ -2040,8 +2035,7 @@ def run_workflow(
     # loop means before any LLM call and any GPU work. The decision itself is
     # a named authority so this orchestrator gains a CALL rather than another
     # branch family (§12.1's sibling-shape tripwire).
-    refuse_shipped_lit_review_config_on_composed_run(
-        task_composition=task_composition,
+    require_lit_review_config_when_enabled(
         lit_review_enabled=launch.lit_review_enabled,
         lit_review_config_path=launch.lit_review_config_path,
     )
@@ -2092,7 +2086,7 @@ def run_workflow(
     # post-validation, but existing indexes may already carry phantoms
     # from prior runs (e.g. v16 global index still has
     # ``gated_dilated_tcn`` pointing at a stale pytest tmp dir).
-    from agent_generated._registry import CapabilityRegistry as _StartupCapReg
+    from core.capability_registry import CapabilityRegistry as _StartupCapReg
 
     _n_pruned, _pruned_names = _cleanup_stale_registry_entries(_StartupCapReg())
     if _n_pruned:
@@ -2688,6 +2682,10 @@ def run_workflow(
         if should_run_literature_review(interpretation, enabled=launch.lit_review_enabled):
             # arXiv U1 — the same resolver the pre-flight hashed through, so
             # the lock's `lit_review_config_sha256` pins THIS file.
+            if launch.lit_review_config_path is None:
+                raise AssertionError(
+                    "literature-review config was not validated at workflow startup"
+                )
             yaml_path = resolve_lit_review_config_path(launch.lit_review_config_path)
             print(f"  [{iteration}] Running lit-review (config: {yaml_path})...")
             with open(yaml_path, encoding="utf-8") as _f:
@@ -2700,7 +2698,15 @@ def run_workflow(
                 storage=lit_storage,
                 run_name=bindings.run_name,
             )
-            lit_agent = MLLiteratureReviewAgent(bridge_factory=bridge_factory)
+            lit_agent = MLLiteratureReviewAgent(
+                bridge_factory=bridge_factory,
+                root_cache_dir=os.path.join(
+                    bindings.workspace,
+                    "cache",
+                    "literature",
+                    "root_papers",
+                ),
+            )
             _bind_iter_context(lit_agent)
             lit_output = lit_agent.run(lit_input)
             external_outputs.append(lit_output)
@@ -3050,7 +3056,7 @@ def run_workflow(
                         # iter_015 ``gated_dilated_tcn``).
                         _capmeta = getattr(impl_output, "capability_metadata", None)
                         if _capmeta is not None:
-                            from agent_generated._registry import (
+                            from core.capability_registry import (
                                 CapabilityRegistry as _CapReg,
                             )
 
@@ -3173,10 +3179,12 @@ def run_workflow(
             tuning_storage,
             max_rounds=launch.max_rounds,
             health_checks_config=bindings.health_checks_config,
+            measurement_capability=bindings.measurement_capability,
             # Step 12 / PR-12a (D-12a-1) — the composition projection crosses
             # the edge on the INPUT, beside every other run-scoped decision
             # this protocol already maps.
             task_composition_ref=build_task_composition_ref(bindings.task_composition),
+            workflow_parameter_rules=launch.workflow_parameter_rules,
             data_scope=bindings.data_scope,
             health_gate_enabled=bindings.health_gate_enabled,
             health_gate_files=(
@@ -3226,12 +3234,17 @@ def run_workflow(
             plan_overrides=frozen_portion_overrides(launch),
             trial_time_budget_minutes=launch.trial_time_budget_minutes,
             formal_time_budget_minutes=launch.formal_time_budget_minutes,
+            trial_time_admission_source=launch.trial_time_admission_source,
+            formal_time_admission_source=launch.formal_time_admission_source,
             data_dir=launch.data_dir,
             gpu_admission_measurement_source=launch.gpu_admission_measurement_source,
             gpu_admission_enforcement=launch.gpu_admission_enforcement,
             gpu_pair_ceiling_gib=launch.gpu_pair_ceiling_gib,
             trial_vram_budget_gb=launch.trial_vram_budget_gb,
             formal_vram_budget_gb=launch.formal_vram_budget_gb,
+            vram_probe_step_timeout_seconds=launch.vram_probe_step_timeout_seconds,
+            vram_preflight_total_timeout_seconds=(launch.vram_preflight_total_timeout_seconds),
+            vram_preflight_host_memory_limit_gb=(launch.vram_preflight_host_memory_limit_gb),
             formal_strategy=launch.formal_strategy,
             formal_portion=launch.formal_portion,
             formal_train_portion=launch.formal_train_portion,
@@ -3251,6 +3264,7 @@ def run_workflow(
             runtime_formal_safety_factor=launch.runtime_formal_safety_factor,
             runtime_watchdog_safety_factor=launch.runtime_watchdog_safety_factor,
             runtime_watchdog_floor_seconds=launch.runtime_watchdog_floor_seconds,
+            runtime_verification_max_wall_seconds=(launch.runtime_verification_max_wall_seconds),
             # V19 PR 1 (P1-C3) — the chain incumbent travels as a NAMED
             # protocol parameter (two-state design, design doc §3.4).
             # ``chain_formal_incumbent_reference`` is decision state:
@@ -3593,7 +3607,7 @@ def main():
     parser.add_argument(
         "--data_dir",
         type=str,
-        default=None,
+        required=True,
         help="Root data directory containing existing tuning results.",
     )
     parser.add_argument(
@@ -3710,18 +3724,13 @@ def main():
     parser.add_argument(
         "--task_composition",
         type=str,
-        default=None,
+        required=True,
         help=(
-            "Path to a YAML task-composition manifest. Omitted = the legacy "
-            "un-composed run. See the chain launcher's flag of the same name."
+            "Path to a required YAML task-composition manifest. "
+            "It binds the task for the complete run and fails closed if unresolved."
         ),
     )
     args = parser.parse_args()
-
-    if args.data_dir is None:
-        from execute_tools.data_paths import SIDERIUS_DATA_DIR
-
-        args.data_dir = SIDERIUS_DATA_DIR
 
     # Build LLM config: --llm_config file takes precedence, then --provider/--model_id
     if args.llm_config:
@@ -3735,11 +3744,7 @@ def main():
 
     # Step 10 / P1 — the module CLI is a composition edge too, and it owns
     # the binding for exactly the same reason the chain launcher does.
-    # `--task_composition` omitted ⇒ `None` ⇒ a no-op context and the legacy
-    # un-composed run.
-    run_composition = (
-        compose_run_task_bindings(args.task_composition) if args.task_composition else None
-    )
+    run_composition = compose_run_task_bindings(args.task_composition)
     # Step 11 C4 — same binding, same authority as the chain launcher.
     # A composed run with no --data_dir is refused rather than silently
     # reading TIDMAD's data (R-11-8).

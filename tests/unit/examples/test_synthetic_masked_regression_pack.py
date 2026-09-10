@@ -85,9 +85,9 @@ def test_masked_objective_declares_supported_mean_comparability(
     masked mean, but the plugin contract must use the framework's supported
     `mean` normalization vocabulary for cross-epoch comparability.
     """
-    from agent_generated._loss_loader import LOSS_REDUCTION_REGISTRY
     from execute_tools.training_history import stamp_comparability
     from ml_models.loss_models_sandbox import _load_custom_loss
+    from ml_models.loss_plugin_loader import LOSS_REDUCTION_REGISTRY
     from ml_models.models_format_sandbox import LossConfig
 
     monkeypatch.setenv("SIDERIUS_LOSS_DIRS", str(PACK / "plugins"))
@@ -115,14 +115,14 @@ def test_production_training_engine_consumes_masked_supervision(
     import torch
 
     import execute_tools.train_engine_sandbox as train_engine
-    from agent_generated._loss_loader import (
-        LOSS_REDUCTION_REGISTRY,
-        LOSS_TARGET_DTYPE_REGISTRY,
-    )
     from ml_models.loss_models_sandbox import (
         LOSS_CONFIG_REGISTRY,
         LOSS_REGISTRY,
         register_loss_in_memory,
+    )
+    from ml_models.loss_plugin_loader import (
+        LOSS_REDUCTION_REGISTRY,
+        LOSS_TARGET_DTYPE_REGISTRY,
     )
     from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY, LossConfig, TrainConfig
     from ml_models.models_sandbox import MODEL_REGISTRY
@@ -409,7 +409,7 @@ def test_resource_worker_accepts_a_task_valid_batch_and_refuses_an_oversized_one
     assert tuple(inputs.shape) == (8, 3)
     assert tuple(supervision.shape) == (8, 2)
     assert set(supervision[:, 1].tolist()) == {0.0, 1.0}
-    with pytest.raises(ValueError, match="cannot produce one full VRAM probe batch of size 64"):
+    with pytest.raises(ValueError, match="cannot produce one full resource probe batch of size 64"):
         _task_probe_batch(spec.model_dump(), batch_size=64)
 
 

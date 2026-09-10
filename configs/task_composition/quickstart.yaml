@@ -56,8 +56,8 @@ objective:
     loss_type: ce
     reduction: mean
 
-# A NAMED absence, not an omission: saying nothing at all would be the
-# LEGACY_OMITTED state that resolves TIDMAD's Health family.
+# A named absence, not an omission: the example explicitly declares that it
+# has no scientific Health roster, so no caller can confuse silence with intent.
 task_health:
   none: true
 

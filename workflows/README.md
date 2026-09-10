@@ -93,7 +93,7 @@ library is not (recorded product gap; see
 | `CompositionDataRootMissing` | composed run without `--data_dir`, before any LLM/GPU work |
 | `CompositionNotBoundError` | a code path reached execution without the run-scoped binding — a wiring defect, not an operator error |
 | `RunInvariantsViolation` at startup | workspace lock mismatch — use a new workspace |
-| shipped task-specific lit-review config on a composed run | refused by name (`refuse_shipped_lit_review_config_on_composed_run`); an explicit task-owned config is accepted |
+| literature review enabled without an explicit config | refused by name (`require_lit_review_config_when_enabled`); a task- or experiment-owned config is accepted |
 
 ## Files normally edited
 
@@ -113,9 +113,9 @@ weakening a refusal into a fallback is the defect class the guards exist for.
 ```bash
 # one composed dry iteration, directly through the module CLI
 .venv/bin/python workflows/model_exploration.py \
-    --task_composition configs/task_composition/tidmad.yaml \
-    --data_dir /path/to/data --workspace /tmp/ws --run_name demo_v1 \
-    --models punet --source_run_name seed --max_iterations 1
+    --task_composition configs/task_composition/quickstart.yaml \
+    --data_dir /tmp/quickstart-data --workspace /tmp/ws --run_name demo_v1 \
+    --source_run_name seed --max_iterations 1
 ```
 
 For real runs use the chain launcher

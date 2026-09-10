@@ -215,21 +215,10 @@ class TestGetGatesForPosition:
         monkeypatch.setattr(runner, "load_health_gates_config", lambda: cfg)
         assert get_gates_for_position(3) == ["gate_a", "gate_b"]
 
-    def test_shipped_config_all_rounds(self):
-        """The shipped configs/health_checks.yaml (M8 rev-7) fires all
-        6 gates on every round via ``after_round: every``."""
-        expected = [
-            "output_diversity_blocking",
-            "output_std_blocking",
-            "amplitude_collapse_blocking",
-            "pearson_dispersion_recording",
-            "spectral_peak_ratio_recording",
-            "per_file_output_std_recording",
-        ]
-        for r in [1, 2, 3, 4, 5, 7, 10]:
-            assert get_gates_for_position(r) == expected, (
-                f"round {r} did not return all 6 every-round gates"
-            )
+    def test_undeclared_task_health_returns_no_gates(self):
+        """Framework policy never invents a scientific check roster."""
+        for round_index in [1, 2, 3, 4, 5, 7, 10]:
+            assert get_gates_for_position(round_index) == []
 
 
 # ---------------------------------------------------------------------------
@@ -516,7 +505,7 @@ class _DeclaringCheck(_ScriptedCheck):
 
 # Requires an encoding family no contrast task declares.
 _INT8_ONLY = CheckInputDeclaration(
-    consumes_view="tidmad.int8_prefix_peek",
+    consumes_view="indexed.int8_prefix_peek",
     required_facts=(FactRequirement(axis="encoding_family", equals="int8_symbol_stream"),),
 )
 # Requires only a context input, so it applies under any facts.
@@ -526,7 +515,7 @@ _ANY_TASK = CheckInputDeclaration(
 )
 
 _CONTRAST_FACTS = TaskHealthFacts(encoding_family="continuous_float", file_group_size=4)
-_TIDMAD_FACTS = TaskHealthFacts(encoding_family="int8_symbol_stream", symbol_cardinality=256)
+_INDEXED_FACTS = TaskHealthFacts(encoding_family="int8_symbol_stream", symbol_cardinality=256)
 
 
 @pytest.fixture
@@ -619,11 +608,10 @@ class TestApplicabilityWiring:
     def test_declaration_less_check_is_unconditionally_applicable(
         self, clean_registry, monkeypatch, contrast_task
     ):
-        """Pre-08a behaviour bit-for-bit — this is why C3 is a TIDMAD no-op.
+        """Declaration-less checks remain unconditionally applicable.
 
-        The six shipped checks carry no declaration until C4, so the whole
-        wiring must be inert for them even under facts that would make a
-        declaring check inapplicable.
+        The wiring must be inert for a check with no requirements even under
+        facts that would make a declaring check inapplicable.
         """
         plain = _ScriptedCheck("plain", passed=False, reason="plain: flagged")
         register(plain)
@@ -737,7 +725,7 @@ class TestApplicabilityWiring:
         Without this, a wiring bug that made EVERY declaring check
         inapplicable would pass every test above.
         """
-        monkeypatch.setattr(runner, "_resolve_task_facts", lambda: _TIDMAD_FACTS)
+        monkeypatch.setattr(runner, "_resolve_task_facts", lambda: _INDEXED_FACTS)
         check = _DeclaringCheck("int8_only", _INT8_ONLY, passed=True)
         register(check)
         monkeypatch.setattr(

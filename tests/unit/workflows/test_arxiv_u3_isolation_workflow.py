@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -40,6 +41,10 @@ from workflows.model_exploration import (
     run_workflow,
 )
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+QUICKSTART = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 
 class TestRefusalAuthority:
@@ -73,8 +78,10 @@ def _run(workspace: str, *, isolation: bool, proposal_name: str, out: dict | Non
     with the captured node inputs and call counts EVEN when the workflow
     raises, so a refusal can be shown to have preceded the implementor."""
     captured: dict = out if out is not None else {}
+    composition = compose_run_task_bindings(str(QUICKSTART))
 
     with (
+        bind_run_task_composition(composition, physical_data_root=workspace),
         patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp,
         patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose,
         patch("workflows.model_exploration.MLModelImplementor") as MockImpl,
@@ -85,7 +92,9 @@ def _run(workspace: str, *, isolation: bool, proposal_name: str, out: dict | Non
         MockPropose.return_value.run.return_value = _make_proposal_output(model_name=proposal_name)
         MockImpl.return_value.run.return_value = _make_implementor_output(model_type=proposal_name)
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
-        MockTune.return_value.run.return_value = _make_tuning_output(model_type=proposal_name)
+        MockTune.return_value.run.return_value = _make_tuning_output(
+            model_type=proposal_name, fingerprint=composition.semantic_fingerprint
+        ).model_copy(update={"metric_spec": composition.metric.spec})
         try:
             run_workflow(
                 launch=WorkflowLaunchConfig(
@@ -93,10 +102,12 @@ def _run(workspace: str, *, isolation: bool, proposal_name: str, out: dict | Non
                     max_iterations=1,
                     start_iteration=1,
                     baseline_isolation=isolation,
+                    data_dir=workspace,
                 ),
                 workspace=workspace,
                 run_name="u3_iso",
                 llm_config=_llm_config_pseudo(),
+                task_composition=composition,
             )
         finally:
             captured["implementor_runs"] = MockImpl.return_value.run.call_count

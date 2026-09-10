@@ -1,4 +1,4 @@
-"""The generic EvaluationMetric interface, and TIDMAD as its instance #1.
+"""The generic EvaluationMetric interface and built-in lightweight metrics.
 
 Step 06, design ``docs/design/generic_framework_upgrade/
 step_06_metric_interface.md`` §4, §5, §6, §7 (roadmap §10, §20.2, §20.4).
@@ -38,19 +38,11 @@ shape" (§5, §16-Q3): each metric instance declares its own contract as a
 required_channels / required_shape`` vocabulary would be the TIDMAD shape
 re-declared as the universal one.
 
-**Runtime-only, derived under Regime A.** :class:`MetricSpec` is a typed
-runtime value in the ``DeliverableSpec`` mould — not user-authored YAML, not a
-new top-level config, not persisted as its own artifact. The TIDMAD instance is
-DERIVED with no declaration (:func:`derive_tidmad_metric`); task-level
-declaration/binding for other tasks is Step 12's, as an additive block inside
-the existing task configuration. Only :class:`MetricResult` /
-:class:`NotScoreableResult` reach a record (Step 06 C4, additive).
-
-**The frozen formula is referenced, never re-implemented.** The TIDMAD
-instance's aggregation IS ``execute_tools.scoring_utils.score_vector`` — its
-``_LOG_BASE``, ``s_max``, anchor normalisation and grand-mean are the
-instance's own constants and are not restated here. The handle wraps the call
-and evaluates scoreability FIRST; the arithmetic entry is untouched.
+**Runtime-only declaration.** :class:`MetricSpec` is a typed runtime value.
+Active execution receives it from the task composition together with the
+task-owned scoreability implementation. Persisted records retain the resolved
+declaration for provenance and ordering, but replay does not import or execute
+task code implicitly.
 """
 
 from __future__ import annotations
@@ -62,7 +54,6 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Annotated, Any, ClassVar, Literal, NamedTuple, cast, get_args
 
-import h5py
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -73,47 +64,14 @@ from pydantic import (
     model_validator,
 )
 
-from execute_tools.dataset_config import DatasetProfile, ScopeViolationError
-from execute_tools.deliverable_spec import DeliverableSpec, derive_tidmad_deliverable_spec
-from execute_tools.scoring_helpers import _LOG_BASE as _TIDMAD_LOG_BASE
-
-# ---------------------------------------------------------------------------
-# The TIDMAD instance's identity — declared ONCE, here.
-# ---------------------------------------------------------------------------
-
-#: The metric identity ``per_file_best`` has emitted since before Step 06
-#: (``execute_tools/per_file_best.py``, key set pinned by
-#: ``tests/unit/execute_tools/test_per_file_best.py``). The interface EXTENDS
-#: that precedent (roadmap §10.2, finding 8); the string is not re-invented.
-TIDMAD_METRIC_ID = "tidmad_denoising_score"
-
-#: Identity of the frozen aggregation rule: anchor-normalised per-segment
-#: weights, linear grand mean over every sampled segment, then ``log_5.27``
-#: (``scoring_utils.py`` module docstring §3). The rule itself lives in
-#: ``score_vector``; this is its NAME.
-TIDMAD_AGGREGATION_ID = "tidmad_anchor_normalised_linear_grand_mean"
-
-#: ``score_transform`` as ``per_file_best`` already emits it.
-TIDMAD_TRANSFORM = "log"
-
-#: Reference kinds the TIDMAD interpretation layer compares against: the
-#: committed anchor map (``s_max`` — consumed by scoring), and the committed
-#: raw-baseline / ground-truth per-file artifacts (``ScoreComparisonTable``).
-TIDMAD_REFERENCES: tuple[str, ...] = ("anchor_map", "raw_baseline", "ground_truth")
-
-#: The two instrument attrs the frozen scorer reads UNCONDITIONALLY from the
-#: input channel group of whichever file it opens
-#: (``scoring_utils.py:159-164``). Evaluation-side facts: how they are
-#: WRITTEN stays with the producer (``array2h5.create_abra_file``).
-TIDMAD_REQUIRED_ATTRS: tuple[str, ...] = ("voltage_range_mV", "sampling_frequency")
-
-#: In-file path the frozen scorer reads samples from
-#: (``scoring_utils.get_one_sec_psd``: ``timeseries/<group>/timeseries``).
-#: A requirement of THIS metric on the artifact, stated where the metric is.
-_TIDMAD_H5_ROOT_GROUP = "timeseries"
-_TIDMAD_H5_SAMPLES_DATASET = "timeseries"
+from execute_tools.dataset_config import ScopeViolationError
 
 MetricDirection = Literal["higher", "lower"]
+
+# Persisted records created before task metrics moved out of the framework use
+# this identity. It is data compatibility only; no arithmetic or scoreability
+# implementation is selected from it.
+TIDMAD_METRIC_ID = "tidmad_denoising_score"
 
 
 def _validate_metric_identifier(identifier: str, *, field: str) -> str:
@@ -255,111 +213,6 @@ class PresenceScoreabilityContract(ScoreabilityContract):
                     )
                 )
         return ScoreabilityVerdict(contract_id=self.contract_id, failures=tuple(failures))
-
-
-class TidmadScoreabilityContract(ScoreabilityContract):
-    """What the frozen TIDMAD scorer requires of a denoised deliverable.
-
-    Declared AGAINST the producer-side :class:`DeliverableSpec` — the input
-    channel group and the storage dtype are READ from it by
-    :func:`derive_tidmad_metric_spec` — and stated here as evaluation-side
-    requirements the LIVE scorer actually exercises on the deliverable
-    (``scoring_utils._collect_raw_pairs``: ``ch=1`` from the DENOISED file at
-    ``:477``; ``ch=2`` comes from the RAW validation file at ``:470``, which is
-    an input-dataset fact, not a deliverable requirement):
-
-    * **completeness** — every in-scope file (every requested input identity)
-      has a deliverable on disk that opens as HDF5. File-level, deliberately:
-      the scorer's own ``reshape(len // N, N)`` boundary is the frozen
-      mechanism for a short segment, and its segment length is a scorer
-      constant this contract must not re-declare (design §19, §19.2).
-    * **required channel** — the input (denoised, ``ch=1``) sample dataset
-      exists at the path the scorer reads. The deliverable's TARGET group is
-      written by the producer but never read by the live scorer, so requiring
-      it would be stricter than the frozen instance (ledger §20.4).
-    * **required attrs** — ``voltage_range_mV`` and ``sampling_frequency`` on
-      the input channel group, which the scorer reads unconditionally.
-    * **required dtype** — the persisted sample dtype is the one the
-      deliverable spec declares (``int8`` under TIDMAD); a float artifact would
-      not crash the scorer, it would silently produce a wrong scale.
-
-    ``_is_complete_trial_output`` (``inference_single.py``) is a crash-resume
-    REUSE guard and is NOT this mechanism (design §1.1, §12).
-    """
-
-    contract_id: str = "tidmad_denoised_h5"
-    input_channel_group: str = Field(
-        description="Group holding the denoised signal the scorer reads as ch=1."
-    )
-    required_attrs: tuple[str, ...] = Field(default=TIDMAD_REQUIRED_ATTRS)
-    required_storage_dtype: str = Field(
-        description="NumPy dtype name the persisted samples must be stored as."
-    )
-
-    def _samples_key(self) -> str:
-        return "/".join(
-            (_TIDMAD_H5_ROOT_GROUP, self.input_channel_group, _TIDMAD_H5_SAMPLES_DATASET)
-        )
-
-    def check(self, deliverables: Mapping[int, str]) -> ScoreabilityVerdict:
-        failures: list[ScoreabilityFailure] = []
-        if not deliverables:
-            failures.append(
-                ScoreabilityFailure(
-                    requirement="completeness",
-                    detail="no in-scope file was named for scoring",
-                )
-            )
-        for identity, path in deliverables.items():
-            failures.extend(self._check_one(int(identity), path))
-        return ScoreabilityVerdict(contract_id=self.contract_id, failures=tuple(failures))
-
-    def _check_one(self, identity: int, path: str) -> list[ScoreabilityFailure]:
-        def fail(requirement: str, detail: str) -> ScoreabilityFailure:
-            return ScoreabilityFailure(
-                requirement=requirement, input_identity=identity, detail=detail
-            )
-
-        if not os.path.isfile(path):
-            return [fail("completeness", f"deliverable not found at {path!r}")]
-        try:
-            with h5py.File(path, "r") as handle:
-                return self._check_open(handle, path, fail)
-        except OSError as exc:
-            return [fail("completeness", f"deliverable at {path!r} is not readable HDF5: {exc}")]
-
-    def _check_open(
-        self, handle: h5py.File, path: str, fail: Callable[[str, str], ScoreabilityFailure]
-    ) -> list[ScoreabilityFailure]:
-        failures: list[ScoreabilityFailure] = []
-        key = self._samples_key()
-        node = handle.get(key)
-        if not isinstance(node, h5py.Dataset):
-            failures.append(
-                fail("required_channels", f"input channel dataset {key!r} missing in {path!r}")
-            )
-        else:
-            found = str(node.dtype)
-            if found != self.required_storage_dtype:
-                failures.append(
-                    fail(
-                        "required_dtype",
-                        f"{key!r} in {path!r} is stored as {found!r}, "
-                        f"required {self.required_storage_dtype!r}",
-                    )
-                )
-        attrs_group = handle.get("/".join((_TIDMAD_H5_ROOT_GROUP, self.input_channel_group)))
-        if isinstance(attrs_group, h5py.Group):
-            for attr in self.required_attrs:
-                if attr not in attrs_group.attrs:
-                    failures.append(
-                        fail(
-                            "required_attrs",
-                            f"attr {attr!r} missing on group "
-                            f"{_TIDMAD_H5_ROOT_GROUP}/{self.input_channel_group} in {path!r}",
-                        )
-                    )
-        return failures
 
 
 # ---------------------------------------------------------------------------
@@ -569,26 +422,6 @@ class EvaluationMetric(ABC):
         """The instance's arithmetic. Returns ``(scalar, per_sample, references_used)``."""
 
 
-class TidmadDenoisingMetric(EvaluationMetric):
-    """Instance #1: the frozen TIDMAD scorer, byte-identical, through the handle.
-
-    ``_compute`` forwards its keyword arguments UNCHANGED to
-    ``execute_tools.scoring_utils.score_vector`` and returns its 2-tuple as
-    ``(scalar, file_vector, references_used)``. Nothing about the arithmetic,
-    its parameters or its return contract is restated here.
-    """
-
-    IMPLEMENTS: ClassVar[tuple[str, ...]] = (TIDMAD_METRIC_ID,)
-
-    def _compute(
-        self, deliverables: Mapping[int, str], /, **compute_kwargs: Any
-    ) -> tuple[float, list[float | None] | None, tuple[str, ...]]:
-        from execute_tools.scoring_utils import score_vector
-
-        file_vector, scalar = score_vector(**compute_kwargs)
-        return scalar, file_vector, ("anchor_map",)
-
-
 class AccuracyMetric(EvaluationMetric):
     """Instance #2 (D14-2): generic classification accuracy through the handle.
 
@@ -686,27 +519,71 @@ class GlobalMseMetric(EvaluationMetric):
 #: class is added in this module.
 _SCOREABILITY_CONTRACT_TYPES: dict[str, type[ScoreabilityContract]] = {
     "deliverable_presence": PresenceScoreabilityContract,
-    "tidmad_denoised_h5": TidmadScoreabilityContract,
 }
 
 
-def scoreability_contract_from_declaration(payload: Mapping[str, Any]) -> ScoreabilityContract:
+class UnknownScoreabilityContractError(ValueError):
+    """A declaration names no framework or explicitly supplied contract type."""
+
+
+class PersistedScoreabilityContract(ScoreabilityContract):
+    """Data-only scoreability declaration reconstructed from a run record.
+
+    A fresh process must be able to inspect and resume persisted records even
+    when the task plugin that produced them is not imported yet. Replay needs
+    the contract identity and fields for provenance; it must never pretend
+    those fields constitute executable task logic. Active composition always
+    loads the task-owned subclass and therefore never constructs this type.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+    def check(self, deliverables: Mapping[int, str]) -> ScoreabilityVerdict:
+        del deliverables
+        raise RuntimeError(
+            "a scoreability contract restored from persisted data is not executable; "
+            "compose the task-owned scoreability plugin before scoring"
+        )
+
+
+def scoreability_contract_from_declaration(
+    payload: Mapping[str, Any],
+    *,
+    additional_types: Mapping[str, type[ScoreabilityContract]] | None = None,
+) -> ScoreabilityContract:
     """Rebuild a declared scoreability contract from its ``contract_id``.
 
     Fail closed: an unknown id names itself and the known vocabulary —
     a task pack cannot smuggle in an unimplemented acceptance contract.
     """
+    contract_types = dict(_SCOREABILITY_CONTRACT_TYPES)
+    for declared_id, contract_type in (additional_types or {}).items():
+        if not isinstance(contract_type, type) or not issubclass(
+            contract_type, ScoreabilityContract
+        ):
+            raise TypeError(
+                f"scoreability contract {declared_id!r} must be a ScoreabilityContract subclass"
+            )
+        # The active task declaration is the execution authority. A legacy
+        # framework type with the same id may remain temporarily for persisted
+        # record replay, but it must not shadow the task plugin during
+        # composition.
+        contract_types[declared_id] = contract_type
+
     contract_id = payload.get("contract_id")
-    contract_cls = _SCOREABILITY_CONTRACT_TYPES.get(str(contract_id))
+    contract_cls = contract_types.get(str(contract_id))
     if contract_cls is None:
-        raise ValueError(
-            f"unknown scoreability contract_id {contract_id!r}; known: "
-            f"{sorted(_SCOREABILITY_CONTRACT_TYPES)}"
+        raise UnknownScoreabilityContractError(
+            f"unknown scoreability contract_id {contract_id!r}; known: {sorted(contract_types)}"
         )
     return contract_cls.model_validate(payload)
 
 
-def metric_spec_from_declaration(payload: Mapping[str, Any]) -> MetricSpec:
+def metric_spec_from_declaration(
+    payload: Mapping[str, Any],
+    *,
+    scoreability_contract_types: Mapping[str, type[ScoreabilityContract]] | None = None,
+) -> MetricSpec:
     """A pack's declared metric JSON → the executable ``MetricSpec``.
 
     ``MetricSpec.model_validate`` alone cannot instantiate the ABSTRACT
@@ -716,8 +593,28 @@ def metric_spec_from_declaration(payload: Mapping[str, Any]) -> MetricSpec:
     the single authority for the metric's identity.
     """
     data = dict(payload)
-    data["scoreability"] = scoreability_contract_from_declaration(dict(data["scoreability"]))
+    data["scoreability"] = scoreability_contract_from_declaration(
+        dict(data["scoreability"]), additional_types=scoreability_contract_types
+    )
     return MetricSpec.model_validate(data)
+
+
+def metric_spec_from_persisted_record(payload: Mapping[str, Any]) -> MetricSpec:
+    """Rebuild a metric declaration for read-only record replay.
+
+    Framework-owned contracts retain their executable type. An external
+    contract is preserved as a data-only declaration until the task is
+    explicitly composed; replay never imports a task package implicitly.
+    """
+    try:
+        return metric_spec_from_declaration(payload)
+    except UnknownScoreabilityContractError:
+        scoreability = payload.get("scoreability")
+        if not isinstance(scoreability, Mapping):
+            raise
+        data = dict(payload)
+        data["scoreability"] = PersistedScoreabilityContract.model_validate(scoreability)
+        return MetricSpec.model_validate(data)
 
 
 def _metric_spec_from_any(value: Any) -> Any:
@@ -735,7 +632,7 @@ def _metric_spec_from_any(value: Any) -> Any:
     pydantic to reject with its own message.
     """
     if isinstance(value, Mapping):
-        return metric_spec_from_declaration(value)
+        return metric_spec_from_persisted_record(value)
     return value
 
 
@@ -1163,88 +1060,21 @@ def _name_specs(entries: Sequence[StampedMetricSpec]) -> str:
     return ", ".join(entry.label for entry in entries) or "<none>"
 
 
-# ---------------------------------------------------------------------------
-# Regime-A derivation — the TIDMAD instance with NO declaration
-# ---------------------------------------------------------------------------
+def resolve_run_metric() -> EvaluationMetric:
+    """Return the metric selected by the active task composition.
 
-
-def derive_tidmad_metric_spec(
-    dataset_profile: DatasetProfile, deliverable_spec: DeliverableSpec | None = None
-) -> MetricSpec:
-    """THE derivation of the TIDMAD metric spec — one function, every caller.
-
-    Regime A: no task declares this; a caller holding the run's profile (and
-    optionally the run's already-derived deliverable spec) obtains the
-    instance. The scoreability contract is declared AGAINST the deliverable
-    spec — channel groups and storage dtype are read from it, never restated —
-    which under TIDMAD resolves to the channels the frozen scorer addresses.
-
-    Args:
-        dataset_profile: The resolved profile in effect for this run.
-        deliverable_spec: The run's Deliverable Contract. ``None`` derives it
-            from the profile through 05c's own derivation, so a caller that
-            has not bound one still gets exactly the shipped instance.
-    """
-    spec = (
-        deliverable_spec
-        if deliverable_spec is not None
-        else derive_tidmad_deliverable_spec(dataset_profile)
-    )
-    return MetricSpec(
-        id=TIDMAD_METRIC_ID,
-        direction="higher",
-        aggregation=TIDMAD_AGGREGATION_ID,
-        transform=TIDMAD_TRANSFORM,
-        transform_params={"log_base": float(_TIDMAD_LOG_BASE)},
-        references=TIDMAD_REFERENCES,
-        scoreability=TidmadScoreabilityContract(
-            input_channel_group=spec.storage.input_channel_group,
-            required_storage_dtype=spec.storage.storage_dtype,
-        ),
-    )
-
-
-def derive_tidmad_metric(
-    dataset_profile: DatasetProfile, deliverable_spec: DeliverableSpec | None = None
-) -> TidmadDenoisingMetric:
-    """The TIDMAD handle, bound to the spec :func:`derive_tidmad_metric_spec` derives."""
-    return TidmadDenoisingMetric(derive_tidmad_metric_spec(dataset_profile, deliverable_spec))
-
-
-def resolve_run_metric(
-    dataset_profile: DatasetProfile, deliverable_spec: DeliverableSpec | None
-) -> EvaluationMetric:
-    """The run's ONE metric: the DECLARED one, else TIDMAD's regime-A instance.
-
-    Step 12 / PR-12d, seam B. The rule is byte-identical to the expression it
-    replaces (``resolve_bound_run_metric() or derive_tidmad_metric(profile,
-    spec)``); what moved is WHERE it lives. Two reasons, both structural:
-
-    * the tuner's ``run()`` is hard-capped at its current branch count, and
-      the ``or`` was one of its branch nodes — resolving here spends none of
-      that budget;
-    * ``deliverable_spec`` became ``DeliverableSpec | None`` when B11 was
-      closed, and the narrowing belongs beside the derivation that needs it
-      rather than inside a 1,100-line orchestrator.
-
-    A composed run finds its declared metric bound and never reaches the
-    legacy branch. An un-composed run has, by construction, a profile that
-    declares TIDMAD's geometry — so its spec is never ``None``, and a ``None``
-    arriving here would mean a composed run reached the legacy branch, which
-    is ``C-P56-1`` and is refused by name rather than silently derived
-    against an invented topology.
+    A scientific metric has task-owned arithmetic, direction, scoreability,
+    and references. The framework therefore cannot manufacture one when the
+    caller omitted the task composition. Supported execution binds the metric
+    before the tuner runs; reaching this function unbound is a wiring error.
     """
     declared = resolve_bound_run_metric()
     if declared is not None:
         return declared
-    if deliverable_spec is None:
-        raise NoRunMetricError(
-            "this run declares no metric AND its task declares no TIDMAD "
-            "deliverable geometry, so there is nothing to derive the legacy "
-            "TIDMAD metric from. Scoring a composed task with TIDMAD's metric "
-            "is the failure this refusal exists to prevent."
-        )
-    return derive_tidmad_metric(dataset_profile, deliverable_spec)
+    raise NoRunMetricError(
+        "this run has no metric bound from a task composition; SIDERIUS cannot "
+        "select a scientific metric implicitly"
+    )
 
 
 # ---------------------------------------------------------------------------

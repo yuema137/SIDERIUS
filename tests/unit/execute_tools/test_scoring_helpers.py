@@ -653,38 +653,4 @@ class TestSecondaryBlock:
         assert "### Sampled files re-ranked by Impact_Score" not in md
 
 
-# =============================================================================
-# Existing test class continues
-# =============================================================================
-
-
-class TestPostPathAReferenceConsistency:
-    def test_post_path_a_reference_consistency(self):
-        """Step-00 OD-4: the FU-P2-4 ``xfail`` is RETIRED. It guarded a
-        soft-floor drift against a STALE machine-local copy
-        (``/home/klz/Data/SIDEREIS_DATA/``, itself a portability
-        violation); the COMMITTED ``reference_data/`` was regenerated
-        2026-07-22 under the offset-free formula and already satisfies
-        the assertion exactly (audit D). The property now runs LIVE
-        against the committed artifacts — the same surface NUM-1/NUM-3/
-        NUM-4 pin at full precision
-        (``tests/unit/{nodes,execute_tools}/test_step00_*``): the helper
-        applied to the committed ceiling file_vector reproduces the
-        committed per-file ground-truth scores bit-for-bit.
-        """
-        import json
-        from pathlib import Path
-
-        reference = Path(__file__).resolve().parents[3] / "reference_data" / "ground_truth"
-        ceiling = json.loads(
-            (reference / "ceiling_anchor_normalized.json").read_text(encoding="utf-8")
-        )
-        helper_out = file_vector_to_log_space(ceiling["file_vector"])
-        for i, expected_log in enumerate(helper_out):
-            per_file = json.loads(
-                (reference / f"ground_truth_score_file_{i:04d}.json").read_text(encoding="utf-8")
-            )
-            assert per_file["score"] == expected_log, (
-                f"helper output for file {i} disagrees with the committed "
-                "ground_truth score — production formula and helper drifted."
-            )
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

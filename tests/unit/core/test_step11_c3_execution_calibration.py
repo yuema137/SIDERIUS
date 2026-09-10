@@ -86,6 +86,16 @@ class TestTheResolutionLadder:
         monkeypatch.setenv(RSS_OVERRIDE_ENV_VAR, "0")
         assert resolve_role_ceiling_gb("training") == 0
 
+    def test_one_override_can_calibrate_roles_independently(self, monkeypatch):
+        """An H100 training VA escape must not silently disable scoring bounds."""
+        monkeypatch.setenv(
+            RSS_OVERRIDE_ENV_VAR,
+            "training=0,inference=96,scoring=24",
+        )
+        assert resolve_role_ceiling_gb("training") == 0
+        assert resolve_role_ceiling_gb("inference") == 96
+        assert resolve_role_ceiling_gb("scoring") == 24
+
     def test_there_is_no_third_layer(self, monkeypatch):
         """§9.3 finding 14. The resolved value must be a function of the
         override and the role ALONE — no per-task, per-run or per-host
@@ -122,6 +132,20 @@ class TestMalformedOverridesRefuse:
     def test_negative_refuses(self, monkeypatch):
         monkeypatch.setenv(RSS_OVERRIDE_ENV_VAR, "-1")
         with pytest.raises(MalformedCeilingOverride, match="negative"):
+            resolve_role_ceiling_gb("training")
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "training=0,inference=96",
+            "training=0,inference=96,scoring=24,unknown=1",
+            "training=0,inference=96,scoring=",
+            "training=0,inference=96,training=24,scoring=24",
+        ],
+    )
+    def test_malformed_role_mapping_refuses(self, monkeypatch, bad):
+        monkeypatch.setenv(RSS_OVERRIDE_ENV_VAR, bad)
+        with pytest.raises(MalformedCeilingOverride):
             resolve_role_ceiling_gb("training")
 
     def test_the_refusal_is_actionable(self, monkeypatch):
@@ -193,6 +217,16 @@ class TestDeclaredProvenance:
             "the DECLARED value must survive beside the effective one, or a "
             "lock cannot say what was overridden"
         )
+
+    def test_the_payload_records_role_specific_effective_values(self):
+        raw = "training=0,inference=96,scoring=24"
+        payload = calibration_provenance(environ={RSS_OVERRIDE_ENV_VAR: raw})
+        assert payload["override_env"] == raw
+        assert {role: item["gib"] for role, item in payload["roles"].items()} == {
+            "training": 0,
+            "inference": 96,
+            "scoring": 24,
+        }
 
 
 # ----------------------------------------------------------------------
@@ -296,6 +330,7 @@ class TestTheSharedBuilderStampsIt:
             health_gate_files=None,
             health_checks_config=None,
             workspace=str(tmp_path / "ws"),
+            task_composition_fingerprint="synthetic-composition-for-calibration-test",
         )
         assert invariants.execution_calibration is not None
         assert invariants.execution_calibration["roles"]["scoring"]["gib"] == 24

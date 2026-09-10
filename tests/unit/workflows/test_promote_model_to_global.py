@@ -87,7 +87,7 @@ def tmp_registry(tmp_path, monkeypatch):
     and ``global_models_dir`` already pins the library env to
     ``{tmp}/lib``) and point the legacy checkout index at a nonexistent tmp
     path so the read fallback can't reach the real checkout either."""
-    from agent_generated import _registry as registry_module
+    from core import capability_registry as registry_module
 
     monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
     monkeypatch.setattr(
@@ -99,7 +99,7 @@ def tmp_registry(tmp_path, monkeypatch):
 
 
 def _register_pre_promotion(name, workspace_path, tmp_registry, math_def="x"):
-    from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+    from core.capability_registry import CapabilityMetadata, CapabilityRegistry
 
     registry = CapabilityRegistry()
     registry.register(
@@ -118,7 +118,7 @@ def _register_pre_promotion(name, workspace_path, tmp_registry, math_def="x"):
 
 class TestPromoteModelToGlobal:
     def test_workspace_binding_ignores_same_named_checkout_plugin(self, tmp_path, monkeypatch):
-        from agent_generated import _registry as registry_module
+        from core import capability_registry as registry_module
         from core.generated_library import bind_generated_library_to_workspace
         from ml_models import plugin_loader
         from workflows.model_exploration import _promote_model_to_global

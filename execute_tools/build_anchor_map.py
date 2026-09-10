@@ -195,10 +195,9 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.data_dir is None:
-        from execute_tools.data_paths import TIDMAD_DATA_DIR
+    from execute_tools.data_paths import resolve_dataset_dir
 
-        args.data_dir = TIDMAD_DATA_DIR
+    args.data_dir = resolve_dataset_dir(args.data_dir, purpose="anchor-map construction")
 
     output_path = args.output or os.path.join(args.data_dir, "segment_anchors.json")
 

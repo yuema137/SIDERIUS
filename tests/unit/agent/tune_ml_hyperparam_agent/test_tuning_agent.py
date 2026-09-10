@@ -931,6 +931,7 @@ FAKE_TIME_CHECK_OK = {
     "limit_minutes": 30.0,
     "verdict": "FITS",
     "suggestion": "",
+    "breakdown": {"over_effective_budget": False},
 }
 
 FAKE_TIME_CHECK_OVER = {
@@ -940,6 +941,7 @@ FAKE_TIME_CHECK_OVER = {
     "limit_minutes": 30.0,
     "verdict": "OVER BUDGET — Est 90.0 min vs budget 30.0 min.",
     "suggestion": "Reduce model depth/width.",
+    "breakdown": {"over_effective_budget": True},
 }
 
 
@@ -976,6 +978,8 @@ def _make_input_with_budget(
         progress_bar=False,
         trial_time_budget_minutes=trial_budget,
         formal_time_budget_minutes=formal_budget,
+        trial_time_admission_source="forecast",
+        formal_time_admission_source="forecast",
         trial_vram_budget_gb=trial_vram_budget,
         formal_vram_budget_gb=formal_vram_budget,
         data_dir=data_dir,
@@ -983,10 +987,16 @@ def _make_input_with_budget(
     )
 
 
+def _make_time_gate_input(tmp_path, **kwargs):
+    """Build the complete synthetic scope required by forecast admission."""
+    kwargs.setdefault("is_trial", True)
+    return _make_input_with_budget(tmp_path, **kwargs)
+
+
 class TestTimeBudgetGate:
     """Phase E1 — tuner round-gate behaviour."""
 
-    def _make_agent(self, time_check_result, *, enable_trial_mode=False):
+    def _make_agent(self, time_check_result, *, enable_trial_mode=True):
         """Patch context with controllable time-check return value.
 
         When ``enable_trial_mode=True``, also patches the anchor-map loader
@@ -1079,7 +1089,7 @@ class TestTimeBudgetGate:
     def test_feasible_proceeds_to_training(self, tmp_path):
         agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
         try:
-            output = agent.run(_make_input_with_budget(tmp_path, formal_budget=30.0))
+            output = agent.run(_make_time_gate_input(tmp_path, formal_budget=30.0))
         finally:
             cleanup()
         assert output.status == "completed"
@@ -1096,10 +1106,10 @@ class TestTimeBudgetGate:
         agent, _, _, _, skill_calls, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
         try:
             agent.run(
-                _make_input_with_budget(
+                _make_time_gate_input(
                     tmp_path,
                     formal_budget=45.0,
-                    data_dir="/mnt/tidmad",
+                    data_dir="/mnt/fixture_data",
                 )
             )
         finally:
@@ -1107,14 +1117,14 @@ class TestTimeBudgetGate:
         time_calls = [p for s, p in skill_calls if s == "evaluate_time_skill"]
         assert len(time_calls) == 1
         assert time_calls[0]["time_budget_minutes"] == 45.0
-        assert time_calls[0]["data_dir"] == "/mnt/tidmad"
+        assert time_calls[0]["data_dir"] == "/mnt/fixture_data"
 
     # --- infeasible path ----------------------------------------------------
 
     def test_infeasible_emits_skipped_record(self, tmp_path):
         agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(FAKE_TIME_CHECK_OVER)
         try:
-            output = agent.run(_make_input_with_budget(tmp_path, max_rounds=1, formal_budget=30.0))
+            output = agent.run(_make_time_gate_input(tmp_path, max_rounds=1, formal_budget=30.0))
         finally:
             cleanup()
         # All 3 attempts hit the time gate → 3 skipped_time_risk records, 0 rounds completed
@@ -1127,7 +1137,7 @@ class TestTimeBudgetGate:
     def test_skipped_record_carries_suggestion(self, tmp_path):
         agent, _, _, saved_records, _, cleanup = self._make_agent(FAKE_TIME_CHECK_OVER)
         try:
-            agent.run(_make_input_with_budget(tmp_path, max_rounds=1, formal_budget=30.0))
+            agent.run(_make_time_gate_input(tmp_path, max_rounds=1, formal_budget=30.0))
         finally:
             cleanup()
         rec = saved_records[0]
@@ -1158,7 +1168,7 @@ class TestTimeBudgetGate:
                 "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent.time.sleep"
             ):
                 output = agent.run(
-                    _make_input_with_budget(tmp_path, max_rounds=1, formal_budget=30.0)
+                    _make_time_gate_input(tmp_path, max_rounds=1, formal_budget=30.0)
                 )
         finally:
             cleanup()
@@ -1182,7 +1192,7 @@ class TestTimeBudgetGate:
         )
         try:
             output = agent.run(
-                _make_input_with_budget(tmp_path)  # both budgets default None
+                _make_time_gate_input(tmp_path)  # both budgets default None
             )
         finally:
             cleanup()
@@ -1214,7 +1224,7 @@ class TestTimeBudgetGate:
         # Override the default plan to return is_trial=True for this round.
         mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
         try:
-            tune_input = _make_input_with_budget(
+            tune_input = _make_time_gate_input(
                 tmp_path,
                 max_rounds=2,
                 trial_budget=15.0,
@@ -1238,7 +1248,7 @@ class TestTimeBudgetGate:
         agent, _, _, _, skill_calls, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
         try:
             agent.run(
-                _make_input_with_budget(
+                _make_time_gate_input(
                     tmp_path,
                     trial_budget=15.0,
                     formal_budget=240.0,
@@ -1267,7 +1277,7 @@ class TestTimeBudgetGate:
         mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
         try:
             output = agent.run(
-                _make_input_with_budget(
+                _make_time_gate_input(
                     tmp_path,
                     max_rounds=2,
                     formal_budget=240.0,  # trial_budget left None
@@ -1291,7 +1301,7 @@ class TestTimeBudgetGate:
         )
         try:
             output = agent.run(
-                _make_input_with_budget(
+                _make_time_gate_input(
                     tmp_path,
                     trial_budget=5.0,  # formal_budget left None
                 )
@@ -1316,7 +1326,7 @@ class TestTimeBudgetGate:
         sourced from the time_check dict and time_mode='formal'."""
         agent, _, _, saved_records, _, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
         try:
-            agent.run(_make_input_with_budget(tmp_path, formal_budget=30.0))
+            agent.run(_make_time_gate_input(tmp_path, formal_budget=30.0))
         finally:
             cleanup()
         rec = saved_records[0]
@@ -1338,7 +1348,7 @@ class TestTimeBudgetGate:
         mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
         try:
             agent.run(
-                _make_input_with_budget(
+                _make_time_gate_input(
                     tmp_path,
                     max_rounds=2,
                     trial_budget=15.0,
@@ -1363,7 +1373,7 @@ class TestTimeBudgetGate:
         records."""
         agent, _, _, saved_records, _, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
         try:
-            agent.run(_make_input_with_budget(tmp_path))  # both None
+            agent.run(_make_time_gate_input(tmp_path))  # both None
         finally:
             cleanup()
         rec = saved_records[0]
@@ -1380,7 +1390,7 @@ class TestTimeBudgetGate:
         agent, _, _, saved_records, _, cleanup = self._make_agent(FAKE_TIME_CHECK_OVER)
         try:
             agent.run(
-                _make_input_with_budget(
+                _make_time_gate_input(
                     tmp_path,
                     max_rounds=1,
                     formal_budget=30.0,
@@ -1933,10 +1943,30 @@ class TestScoreTablePropagation:
         assert output.formal_score_table is None
 
     def test_score_table_md_excludes_record_without_health_evidence(
-        self, agent_and_mocks, tmp_path
+        self, agent_and_mocks, tmp_path, monkeypatch
     ):
         """Legacy records without typed gate evidence are not viable context."""
-        agent, mock_brain, _, _saved_records = agent_and_mocks
+        import importlib
+
+        from execute_tools.health_checks.candidate_eligibility import is_valid_candidate
+
+        agent, mock_brain, mock_sandbox, saved_records = agent_and_mocks
+
+        def _persist_as_legacy(record):
+            legacy_record = dict(record)
+            legacy_record.pop("health_gate_enabled", None)
+            legacy_record.pop("health_gate_results", None)
+            saved_records.append(legacy_record)
+
+        mock_sandbox.save_record.side_effect = _persist_as_legacy
+        planning = importlib.import_module("nodes.ml_hyperparameter_tune_agent.planning")
+        monkeypatch.setattr(
+            planning,
+            "is_valid_candidate",
+            lambda record, *, required_gate_ids: is_valid_candidate(
+                record, required_gate_ids=frozenset({"fixture_required_gate"})
+            ),
+        )
         agent.run(_make_trial_input(tmp_path, max_rounds=2, is_trial=True))
 
         # Two planner calls — one per round.
@@ -1946,9 +1976,9 @@ class TestScoreTablePropagation:
         first_kwargs = mock_brain.plan.call_args_list[0].kwargs
         assert first_kwargs.get("score_table_md") is None
 
-        # Round 2: the prior record has no gates because this legacy fixture
-        # disables them, so its validity is unknown and it is not presented as
-        # the best viable score table.
+        # Round 2: the persisted prior record has neither the modern disabled
+        # waiver nor typed gate evidence, so its validity is unknown and it is
+        # not presented as the best viable score table.
         second_kwargs = mock_brain.plan.call_args_list[1].kwargs
         assert second_kwargs.get("score_table_md") is None
 
@@ -2051,3 +2081,6 @@ class TestScoreTablePropagation:
             assert mock_brain.plan.call_count == 1
             threaded = mock_brain.plan.call_args.kwargs.get("score_table_md")
             assert threaded == "### HIGH-TABLE"
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

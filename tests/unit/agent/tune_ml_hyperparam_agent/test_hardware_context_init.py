@@ -192,3 +192,6 @@ def test_second_run_does_not_rewrite_manifest(agent_run):
         f"get_or_create should return the stored manifest when device + "
         f"hostname match, preserving discovered_at."
     )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

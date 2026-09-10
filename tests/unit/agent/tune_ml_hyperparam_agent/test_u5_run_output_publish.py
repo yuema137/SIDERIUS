@@ -14,6 +14,8 @@ import importlib
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.helpers.step00_pseudo_iteration import run_bounded_pseudo_iteration
 
 _HERE = Path(__file__).parent
@@ -46,3 +48,6 @@ def test_the_run_output_is_published_through_the_atomic_boundary(tmp_path_factor
     assert [c for c in calls if c[0] == str(run_output)] == [(str(run_output), {"indent": 4})]
     assert run_output.is_file()
     assert list(Path(workspace).glob(".run_output_*.tmp")) == []
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

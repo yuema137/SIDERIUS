@@ -54,10 +54,10 @@ framework cannot hold contradictory opinions about what a failure means.
 
 | file | declares | tracked? |
 |---|---|---|
-| `configs/lit_review_config.yaml` | literature-review budget, root papers, rubric | yes |
+| caller-owned `--ml_lit_review_config` | literature-review budget, root papers, rubric | external task or experiment |
 | `llm_configs/*.json` | per-stage LLM provider routing | yes |
-| `advice/**/*.json` | human advice injected into the loop | yes |
-| `tidmad_data_config.yaml` | machine-local data + output roots | **gitignored** — copy from `.example` |
+| caller-owned advice files | human advice injected into the loop | external experiment |
+| `--data_dir` / `--workspace` | explicit input-data / run-output roots | machine-local directories outside the checkout |
 | `dashboard_config.yaml` | dashboard data root | **gitignored** — copy from `.example` |
 | `.env` | API keys | **gitignored** |
 

@@ -1,6 +1,6 @@
 """F-SCANE-1 — the exclusion must reach somebody, and must not delete a warning.
 
-Frozen row: ``docs/campaign/official_campaign_decisions.yaml`` ``F-SCANE-1``
+Historical regression boundary retained after campaign evidence moved to external ownership.
 ("14 of 15 digests concluded there was no authoritative result and nobody was
 told" · "and the exclusion SUPPRESSES the warning that would have flagged it").
 

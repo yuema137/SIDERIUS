@@ -14,7 +14,7 @@ key at all* — every LLM is mocked, nothing touches the network, and CI runs
 the same suite (`-m "not real_run"`) with no secrets configured:
 
 ```bash
-uv run pytest tests/unit/ -q
+.venv/bin/python -m pytest tests/unit/ -q
 ```
 
 That claim is enforced, not aspirational: the handful of tests that *do* need
@@ -28,7 +28,7 @@ LLM and subprocess responses — the complete plan → train → score → refle
 in milliseconds, still no API key, no GPU:
 
 ```bash
-uv run pytest tests/integration/ -q
+.venv/bin/python -m pytest tests/integration/ -q
 ```
 
 This is the fastest way to see the shape of the system. It is not a scientific
@@ -69,8 +69,8 @@ bash sdsc_submission_scripts/run_chain.sh \
     --mode lilab \
     --workspace /path/to/your/workspace \
     --run_name first_run_v1 \
-    --task_composition configs/task_composition/tidmad.yaml \
-    --data_dir /path/to/tidmad/data \
+    --task_composition configs/task_composition/quickstart.yaml \
+    --data_dir /path/to/workspace/quickstart_data \
     --num_iterations 1 \
     --max_rounds 1 \
     --dry-run
@@ -79,11 +79,11 @@ bash sdsc_submission_scripts/run_chain.sh \
 `--dry-run` walks the chain and prints the exact child commands with no side
 effects. Do this before every unfamiliar configuration.
 
-## Level 2 — a real TIDMAD run
+## Level 2 — a real external task
 
-TIDMAD is the flagship task and the deepest-exercised path through the
-production chain. You need the raw `.h5` files staged at `tidmad_data_dir`
-(~50 GB) and a CUDA GPU.
+Real scientific task packages and campaign workflows live in the separate
+`siderius-exp` repository. Point the same generic launcher at that repository's
+manifest and workspace; no framework checkout file needs to be edited.
 
 Start small — one iteration, one round, trial budget, a bounded scope:
 
@@ -92,14 +92,13 @@ bash sdsc_submission_scripts/run_chain.sh \
     --mode lilab \
     --workspace /path/to/your/workspace \
     --run_name first_run_v1 \
-    --task_composition configs/task_composition/tidmad.yaml \
-    --data_dir /path/to/tidmad/data \
+    --task_composition /path/to/siderius-exp/tasks/example/compositions/workflow.yaml \
+    --data_dir /path/to/task/data \
     --healthgate_mode blocking \
     --result_authority scientific \
     --num_iterations 1 \
     --max_rounds 1 \
-    --data_scope 4-9 \
-    --health_gate_files 4,7,9 \
+    --data_scope 0-9 \
     --trial_time_budget_minutes 20
 ```
 
@@ -113,8 +112,7 @@ Notes on the flags that are not obvious:
 - Time budgets prevent a badly chosen data portion from producing a multi-hour
   round.
 
-Omitting `--task_composition` runs the ⚠ legacy un-composed path. It works, but
-it is not the path to learn.
+Omitting `--task_composition` is refused. Every supported run declares its task explicitly.
 
 ## What you will see
 
@@ -126,37 +124,17 @@ results with the dashboard:
 python dashboard/main.py     # http://localhost:8000
 ```
 
-## Level 3 — the contrast example tasks
+## Level 3 — real task packages
 
-✅ **Available.** The Oxford-IIIT Pet and DAVIS example packs run through the
-same composed production chain as TIDMAD (PR-12d landed the task-neutral
-subprocess path; both packs are at declared maturity **L4**).
+Real task packages are maintained outside this repository. Each package owns
+its manifest, plugins, Health science, data instructions, and workflow
+settings. It calls the same `run_chain.sh` entrypoint shown above and writes all
+generated modules and run artifacts beneath its declared workspace.
 
-Each pack ships exactly one documented run command — a thin `quickstart.sh`
-that supplies the pack's composition manifest and bounded defaults, then execs
-the normal chain launcher. For Pets:
-
-```bash
-# one-time: fetch the dataset to a machine-local directory outside the repo
-.venv/bin/python -m tools.example_packs.fetch_oxford_iiit_pet \
-    --dest /path/outside/repo --extract
-
-bash examples/oxford_iiit_pet/quickstart.sh \
-    --workspace /path/to/your/workspace \
-    --data_dir /path/outside/repo/images
-```
-
-DAVIS is the same shape (`examples/davis_future_prediction/quickstart.sh`).
-Both are equivalent to calling `run_chain.sh` yourself with
-`--task_composition configs/task_composition/pets.yaml` (or `davis.yaml`) —
-the shipped manifests point into the packs; nothing about them is
-special-cased. Extra arguments pass straight through to the chain launcher,
-so `--dry-run` works here too.
-
-See [supported tasks and current maturity](../concepts/supported-tasks.md) for
-what those runs do and do not demonstrate (single-round composed witnesses;
-health gates do not yet fire on the composed path), and each pack's
-`README.md` / `STATUS.md` for the full journey.
+The framework repository intentionally does not ship Oxford-IIIT Pet, DAVIS,
+TIDMAD, Cancer Gene Identification, or any other scientific task as a default.
+Use the task package documentation in the consumer repository for its exact
+launch command and data requirements.
 
 ## When something refuses
 

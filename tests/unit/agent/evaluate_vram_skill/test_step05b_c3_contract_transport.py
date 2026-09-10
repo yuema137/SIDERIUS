@@ -39,6 +39,7 @@ from pathlib import Path
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.skills.evaluate_vram_skill import preflight_worker_main
 from agent.skills.evaluate_vram_skill.isolated_probe import IsolatedProbeSpec
+from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
 from tests.helpers.step04a_fixtures import tidmad_model_io
 
 
@@ -114,8 +115,14 @@ class TestTheContractArrivesInTheChild:
         would not."""
         contract = tidmad_model_io(num_classes=16)
         spec_path = tmp_path / "spec.json"
+        budgets = ProbeBudgets(single_probe_seconds=321.0, preflight_total_seconds=987.0)
         spec_path.write_text(
-            _spec(tmp_path, model_io_contract=contract).model_dump_json(), encoding="utf-8"
+            _spec(
+                tmp_path,
+                model_io_contract=contract,
+                probe_budgets=budgets,
+            ).model_dump_json(),
+            encoding="utf-8",
         )
 
         seen: dict[str, object] = {}
@@ -128,6 +135,7 @@ class TestTheContractArrivesInTheChild:
         preflight_worker_main.main([str(spec_path)])
 
         assert seen["model_io_contract"] == contract
+        assert seen["probe_budgets"] == budgets
 
     def test_an_absent_field_forwards_none(self, tmp_path, monkeypatch):
         """Absence is the legacy no-contract path, all the way down — the

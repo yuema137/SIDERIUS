@@ -146,8 +146,9 @@ A task may now declare an **optional sibling capability**,
 before.
 
 ```text
-declared?  no  -> the legacy build_sample_set path, byte-identical
-           yes -> the tuner asks the TASK to build the attempt's scopes
+un-composed caller with legacy physical geometry
+              -> the legacy build_sample_set path, byte-identical
+composed task -> the tuner asks the TASK to build the attempt's scopes
                   (nodes/ml_hyperparameter_tune_agent/scope_acquisition.py)
                   -> the task serializes them
                   -> the parent writes a scope ARTIFACT + sha256 digest
@@ -191,26 +192,21 @@ profile that declares TIDMAD's sections but carries a malformed payload still
 raises out of `tidmad_topology()` rather than being reclassified as "declares
 none".
 
-Two consumers now SKIP rather than fabricate when the run's task declares no
-physical geometry, instead of dying:
+Two consumers now SKIP rather than fabricate instead of dying:
 
 - `_validate_data_config` (PSD-segment divisibility / per-file segment
   counts) — skipped; per the D-BC-8 precedent, this is TASK topology, not the
   generic partition-count bound.
 - the two legacy `build_sample_set()` calls (training + validation
-  SampleSets) — skipped in favour of `AttemptScopes`, the task-owned scope
-  acquired separately by `acquire_attempt_scopes` (PR-12bc B5).
+  SampleSets) — skipped for every composed task in favour of `AttemptScopes`,
+  the task-owned scopes acquired separately by `acquire_attempt_scopes`
+  (PR-12bc B5). A composed task that also declares legacy physical geometry
+  does not receive both representations: doing so would create two scope
+  authorities and the task-generic training engine correctly refuses it.
 
-**Deferred by name, not fixed here**: the legacy SampleSets still reach the
-training spawn, both inference spawns and the validation-expectation decision
-in `execution.py`. A composed contrast run without physical geometry reaches
-those sites with `None` — further than the outright `tidmad_topology`
-refusal it hit before PR-12d, but D3 (12bc's B6) is what flips those
-consumers to read the transported task scope instead.
-
-Under TIDMAD — composed or not — every fact `AttemptTopologyFacts` reports is
-the SAME object it was before this projection existed; nothing here changes
-un-composed or TIDMAD-composed behaviour.
+Under an un-composed legacy physical-data caller, every fact
+`AttemptTopologyFacts` reports and both legacy SampleSets remain unchanged.
+Composition presence, never a task name, selects the task-owned scope path.
 
 ### Resource and time planning (Step-05b)
 
@@ -238,8 +234,9 @@ Resolution (preset + dataset cross-check) already happened inside
 `load_task_config`; nothing here re-resolves.
 
 A task declaring no `model_io` binds `None`, and every consumer takes its
-legacy no-contract path. **No new CLI argument and no new config field** —
-both values are runtime transport, not configuration.
+legacy no-contract path. Model-I/O itself adds no CLI argument or config
+field; the separately documented preflight watchdogs are workflow execution
+configuration and do not alter the model-I/O declaration.
 
 One behavioural consequence, stated because it is a change: binding the
 contract at startup makes an unreadable `configs/task_config.yaml` fatal
@@ -251,11 +248,17 @@ expression — and failing before any GPU work is the fail-closed direction.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `trial_time_budget_minutes` | `float \| None` | No | `None` | Wall-time budget against which `evaluate_time_skill` gates rounds where the planner picks trial mode. `None` = trial time-gate disabled. |
-| `formal_time_budget_minutes` | `float \| None` | No | `None` | Wall-time budget against which `evaluate_time_skill` gates rounds where the planner picks formal mode. `None` = formal time-gate disabled. |
+| `trial_time_budget_minutes` | `float \| None` | No | `None` | Trial wall-time ceiling. `None` disables Trial time admission regardless of source. |
+| `formal_time_budget_minutes` | `float \| None` | No | `None` | Formal wall-time ceiling. `None` disables Formal time admission regardless of source. |
+| `trial_time_admission_source` | `forecast \| measured` | No | `measured` | Trial's sole time-admission authority. `measured` enforces executing-device evidence and skips advance forecast admission; `forecast` does the reverse. |
+| `formal_time_admission_source` | `forecast \| measured` | No | `measured` | Formal's independent sole time-admission authority, with the same mutually exclusive semantics. |
 | `trial_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates trial rounds. `None` = trial VRAM-gate disabled. |
 | `formal_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates formal rounds. `None` = formal VRAM-gate disabled. |
-| `data_dir` | `str \| None` | No | `None` | Filesystem path to the dataset directory, **for an UN-COMPOSED run**. Forwarded to `evaluate_time_skill` so the real-dataset warmup can read 1 PSD from disk. **Step 11 C4 (R-11-7)**: a COMPOSED run's bound physical data root WINS over this field — there is one authority for where the data physically lives, and pricing a warmup against a different root would measure the wrong disk. `None` on an un-composed run keeps its meaning: no warmup, static-formula estimate. |
+| `vram_probe_step_timeout_seconds` | `float` | No | `180.0` | Watchdog for one training-mode or inference footprint forward during VRAM preflight. It runs no optimizer update and does not bound an epoch or candidate run. |
+| `vram_preflight_total_timeout_seconds` | `float` | No | `900.0` | End-to-end watchdog for the isolated VRAM preflight worker, including model construction, footprint measurement, and inference-batch search. Independent of Trial/Formal training budgets. |
+| `vram_preflight_host_memory_limit_gb` | `float \| None` | No | `None` | Resident host-memory limit for the complete isolated VRAM-preflight process tree. `None` preserves the deployment default, normally 24 GiB. Independent of the GPU VRAM ceiling; a breach is inconclusive rather than model-capacity evidence. |
+| `data_dir` | `str \| None` | No | `None` | Caller-selected physical dataset root forwarded to runtime measurement and child execution. Supported composed launches require an explicit root; the framework never substitutes a scientific-task or machine-local default. |
+| `measurement_capability` | `ResolvedMeasurementCapability \| None` | No | `None` | Caller-resolved measurement identity and availability. The workflow transports this typed value through the validator-to-tuner protocol so tuning and calibration never infer a scientific task identity from `data_dir`. `None` records an unavailable measurement path and cannot authorize a formal scientific decision that requires measured evidence. |
 
 **The time budgets above are forecast/admission inputs, not runtime
 limits.** They gate whether a round is admitted, using an estimate; the
@@ -594,13 +597,20 @@ The tuner calls `_handle_prephase_gpu_measurement` and reads only the
 disposition; identity comparison, classification, authority validation and
 admission all live in `core/runtime_control/prephase_admission.py`.
 
-**When it does NOT run**, and these are the only three cases:
+**When it does NOT run**, and these are the only two cases:
 
 | Condition | Behaviour |
 |---|---|
 | trial round | not measured — O-7 governs formal execution, and trial admission already proceeds while recording what it could not prove |
 | `sandbox.device_identity` is not a `DeviceIdentity` | not measured — no card means nothing to measure and nothing for admission to decide, the same conclusion `_admission_refusal` reaches. CPU and pseudo runs are unaffected. |
-| the run's task declares no TIDMAD topology (**Step 12 / PR-12d, B12 / F-12d-25**, operator-ruled 2026-08-24 option B) | not measured — the isolated worker's bounded probe-batch builder has a TIDMAD-specific input contract (`abra_training_????.h5`, TIDMAD channel layout) and cannot build a batch for a Pets or DAVIS profile. Resolves to `PrephaseOutcome.PROCEED` (no measured requirement attached; the VRAM capacity gate is unaffected) — never `STOP_INFRASTRUCTURE_FAILURE`, which would misreport a healthy environment as broken. A **membership test** (`declares_tidmad_topology`), not a caught exception: a malformed TIDMAD profile still measures and still fails closed. An un-composed run (`run_profile is None`) is Regime A — always TIDMAD — and stays applicable, bit-for-bit unchanged. Making the probe batch task-composable (option A) is recorded as post-Step-12 debt, not attempted here. |
+
+A composed external task supplies a typed `TaskProbeDataSpec`. The isolated
+worker verifies the task-composition fingerprint, rehydrates the task-owned
+training scope, and obtains one real batch through `TaskDataPath`. The same
+projection feeds both the lightweight VRAM preflight and this authoritative
+Formal measurement. Legacy un-composed runs keep their existing physical-array
+loader. A composed task with an invalid or unavailable projection fails closed;
+it is never silently measured with TIDMAD data or a synthetic batch.
 
 There is **no flag**. It is not optional on a formal attempt with a real
 device.
@@ -927,7 +937,7 @@ for the full design rationale.
 
 - **Round-loop structure**: each round runs **plan → resource check → train → infer → score → reflect**:
   1. **Plan** — `bridge.plan(...)` produces an `ExperimentPlan` (hyperparameters + `is_trial` choice). Subject to `plan_overrides`.
-  2. **Resource check** — `evaluate_vram_skill` + `evaluate_time_skill` pre-flight gates. A failure here counts as an *attempt* (not a *round*); the round retries up to its budget.
+  2. **Resource check** — `evaluate_vram_skill` plus the selected time-admission authority. ``forecast`` invokes `evaluate_time_skill`; ``measured`` defers the decision to executing-device runtime verification. A refusal counts as an *attempt* (not a *round*); the round retries up to its budget.
      For a composed attempt, the VRAM worker materializes one full task-valid
      batch from the already-resolved training scope. It verifies the task
      composition fingerprint before reading data. Legacy un-composed attempts
@@ -935,14 +945,15 @@ for the full design rationale.
   2b. **Pre-phase GPU measurement** (V20 PR C2, **formal attempts with a real device only**) — a bounded isolated measurement of the exact candidate on the current card, feeding PR B's admission gate. A stop consumes the attempt and starts no GPU work. See *Pre-phase GPU measurement* above.
   3. **Train** — `training_skill` runs as a subprocess via `TidmadSandbox`. Writes the trained model + denoised outputs. **Step 07a**: the tuner's `eval_sample_set` reaches the trainer (`--eval_sample_set_json`), which evaluates the same run-resolved objective on it after every completed epoch (R3, transactional: model / optimizer / objective state and every RNG restored) and emits `training_history` beside the three legacy keys; the tuner interprets the results through the typed boundary `_interpret_training_status` → `interpret_training_results(raw, expected_validation=eval_sample_set is not None)` (a contract violation → the existing `error_training` record path) and derives `training_diagnosis` once.
   4. **Infer** — `inference_skill` runs as a subprocess. Writes denoised HDF5s.
-  5. **Score** — the frozen TIDMAD scorer runs **through the run's evaluation-metric handle** (Step 06): `sandbox.evaluate_metric(run_metric, …)` validates the DataScope, runs the metric's scoreability contract over the deliverables the scorer would open, and only then calls `scoring_utils.score_vector` (unchanged arithmetic) → `denoising_score` / `file_vector` / `metric_result`. A deliverable the contract refuses never reaches the scorer: it becomes an `error_scoring` record with `failure_type='not_scoreable'` and a structured `metric_refusal`. **Scoring routes (Step 12 / PR-12d, D4b)** — `policy.py::ScoringRoute` / `resolve_scoring_route` NAME which of three paths an attempt actually takes: `ANCHOR_NORMALIZED` (an anchor map exists — the in-process path just described), `TASK_OWNED` (a composed task's own deliverable, scored by its own metric inside the scoring subprocess against the transported evaluation scope — every composed contrast run, since no contrast implementation declares trial anchoring), or `SUBPROCESS_LEGACY` (TIDMAD scoring through the subprocess with no anchor normalization — every un-composed FORMAL round, and any trial round with no anchor map; the code's prior `else  # legacy single-file mode` comment mis-described this branch, which was never only "legacy single-file"). Cleanup runs after if `cleanup_denoised=True`.
+  5. **Score** — the frozen TIDMAD scorer runs **through the run's evaluation-metric handle** (Step 06): `sandbox.evaluate_metric(run_metric, …)` validates the DataScope, runs the metric's scoreability contract over the deliverables the scorer would open, and only then calls `scoring_utils.score_vector` (unchanged arithmetic) → `denoising_score` / `file_vector` / `metric_result`. A deliverable the contract refuses never reaches the scorer: it becomes an `error_scoring` record with `failure_type='not_scoreable'` and a structured `metric_refusal`. **Scoring routes (Step 12 / PR-12d, D4b)** — `policy.py::ScoringRoute` / `resolve_scoring_route` NAME which of three paths an attempt actually takes: `TASK_OWNED` when a composed task supplied its opaque evaluation scope, even if it also supplied an anchor artifact; `ANCHOR_NORMALIZED` for an uncomposed compatibility run with a legacy `SampleSet` and anchor map; or `SUBPROCESS_LEGACY` when neither authority is present. Cleanup runs after if `cleanup_denoised=True`.
   6. **Reflect** — `bridge.reflect(...)` analyses the round's result and updates memory for the next plan call.
 - **Two LLM sub-calls per round** (planner + reflector). When `reflect_provider` / `reflect_model_id` are set, the two go through separate `LLMBridge` instances — enables splits like "cheap planner + smarter reflector" or "small planner + large reflector" without changing prompts.
 - **Attempt vs round distinction.** A *round* is a slot in the optimization history that produces a final record. An *attempt* is one LLM-plan + downstream-execution attempt. Each round can consume up to `attempts_per_round` (or `attempts_per_formal_round` for the forced-formal round) attempts before being marked failed. Attempts that fail at the pre-flight gate cost LLM tokens but no GPU time; attempts that reach training but fail (OOM, training error) cost both.
 - **`max_fail_rounds` termination trigger.** When this many *consecutive* rounds exhaust their attempt budget without producing a successful record, the tuner exits with `termination_reason="aborted_fail_rounds"`. The downstream interpreter reads `consecutive_fail_rounds_at_exit` to recognize this exit.
 - **Force-formal-round mechanic.** When `force_formal_round=True` (default), the **last** round in the loop has `plan.is_trial` forcibly set to `False` so it runs on the full dataset. The `formal_round_strategy` controls how that round's config is built: `full_clone` (re-run best trial verbatim), `hybrid_params` (best-trial hyperparams + formal sampling), `independent` (planner proposes fresh), or `inherit_best_train_plus_formal_eval` (best train + formal eval scope).
-- **Pre-flight gates use static-formula estimates + brief warmup.** `evaluate_time_skill` uses a static formula by default; when `data_dir` is set, it adds a brief real-dataset warmup that reads 1 PSD from disk.
-  - **C8c (2026-07-30) — the time gate's authority now comes from the shared `RuntimeDecisionPolicy`, not from the skill.** The tuner passes `runtime_phase="trial"|"formal"`; the skill returns `feasible` DERIVED from the policy decision, plus `breakdown.runtime_decision` / `runtime_decision_reasons` / `runtime_decision_provenance` / `runtime_policy_identity` / `over_effective_budget`. Consequences: a **measured** (warmup-backed) projection over budget still emits `skipped_time_risk` with identical arithmetic (including the 10 % measured-inference slack); a **static** or **store-reused** projection no longer can — it is reported (verdict text, suggestion, `over_effective_budget=True`) but cannot gate the round, because prior-tier evidence has no blocking authority (`docs/design/runtime_estimation_and_calibration.md` §7.4). In **formal** mode with prior-tier evidence and no probe record the decision is `REQUEST_PROBE`, which lets the round proceed into the authoritative in-subprocess (RT2) verification instead of pricing it from a prior. An **uninterpretable** evidence source is an evidence-channel failure: the skill returns `status="error"` and the tuner raises — never a candidate-level "infeasible". `evaluate_vram_skill` uses architectural pattern tagging (`TIME_FACTOR_THRESHOLD`, `VRAM_FACTOR_THRESHOLD`) and a per-pattern memory budget. Both gates emit a `GateExhaustionInfo` payload when they reject all attempts in a round.
+- **Wall-time admission has one authority per role.** Trial and Formal independently select ``forecast`` or ``measured``. The default ``measured`` posture skips advance time admission and enforces the budget from executing-device verification. ``forecast`` invokes `evaluate_time_skill` and leaves in-process verification record-only. An unavailable selected authority refuses; the system never falls back to the other authority.
+  - ``runtime_verification_max_wall_seconds`` optionally extends the adaptive verifier's observation window for workloads with slow individual optimizer steps. It does not change Trial or Formal budgets, and the observed verification steps are the first production training steps rather than a duplicate probe. Omit it to preserve the verifier's default window.
+  - **C8c (2026-07-30) — standalone time evaluation still classifies evidence through the shared `RuntimeDecisionPolicy`.** When a workflow explicitly selects `forecast` admission, that workflow-level selection accepts the skill's already-computed `over_effective_budget` comparison as authoritative and does not resolve `REQUEST_PROBE`; otherwise measurement would become an undeclared second authority. Under `measured`, the advance skill is not called and RT2 verification owns admission. An uninterpretable selected channel is an execution-system failure, never a candidate-level "infeasible". `evaluate_vram_skill` remains independent and uses architectural pattern tagging (`TIME_FACTOR_THRESHOLD`, `VRAM_FACTOR_THRESHOLD`) and a per-pattern memory budget.
   - **V21 PR G (2026-08-10) — the time gate prices inference at the batch that will actually run.** The feasible VRAM-gate return's probe-derived `inference_batch` is captured into `active_params` (`:4696`) before the time gate fires, and `_run_time_preflight` forwards it (the `**active_params` splat) into `evaluate_time_skill`, which uses the SAME value for the hint→ms/step conversion and the inference estimator. This is a two-sided correction on the `training_warmup_x2.7_fallback` forecast branch: a plan is no longer falsely `skipped_time_risk` when the probed batch > 25, and no longer falsely admitted when it is < 25. No-hint callers (baselines, legacy scripts) keep registry-table pricing unchanged. `active_params` is rebuilt per attempt, so a stale hint cannot leak between attempts (0.R.4).
 - **Sandbox subprocess for skill execution.** Each skill runs in a fresh subprocess via `TidmadSandbox` for memory isolation (PyTorch's CUDA context doesn't reliably release VRAM in-process). The sandbox communicates via JSON files in a temp dir and reports back through `get_summary()`. Pseudo-mode tests replace the sandbox with a `RecordingSandbox` that returns canned results without subprocess overhead.
 - **Per-run plugin dir** isolates agent-generated plugins. When `seed_plugin_path` is set, the file is copied into `{workspace}/plugins/{run_name}/` and the training subprocess sees this via `SIDERIUS_PLUGIN_DIRS`. Plugins from one run don't pollute another's `MODEL_REGISTRY`. See [`docs/agent-reference/mechanisms/plugins.md`](../../docs/agent-reference/mechanisms/plugins.md).
@@ -1099,8 +1110,8 @@ contract have exactly one source for the whole run.
 | Element | Where | What |
 |---|---|---|
 | binding | `run()`, run scope, after `run_deliverable_spec` | `run_metric = resolve_run_metric(run_profile, run_deliverable_spec)` — **Step 10 P1**, moved into the metric module at **Step 12 / PR-12d seam B** (byte-identical to the `resolve_bound_run_metric() or derive_tidmad_metric(...)` expression it replaced): a COMPOSED run's declared metric wins; un-composed falls through to the Regime-A derivation, byte-identical, and resumed un-composed runs re-derive the same value; a composed run declaring neither its own metric nor TIDMAD deliverable geometry is refused (`NoRunMetricError`) rather than deriving TIDMAD's against an invented topology. Exactly ONE acquisition site, pinned by census (`tests/unit/workflows/test_step10_p1_c0_census.py`), which also pins the ORDER — putting the derivation first would make every composed run execute TIDMAD's arithmetic while the composed metric sat unused |
-| live route (`ANCHOR_NORMALIZED`) | the anchor-map scoring branch | `metric_result = sandbox.evaluate_metric(run_metric, sample_set=eval_sample_set, anchor_map=…, s_max=…, denoised_filename_fn=_denoised_fn)`; `file_vector, final_scalar = metric_result.per_sample, metric_result.scalar` — `score_res`, reflector and record unchanged. **HealthGates are no longer part of this branch** (F2, below): they fire once per round for every route |
-| task-owned route (`TASK_OWNED`, **Step 12 / PR-12d**) | scoring subprocess — every composed contrast run, which declares no trial anchor map | the child scores its OWN deliverable through the SAME composed metric and reports `metric_result` (plus declared secondaries) in its JSON output; the tuner ADOPTS them (`_adopt_child_metric_result`, `_adopt_child_secondaries` in `execution.py`) because only the child holds the deliverable and the evaluation scope. Total-function precedence: an anchor-route value, when one was computed, always wins, so adoption can never blank an in-process result |
+| live route (`ANCHOR_NORMALIZED`) | an uncomposed compatibility run with an anchor map and legacy `SampleSet` | `metric_result = sandbox.evaluate_metric(run_metric, sample_set=eval_sample_set, anchor_map=…, s_max=…, denoised_filename_fn=_denoised_fn)`; `file_vector, final_scalar = metric_result.per_sample, metric_result.scalar` — `score_res`, reflector and record unchanged. **HealthGates are no longer part of this branch** (F2, below): they fire once per round for every route |
+| task-owned route (`TASK_OWNED`, **Step 12 / PR-12d**) | scoring subprocess — every composed run with an opaque evaluation scope, including a task that also declares an anchor artifact | the child scores its OWN deliverable through the SAME composed metric and reports `metric_result` (plus declared secondaries) in its JSON output; the tuner ADOPTS them (`_adopt_child_metric_result`, `_adopt_child_secondaries` in `execution.py`) because only the child holds the deliverable and the evaluation scope. A multi-artifact task may return `TaskEvaluationPayload` so scoreability checks every artifact before arithmetic. |
 | order inside the seam | `TidmadSandbox.evaluate_metric` | DataScope `validate_sample_set` (unchanged, first) → `TidmadScoreabilityContract.check({file_index: path})` → `scoring_utils.score_vector(**the same kwargs as before)` |
 | refusal | `NotScoreableError` from the seam → the scoring `except` → `_build_scoring_failure_record` | `status='error_scoring'`, `failure_stage='scoring'`, `failure_type='not_scoreable'`, `metric_refusal=<NotScoreableResult>`, memory prose naming contract + requirement (never "crashed"); round outcome unchanged (next attempt) |
 | record | success record | `metric_result` (identity / direction / scalar / references; `per_sample` = pointer to `file_vector`) |
@@ -1426,41 +1437,20 @@ all retry / round / attempt semantics.
 
 ---
 
-## Reference science is not implicit in a composed run (Step 10 / P5+P6, C-P56-1)
+## Reference science is never selected implicitly
 
-`load_reference_scores()` supplies TIDMAD's per-file legacy reference
-table. It is **task-specific science**, so it is loaded ONLY when the run
-is un-composed:
+The tuner carries no task reference dataset and resolves no comparison path.
+When the caller declares no reference evidence, `load_reference_scores()`
+returns `None`, the run records a named absence, and the optional comparison
+table is omitted. This rule applies equally to composed and isolated node
+invocations.
 
-```python
-if agent_input.task_composition_ref is None:
-    reference_scores = load_reference_scores()
-else:
-    reference_scores = None      # composed run: named absence
-```
-
-The guard keys on **composition PRESENCE**, never on `TIDMAD_METRIC_ID`, a
-task name, or any other task-identity surrogate — a surrogate would answer
-"is this TIDMAD?" when the question is "did this run declare its own
-science?".
-
-**Step 12 / PR-12a (D-12a-1) changed WHERE the presence is read**, not what
-it means. It used to call `active_task_data_path()` — which answers "is a
-data-path implementation bound in this process right now?", a subsystem seam
-consulted as a proxy for "is MY run composed?". The two coincide in
-production and can diverge anywhere else, and a node should not have to read
-a ContextVar to learn what kind of run it was handed. The run's composition
-now arrives as a typed projection on the node's own INPUT
-(`HyperparamTuningInput.task_composition_ref`, additive and default-`None`).
-The presence test and both branches are unchanged, so the guard's OUTPUT is
-identical on both paths.
-
-**Declared consequence, not a regression** (frozen ruling **C-P56-1**): a
-composed run's tuner/interpreter/proposer prompts carry the named absence
-where a legacy run carries the 42-file reference table, and the record's
-`formal_comparison_reference_source` says so. Observed live in the Step-10
-Gate: `Reference scores: NOT LOADED — this run is COMPOSED`. The legacy
-(un-composed) path is byte-for-byte unchanged.
+Task-specific baselines, ceilings, and published-result tables belong to the
+external task package. Tests may inject synthetic evidence through the narrow
+`load_reference_scores` dependency seam to exercise downstream table
+construction, but production never imports a task loader or examines a task
+name, metric identity, environment variable, or checkout-relative data path to
+choose that evidence.
 
 Downstream, `reference_scores` may therefore be `None`, and the score-table
 guard in `execution.py` tests for it. Carried debt: `contracts.py` still

@@ -64,9 +64,7 @@ def _write_overlay(
     return path, hashlib.sha256(payload).hexdigest()
 
 
-#: The overlay row bound in the certification tests — deliberately different
-#: from the shipped 5090/single literals (3.5 / 120), so a fall-through to
-#: shipped is DETECTED by value, not only by provenance.
+#: The overlay row bound in the certification tests.
 BOUND_ROW = {
     "watchdog_enabled": True,
     "watchdog_safety_factor": 2.25,
@@ -82,24 +80,24 @@ BOUND_ROW = {
 def test_differential_undeclared_ladder_is_byte_identical(calib_dir):
     """F-H100-WD-1-PRETAG differential witness — the defect only this catches:
     the Route-B binding mechanism CHANGING the undeclared path. With NO
-    binding declared, all three ladder outcomes (measured-hit, shipped-hit,
-    uncalibrated) must match the HAND-WRITTEN dicts below, which pin the
+    binding declared, both ladder outcomes (measured-hit and uncalibrated)
+    must match the HAND-WRITTEN dicts below, which pin the
     pre-change contract and are recorded PASSING against the pristine module
     before the binding existed (the differential-first workflow). Fails by:
     any field, value, or provenance string moving on the undeclared path.
     """
-    # (1) shipped-hit: empty calibration dir, the committed 5090/single row.
+    # (1) no caller profile: the framework remains uncalibrated.
     assert resolve_runtime_profile(RTX_5090, "single").model_dump() == {
         "device_name": "NVIDIA GeForce RTX 5090",
         "execution_regime": "single",
-        "calibrated": True,
-        "watchdog_enabled": True,
-        "watchdog_safety_factor": 3.5,
-        "watchdog_floor_seconds": 120.0,
-        "provenance": "shipped:nvidia_geforce_rtx_5090/single",
+        "calibrated": False,
+        "watchdog_enabled": False,
+        "watchdog_safety_factor": None,
+        "watchdog_floor_seconds": 60.0,
+        "provenance": "uncalibrated",
     }
 
-    # (2) uncalibrated: a pair in neither layer -> the honest fail-open legacy
+    # (2) another uncalibrated pair keeps the same explicit absence.
     #     triple (watchdog DISABLED; the outer wall-time budgets are the bound).
     assert resolve_runtime_profile(H100, "four_way_coresident").model_dump() == {
         "device_name": "NVIDIA H100 80GB HBM3",
@@ -111,7 +109,7 @@ def test_differential_undeclared_ladder_is_byte_identical(calib_dir):
         "provenance": "uncalibrated",
     }
 
-    # (3) measured-hit: an overlay row outranks the shipped row.
+    # (3) measured-hit: an overlay row supplies caller-owned evidence.
     overlay_path, _ = _write_overlay(
         calib_dir,
         RTX_5090,

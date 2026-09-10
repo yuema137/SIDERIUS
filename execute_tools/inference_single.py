@@ -35,6 +35,7 @@ from execute_tools.deliverable_spec import (
     default_deliverable_storage,
     derive_run_deliverable_spec,
 )
+from execute_tools.hdf5_deliverable import is_complete_hdf5_deliverable
 from execute_tools.model_input_dtype import (
     INFERENCE_SITE_DTYPE,
     apply_contract_cardinality,
@@ -43,14 +44,9 @@ from execute_tools.model_input_dtype import (
 from execute_tools.scope_artifact import load_transported_scope
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
+    TaskDataPathResolutionError,
     bind_task_data_path,
-    bootstrap_legacy_tidmad_data_path,
 )
-
-# D14-1 C4: the deliverable READER lives with the TIDMAD codec now; the alias
-# preserves this module's historical import surface (test_step05c imports it
-# from here) and every in-module call site unchanged.
-from execute_tools.tidmad_data_path import is_complete_trial_output as _is_complete_trial_output
 from execute_tools.workload_resolvers import resolve_inference_workload
 from ml_models.loss_models_sandbox import get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, get_config_class
@@ -60,6 +56,19 @@ from ml_models.models_sandbox import MODEL_REGISTRY
 from ml_models.plugin_loader import UnknownOutputContractError, get_output_type
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
+def _is_complete_trial_output(
+    path: str,
+    expected_samples: int,
+    storage: DeliverableStorage | None = None,
+) -> bool:
+    """Compatibility name for declared HDF5 deliverable validation."""
+    return is_complete_hdf5_deliverable(
+        path,
+        expected_samples,
+        storage or default_deliverable_storage(),
+    )
 
 
 def _h5_dataset(f: h5py.File, *path: str) -> h5py.Dataset:
@@ -616,14 +625,14 @@ def main():
     # ABOVE this one, and only a composed run ever reaches it.
     from workflows.task_composition import resolve_child_task_data_path
 
-    data_path = (
-        resolve_child_task_data_path(
-            args.task_data_path_id,
-            identity=args.task_data_path_identity,
-            manifest_path=args.task_manifest,
+    if args.task_data_path_id is None:
+        raise TaskDataPathResolutionError(
+            "Inference requires --task_data_path_id from an explicit task composition."
         )
-        if args.task_data_path_id is not None
-        else bootstrap_legacy_tidmad_data_path()
+    data_path = resolve_child_task_data_path(
+        args.task_data_path_id,
+        identity=args.task_data_path_identity,
+        manifest_path=args.task_manifest,
     )
 
     # V20 PR C2, validation only. ``None`` — and therefore completely
@@ -660,10 +669,9 @@ def main():
         # milestone name implying it.
         trace.record("after_cuda_init", detail=f"DEVICE={DEVICE}")
 
-    if args.data_dir is None:
-        from execute_tools.data_paths import TIDMAD_DATA_DIR
+    from execute_tools.data_paths import resolve_dataset_dir
 
-        args.data_dir = TIDMAD_DATA_DIR
+    args.data_dir = resolve_dataset_dir(args.data_dir, purpose="inference child")
 
     # 2. Model Loading Logic
     if args.mode == "fix":

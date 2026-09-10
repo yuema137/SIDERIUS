@@ -16,6 +16,7 @@ import h5py
 import numpy as np
 import pytest
 
+from execute_tools.dataset_config import resolve_dataset_profile, tidmad_topology
 from execute_tools.health_checks._multi_file_peek import (
     MultiFilePeekOutcome,
     PerFilePeekResult,
@@ -24,11 +25,12 @@ from execute_tools.health_checks._multi_file_peek import (
 from execute_tools.health_checks.schemas import HealthCheckContext
 
 
-def _write_ch1(path, ch1: np.ndarray) -> None:
+def _write_output(path, values: np.ndarray) -> None:
+    channel = tidmad_topology(resolve_dataset_profile()).channels.input_channel
     with h5py.File(str(path), "w") as f:
         ts = f.create_group("timeseries")
-        c1 = ts.create_group("channel0001")
-        c1.create_dataset("timeseries", data=ch1, chunks=True)
+        output = ts.create_group(channel)
+        output.create_dataset("timeseries", data=values, chunks=True)
 
 
 def _ctx(**overrides) -> HealthCheckContext:
@@ -59,8 +61,8 @@ class TestBackwardCompat:
         """Explicit denoised_paths → fallback picks min key (0 wins over 5)."""
         p0 = tmp_path / "d0.h5"
         p5 = tmp_path / "d5.h5"
-        _write_ch1(p0, np.tile(np.arange(-30, 30, dtype=np.int8), 2000))
-        _write_ch1(p5, np.full(10_000, -65, dtype=np.int8))
+        _write_output(p0, np.tile(np.arange(-30, 30, dtype=np.int8), 2000))
+        _write_output(p5, np.full(10_000, -65, dtype=np.int8))
         ctx = _ctx(denoised_paths={0: str(p0), 5: str(p5)})
         outcome = peek_and_aggregate(
             ctx,
@@ -115,7 +117,7 @@ class TestAnyPass:
         paths = {}
         for i in (3, 10, 17):
             p = tmp_path / f"d{i}.h5"
-            _write_ch1(p, np.tile(np.arange(-30, 30, dtype=np.int8), 500))
+            _write_output(p, np.tile(np.arange(-30, 30, dtype=np.int8), 500))
             paths[i] = str(p)
         ctx = _ctx(denoised_paths=paths)
         outcome = peek_and_aggregate(
@@ -135,9 +137,9 @@ class TestAnyPass:
         p3 = tmp_path / "d3.h5"
         p10 = tmp_path / "d10.h5"
         p17 = tmp_path / "d17.h5"
-        _write_ch1(p3, np.full(10_000, -65, dtype=np.int8))
-        _write_ch1(p10, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
-        _write_ch1(p17, np.full(10_000, 5, dtype=np.int8))
+        _write_output(p3, np.full(10_000, -65, dtype=np.int8))
+        _write_output(p10, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
+        _write_output(p17, np.full(10_000, 5, dtype=np.int8))
         ctx = _ctx(denoised_paths={3: str(p3), 10: str(p10), 17: str(p17)})
         outcome = peek_and_aggregate(
             ctx,
@@ -156,7 +158,7 @@ class TestAnyPass:
         paths = {}
         for i in (3, 10, 17):
             p = tmp_path / f"d{i}.h5"
-            _write_ch1(p, np.full(10_000, -65, dtype=np.int8))
+            _write_output(p, np.full(10_000, -65, dtype=np.int8))
             paths[i] = str(p)
         ctx = _ctx(denoised_paths=paths)
         outcome = peek_and_aggregate(
@@ -173,7 +175,7 @@ class TestAnyPass:
     def test_one_ok_two_io_failures(self, tmp_path):
         """1 OK diverse file + 2 missing → any_pass passes (drops failed)."""
         p3 = tmp_path / "d3.h5"
-        _write_ch1(p3, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
+        _write_output(p3, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
         ctx = _ctx(
             denoised_paths={
                 3: str(p3),
@@ -225,7 +227,7 @@ class TestAllPass:
         paths = {}
         for i in (3, 10, 17):
             p = tmp_path / f"d{i}.h5"
-            _write_ch1(p, np.tile(np.arange(-30, 30, dtype=np.int8), 500))
+            _write_output(p, np.tile(np.arange(-30, 30, dtype=np.int8), 500))
             paths[i] = str(p)
         ctx = _ctx(denoised_paths=paths)
         outcome = peek_and_aggregate(
@@ -243,9 +245,9 @@ class TestAllPass:
         p3 = tmp_path / "d3.h5"
         p10 = tmp_path / "d10.h5"
         p17 = tmp_path / "d17.h5"
-        _write_ch1(p3, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
-        _write_ch1(p10, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
-        _write_ch1(p17, np.full(10_000, -65, dtype=np.int8))
+        _write_output(p3, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
+        _write_output(p10, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
+        _write_output(p17, np.full(10_000, -65, dtype=np.int8))
         ctx = _ctx(denoised_paths={3: str(p3), 10: str(p10), 17: str(p17)})
         outcome = peek_and_aggregate(
             ctx,
@@ -261,7 +263,7 @@ class TestAllPass:
         """all_pass strictest: I/O failure counts as fail even if only file
         with real data is diverse."""
         p3 = tmp_path / "d3.h5"
-        _write_ch1(p3, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
+        _write_output(p3, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
         ctx = _ctx(
             denoised_paths={
                 3: str(p3),
@@ -293,9 +295,9 @@ class TestNumericAggregations:
         p3 = tmp_path / "d3.h5"
         p10 = tmp_path / "d10.h5"
         p17 = tmp_path / "d17.h5"
-        _write_ch1(p3, np.arange(-5, 5, dtype=np.int8).repeat(2000))  # ~10 uniq
-        _write_ch1(p10, np.tile(np.arange(-30, 30, dtype=np.int8), 200))  # ~60 uniq
-        _write_ch1(p17, np.arange(-60, 60, dtype=np.int8).repeat(100))  # ~120 uniq
+        _write_output(p3, np.arange(-5, 5, dtype=np.int8).repeat(2000))  # ~10 uniq
+        _write_output(p10, np.tile(np.arange(-30, 30, dtype=np.int8), 200))  # ~60 uniq
+        _write_output(p17, np.arange(-60, 60, dtype=np.int8).repeat(100))  # ~120 uniq
         return {3: str(p3), 10: str(p10), 17: str(p17)}
 
     def _outcome(self, tmp_path, aggregation, predicate):
@@ -363,7 +365,7 @@ class TestEdgeCases:
     def test_index_not_in_denoised_paths_and_no_fn(self, tmp_path):
         """peek_file_indices=[3, 10, 17] but denoised_paths only has {3}."""
         p3 = tmp_path / "d3.h5"
-        _write_ch1(p3, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
+        _write_output(p3, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
         ctx = _ctx(denoised_paths={3: str(p3)})
         outcome = peek_and_aggregate(
             ctx,
@@ -381,7 +383,7 @@ class TestEdgeCases:
 
     def test_deduplicates_indices(self, tmp_path):
         p3 = tmp_path / "d3.h5"
-        _write_ch1(p3, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
+        _write_output(p3, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
         ctx = _ctx(denoised_paths={3: str(p3)})
         outcome = peek_and_aggregate(
             ctx,
@@ -395,7 +397,7 @@ class TestEdgeCases:
 
     def test_unknown_aggregation_raises(self, tmp_path):
         p = tmp_path / "d.h5"
-        _write_ch1(p, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
+        _write_output(p, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
         ctx = _ctx(denoised_paths={0: str(p)})
         with pytest.raises(ValueError, match="unknown aggregation"):
             peek_and_aggregate(
@@ -435,7 +437,7 @@ class TestEdgeCases:
         metric normally — the helper doesn't inject any special-case
         NaN handling; that's each check's responsibility."""
         p = tmp_path / "const.h5"
-        _write_ch1(p, np.full(10_000, -65, dtype=np.int8))
+        _write_output(p, np.full(10_000, -65, dtype=np.int8))
         ctx = _ctx(denoised_paths={0: str(p)})
         outcome = peek_and_aggregate(
             ctx,
@@ -462,7 +464,7 @@ class TestOutcomeShape:
         paths = {}
         for i in (3, 10, 17):
             p = tmp_path / f"d{i}.h5"
-            _write_ch1(p, np.full(10_000, -65, dtype=np.int8))
+            _write_output(p, np.full(10_000, -65, dtype=np.int8))
             paths[i] = str(p)
         ctx = _ctx(denoised_paths=paths)
         outcome = peek_and_aggregate(
@@ -484,7 +486,7 @@ class TestOutcomeShape:
         """MultiFilePeekOutcome must round-trip through Pydantic dump —
         callers persist per_file via json.dumps."""
         p = tmp_path / "d.h5"
-        _write_ch1(p, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
+        _write_output(p, np.tile(np.arange(-30, 30, dtype=np.int8), 200))
         ctx = _ctx(denoised_paths={0: str(p)})
         outcome = peek_and_aggregate(
             ctx,
@@ -498,3 +500,6 @@ class TestOutcomeShape:
         assert dumped["passed"] is True
         assert isinstance(dumped["per_file"], list)
         assert dumped["per_file"][0]["metric_value"] > 10
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

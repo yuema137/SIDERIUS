@@ -30,7 +30,6 @@ from __future__ import annotations
 import ast
 import inspect
 import pathlib
-from typing import ClassVar
 
 import pytest
 
@@ -146,70 +145,11 @@ class TestTheTaskOwnedRouteEvaluatesSecondaries:
 
 
 # ======================================================================
-# F-12d-19 — the shipped primaries speak the composed vocabulary
+# F-12d-19 — framework metrics retain their in-process vocabulary
 # ======================================================================
 
 
-class TestTheShippedPrimariesAcceptTheComposedCall:
-    """The framework's same-named metrics are KEPT for the in-process runners.
-
-    Both pairs compute identical arithmetic and differ only in calling
-    vocabulary, so the fix is a pack-local implementation — not teaching
-    generic core how a Pets scope stores truth.
-    """
-
-    GENERIC_KWARGS: ClassVar[set[str]] = {"evaluation_payload", "task_scope", "data_dir"}
-
-    @pytest.mark.parametrize(
-        ("manifest", "expected_class", "metric_id"),
-        [
-            ("pets.yaml", "PetsAccuracyMetric", "accuracy"),
-            ("davis.yaml", "DavisMseMetric", "mse"),
-        ],
-    )
-    def test_the_shipped_primary_is_the_packs_own_implementation(
-        self, manifest, expected_class, metric_id
-    ):
-        from workflows.task_composition import compose_run_task_bindings
-
-        composition = compose_run_task_bindings(
-            str(REPO_ROOT / "configs" / "task_composition" / manifest)
-        )
-        assert type(composition.metric).__name__ == expected_class
-        assert composition.metric.spec.id == metric_id
-        assert metric_id in type(composition.metric).IMPLEMENTS
-
-    @pytest.mark.parametrize(
-        ("manifest", "expected"),
-        [
-            ("pets.yaml", ("accuracy", "macro_f1", "log_loss")),
-            ("davis.yaml", ("mse", "psnr", "mae")),
-        ],
-    )
-    def test_every_shipped_metric_accepts_the_generic_KEYWORDS(self, manifest, expected):
-        """The defect, as a signature contract.
-
-        A metric bound into a composed run that cannot accept
-        ``evaluation_payload`` fails with a ``TypeError`` inside the scoring
-        child — which is exactly what the shipped Pets primary did.
-        """
-        import inspect
-
-        from workflows.task_composition import compose_run_task_bindings
-
-        composition = compose_run_task_bindings(
-            str(REPO_ROOT / "configs" / "task_composition" / manifest)
-        )
-        metrics = (composition.metric, *(composition.secondary_metrics or ()))
-        assert tuple(m.spec.id for m in metrics) == expected
-        for metric in metrics:
-            params = set(inspect.signature(type(metric)._compute).parameters)
-            missing = self.GENERIC_KWARGS - params
-            assert not missing, (
-                f"{type(metric).__name__} (bound to {metric.spec.id!r}) cannot accept "
-                f"{sorted(missing)} — the composed scoring child passes exactly these"
-            )
-
+class TestFrameworkMetricVocabulary:
     def test_the_FRAMEWORK_metrics_are_deliberately_left_alone(self):
         """They are the right shape for the in-process D14 runners.
 
@@ -238,8 +178,8 @@ class TestTheGenericCallPassesThePhysicalDataRoot:
 
         In the SCORING child ``--data_dir`` is the DELIVERABLE directory and
         the physical root arrives as ``--raw_data_dir``
-        (`core/sandbox_executor.py:894`). Passing the former sent DAVIS' metric
-        looking for `<workspace>/DAVIS/JPEGImages/480p/...`.
+        (`core/sandbox_executor.py:894`). A disk-backed metric would otherwise
+        search below the workspace rather than the declared physical root.
 
         Fails when someone "simplifies" this back to ``args.data_dir``, which
         reads correctly and is wrong.
@@ -248,29 +188,6 @@ class TestTheGenericCallPassesThePhysicalDataRoot:
         body = ast.unparse(fn)
         assert "'data_dir': args.raw_data_dir" in body or '"data_dir": args.raw_data_dir' in body
         assert "'data_dir': args.data_dir" not in body
-
-    def test_a_PETS_ONLY_witness_could_not_have_caught_it(self):
-        """Why the second track is not redundant (parent §14a.4).
-
-        Pets' truth comes from the transported scope, so its metrics ignore
-        ``data_dir`` entirely — a Pets-only run passes either way. DAVIS reads
-        ground-truth FRAMES from disk, so only it can witness this.
-        """
-        import inspect
-
-        from examples.davis_future_prediction.plugins._davis_metrics import DavisMseMetric
-        from examples.oxford_iiit_pet.plugins._pets_metrics import PetsAccuracyMetric
-
-        pets_body = inspect.getsource(PetsAccuracyMetric._compute)
-        davis_truth = inspect.getsource(
-            __import__(
-                "examples.davis_future_prediction.plugins._davis_metrics",
-                fromlist=["_davis_truth"],
-            )._davis_truth
-        )
-        assert "data_dir" not in pets_body.split(") -> tuple")[1]
-        assert "data_dir" in davis_truth
-        assert "mse" in DavisMseMetric.IMPLEMENTS
 
 
 # ======================================================================

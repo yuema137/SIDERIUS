@@ -109,15 +109,19 @@ def project_plan_call(call: tuple) -> dict:
     projected = dict(kwargs)
     registry = projected.pop("registry", None)
     config_manual = projected.pop("config_manual", None)
-    # Step 07 PR 07b — ``task_render`` is a frozen Pydantic model of small
-    # deterministic strings, so unlike ``registry`` it is pinned by CONTENT:
-    # its fields ARE the task facts the planner is told, and a drift in any of
-    # them is exactly what this baseline exists to catch.
+    # WF-1 owns the call surface, not one scientific task's rendered prose.
+    # Pin the typed carrier and its complete field set; task-render content is
+    # covered by the renderer's own focused tests.  Embedding that content here
+    # formerly made this generic choreography oracle a second TIDMAD authority.
     task_render = projected.pop("task_render", None)
-    # ``mode="json"`` so tuple fields land as lists: the golden round-trips
-    # through JSON, and a tuple/list mismatch fails the deep-compare while
-    # producing an EMPTY diff, which is the least debuggable failure there is.
-    projected["task_render"] = None if task_render is None else task_render.model_dump(mode="json")
+    projected["task_render"] = (
+        None
+        if task_render is None
+        else {
+            "type": type(task_render).__name__,
+            "fields": sorted(type(task_render).model_fields),
+        }
+    )
     # Step 07 PR 07b (P3) — same treatment for the metric declaration: its
     # `direction` and `id` are what the planner prompt now states, so a drift
     # in either is an LLM-visible change this baseline must catch.
@@ -191,3 +195,6 @@ class TestWF2ReflectCallSurface:
             GOLDENS / "wf2_reflect_call_surfaces.json",
             surface="WF-2 reflect() call surfaces",
         )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

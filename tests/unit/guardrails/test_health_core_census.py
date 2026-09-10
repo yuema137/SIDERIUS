@@ -98,12 +98,7 @@ BUILTIN_CHECK_CLASSES = (
     "CategoricalDominantFractionCheck",
 )
 
-PACK_IDS = (
-    "pets.prediction_views",
-    "davis.sample_views",
-    "pets_distinct_symbols_blocking",
-    "pets_dominant_fraction_blocking",
-    "davis_dispersion_blocking",
+EXTERNAL_PACK_IDS = (
     "acme.window_provider",
     "acme_window_dispersion",
 )
@@ -193,31 +188,12 @@ class TestCensusScope:
 
 
 class TestNoTaskTokensInGenericCore:
-    #: The ONE sanctioned occurrence: the quarantined legacy-default path
-    #: constant (state A). Named here so it cannot quietly grow into a
-    #: task registry.
-    QUARANTINED = frozenset({("_composition.py", "tidmad")})
-
     @pytest.mark.parametrize("module_name", GENERIC_MODULES)
     def test_no_task_token_beyond_the_quarantined_constant(self, module_name):
         found = _module_names(module_name)
         for token in TASK_TOKENS:
             hits = _token_hits(found, token)
-            if (module_name, token) in self.QUARANTINED:
-                joined = str(Path("configs") / "task_health" / "tidmad.yaml")
-                assert hits == ["tidmad.yaml"] or hits == [joined], (
-                    f"{module_name}: the quarantined tidmad allowance grew: {hits}"
-                )
-                continue
             assert hits == [], f"{module_name}: task token {token!r} in code: {hits}"
-
-    def test_the_quarantined_constant_is_still_the_legacy_default(self):
-        """The allowance above must describe something real."""
-        from execute_tools.health_checks._composition import (
-            LEGACY_DEFAULT_TASK_HEALTH_CONFIG,
-        )
-
-        assert LEGACY_DEFAULT_TASK_HEALTH_CONFIG.endswith("tidmad.yaml")
 
     def test_a_planted_task_comparison_is_detected(self, tmp_path):
         offender = tmp_path / "offender.py"
@@ -361,13 +337,13 @@ class TestCorrectedRegistrationClaim:
     def test_no_pack_or_external_id_in_the_package(self):
         for module in sorted(HEALTH_CORE.glob("*.py")):
             found = _code_level_names(ast.parse(module.read_text(encoding="utf-8")))
-            offenders = [pack_id for pack_id in PACK_IDS if pack_id in found]
+            offenders = [pack_id for pack_id in EXTERNAL_PACK_IDS if pack_id in found]
             assert offenders == [], f"{module.name}: {offenders}"
 
     def test_no_pack_or_external_id_in_the_framework_policy_yamls(self):
         for policy in FRAMEWORK_POLICY_YAMLS:
             text = policy.read_text(encoding="utf-8")
-            offenders = [pack_id for pack_id in PACK_IDS if pack_id in text]
+            offenders = [pack_id for pack_id in EXTERNAL_PACK_IDS if pack_id in text]
             assert offenders == [], f"{policy.name}: {offenders}"
 
     def test_a_fixture_id_planted_in_the_bootstrap_is_detected(self):
@@ -385,119 +361,3 @@ class TestCorrectedRegistrationClaim:
         registered = _bootstrap_registered_classes(planted)
         assert "AcmeWindowDispersionCheck" in registered
         assert [n for n in registered if n.endswith("Check")] != list(BUILTIN_CHECK_CLASSES)
-
-
-# ---------------------------------------------------------------------------
-# The three-task composition rung
-# ---------------------------------------------------------------------------
-
-STATE_A_GATE_IDS = [
-    "output_diversity_blocking",
-    "output_std_blocking",
-    "amplitude_collapse_blocking",
-    "pearson_dispersion_recording",
-    "spectral_peak_ratio_recording",
-    "per_file_output_std_recording",
-]
-PETS_GATE_IDS = ["pets_distinct_symbols_blocking", "pets_dominant_fraction_blocking"]
-DAVIS_GATE_IDS = ["davis_dispersion_blocking"]
-
-PETS_BINDING = REPO_ROOT / "examples" / "oxford_iiit_pet" / "declared" / "task_health.yaml"
-DAVIS_BINDING = REPO_ROOT / "examples" / "davis_future_prediction" / "declared" / "task_health.yaml"
-
-INT8_CHECK_MODULES = (
-    ("amplitude_collapse", "AmplitudeCollapseCheck"),
-    ("output_diversity", "OutputDiversityCheck"),
-    ("output_std", "OutputStdCheck"),
-    ("pearson_dispersion", "PearsonDispersionCheck"),
-    ("per_file_output_std", "PerFileOutputStdCheck"),
-    ("spectral_peak_ratio", "SpectralPeakRatioCheck"),
-)
-
-
-class TestThreeTaskCompositionRung:
-    """TIDMAD (state A) + Pets (state C) + DAVIS (state C), one process."""
-
-    @pytest.fixture(autouse=True)
-    def _isolated(self):
-        from execute_tools.health_checks import _plugin_binding
-        from execute_tools.health_checks.registry import _PROVIDER_REGISTRY, _REGISTRY
-
-        registry_snapshot = dict(_REGISTRY)
-        provider_snapshot = dict(_PROVIDER_REGISTRY)
-        _plugin_binding.reset_run_scope()
-        try:
-            yield
-        finally:
-            _REGISTRY.clear()
-            _REGISTRY.update(registry_snapshot)
-            _PROVIDER_REGISTRY.clear()
-            _PROVIDER_REGISTRY.update(provider_snapshot)
-            _plugin_binding.reset_run_scope()
-
-    def test_three_tasks_compose_disjointly_and_state_a_is_byte_stable(self, tmp_path):
-        from execute_tools.health_checks import _plugin_binding
-        from execute_tools.health_checks.config import (
-            load_composed_health_config,
-            materialize_effective_config,
-        )
-        from execute_tools.health_checks.schemas import (
-            HealthCheckContext,
-            applicability,
-        )
-
-        # State A, before the pack families exist in this process.
-        _path_a1, sha_a1 = materialize_effective_config(None, None, str(tmp_path / "a1"))
-        composed_a, _, _ = load_composed_health_config(None)
-        assert [g.id for g in composed_a.health_gates] == STATE_A_GATE_IDS
-        _plugin_binding.reset_run_scope()
-
-        # Pets, state C.
-        composed_b, pets_config, _ = load_composed_health_config(None, str(PETS_BINDING))
-        assert [g.id for g in composed_b.health_gates] == PETS_GATE_IDS
-        assert {ref.name for g in composed_b.health_gates for ref in g.checks} == {
-            "categorical_distinct_symbols",
-            "categorical_dominant_fraction",
-        }
-        assert pets_config is not None
-        pets_facts = pets_config.resolved_facts()
-        _plugin_binding.reset_run_scope()
-
-        # DAVIS, state C.
-        composed_c, davis_config, _ = load_composed_health_config(None, str(DAVIS_BINDING))
-        assert [g.id for g in composed_c.health_gates] == DAVIS_GATE_IDS
-        assert composed_c.health_gates[0].checks[0].name == "sample_dispersion_floor"
-        assert davis_config is not None
-        davis_facts = davis_config.resolved_facts()
-        _plugin_binding.reset_run_scope()
-
-        # Rosters pairwise disjoint — three tasks, three families, no bleed.
-        ids_a, ids_b, ids_c = set(STATE_A_GATE_IDS), set(PETS_GATE_IDS), set(DAVIS_GATE_IDS)
-        assert not (ids_a & ids_b) and not (ids_a & ids_c) and not (ids_b & ids_c)
-
-        # The int8 family is honestly inapplicable under BOTH contrast tasks.
-        import importlib
-
-        ctx = HealthCheckContext(
-            model_name="m",
-            run_name="r",
-            round_index=1,
-            denoised_paths={0: "/tmp/whatever"},
-            target_path_fn=lambda fi: f"/tmp/target_{fi:04d}.h5",
-        )
-        for module_name, class_name in INT8_CHECK_MODULES:
-            check_cls = getattr(
-                importlib.import_module(f"execute_tools.health_checks.{module_name}"),
-                class_name,
-            )
-            for facts in (pets_facts, davis_facts):
-                verdict = applicability(check_cls.declaration, facts, ctx)
-                assert verdict.applicable is False, (class_name, facts.encoding_family)
-                assert verdict.axis == "encoding_family"
-
-        # State A again, AFTER the interleaving: byte-stable.
-        _path_a2, sha_a2 = materialize_effective_config(None, None, str(tmp_path / "a2"))
-        assert sha_a2 == sha_a1
-        assert Path(_path_a1).read_text(encoding="utf-8") == Path(_path_a2).read_text(
-            encoding="utf-8"
-        )

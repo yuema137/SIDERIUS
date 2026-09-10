@@ -335,49 +335,6 @@ class TestRefusals:
             assert report.render()
 
 
-class TestCliSurface:
-    def test_the_parser_exposes_the_documented_flags(self):
-        import importlib.util
-        from pathlib import Path
-
-        path = Path(__file__).resolve().parents[3] / "scripts" / "runtime_bootstrap.py"
-        spec = importlib.util.spec_from_file_location("_c10_cli", path)
-        assert spec and spec.loader
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        parser = module.build_parser()
-        flags = {action.dest for action in parser._actions}
-        assert {
-            "model",
-            "segmentation_size",
-            "batch_size",
-            "data_dir",
-            "registry_dir",
-            "max_wall_seconds",
-            "warmup_steps",
-            "timed_train_steps",
-            "timed_inference_batches",
-            "expected_peer_pid",
-            "dry_run",
-            "as_json",
-        } <= flags
-
-    def test_defaults_are_bounded(self):
-        import importlib.util
-        from pathlib import Path
-
-        path = Path(__file__).resolve().parents[3] / "scripts" / "runtime_bootstrap.py"
-        spec = importlib.util.spec_from_file_location("_c10_cli2", path)
-        assert spec and spec.loader
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        args = module.build_parser().parse_args([])
-        assert args.max_wall_seconds == 90.0
-        assert args.timed_train_steps == 7
-        assert args.timed_inference_batches == 5
-        assert args.dry_run is False
-
-
 class TestWorkloadMetadata:
     """Regression: the first real GPU bootstrap recorded
     `batch_size = n_timed_train_steps` (7 instead of 8) and no

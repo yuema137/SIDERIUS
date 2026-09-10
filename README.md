@@ -95,7 +95,6 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone git@github.com:Galileo-Sandbox/SIDERIUS.git && cd SIDERIUS
 uv sync && source .venv/bin/activate
 
-cp tidmad_data_config.example.yaml tidmad_data_config.yaml   # edit paths
 cp dashboard_config.example.yaml   dashboard_config.yaml
 printf 'OPENAI_API_KEY=...\n' > .env
 
@@ -108,8 +107,8 @@ Then see what a real run would execute, without executing it:
 ```bash
 bash sdsc_submission_scripts/run_chain.sh --mode lilab \
     --workspace /path/to/workspace --run_name first_run_v1 \
-    --task_composition configs/task_composition/tidmad.yaml \
-    --data_dir /path/to/tidmad/data \
+    --task_composition configs/task_composition/quickstart.yaml \
+    --data_dir /path/to/workspace/quickstart_data \
     --llm_config llm_configs/openai_tiered_pro.json \
     --num_iterations 1 --max_rounds 1 --dry-run
 ```

@@ -265,10 +265,16 @@ class TestGetCriterion:
 # Verifies the custom-loss routing path added by L2. See
 # ``docs/design/enable_loss_inventory.md`` § Commit L2.
 
-# Stub template lives in agent_generated/_stub_loss_template.py (committed in L1a).
+# Synthetic stub lives with the framework's test fixtures.
 # Tests copy it (without the leading ``_``) into a tmp loss dir and point
 # SIDERIUS_LOSS_DIRS at that dir.
-_STUB_TEMPLATE = Path(__file__).resolve().parents[3] / "agent_generated" / "_stub_loss_template.py"
+_STUB_TEMPLATE = (
+    Path(__file__).resolve().parents[3]
+    / "tests"
+    / "fixtures"
+    / "generated_capabilities"
+    / "stub_loss_template.py"
+)
 
 
 @pytest.fixture
@@ -520,8 +526,8 @@ def _l6c_clear_loss_registry():
     I13 — also clears LOSS_TARGET_DTYPE_REGISTRY so dtype-routing tests
     don't leak custom-loss declarations between tests.
     """
-    from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
     from ml_models.loss_models_sandbox import LOSS_CONFIG_REGISTRY, LOSS_REGISTRY
+    from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY
 
     saved_loss = dict(LOSS_REGISTRY)
     saved_cfg = dict(LOSS_CONFIG_REGISTRY)
@@ -543,7 +549,7 @@ class TestL6cResolveLossDirsUnion:
         """With SIDERIUS_LOSS_DIRS set, _resolve_loss_dirs returns env-var
         dirs FIRST, then the resolved generated-library losses dir (arXiv
         P1), then the legacy checkout LOSSES_DIR as a union."""
-        from agent_generated._loss_loader import LOSSES_DIR, _resolve_loss_dirs
+        from ml_models.loss_plugin_loader import LOSSES_DIR, _resolve_loss_dirs
 
         ws_dir = tmp_path / "ws_losses"
         ws_dir.mkdir()
@@ -557,7 +563,7 @@ class TestL6cResolveLossDirsUnion:
         resolved library losses dir followed by the legacy checkout
         LOSSES_DIR (arXiv P1 — the legacy dir is the read-only
         compatibility fallback, scanned last)."""
-        from agent_generated._loss_loader import LOSSES_DIR, _resolve_loss_dirs
+        from ml_models.loss_plugin_loader import LOSSES_DIR, _resolve_loss_dirs
 
         monkeypatch.delenv("SIDERIUS_LOSS_DIRS", raising=False)
         monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
@@ -681,7 +687,7 @@ class TestL6cPreloadGlobalLosses:
     def test_preload_loads_all_plugins(self, tmp_path, monkeypatch):
         """preload_global_losses scans the resolved library losses dir
         (pinned to a tmp root) and registers every valid .py."""
-        from agent_generated import _loss_loader
+        from ml_models import loss_plugin_loader as _loss_loader
         from ml_models.loss_models_sandbox import LOSS_REGISTRY, preload_global_losses
 
         lib_losses = tmp_path / "lib" / "losses"
@@ -710,7 +716,7 @@ class TestL6cPreloadGlobalLosses:
         promotions silently vanish from Branch-B reuse) or registering the
         legacy copy after the library one (stale legacy bytes would win the
         in-memory most-recent-registration rule)."""
-        from agent_generated import _loss_loader
+        from ml_models import loss_plugin_loader as _loss_loader
         from ml_models.loss_models_sandbox import LOSS_REGISTRY, preload_global_losses
 
         lib_losses = tmp_path / "lib" / "losses"
@@ -733,7 +739,7 @@ class TestL6cPreloadGlobalLosses:
         loaded = preload_global_losses()
         assert sorted(loaded) == ["bar_loss_l6c", "foo_loss_l6c"]
         assert "foo_loss_l6c" in LOSS_REGISTRY
-        from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
+        from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY
 
         # The library copy (dtype default "long") won; the legacy decoy
         # ("float") was shadowed by basename and never registered.
@@ -742,7 +748,7 @@ class TestL6cPreloadGlobalLosses:
     def test_preload_returns_empty_when_dirs_missing(self, tmp_path, monkeypatch):
         """preload_global_losses is safe when neither library location
         exists — first-run / fresh-host case."""
-        from agent_generated import _loss_loader
+        from ml_models import loss_plugin_loader as _loss_loader
         from ml_models.loss_models_sandbox import preload_global_losses
 
         monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "no_lib"))
@@ -792,8 +798,8 @@ class TestI13GetTargetTorchDtype:
     def test_custom_with_registered_long_routes_to_long(self):
         """Custom loss declared as ``PLUGIN_LOSS_TARGET_DTYPE = "long"`` —
         registered via the LOSS_TARGET_DTYPE_REGISTRY — routes to torch.long."""
-        from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
         from ml_models.loss_models_sandbox import get_target_torch_dtype
+        from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY
 
         LOSS_TARGET_DTYPE_REGISTRY["__i13_custom_long__"] = "long"
         try:
@@ -805,8 +811,8 @@ class TestI13GetTargetTorchDtype:
     def test_custom_with_registered_float_routes_to_float32(self):
         """Custom loss declared as ``PLUGIN_LOSS_TARGET_DTYPE = "float"`` —
         e.g. a regressor-style loss — routes to torch.float32."""
-        from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
         from ml_models.loss_models_sandbox import get_target_torch_dtype
+        from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY
 
         LOSS_TARGET_DTYPE_REGISTRY["__i13_custom_float__"] = "float"
         try:
@@ -831,8 +837,8 @@ class TestI13RegisterPopulatesDtypeRegistry:
     cross-process Branch B reuse can't route targets correctly."""
 
     def test_register_populates_dtype_registry_long(self, tmp_path):
-        from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
         from ml_models.loss_models_sandbox import register_loss_in_memory
+        from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY
 
         src = _L6C_PLUGIN_SRC_FOR_FOO + '\nPLUGIN_LOSS_TARGET_DTYPE = "long"\n'
         plugin_path = tmp_path / "foo_loss_l6c.py"
@@ -842,8 +848,8 @@ class TestI13RegisterPopulatesDtypeRegistry:
         assert LOSS_TARGET_DTYPE_REGISTRY.get("foo_loss_l6c") == "long"
 
     def test_register_populates_dtype_registry_float(self, tmp_path):
-        from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
         from ml_models.loss_models_sandbox import register_loss_in_memory
+        from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY
 
         src = _L6C_PLUGIN_SRC_FOR_FOO + '\nPLUGIN_LOSS_TARGET_DTYPE = "float"\n'
         plugin_path = tmp_path / "foo_loss_l6c.py"
@@ -854,8 +860,8 @@ class TestI13RegisterPopulatesDtypeRegistry:
     def test_register_missing_declaration_defaults_to_long(self, tmp_path):
         """A pre-I13 plugin (no PLUGIN_LOSS_TARGET_DTYPE) registers cleanly
         with the default 'long' — back-compat path."""
-        from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
         from ml_models.loss_models_sandbox import register_loss_in_memory
+        from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY
 
         plugin_path = tmp_path / "foo_loss_l6c.py"
         plugin_path.write_text(_L6C_PLUGIN_SRC_FOR_FOO)

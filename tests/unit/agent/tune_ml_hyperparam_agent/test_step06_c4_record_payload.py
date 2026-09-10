@@ -32,7 +32,6 @@ from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
 from execute_tools.evaluation_metric import (
-    TIDMAD_METRIC_ID,
     MetricResult,
     NotScoreableError,
     NotScoreableResult,
@@ -46,6 +45,7 @@ _TUNER = importlib.import_module("nodes.ml_hyperparameter_tune_agent.ml_hyperpar
 _HERE = Path(__file__).parent
 _PREFLIGHT_FIXTURE = _HERE / "fixtures" / "step00_preflight_results.json"
 _REPLAY_WS = _HERE.parents[1] / "core" / "fixtures" / "step00_replay_workspace" / "iter_001"
+FIXTURE_METRIC_ID = "fixture_accuracy"
 
 
 @pytest.fixture(scope="module")
@@ -76,7 +76,7 @@ def test_success_records_carry_the_metric_identity_direction_and_value(pseudo_ru
     for record in successes:
         payload = record.metric_result
         assert payload is not None
-        assert (payload.metric_id, payload.direction) == (TIDMAD_METRIC_ID, "higher")
+        assert (payload.metric_id, payload.direction) == (FIXTURE_METRIC_ID, "higher")
         assert payload.scalar == record.denoising_score
         assert payload.per_sample is None  # pointer: file_vector on the same record
         assert record.file_vector is not None
@@ -153,7 +153,7 @@ def _base_record(**overrides) -> dict:
 
 def _payload(scalar: float | None, per_sample=None) -> dict:
     return MetricResult(
-        metric_id=TIDMAD_METRIC_ID, direction="higher", scalar=scalar, per_sample=per_sample
+        metric_id=FIXTURE_METRIC_ID, direction="higher", scalar=scalar, per_sample=per_sample
     ).model_dump(mode="json")
 
 
@@ -182,10 +182,10 @@ def test_the_collapse_penalty_is_not_a_disagreement():
 
 def test_result_and_refusal_are_mutually_exclusive():
     refusal = NotScoreableResult(
-        metric_id=TIDMAD_METRIC_ID,
+        metric_id=FIXTURE_METRIC_ID,
         direction="higher",
         verdict=ScoreabilityVerdict(
-            contract_id="tidmad_denoised_h5",
+            contract_id="deliverable_presence",
             failures=(ScoreabilityFailure(requirement="completeness", detail="d"),),
         ),
     ).model_dump(mode="json")
@@ -218,10 +218,10 @@ def test_the_non_finite_sentinel_round_trips_through_the_storage_boundary():
 def test_the_refusal_record_carries_the_structured_result_and_validates(monkeypatch):
     monkeypatch.setattr(_TUNER.time, "strftime", lambda *_a, **_k: "2026-08-15 00:00:00")
     refusal = NotScoreableResult(
-        metric_id=TIDMAD_METRIC_ID,
+        metric_id=FIXTURE_METRIC_ID,
         direction="higher",
         verdict=ScoreabilityVerdict(
-            contract_id="tidmad_denoised_h5",
+            contract_id="deliverable_presence",
             failures=(
                 ScoreabilityFailure(
                     requirement="required_dtype", input_identity=6, detail="int16 vs int8"
@@ -245,6 +245,9 @@ def test_the_refusal_record_carries_the_structured_result_and_validates(monkeypa
     assert parsed.status == "error_scoring"
     assert parsed.metric_result is None
     assert parsed.metric_refusal is not None
-    assert parsed.metric_refusal.metric_id == TIDMAD_METRIC_ID
+    assert parsed.metric_refusal.metric_id == FIXTURE_METRIC_ID
     assert parsed.metric_refusal.verdict.failures[0].requirement == "required_dtype"
     assert parsed.metric_refusal.verdict.failures[0].input_identity == 6
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

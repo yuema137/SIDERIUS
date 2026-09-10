@@ -26,7 +26,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from execute_tools.dataset_config import bind_dataset_profile
 from execute_tools.health_checks.schemas import CheckVerdict, HealthCheckResult
+from tests.helpers.two_family_profile import make_two_family_profile
 from tests.unit.execute_tools.health_checks._verdict_corpus import (
     CASE_IDS,
     normalise,
@@ -34,6 +36,19 @@ from tests.unit.execute_tools.health_checks._verdict_corpus import (
 )
 
 MANIFEST_PATH = Path(__file__).resolve().parent / "goldens" / "verdict_parity_manifest_pre08a.json"
+
+
+@pytest.fixture(scope="module")
+def verdict_parity_profile():
+    """Bind the measurement rate under which the historical corpus was captured."""
+    profile = make_two_family_profile(
+        num_files=20,
+        psd_segment_length=10_000_000,
+        segments_per_file=200,
+        sampling_frequency=10_000_000.0,
+    )
+    with bind_dataset_profile(profile):
+        yield profile
 
 
 # ---------------------------------------------------------------------------
@@ -249,3 +264,6 @@ class TestVerdictParityManifest:
                     f"{case_id}: verdict {case['expected_verdict']} -> {result.verdict.value}"
                 )
         assert not drift, "pre-08a parity broken:\n  " + "\n  ".join(drift)
+
+
+pytestmark = pytest.mark.usefixtures("verdict_parity_profile")

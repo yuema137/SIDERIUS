@@ -81,6 +81,8 @@
 .venv/bin/python nodes/ml_model_proposal_agent/ml_model_proposal_agent.py \
     --workspace ./siderius_workspace \
     --run_name v1 \
+    --task_composition configs/task_composition/quickstart.yaml \
+    --data_dir ./siderius_workspace/quickstart_data \
     --provider gemini \
     --model_id gemini-3.1-flash-lite-preview
 ```
@@ -102,6 +104,8 @@ The CLI reads `{workspace}/interpretation_{run_name}.json` (the upstream interpr
 | `--run_name` | `str` | `v1` | Filename suffix shared across the chain (interpretation, proposal). |
 | `--provider` | `str` (`gemini` \| `openai`) | `gemini` | LLM provider for both calls (reasoning + commit in legacy; all stages in pipeline). |
 | `--model_id` | `str` | `gemini-3.1-flash-lite-preview` | Specific model id passed to the provider. |
+| `--task_composition` | path | required | Task-composition manifest supplying the scientific contract. |
+| `--data_dir` | path | required | Physical data root bound for the selected task composition. |
 
 ## Python API usage
 

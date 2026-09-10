@@ -1,6 +1,6 @@
 # workflows/task_config.py
 """
-Loader + renderer for the global task config (``configs/task_config.yaml``).
+Loader + renderer for a caller-owned task configuration.
 
 The task config is the single source of truth for two pieces of operator-facing
 information — ``task_description`` and ``forward_contract`` — that used to be
@@ -83,11 +83,8 @@ _CACHE: dict[str, dict[str, Any]] = {}
 # docs/design/enable_global_task_config.md § "Backward compatibility".
 _MISSING_FILE_REMEDIATION = (
     "{path} not found.\n"
-    "  This file is required for all SIDERIUS agent runs.\n"
-    "  If you deleted it accidentally, restore from git:\n"
-    "      git checkout {path}\n"
-    "  If you are setting up a new task, copy and edit:\n"
-    "      cp configs/task_config.example.yaml {path}"
+    "  Supply the task through --task_composition, or pass an explicit "
+    "task-config path. SIDERIUS does not select a scientific task by default."
 )
 
 
@@ -225,6 +222,11 @@ def load_task_config(path: str | None = None) -> dict[str, Any]:
         bound = _BOUND_TASK_CONFIG.get()
         if bound is not None:
             return bound
+        raise ValueError(
+            "no task configuration is bound. Supply --task_composition or "
+            "pass an explicit task-config path; SIDERIUS has no scientific "
+            "task default."
+        )
 
     resolved = os.path.abspath(path or default_task_config_path())
 

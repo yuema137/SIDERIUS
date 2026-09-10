@@ -67,6 +67,8 @@ from ml_models.plugin_binding import (
     union_plugin_roots,
 )
 
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities", "synthetic_physical_data_root")
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 QUICKSTART_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 DECLARED_NAMING_TASK = REPO_ROOT / "tests" / "fixtures" / "fcov8_declared_naming_task.py"

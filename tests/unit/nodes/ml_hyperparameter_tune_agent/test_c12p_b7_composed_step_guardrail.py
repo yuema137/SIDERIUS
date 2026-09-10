@@ -42,9 +42,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from execute_tools.dataset_config import TIDMAD_PROFILE
 from execute_tools.task_data_path import bind_task_data_path
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import AttemptScopes
+from tests.helpers.two_family_profile import make_two_family_profile
 
 # The node package rebinds ``sys.modules[...]`` to its main module (see the
 # package ``__init__``), so ``from nodes.ml_hyperparameter_tune_agent import
@@ -61,6 +61,11 @@ TINY_TASK_SCOPE = {"partitions": {"0": list(range(8))}, "sample_count": 8}
 #: The run's resolved physical data root. A VALUE the caller holds
 #: (``bindings.time_data_dir``), never a path this test reads.
 DATA_ROOT = "/c12p/b7/data-root"
+PROFILE = make_two_family_profile(
+    num_files=1,
+    psd_segment_length=80_000,
+    segments_per_file=1,
+)
 
 
 class _ScopeRows:
@@ -196,7 +201,7 @@ def _run_guardrail(agent_input, *, train_sample_set):
             hypothesis="",
             round_index=1,
             attempt_in_round=1,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
 
 
@@ -310,7 +315,7 @@ class TestTheGuardrailCanSeeTheAttemptsTaskOwnedScope:
             hypothesis="",
             round_index=1,
             attempt_in_round=1,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
 
 
@@ -349,7 +354,7 @@ class TestTheLegacyPathIsUntouched:
             hypothesis="",
             round_index=1,
             attempt_in_round=1,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
 
         assert skipped is True

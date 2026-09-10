@@ -33,7 +33,13 @@ import pytest
 
 from agent.skills.inference_skill import estimator as est
 from agent.skills.training_skill import estimator as train_est
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.two_family_profile import make_two_family_profile
+
+_PROFILE = make_two_family_profile(
+    num_files=20,
+    psd_segment_length=1_600_000,
+    segments_per_file=20,
+)
 
 
 def _sample_set(n_psd: int = 400) -> dict:
@@ -183,7 +189,7 @@ class TestEstimateWallTimeSeconds:
             {"segmentation_size": 16000},
             _sample_set(),
             inference_ms_per_step=1.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert set(out.keys()) == {"phase", "seconds", "breakdown"}
         assert out["phase"] == "inference"
@@ -201,14 +207,14 @@ class TestEstimateWallTimeSeconds:
             {"segmentation_size": 16000},
             _sample_set(100),
             inference_ms_per_step=1.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         big = est.estimate_wall_time_seconds(
             "rnn",
             {"segmentation_size": 16000},
             _sample_set(400),
             inference_ms_per_step=1.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert big["seconds"] > small["seconds"]
 
@@ -224,7 +230,7 @@ class TestEstimateWallTimeSeconds:
             {"segmentation_size": 16000},
             _sample_set(),
             inference_ms_per_step=1.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         monkeypatch.setattr(est, "inference_batch_for", lambda mt: 50)
         large_bs = est.estimate_wall_time_seconds(
@@ -232,7 +238,7 @@ class TestEstimateWallTimeSeconds:
             {"segmentation_size": 16000},
             _sample_set(),
             inference_ms_per_step=1.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert large_bs["seconds"] < small_bs["seconds"]
 
@@ -242,7 +248,7 @@ class TestEstimateWallTimeSeconds:
             {"segmentation_size": 16000},
             _sample_set(),
             inference_ms_per_step=3.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert out["breakdown"]["ms_source"] == "derived_from_training_warmup"
         assert out["breakdown"]["ms_per_step"] == pytest.approx(3.0)
@@ -260,7 +266,7 @@ class TestEstimateWallTimeSeconds:
             "rnn",
             {"segmentation_size": 16000},
             _sample_set(),
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert calls == ["rnn"]
         assert out["breakdown"]["ms_source"] == "static_formula"
@@ -273,7 +279,7 @@ class TestEstimateWallTimeSeconds:
             {"segmentation_size": 16000},
             _sample_set(),
             inference_ms_per_step=1.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert out["breakdown"]["inference_batch"] == 25
         assert out["breakdown"]["inference_batch_uncalibrated"] is True
@@ -314,24 +320,24 @@ class TestG1ExplicitBatchSeam:
     ``inference_batch_uncalibrated`` unchanged by supplying a hint."""
 
     # Fixture algebra (hardcoded, independent of the code under test):
-    # SEGMENT_LENGTH = 10_000_000, seg 16000 → ml_per_psd = 625;
-    # _sample_set() = 400 PSDs → total_ml = 250_000.
+    # SEGMENT_LENGTH = 1_600_000, seg 16000 → ml_per_psd = 100;
+    # _sample_set() = 400 physical segments → total_ml = 40_000.
 
     def test_default_parity_registered_deep_equal(self):
         """Absent hint → byte-identical pre-G1 output. Full-dict pin, not
-        just the batch field: rnn table batch 10 → 25_000 steps × 2 ms."""
+        just the batch field: rnn table batch 10 → 4_000 steps × 2 ms."""
         out = est.estimate_wall_time_seconds(
             "rnn",
             {"segmentation_size": 16000},
             _sample_set(),
             inference_ms_per_step=2.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert out == {
             "phase": "inference",
-            "seconds": 50.0,
+            "seconds": 8.0,
             "breakdown": {
-                "total_inference_steps": 25_000,
+                "total_inference_steps": 4_000,
                 "inference_batch": 10,
                 "ms_per_step": 2.0,
                 "ms_source": "derived_from_training_warmup",
@@ -341,19 +347,19 @@ class TestG1ExplicitBatchSeam:
 
     def test_default_parity_unregistered_deep_equal(self):
         """Absent hint, unregistered model → fallback batch 25 →
-        10_000 steps × 2 ms; flag True. Full-dict pin."""
+        1_600 steps × 2 ms; flag True. Full-dict pin."""
         out = est.estimate_wall_time_seconds(
             "unregistered_plugin",
             {"segmentation_size": 16000},
             _sample_set(),
             inference_ms_per_step=2.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert out == {
             "phase": "inference",
-            "seconds": 20.0,
+            "seconds": 3.2,
             "breakdown": {
-                "total_inference_steps": 10_000,
+                "total_inference_steps": 1_600,
                 "inference_batch": 25,
                 "ms_per_step": 2.0,
                 "ms_source": "derived_from_training_warmup",
@@ -368,7 +374,7 @@ class TestG1ExplicitBatchSeam:
             {"segmentation_size": 16000},
             _sample_set(),
             inference_ms_per_step=2.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         explicit_none = est.estimate_wall_time_seconds(
             "rnn",
@@ -376,25 +382,25 @@ class TestG1ExplicitBatchSeam:
             _sample_set(),
             inference_ms_per_step=2.0,
             inference_batch=None,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert absent == explicit_none
 
     def test_explicit_value_used_verbatim_with_ceil_algebra(self):
         """Explicit 64 on rnn (table 10): the breakdown reports 64 in the
         EXISTING key (no new key on any path — 0.R.1) and the step count
-        follows ceil(250_000 / 64) = 3907."""
+        follows ceil(40_000 / 64) = 625."""
         out = est.estimate_wall_time_seconds(
             "rnn",
             {"segmentation_size": 16000},
             _sample_set(),
             inference_ms_per_step=2.0,
             inference_batch=64,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert out["breakdown"]["inference_batch"] == 64
-        assert out["breakdown"]["total_inference_steps"] == 3907
-        assert out["seconds"] == pytest.approx(3907 * 2.0 / 1000.0)
+        assert out["breakdown"]["total_inference_steps"] == 625
+        assert out["seconds"] == pytest.approx(625 * 2.0 / 1000.0)
         assert set(out["breakdown"].keys()) == {
             "total_inference_steps",
             "inference_batch",
@@ -413,7 +419,7 @@ class TestG1ExplicitBatchSeam:
             _sample_set(),
             inference_ms_per_step=2.0,
             inference_batch=64,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         unregistered = est.estimate_wall_time_seconds(
             "unregistered_plugin",
@@ -421,7 +427,7 @@ class TestG1ExplicitBatchSeam:
             _sample_set(),
             inference_ms_per_step=2.0,
             inference_batch=64,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert registered["breakdown"]["inference_batch_uncalibrated"] is False
         assert unregistered["breakdown"]["inference_batch_uncalibrated"] is True
@@ -434,7 +440,7 @@ class TestG1ExplicitBatchSeam:
             {"segmentation_size": 16000},
             _sample_set(),
             inference_ms_per_step=2.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         explicit = est.estimate_wall_time_seconds(
             "rnn",
@@ -442,7 +448,7 @@ class TestG1ExplicitBatchSeam:
             _sample_set(),
             inference_ms_per_step=2.0,
             inference_batch=10,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         assert default == explicit
 
@@ -454,5 +460,5 @@ class TestG1ExplicitBatchSeam:
                 _sample_set(),
                 inference_ms_per_step=2.0,
                 inference_batch=0,
-                dataset_profile=TIDMAD_PROFILE,
+                dataset_profile=_PROFILE,
             )

@@ -36,6 +36,7 @@ from agent.schemas.training_diagnosis import TrainingDiagnosis
 # field did before. Same layering as proposal.py importing
 # core.hardware_context.
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
@@ -59,6 +60,14 @@ HealthGateMode = Literal["blocking", "observe_only"]
 #:     observe_only + diagnostic  -> the normal observation run
 #:     observe_only + scientific  -> REFUSED, a contradiction
 ResultAuthority = Literal["scientific", "diagnostic"]
+
+#: The single wall-time admission authority selected for one candidate role.
+#:
+#: ``forecast`` uses the advance workload forecast and leaves in-process
+#: measurements observational. ``measured`` skips advance forecast admission
+#: and lets the executing-device measurement enforce the configured budget.
+#: There is intentionally no hybrid value: one budget must have one authority.
+TimeAdmissionSource = Literal["forecast", "measured"]
 
 
 # ---------------------------------------------------------------------------
@@ -1538,6 +1547,13 @@ class HyperparamTuningInput(BaseModel):
             "Optional HealthGate YAML override. None preserves the shipped default config."
         ),
     )
+    measurement_capability: ResolvedMeasurementCapability | None = Field(
+        default=None,
+        description=(
+            "Caller-resolved measurement identity and availability. Generic tuning "
+            "never derives a scientific task identity from the dataset path."
+        ),
+    )
     resume: bool = Field(
         default=False,
         description="Resume from validated completed rounds already present in this run workspace.",
@@ -2023,6 +2039,15 @@ class HyperparamTuningInput(BaseModel):
             "estimates."
         ),
     )
+    trial_time_admission_source: TimeAdmissionSource = Field(
+        default="measured",
+        description=(
+            "Single wall-time admission authority for Trial rounds. "
+            "'forecast' uses the advance workload forecast; 'measured' uses "
+            "executing-device in-process evidence. The unselected authority "
+            "may record observations but cannot reject the attempt."
+        ),
+    )
     formal_time_budget_minutes: float | None = Field(
         default=None,
         description=(
@@ -2032,6 +2057,15 @@ class HyperparamTuningInput(BaseModel):
             "at startup and skips the time check for formal rounds. Sized "
             "independently from the trial budget because formal runs use the "
             "full dataset and have a wall-time scale 50-100× longer."
+        ),
+    )
+    formal_time_admission_source: TimeAdmissionSource = Field(
+        default="measured",
+        description=(
+            "Single wall-time admission authority for Formal rounds. "
+            "'forecast' uses the advance workload forecast; 'measured' uses "
+            "executing-device in-process evidence. The unselected authority "
+            "may record observations but cannot reject the attempt."
         ),
     )
 
@@ -2141,6 +2175,17 @@ class HyperparamTuningInput(BaseModel):
             "launch configuration."
         ),
     )
+    runtime_verification_max_wall_seconds: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Optional wall-time ceiling for adaptive in-subprocess runtime "
+            "verification. None preserves AdaptiveVerificationConfig's "
+            "default. Increase this for workloads whose individual optimizer "
+            "steps are too slow for the default window to observe steady "
+            "state; this does not change the Trial or Formal run budget."
+        ),
+    )
 
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K) ---
     # Mirrors the trial/formal split of the time gate. The tuner picks the
@@ -2207,6 +2252,39 @@ class HyperparamTuningInput(BaseModel):
             "warning at startup and skips the VRAM check for formal rounds. "
             "Sized independently from the trial budget because formal runs may "
             "use larger batch sizes or full-dataset sampling."
+        ),
+    )
+    vram_probe_step_timeout_seconds: float = Field(
+        default=180.0,
+        gt=0.0,
+        description=(
+            "Maximum wall time for one training-mode or inference VRAM "
+            "footprint forward. This is not an epoch, optimizer step, or "
+            "candidate-runtime budget. The workflow owns this safeguard "
+            "because one task-valid batch may have very different execution "
+            "cost across task types."
+        ),
+    )
+    vram_preflight_total_timeout_seconds: float = Field(
+        default=900.0,
+        gt=0.0,
+        description=(
+            "Maximum wall time for the complete isolated VRAM preflight "
+            "worker, including model construction, training-footprint "
+            "measurement, inference-batch search, and inference-footprint "
+            "measurement. Independent of Trial/Formal training budgets."
+        ),
+    )
+    vram_preflight_host_memory_limit_gb: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Optional maximum resident host memory in GiB for the complete isolated "
+            "VRAM-preflight process tree. This is a workflow-owned safety "
+            "limit, not a GPU VRAM ceiling or a model-capacity verdict. "
+            "Task-valid batches and model inspection can have different host "
+            "memory costs across task types. None preserves the deployment "
+            "default, normally 24 GiB."
         ),
     )
     data_dir: str | None = Field(
@@ -2800,6 +2878,14 @@ class HyperparamTuningInput(BaseModel):
             "this input without it and gets byte-identical legacy behaviour. "
             "It carries composition facts the tuner used to read from the "
             "ambient environment; it is never a second authority for them."
+        ),
+    )
+    workflow_parameter_rules: ParameterRules | None = Field(
+        default=None,
+        description=(
+            "Workflow-owned constraints on resolved model, training, or loss "
+            "parameters. None leaves the workflow unconstrained. These rules "
+            "are enforced together with, and may only narrow, task-owned rules."
         ),
     )
 

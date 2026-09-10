@@ -27,7 +27,6 @@ import ast
 import os
 from pathlib import Path
 
-import h5py
 import numpy as np
 import pytest
 
@@ -35,6 +34,7 @@ from execute_tools.inference_single import (
     _assert_training_sentinel,
     _is_complete_trial_output,
 )
+from tests.helpers.two_family_profile import write_bound_timeseries
 
 _INFERENCE_SOURCE = Path(__file__).resolve().parents[3] / "execute_tools" / "inference_single.py"
 
@@ -101,14 +101,11 @@ class TestAssertTrainingSentinel:
 
 
 class TestCompleteTrialOutput:
-    """Interrupted inference may reuse only fully flushed ABRA outputs."""
+    """Interrupted inference may reuse only complete declared deliverables."""
 
     @staticmethod
     def _write(path: Path, channel1: np.ndarray, channel2: np.ndarray) -> None:
-        with h5py.File(path, "w") as handle:
-            timeseries = handle.create_group("timeseries")
-            timeseries.create_group("channel0001").create_dataset("timeseries", data=channel1)
-            timeseries.create_group("channel0002").create_dataset("timeseries", data=channel2)
+        write_bound_timeseries(path, channel1, channel2)
 
     def test_accepts_exact_readable_int8_channels(self, tmp_path):
         path = tmp_path / "complete.h5"
@@ -392,3 +389,6 @@ class TestTimingFlagAndInstrumentation:
             "Expected `if args.timing_out_json: ... json.dump(per_file_timings_ms, ...)` "
             "block in main(); not found."
         )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

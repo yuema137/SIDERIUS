@@ -90,7 +90,7 @@ HEALTH_CHECKS_CONFIG=""             # optional; empty preserves tuner's shipped 
 # argv stays byte-identical. Until this flag existed the chain could not
 # launch a composed run at all, even though run_one_iteration.py has parsed
 # --task_composition since P1.
-TASK_COMPOSITION=""                 # optional; empty == omit == un-composed (legacy)
+TASK_COMPOSITION=""                 # required task declaration
 DATA_SCOPE=""                       # DS6c: '4-9' / '4,5,6,7,8,9' / mixed; empty = complete dataset
 HEALTH_GATE_ENABLED=1               # DS6c: --no-health_gate_enabled disables the subsystem
 HEALTH_GATE_FILES=""                # DS6c: shared monitored-file list; empty = YAML defaults
@@ -107,22 +107,24 @@ ADVICE=""
 # child's argv is then byte-identical to a pre-feature chain.
 ADVICE_SHA256=""
 PLAN_OVERRIDES=""
-# DATA_DIR: unset by default. The TIDMAD data directory used for training,
-# inference, and scoring is resolved by the Python config layer
-# (execute_tools/data_paths.py -> tidmad_data_config.yaml), so the chain does
-# not need this value to locate data and stays portable across servers.
-# --data_dir only feeds evaluate_time_skill's optional real-dataset wall-time
-# warmup; when empty the time skill uses its static formula. Operators may
-# still pass --data_dir to enable warmup against a specific directory.
+WORKFLOW_PARAMETER_RULES=""          # JSON ParameterRules; empty = workflow unconstrained
+# DATA_DIR is caller-owned physical execution provenance. The generic chain
+# has no task, machine, environment-variable, or repository fallback; Python
+# startup refuses an omitted or unreadable root before any expensive work.
 DATA_DIR=""
 TRIAL_TIME_BUDGET_MINUTES=""        # §3.2: empty == omit == Python None
 FORMAL_TIME_BUDGET_MINUTES=""       # §3.2: empty == omit == Python None
+TRIAL_TIME_ADMISSION_SOURCE="measured"
+FORMAL_TIME_ADMISSION_SOURCE="measured"
 FORMAL_EVAL_PORTION=1.0             # Phase R §13: eval-side scope for formal training; default 1.0 = production full-clone (lower for smoke/CI)
 GPU_ADMISSION_MEASUREMENT_SOURCE="" # B-G3: reference, never a figure; empty == omit
 GPU_ADMISSION_ENFORCEMENT=""        # B-G3/D-B4: empty == omit == observe_only
 GPU_PAIR_CEILING_GIB=""             # B-G3: empty == omit == defer to env/default
 TRIAL_VRAM_BUDGET_GB=""             # §3.2: empty == omit == Python None
 FORMAL_VRAM_BUDGET_GB=""            # §3.2: empty == omit == Python None
+VRAM_PROBE_STEP_TIMEOUT_SECONDS=180  # one training-mode/inference footprint forward
+VRAM_PREFLIGHT_TOTAL_TIMEOUT_SECONDS=900 # complete isolated preflight worker
+VRAM_PREFLIGHT_HOST_MEMORY_LIMIT_GB="" # optional complete isolated process-tree RSS
 # §3.2 — Runtime-control operator surface (RT6, runtime design §4/§5).
 # Defaults synced to run_one_iteration.py (§5 provisional operational
 # values); 0 disables a numeric guardrail; booleans forwarded when 1.
@@ -142,6 +144,7 @@ RUNTIME_TRIAL_SAFETY_FACTOR=""      # §3.2: empty == omit == Python None; effec
 RUNTIME_FORMAL_SAFETY_FACTOR=""     # §3.2: empty == omit == Python None
 RUNTIME_WATCHDOG_SAFETY_FACTOR=""   # §3.2: empty == omit == Python None; V19 split — watchdog-only multiplier (5090 posture 3.5)
 RUNTIME_WATCHDOG_FLOOR_SECONDS=""   # arXiv #261: empty == omit == profile floor (legacy 60.0 when uncalibrated); explicit value overrides; V18 posture 120
+RUNTIME_VERIFICATION_MAX_WALL_SECONDS="" # empty == omit == adaptive verifier default; explicit value supports slow-step workloads
 EXPLORATION_MODE="auto"             # §3.2: matches Python default
 MINIMUM_BOLDNESS="0.05"             # §3.2: matches Python default
 # §3.2 — Adaptive-tuning brakes (default-synced to run_one_iteration.py)
@@ -175,19 +178,14 @@ IS_PSEUDO_TRAINING=0
 # halts the *chain* when the most recent N committed iters all carry
 # manifest.status='failed'. Default 3 matches the Python argparse default.
 MAX_FAILED_ITERATIONS=3
-# R-RETENTION-1 (Gold campaign release blocker, 2026-08-26). Default 1
-# preserves the historical chain behavior byte-identically: exploratory
-# chain runs emit --cleanup_denoised because per-experiment denoised .h5
-# files accumulate at ~76 GB / attempt. --no-cleanup_denoised (typed by the
-# campaign entrypoint) suppresses the token so the child argv carries NO
-# cleanup flag and official FORMAL execution RETAINS its deliverables — a
-# cleaned formal winner leaves Stage-3 nothing to pool
-# (docs/campaign/stage_artifact_contract.md, retention clause).
+# Default 1 preserves historical chain behavior: exploratory runs remove
+# large per-attempt denoised files. A caller that needs those deliverables
+# for later result composition can pass --no-cleanup_denoised; the child argv
+# then carries no cleanup flag.
 CLEANUP_DENOISED=1
-# --- F-SCANI-2 ENTRY CONDITION (release blocker, 2026-08-26) ---------------
+# --- Shell entry condition ---------------------------------------------------
 # "Initialise every consumed shell variable" is an ENTRY CONDITION of this
-# reused library (D-ARCH-2 reuse map: _chain_common.sh is REUSED_AS_IS by
-# the canonical campaign entrypoint), NOT a cleanup step performed by each
+# reused library, not a cleanup step performed by each
 # caller. Every variable build_app_args reads is assigned HERE, at source
 # time, BEFORE parse_chain_args runs — so the only route into the child
 # argv is a flag.
@@ -197,7 +195,7 @@ CLEANUP_DENOISED=1
 # ran a validation posture reached APP_ARGS directly. That is not a
 # cosmetic hole: --validation_fixed_candidate_plan BYPASSES THE PROPOSER,
 # substituting one fixed candidate plan for the whole campaign, and
-# launch_prior_baseline_experiment.sh REFUSES that flag by name (:150-154)
+# Task-specific launchers must refuse ambient validation overrides themselves.
 # — the environment route went around a refusal that was already written.
 #
 # The `:-` form is retained at the read sites on purpose: it is what makes
@@ -280,85 +278,6 @@ MEM="48G"
 GPUS=1
 CPUS=8
 
-# ---------------------------------------------------------------------------
-# filter_roster — V19 O2 selective launching (design:
-# docs/design/v19_priorities/o1a_o2_operator_tooling.md §2).
-#
-# Side-effect-free selection of roster entries by run_name. Pure stdout/
-# return-code contract so it is directly unit-testable without GPU,
-# screen, or any launch.
-#
-#   filter_roster "<only_csv>" "<entry1>" "<entry2>" ...
-#
-#   * entries are "run_name:rest..." specs (the wave-roster format);
-#   * only_csv == ""  → every entry, original order (identity — the
-#     no-`--only` path must remain byte-identical to prior behavior);
-#   * names are comma-separated, surrounding whitespace trimmed;
-#   * unknown name        → error listing the valid names, rc=1;
-#   * duplicate name      → error, rc=1 (operator confusion is surfaced,
-#     never silently deduplicated — operator decision 2026-07-29);
-#   * empty/blank selection ("," / "  ") → error, rc=1;
-#   * CANONICAL ROSTER ORDER is preserved regardless of the order the
-#     names were given (launch stagger/topology follow roster order —
-#     operator decision 2026-07-29);
-#   * matching entries are printed one per line; NO fallback to "all"
-#     on any error path.
-# ---------------------------------------------------------------------------
-filter_roster() {
-  local only_csv="$1"; shift
-  local roster=("$@")
-
-  if [ -z "$only_csv" ]; then
-    printf '%s\n' "${roster[@]}"
-    return 0
-  fi
-
-  local valid_names=()
-  local spec
-  for spec in "${roster[@]}"; do
-    valid_names+=("${spec%%:*}")
-  done
-
-  # Parse + trim + validate the requested names.
-  local requested=() raw name
-  IFS=',' read -ra _parts <<< "$only_csv"
-  for raw in "${_parts[@]}"; do
-    name="$(echo "$raw" | xargs)"   # trim surrounding whitespace
-    [ -z "$name" ] && continue
-    local seen
-    for seen in ${requested[@]+"${requested[@]}"}; do
-      if [ "$seen" = "$name" ]; then
-        echo "[filter_roster] duplicate name in --only: '$name'" >&2
-        return 1
-      fi
-    done
-    local known=0 v
-    for v in "${valid_names[@]}"; do
-      [ "$v" = "$name" ] && known=1
-    done
-    if [ "$known" = 0 ]; then
-      echo "[filter_roster] unknown name in --only: '$name' (valid: ${valid_names[*]})" >&2
-      return 1
-    fi
-    requested+=("$name")
-  done
-
-  if [ "${#requested[@]}" -eq 0 ]; then
-    echo "[filter_roster] --only selected nothing (valid: ${valid_names[*]})" >&2
-    return 1
-  fi
-
-  # Emit in CANONICAL roster order.
-  for spec in "${roster[@]}"; do
-    name="${spec%%:*}"
-    local want
-    for want in "${requested[@]}"; do
-      [ "$want" = "$name" ] && printf '%s\n' "$spec"
-    done
-  done
-  return 0
-}
-
 parse_chain_args() {
     while [[ $# -gt 0 ]]; do
       case $1 in
@@ -391,6 +310,7 @@ parse_chain_args() {
         --advice)                 ADVICE="$2"; shift 2 ;;
         --advice_sha256)          ADVICE_SHA256="$2"; shift 2 ;;
         --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
+        --workflow_parameter_rules) WORKFLOW_PARAMETER_RULES="$2"; shift 2 ;;
         --llm_config)             LLM_CONFIG="$2"; shift 2 ;;
         --required_runtime_profile_path) REQUIRED_RUNTIME_PROFILE_PATH="$2"; shift 2 ;;
         --required_runtime_profile) REQUIRED_RUNTIME_PROFILE="$2"; shift 2 ;;
@@ -404,6 +324,8 @@ parse_chain_args() {
         --data_dir)               DATA_DIR="$2"; shift 2 ;;
         --trial_time_budget_minutes) TRIAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
         --formal_time_budget_minutes) FORMAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
+        --trial_time_admission_source) TRIAL_TIME_ADMISSION_SOURCE="$2"; shift 2 ;;
+        --formal_time_admission_source) FORMAL_TIME_ADMISSION_SOURCE="$2"; shift 2 ;;
         --max_steps_per_attempt)  MAX_STEPS_PER_ATTEMPT="$2"; shift 2 ;;
         --min_formal_batch_size)  MIN_FORMAL_BATCH_SIZE="$2"; shift 2 ;;
         --allow_extreme_steps)    ALLOW_EXTREME_STEPS=1; shift ;;
@@ -421,12 +343,16 @@ parse_chain_args() {
         --runtime_formal_safety_factor) RUNTIME_FORMAL_SAFETY_FACTOR="$2"; shift 2 ;;
         --runtime_watchdog_safety_factor) RUNTIME_WATCHDOG_SAFETY_FACTOR="$2"; shift 2 ;;
         --runtime_watchdog_floor_seconds) RUNTIME_WATCHDOG_FLOOR_SECONDS="$2"; shift 2 ;;
+        --runtime_verification_max_wall_seconds) RUNTIME_VERIFICATION_MAX_WALL_SECONDS="$2"; shift 2 ;;
         --formal_eval_portion)       FORMAL_EVAL_PORTION="$2"; shift 2 ;;
         --gpu_admission_measurement_source) GPU_ADMISSION_MEASUREMENT_SOURCE="$2"; shift 2 ;;
         --gpu_admission_enforcement) GPU_ADMISSION_ENFORCEMENT="$2"; shift 2 ;;
         --gpu_pair_ceiling_gib)   GPU_PAIR_CEILING_GIB="$2"; shift 2 ;;
         --trial_vram_budget_gb)   TRIAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
         --formal_vram_budget_gb)  FORMAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
+        --vram_probe_step_timeout_seconds) VRAM_PROBE_STEP_TIMEOUT_SECONDS="$2"; shift 2 ;;
+        --vram_preflight_total_timeout_seconds) VRAM_PREFLIGHT_TOTAL_TIMEOUT_SECONDS="$2"; shift 2 ;;
+        --vram_preflight_host_memory_limit_gb) VRAM_PREFLIGHT_HOST_MEMORY_LIMIT_GB="$2"; shift 2 ;;
         --exploration_mode)       EXPLORATION_MODE="$2"; shift 2 ;;
         --minimum_boldness)       MINIMUM_BOLDNESS="$2"; shift 2 ;;
         --mode)                   MODE="$2"; shift 2 ;;
@@ -665,6 +591,9 @@ build_app_args() {
     if [ -n "$PLAN_OVERRIDES" ]; then
         APP_ARGS+=(--plan_overrides "$PLAN_OVERRIDES")
     fi
+    if [ -n "$WORKFLOW_PARAMETER_RULES" ]; then
+        APP_ARGS+=(--workflow_parameter_rules "$WORKFLOW_PARAMETER_RULES")
+    fi
     if [ -n "$DATA_DIR" ]; then
         APP_ARGS+=(--data_dir "$DATA_DIR")
     fi
@@ -674,6 +603,8 @@ build_app_args() {
     if [ -n "$FORMAL_TIME_BUDGET_MINUTES" ]; then
         APP_ARGS+=(--formal_time_budget_minutes "$FORMAL_TIME_BUDGET_MINUTES")
     fi
+    APP_ARGS+=(--trial_time_admission_source "$TRIAL_TIME_ADMISSION_SOURCE")
+    APP_ARGS+=(--formal_time_admission_source "$FORMAL_TIME_ADMISSION_SOURCE")
     # RT6 runtime-control surface: numeric flags always cross explicitly.
     # The Formal-only batch floor defaults to 0 (disabled), preserving
     # Trial/Formal parity unless a task or campaign opts in.
@@ -694,6 +625,9 @@ build_app_args() {
     # pinning the legacy 60.0 as a field-level override.
     if [ -n "$RUNTIME_WATCHDOG_FLOOR_SECONDS" ]; then
         APP_ARGS+=(--runtime_watchdog_floor_seconds "$RUNTIME_WATCHDOG_FLOOR_SECONDS")
+    fi
+    if [ -n "$RUNTIME_VERIFICATION_MAX_WALL_SECONDS" ]; then
+        APP_ARGS+=(--runtime_verification_max_wall_seconds "$RUNTIME_VERIFICATION_MAX_WALL_SECONDS")
     fi
     if [ "$ALLOW_EXTREME_STEPS" -eq 1 ]; then
         APP_ARGS+=(--allow_extreme_steps)
@@ -789,6 +723,11 @@ build_app_args() {
     if [ -n "$FORMAL_VRAM_BUDGET_GB" ]; then
         APP_ARGS+=(--formal_vram_budget_gb "$FORMAL_VRAM_BUDGET_GB")
     fi
+    APP_ARGS+=(--vram_probe_step_timeout_seconds "$VRAM_PROBE_STEP_TIMEOUT_SECONDS")
+    APP_ARGS+=(--vram_preflight_total_timeout_seconds "$VRAM_PREFLIGHT_TOTAL_TIMEOUT_SECONDS")
+    if [ -n "$VRAM_PREFLIGHT_HOST_MEMORY_LIMIT_GB" ]; then
+        APP_ARGS+=(--vram_preflight_host_memory_limit_gb "$VRAM_PREFLIGHT_HOST_MEMORY_LIMIT_GB")
+    fi
     if [ -n "$DEGENERATE_PENALTY_SCORE" ]; then
         APP_ARGS+=(--degenerate_penalty_score "$DEGENERATE_PENALTY_SCORE")
     fi
@@ -817,7 +756,7 @@ print_chain_header() {
         echo "  LLM config       : $LLM_CONFIG"
     fi
     echo "  HealthGate config: ${HEALTH_CHECKS_CONFIG:-(shipped default)}"
-    echo "  Task composition : ${TASK_COMPOSITION:-(none — un-composed legacy run)}"
+    echo "  Task composition : ${TASK_COMPOSITION:-(missing)}"
     echo "  Required profile : ${REQUIRED_RUNTIME_PROFILE:-(none — measured > shipped > uncalibrated ladder)}${REQUIRED_RUNTIME_PROFILE:+ sha256=${REQUIRED_RUNTIME_PROFILE_SHA256:-(unset)} artifact=${REQUIRED_RUNTIME_PROFILE_PATH:-(unset)}}"
     echo "  Data scope       : ${DATA_SCOPE:-(complete dataset)}"
     echo "  HealthGate       : enabled=$HEALTH_GATE_ENABLED monitored=${HEALTH_GATE_FILES:-(YAML defaults)}"
@@ -863,7 +802,7 @@ print_chain_header() {
         echo "    Pseudo-mode    : off (production)"
     fi
     if [ -n "$TRIAL_TIME_BUDGET_MINUTES" ] || [ -n "$FORMAL_TIME_BUDGET_MINUTES" ]; then
-        echo "    Time budgets   : trial=${TRIAL_TIME_BUDGET_MINUTES:-(none)}min, formal=${FORMAL_TIME_BUDGET_MINUTES:-(none)}min, eval_portion=$FORMAL_EVAL_PORTION"
+        echo "    Time budgets   : trial=${TRIAL_TIME_BUDGET_MINUTES:-(none)}min (${TRIAL_TIME_ADMISSION_SOURCE}), formal=${FORMAL_TIME_BUDGET_MINUTES:-(none)}min (${FORMAL_TIME_ADMISSION_SOURCE}), eval_portion=$FORMAL_EVAL_PORTION"
     fi
     if [ -n "$TRIAL_VRAM_BUDGET_GB" ] || [ -n "$FORMAL_VRAM_BUDGET_GB" ]; then
         echo "    VRAM budgets   : trial=${TRIAL_VRAM_BUDGET_GB:-(auto)}GB, formal=${FORMAL_VRAM_BUDGET_GB:-(auto)}GB"
@@ -1090,7 +1029,7 @@ _manifest_status() {  # path -> status on stdout, empty if unreadable
 # old clean verdict could ever see it: the file existed, and the child's
 # exit status was 0. A chain whose every iteration exhausted its gates
 # trained nothing, scored nothing, printed CHAIN COMPLETE and exited 0 —
-# and `v19_queue_runner.sh` read `EXIT=0`, resolved `DISPOSITION=complete`
+# and an external scheduler read `EXIT=0`, resolved `DISPOSITION=complete`
 # and advanced the campaign wave.
 #
 # `no_records` is a DESIGNED chainable state, not a crash, so it is not

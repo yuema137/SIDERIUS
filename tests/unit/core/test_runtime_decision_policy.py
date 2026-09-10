@@ -314,3 +314,6 @@ class TestCharacterization:
         assert wrapped.expected_seconds == pytest.approx(legacy["estimated_minutes"] * 60.0)
         assert wrapped.provenance == "static_uncalibrated"
         assert wrapped.blocking_eligible is False
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

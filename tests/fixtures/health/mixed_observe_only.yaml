@@ -1,0 +1,25 @@
+health_gates:
+  - id: synthetic_stability_blocking
+    gate_role: blocking
+    after_round: every
+    short_circuit: true
+    checks:
+      - name: synthetic_stability_check
+        config: {}
+    on_pass:
+      action: continue
+    on_fail:
+      action: continue
+    reason: Synthetic blocking-role gate observed without enforcement.
+  - id: synthetic_diagnostics
+    gate_role: observational
+    after_round: every
+    short_circuit: false
+    checks:
+      - name: synthetic_diagnostic_check
+        config: {}
+    on_pass:
+      action: continue
+    on_fail:
+      action: continue
+    reason: Synthetic observational policy for launch-contract tests.

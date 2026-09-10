@@ -22,6 +22,8 @@ from __future__ import annotations
 import tempfile
 from unittest.mock import patch
 
+import pytest
+
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
@@ -135,3 +137,6 @@ def test_unfrozen_launch_lets_the_plan_execute_the_inverse_leg(tmp_path):
         assert rec["trial_portion"] == 0.02
         assert rec["train_portion"] == 0.5
         assert rec["eval_portion"] == 0.02
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

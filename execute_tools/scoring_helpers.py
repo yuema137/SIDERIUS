@@ -58,8 +58,7 @@ def file_vector_to_log_space(
     vector in *linear* units (``file_sum / n_segments`` of the normalised
     score). The reference per-file columns
     (``ReferenceScores.raw_per_file_log`` and ``gt_per_file_log``) are
-    in *log* units (``math.log(mean_linear, 5.27)`` — see
-    ``compute_raw_baseline._per_file_log_score``). ``build_score_table``
+    in *log* units (``math.log(mean_linear, 5.27)``). ``build_score_table``
     expects the model column in the same log-space units so the rendered
     markdown is unit-consistent across all three columns.
 

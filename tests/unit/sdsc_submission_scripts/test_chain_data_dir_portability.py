@@ -38,6 +38,10 @@ def _dry_run(tmp_path, *extra_args):
         "1",
         "--seed_paths",
         str(seed),
+        "--task_composition",
+        str(_REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"),
+        "--data_dir",
+        str(tmp_path),
         "--dry-run",
         *extra_args,
     ]
@@ -55,10 +59,11 @@ def test_no_hardcoded_old_server_path(tmp_path):
     assert _OLD_HARDCODED_PATH not in (r.stdout + r.stderr)
 
 
-def test_no_data_dir_flag_when_unset(tmp_path):
-    """No --data_dir supplied → the rendered invocation omits it entirely."""
-    r = _dry_run(tmp_path)
-    assert "--data_dir" not in r.stdout
+def test_missing_data_dir_is_refused(tmp_path):
+    """An empty explicit data root is refused before rendering work."""
+    r = _dry_run(tmp_path, "--data_dir", "")
+    assert r.returncode != 0
+    assert "Required: --data_dir DIRECTORY" in r.stderr
 
 
 def test_explicit_data_dir_preserved(tmp_path):

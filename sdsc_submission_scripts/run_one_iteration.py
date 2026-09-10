@@ -66,6 +66,7 @@ from dotenv import load_dotenv
 
 from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
 from agent.schemas.ordering import ResolvedOrdering, parse_file_order_cli
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import OutputTypeName
 from agent.schemas.telemetry import LLMBridgeContextError
 from agent.skills.evaluate_vram_skill.preflight_adapter import PREFLIGHT_EXECUTION_MODE
@@ -538,9 +539,8 @@ ADVICE_PER_AGENT_KEYS = ("interpret", "propose", "implement", "validate", "tune"
 ADVICE_RECOGNISED_KEYS = (*ADVICE_PER_AGENT_KEYS, "mindset")
 
 #: The ONE way to say "this key is deliberately not advice". A leading
-#: underscore marks an inert annotation block — the convention already in
-#: ``advice/workflow/gate2_smoke_advice.json``, whose ``_meta`` records why
-#: that artifact exists. It is spelled as an explicit opt-out precisely so
+#: underscore marks an inert annotation block. It is spelled as an explicit
+#: opt-out precisely so
 #: that an unrecognised key WITHOUT it can be treated as the typo it almost
 #: always is, instead of being dropped in silence.
 ADVICE_INERT_KEY_PREFIX = "_"
@@ -804,7 +804,7 @@ class LaunchIdentity:
 
     experiment_arm: str | None
     lit_review_enabled: bool
-    lit_review_config_path: str
+    lit_review_config_path: str | None
     lit_review_config_sha256: str | None
     baseline_isolation: bool = False
     advice_path: str | None = None
@@ -910,9 +910,8 @@ def write_manifest(
         # records, trial and formal mixed (records.py), so it answers "is
         # there an artifact for the next iteration to consume?" and nothing
         # else. `status` keeps deriving from it because the manifest status
-        # vocabulary is FROZEN at completed|failed|no_records
-        # (docs/campaign/stage_artifact_contract.md section 1) and is the
-        # token core/resume.py, stage3 and the inspector branch on — a
+        # vocabulary is completed|failed|no_records and is shared by
+        # core/resume.py, result consumers, and the inspector. A
         # trial-only iteration DID produce a consumable run_output and a
         # restorable plugin.
         score = tune_output.best_denoising_score
@@ -1601,6 +1600,17 @@ def build_parser() -> argparse.ArgumentParser:
         'E.g. \'{"trial_portion": 0.2, "train_portion": 1.0}\'. '
         "Keys must be valid ExperimentPlan fields.",
     )
+    parser.add_argument(
+        "--workflow_parameter_rules",
+        type=str,
+        default=None,
+        help=(
+            "JSON object using the same ParameterRules schema as a task manifest. "
+            "Omitted leaves the workflow unconstrained; exact rules lock values, "
+            "while range, allowed, and registered predicate rules validate the "
+            "agent's proposal."
+        ),
+    )
     # --- Workflow-level CLI flags (Phase 6.8 Commit 11) ---
     parser.add_argument(
         "--llm_config",
@@ -1641,10 +1651,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--task_composition",
         type=str,
-        default=None,
+        required=True,
         help=(
-            "Path to a YAML task-composition manifest. Omitted = the legacy "
-            "un-composed run, byte-identical to its pre-Step-10 behaviour. "
+            "Path to a required YAML task-composition manifest. "
             "Supplied, it binds this run's task data path, dataset profile, "
             "metric, Health family, interpretation blocks and task "
             "description/forward contract EXPLICITLY, and every unresolvable "
@@ -1815,13 +1824,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--trial_time_budget_minutes",
         type=float,
         default=None,
-        help="Wall-time budget (minutes) for trial-mode time gate. None disables.",
+        help="Trial wall-time budget in minutes. None disables Trial time admission.",
     )
     parser.add_argument(
         "--formal_time_budget_minutes",
         type=float,
         default=None,
-        help="Wall-time budget (minutes) for formal-mode time gate. None disables.",
+        help="Formal wall-time budget in minutes. None disables Formal time admission.",
+    )
+    parser.add_argument(
+        "--trial_time_admission_source",
+        choices=("forecast", "measured"),
+        default="measured",
+        help=(
+            "Single Trial wall-time admission authority. 'forecast' uses the "
+            "advance workload forecast; 'measured' uses executing-device evidence."
+        ),
+    )
+    parser.add_argument(
+        "--formal_time_admission_source",
+        choices=("forecast", "measured"),
+        default="measured",
+        help=(
+            "Single Formal wall-time admission authority. 'forecast' uses the "
+            "advance workload forecast; 'measured' uses executing-device evidence."
+        ),
     )
     # --- Runtime-control operator surface (RT6, runtime design §4/§5) ---
     # The chain is the OPERATIONAL surface: §5 provisional defaults live
@@ -1896,6 +1923,14 @@ def build_parser() -> argparse.ArgumentParser:
         "(schema-mirroring); V18 production posture 120.0.",
     )
     parser.add_argument(
+        "--runtime_verification_max_wall_seconds",
+        type=float,
+        default=None,
+        help="Maximum wall time for adaptive in-subprocess runtime verification. "
+        "Omit to preserve the verifier default. The verification steps are "
+        "the first production steps, not a separate probe workload.",
+    )
+    parser.add_argument(
         "--execution_regime",
         type=str,
         choices=sorted(get_args(ExecutionRegime)),
@@ -1951,11 +1986,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--data_dir",
         type=str,
-        default=None,
-        help="Physical dataset directory for this run — an OPERATOR OVERRIDE. "
-        "Omit it and the machine-local tidmad_data_config.yaml "
-        "(execute_tools.data_paths.TIDMAD_DATA_DIR) answers instead. Either "
-        "way the value is resolved and validated at launch, before any LLM "
+        required=True,
+        help="Physical dataset directory for this run. "
+        "The value is resolved and validated at launch, before any LLM "
         "or training work, and the resolved path is what reaches the "
         "real-dataset warmup AND the pre-phase GPU measurement.",
     )
@@ -2009,6 +2042,35 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Per-mode VRAM ceiling (GB) for formal rounds. None uses free×0.8.",
+    )
+    parser.add_argument(
+        "--vram_probe_step_timeout_seconds",
+        type=float,
+        default=180.0,
+        help=(
+            "Maximum wall time for one training-mode or inference VRAM "
+            "footprint forward (default: 180). This is not an epoch, "
+            "optimizer step, or candidate-runtime budget."
+        ),
+    )
+    parser.add_argument(
+        "--vram_preflight_total_timeout_seconds",
+        type=float,
+        default=900.0,
+        help=(
+            "Maximum wall time for the complete isolated VRAM preflight "
+            "worker (default: 900), independent of Trial/Formal runtime budgets."
+        ),
+    )
+    parser.add_argument(
+        "--vram_preflight_host_memory_limit_gb",
+        type=float,
+        default=None,
+        help=(
+            "Maximum resident host memory in GiB for the complete isolated "
+            "VRAM-preflight process tree. Omission preserves the deployment "
+            "default, normally 24 GiB. Independent of the GPU VRAM ceiling."
+        ),
     )
     parser.add_argument(
         "--attempts_per_round",
@@ -2105,14 +2167,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ml_lit_review_config",
         type=str,
-        default="configs/lit_review_config.yaml",
+        default=None,
         help=(
-            "Path to the lit-review YAML config (default: "
-            "configs/lit_review_config.yaml). Resolved relative to "
-            "SIDERIUS_ROOT inside the workflow. Pass an absolute path "
-            "or a different relative path to use a non-default config "
-            "without editing the default file (Design Decision 2, "
-            "2026-06-11)."
+            "Explicit path to the task or experiment's lit-review YAML config. "
+            "Required when literature review is enabled; relative paths resolve "
+            "against SIDERIUS_ROOT."
         ),
     )
     # arXiv U1 (#254) — the OPAQUE experiment-arm label. Pinned into the
@@ -2226,7 +2285,7 @@ def _experiment_arm_label(value: str) -> str:
     return value
 
 
-def resolve_lit_review_enabled(cli_flag: bool | None, config_path: str) -> bool:
+def resolve_lit_review_enabled(cli_flag: bool | None, config_path: str | None) -> bool:
     """Resolve the lit-review enable flag (Design Decisions 1 + 2, 2026-06-11).
 
     Priority: CLI flag (when explicitly set) > the YAML's top-level
@@ -2238,6 +2297,8 @@ def resolve_lit_review_enabled(cli_flag: bool | None, config_path: str) -> bool:
     """
     if cli_flag is not None:
         return cli_flag
+    if config_path is None:
+        return False
     yaml_path = resolve_lit_review_config_path(config_path)
     try:
         with open(yaml_path, encoding="utf-8") as f:
@@ -2512,6 +2573,13 @@ def compute_expected_invariants(
             # pre-flight and `run_workflow`'s own lock for this workspace
             # cannot contradict each other.
             formal_eval_portion=args.formal_eval_portion,
+            workflow_parameter_rules=(
+                None
+                if args.workflow_parameter_rules is None
+                else args.workflow_parameter_rules.model_dump(mode="json", exclude_none=True)
+            ),
+            trial_time_admission_source=args.trial_time_admission_source,
+            formal_time_admission_source=args.formal_time_admission_source,
         ),
     )
     return invariants
@@ -2619,6 +2687,14 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
         args.plan_overrides = json.loads(args.plan_overrides)
     else:
         args.plan_overrides = None
+    try:
+        args.workflow_parameter_rules = (
+            ParameterRules.model_validate_json(args.workflow_parameter_rules)
+            if args.workflow_parameter_rules
+            else None
+        )
+    except ValueError as exc:
+        parser.error(f"--workflow_parameter_rules is invalid: {exc}")
 
     # DS7 — deprecated no-op strategy flags (removal tracked as FU-2).
     if args.trial_strategy != "snapshot" or args.target_files is not None:
@@ -2686,7 +2762,11 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
         "start_iteration": args.start_iteration,
         "experiment_arm": identity.experiment_arm,
         "lit_review_enabled": identity.lit_review_enabled,
-        "lit_review_config_path": resolve_lit_review_config_path(identity.lit_review_config_path),
+        "lit_review_config_path": (
+            resolve_lit_review_config_path(identity.lit_review_config_path)
+            if identity.lit_review_config_path is not None
+            else None
+        ),
         "lit_review_config_sha256": identity.lit_review_config_sha256,
         "baseline_isolation": identity.baseline_isolation,
         "task_composition": args.task_composition or None,
@@ -2707,6 +2787,7 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
         "runtime_watchdog_enabled": watchdog_policy.enabled,
         "runtime_watchdog_safety_factor": watchdog_policy.safety_factor,
         "runtime_watchdog_floor_seconds": watchdog_policy.floor_seconds,
+        "runtime_verification_max_wall_seconds": (args.runtime_verification_max_wall_seconds),
         "runtime_watchdog_provenance": watchdog_policy.provenance,
         # F-H100-WD-1-PRETAG — the DECLARED requirement, recorded whether or
         # not it was made, so "no binding was declared" is an observable
@@ -2854,11 +2935,8 @@ def main():
 
     # --- Dataset-directory resolution preflight -------------------------
     # Resolve WHERE the data physically lives ONCE, here, before anything
-    # expensive. `--data_dir` is the operator override; otherwise the
-    # machine-local `tidmad_data_config.yaml` answers, which is the
-    # precedence `probe_production.py` already documents as F-1a and the
-    # chain-shell portability test already assumes ("the Python config
-    # layer resolves the data directory").
+    # expensive. `--data_dir` is an explicit caller-owned input; the generic
+    # framework never selects a task or machine-local fallback.
     #
     # Before this existed nothing on the launch path performed that
     # resolution, so a chain launched without `--data_dir` carried
@@ -3130,6 +3208,11 @@ def main():
             current_iter=args.start_iteration,
             seed_paths=resolved_seeds,
             expected_invariants=expected_invariants,
+            dataset_partition_count=(
+                run_composition.dataset_profile.partition_count
+                if run_composition is not None
+                else resolve_dataset_profile().partition_count
+            ),
         )
     except (ResumeError, RunInvariantsViolation) as e:
         print(f"FAIL: restore_prior_state refused to chain: {e}")
@@ -3201,8 +3284,6 @@ def main():
         # `measurement_capability.py` states this contract explicitly:
         # "Callers that know the task supply those." The workflow must not
         # name a task resolver itself.
-        from execute_tools.data_paths import resolve_tidmad_measurement_capability
-
         # Step 10 / P1 — the composition EDGE.
         #
         # Resolved here, before the workflow, for the same reason the
@@ -3235,14 +3316,8 @@ def main():
         # ADMITTED on the strength of another task's dataset where it is
         # present, which is every campaign host.
         #
-        # The branch is on composition PRESENCE, exactly like the composition
-        # edge itself, never on a task name. Un-composed keeps the identical
-        # zero-argument legacy call, so its identity and its availability
-        # verdict are unchanged.
-        measurement_capability = (
-            resolve_composed_measurement_capability(run_composition, dataset_root=args.data_dir)
-            if run_composition is not None
-            else resolve_tidmad_measurement_capability()
+        measurement_capability = resolve_composed_measurement_capability(
+            run_composition, dataset_root=args.data_dir
         )
         # Step 11 C4 — the run's resolved physical data root travels with
         # the composition binding. `args.data_dir` was already put through
@@ -3286,12 +3361,19 @@ def main():
                     bypass_formal_time_budget_minutes=args.bypass_formal_time_budget_minutes,
                     trial_time_budget_minutes=args.trial_time_budget_minutes,
                     formal_time_budget_minutes=args.formal_time_budget_minutes,
+                    trial_time_admission_source=args.trial_time_admission_source,
+                    formal_time_admission_source=args.formal_time_admission_source,
                     data_dir=args.data_dir,
                     gpu_admission_measurement_source=args.gpu_admission_measurement_source,
                     gpu_admission_enforcement=args.gpu_admission_enforcement,
                     gpu_pair_ceiling_gib=args.gpu_pair_ceiling_gib,
                     trial_vram_budget_gb=args.trial_vram_budget_gb,
                     formal_vram_budget_gb=args.formal_vram_budget_gb,
+                    vram_probe_step_timeout_seconds=args.vram_probe_step_timeout_seconds,
+                    vram_preflight_total_timeout_seconds=(
+                        args.vram_preflight_total_timeout_seconds
+                    ),
+                    vram_preflight_host_memory_limit_gb=(args.vram_preflight_host_memory_limit_gb),
                     attempts_per_round=args.attempts_per_round,
                     attempts_per_formal_round=args.attempts_per_formal_round,
                     max_fail_rounds=args.max_fail_rounds,
@@ -3304,6 +3386,9 @@ def main():
                     runtime_formal_safety_factor=args.runtime_formal_safety_factor,
                     runtime_watchdog_safety_factor=args.runtime_watchdog_safety_factor,
                     runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
+                    runtime_verification_max_wall_seconds=(
+                        args.runtime_verification_max_wall_seconds
+                    ),
                     human_advice_interpret=args.human_advice_interpret,
                     human_advice_propose=args.human_advice_propose,
                     human_advice_implement=args.human_advice_implement,
@@ -3311,6 +3396,7 @@ def main():
                     human_advice_tune=args.human_advice_tune,
                     human_advice_mindset=args.human_advice_mindset,
                     plan_overrides=args.plan_overrides,
+                    workflow_parameter_rules=args.workflow_parameter_rules,
                     exploration_mode=args.exploration_mode,
                     minimum_boldness=args.minimum_boldness,
                     max_impl_attempts=args.max_impl_attempts,

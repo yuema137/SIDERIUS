@@ -117,10 +117,14 @@ class TestImmutability:
 #:   concrete 0.1 defaults were dead transit (no tuner consumer) that made
 #:   "typed" indistinguishable from "defaulted", which is how the frozen
 #:   campaign portions failed to reach execution.
+#: * Repository separation (2026-08-31): literature-review science is owned by
+#:   the caller. ``None`` keeps review disabled unless an enabled run supplies
+#:   an explicit task-owned config; the framework ships no scientific default.
 POST_REFACTOR_DEFAULT_CHANGES: dict[str, object] = {
     "trial_portion": None,
     "train_portion": None,
     "eval_portion": None,
+    "lit_review_config_path": None,
 }
 
 #: * ``bypass_formal_time_budget_minutes`` — Lane F3 / F-BYPASS-WD-1: the
@@ -142,6 +146,21 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     # for every run that declares no advice.
     "advice_path": None,
     "advice_sha256": None,
+    # Generic VRAM-preflight watchdogs (2026-09-01). Pure transit from the
+    # workflow to the isolated worker; defaults preserve the pre-feature
+    # production adapter's 180 s per-forward and 900 s worker deadlines.
+    "vram_probe_step_timeout_seconds": 180.0,
+    "vram_preflight_total_timeout_seconds": 900.0,
+    "vram_preflight_host_memory_limit_gb": None,
+    # Unified workflow parameter rules (2026-09-01). The validated rules are
+    # transit-only here; the planner owns their semantics and run identity.
+    "workflow_parameter_rules": None,
+    # One admission authority per candidate role. These fields are pure
+    # workflow-to-tuner transport; the runtime policy owns enforcement.
+    "trial_time_admission_source": "measured",
+    "formal_time_admission_source": "measured",
+    # Caller-configurable measurement window; None retains runtime defaults.
+    "runtime_verification_max_wall_seconds": None,
 }
 
 

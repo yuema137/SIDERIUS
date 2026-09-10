@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import json
 
-import h5py
 import numpy as np
+import pytest
 
 from execute_tools.health_checks._composition import (
     VALUE_SCALE_PARAMETER,
@@ -22,13 +22,11 @@ from execute_tools.health_checks._composition import (
 )
 from execute_tools.health_checks.output_std import OutputStdCheck
 from execute_tools.health_checks.schemas import HealthCheckContext
+from tests.helpers.two_family_profile import write_bound_timeseries
 
 
 def _write_ch1(path, ch1: np.ndarray) -> None:
-    with h5py.File(str(path), "w") as f:
-        ts = f.create_group("timeseries")
-        c1 = ts.create_group("channel0001")
-        c1.create_dataset("timeseries", data=ch1, chunks=True)
+    write_bound_timeseries(path, ch1)
 
 
 def _ctx(**overrides) -> HealthCheckContext:
@@ -133,3 +131,6 @@ class TestOutputStdCheck:
         r = OutputStdCheck().run(ctx, config=_cfg(**{"min_std_mv": 100.0}))
         assert r.passed is False
         assert r.metrics["threshold_mv"] == 100.0
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

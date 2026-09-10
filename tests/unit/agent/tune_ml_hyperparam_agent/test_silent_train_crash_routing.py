@@ -379,3 +379,6 @@ class TestNonSilentCrashStaysAsInference:
         assert rec["status"] == "error_inference_oom", (
             f"CUDA OOM mis-routed as {rec['status']!r}; the prefix check is over-matching."
         )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

@@ -21,13 +21,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks._composition import (
     DEFAULT_DISPOSITION_POLICY,
-    LEGACY_DEFAULT_TASK_HEALTH_CONFIG,
     SIDERIUS_ROOT,
     DispositionPolicy,
     HealthBindingState,
@@ -289,6 +288,16 @@ class GateConfig(BaseModel):
     )
 
 
+class PersistedHealthPluginIdentity(BaseModel):
+    """Canonical plugin provenance carried by a materialized Health config."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    configured_ref: str
+    member: str = ""
+    content_sha256: str
+
+
 class HealthChecksConfig(BaseModel):
     """The rev-6 HealthGate YAML root.
 
@@ -352,6 +361,14 @@ class HealthChecksConfig(BaseModel):
             "and while it was dropped as an undeclared extra an "
             "``explicit_none`` effective config read back as 'no roster "
             "supplied' and acquired the legacy task's family (F-6)."
+        ),
+    )
+    resolved_plugins: tuple[PersistedHealthPluginIdentity, ...] = Field(
+        default=(),
+        exclude=True,
+        description=(
+            "Canonical plugin identities read from a materialized effective "
+            "config. They are provenance, not a second plugin-loading path."
         ),
     )
 
@@ -667,11 +684,9 @@ def _load_task_binding(
     """
     if binding is HealthBindingState.EXPLICIT_NONE:
         return None, ()
-    resolved_ref = (
-        LEGACY_DEFAULT_TASK_HEALTH_CONFIG
-        if binding is HealthBindingState.LEGACY_OMITTED
-        else binding
-    )
+    if binding is HealthBindingState.LEGACY_OMITTED:
+        return None, ()
+    resolved_ref = binding
 
     from execute_tools.health_checks._plugin_binding import (
         load_task_health_plugins,
@@ -807,10 +822,10 @@ def materialize_effective_config(
     (same inputs, different body — e.g. the shipped
     ``configs/health_checks.yaml`` changed underneath the workspace).
 
-    Step 08b: ``task_health_binding`` selects between the three binding
-    states (§3.10). The default — the argument omitted — is the pre-08b
-    compatibility path and produces a BYTE-IDENTICAL artifact, so every
-    existing workspace and every existing caller is unaffected.
+    ``task_health_binding`` selects between the three binding states (§3.10).
+    An omitted binding means that no task roster was declared; it does not
+    silently select a framework-shipped scientific task. Tasks that use
+    Health checks pass their own config path explicitly.
 
     Returns:
         (effective_config_path, body_sha256)
@@ -830,11 +845,16 @@ def materialize_effective_config(
             dataset_partition_count=dataset_partition_count,
         )
 
-    # State A adds no keys, so its document is the pre-08b one exactly.
-    document = {
-        **cfg.model_dump(mode="json"),
-        **body_markers(task_health_binding, resolved_plugins),
-    }
+    markers = body_markers(task_health_binding, resolved_plugins)
+    if (
+        task_health_binding is not HealthBindingState.EXPLICIT_NONE
+        and not resolved_plugins
+        and cfg.resolved_plugins
+    ):
+        markers["resolved_plugins"] = [
+            identity.model_dump(mode="json") for identity in cfg.resolved_plugins
+        ]
+    document = {**cfg.model_dump(mode="json"), **markers}
     body = yaml.safe_dump(document, sort_keys=True)
     sha = hashlib.sha256(body.encode()).hexdigest()
     files_repr = sorted({int(i) for i in files}) if files else None

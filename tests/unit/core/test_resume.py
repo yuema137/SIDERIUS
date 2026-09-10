@@ -1572,6 +1572,30 @@ _INV_PARTIAL = RunInvariants(
 
 
 class TestRunInvariantsIngress:
+    def test_explicit_partition_count_avoids_pre_binding_profile_lookup(
+        self, tmp_path, isolated_registries, monkeypatch
+    ):
+        """Iteration 2 must restore an external task before activation.
+
+        The chain already resolved the task profile.  Re-reading an ambient
+        profile here fails for every external task because composition is not
+        active until workflow execution.
+        """
+        _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
+
+        def _unexpected_profile_lookup():
+            raise AssertionError("resume must use the caller-resolved partition count")
+
+        monkeypatch.setattr("core.resume.resolve_dataset_profile", _unexpected_profile_lookup)
+        state = restore_prior_state(
+            str(tmp_path),
+            2,
+            [],
+            expected_invariants=_INV_FULL,
+            dataset_partition_count=20,
+        )
+        assert state.committed_iters == [1]
+
     def test_none_skips_all_checks(self, tmp_path, isolated_registries):
         """expected_invariants=None → pre-DS6b behavior, even with a
         contradicting lock present."""
@@ -1582,7 +1606,13 @@ class TestRunInvariantsIngress:
 
     def test_legacy_unstamped_history_vs_full_run_passes(self, tmp_path, isolated_registries):
         _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
-        state = restore_prior_state(str(tmp_path), 2, [], expected_invariants=_INV_FULL)
+        state = restore_prior_state(
+            str(tmp_path),
+            2,
+            [],
+            expected_invariants=_INV_FULL,
+            dataset_partition_count=20,
+        )
         assert state.committed_iters == [1]
 
     def test_legacy_unstamped_history_vs_partial_run_fails_unmutated(
@@ -1592,7 +1622,13 @@ class TestRunInvariantsIngress:
 
         _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
         with pytest.raises(RunInvariantsViolation, match="resolved_data_scope"):
-            restore_prior_state(str(tmp_path), 2, [], expected_invariants=_INV_PARTIAL)
+            restore_prior_state(
+                str(tmp_path),
+                2,
+                [],
+                expected_invariants=_INV_PARTIAL,
+                dataset_partition_count=20,
+            )
         # The mismatching iter's plugin was NOT registered (fails before
         # mutation — DS6b invariant 4).
         assert "resume_test_arch_a" not in MODEL_REGISTRY
@@ -1609,7 +1645,13 @@ class TestRunInvariantsIngress:
                 "health_config_sha256": "e" * 64,
             },
         )
-        state = restore_prior_state(str(tmp_path), 2, [], expected_invariants=_INV_PARTIAL)
+        state = restore_prior_state(
+            str(tmp_path),
+            2,
+            [],
+            expected_invariants=_INV_PARTIAL,
+            dataset_partition_count=20,
+        )
         assert state.committed_iters == [1]
 
     def test_stamped_sha_drift_fails(self, tmp_path, isolated_registries):
@@ -1625,7 +1667,13 @@ class TestRunInvariantsIngress:
             },
         )
         with pytest.raises(RunInvariantsViolation, match="health_config_sha256"):
-            restore_prior_state(str(tmp_path), 2, [], expected_invariants=_INV_PARTIAL)
+            restore_prior_state(
+                str(tmp_path),
+                2,
+                [],
+                expected_invariants=_INV_PARTIAL,
+                dataset_partition_count=20,
+            )
 
     def test_contradicting_lock_fails_before_any_iter(self, tmp_path, isolated_registries):
         from ml_models.models_sandbox import MODEL_REGISTRY

@@ -67,10 +67,6 @@ from agent.skills.paper_resolver_skill.wrapper import run_skill
 
 logger = logging.getLogger(__name__)
 
-# Default on-disk cache for resolved root papers (overridable for tests).
-# (Hits-per-query is now DynamicSearchConfig.results_per_query.)
-DEFAULT_ROOT_CACHE_DIR = "reference_data/root_papers_cache"
-
 # Static self-description emitted on every run — tells the proposal LLM how to
 # weight this agent's findings (see AgentCard / docs/external_agents_for_proposer.md).
 #
@@ -286,8 +282,8 @@ class MLLiteratureReviewAgent:
         bridge_factory: callable constructing an ``LLMBridge``-compatible object.
             Defaults to the real ``LLMBridge``; tests inject a fake. The bridge
             is built inside ``run()`` from the input's llm config.
-        root_cache_dir: directory for the root-paper JSON cache. Defaults to
-            ``reference_data/root_papers_cache``; tests point it at a tmp dir.
+        root_cache_dir: explicit directory for the root-paper JSON cache. The
+            workflow places it below the caller's workspace.
     """
 
     # Built in run() from the validated input's llm config (the provider/model
@@ -299,7 +295,7 @@ class MLLiteratureReviewAgent:
     search_bridge: LLMBridge
     _task_description: str  # Fix 6 (6.5b-5): set in run() from inp.task_description
 
-    def __init__(self, bridge_factory=None, root_cache_dir: str = DEFAULT_ROOT_CACHE_DIR):
+    def __init__(self, bridge_factory=None, *, root_cache_dir: str):
         self._bridge_factory = bridge_factory or LLMBridge
         self._root_cache_dir = root_cache_dir
 
@@ -1040,7 +1036,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lit_review_config",
         type=str,
-        default="configs/lit_review_config.yaml",
+        required=True,
         help="Node-knob YAML (root_papers / dynamic_search / synthesis / "
         "confidence_rubric / findings_verbosity) — the same file and key mapping "
         "the workflow uses. A relative path resolves against the repo root. The "
@@ -1117,7 +1113,9 @@ def main() -> None:
             "synthesis prompt grounds findings in the task description instead."
         )
 
-    agent = MLLiteratureReviewAgent()
+    agent = MLLiteratureReviewAgent(
+        root_cache_dir=str(Path(args.workspace) / "cache" / "literature" / "root_papers")
+    )
     output = agent.run(agent_input)
 
     print(f"\n{'=' * 60}")

@@ -19,6 +19,7 @@ import h5py
 import numpy as np
 import pytest
 
+from execute_tools.dataset_config import resolve_dataset_profile, tidmad_topology
 from execute_tools.deliverable_spec import default_deliverable_storage
 from execute_tools.health_checks._peek import (
     choose_peek_file_index,
@@ -26,13 +27,15 @@ from execute_tools.health_checks._peek import (
     peek_int8_at_path,
 )
 from execute_tools.health_checks.schemas import HealthCheckContext
+from tests.helpers.two_family_profile import write_bound_timeseries
 
 
 def _write_denoised_h5(path, ch1: np.ndarray) -> None:
-    """Write a minimal denoised HDF5 with ``channel0001/timeseries`` populated."""
+    """Write a minimal deliverable using the bound output-channel name."""
+    channel = tidmad_topology(resolve_dataset_profile()).channels.input_channel
     with h5py.File(str(path), "w") as f:
         ts = f.create_group("timeseries")
-        c1 = ts.create_group("channel0001")
+        c1 = ts.create_group(channel)
         c1.create_dataset("timeseries", data=ch1, chunks=True)
 
 
@@ -126,11 +129,12 @@ class TestPeekInt8AtPath:
 
 
 class TestPeekInt8AtChannel:
-    def test_reads_channel0001_matching_wrapper(self, tmp_path):
+    def test_reads_bound_output_channel_matching_wrapper(self, tmp_path):
         p = tmp_path / "d.h5"
         ch1 = np.arange(-5, 5, dtype=np.int8).repeat(50)
-        _write_two_channel_h5(p, ch1=ch1, ch2=np.zeros(500, dtype=np.int8))
-        s = peek_int8_at_channel(str(p), "channel0001", peek_samples=500)
+        write_bound_timeseries(p, ch1, np.zeros(500, dtype=np.int8))
+        channel = tidmad_topology(resolve_dataset_profile()).channels.input_channel
+        s = peek_int8_at_channel(str(p), channel, peek_samples=500)
         wrapped = peek_int8_at_path(str(p), peek_samples=500)
         np.testing.assert_array_equal(s, wrapped)
 
@@ -175,11 +179,7 @@ def _known_stream(n: int, seed: int) -> np.ndarray:
 
 
 def _write_two_channel_file(path, ch1: np.ndarray, ch2: np.ndarray) -> None:
-    with h5py.File(str(path), "w") as f:
-        ts = f.create_group("timeseries")
-        for name, data in (("channel0001", ch1), ("channel0002", ch2)):
-            grp = ts.create_group(name)
-            grp.create_dataset("timeseries", data=data, chunks=True)
+    write_bound_timeseries(path, ch1, ch2)
 
 
 # Hashes of the first 4096 samples of each seeded stream, computed from the
@@ -202,9 +202,10 @@ class TestContractRoutedPeekReadsTheSameBytes:
     def test_channel_reads_are_byte_identical_to_the_independent_oracle(self, tmp_path):
         path = tmp_path / "two_channel.h5"
         _write_two_channel_file(path, _known_stream(10_000, 11), _known_stream(10_000, 22))
+        channels = tidmad_topology(resolve_dataset_profile()).channels
 
-        ch1 = peek_int8_at_channel(str(path), "channel0001", 4096)
-        ch2 = peek_int8_at_channel(str(path), "channel0002", 4096)
+        ch1 = peek_int8_at_channel(str(path), channels.input_channel, 4096)
+        ch2 = peek_int8_at_channel(str(path), channels.target_channel, 4096)
 
         assert ch1.dtype == np.int8 and ch2.dtype == np.int8
         assert ch1.shape == (4096,) and ch2.shape == (4096,)
@@ -217,28 +218,22 @@ class TestContractRoutedPeekReadsTheSameBytes:
         """Guards the guard: identical channels would make a swap invisible."""
         assert _CH1_SHA != _CH2_SHA
 
-    def test_deliverable_contract_channel_names_match_what_the_files_use(self):
-        """The values C5 substitutes for the literals, pinned as constants.
-
-        If the Deliverable Contract ever returned different group names,
-        every peek would raise KeyError at runtime rather than read the
-        wrong thing — but this states the equality the swap depends on.
-        """
+    def test_deliverable_contract_channel_names_match_the_bound_profile(self):
+        """The storage adapter must project the active declaration."""
         storage = default_deliverable_storage()
-        assert storage.input_channel_group == "channel0001"
-        assert storage.target_channel_group == "channel0002"
+        channels = tidmad_topology(resolve_dataset_profile()).channels
+        assert storage.input_channel_group == channels.input_channel
+        assert storage.target_channel_group == channels.target_channel
         assert storage.storage_dtype == "int8"
 
-    def test_contract_resolved_names_read_the_same_bytes_as_the_literals(self, tmp_path):
-        """The substitution itself: contract-resolved names ≡ the old literals."""
+    def test_contract_resolved_name_reads_the_declared_output_bytes(self, tmp_path):
+        """The contract-routed wrapper reads the independently seeded output."""
         path = tmp_path / "two_channel.h5"
         _write_two_channel_file(path, _known_stream(10_000, 11), _known_stream(10_000, 22))
         storage = default_deliverable_storage()
 
         by_contract = peek_int8_at_channel(str(path), storage.input_channel_group, 4096)
-        by_literal = peek_int8_at_channel(str(path), "channel0001", 4096)
-
-        assert np.array_equal(by_contract, by_literal)
+        assert np.array_equal(by_contract, _known_stream(10_000, 11)[:4096])
         assert hashlib.sha256(by_contract.tobytes()).hexdigest() == _CH1_SHA
 
 
@@ -346,3 +341,6 @@ class TestNoChannelLiteralsSurviveInHealthCode:
         source = (self._health_checks_dir() / "evaluation.py").read_text()
         assert "channel0001" not in source
         assert "channel0002" not in source
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

@@ -72,6 +72,7 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
     _gate_results_to_score_meta,
     _merge_score_validity_failure,
     _should_bypass_formal_time_budget,
+    resolve_measured_time_budget,
     resolve_scoring_route,
 )
 from nodes.ml_hyperparameter_tune_agent.probe_data import build_task_probe_data
@@ -99,10 +100,10 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     _raise_if_evidence_channel_failure,
     _raise_if_preflight_blocks,
     _raise_if_wall_clock_timeout,
-    _resolve_time_check_probe_request,
     _run_time_preflight,
     _time_skip_memory_extra,
     _vram_skip_memory_extra,
+    apply_forecast_time_authority,
     is_evidence_refusal,
 )
 
@@ -163,7 +164,10 @@ def _emit_attempt_record(sandbox, record: dict, agent_input, *, status: dict | N
 SIDERIUS_ROOT = str(_Path(__file__).resolve().parents[2])
 
 
-def wall_time_preflight_applicable(run_profile: object) -> bool:
+def wall_time_preflight_applicable(
+    run_profile: object,
+    legacy_sample_set: object,
+) -> bool:
     """Is the wall-time pre-flight family in this run's domain at all?
 
     C12-P / B1 + B4. The whole family — the training and inference wall-time
@@ -176,6 +180,18 @@ def wall_time_preflight_applicable(run_profile: object) -> bool:
     from. It is **semantically outside the subsystem**, which is precisely
     what ``NOT_APPLICABLE`` means; it is not a missing artifact and not an
     error.
+
+    A TIDMAD topology is necessary but not sufficient. The estimator family
+    also consumes the legacy physical ``SampleSet`` for training, inference,
+    and scoring. A composed task may legitimately declare TIDMAD topology yet
+    carry an opaque task-owned scope instead of that mapping. Entering the
+    legacy estimator with ``None`` would then crash at ``sample_set.items()``.
+    A partial task-scope repair for training would merely move the same defect
+    into inference or scoring, whose cost models are also TIDMAD-specific.
+    Therefore the family is applicable only when its complete workload input
+    is present. The attempt's independently configured in-subprocess runtime
+    policy still measures and enforces Formal execution; this decision skips
+    only the unsupported advance forecast.
 
     **ONE decision for the whole family, made caller-side.** B1 (the estimate)
     and B4 (the probe lane) are two consumers of the same assumption, and B1
@@ -192,11 +208,16 @@ def wall_time_preflight_applicable(run_profile: object) -> bool:
     returns ``True`` here, still runs, and still fails closed.
 
     ``run_profile`` that is not a ``DatasetProfile`` is Regime A — an
-    un-composed run, which IS TIDMAD — so it stays applicable and the legacy
-    path is bit-for-bit unchanged.
+    un-composed run, which IS TIDMAD — but it is applicable only when that
+    legacy run supplied its SampleSet. A mapping (including an empty mapping)
+    is structurally valid; ``None`` means the task-owned-scope regime.
     """
+    from collections.abc import Mapping
+
     from execute_tools.dataset_config import DatasetProfile, declares_tidmad_topology
 
+    if not isinstance(legacy_sample_set, Mapping):
+        return False
     if not isinstance(run_profile, DatasetProfile):
         return True
     return declares_tidmad_topology(run_profile)
@@ -251,7 +272,6 @@ def run_admission_preflight(
 ) -> AdmissionOutcome:
     """Phase 1 of 3. Body moved verbatim; see the module docstring."""
     agent_input = bindings.agent_input
-    device_identity = bindings.device_identity
     expert_advice_str = bindings.expert_advice_str
     file_index = bindings.file_index
     formal_reference_score = bindings.formal_reference_score
@@ -260,7 +280,6 @@ def run_admission_preflight(
     hardware_context = bindings.hardware_context
     resolved_bypass_formal_threshold = bindings.resolved_bypass_formal_threshold
     run_model_io = bindings.run_model_io
-    run_name = bindings.run_name
     run_order = bindings.run_order
     run_profile = bindings.run_profile
     sandbox = bindings.sandbox
@@ -349,6 +368,14 @@ def run_admission_preflight(
     # exactly how the original defect would return, on the
     # exception paths nobody watches.
     # See docs/design/v20_priorities/pr_a_isolated_preflight_wiring.md
+    task_probe_data = build_task_probe_data(
+        task_composition_ref=agent_input.task_composition_ref,
+        task_scopes=prepared.task_scopes,
+        data_dir=time_data_dir,
+        epoch_seed=trial_config.train_base_seed,
+        train_portion=trial_config.train_portion,
+        max_samples=agent_input.validation_max_train_samples,
+    )
     resource_check = run_production_preflight(
         model_type=active_params["model_type"],
         model_config=active_params["model_config"],
@@ -372,14 +399,10 @@ def run_admission_preflight(
         # legacy global plugin dir instead of this run's.
         plugin_dir=sandbox.plugin_dir,
         loss_dir=sandbox.loss_dir,
-        task_probe_data=build_task_probe_data(
-            task_composition_ref=agent_input.task_composition_ref,
-            task_scopes=prepared.task_scopes,
-            data_dir=time_data_dir,
-            epoch_seed=trial_config.train_base_seed,
-            train_portion=trial_config.train_portion,
-            max_samples=agent_input.validation_max_train_samples,
-        ),
+        probe_step_timeout_seconds=(bindings.agent_input.vram_probe_step_timeout_seconds),
+        deadline_seconds=(bindings.agent_input.vram_preflight_total_timeout_seconds),
+        host_memory_limit_gb=(bindings.agent_input.vram_preflight_host_memory_limit_gb),
+        task_probe_data=task_probe_data,
     )
     if resource_check.get("status") == "error":
         raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
@@ -539,20 +562,34 @@ def run_admission_preflight(
     # ignored. The skill itself stays mode-agnostic — it gets a
     # single time_budget_minutes kwarg.
     chosen_time_budget = trial_time_budget if plan.is_trial else formal_time_budget
+    chosen_time_source = (
+        agent_input.trial_time_admission_source
+        if plan.is_trial
+        else agent_input.formal_time_admission_source
+    )
+    chosen_time_budget = resolve_measured_time_budget(
+        base_budget_minutes=chosen_time_budget,
+        admission_source=chosen_time_source,
+        is_formal_round=is_formal_round,
+        formal_trial_winner=formal_trial_winner,
+        bypass_threshold=resolved_bypass_formal_threshold,
+        bypass_ceiling_minutes=agent_input.bypass_formal_time_budget_minutes,
+        order=run_order,
+    )
     time_check = None
     # C12-P B1/B4 — decided ONCE, before the gate, for the whole family.
     # `time_check` staying None is the state an unset budget already produces,
     # so an inapplicable run takes a downstream path that has always existed.
-    _walltime_applicable = wall_time_preflight_applicable(run_profile)
-    if chosen_time_budget is not None and not _walltime_applicable:
-        print(
-            "  Wall-time pre-flight NOT APPLICABLE: this task declares no "
-            "TIDMAD topology, and the wall-time family prices a workload as "
-            "psd_segment_length // segmentation_size. No time estimate and no "
-            "bounded probe is attempted for this run; the VRAM capacity gate "
-            "is unaffected. This is an applicability decision, not a failure."
+    _forecast_selected = chosen_time_source == "forecast"
+    _walltime_applicable = wall_time_preflight_applicable(run_profile, train_sample_set)
+    if chosen_time_budget is not None and _forecast_selected and not _walltime_applicable:
+        raise RuntimeEvidenceChannelError(
+            "forecast wall-time admission was selected, but this attempt does "
+            "not provide the complete workload required by the advance "
+            "forecast; choose measured admission or provide a supported "
+            "forecast workload"
         )
-    if chosen_time_budget is not None and _walltime_applicable:
+    if chosen_time_budget is not None and _forecast_selected and _walltime_applicable:
         stage.name = "time_estimation"
         # refine_inference_time_estimator.md Commit D — pull
         # the most recent successful trial round's measured
@@ -579,34 +616,10 @@ def run_admission_preflight(
             # failure, never a candidate verdict.
             raise RuntimeError(f"Time check error: {time_check.get('message')}")
 
-        # C9d — resolve a REQUEST_PROBE by taking the
-        # measurement (see _resolve_time_check_probe_request).
-        if (
-            _resolve_time_check_probe_request(
-                time_check,
-                model_type=model_type,
-                active_params=active_params,
-                time_budget_minutes=chosen_time_budget,
-                is_trial=plan.is_trial,
-                data_dir=time_data_dir,
-                run_name=run_name,
-                exp_id=exp_id,
-                device_identity=device_identity,
-                # M6: the declared authority decides whether
-                # an unresolvable probe may fail open.
-                result_authority=getattr(agent_input, "result_authority", None),
-                # B3 Stage B: the EFFECTIVE admission
-                # threshold — min(physical, operator budget),
-                # already computed by the VRAM gate and
-                # already recorded as vram_budget_gb.
-                vram_threshold_gb=(resource_check or {}).get("limit_gb"),
-            )
-            == "abort"
-        ):
-            raise RuntimeEvidenceChannelError(
-                "bounded live probe could not produce evidence: "
-                + "; ".join((time_check.get("breakdown") or {}).get("probe_resolution_reasons", []))
-            )
+        apply_forecast_time_authority(time_check)
+
+        # Forecast admission deliberately does not resolve REQUEST_PROBE:
+        # doing so would make executing-device measurement a second authority.
 
         # Post-v15 bypass-time-budget gate: when the formal
         # round is gated by the time estimator, but the
@@ -755,16 +768,13 @@ def run_admission_preflight(
             _emit_attempt_record(sandbox, time_record, agent_input)
             return AdmissionOutcome.next_attempt()
 
-    # RT2-G: operator runtime policy for the in-subprocess
-    # verification session (§2.1/§3). Formal rounds enforce
-    # the operator budget (the in-subprocess measured
-    # verification is the sole formal authority; the
-    # pre-flight gate above stays as the cheap screen);
-    # trial rounds run record-only so observations and
-    # priors accrue with zero behavior change.
+    # RT2-G: operator runtime policy for the in-subprocess verification
+    # session (§2.1/§3). The selected source decides whether verification
+    # enforces the budget or remains record-only for either candidate role.
     active_params["runtime_policy"] = _build_runtime_policy(
         agent_input,
         chosen_time_budget=chosen_time_budget,
+        admission_source=chosen_time_source,
         is_trial=plan.is_trial,
         base_dir=sandbox.base_dir,
     )
@@ -801,6 +811,7 @@ def run_admission_preflight(
         attempt_in_round=attempt_in_round,
         run_profile=run_profile,
         run_model_io=run_model_io,
+        task_probe_data=task_probe_data,
     )
     if _prephase is PrephaseOutcome.TERMINAL_INFRASTRUCTURE_FAILURE:
         # The measurement could not be established. Retrying

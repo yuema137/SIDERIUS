@@ -1,6 +1,6 @@
 """F-SCANE-2 — the diagnosis names what it cannot observe, and never fakes it.
 
-Frozen row: ``docs/campaign/official_campaign_decisions.yaml`` ``F-SCANE-2``,
+Historical regression boundary retained after campaign evidence moved to external ownership.
 ``status: FROZEN``::
 
     ruling_2026_08_26: ACCEPTED. ... The diagnosis must report

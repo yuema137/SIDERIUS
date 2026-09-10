@@ -245,7 +245,7 @@ class TestBranchBReuseEcho:
     the first mutation round precisely because no test drove this path."""
 
     def test_branch_b_reuse_keeps_the_current_candidates_id(self, tmp_path):
-        from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+        from core.capability_registry import CapabilityMetadata, CapabilityRegistry
 
         existing_path = tmp_path / "global_models" / "reused_net.py"
         existing_path.parent.mkdir(parents=True)

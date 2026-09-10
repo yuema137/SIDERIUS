@@ -115,6 +115,11 @@ def _run_inference_child(tmp_path, monkeypatch, *, deliverable):
         },
         deliverable=deliverable,
     )
+    from workflows.task_composition import compose_run_task_bindings
+
+    composition = compose_run_task_bindings(str(manifest))
+    profile_ref = tmp_path / "dataset_profile.json"
+    profile_ref.write_text(composition.dataset_profile.model_dump_json(indent=2), encoding="utf-8")
 
     # A REAL transported scope, serialized by the task's OWN codec — the bytes
     # the parent writes and the child must read. Hand-writing the payload would
@@ -156,6 +161,7 @@ def _run_inference_child(tmp_path, monkeypatch, *, deliverable):
             "--run_name", "run1",
             "--output_dir", str(out_dir),
             "--data_dir", str(tmp_path),
+            "--dataset_profile_json", str(profile_ref),
             "--task_manifest", str(manifest),
             "--task_data_path_id", fixture.TASK_ID,
             "--task_eval_scope_ref", str(scope_ref),
@@ -252,11 +258,11 @@ class TestAnUncomposedRunIsUnchanged:
 
         Fails as: the fix changed legacy TIDMAD deliverable names.
         """
-        from execute_tools.dataset_config import resolve_dataset_profile
+        from execute_tools.dataset_config import TIDMAD_PROFILE
         from execute_tools.deliverable_spec import derive_run_deliverable_spec
         from execute_tools.inference_single import _derive_spec_under_declared_naming
 
-        profile = resolve_dataset_profile()
+        profile = TIDMAD_PROFILE
         assert _derive_spec_under_declared_naming(profile, None) == derive_run_deliverable_spec(
             profile
         )
@@ -333,7 +339,6 @@ def _score_task_owned(tmp_path, *, deliverable):
     Returns the parsed ``--output_json`` the child emitted.
     """
     from execute_tools import denoising_score_single
-    from execute_tools.dataset_config import resolve_dataset_profile
     from tests.fixtures import fcov8_declared_naming_task as fixture
     from tests.helpers.composed_manifest import write_complete_manifest
     from workflows.task_composition import compose_metric_from_manifest
@@ -411,9 +416,11 @@ def _score_task_owned(tmp_path, *, deliverable):
 
         declared = compose_deliverable_naming_from_manifest(str(manifest))
 
+    from workflows.task_composition import compose_run_task_bindings
+
     denoising_score_single._emit_task_owned_score(
         args,
-        resolve_dataset_profile(),
+        compose_run_task_bindings(str(manifest)).dataset_profile,
         compose_metric_from_manifest(str(manifest)),
         declared_naming=declared,
     )
@@ -455,12 +462,10 @@ class TestTheScoringChildScanUsesTheDeclaredTemplate:
         nothing to bind.
 
         NOTE this route does NOT raise ``NotApplicable`` for an absent
-        declaration, and asserting that it does would assert a fiction — the
-        refusal keys on ``active_task_data_path()``, and this child's
-        ``bind_task_data_path`` covers only ``load_transported_scope``, so no
-        implementation is bound when the scan runs. That is a SEPARATE
-        binding-scope gap (a different ContextVar), reported as carried debt
-        rather than widened into here.
+        declaration. The task-data-path binding covers scope deserialization
+        and, separately, metric arithmetic; the deliverable scan remains
+        outside it so the naming behavior tested here stays unchanged. The
+        metric-scoped binding is covered by its own focused regression.
         """
         emitted = _score_task_owned(tmp_path, deliverable=None)
 
@@ -479,10 +484,6 @@ class TestTheScoringChildBindsEveryNamingConsumer:
         [
             # the task-owned route: SCAN and reported NAME under one binding
             "with bind_dataset_profile(dataset_profile), declared_naming_binding(declared_naming):",
-            # the legacy TIDMAD route's payload scan
-            "with bind_dataset_profile(dataset_profile), declared_naming_binding(_declared_naming):",
-            # the spec derivation the child always had
-            "with declared_naming_binding(_declared_naming):",
         ],
     )
     def test_each_scoring_naming_consumer_is_inside_the_binding(self, consumer):

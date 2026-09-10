@@ -1,10 +1,8 @@
-"""RT1 — trainer-mirroring step-count resolver + static-prior demotion.
+"""RT1 — trainer-mirroring step-count resolver and static-prior demotion.
 
 Design: docs/design/runtime_estimation_and_watchdog.md §1 (rev 4).
-Motivated by the 2026-07-23 V18 incident: a 480,000-step formal attempt
-priced at 2.00 ms/step (static) vs 44.3 ms/step measured — a 22x
-underestimate that passed a 120-minute budget for a 5.9-hour training
-run. Rev 4 contract: the static formula is a preliminary risk screen
+The exact scientific incident oracle lives in ``siderius-exp``. This module
+keeps the generic Rev-4 contract: the static formula is a preliminary risk screen
 (``formal_execution_eligible: False``); the runtime prediction that
 admits a formal execution must come from a warm-up measurement.
 """
@@ -17,12 +15,16 @@ from agent.skills.training_skill.estimator import (
     _total_train_steps,
     estimate_wall_time_seconds,
 )
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.two_family_profile import make_two_family_profile
 
-PSD_LEN = 10_000_000
+PHYSICAL_SEGMENT_LENGTH = 1_600_000
+PROFILE = make_two_family_profile(
+    num_files=20,
+    psd_segment_length=PHYSICAL_SEGMENT_LENGTH,
+    segments_per_file=20,
+)
 
-# The V18 incident scope: files 4-9 x 20 PSDs, seg 1250, bs 2, 1 epoch.
-INCIDENT_SAMPLE_SET: dict[str, list[int]] = {str(i): list(range(20)) for i in range(4, 10)}
+SAMPLE_SET: dict[str, list[int]] = {str(i): list(range(20)) for i in range(4, 10)}
 
 
 class TestStepResolverContract:
@@ -36,7 +38,7 @@ class TestStepResolverContract:
         """Independent re-derivation of train_engine_sandbox.py:300-304 +
         DataLoader(drop_last=True): per-file max(1, round(portion*len)),
         then floor(total_samples / bs) per epoch."""
-        ml = PSD_LEN // seg
+        ml = PHYSICAL_SEGMENT_LENGTH // seg
         n_psd = sum(
             max(1, round(portion * len(v))) if (portion is not None and portion < 1.0) else len(v)
             for v in sample_set.values()
@@ -50,7 +52,7 @@ class TestStepResolverContract:
                 for portion in (1.0, 0.5, 0.1, None):
                     for epochs in (1, 3):
                         ss = {"4": list(range(20)), "5": list(range(7)), "9": [0]}
-                        est = _total_train_steps(ss, seg, bs, portion, epochs, TIDMAD_PROFILE)
+                        est = _total_train_steps(ss, seg, bs, portion, epochs, PROFILE)
                         actual = self._loader_steps(ss, seg, bs, portion, epochs)
                         assert est == actual, (seg, bs, portion, epochs, est, actual)
 
@@ -59,19 +61,8 @@ class TestStepResolverContract:
         scopes ~10x: 20 files x 1 PSD at portion 0.1 keeps
         max(1, round(0.1)) = 1 PSD per file = 20 PSDs, not 2."""
         ss = {str(i): [0] for i in range(20)}
-        est = _total_train_steps(ss, 10_000, 8, 0.1, 1, TIDMAD_PROFILE)
-        assert est == (20 * (PSD_LEN // 10_000)) // 8  # all 20 PSDs kept
-
-    def test_incident_step_count_exact(self):
-        steps = _total_train_steps(
-            INCIDENT_SAMPLE_SET,
-            seg_size=1250,
-            batch_size=2,
-            train_portion=1.0,
-            epochs=1,
-            profile=TIDMAD_PROFILE,
-        )
-        assert steps == 480_000
+        est = _total_train_steps(ss, 10_000, 8, 0.1, 1, PROFILE)
+        assert est == (20 * (PHYSICAL_SEGMENT_LENGTH // 10_000)) // 8
 
 
 class TestFormalEligibilityContract:
@@ -79,41 +70,35 @@ class TestFormalEligibilityContract:
     that admits a formal execution. RT2/RT3 enforce; RT1 provides the
     interface field."""
 
-    INCIDENT_KW: ClassVar[dict] = dict(
+    WORKLOAD_KW: ClassVar[dict] = dict(
         model_type="x",
         model_config={"segmentation_size": 1250},
         train_config={"batch_size": 2, "epochs": 1},
-        sample_set=INCIDENT_SAMPLE_SET,
+        sample_set=SAMPLE_SET,
         train_portion=1.0,
         num_params=141_280,
     )
 
     def test_static_prior_is_not_formal_eligible(self):
         r = estimate_wall_time_seconds(
-            **self.INCIDENT_KW, ms_per_step=None, dataset_profile=TIDMAD_PROFILE
+            **self.WORKLOAD_KW, ms_per_step=None, dataset_profile=PROFILE
         )
         bd = r["breakdown"]
         assert bd["ms_source"] == "static_uncalibrated"
         assert bd["formal_execution_eligible"] is False
-        # The static prior still prices the incident config optimistically
-        # (2.0 ms floor) — which is exactly why it may not admit formal
-        # execution on its own.
-        assert r["seconds"] / 60 < 120
+        assert r["seconds"] > 0
 
     def test_warmup_measurement_is_formal_eligible(self):
-        r = estimate_wall_time_seconds(
-            **self.INCIDENT_KW, ms_per_step=3.5, dataset_profile=TIDMAD_PROFILE
-        )
+        r = estimate_wall_time_seconds(**self.WORKLOAD_KW, ms_per_step=3.5, dataset_profile=PROFILE)
         bd = r["breakdown"]
         assert bd["ms_source"] == "real_dataset_warmup"
         assert bd["formal_execution_eligible"] is True
 
-    def test_incident_measured_step_time_exceeds_budget(self):
-        """With the measured 44.3 ms/step the warm-up path would have
-        supplied, the incident config is over the 120-min formal budget —
-        the mandatory-warm-up contract catches what the static prior
-        cannot."""
-        r = estimate_wall_time_seconds(
-            **self.INCIDENT_KW, ms_per_step=44.3, dataset_profile=TIDMAD_PROFILE
+    def test_measured_step_time_changes_the_prediction(self):
+        static = estimate_wall_time_seconds(
+            **self.WORKLOAD_KW, ms_per_step=None, dataset_profile=PROFILE
         )
-        assert r["seconds"] / 60 > 120  # 480k x 44.3ms x 1.3 = 461 min
+        measured = estimate_wall_time_seconds(
+            **self.WORKLOAD_KW, ms_per_step=44.3, dataset_profile=PROFILE
+        )
+        assert measured["seconds"] > static["seconds"]

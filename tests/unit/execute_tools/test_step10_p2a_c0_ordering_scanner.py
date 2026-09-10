@@ -485,17 +485,6 @@ MIGRATED_SITES: tuple[tuple[str, str, str], ...] = (
         "  ->  sort(key=order.rank(...))",
     ),
     (
-        "C3",
-        "scripts/build_diagnostic_summary.py",
-        "max(valid, key=lambda record: record['denoising_score'])"
-        "  ->  best_by_declared_metric(...)",
-    ),
-    (
-        "C3",
-        "scripts/finalize_recovered_diagnostic_round.py",
-        "max(valid, key=lambda item: item['denoising_score'])  ->  best_by_declared_metric(...)",
-    ),
-    (
         "C4",
         "nodes/proposal_helpers.py",
         "scored.sort(key=lambda m: m['best_score'], reverse=True)  ->  sorted(key=order.rank(...))",
@@ -604,13 +593,14 @@ class TestTheScannerFindsTheWholeSurface:
         )
 
     def test_the_whole_surface_is_accounted_for(self):
-        """Every one of the twelve sites is either pending or retired.
+        """Every surviving framework site is either pending or retired.
 
-        Twelve is the C0 measurement (the ten frozen §2.1 code sites plus the
-        two chain-fold sites the scanner found); the total must not drift as
-        rows move from pending to retired.
+        The original C0 measurement found twelve sites. Two diagnostic
+        consumers now live with experiment provenance, so ten framework
+        consumers remain. The total must not drift as rows move from pending
+        to retired.
         """
-        assert len(EXPECTED_ORDERING_SURFACE) + len(MIGRATED_SITES) == 12
+        assert len(EXPECTED_ORDERING_SURFACE) + len(MIGRATED_SITES) == 10
 
 
 class TestThePrecisionContract:

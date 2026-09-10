@@ -28,7 +28,7 @@ every real formal record was silently discarded.
 
 WHAT THEY DELIBERATELY DO NOT PIN. The manifest ``status`` vocabulary is
 FROZEN at ``completed|failed|no_records``
-(``docs/campaign/stage_artifact_contract.md`` section 1) and is the
+(the persisted iteration contract) and is the
 chain-control token ``core/resume.py``, Stage 3 and the inspector branch
 on. A trial-only iteration DID produce a consumable ``run_output`` and a
 restorable plugin, so its status stays ``completed`` and the chain is
@@ -279,18 +279,3 @@ class TestTheProductionPathGoesThroughTheOneAuthority:
         monkeypatch.setattr(record_role, "is_formal_role", _severed)
         with pytest.raises(AssertionError, match="severed authority"):
             roi.write_manifest(str(tmp_path), RUN_NAME, [_trial_only_output()])
-
-    def test_the_gold_scanner_imports_the_same_authority(self) -> None:
-        """One rule, two consumers — the campaign scanner and the manifest.
-
-        Imported by name rather than grepped: a rename that split them apart
-        fails at import.
-        """
-        state_helper = _REPO / "sdsc_submission_scripts" / "gold_campaign_state.py"
-        spec = importlib.util.spec_from_file_location("gold_state_for_fscanb3", state_helper)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-
-        assert module.is_formal_role is is_formal_role

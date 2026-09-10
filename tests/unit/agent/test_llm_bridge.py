@@ -24,8 +24,8 @@ from agent.llm_bridge import (
     ToolCallResult,
 )
 from agent.prompts import PLANNER_PROMPT, REFLECTOR_PROMPT
-from tests.helpers.metric_fixtures import shipped_spec
-from tests.unit.agent.llm_bridge.test_step00_prompt_goldens import tidmad_task_render
+from tests.helpers.metric_fixtures import accuracy_like_spec, shipped_spec
+from tests.helpers.tuner_prompt_fixtures import TASK_RENDER
 
 
 @pytest.fixture(autouse=True)
@@ -908,8 +908,8 @@ class TestPlanScoreTableSubstitution:
             memory_history=[],
             expert_advice="none",
             score_table_md=_RENDERED_SENTINEL,
-            task_render=tidmad_task_render(),
-            metric_spec=shipped_spec(),
+            task_render=TASK_RENDER,
+            metric_spec=accuracy_like_spec(),
         )
         sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
         assert _TABLE_MARKER in sent_system
@@ -923,8 +923,8 @@ class TestPlanScoreTableSubstitution:
         bridge.plan(
             memory_history=[],
             expert_advice="none",
-            task_render=tidmad_task_render(),
-            metric_spec=shipped_spec(),
+            task_render=TASK_RENDER,
+            metric_spec=accuracy_like_spec(),
         )  # no score_table_md
         sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
         assert _PLANNER_SCORE_TABLE_FALLBACK in sent_system
@@ -939,8 +939,8 @@ class TestPlanScoreTableSubstitution:
             memory_history=[],
             expert_advice="none",
             score_table_md="",
-            task_render=tidmad_task_render(),
-            metric_spec=shipped_spec(),
+            task_render=TASK_RENDER,
+            metric_spec=accuracy_like_spec(),
         )
         sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
         assert _PLANNER_SCORE_TABLE_FALLBACK in sent_system

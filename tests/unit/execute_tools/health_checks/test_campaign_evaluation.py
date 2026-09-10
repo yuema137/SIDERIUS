@@ -1,4 +1,9 @@
-"""Campaign-specific regression tests for shared HealthGate persistence."""
+"""Generic Health persistence witnesses formerly mixed with campaign defaults.
+
+Retains the pre-08a persisted-status differential and typed multi-check
+persistence, plus the 2026-08-26 rule that aggregation records what RAN,
+not what configuration suggested. No scientific campaign config is loaded.
+"""
 
 from __future__ import annotations
 
@@ -6,119 +11,17 @@ import ast
 import json
 from pathlib import Path
 
-from execute_tools.health_checks import evaluation, runner
-from execute_tools.health_checks.config import load_health_gates_config
+import pytest
+
+from execute_tools.health_checks import evaluation
+from execute_tools.health_checks.config import HealthChecksConfig
 from execute_tools.health_checks.schemas import (
+    CheckVerdict,
     GateAction,
     GateResult,
     HealthCheckContext,
     HealthCheckResult,
-    PersistedHealthGateResult,
 )
-
-OBSERVE_CONFIG = "configs/health_checks_baseline_observe_mode.yaml"
-
-
-def test_observe_yaml_runs_every_gate_every_round_and_always_continues():
-    config = load_health_gates_config(OBSERVE_CONFIG)
-    assert len(config.health_gates) == 6
-    for round_index in range(1, 11):
-        assert all(gate.matches_round(round_index) for gate in config.health_gates)
-    assert all(
-        gate.on_pass.action is GateAction.CONTINUE and gate.on_fail.action is GateAction.CONTINUE
-        for gate in config.health_gates
-    )
-
-
-def test_alternate_config_path_is_forwarded(monkeypatch):
-    seen: list[str | None] = []
-    config = load_health_gates_config(OBSERVE_CONFIG)
-
-    def fake_load(path=None):
-        seen.append(path)
-        return config
-
-    monkeypatch.setattr(runner, "load_health_gates_config", fake_load)
-    runner.get_gates_for_position(4, config_path=OBSERVE_CONFIG)
-    assert seen == [OBSERVE_CONFIG]
-
-
-def test_omitted_config_path_preserves_default_loader_call(monkeypatch):
-    calls = 0
-    config = load_health_gates_config(OBSERVE_CONFIG)
-
-    def fake_load():
-        nonlocal calls
-        calls += 1
-        return config
-
-    monkeypatch.setattr(runner, "load_health_gates_config", fake_load)
-    runner.get_gates_for_position(4)
-    assert calls == 1
-
-
-def test_failed_gate_persists_full_typed_observation(monkeypatch, tmp_path):
-    output = tmp_path / "denoised.h5"
-    output.write_bytes(b"output")
-    checkpoint = tmp_path / "model.pth"
-    checkpoint.write_bytes(b"checkpoint")
-    config = load_health_gates_config(OBSERVE_CONFIG)
-    gate = config.health_gates[0]
-    per_file = [
-        {"file_index": index, "metric_value": value, "passed": passed, "io_error": None}
-        for index, value, passed in ((3, 1, False), (10, 30, True), (17, 2, False))
-    ]
-    result = GateResult(
-        gate_id=gate.id,
-        round_index=1,
-        passed=False,
-        action=GateAction.CONTINUE,
-        failure_reason="output_diversity: collapsed",
-        check_results=[
-            HealthCheckResult(
-                check_name="output_diversity",
-                passed=False,
-                reason="output_diversity: collapsed",
-                metrics={
-                    "per_file": per_file,
-                    "n_files_attempted": 3,
-                    "n_files_io_failed": 0,
-                    "peek_samples_requested": 100000,
-                },
-            )
-        ],
-    )
-    monkeypatch.setattr(evaluation, "evaluate_gate", lambda *args, **kwargs: result)
-    monkeypatch.setattr(
-        evaluation,
-        "load_health_gates_config",
-        lambda path=None: type(config)(health_gates=[gate]),
-    )
-    ctx = HealthCheckContext(
-        model_name="wavenet",
-        run_name="v17_pregate_baseline",
-        round_index=1,
-        checkpoint_path=str(checkpoint),
-        denoised_filename_fn=lambda _index: str(output),
-    )
-    _, persisted, action = evaluation.evaluate_and_persist_health_gates(
-        ctx,
-        config_path=OBSERVE_CONFIG,
-        production_config_path="configs/health_checks.yaml",
-    )
-    observation = persisted[0]
-    assert action is GateAction.CONTINUE
-    assert observation.execution_status == "failed"
-    assert observation.resolved_action is GateAction.CONTINUE
-    assert observation.threshold["value"] == 25
-    assert set(observation.metrics["per_file"]) == {"3", "10", "17"}
-    assert observation.aggregation["files_completed"] == [3, 10, 17]
-    assert observation.metrics["aggregate_statistics"]["count"] == 3
-
-
-# ---------------------------------------------------------------------------
-# Step 08a C3 — _execution_status is derived from typed verdicts, not prose
-# ---------------------------------------------------------------------------
 
 
 def _pre_08a_execution_status(passed: bool, reason: str, metrics: dict[str, object]) -> str:
@@ -155,7 +58,7 @@ def _manifest_cases() -> list[dict]:
     return json.loads(path.read_text())["cases"]
 
 
-def test_execution_status_is_byte_identical_to_the_pre_08a_rule():
+def test_execution_status_preserves_the_pre_08a_differential():
     """Differential over the frozen C1 corpus — 27 real check outcomes.
 
     The defect this owns: the string sniff carried real semantics, and
@@ -216,152 +119,93 @@ def test_evaluation_module_no_longer_sniffs_reason_prose():
     assert ".reason" not in code
 
 
-def test_check_verdicts_are_persisted_for_every_check_that_ran(monkeypatch):
-    """The additive field carries the honest four-way statement."""
-    config = load_health_gates_config(OBSERVE_CONFIG)
-    gate = config.health_gates[0]
+def _persist(monkeypatch, checks, *, aggregation=None):
+    """Inject only check outcomes; execute real typed persistence."""
+    config = HealthChecksConfig.model_validate(
+        {
+            "health_gates": [
+                {
+                    "id": "synthetic_gate",
+                    "gate_role": "blocking",
+                    "after_round": "every",
+                    "checks": [
+                        {
+                            "name": checks[0].check_name,
+                            "config": {} if aggregation is None else {"aggregation": aggregation},
+                        }
+                    ],
+                    "on_pass": {"action": "continue"},
+                    "on_fail": {"action": "continue"},
+                }
+            ]
+        }
+    )
     result = GateResult(
-        gate_id=gate.id,
+        gate_id="synthetic_gate",
         round_index=1,
-        passed=False,
+        passed=all(check.passed for check in checks),
         action=GateAction.CONTINUE,
-        failure_reason="output_diversity: collapsed",
-        check_results=[
-            HealthCheckResult(
-                check_name="output_diversity",
-                passed=False,
-                reason="output_diversity: collapsed",
-                metrics={"n_files_attempted": 3, "n_files_io_failed": 0},
-            ),
-            HealthCheckResult(
-                check_name="amplitude_collapse",
-                passed=True,
-                reason="amplitude_collapse: not applicable — no files in context",
-            ),
-        ],
+        check_results=checks,
     )
-    monkeypatch.setattr(evaluation, "evaluate_gate", lambda *a, **k: result)
-    monkeypatch.setattr(
-        evaluation, "load_health_gates_config", lambda path=None: type(config)(health_gates=[gate])
-    )
-    ctx = HealthCheckContext(model_name="m", run_name="r", round_index=1)
-
-    _, persisted, _ = evaluation.evaluate_and_persist_health_gates(ctx, config_path=OBSERVE_CONFIG)
-
-    assert persisted[0].check_verdicts == {
-        "output_diversity": "failed",
-        "amplitude_collapse": "inapplicable",
-    }
-    # The gate's own status is unchanged by the additive field.
-    assert persisted[0].execution_status == "failed"
-
-
-def test_legacy_persisted_record_without_verdicts_still_validates():
-    """Records written before 08a must load unchanged — absence is not a verdict."""
-    legacy = PersistedHealthGateResult(
-        gate_name="output_diversity_blocking",
-        execution_status="passed",
-        check_passed=True,
-        would_invalidate_under_production_policy=False,
-        resolved_action=GateAction.CONTINUE,
-    )
-    assert legacy.check_verdicts is None
-    assert "check_verdicts" in legacy.model_dump()
-
-
-# ---------------------------------------------------------------------------
-# M cleanup (2026-08-26) — aggregation_rule records what RAN, never the config
-# ---------------------------------------------------------------------------
-
-
-def _persist_one(monkeypatch, gate, check_result):
-    """Route one crafted gate result through the production persistence path."""
-    config = load_health_gates_config("configs/health_checks.yaml")
-    result = GateResult(
-        gate_id=gate.id,
-        round_index=1,
-        passed=check_result.passed,
-        action=GateAction.CONTINUE,
-        failure_reason="" if check_result.passed else check_result.reason,
-        check_results=[check_result],
-    )
-    monkeypatch.setattr(evaluation, "evaluate_gate", lambda *a, **k: result)
-    monkeypatch.setattr(
-        evaluation, "load_health_gates_config", lambda path=None: type(config)(health_gates=[gate])
-    )
-    ctx = HealthCheckContext(model_name="m", run_name="r", round_index=1)
+    monkeypatch.setattr(evaluation, "evaluate_gate", lambda *args, **kwargs: result)
+    monkeypatch.setattr(evaluation, "load_health_gates_config", lambda path=None: config)
     _, persisted, _ = evaluation.evaluate_and_persist_health_gates(
-        ctx, config_path="configs/health_checks.yaml"
+        HealthCheckContext(model_name="model", run_name="run", round_index=1),
+        config_path="synthetic-policy.yaml",
     )
     return persisted[0]
 
 
-def _production_gate(gate_id: str):
-    config = load_health_gates_config("configs/health_checks.yaml")
-    return next(g for g in config.health_gates if g.id == gate_id)
-
-
-class TestAggregationRuleIsEvidenceNotConfig:
-    """M cleanup (2026-08-26): ``aggregation_rule`` claims only what the
-    check actually applied — the ``peek_and_aggregate`` echo in its result
-    metrics. Before, ``_persist`` read the GATE CONFIG and fabricated a
-    default, so every persisted gate claimed a rule: recording gates a
-    made-up ``"recording"`` (not an AggregationMode at all), and a blocking
-    gate whose check ignores the injected policy key (the single-view
-    categorical checks) the config value the runtime never implemented for
-    it. Each test names the pre-fix wrong value it fails back to when
-    ``_persist`` is reverted to config-reading."""
-
-    def test_a_consuming_check_persists_the_rule_it_applied(self, monkeypatch):
-        gate = _production_gate("output_diversity_blocking")
-        check = HealthCheckResult(
-            check_name="output_diversity",
-            passed=False,
-            reason="output_diversity: collapsed",
-            metrics={
-                "aggregation": "all_pass",
-                "per_file": [
-                    {"file_index": 3, "metric_value": 52, "passed": True, "io_error": None},
-                    {"file_index": 10, "metric_value": 1, "passed": False, "io_error": None},
-                ],
-                "n_files_attempted": 2,
-                "n_files_io_failed": 0,
-            },
+def test_every_executed_check_verdict_survives_persistence(monkeypatch):
+    checks = [
+        HealthCheckResult(
+            check_name=name,
+            passed=passed,
+            verdict=verdict,
+            reason="fixture",
+            metrics={"exception_type": "SyntheticError"} if verdict is CheckVerdict.ERROR else {},
         )
-        observation = _persist_one(monkeypatch, gate, check)
-        assert observation.aggregation["aggregation_rule"] == "all_pass"
-        assert observation.aggregation["files_passed"] == [3]
-        assert observation.aggregation["files_failed"] == [10]
+        for name, passed, verdict in [
+            ("first", False, CheckVerdict.FAILED),
+            ("second", True, CheckVerdict.INAPPLICABLE),
+            ("third", False, CheckVerdict.ERROR),
+            ("fourth", True, CheckVerdict.PASSED),
+        ]
+    ]
+    persisted = _persist(monkeypatch, checks)
+    assert persisted.check_verdicts == {
+        "first": "failed",
+        "second": "inapplicable",
+        "third": "error",
+        "fourth": "passed",
+    }
+    assert persisted.execution_status == "error"
 
-    def test_a_check_that_never_applied_a_rule_claims_none_despite_config(self, monkeypatch):
-        """THE defect witness. The blocking gate's composed check config
-        carries the injected ``aggregation`` policy key, but this result
-        carries no echo — the check never consumed it. Reverting
-        ``_persist`` to ``check_config.get("aggregation", ...)`` makes this
-        fail with ``aggregation_rule == "all_pass"``: a rule claimed on
-        evidence that no aggregation ever produced."""
-        gate = _production_gate("output_diversity_blocking")
-        assert gate.checks[0].config["aggregation"] == "all_pass"  # config DOES carry it
-        check = HealthCheckResult(
-            check_name="output_diversity",
-            passed=True,
-            reason="",
-            metrics={"n_files_attempted": 1, "n_files_io_failed": 0},
-        )
-        observation = _persist_one(monkeypatch, gate, check)
-        assert "aggregation_rule" not in observation.aggregation
-        assert observation.aggregation["aggregate_passed"] is True
 
-    def test_a_recording_check_no_longer_fabricates_the_recording_pseudo_rule(self, monkeypatch):
-        """Pre-fix value: ``"recording"`` — not a member of AggregationMode,
-        invented by the persistence layer when the config carried no key."""
-        gate = _production_gate("pearson_dispersion_recording")
-        assert "aggregation" not in gate.checks[0].config
-        check = HealthCheckResult(
-            check_name="pearson_dispersion",
-            passed=True,
-            reason="",
-            metrics={"pearson_dispersion": 0.048},
-        )
-        observation = _persist_one(monkeypatch, gate, check)
-        assert "aggregation_rule" not in observation.aggregation
+def test_aggregation_uses_applied_rule_not_configured_rule(monkeypatch):
+    check = HealthCheckResult(
+        check_name="synthetic_check",
+        passed=False,
+        reason="fixture",
+        metrics={
+            "aggregation": "all_pass",
+            "per_file": [
+                {"file_index": 2, "metric_value": 9, "passed": True, "io_error": None},
+                {"file_index": 5, "metric_value": 1, "passed": False, "io_error": None},
+            ],
+            "n_files_attempted": 2,
+            "n_files_io_failed": 0,
+        },
+    )
+    observation = _persist(monkeypatch, [check], aggregation="any_pass")
+    assert observation.aggregation["aggregation_rule"] == "all_pass"
+    assert observation.aggregation["files_passed"] == [2]
+    assert observation.aggregation["files_failed"] == [5]
+
+
+@pytest.mark.parametrize("configured", [None, "all_pass"])
+def test_no_applied_aggregation_never_fabricates_a_rule(monkeypatch, configured):
+    check = HealthCheckResult(check_name="synthetic_check", passed=True, reason="fixture")
+    observation = _persist(monkeypatch, [check], aggregation=configured)
+    assert "aggregation_rule" not in observation.aggregation
+    assert observation.aggregation["aggregate_passed"] is True

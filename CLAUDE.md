@@ -1,49 +1,56 @@
 # SIDERIUS Project Rules
 
 ## Context
-- SIDERIUS is a project that utilizes LLM agents to explore advanced denoising
-  algorithms (stage 0), propose new hypotheses, and conduct experiments to
-  investigate them (stage 1).
-- Primary application: SQUID / TIDMAD signal denoising (framed in
-  `configs/task_config.yaml`). The framework is task-agnostic — porting to a new
-  task starts with editing `configs/task_config.yaml`, not with grep-and-replace
-  across Python sources.
+- SIDERIUS is a task-generic closed-loop research framework for supervised
+  scientific machine learning. Its agent loop surrounds a deterministic core
+  that owns execution, scoring, validity checks, and provenance.
+- Real scientific tasks and campaigns are external consumers. A task declares
+  its data, metric, objective, Health checks, prompt guidance, and plugins in
+  its own composition manifest and workspace. Framework source must not select
+  TIDMAD or any other scientific task implicitly.
+- The shipped Quickstart and synthetic examples are framework specifications,
+  not scientific defaults, benchmarks, or campaign templates.
+- During the active repository-separation work, after any conversation
+  compaction, reread
+  `docs/design/framework_experiment_repository_separation.md` before taking
+  another task action. Keep that work ledger current with decisions, changed
+  ownership, validation evidence, and unresolved findings.
 
 ## Environment
-- **Always use the project virtualenv**: every Python command must use the
-  repo's `.venv/bin/python` (e.g. `/workspace/REPO/SIDERIUS/.venv/bin/python`
-  on the H100 box, `/home/yuema137/SIDERIUS/.venv/bin/python` on lilab) or
-  activate `.venv/bin/activate` first. Never use the system `python` or `python3` — they are Python 3.8 and
-  will fail on f-strings and other modern syntax.
-- **`run_comparison.py` lives at `scripts/run_comparison.py`** (moved from repo
-  root in commit `13c34fa`). If you see a `SIDERIUS_ROOT` bug where subprocess
-  paths resolve to `scripts/nodes/...` instead of `nodes/...`, that's the
-  double-dirname fix from commit `6789e29` — verify that fix is on disk before
-  running.
-- **Standard baseline / chain launch command** (as of 2026-07):
+- **Every checkout owns one frozen virtualenv.** From the exact SIDERIUS
+  checkout that will be tested or executed, run
+  `uv sync --group dev --frozen`, then use that checkout's
+  `.venv/bin/python` for every Python command. This is the shared environment
+  rule for local tests, hardware qualification, and formal campaigns.
+- **Never borrow another checkout's environment.** Do not copy or reuse a
+  different checkout's `.venv`, editable install, `site-packages`, or source
+  path through `PYTHONPATH`. Those shortcuts can import code from a different
+  revision while reporting the current checkout's Git SHA. The system
+  `python` / `python3` is also unsupported.
+- A container image may be used by a deployment, but it must be built from
+  the same committed `uv.lock` and execute the selected checkout/package
+  revisions. A container is an isolation mechanism, not a second dependency
+  authority. Datasets, workspaces, and machine-owned secrets remain external
+  mounts or runtime inputs.
+- **Scientific baseline comparison is external.** The former
+  `scripts/run_comparison.py` now belongs to siderius-exp at
+  `tasks/tidmad/tools/run_comparison.py`. Do not invoke the retired path from
+  this checkout or restore a scientific default to make it work.
+- **Generic chain dry-run**:
   ```bash
-  python scripts/run_comparison.py \
-      --model {wavenet|punet|...} \
-      --provider openai --model_id gpt-5.5 \
-      --reflect_provider openai --reflect_model_id gpt-5.5 \
-      --max_rounds 10 \
-      --max_epochs 1 \
-      --trial_time_budget_minutes 20 \
-      --formal_time_budget_minutes 120 \
-      --formal_portion 0.1 \
-      --formal_train_portion 1.0 \
-      --run_name healthgate_baseline_v1 \
-      --is_trial \
-      --progress_bar \
-      --cleanup_denoised
+  bash sdsc_submission_scripts/run_chain.sh \
+      --mode lilab \
+      --workspace /path/to/workspace \
+      --run_name quickstart_v1 \
+      --task_composition configs/task_composition/quickstart.yaml \
+      --data_dir /path/to/workspace/quickstart_data \
+      --num_iterations 1 \
+      --max_rounds 1 \
+      --dry-run
   ```
-  - `--max_epochs 1` matches the TIDMAD paper spec (direct communication from
-    the paper authors). The 10-epoch default was wrong.
-  - `--trial_time_budget_minutes` / `--formal_time_budget_minutes` cap per-round
-    wall time. Without them, a badly-chosen `trial_portion` from the LLM planner
-    can produce multi-hour trial rounds.
-  - `--max_epochs` is forwarded to the tuner subprocess (clamps LLM-planned
-    epochs to `min(planned, max_epochs)`).
+  Real task manifests, data, workflow settings, and campaign launchers belong
+  in the consumer repository. They call the same framework entrypoint without
+  modifying this checkout.
 
 ## Repository and Environment Portability
 
@@ -260,6 +267,49 @@ validate.
   branching to a function already coordinating unrelated concerns?* If
   yes, establish the boundary first. Adding detail to a focused function
   is fine; adding another responsibility to a giant orchestrator is not.
+
+- **Maintainability without critical-path drift (binding, operator decision
+  2026-08-31)**: clarity, local testability, and explicit data flow are part
+  of correctness. Prefer the simplest implementation that preserves the
+  required boundary: simple, then explicit, modular, testable, and extensible.
+  Do not introduce abstraction, inheritance, dispatch machinery, or special
+  cases for hypothetical consumers. Use composition and small typed
+  interfaces where behavior genuinely varies by task, backend, or provider.
+
+  Size is a review signal, not a mechanical splitting rule. A cohesive
+  function below roughly 100 lines is normally unremarkable; 100--200 lines
+  warrants a responsibility check; above 300 lines creates a strong
+  presumption for decomposition; and ordinary handwritten functions above
+  500 lines require a compelling documented reason. Cohesive modules below
+  roughly 1,000 lines are normally acceptable; 1,000--2,000 lines warrant
+  review; above 2,000 lines is a strong modularization candidate; and ordinary
+  handwritten modules above 3,000 lines require a compelling architectural
+  reason. Generated, vendored, schema-generated, and static-data files are
+  exceptions. Extract real responsibilities, never meaningless numbered
+  helpers.
+
+  Keep control flow shallow through guard clauses, focused policy functions,
+  and typed adapters. Nesting beyond three levels, long conditional chains,
+  or cyclomatic complexity above 10 should trigger review; complexity above
+  15 is a strong refactoring candidate unless the domain logic is inherently
+  branch-heavy. Comments explain scientific invariants, policy reasons, and
+  compatibility constraints; they do not compensate for tangled code.
+
+  Preserve public APIs, CLIs, configuration contracts, serialization formats,
+  and task/plugin interfaces during internal refactoring. Tests follow the
+  real boundary: pure policy tests, contract tests, bounded component tests,
+  and only the end-to-end tests that require the complete chain. Before a
+  non-trivial commit, ask whether the same behavior can be expressed more
+  simply, whether a special case or speculative abstraction was added, and
+  whether another implementation could be added without editing unrelated
+  branches.
+
+  These rules are preventive, not authorization for a repository-wide cleanup.
+  The active priority is clean campaign readiness and completion of the
+  framework/experiment separation. Refactor only when the current change would
+  worsen an unhealthy boundary, the existing structure makes the repair
+  unsafe, or nearby duplication and special cases are accumulating. Keep such
+  refactors bounded, behavior-preserving, and separately validated.
 
   **Why this is a rule and not a preference**: `HyperparamTuningAgent.run()`
   reached 2,487 lines and sat *exactly* on pyright's strict complexity
@@ -520,10 +570,9 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   `health_policy` block mapping each disposition (`blocking` / `recording`)
   to gate role, cadence, short-circuit, `on_pass`/`on_fail` and per-check
   policy keys such as `aggregation`. It must NEVER carry a task identity,
-  roster, threshold, peek set or science prose. TIDMAD's roster, thresholds,
-  `peek_samples`, health-peek files, mV value scale and `reason` prose live
-  in **`configs/task_health/tidmad.yaml`**; an external task supplies its own
-  file anywhere on disk and needs no SIDERIUS edit. The two compose
+  roster, threshold, peek set or science prose. An external task supplies its
+  own Health declaration and plugins from its task package and needs no
+  SIDERIUS edit. The two inputs compose
   deterministically into the same pinned
   `{workspace}/health_checks_effective.yaml`, and
   `load_health_gates_config()` returns that COMPOSED result. To change a
@@ -556,34 +605,6 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   inside `score_vector`.
 - **Design doc**: `docs/design/pluggable_health_checks.md`.
 
-## Baseline Configs — TIDMAD Paper Alignment
-
-**`ml_models/legacy_baseline_configs.json` is the source of truth for
-paper-spec baseline configurations.** Cross-referenced verbatim against
-`/home/tidmad/TIDMAD/train.py` and `/home/tidmad/TIDMAD/network.py` (class
-`FocalLoss1D`).
-
-Aligned parameters (as of commit `3e119c6`):
-- **Learning rate**: `lr = 5e-4` for every model (paper:
-  `torch.optim.Adam(..., lr=0.0005)`). Was `1e-3` before the fix.
-- **Wavenet focal alpha**: `alpha = 0.5` (paper: `FocalLoss1D()` default). Was
-  `0.25` before the fix. Punet/transformer/rnn/gated_fno already matched at
-  `alpha=0.5`.
-- **Epochs (Phase 1 baseline)**: hardcoded to `--max_epochs 1` in
-  `scripts/run_comparison.py::run_baseline_trial` (paper authors, direct
-  communication).
-
-Structural discrepancies known and NOT addressed by config alone:
-- Paper trains 4 separate models per architecture (frequency-band split via
-  `ifile_checkpoint = [0, 4, 10, 15, 20]` in `train.py`); SIDERIUS trains a
-  single generalist model on all 20 files.
-- Paper re-initializes the optimizer per-file (`optimizer = ...` inside the
-  `for ifile` loop); SIDERIUS uses a single optimizer.
-
-The `FocalLoss1D` implementation itself
-(`ml_models/loss_models_sandbox.py`, class `FocalLoss1D`) is line-for-line
-identical to TIDMAD's `network.py:FocalLoss1D`.
-
 ## Subsystem Invariants (Read Before Touching)
 
 - **`score_vector` is pure scoring** (2-tuple return: `(file_vector, scalar)`)
@@ -610,10 +631,6 @@ identical to TIDMAD's `network.py:FocalLoss1D`.
   the id. Losses are NOT metrics — but that boundary is TYPED, not lexical: since Step 12 / PR-12a C5 closed D16, **`MetricSpec.id` is an OPAQUE identity** and `log_loss` is as declarable as `accuracy`. What enforces the boundary is the contract (a deliverable, an aggregation, an executable `ScoreabilityContract`), `_compose_metric`'s `EvaluationMetric` type check, and `extra="forbid"` plus zero loss-named fields on the record-facing types.
   Records carry the additive `metric_result` / `metric_refusal`; the frozen
   `denoising_score` / `file_vector` / `score_table` names are unchanged (D1).
-- **`ml_models/legacy_baseline_configs.json` is the paper-spec source of
-  truth.** Any edit here must cite the corresponding paper source (train.py
-  line, network.py class, or paper section). Do not tune these values away
-  from paper spec without a written justification in the commit message.
 - **RLIMIT_AS for inference subprocess = 60 GiB**
   (`core/sandbox_executor.py:_ROLE_DEFAULT_RSS_GB["inference"] = 60`).
   Training uses 40 GiB, scoring uses 24 GiB. The inference bump (commit
@@ -1364,9 +1381,12 @@ identical to TIDMAD's `network.py:FocalLoss1D`.
   a fresh session — never from the conversation that produced this correction.
   See the Step-07 parent §17.1.
 
-- **Active line of work**: the **v0.1.0 release train** on `master` — release
-  candidate `v0.1.0-rc.2` (`2e4ce1ce`), with the campaign lanes tracked in
-  `docs/campaign/`.
+- **Active line of work (2026-08-30)**: separate reusable framework ownership
+  from real tasks and campaigns. The live ledger is
+  `docs/design/framework_experiment_repository_separation.md`. Real task and
+  campaign assets move to `siderius-exp`; SIDERIUS retains only generic
+  mechanisms and lightweight synthetic examples. Historical entries below
+  remain provenance, not current ownership instructions.
 
 - **HISTORICAL — superseded, retained for provenance, NOT actionable.** The
   four entries below were accurate around 2026-08-17 and are kept because this

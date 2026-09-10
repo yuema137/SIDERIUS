@@ -16,6 +16,7 @@ workflow is out of scope.
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from agent.schemas.interpretation import InterpretationOutput
@@ -27,7 +28,7 @@ from workflows.model_exploration import (
     merge_external_agent_outputs,
     should_run_literature_review,
 )
-from workflows.task_config import get_task_description, load_task_config
+from workflows.task_config import bind_task_config, get_task_description, load_task_config
 
 # ---------------------------------------------------------------------------
 # Builders
@@ -82,6 +83,17 @@ _LLM_KWARGS = {
     "search_llm_provider": "deepseek",
     "search_llm_model_id": "deepseek-v4-pro",
 }
+
+
+@pytest.fixture(autouse=True)
+def _bound_synthetic_task():
+    with bind_task_config(
+        {
+            "task_description": "Predict a continuous synthetic target from tabular inputs.",
+            "forward_contract": {},
+        }
+    ):
+        yield
 
 
 def _storage(tmp_path) -> StorageConfig:
@@ -149,12 +161,27 @@ class TestShouldRunLiteratureReview:
 
 
 class TestBuildLitReviewInput:
-    def test_canonical_yaml_round_trips_every_knob(self, tmp_path):
-        """The repo's default YAML at configs/lit_review_config.yaml carries
-        every operator-visible knob explicit; verify each round-trips into
+    def test_caller_config_round_trips_every_knob(self, tmp_path):
+        """A caller-owned config carries every operator-visible knob into
         the resulting LiteratureReviewInput."""
-        with open("configs/lit_review_config.yaml", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
+        cfg = {
+            "root_papers": [{"source_type": "arxiv", "identifier": "2406.04378", "verbosity": 1}],
+            "dynamic_search": {
+                "enabled": True,
+                "max_rounds": 3,
+                "initial_verbosity": 0,
+            },
+            "findings_verbosity": 1,
+            "synthesis": {"transfer_tolerance": "moderate"},
+            "confidence_rubric": {
+                "omit_below": 0.40,
+                "bands": [
+                    {"lower": 0.40, "upper": 0.59, "criteria": "low"},
+                    {"lower": 0.60, "upper": 0.79, "criteria": "medium"},
+                    {"lower": 0.80, "upper": 1.00, "criteria": "high"},
+                ],
+            },
+        }
         inp = _build_lit_review_input(
             cfg,
             _interp(),

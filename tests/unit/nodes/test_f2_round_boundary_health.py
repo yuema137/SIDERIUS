@@ -396,29 +396,13 @@ class TestARunThatDeclaresNoHealthEvaluatesZeroGates:
                 "selected gates at the firing site"
             )
 
-    def test_the_path_route_tells_the_four_config_states_apart(self, tmp_path):
-        """The discrimination that makes the fix a REPAIR and not a special case.
-
-        Two of these four were indistinguishable at the firing site — an
-        ``explicit_none`` config and NO config produced the same six gates —
-        which is what made "an EXPLICIT_NONE config yields zero gates"
-        insufficient as a witness on its own. A fix that merely made an empty
-        roster mean "no gates" would collapse the three-state binding
-        vocabulary: state 2b below would go to zero with it, and a pre-08b or
-        hand-written empty YAML would silently stop resolving the legacy
-        family it is supposed to resolve.
-
-        What is actually asked is the DECLARATION: the marker
-        ``task_health_binding`` is now a declared field, so it survives the
-        load and the loader consumes it. The decision therefore travels IN
-        the document — which is what the path route needs, since
-        ``load_health_gates_config`` takes a path and no binding argument.
-        """
+    def test_absent_and_explicitly_empty_paths_both_evaluate_zero_gates(self, tmp_path):
+        """No path state may reconstruct an undeclared scientific family."""
         from execute_tools.health_checks import get_gates_for_position
         from execute_tools.health_checks._composition import HealthBindingState
         from execute_tools.health_checks.config import materialize_effective_config
 
-        legacy, _ = materialize_effective_config(None, None, str(tmp_path / "ws_legacy"))
+        omitted, _ = materialize_effective_config(None, None, str(tmp_path / "ws_omitted"))
         explicit_none, _ = materialize_effective_config(
             None,
             None,
@@ -428,15 +412,15 @@ class TestARunThatDeclaresNoHealthEvaluatesZeroGates:
         bare_empty = tmp_path / "bare_empty.yaml"
         bare_empty.write_text("health_gates: []\n", encoding="utf-8")
 
-        # 1 — a file with its own roster: exactly that roster.
-        assert get_gates_for_position(1, config_path=legacy) != []
-        # 2 — `health_gates: []` DECLARING `explicit_none`: no gates.
+        # A materialized omission and a declared explicit absence are both
+        # honest empty families. Neither selects a scientific default.
+        assert get_gates_for_position(1, config_path=omitted) == []
         assert get_gates_for_position(1, config_path=explicit_none) == []
-        # 2b — `health_gates: []` declaring NOTHING: an ABSENT roster, which
-        #      still composes the legacy default. Emptiness is not a decision.
-        assert get_gates_for_position(1, config_path=str(bare_empty)) != []
-        # 3 — no config at all: the same absent-roster answer as 2b.
-        assert get_gates_for_position(1) != []
+        # A hand-written empty effective file and no file at all also remain
+        # empty; restoring task science in either branch would violate the
+        # explicit-composition boundary.
+        assert get_gates_for_position(1, config_path=str(bare_empty)) == []
+        assert get_gates_for_position(1) == []
         assert get_gates_for_position(1, config_path=str(bare_empty)) == get_gates_for_position(1)
 
     def test_the_round_boundary_runs_the_real_engine_and_persists_nothing(

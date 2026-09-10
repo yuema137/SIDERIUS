@@ -21,9 +21,11 @@ import json
 
 import h5py
 import numpy as np
+import pytest
 
 from execute_tools.health_checks.output_diversity import OutputDiversityCheck
 from execute_tools.health_checks.schemas import HealthCheckContext
+from tests.helpers.two_family_profile import write_bound_timeseries
 
 
 def _per_file(result) -> list[dict]:
@@ -32,11 +34,8 @@ def _per_file(result) -> list[dict]:
 
 
 def _write_denoised_h5(path, ch1: np.ndarray) -> None:
-    """Write a minimal denoised HDF5 with ``channel0001/timeseries`` populated."""
-    with h5py.File(str(path), "w") as f:
-        ts = f.create_group("timeseries")
-        c1 = ts.create_group("channel0001")
-        c1.create_dataset("timeseries", data=ch1, chunks=True)
+    """Write a minimal deliverable using the bound output-channel name."""
+    write_bound_timeseries(path, ch1)
 
 
 def _ctx(**overrides) -> HealthCheckContext:
@@ -244,3 +243,6 @@ class TestConfigThresholds:
         assert _per_file(small)[0]["metric_value"] == 1
         big = OutputDiversityCheck().run(ctx, {"min_unique_int8_values": 5, "peek_samples": 10_000})
         assert big.passed is True
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

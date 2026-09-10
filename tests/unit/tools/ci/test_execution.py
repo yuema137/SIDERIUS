@@ -129,10 +129,10 @@ class TestFrozenSensitiveManifest:
         Fails as: a file is added or removed without the reasoning that CP-6
         requires, re-opening the keyword-classification trap.
         """
-        assert len(SENSITIVE_FILES) == 6
+        assert len(SENSITIVE_FILES) == 5
         assert TIMING_FILES | GIT_STATE_FILES == set(SENSITIVE_FILES)
         assert len(GIT_STATE_FILES) == 1
-        assert len(TIMING_FILES) == 5
+        assert len(TIMING_FILES) == 4
 
     def test_every_sensitive_file_states_why_it_is_sensitive(self):
         """A quarantine without a reason becomes permanent and unexamined.

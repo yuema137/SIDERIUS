@@ -378,3 +378,6 @@ class TestSynthesizedHumanAgentCard:
         human_items = [c for c in result.expert_context if c.source == "human"]
         assert len(human_items) == 1
         assert human_items[0].source_ref.startswith("human:")
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

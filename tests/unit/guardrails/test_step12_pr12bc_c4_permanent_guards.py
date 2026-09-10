@@ -107,20 +107,8 @@ RETIRED_INVERTED_GUARDS: dict[str, str] = {
 
 #: The properties those guards were pointing at, and their single owner now.
 CORRECTED_PROPERTY_OWNERS: dict[str, str] = {
-    "test_the_emitter_is_used_at_all_three_spawn_sites": (
-        "tests/unit/execute_tools/test_step12_pr12bc_c3_child_loading.py"
-    ),
-    "test_an_OUT_OF_TREE_implementation_resolves_in_a_child": (
-        "tests/unit/execute_tools/test_step12_pr12bc_c3_child_loading.py"
-    ),
-    "test_a_child_resolves_an_id_that_is_in_NO_bootstrap": (
-        "tests/unit/execute_tools/test_step12_pr12bc_c3_child_loading.py"
-    ),
-    "test_a_REGISTRY_HIT_with_divergent_content_is_REFUSED": (
-        "tests/unit/workflows/test_step12_pr12bc_c2_identity.py"
-    ),
-    "test_after_unwind_a_DIFFERENT_roster_is_legal": (
-        "tests/unit/workflows/test_step12_pr12bc_c1_lifecycle.py"
+    "test_same_id_DIFFERENT_content_is_refused_naming_both": (
+        "tests/unit/workflows/test_step12_pr12e_negative_controls.py"
     ),
 }
 

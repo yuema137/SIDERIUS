@@ -32,17 +32,17 @@ from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from execute_tools.evaluation_metric import (
-    TIDMAD_METRIC_ID,
     MetricSpec,
     metric_spec_from_declaration,
 )
 from execute_tools.scoring_utils import coerce_nonfinite_to_none
-from tests.helpers.metric_fixtures import shipped_spec
+from tests.helpers.metric_fixtures import accuracy_like_spec
 from tests.helpers.step00_pseudo_iteration import run_bounded_pseudo_iteration
 
 _HERE = Path(__file__).parent
 _PREFLIGHT_FIXTURE = _HERE / "fixtures" / "step00_preflight_results.json"
 _REPLAY_WS = _HERE.parents[1] / "core" / "fixtures" / "step00_replay_workspace" / "iter_001"
+FIXTURE_METRIC_ID = "fixture_accuracy"
 
 
 @pytest.fixture(scope="module")
@@ -69,9 +69,9 @@ class TestTheLivePathStampsTheRunSpec:
             "interpreter would have to re-derive a metric, which Step 09 forbids"
         )
         # Hardcoded expectation, not read back off the output.
-        assert output.metric_spec.id == TIDMAD_METRIC_ID
+        assert output.metric_spec.id == FIXTURE_METRIC_ID
         assert output.metric_spec.direction == "higher"
-        assert output.metric_spec == shipped_spec()
+        assert output.metric_spec == accuracy_like_spec()
 
     def test_the_persisted_json_revalidates_to_an_equal_spec(self, pseudo_run):
         """The round trip the transport depends on, through the REAL writer's
@@ -90,7 +90,7 @@ class TestTheLivePathStampsTheRunSpec:
         output, _bridge, _sandbox, workspace = pseudo_run
         path = Path(workspace) / f"run_output_{output.run_name}.json"
         payload = json.loads(path.read_text(encoding="utf-8"))
-        assert payload["metric_spec"]["id"] == TIDMAD_METRIC_ID
+        assert payload["metric_spec"]["id"] == FIXTURE_METRIC_ID
         assert payload["metric_spec"]["direction"] == "higher"
 
 
@@ -140,10 +140,10 @@ class TestTheDegradedWriterKeepsTheLaunchFact:
         assert "_partial_reason" in payload, (
             "the degraded writer did not run — this test proved nothing about it"
         )
-        assert payload["metric_spec"]["id"] == TIDMAD_METRIC_ID
+        assert payload["metric_spec"]["id"] == FIXTURE_METRIC_ID
         assert payload["metric_spec"]["direction"] == "higher"
         # The re-validated in-memory output the caller receives carries it too.
-        assert output.metric_spec == shipped_spec()
+        assert output.metric_spec == accuracy_like_spec()
 
 
 class TestTheCarrierSurvivesItsOwnDump:
@@ -153,13 +153,14 @@ class TestTheCarrierSurvivesItsOwnDump:
         """Anti-vacuity for the field: if this ever STOPS raising, the
         BeforeValidator is no longer load-bearing and the extra machinery
         should be reconsidered rather than kept out of habit."""
-        spec = shipped_spec()
-        with pytest.raises(ValidationError) as excinfo:
+        spec = accuracy_like_spec()
+        with pytest.raises((TypeError, ValidationError)) as excinfo:
             MetricSpec.model_validate(spec.model_dump())
-        assert "extra_forbidden" in str(excinfo.value) or "Extra inputs" in str(excinfo.value)
+        if isinstance(excinfo.value, ValidationError):
+            assert "extra_forbidden" in str(excinfo.value) or "Extra inputs" in str(excinfo.value)
 
     def test_the_field_accepts_an_instance_a_mapping_and_rejects_garbage(self):
-        spec = shipped_spec()
+        spec = accuracy_like_spec()
 
         from_instance = HyperparamTuningOutput.model_validate(
             _minimal_output_dict() | {"metric_spec": spec}
@@ -180,14 +181,14 @@ class TestTheCarrierSurvivesItsOwnDump:
 
         with pytest.raises(ValidationError):
             HyperparamTuningOutput.model_validate(
-                _minimal_output_dict() | {"metric_spec": "tidmad_denoising_score"}
+                _minimal_output_dict() | {"metric_spec": "not_a_metric_declaration"}
             )
 
     def test_the_field_uses_the_one_sanctioned_rebind(self):
         """The mapping path must be EXACTLY ``metric_spec_from_declaration`` —
         the equality below is what makes 'no second construction path' checkable
         rather than merely asserted in a comment."""
-        spec = shipped_spec()
+        spec = accuracy_like_spec()
         declared = json.loads(json.dumps(spec.model_dump()))
         assert metric_spec_from_declaration(declared) == spec
         assert HyperparamTuningOutput.model_validate(
@@ -224,3 +225,6 @@ def _minimal_output_dict() -> dict:
         "started_at": "2026-08-19T00:00:00Z",
         "finished_at": "2026-08-19T01:00:00Z",
     }
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

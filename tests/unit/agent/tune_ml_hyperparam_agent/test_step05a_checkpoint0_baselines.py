@@ -4,10 +4,16 @@ Captured against **byte-unchanged production code**, before any 05a edit, so
 Checkpoint A can prove the run-bound-`DatasetProfile` migration moved nothing.
 
 Design: `docs/design/generic_framework_upgrade/step_05a_tuner_data_selection.md`
-§6 names exactly two compatibility surfaces with **no existing oracle**:
+§6 originally named two compatibility surfaces with **no existing oracle**:
 
 1. ``_validate_data_config`` accept/reject **and its exact diagnostic text**;
 2. the **live** legacy ``single_file`` train/eval segment counts.
+
+The second oracle was retired during repository separation. Its harness had no
+task composition, task configuration, or declared metric and therefore could
+not construct a supported run after scientific defaults moved outside the
+framework. External composed-task qualification owns live runtime accounting;
+this module retains only the pure, explicitly supplied legality parity below.
 
 Everything else in §6 (TrialConfig serialization, SampleSet identities,
 run-invariant stamping) already has a Step-00/Step-02 baseline, and §17
@@ -43,27 +49,12 @@ call here would make the baseline itself un-runnable the moment M3 removes
 that default, which would defeat the purpose of a baseline.
 """
 
-import json
-import os
-from pathlib import Path
-from unittest.mock import patch
-
 import pytest
 
 from agent.schemas.hyperparam_tuning import TrialConfig
 from execute_tools.dataset_config import TIDMAD
-from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _validate_data_config,
-)
-from tests.helpers.scoring_stubs import stub_scoring
-from tests.unit.agent.tune_ml_hyperparam_agent.test_tuning_agent import (
-    FAKE_PLAN_RESPONSE,
-    FAKE_REFLECT_RESPONSE,
-    FAKE_SCORE_VECTOR_RESULT,
-    _make_trial_input,
-    _mock_run_skill,
-    _synth_reference,
 )
 
 # ---------------------------------------------------------------------------
@@ -131,89 +122,3 @@ class TestLegalityBaselineUnderTidmad:
             ACCEPTING_SEGMENTATION_SIZE,
             dataset_config=TIDMAD,
         )
-
-
-# ---------------------------------------------------------------------------
-# Baseline 2 — LIVE legacy single_file segment accounting
-# ---------------------------------------------------------------------------
-
-# TIDMAD.segments_per_file. Hardcoded for the same reason as above: reading
-# it from the dataset object would make the assertion true by construction
-# both before and after the migration.
-EXPECTED_SINGLE_FILE_SEGMENTS = 200
-
-
-def _run_single_file_tuner(tmp_path):
-    """Drive the REAL tuner down the legacy ``single_file`` route.
-
-    Reachability (design §2): ``mode = "single_file"`` requires BOTH
-    ``plan.is_trial`` false and ``trial_allowed`` false, and
-    ``trial_allowed = agent_input.is_trial`` is an operator CLI flag. So
-    ``FAKE_PLAN_RESPONSE`` (which carries no ``is_trial`` key) plus
-    ``is_trial=False`` selects it — no patching of the branch itself, which
-    is what makes this the *live* path rather than the arithmetic expression
-    called directly (§17 CHECKPOINT 0).
-
-    Returns ``(saved_records, persisted_trial_configs)``. The saved record
-    carries no ``mode``, so the route is confirmed from the ``TrialConfig``
-    JSON the tuner writes for the subprocess — an operator-visible artifact
-    rather than an inference from the counts being asserted.
-    """
-    configs_dir = str(tmp_path / "configs")
-    os.makedirs(configs_dir, exist_ok=True)
-    with (
-        patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
-        patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-        patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_mock_run_skill),
-        patch(
-            "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
-            return_value=_synth_reference(),
-        ),
-        patch(
-            "nodes.ml_hyperparameter_tune_agent.round_health.get_gates_for_position",
-            return_value=[],
-        ),
-    ):
-        mock_brain = MockBridge.return_value
-        mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
-        mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
-
-        saved_records: list = []
-        mock_sandbox = MockSandbox.return_value
-        mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
-        mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
-        mock_sandbox.dirs = {"configs": configs_dir, "data": configs_dir}
-        stub_scoring(mock_sandbox, *FAKE_SCORE_VECTOR_RESULT)
-
-        agent = HyperparamTuningAgent()
-        agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=False))
-
-    trial_configs = [
-        json.loads((Path(configs_dir) / name).read_text())
-        for name in sorted(os.listdir(configs_dir))
-        if name.startswith("trial_config_")
-    ]
-    return saved_records, trial_configs
-
-
-class TestLegacySingleFileAccountingBaseline:
-    def test_the_live_single_file_path_reports_tidmad_segment_counts(self, tmp_path):
-        """Both counts come from ``DATASET_CONFIG.segments_per_file`` today.
-
-        Asserted on the persisted record, which is what the reflector and
-        every downstream consumer actually read — not on a local variable.
-        """
-        records, trial_configs = _run_single_file_tuner(tmp_path)
-
-        # Route first: if the run silently took the trial/formal branch the
-        # counts would come from a SampleSet and this would be measuring the
-        # wrong thing while still looking plausible.
-        assert trial_configs, "the tuner persisted no TrialConfig — no attempt ran"
-        assert trial_configs[0]["mode"] == "single_file", (
-            f"expected the legacy route, got mode={trial_configs[0]['mode']!r}"
-        )
-
-        assert records, "the run saved no record — the accounting path never executed"
-        record = records[0]
-        assert record["training_psd_segments"] == EXPECTED_SINGLE_FILE_SEGMENTS
-        assert record["eval_psd_segments"] == EXPECTED_SINGLE_FILE_SEGMENTS

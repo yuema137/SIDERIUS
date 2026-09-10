@@ -9,7 +9,7 @@ Three properties, each with the defect only it catches:
   (``test_step06_c1_evaluation_metric.py`` §3: loss-shaped identities refused
   on every metric type, ``loss_history`` refused under any key, no loss field
   structurally). Not duplicated here; referenced.
-* **Declared exactly once.** The TIDMAD metric identity and the metric
+* **Declared exactly once.** The compatibility metric identity and the metric
   DIRECTION vocabulary live in ONE executed constant each, in the metric
   module. A second executed ``"tidmad_denoising_score"`` or a stray
   ``"higher"``/``"lower"`` literal anywhere in production is a second
@@ -32,13 +32,10 @@ per_file_best / dashboard) are still debt and still hold their literals.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
-
-from tests.unit.scripts.test_step05c_c6_launcher_reconstruction import (
-    _executed_string_constants,
-)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_DIRS = (
@@ -63,6 +60,27 @@ ORDER_MODULE = "execute_tools/metric_order.py"
 def _production_files():
     for d in PRODUCTION_DIRS:
         yield from sorted((REPO_ROOT / d).rglob("*.py"))
+
+
+def _executed_string_constants(source: str) -> list[str]:
+    """Return executed string literals while excluding module docstrings."""
+    tree = ast.parse(source)
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+        and isinstance(node.body[0].value.value, str)
+    }
+    return [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+    ]
 
 
 def _executed(path: Path) -> list[str]:
@@ -143,7 +161,7 @@ def test_no_production_surface_executes_a_direction_literal_outside_the_metric_m
     handle or not at all.
 
     TWO modules name it, and the split is the architecture: the metric module
-    DECLARES the vocabulary (``MetricDirection``) and TIDMAD's value; the
+    DECLARES the vocabulary (``MetricDirection``); the
     order module (Step 07 PR 07b) INTERPRETS it. Anything else executing
     ``"higher"``/``"lower"`` is a third authority that a direction flip would
     leave behind — which is the entire defect 07b removed from 21 tuner sites.
@@ -153,8 +171,10 @@ def test_no_production_surface_executes_a_direction_literal_outside_the_metric_m
         rel = p.relative_to(REPO_ROOT).as_posix()
         found = [s for s in _executed(p) if s in ("higher", "lower")]
         if rel == METRIC_MODULE:
-            # Literal["higher", "lower"] (vocabulary) + direction="higher" (TIDMAD).
-            assert sorted(found) == ["higher", "higher", "lower"], found
+            # Literal["higher", "lower"] is the complete direction vocabulary.
+            # Scientific metric values are task declarations, not framework
+            # constants.
+            assert sorted(found) == ["higher", "lower"], found
             continue
         if rel == ORDER_MODULE:
             # Five executed literals, all in one place on purpose:
@@ -320,14 +340,6 @@ MIGRATED_TO_THE_ORDER_AUTHORITY = (
         'entries.sort(key=lambda e: e["denoising_score"], reverse=True)',
     ),
     ("dashboard/data_sources/base.py", "ranked by denoising_score descending (higher is better)"),
-    (
-        "scripts/build_diagnostic_summary.py",
-        'max(valid, key=lambda record: record["denoising_score"])',
-    ),
-    (
-        "scripts/finalize_recovered_diagnostic_round.py",
-        'max(valid, key=lambda item: item["denoising_score"])',
-    ),
 )
 
 
@@ -342,8 +354,6 @@ MIGRATED_TO_THE_ORDER_AUTHORITY = (
 #: ASSERTED property rather than becoming an unchecked exemption.
 _AUTHORITY_MARKERS: dict[str, str] = {
     "dashboard/data_sources/local_json.py": "persisted_ranking",
-    "scripts/build_diagnostic_summary.py": "persisted_ranking",
-    "scripts/finalize_recovered_diagnostic_round.py": "persisted_ranking",
     # A prose-only row: an abstract method's docstring, which names no
     # authority because it executes nothing. What must be true of it is that
     # it no longer STATES a fixed direction — asserted below by the absence of

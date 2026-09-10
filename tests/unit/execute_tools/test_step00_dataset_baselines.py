@@ -12,113 +12,19 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.runtime_control.registry_schemas import MeasurementIdentity
-from execute_tools.dataset_config import (
-    NUM_FILES,
-    SEGMENT_LENGTH,
-    SEGMENTS_PER_FILE,
-    TIDMAD,
-    DataScope,
-)
 from tests.helpers.golden import assert_json_golden
 
 GOLDENS = Path(__file__).parent / "goldens"
 
-# The exact divisor list of 2_000_000_000 total samples per file geometry:
-# valid ML segmentation sizes in [100, 100_000] (audit B: 36 entries, only
-# PROPERTIES were pinned before Step 00). Hardcoded expectation — never
-# read back from the code under test.
-_VALID_SEGMENTATION_SIZES_36 = [
-    100,
-    125,
-    128,
-    160,
-    200,
-    250,
-    320,
-    400,
-    500,
-    625,
-    640,
-    800,
-    1000,
-    1250,
-    1600,
-    2000,
-    2500,
-    3125,
-    3200,
-    4000,
-    5000,
-    6250,
-    8000,
-    10000,
-    12500,
-    15625,
-    16000,
-    20000,
-    25000,
-    31250,
-    40000,
-    50000,
-    62500,
-    78125,
-    80000,
-    100000,
-]
 
-
-class TestDS1TidmadDatasetConfig:
-    def test_all_six_fields_deep_equal(self):
-        """DS-1 (Type 2): every field of the TIDMAD singleton. Before
-        Step 00, ``sampling_frequency`` and ``validation_file_pattern``
-        were UNPINNED (the frozen raw-filename literal in the scorer is a
-        separate MIGRATION PARITY pin, NUM-6)."""
-        assert TIDMAD.model_dump() == {
-            "psd_segment_length": 10_000_000,
-            "segments_per_file": 200,
-            "num_files": 20,
-            "sampling_frequency": 10_000_000.0,
-            "training_file_pattern": "abra_training_{file_index:04d}.h5",
-            "validation_file_pattern": "abra_validation_{file_index:04d}.h5",
-        }
-
-    def test_module_constants_mirror_singleton(self):
-        assert SEGMENT_LENGTH == 10_000_000
-        assert SEGMENTS_PER_FILE == 200
-        assert NUM_FILES == 20
-
-    def test_valid_segmentation_sizes_exact_list(self):
-        assert TIDMAD.valid_segmentation_sizes() == _VALID_SEGMENTATION_SIZES_36
-
-    def test_filename_renders(self):
-        assert TIDMAD.training_file_name(0) == "abra_training_0000.h5"
-        assert TIDMAD.training_file_name(19) == "abra_training_0019.h5"
-        assert TIDMAD.validation_file_pattern.format(file_index=7) == "abra_validation_0007.h5"
-
-    def test_default_scope_resolves_full_range(self):
-        assert DataScope.default().resolve(NUM_FILES) == list(range(20))
-
-
-class TestDS2ShapeClassAndIdentityOrder:
-    def test_data_shape_class_exact_string(self):
-        """DS-2: the shape-class string existed only as a fixture literal
-        before Step 00. Produced through the REAL resolver with an
-        explicit ``dataset_root`` (no machine data-dir coupling; steps
-        02/07b depend on this key's stability)."""
-        from execute_tools.data_paths import resolve_tidmad_measurement_capability
-
-        cap = resolve_tidmad_measurement_capability(dataset_root="/nonexistent/step00-fixture")
-        assert cap.data_shape_class == "psd10000000_seg200_files20"
-        assert cap.task_identity == "tidmad_denoise"
-        assert cap.dataset_adapter == "tidmad_hdf5"
-
+class TestMeasurementIdentityOrder:
     def test_measurement_identity_component_order(self):
         """DS-2: the ordered identity-key composition (stack LAST) — store
         keys and comparability groups depend on this exact order."""
         ident = MeasurementIdentity(
             measurement_kind="duration",
-            task_identity="tidmad_denoise",
-            data_shape_class="psd10000000_seg200_files20",
+            task_identity="synthetic_regression",
+            data_shape_class="vector3_mask2",
             model_family="wavenet",
             candidate_config_hash="cfg-hash-fixture",
             phase="training",
@@ -127,8 +33,8 @@ class TestDS2ShapeClassAndIdentityOrder:
         )
         assert ident.components() == (
             "duration",
-            "tidmad_denoise",
-            "psd10000000_seg200_files20",
+            "synthetic_regression",
+            "vector3_mask2",
             "wavenet",
             "cfg-hash-fixture",
             "training",

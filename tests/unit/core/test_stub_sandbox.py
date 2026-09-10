@@ -31,6 +31,8 @@ import pytest
 from agent.schemas.hyperparam_tuning import ExperimentRecord
 from core.sandbox_executor import StubSandbox
 
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile", "synthetic_physical_data_root")
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

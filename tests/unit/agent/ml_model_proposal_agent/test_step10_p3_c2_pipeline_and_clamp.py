@@ -27,6 +27,7 @@ from typing import ClassVar
 import pytest
 
 from agent.schemas.proposer_evidence import build_proposer_evidence
+from execute_tools.dataset_config import bind_dataset_profile
 from execute_tools.evaluation_metric import MetricIdentityKey
 from execute_tools.metric_order import MetricOrder
 from nodes.ml_model_proposal_agent.evidence_rendering import (
@@ -34,6 +35,7 @@ from nodes.ml_model_proposal_agent.evidence_rendering import (
     build_interpretation_summary,
 )
 from nodes.proposal_helpers import clamp_comparative_analysis, evidence_order
+from tests.helpers.two_family_profile import make_two_family_profile
 from tests.unit.agent.ml_model_proposal_agent.test_step00_prompt_goldens import (
     fixture_interpretation,
 )
@@ -46,6 +48,14 @@ HIGHER = MetricOrder(MetricIdentityKey(id="tidmad_denoising_score", direction="h
 
 
 LOWER = MetricOrder(MetricIdentityKey(id="fixture_mse", direction="lower"))
+_INTERPRETATION_PROFILE = make_two_family_profile(num_files=20)
+
+
+@pytest.fixture(autouse=True)
+def _bind_interpretation_profile():
+    """Exercise every schema projection under its explicit test topology."""
+    with bind_dataset_profile(_INTERPRETATION_PROFILE):
+        yield
 
 
 def _production_shaped(dump: dict) -> dict:
@@ -63,7 +73,8 @@ def _production_shaped(dump: dict) -> dict:
     """
     from agent.schemas.interpretation import InterpretationOutput
 
-    return InterpretationOutput.model_validate(dump).model_dump()
+    with bind_dataset_profile(_INTERPRETATION_PROFILE):
+        return InterpretationOutput.model_validate(dump).model_dump()
 
 
 #: The 18 whitelist keys as the PRE-P3 source spelled them, in the PRE-P3 order,

@@ -8,6 +8,10 @@ captured from the PRE-rendering-change code at commit ``f3a0b8c``
 (clean tree), so equality here is against true pre-change output, not a
 re-derivation.
 
+The migrated fixture supplies a synthetic gate roster and explicit metric.
+Those identities are hidden when the flag is OFF, so both historical user
+goldens remain byte-identical; no expected text is regenerated.
+
 Parity is proven by exact string equality, not by absence of diffs in
 the renderer (design §11-CB3 acceptance criteria).
 """
@@ -16,30 +20,26 @@ from pathlib import Path
 
 from agent.prompt_templates.interpretation.rendering import (
     _build_per_model_prompt,
-    _build_per_model_system_prompt,
 )
-from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
-from agent.schemas.interpretation import InterpretationInput
 from execute_tools.metric_order import MetricOrder
-from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
-from tests.helpers.metric_fixtures import shipped_spec
+from tests.helpers.metric_fixtures import accuracy_like_spec
 from tests.unit.agent.result_interpretation_agent.test_round_health_summary import (
     _gate_result,
     _output,
     _record,
+    tuning_output_to_model_run_summary,
 )
 
 #: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
-#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
+#: REQUIRED keyword. The synthetic metric is `higher`, so every expectation in
 #: this file is unchanged; the direction is now stated instead of assumed.
-_STEP09A_ORDER = MetricOrder(shipped_spec())
+_STEP09A_ORDER = MetricOrder(accuracy_like_spec())
 
 GOLDENS = Path(__file__).parent / "goldens"
 
 
 def _summary_collapse():
-    """Same fixture the golden-capture script used — collapse-heavy run
-    WITH round_health populated."""
+    """Original record shape, with explicit synthetic Health evidence."""
     return tuning_output_to_model_run_summary(
         _output(
             _record(
@@ -47,7 +47,7 @@ def _summary_collapse():
                 status="failed_mode_collapse",
                 denoising_score=None,
                 gate_action="invalidate_round",
-                failure_reason="[output_diversity_blocking] unique=1",
+                failure_reason="[synthetic_stability_blocking] dispersion=1",
                 health_gate_results=[_gate_result()],
                 trial_portion=0.05,
                 model_params=120000,
@@ -93,19 +93,3 @@ def test_per_model_prompt_parity_legacy_summary():
         human_advice="Try smaller lr.",
     )
     assert rendered == (GOLDENS / "per_model_prompt_legacy.txt").read_text()
-
-
-def test_per_model_system_prompt_parity():
-    """Step 09b C2 SUPERSEDES the pre-PR3 provenance for THIS golden only:
-    the system prompt's science moved into TIDMAD's task blocks, so
-    ``per_model_system_prompt.txt`` now pins the CURRENT assembled bytes
-    (framework template + TIDMAD blocks; regenerated at C2 with the delta
-    declared in the 09b design §22.2). The USER-prompt parity tests above
-    keep their original pre-PR3 capture claim untouched."""
-    inp = InterpretationInput(
-        model_types=["wavenet"],
-        task_description="Denoise SQUID data.",
-        task_blocks=load_interpretation_task_blocks(),
-    )
-    rendered = _build_per_model_system_prompt(inp)
-    assert rendered == (GOLDENS / "per_model_system_prompt.txt").read_text()

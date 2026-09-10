@@ -9,14 +9,14 @@
       {
         "exp_id": "e1",
         "failed_gate_names": [
-          "output_diversity_blocking"
+          "synthetic_stability_blocking"
         ],
         "failure_reasons": [
           "collapsed"
         ],
         "health_validity": "invalid",
         "key_metrics": {
-          "output_diversity_blocking.unique_int8": 1
+          "synthetic_stability_blocking.dispersion": 1
         },
         "status": "success"
       }
@@ -34,14 +34,14 @@
       {
         "exp_id": "e1",
         "failed_gate_names": [
-          "output_diversity_blocking"
+          "synthetic_stability_blocking"
         ],
         "failure_reasons": [
           "collapsed"
         ],
         "health_validity": "invalid",
         "key_metrics": {
-          "output_diversity_blocking.unique_int8": 1
+          "synthetic_stability_blocking.dispersion": 1
         },
         "status": "success"
       }

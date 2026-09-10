@@ -29,6 +29,7 @@ move rather than an edit.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -46,12 +47,22 @@ from tests.unit.workflows.test_model_exploration import (
 )
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+QUICKSTART = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 
 def _drive(tmp_path, per_iteration_findings, *, restored_state=None):
     """Drive the REAL ``run_workflow``; return each iteration's proposer
     expert-context findings block (or ``None`` when none rendered)."""
-    _write_tuning_output(tmp_path, "punet")
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    _write_tuning_output(
+        tmp_path,
+        "punet",
+        fingerprint=composition.semantic_fingerprint,
+        metric_spec=composition.metric.spec,
+    )
     iterations = len(per_iteration_findings)
 
     with (
@@ -75,20 +86,25 @@ def _drive(tmp_path, per_iteration_findings, *, restored_state=None):
         MockImpl.return_value.run.return_value = _make_implementor_output()
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
         MockTune.return_value.run.side_effect = lambda inp: _make_tune_output(
-            model_type=inp.model_type, score=1.6
+            model_type=inp.model_type,
+            score=1.6,
+            fingerprint=composition.semantic_fingerprint,
+            metric_spec=composition.metric.spec,
         )
 
-        run_workflow(
-            launch=WorkflowLaunchConfig(
-                data_dir=str(tmp_path / "data"),
-                model_types=["punet"],
-                source_run_name="v1",
-                max_iterations=iterations,
-            ),
-            workspace=str(tmp_path / "workflow_output"),
-            run_name="p56_c3",
-            restored_state=restored_state,
-        )
+        with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=str(tmp_path / "data"),
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    max_iterations=iterations,
+                ),
+                workspace=str(tmp_path / "workflow_output"),
+                run_name="p56_c3",
+                restored_state=restored_state,
+                task_composition=composition,
+            )
 
         blocks = []
         for c in MockPropose.return_value.run.call_args_list:
@@ -250,7 +266,13 @@ class TestTheRenderedBlock:
         assert blocks[0].startswith("Accumulated key findings from 3 prior iter(s):")
 
     def test_the_item_metadata_is_unchanged(self, tmp_path):
-        _write_tuning_output(tmp_path, "punet")
+        composition = compose_run_task_bindings(str(QUICKSTART))
+        _write_tuning_output(
+            tmp_path,
+            "punet",
+            fingerprint=composition.semantic_fingerprint,
+            metric_spec=composition.metric.spec,
+        )
         restored = RestoredState(accumulated_key_findings=["alpha"])
 
         with (
@@ -265,19 +287,24 @@ class TestTheRenderedBlock:
             MockImpl.return_value.run.return_value = _make_implementor_output()
             MockValid.return_value.run.return_value = _make_validator_output(passed=True)
             MockTune.return_value.run.side_effect = lambda inp: _make_tune_output(
-                model_type=inp.model_type, score=1.6
+                model_type=inp.model_type,
+                score=1.6,
+                fingerprint=composition.semantic_fingerprint,
+                metric_spec=composition.metric.spec,
             )
-            run_workflow(
-                launch=WorkflowLaunchConfig(
-                    data_dir=str(tmp_path / "data"),
-                    model_types=["punet"],
-                    source_run_name="v1",
-                    max_iterations=1,
-                ),
-                workspace=str(tmp_path / "workflow_output"),
-                run_name="p56_c3_meta",
-                restored_state=restored,
-            )
+            with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
+                run_workflow(
+                    launch=WorkflowLaunchConfig(
+                        data_dir=str(tmp_path / "data"),
+                        model_types=["punet"],
+                        source_run_name="v1",
+                        max_iterations=1,
+                    ),
+                    workspace=str(tmp_path / "workflow_output"),
+                    run_name="p56_c3_meta",
+                    restored_state=restored,
+                    task_composition=composition,
+                )
             proposal_input = MockPropose.return_value.run.call_args_list[0][0][0]
 
         [item] = [i for i in proposal_input.expert_context if i.kind == "findings"]

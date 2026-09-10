@@ -10,20 +10,34 @@ Two properties matter at this boundary:
 
 import json
 import os
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from core.sandbox_executor import StubSandbox, TidmadSandbox
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
-PERMUTATION = [4, 6, 5, 9, 7, 8]
-SAMPLE_SET = {4: [0], 5: [0], 6: [0], 7: [0], 8: [0], 9: [0]}
+REPO_ROOT = Path(__file__).resolve().parents[3]
+QUICKSTART_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
+PERMUTATION = [3, 1, 0, 2]
+SAMPLE_SET = {0: [0], 1: [0], 2: [0], 3: [0]}
+
+
+@pytest.fixture(autouse=True)
+def explicit_task_binding(tmp_path):
+    """Every sandbox in this module runs under the framework example task."""
+    data_root = tmp_path / "quickstart_data"
+    data_root.mkdir(exist_ok=True)
+    composition = compose_run_task_bindings(str(QUICKSTART_MANIFEST))
+    with bind_run_task_composition(composition, physical_data_root=str(data_root)):
+        yield
 
 
 @pytest.fixture
 def sandbox(tmp_path):
-    return TidmadSandbox(run_name="ordering_propagation", workspace=str(tmp_path), file_index=6)
+    return TidmadSandbox(run_name="ordering_propagation", workspace=str(tmp_path), file_index=1)
 
 
 def _cmd_from(mock_run) -> list[str]:
@@ -55,10 +69,14 @@ def _launch(sandbox, **ordering):
             sandbox.execute_training(
                 exp_id="e1",
                 run_name="ordering_propagation",
-                model_type="wavenet",
-                m_cfg={"model_type": "wavenet", "segmentation_size": 1000},
+                model_type="quickstart_reference_mlp",
+                m_cfg={
+                    "model_type": "quickstart_reference_mlp",
+                    "segmentation_size": 4,
+                    "hidden_dim": 16,
+                },
                 t_cfg={"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cpu"},
-                l_cfg={},
+                l_cfg={"loss_type": "ce", "reduction": "mean"},
                 sample_set=SAMPLE_SET,
                 **ordering,
             )
@@ -126,7 +144,7 @@ def test_wrapper_forwards_resolved_ordering():
         sandbox,
         exp_id="e1",
         run_name="r",
-        model_type="wavenet",
+        model_type="quickstart_reference_mlp",
         model_config={},
         train_config={},
         loss_config={},
@@ -145,7 +163,7 @@ def test_wrapper_defaults_to_shuffle_when_ordering_is_absent():
         sandbox,
         exp_id="e1",
         run_name="r",
-        model_type="wavenet",
+        model_type="quickstart_reference_mlp",
         model_config={},
         train_config={},
         loss_config={},
@@ -160,12 +178,12 @@ def test_wrapper_defaults_to_shuffle_when_ordering_is_absent():
 def test_stub_accepts_the_same_ordering_signature(tmp_path):
     """Pseudo mode must not drift from production at the call boundary."""
     stub = StubSandbox(
-        run_name="r", workspace=str(tmp_path), file_index=6, run_id="ordering-parity"
+        run_name="r", workspace=str(tmp_path), file_index=1, run_id="ordering-parity"
     )
     result = stub.execute_training(
         exp_id="e1",
         run_name="r",
-        model_type="wavenet",
+        model_type="quickstart_reference_mlp",
         m_cfg={},
         t_cfg={},
         l_cfg={},

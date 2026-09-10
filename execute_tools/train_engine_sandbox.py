@@ -1,5 +1,4 @@
 import argparse
-import contextlib
 import gc
 import json
 import os
@@ -54,16 +53,15 @@ from execute_tools.task_data_path import (
     EpochSamplingParams,
     EvalMaterializationParams,
     TaskDataPath,
+    TaskDataPathResolutionError,
     TrainingScopeError,
     bind_task_data_path,
-    bootstrap_legacy_tidmad_data_path,
     resolve_bound_task_data_path,
+    resolve_storage_read_scope,
 )
 from execute_tools.task_data_path import (
     ValidationScopeError as ValidationScopeError,
 )
-from execute_tools.tidmad_data_path import TIDMADEpochDataset as TIDMADEpochDataset
-from execute_tools.tidmad_data_path import TidmadScope
 from execute_tools.training_history import (
     STATIC_OBSERVATIONS_KEY,
     TRAINING_HISTORY_KEY,
@@ -451,42 +449,6 @@ def build_sequential_indices(
 # ==========================================
 # 2. Refactored Training Engine
 # ==========================================
-
-
-def _stability_log():
-    """The validation-only step log, or ``None`` in every production run.
-
-    V20 PR C2. Returns ``None`` unless ``SIDERIUS_C2_FORMAL_STABILITY``
-    describes a channel — no file is opened, no event is written and no
-    stop signal is read, so the training loop is byte-for-byte the loop it
-    was. There is deliberately no CLI flag and no config key: the absence
-    of the log is the disabled state, which cannot be half-configured.
-
-    A malformed channel is reported rather than ignored. Silently dropping
-    it would run a Gate with no stability evidence and no warning, at the
-    full cost of the run.
-    """
-    from core.runtime_control.formal_stability import StepEventLog, channel_from_environment
-
-    channel = channel_from_environment()
-    return None if channel is None else StepEventLog(channel)
-
-
-def _synchronize_for_stability(device) -> bool:
-    """Complete outstanding CUDA work so the event follows the step.
-
-    CUDA is asynchronous: without this the event can be written while the
-    step's kernels are still queued, and the parent would credit memory
-    readings to work that had not finished — exactly the correlation error
-    the stability rule depends on not making.
-    """
-    try:
-        if getattr(device, "type", None) == "cuda" or str(device).startswith("cuda"):
-            torch.cuda.synchronize()
-            return True
-    except Exception:  # pragma: no cover - driver-shape guard
-        return False
-    return False
 
 
 def build_training_optimizer(model, train_cfg: TrainConfig):
@@ -989,23 +951,8 @@ def run_experiment(
     # Optimizer Setup
     optimizer = build_training_optimizer(model, train_cfg)
 
-    # V20 PR C2, validation only. `None` -- and wholly inert -- unless
-    # SIDERIUS_C2_FORMAL_STABILITY names a channel, which production never
-    # does. There is no CLI flag and no config key: the absence of the log
-    # IS the disabled state.
-    #
-    # It exists so a Gate's formal arm stops when the driver-visible peak
-    # has demonstrably settled ON THE MACHINE UNDER TEST, instead of after
-    # a step count copied from another card. The trainer only emits
-    # evidence and obeys a signal -- it cannot see its own process tree's
-    # driver-visible memory, so the parent owns the decision.
-    stability_log = _stability_log()
-    stability_stopped = False
-
     history = []
     for ep in range(train_cfg.epochs):
-        if stability_stopped:
-            break
         model.train()
         batch_losses = []
         for input_batch, target_batch in tqdm(data_loader, desc=f"Epoch {ep}", file=sys.stdout):
@@ -1037,27 +984,6 @@ def run_experiment(
             loss.backward()
             optimizer.step()
             batch_losses.append(loss.item())
-
-            # V20 PR C2, validation only. Emitted HERE and nowhere else:
-            # forward, backward and the optimizer update have all returned,
-            # so this is a COMPLETED step. An event written earlier would
-            # let the stable-step count advance on work that had not
-            # happened -- the one way this rule could certify a moving peak
-            # as settled.
-            #
-            # The stop is checked only BETWEEN steps, so the trainer never
-            # halts part-way through an update and never leaves the model in
-            # a state no production run could produce.
-            if stability_log is not None and stability_log.observe_completed_step(
-                synchronized=_synchronize_for_stability(device)
-            ):
-                stability_stopped = True
-                print(
-                    f"[stability] parent signalled stop after "
-                    f"{stability_log.completed_steps} completed steps",
-                    flush=True,
-                )
-                break
 
         refuse_zero_optimizer_steps(
             len(batch_losses),
@@ -1101,34 +1027,13 @@ def run_experiment(
     return summary
 
 
-def _regime_a_train_scope(
-    sample_set: dict | None, seg_size: int, profile: DatasetProfile
-) -> TidmadScope:
-    """Assemble regime A's training scope from the legacy arguments.
-
-    Reached only when NO task scope was transported. In that regime a legacy
-    ``SampleSet`` is what the run trains from, so its absence is not a
-    degraded mode to paper over — it means the run has no scope at all, and
-    ``main`` already refuses that combination in
-    ``_has_scope_to_train_from``. This states the same invariant at the point
-    of USE, where the value is consumed.
-
-    Extracted rather than inlined: ``run_experiment_streaming`` is frozen by
-    the PR-12bc B0 / PR-12d D0 structural baselines, and §E.2 requires new
-    behaviour to arrive by extraction rather than by spending the branch
-    allowance. The caller keeps exactly the one branch it already had.
-    """
-    if sample_set is None:
-        raise ValueError(
-            "no task scope was transported and no legacy sample set was "
-            "supplied — this run has nothing to train from. A composed run "
-            "carries `--task_scope_ref`; a legacy run carries a SampleSet."
-        )
-    return TidmadScope(sample_set=sample_set, seg_size=seg_size, profile=profile)
-
-
 def _setup_storage_provenance(
-    data_dir: str, sample_set: dict | None, profile: DatasetProfile
+    data_dir: str,
+    sample_set: dict | None,
+    profile: DatasetProfile,
+    *,
+    data_path: TaskDataPath | None = None,
+    task_scope: object = None,
 ) -> dict:
     """RT2-B storage provenance for the measured setup window.
 
@@ -1144,7 +1049,20 @@ def _setup_storage_provenance(
     ``F-12-2`` already made the runtime ESTIMATE honest: skip the term, never
     guess it.
     """
-    if sample_set is None or not declares_tidmad_topology(profile):
+    if sample_set is None:
+        task_read_scope = (
+            resolve_storage_read_scope(data_path, data_dir, task_scope)
+            if data_path is not None and task_scope is not None
+            else None
+        )
+        if task_read_scope is not None:
+            return capture_storage_provenance(
+                data_dir,
+                list(task_read_scope.file_paths),
+                scoped_bytes=task_read_scope.expected_on_disk_bytes,
+            )
+        return capture_storage_provenance(data_dir, [])
+    if not declares_tidmad_topology(profile):
         # No legacy SampleSet means no per-file scope to enumerate — the same
         # answer, and for the same reason, as a profile that declares no
         # TIDMAD topology: report the dataset ROOT and make no per-file claim.
@@ -1157,12 +1075,17 @@ def _setup_storage_provenance(
         os.path.join(data_dir, dataset.training_file_name(int(k)))
         for k in sorted(sample_set.keys(), key=int)
     ]
-    # Scoped read volume (pre-Gate F2): the setup reads only the scope's PSD
-    # slices — ch1 int8 + ch2 int16 = 3 bytes/sample.
-    n_psd_scoped = sum(len(v) for v in sample_set.values())
-    return capture_storage_provenance(
-        data_dir, file_paths, scoped_bytes=n_psd_scoped * dataset.psd_segment_length * 3
-    )
+    # Estimate bytes on the same on-disk (compressed) ruler as /proc/self/io.
+    # The prior logical ``samples * 3`` value was incommensurable with the
+    # block-layer counter and labelled genuinely cold gzip reads as warm.
+    scoped_on_disk_bytes = 0
+    for key, segments in sample_set.items():
+        path = os.path.join(data_dir, dataset.training_file_name(int(key)))
+        if os.path.isfile(path):
+            scoped_on_disk_bytes += round(
+                os.path.getsize(path) * len(segments) / dataset.segments_per_file
+            )
+    return capture_storage_provenance(data_dir, file_paths, scoped_bytes=scoped_on_disk_bytes)
 
 
 def run_experiment_streaming(
@@ -1307,16 +1230,13 @@ def run_experiment_streaming(
     seg_size = model_cfg.segmentation_size
 
     # D14-1 C3 — ONE data path for the whole run, from the run-scoped binding
-    # (regime-A resolves to TIDMAD's registered implementation; an explicit
-    # binding was installed by the caller / the argv transport in main()).
-    # Scope objects are opaque here; when absent, regime-A assembles TIDMAD's
-    # from the legacy arguments — discrimination by PRESENCE, never task name.
+    # binding installed by the caller / argv transport in main()). Scope
+    # objects remain opaque to the engine and must come from that task.
     data_path = resolve_bound_task_data_path()
     if task_scope is None:
-        task_scope = _regime_a_train_scope(sample_set, seg_size, profile)
-    # (The regime-A EVAL scope is assembled further down, after the 07c C6
-    # clamp has produced the EFFECTIVE eval_sample_set — assembling it here
-    # would freeze the pre-clamp scope and break `requested == materialized`.)
+        raise TaskDataPathResolutionError(
+            "Training requires a task-owned scope from the active task composition."
+        )
 
     # Model initialization (once)
     model_class = MODEL_REGISTRY.get(model_cfg.model_type)
@@ -1336,21 +1256,6 @@ def run_experiment_streaming(
 
     # Deterministic base seed for reproducible per-epoch subsampling
     base_seed = train_base_seed if train_base_seed is not None else hash(exp_id) % (2**31)
-
-    # V20 PR C2, validation only. `None` -- and wholly inert -- unless
-    # SIDERIUS_C2_FORMAL_STABILITY names a channel, which production never
-    # does. The parent watches the driver-visible peak and signals; this
-    # loop only emits completed steps and obeys, because it cannot see its
-    # own process tree's driver memory (D-C2-13).
-    #
-    # THIS is the path every Gate arm takes. The first wiring landed in
-    # `run_experiment` alone -- the legacy single-file mode reached only
-    # when `sample_set is None` -- so no formal arm would have emitted a
-    # single event and every phase would have run to its backstop with the
-    # stop rule silently inert. The structural test meant to catch that
-    # walked the whole module instead of this function, so it passed.
-    stability_log = _stability_log()
-    stability_stopped = False
 
     # VALIDATION POSTURE, None in every production campaign. The Gate's
     # workload envelope, applied where the epoch is BUILT: the dataset
@@ -1415,35 +1320,10 @@ def run_experiment_streaming(
             "unvalidated R3."
         )
     if eval_sample_set is not None:
-        # 07c C6. The ceiling bounds the REQUESTED scope, here, before the
-        # pre-flight measures it — so `validation_requested_samples` is the
-        # EFFECTIVE request and 07a's `requested == materialized` invariant
-        # holds untouched. Applied after the natural scope has been measured,
-        # so the pre-limit count survives as provenance the effective count
-        # can no longer recover (Q-07c-9).
-        max_validation_samples = (
-            runtime_session.policy.validation_max_samples if runtime_session is not None else None
+        raise TaskDataPathResolutionError(
+            "Validation requires a task-owned evaluation scope; the training "
+            "engine does not interpret a task-specific sample-set format."
         )
-        if max_validation_samples is not None:
-            validation_rows_before_limit = _preflight_validation_scope(
-                data_dir, eval_sample_set, seg_size, profile
-            )
-            eval_sample_set = clamp_validation_scope(
-                eval_sample_set,
-                max_samples=max_validation_samples,
-                ml_segs_per_psd=tidmad_topology(profile).dataset.psd_segment_length // seg_size,
-            )
-        validation_requested_rows = _preflight_validation_scope(
-            data_dir, eval_sample_set, seg_size, profile
-        )
-        # D14-1 C3 — regime-A eval scope, assembled from the EFFECTIVE
-        # (post-clamp) eval_sample_set so the implementation's relocated
-        # exact-materialization check compares against the same request the
-        # preflight measured and TrainingHistory pins.
-        if task_eval_scope is None:
-            task_eval_scope = TidmadScope(
-                sample_set=eval_sample_set, seg_size=seg_size, profile=profile
-            )
     # D14-2 C5b — the SHARED validation-pass arming, one tail for both legs:
     # regime-A (declaration = the preflight, above) and an explicit
     # task_eval_scope (declaration = the caller's validation_requested_rows,
@@ -1576,11 +1456,10 @@ def run_experiment_streaming(
             # keeps epoch N's ordering stream from colliding with epoch N+1's
             # subsampling stream.
             order_rng = random.Random(f"order:{epoch_seed}")
-            # Recorded D14-1 C3 residue: sequential ordering is TIDMAD-file
-            # vocabulary (`file_row_ranges`) — the cast makes the residue
-            # explicit; a non-TIDMAD dataset here would fail loudly.
+            # Sequential ordering is an optional dataset capability. Tasks
+            # that select it must expose the declared row groups.
             epoch_indices = build_sequential_indices(
-                cast("TIDMADEpochDataset", dataset).file_row_ranges, file_order, order_rng
+                cast("Any", dataset).file_row_ranges, file_order, order_rng
             )
             # ONE global loader with the global drop_last, exactly as the
             # shuffle path: ordering changes the visit sequence only. Batches
@@ -1613,7 +1492,13 @@ def run_experiment_streaming(
             # deterministic per epoch, so every epoch runs the same count.
             steps_per_epoch = len(loader)
             runtime_session.complete_setup(
-                storage_provenance=_setup_storage_provenance(data_dir, sample_set, profile),
+                storage_provenance=_setup_storage_provenance(
+                    data_dir,
+                    sample_set,
+                    profile,
+                    data_path=data_path,
+                    task_scope=task_scope,
+                ),
                 training_workload=ResolvedPhaseWorkload(
                     phase="training",
                     unit="optimizer_step",
@@ -1726,30 +1611,6 @@ def run_experiment_streaming(
                     if rejected_mid_epoch:
                         break
 
-            # V20 PR C2, validation only. Emitted HERE and nowhere else:
-            # forward, backward and the optimizer update have all returned,
-            # so this is a COMPLETED step. An event written earlier would
-            # let the stable-step count advance on work that had not
-            # happened -- the one way this rule could certify a moving peak
-            # as settled.
-            #
-            # The stop is read only BETWEEN steps, so the trainer never
-            # halts part-way through an update and never leaves the model in
-            # a state no production run could produce. The break falls
-            # through to the normal end-of-epoch path, so the checkpoint and
-            # the summary are written exactly as an epoch that ran to its
-            # end -- the formal arm's inference phase needs that checkpoint.
-            if stability_log is not None and stability_log.observe_completed_step(
-                synchronized=_synchronize_for_stability(device)
-            ):
-                stability_stopped = True
-                print(
-                    f"[stability] parent signalled stop after "
-                    f"{stability_log.completed_steps} completed steps",
-                    flush=True,
-                )
-                break
-
         if verifier is not None:
             # Epoch-0 loader exhausted before a verdict: resolve from the
             # evidence collected. With a single epoch the training work is
@@ -1818,13 +1679,6 @@ def run_experiment_streaming(
             if validation_verifier is not None and validation_verifier.is_terminal:
                 _finish_validation_verification()
             print(f"Epoch {ep} | Validation Loss: {r3:.6f} ({n_val} ML segments)")
-
-        # The stop ends the PHASE, not just the epoch. Continuing into
-        # epoch 1 would keep executing after the parent concluded the peak
-        # had settled, and the arm's measured time would include work the
-        # decision had already excluded.
-        if stability_stopped:
-            break
 
     if runtime_session is not None and t_train_start is not None:
         # The training ACTUAL spans admission → last optimizer step. It
@@ -2042,17 +1896,16 @@ def main():
         default=None,
         help=(
             "Path to a resolved Dataset Profile JSON (topology, geometry, "
-            "channel identity, value encoding). OMITTED means the Regime-A "
-            "compatibility adapter: resolve the shipped TIDMAD profile, "
-            "exactly as before this flag existed. SUPPLIED but broken fails "
-            "closed — it never falls back to the singleton."
+            "channel identity, value encoding). OMITTED delegates to the "
+            "active task binding and refuses when none exists. SUPPLIED but "
+            "broken fails closed."
         ),
     )
     parser.add_argument(
         "--data_dir",
         type=str,
         default=None,
-        help="Directory with TIDMAD training files. Default: from tidmad_data_config.json.",
+        help="Caller-selected physical dataset directory. No implicit fallback.",
     )
     parser.add_argument("--sandbox_dir", type=str, default=None, help="Sandbox output directory.")
     parser.add_argument("--file_index", type=int, default=6)
@@ -2206,11 +2059,11 @@ def main():
     # Dataset Profile resolution — the child side of the parent's transport.
     #
     #   flag SUPPLIED but broken  -> fail closed, diagnostic names the path
-    #   flag ABSENT               -> Regime-A adapter, shipped TIDMAD profile
+    #   flag ABSENT               -> active task binding, or named refusal
     #
-    # The two are deliberately different: a bound task whose profile file is
-    # unreadable must never be silently run against TIDMAD's topology, while a
-    # caller that predates the flag must not be broken by genericization.
+    # The two are deliberately different: a supplied file is decoded directly;
+    # omission delegates to the already-established run binding. Neither path
+    # may select scientific task semantics implicitly.
     if args.dataset_profile_json is not None:
         dataset_profile = load_dataset_profile(args.dataset_profile_json)
     else:
@@ -2245,10 +2098,9 @@ def main():
         )
 
     # Resolve defaults from config file
-    if args.data_dir is None:
-        from execute_tools.data_paths import TIDMAD_DATA_DIR
+    from execute_tools.data_paths import resolve_dataset_dir
 
-        args.data_dir = TIDMAD_DATA_DIR
+    args.data_dir = resolve_dataset_dir(args.data_dir, purpose="training child")
 
     # Define standard sandbox structure
     base_sandbox = args.sandbox_dir
@@ -2311,7 +2163,7 @@ def main():
         #
         # Task-data-path transport: SUPPLIED resolves the transported
         # id as an EXPLICIT binding (unknown -> fail closed, never a
-        # fallback); ABSENT leaves regime-A to the run itself.
+        # fallback); ABSENT is invalid because execution has no task owner.
         if args.task_data_path_id is not None:
             # C3: imported here, not at module scope — the composition layer
             # sits ABOVE this one, and only a composed run ever reaches it.
@@ -2325,8 +2177,9 @@ def main():
                 )
             )
         else:
-            bootstrap_legacy_tidmad_data_path()
-            binding_cm = contextlib.nullcontext()
+            raise TaskDataPathResolutionError(
+                "Training requires --task_data_path_id from an explicit task composition."
+            )
         with binding_cm, child_observables_binding(args.task_manifest):
             # Step 12 / PR-12bc B6 — the child side of the SCOPE transport, and
             # the close of the pairing gap. Before this the binding crossed and

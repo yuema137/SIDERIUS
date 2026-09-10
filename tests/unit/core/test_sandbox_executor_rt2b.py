@@ -20,11 +20,16 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.sandbox_executor import StubSandbox, TidmadSandbox
+from execute_tools.data_paths import bind_physical_data_root
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+
+QUICKSTART = Path(__file__).resolve().parents[3] / "configs/task_composition/quickstart.yaml"
 
 _STORAGE = {
     "dataset_root": "/data",
@@ -37,13 +42,21 @@ _STORAGE = {
 _CFGS = {
     "m_cfg": {"model_type": "wavenet", "segmentation_size": 1000},
     "t_cfg": {"epochs": 1, "batch_size": 1, "device": "cpu"},
-    "l_cfg": {},
+    "l_cfg": {"loss_type": "ce"},
 }
+
+
+@pytest.fixture(autouse=True)
+def _bound_data_root(tmp_path):
+    with bind_physical_data_root(str(tmp_path)):
+        yield
 
 
 @pytest.fixture
 def sandbox(tmp_path):
-    return TidmadSandbox(run_name="rt2b_test", workspace=str(tmp_path))
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
+        yield TidmadSandbox(run_name="rt2b_test", workspace=str(tmp_path))
 
 
 def _argv_value(cmd: list[str], flag: str) -> str | None:
@@ -235,3 +248,6 @@ class TestStubParity:
         )
         assert out["status"] == "success"
         assert out["runtime_verification"] is None
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

@@ -26,7 +26,6 @@ import execute_tools.task_data_path as tdp
 from execute_tools.task_data_path import (
     TASK_DATA_PATH_ARGV_FLAG,
     TASK_DATA_PATH_IDENTITY_FLAG,
-    TIDMAD_COMPATIBILITY_ID,
     DeliverableWriteRequest,
     EpochSamplingParams,
     EvalMaterializationParams,
@@ -122,7 +121,7 @@ def _tidmad_stand_in():
     impl = SyntheticTaskDataPath()
     impl_cls = type("TidmadStandIn", (SyntheticTaskDataPath,), {})
     impl = impl_cls()
-    impl_cls.task_data_path_id = TIDMAD_COMPATIBILITY_ID
+    impl_cls.task_data_path_id = "legacy_stand_in"
     return impl
 
 
@@ -132,18 +131,10 @@ def _tidmad_stand_in():
 
 
 class TestTheResolverTruthTable:
-    def test_legacy_regime_a_absent_binding_resolves_to_tidmad_compat(self):
-        """Row 1, REQUIRED test 1: `None` context IS the legacy path."""
+    def test_absent_binding_refuses_without_selecting_a_task(self):
         register_task_data_path(_tidmad_stand_in())
-        resolved = resolve_task_data_path(None)
-        assert resolved.task_data_path_id == TIDMAD_COMPATIBILITY_ID
-
-    def test_explicit_legacy_bootstrap_preserves_the_uncomposed_path(self):
-        """Removing import-time registration must not remove regime A."""
-        from execute_tools.task_data_path import bootstrap_legacy_tidmad_data_path
-
-        resolved = bootstrap_legacy_tidmad_data_path()
-        assert resolved.task_data_path_id == TIDMAD_COMPATIBILITY_ID
+        with pytest.raises(TaskDataPathResolutionError, match="does not select"):
+            resolve_task_data_path(None)
 
     def test_explicit_binding_with_absent_id_fails_closed(self):
         """Row 2, REQUIRED test 2 — the load-bearing genericity row.
@@ -174,10 +165,8 @@ class TestTheResolverTruthTable:
         assert "petz_typo" in msg, "the diagnostic must name the offending id"
         assert "synthetic_vector_pairs" in msg, "and the registered set"
 
-    def test_regime_a_without_a_registered_compat_impl_fails_loudly(self):
-        """Row 1's own fail-closed edge: absence of the compatibility
-        implementation is an error, never a silent no-op."""
-        with pytest.raises(TaskDataPathResolutionError, match=TIDMAD_COMPATIBILITY_ID):
+    def test_absent_binding_refusal_does_not_depend_on_registry_contents(self):
+        with pytest.raises(TaskDataPathResolutionError, match="No task data path"):
             resolve_task_data_path(None)
 
     def test_malformed_implementation_refused_at_registration(self):
@@ -263,13 +252,13 @@ class TestTransportCarriesOnlyTheResolvedBinding:
 
 
 class TestRunScopedBinding:
-    def test_bound_implementation_wins_and_reset_restores_regime_a(self):
+    def test_bound_implementation_wins_and_reset_restores_refusal(self):
         register_task_data_path(_tidmad_stand_in())
         synthetic = SyntheticTaskDataPath()
         with bind_task_data_path(synthetic):
             assert resolve_bound_task_data_path() is synthetic
-        # After the scope closes, the legacy path is back.
-        assert resolve_bound_task_data_path().task_data_path_id == TIDMAD_COMPATIBILITY_ID
+        with pytest.raises(TaskDataPathResolutionError, match="No task data path is bound"):
+            resolve_bound_task_data_path()
 
 
 # ---------------------------------------------------------------------------

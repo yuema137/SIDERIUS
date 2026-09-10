@@ -47,20 +47,21 @@ from agent.schemas.implementor import ImplementorOutput, LossProvenance
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ExpertAdvice, ProposalOutput
 from agent.schemas.validator import ValidatorOutput
-from agent_generated._registry import CapabilityMetadata
+from core.capability_registry import CapabilityMetadata
 from core.resume import restore_prior_state
 from core.run_invariants import RUN_INVARIANTS_BASENAME
 from core.scientific_authority import ScientificAuthority
 from sdsc_submission_scripts.run_one_iteration import write_manifest
-from tests.helpers.metric_fixtures import shipped_spec
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 pytestmark = pytest.mark.dual_mode
 
 _REPO_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
+_QUICKSTART_MANIFEST = os.path.join(_REPO_ROOT, "configs", "task_composition", "quickstart.yaml")
 
 _GEN_MODEL_TYPE = "gen_probe_model"
 _GEN_LOSS_NAME = "gen_probe_loss"
@@ -159,7 +160,14 @@ def _formal_record(exp_id: str, score: float, model_type: str) -> dict:
     }
 
 
-def _tune_output(run_name: str, model_type: str, score: float) -> HyperparamTuningOutput:
+def _tune_output(
+    run_name: str,
+    model_type: str,
+    score: float,
+    *,
+    task_composition_fingerprint: str,
+    metric_spec,
+) -> HyperparamTuningOutput:
     records = [_formal_record("f1", score, model_type)]
     return HyperparamTuningOutput(
         run_name=run_name,
@@ -177,7 +185,8 @@ def _tune_output(run_name: str, model_type: str, score: float) -> HyperparamTuni
         finished_at="2026-07-27 00:00:01",
         # Step 09a: a score-bearing output must carry its MetricSpec or the
         # summary projection refuses (a direction is never assumed).
-        metric_spec=shipped_spec(),
+        metric_spec=metric_spec,
+        task_composition_fingerprint=task_composition_fingerprint,
     )
 
 
@@ -306,7 +315,16 @@ def test_fresh_run_writes_the_library_not_the_checkout(tmp_path, monkeypatch, ca
 
     before = _checkout_agent_generated_snapshot()
 
-    _write_iter_disk(str(workspace), 1, _tune_output("iter_001", "punet", 1.0))
+    composition = compose_run_task_bindings(_QUICKSTART_MANIFEST)
+    output_kwargs = {
+        "task_composition_fingerprint": composition.semantic_fingerprint,
+        "metric_spec": composition.metric.spec,
+    }
+    _write_iter_disk(
+        str(workspace),
+        1,
+        _tune_output("iter_001", "punet", 1.0, **output_kwargs),
+    )
     state = restore_prior_state(str(workspace), current_iter=2, seed_paths=[])
 
     with contextlib.ExitStack() as stack:
@@ -326,21 +344,28 @@ def test_fresh_run_writes_the_library_not_the_checkout(tmp_path, monkeypatch, ca
         MockPropose.return_value.run.return_value = _proposal_out()
         MockImpl.return_value.run.return_value = _impl_out(str(gen_dir))
         MockValid.return_value.run.return_value = _VALID_OUT
-        MockTune.return_value.run.return_value = _tune_output("iter_002", _GEN_MODEL_TYPE, 1.2)
-
-        run_workflow(
-            launch=WorkflowLaunchConfig(
-                data_dir=str(tmp_path / "data"),
-                model_types=["punet"],
-                source_run_name="v1",
-                start_iteration=2,
-                max_iterations=1,
-                source_paths=state.resolved_source_paths,
-            ),
-            workspace=str(workspace),
-            run_name="iter_002",
-            restored_state=state,
+        MockTune.return_value.run.return_value = _tune_output(
+            "iter_002", _GEN_MODEL_TYPE, 1.2, **output_kwargs
         )
+
+        data_path = tmp_path / "data"
+        data_path.mkdir()
+        data_dir = str(data_path)
+        with bind_run_task_composition(composition, physical_data_root=data_dir):
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=data_dir,
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    start_iteration=2,
+                    max_iterations=1,
+                    source_paths=state.resolved_source_paths,
+                ),
+                workspace=str(workspace),
+                run_name="iter_002",
+                restored_state=state,
+                task_composition=composition,
+            )
 
     out = capsys.readouterr().out
 

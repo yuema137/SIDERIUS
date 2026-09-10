@@ -10,33 +10,49 @@ Uses unittest.mock to intercept subprocess.run — no GPU, no real data needed.
 import json
 import os
 import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
 from core.sandbox_executor import TidmadSandbox, get_plugin_dir
+from execute_tools.data_paths import bind_physical_data_root
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+
+QUICKSTART = Path(__file__).resolve().parents[3] / "configs/task_composition/quickstart.yaml"
 
 # ==========================================
 # Fixtures
 # ==========================================
 
 
+@pytest.fixture(autouse=True)
+def _bind_data_root(tmp_path):
+    with bind_physical_data_root(str(tmp_path)):
+        yield
+
+
 @pytest.fixture
 def sandbox(tmp_path):
-    return TidmadSandbox(
-        run_name="test_run",
-        workspace=str(tmp_path),
-        progress_bar=False,
-    )
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
+        yield TidmadSandbox(
+            run_name="test_run",
+            workspace=str(tmp_path),
+            progress_bar=False,
+        )
 
 
 @pytest.fixture
 def sandbox_progress(tmp_path):
-    return TidmadSandbox(
-        run_name="test_run",
-        workspace=str(tmp_path),
-        progress_bar=True,
-    )
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
+        yield TidmadSandbox(
+            run_name="test_run",
+            workspace=str(tmp_path),
+            progress_bar=True,
+        )
 
 
 # Minimal valid configs that pass Pydantic validation
@@ -510,18 +526,30 @@ class TestSubprocessEnv:
         env = _subprocess_env(plugin_dir=str(tmp_path))
         assert env["SIDERIUS_PLUGIN_DIRS"] == str(tmp_path)
 
-    def test_plugin_dir_does_not_clobber_pythonpath(self, tmp_path):
-        """Regression guard: the plugin_dir wiring must not interfere with
-        the PYTHONPATH construction that lets flat imports resolve in the
-        training subprocess."""
+    def test_plugin_dir_does_not_restore_ambient_pythonpath(self, monkeypatch, tmp_path):
+        """Generated plugins use their own channel, never framework PYTHONPATH."""
+        monkeypatch.setenv("PYTHONPATH", "/foreign/source")
         env = _subprocess_env(plugin_dir=str(tmp_path))
-        assert "PYTHONPATH" in env
-        project_root = _os.path.dirname(
-            _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+        assert "PYTHONPATH" not in env
+        assert env["SIDERIUS_PLUGIN_DIRS"] == str(tmp_path)
+
+    def test_neutral_child_imports_framework_from_the_exact_environment(self, tmp_path):
+        """A child outside the checkout must not need a source-path injection."""
+        env = _subprocess_env()
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import core.sandbox_executor as module; print(module.__file__)",
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
         )
-        assert project_root in env["PYTHONPATH"]
-        assert _os.path.join(project_root, "ml_models") in env["PYTHONPATH"]
-        assert _os.path.join(project_root, "execute_tools") in env["PYTHONPATH"]
+        source = Path(completed.stdout.strip()).resolve()
+        assert source.is_relative_to(Path(__file__).resolve().parents[3])
 
 
 # ==========================================
@@ -555,7 +583,7 @@ class TestSandboxPluginDir:
         sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
         assert "env" in kwargs
-        assert kwargs["env"]["SIDERIUS_PLUGIN_DIRS"] == sandbox.plugin_dir
+        assert kwargs["env"]["SIDERIUS_PLUGIN_DIRS"].split(os.pathsep)[0] == sandbox.plugin_dir
 
 
 # ==========================================
@@ -797,17 +825,12 @@ class TestSubprocessEnvLossDir:
         assert env["SIDERIUS_PLUGIN_DIRS"] == str(plugin)
         assert env["SIDERIUS_LOSS_DIRS"] == str(loss)
 
-    def test_loss_dir_does_not_clobber_pythonpath(self, tmp_path):
-        """Regression guard: the loss_dir wiring must not interfere with
-        PYTHONPATH construction. Mirror of the plugin_dir version above."""
+    def test_loss_dir_does_not_restore_ambient_pythonpath(self, monkeypatch, tmp_path):
+        """Generated losses use their own channel, never framework PYTHONPATH."""
+        monkeypatch.setenv("PYTHONPATH", "/foreign/source")
         env = _subprocess_env(loss_dir=str(tmp_path))
-        assert "PYTHONPATH" in env
-        project_root = _os.path.dirname(
-            _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-        )
-        assert project_root in env["PYTHONPATH"]
-        assert _os.path.join(project_root, "ml_models") in env["PYTHONPATH"]
-        assert _os.path.join(project_root, "execute_tools") in env["PYTHONPATH"]
+        assert "PYTHONPATH" not in env
+        assert env["SIDERIUS_LOSS_DIRS"] == str(tmp_path)
 
 
 class TestSandboxLossDir:
@@ -847,7 +870,7 @@ class TestSandboxLossDir:
         assert "env" in kwargs
         assert kwargs["env"]["SIDERIUS_LOSS_DIRS"] == sandbox.loss_dir
         # And plugin_dir is still wired — regression guard for the existing path.
-        assert kwargs["env"]["SIDERIUS_PLUGIN_DIRS"] == sandbox.plugin_dir
+        assert kwargs["env"]["SIDERIUS_PLUGIN_DIRS"].split(os.pathsep)[0] == sandbox.plugin_dir
 
 
 class TestGetLossDir:

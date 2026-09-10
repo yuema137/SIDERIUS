@@ -685,24 +685,16 @@ class TestTheRealTrainerEmitsAValidationComponent:
     ):
         """One real `train_engine_sandbox.py` subprocess over the committed
         two-family fixture. Returns (result, fixture)."""
-        import core.sandbox_executor as sandbox_module
         from core.sandbox_executor import TidmadSandbox
-        from execute_tools.dataset_config import bind_dataset_profile
+        from tests.helpers.trainer_subprocess_binding import attempt_scopes, bound_trainer_task
         from tests.helpers.two_family_profile import write_two_family_fixture
 
         (tmp_path / "data").mkdir(exist_ok=True)
         fx = write_two_family_fixture(tmp_path / "data")
 
-        # The only test seam, inherited from the 07a rung: the child would
-        # otherwise resolve the machine's TIDMAD directory.
-        real_launch = sandbox_module._run_observed_subprocess
-
-        def launch_with_data_dir(cmd, **kwargs):
-            return real_launch([*cmd, "--data_dir", fx.data_dir], **kwargs)
-
-        monkeypatch.setattr(sandbox_module, "_run_observed_subprocess", launch_with_data_dir)
-
-        with bind_dataset_profile(fx.profile):
+        training = {0: [0, 1, 2, 3], 1: [0, 1, 2, 3], 2: [0, 1, 2, 3]}
+        evaluation = {0: [0, 1], 2: [1, 3]} if eval_sample_set is _DEFAULT_EVAL else eval_sample_set
+        with bound_trainer_task(tmp_path, fx) as adapter:
             sb = TidmadSandbox(
                 run_name=run_name, workspace=str(tmp_path / "ws"), progress_bar=False
             )
@@ -719,10 +711,7 @@ class TestTheRealTrainerEmitsAValidationComponent:
                     "device": "cpu",
                 },
                 {"loss_type": "focal"},
-                sample_set={0: [0, 1, 2, 3], 1: [0, 1, 2, 3], 2: [0, 1, 2, 3]},
-                eval_sample_set=(
-                    {0: [0, 1], 2: [1, 3]} if eval_sample_set is _DEFAULT_EVAL else eval_sample_set
-                ),
+                task_scopes=attempt_scopes(adapter, training, evaluation),
                 train_base_seed=5,
                 runtime_policy=runtime_policy,
             )

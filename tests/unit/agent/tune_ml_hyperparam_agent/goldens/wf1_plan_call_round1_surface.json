@@ -1,7 +1,7 @@
 {
   "_captured_at": {
-    "commit": "4f6b42e42164986e2f6373622e49b7b2ee55c0c5",
-    "note": "REGENERATED at Step 07 PR 07b C5 (P3 owned rendering deltas), clean tree. WHAT CHANGED: one further ADDITIVE kwarg, `metric_spec` \u2014 the run's bound golden-metric declaration, whose `direction` decides maximize/minimize and whose `id` names what the `denoising_score` field measures. Kwarg key set 23 -> 24 (22 pre-07b, +task_render at C4). WHY: P3 renders the direction wording and the metric identity from the handle instead of stating TIDMAD's convention as the framework's. WHAT DID NOT CHANGE: every pre-existing kwarg name and value."
+    "commit": "worktree-pr422",
+    "note": "DECLARED DELTA: the generic choreography oracle now binds a neutral synthetic profile and metric. TaskRender content is projected to its typed field set because rendered scientific prose belongs to focused renderer tests; the call-surface oracle no longer embeds TIDMAD metric, scoreability, Health, geometry, or model-roster authority."
   },
   "memory_history": {
     "type": "list",
@@ -13,7 +13,7 @@
   "kwargs": {
     "model_description": null,
     "exploration_checklist": "",
-    "plugin_source_excerpt": "## PLUGIN CONFIG SCHEMA (authoritative \u2014 read validators carefully)\nThe planner prompt's JSON schema below cannot represent `@model_validator(mode='after')` or cross-field `@field_validator` bodies. Treat the source below as the single source of truth for any cross-field invariants; a proposed config that violates one will be rejected by the resource-eval skill and burn a retry attempt.\n\n```python\nclass PeWavenetDeltaConfig(BaseModel):\n    model_type: str = Field(default=\"pe_wavenet_delta\")\n    segmentation_size: int = Field(default=1000, ge=1)\n    batch_size: int = Field(default=1, ge=1)\n    hidden_dim: int = Field(default=128, ge=8, le=8192)\n\n```\n",
+    "plugin_source_excerpt": "## PLUGIN CONFIG SCHEMA (authoritative — read validators carefully)\nThe planner prompt's JSON schema below cannot represent `@model_validator(mode='after')` or cross-field `@field_validator` bodies. Treat the source below as the single source of truth for any cross-field invariants; a proposed config that violates one will be rejected by the resource-eval skill and burn a retry attempt.\n\n```python\nclass PeWavenetDeltaConfig(BaseModel):\n    model_type: str = Field(default=\"pe_wavenet_delta\")\n    segmentation_size: int = Field(default=1000, ge=1)\n    batch_size: int = Field(default=1, ge=1)\n    hidden_dim: int = Field(default=128, ge=8, le=8192)\n\n```\n",
     "current_round": 1,
     "max_rounds": 2,
     "trial_allowed": true,
@@ -34,49 +34,33 @@
     "score_table_md": null,
     "task_description": "",
     "task_render": {
-      "available_models_block": "### AVAILABLE MODELS:\n1. **PositionalUNet (punet)**: U-Net with positional encoding for global signal structures.\n2. **FCNet (fcnet)**: Fully-connected AutoEncoder, efficient for local smoothing.\n3. **TransformerModel (transformer)**: Self-attention over time steps; memory scales O(T\u00b2) \u2014 use small segmentation_size.\n4. **SimpleWaveNet (wavenet)**: Dilated causal convolutions; memory-efficient.\n5. **RNNSeq2Seq (rnn)**: LSTM encoder-decoder; memory grows linearly with batch_size \u00d7 segmentation_size.\n",
-      "per_file_comparison_block": "### PER-FILE COMPARISON (Impact-Aware):\nThe score_comparison_table below shows per-file performance against the raw\nbaseline and the ground-truth ceiling, alongside `Linear_Weight` (each\nfile's share of the linear denominator behind the aggregate scalar) and\n`Impact_Score` (the log-scalar gain available if that file's `model` were\nlifted to its `ground_truth`). The table is followed by a secondary block\nre-sorted by `Impact_Score` descending.\n\nUse the table to produce per-file discoveries grounded in the\n`Impact_Score` ranking \u2014 e.g., \"architecture X recovered most of the\nhigh-Impact rows but left rows with the largest remaining Impact untouched\"\nrather than \"score went up.\" Cite `Impact_Score` and `Linear_Weight`\ntogether when discussing per-file bottlenecks; do not assert that a file is\npermanently weak from a single round's reading or from `headroom_vs_gt`\nalone. These row-level insights compound across rounds when the next\nplanner inherits them.",
-      "per_file_table_protocol": "### PER-FILE PERFORMANCE TABLE:\n\nBelow is a comparison of your best experiment's per-file scores against two\nreference columns:\n\n- **raw_baseline**  = no denoising at all (CH1 passed through the scorer).\n- **ground_truth**  = what a perfect denoiser (CH2 substituted for CH1) scores.\n- **model**         = your best experiment so far.\n\nAll three are log-space under the same global s_max, so differences are\ndirectly comparable.\n\n- `gain vs raw > 0`   \u2192 your model is doing useful work on that file.\n- `headroom vs gt`    \u2192 how far below the theoretical ceiling you are.\n- `Linear_Weight`     \u2192 the file's share of the linear denominator behind the\n                        aggregate scalar. Sums to 1 across sampled files.\n- `Impact_Score`      \u2192 the log-scalar gain you would obtain by lifting this\n                        file's `model` to its `ground_truth`. This is the\n                        per-file opportunity ranking; the table is followed\n                        by a secondary block re-sorted by `Impact_Score`\n                        descending.\n\nRead the table by `Impact_Score` descending \u2014 that is where the next-iter\nlever is. A multi-log-unit `headroom_vs_gt` does not by itself indicate\nopportunity; only `Impact_Score` does. A high-weight file at its ceiling has\nzero `Impact_Score` and is not actionable. If the entire `Impact_Score`\ncolumn is small in magnitude relative to the chain's per-iter gains, this\nconfiguration has reached the dataset ceiling.\n\n",
-      "sampling_impact_tradeoff": " Consult the per-file score table below \u2014 if\n`Impact_Score` is roughly uniform across files, snapshot is efficient. If a small subset\nof files dominates the `Impact_Score` ranking, target those files.",
-      "score_display_noun": "Denoising Score",
-      "score_field_noun": "metric",
-      "target_strategy_impact_note": "Useful when the per-file score table indicates a small set of\n  files carries most of the next-iter improvement budget \u2014 those are the files with the\n  largest `Impact_Score` for the current best model. Choosing `target_files` is a\n  data-allocation decision; it should be driven by the Impact_Score column, not by\n  fixed file-index labels or thresholds.",
-      "builtin_model_roster": "punet | fcnet | transformer | wavenet | rnn | gated_fno",
-      "full_scope_segments": 4000,
-      "output_contract_shape": "[B, 256, T]",
-      "focal_alpha_default": "0.5",
-      "focal_gamma_default": "2.0",
-      "gate_check_names": [
-        "output_diversity",
-        "output_std",
-        "amplitude_collapse",
-        "pearson_dispersion",
-        "spectral_peak_ratio",
-        "per_file_output_std"
-      ],
-      "efficiency_band_pct": "5"
+      "type": "TunerTaskRender",
+      "fields": [
+        "available_models_block",
+        "builtin_model_roster",
+        "efficiency_band_pct",
+        "focal_alpha_default",
+        "focal_gamma_default",
+        "full_scope_segments",
+        "gate_check_names",
+        "output_contract_shape",
+        "per_file_comparison_block",
+        "per_file_table_protocol",
+        "sampling_impact_tradeoff",
+        "score_display_noun",
+        "score_field_noun",
+        "target_strategy_impact_note"
+      ]
     },
     "metric_spec": {
-      "id": "tidmad_denoising_score",
+      "id": "fixture_accuracy",
       "direction": "higher",
-      "aggregation": "tidmad_anchor_normalised_linear_grand_mean",
-      "transform": "log",
-      "transform_params": {
-        "log_base": 5.27
-      },
-      "references": [
-        "anchor_map",
-        "raw_baseline",
-        "ground_truth"
-      ],
+      "aggregation": "mean_over_deliverables",
+      "transform": null,
+      "transform_params": {},
+      "references": [],
       "scoreability": {
-        "contract_id": "tidmad_denoised_h5",
-        "input_channel_group": "channel0001",
-        "required_attrs": [
-          "voltage_range_mV",
-          "sampling_frequency"
-        ],
-        "required_storage_dtype": "int8"
+        "contract_id": "deliverable_presence"
       }
     },
     "config_manual_keys": [

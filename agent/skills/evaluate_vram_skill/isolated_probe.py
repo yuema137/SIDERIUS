@@ -21,9 +21,8 @@ process:
 ```text
 parent validates a LIGHTWEIGHT config      (never builds the model)
   -> launches ONE worker per candidate, own process group
-     -> worker applies its own RLIMIT_AS BEFORE constructing anything
      -> worker builds, inspects, probes, writes a bounded JSON result
-  -> parent samples worker-tree RSS and the deadline
+  -> parent samples worker-tree RSS and enforces the host-RSS budget + deadline
      -> TERM process group -> bounded grace -> KILL
   -> parent reaps descendants and classifies a TYPED disposition
 ```
@@ -51,13 +50,14 @@ from typing import Any, Literal, get_args
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.model_io_contract import ModelIOContract
+from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
 from core.runtime_control.process_group import (
     process_group_alive,
     signal_group,
     tree_rss_bytes,
 )
 from core.subprocess_env import subprocess_env
-from execute_tools.task_data_path import EpochSamplingParams
+from execute_tools.task_data_path import TaskProbeDataSpec
 
 #: Terminal dispositions. Each names WHAT was established, so that
 #: authority to reject a candidate — or to tell an agent to shrink it —
@@ -109,11 +109,10 @@ def default_worker_memory_limit_bytes() -> int:
         + ~1 GiB              the two parent processes
         = ~53 GiB of 61.8     leaving ~8.8 GiB headroom
 
-    24 GiB also sits far above any legitimate candidate: the 323 M-parameter
-    baseline pre-flight completed in 6.79 s well inside it. A worker that
-    reaches 24 GiB is pathological, which is exactly what this is for.
-
-    Overridable per deployment; never inferred silently from free memory,
+    This remains the compatibility default, not a universal statement about
+    valid task workloads. A workflow can declare a different explicit limit
+    when task-valid decoded batches or model inspection have a different host
+    memory footprint. The value is never inferred silently from free memory,
     because a transient reading would make the bound irreproducible.
     """
     raw = os.environ.get("SIDERIUS_PREFLIGHT_WORKER_MEM_GIB")
@@ -155,18 +154,6 @@ class HardwareSnapshot(BaseModel):
     hardware_fingerprint: str = Field(min_length=1)
     device_index: int = Field(default=0, ge=0)
     cuda_visible_devices: str | None = None
-
-
-class TaskProbeDataSpec(BaseModel):
-    """Run-bound task data needed to materialize one training probe batch."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    manifest_path: str = Field(min_length=1)
-    semantic_fingerprint: str = Field(min_length=1)
-    training_scope_payload: str = Field(min_length=1)
-    sampling: EpochSamplingParams
-    max_inference_batch_size: int | None = Field(default=None, ge=1)
 
 
 class IsolatedProbeSpec(BaseModel):
@@ -227,6 +214,9 @@ class IsolatedProbeSpec(BaseModel):
     #: worker so the loss sees one task-valid training batch. ``None`` keeps
     #: the legacy shape-and-dtype synthetic probe unchanged.
     task_probe_data: TaskProbeDataSpec | None = None
+    #: Per-operation watchdog budgets selected by the workflow. The complete
+    #: typed object crosses IPC so the worker never reads mutable module state.
+    probe_budgets: ProbeBudgets = Field(default_factory=ProbeBudgets)
 
     def effective_cap_gb(self) -> float | None:
         """The cap the worker must apply: the LOWER of the operator ceiling
@@ -545,9 +535,8 @@ def run_isolated_preflight(
         rss = _worker_tree_rss_bytes(pgid)
         peak_rss = max(peak_rss, rss)
 
-        # Belt and braces: RLIMIT_AS bounds the ADDRESS SPACE inside the
-        # worker, but a tree of descendants can still grow resident memory
-        # past the intended ceiling, so the parent watches the tree too.
+        # The worker may create descendants, so enforce the host-memory budget
+        # against the complete process tree from the parent.
         if rss >= spec.worker_memory_limit_bytes:
             host_exceeded = True
         if host_exceeded or elapsed >= deadline_seconds:

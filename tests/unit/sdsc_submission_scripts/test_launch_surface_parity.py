@@ -238,6 +238,7 @@ class TestProtocolsToSchemas:
             "runtime_formal_safety_factor",
             "runtime_watchdog_safety_factor",
             "runtime_watchdog_floor_seconds",
+            "runtime_verification_max_wall_seconds",
             "enable_structured_health_feedback",
             "health_feedback_history_window_iterations",
             "health_feedback_history_max_entries_per_model",

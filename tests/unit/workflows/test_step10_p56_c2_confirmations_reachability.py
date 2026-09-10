@@ -52,9 +52,11 @@ from tests.unit.workflows.test_model_exploration import (
 )
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MODEL_EXPLORATION = REPO_ROOT / "workflows" / "model_exploration.py"
+QUICKSTART = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 FEATURE = "dilated_stack"
 CAPABILITY = "long_range_context"
@@ -70,6 +72,32 @@ def _seed_vocab() -> list[VocabEntry]:
     return [VocabEntry(name=FEATURE, kind="candidate", description="d")]
 
 
+def _prepare_quickstart(tmp_path):
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    _write_tuning_output(
+        tmp_path,
+        "punet",
+        fingerprint=composition.semantic_fingerprint,
+        metric_spec=composition.metric.spec,
+    )
+    return composition
+
+
+def _run_bound_workflow(tmp_path, composition, *, run_name: str, iterations: int = 3):
+    with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
+        run_workflow(
+            launch=WorkflowLaunchConfig(
+                data_dir=str(tmp_path / "data"),
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=iterations,
+            ),
+            workspace=str(tmp_path / "workflow_output"),
+            run_name=run_name,
+            task_composition=composition,
+        )
+
+
 def _drive(tmp_path, *, iterations: int, restored_state=None):
     """Drive ``run_workflow`` for ``iterations`` iterations with a REAL producer.
 
@@ -77,7 +105,7 @@ def _drive(tmp_path, *, iterations: int, restored_state=None):
     iteration's interpreter produced, so both the transport and the promotion
     are observable.
     """
-    _write_tuning_output(tmp_path, "punet")
+    composition = _prepare_quickstart(tmp_path)
     seen: dict[str, list] = {"inputs": [], "outputs": [], "promoted": []}
 
     with (
@@ -118,20 +146,25 @@ def _drive(tmp_path, *, iterations: int, restored_state=None):
         MockImpl.return_value.run.return_value = _make_implementor_output()
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
         MockTune.return_value.run.side_effect = lambda inp: _make_tune_output(
-            model_type=inp.model_type, score=1.6
+            model_type=inp.model_type,
+            score=1.6,
+            fingerprint=composition.semantic_fingerprint,
+            metric_spec=composition.metric.spec,
         )
 
-        run_workflow(
-            launch=WorkflowLaunchConfig(
-                data_dir=str(tmp_path / "data"),
-                model_types=["punet"],
-                source_run_name="v1",
-                max_iterations=iterations,
-            ),
-            workspace=str(tmp_path / "workflow_output"),
-            run_name="p56_c2",
-            restored_state=restored_state,
-        )
+        with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=str(tmp_path / "data"),
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    max_iterations=iterations,
+                ),
+                workspace=str(tmp_path / "workflow_output"),
+                run_name="p56_c2",
+                restored_state=restored_state,
+                task_composition=composition,
+            )
     return seen
 
 
@@ -226,7 +259,7 @@ class TestTheProducerSemanticsSurviveTheCarry:
         digests could. Driving two iterations under ONE run name proves the
         count stays at 1 and the pair does not creep toward promotion.
         """
-        _write_tuning_output(tmp_path, "punet")
+        composition = _prepare_quickstart(tmp_path)
         seen: list[dict] = []
 
         with (
@@ -258,25 +291,19 @@ class TestTheProducerSemanticsSurviveTheCarry:
             MockImpl.return_value.run.return_value = _make_implementor_output()
             MockValid.return_value.run.return_value = _make_validator_output(passed=True)
             MockTune.return_value.run.side_effect = lambda i: _make_tune_output(
-                model_type=i.model_type, score=1.6
+                model_type=i.model_type,
+                score=1.6,
+                fingerprint=composition.semantic_fingerprint,
+                metric_spec=composition.metric.spec,
             )
-            run_workflow(
-                launch=WorkflowLaunchConfig(
-                    data_dir=str(tmp_path / "data"),
-                    model_types=["punet"],
-                    source_run_name="v1",
-                    max_iterations=3,
-                ),
-                workspace=str(tmp_path / "workflow_output"),
-                run_name="p56_c2_dedup",
-            )
+            _run_bound_workflow(tmp_path, composition, run_name="p56_c2_dedup")
 
         assert seen == [{KEY: ["the_same_run"]}] * 3
 
     def test_no_confirmed_outcome_accumulates_nothing(self, tmp_path):
         """An empty mapping is first-class: three iterations of ``refuted``
         leave the carrier empty and promote nothing."""
-        _write_tuning_output(tmp_path, "punet")
+        composition = _prepare_quickstart(tmp_path)
         seen: list[dict] = []
 
         with (
@@ -309,18 +336,12 @@ class TestTheProducerSemanticsSurviveTheCarry:
             MockImpl.return_value.run.return_value = _make_implementor_output()
             MockValid.return_value.run.return_value = _make_validator_output(passed=True)
             MockTune.return_value.run.side_effect = lambda i: _make_tune_output(
-                model_type=i.model_type, score=1.6
+                model_type=i.model_type,
+                score=1.6,
+                fingerprint=composition.semantic_fingerprint,
+                metric_spec=composition.metric.spec,
             )
-            run_workflow(
-                launch=WorkflowLaunchConfig(
-                    data_dir=str(tmp_path / "data"),
-                    model_types=["punet"],
-                    source_run_name="v1",
-                    max_iterations=3,
-                ),
-                workspace=str(tmp_path / "workflow_output"),
-                run_name="p56_c2_refuted",
-            )
+            _run_bound_workflow(tmp_path, composition, run_name="p56_c2_refuted")
 
         assert seen == [{}, {}, {}]
 
@@ -552,7 +573,7 @@ class TestEverySeveringMutationTurnsItRed:
         Without the closure, iteration N+1 re-reads the SEED rather than what
         iteration N produced, so the counter never advances past one run.
         """
-        _write_tuning_output(tmp_path, "punet")
+        composition = _prepare_quickstart(tmp_path)
         received: list[dict] = []
 
         # A ChainState whose carrier refuses to be updated is exactly a missing
@@ -599,18 +620,12 @@ class TestEverySeveringMutationTurnsItRed:
             MockImpl.return_value.run.return_value = _make_implementor_output()
             MockValid.return_value.run.return_value = _make_validator_output(passed=True)
             MockTune.return_value.run.side_effect = lambda i: _make_tune_output(
-                model_type=i.model_type, score=1.6
+                model_type=i.model_type,
+                score=1.6,
+                fingerprint=composition.semantic_fingerprint,
+                metric_spec=composition.metric.spec,
             )
-            run_workflow(
-                launch=WorkflowLaunchConfig(
-                    data_dir=str(tmp_path / "data"),
-                    model_types=["punet"],
-                    source_run_name="v1",
-                    max_iterations=3,
-                ),
-                workspace=str(tmp_path / "workflow_output"),
-                run_name="p56_c2_severed_closure",
-            )
+            _run_bound_workflow(tmp_path, composition, run_name="p56_c2_severed_closure")
 
         # Every iteration saw the empty seed — the C0 defect, reproduced.
         assert received == [{}, {}, {}]
@@ -709,14 +724,21 @@ def test_the_workflow_delta_stayed_sibling_shaped():
     # (agent/schemas/proposal.py); run_workflow only forwards a declared
     # value. One sibling-shaped branch, within the pre-registered limit.
     #
+    # Repository separation (2026-08-31): 128 -> 129. Enabled literature
+    # review now requires caller-owned configuration at startup; the use
+    # site keeps one assertion branch so a future reordering cannot open an
+    # undeclared file after startup validation. Configuration resolution
+    # remains in the existing helper and no task dispatch was added.
+    #
     # All of it is the permitted shape: no new phase, no new branch family, no
     # task dispatch, no new mutable local accumulator, no new semantic owner.
-    assert branchish == 128, (
-        f"run_workflow branch-ish count is {branchish}, expected 128 "
+    assert branchish == 129, (
+        f"run_workflow branch-ish count is {branchish}, expected 129 "
         "(130 at C0 + 1 C2 unpack IfExp + 1 C5/W6 binding-selection IfExp "
         "- 1 arXiv-U1 extraction of the lit-review path-resolution If "
         "+ 1 arXiv-#259 constraint-forwarding If - 4 after extracting "
-        "cross-iteration negative-feedback restoration; "
+        "cross-iteration negative-feedback restoration + 1 explicit "
+        "caller-owned literature-config use-site assertion; "
         "C3's union closure costs ZERO because the merge rule lives in "
         "core.resume.union_key_findings and this closure only calls it). "
         "If this grew further, the §12.1 tripwire requires re-running the "

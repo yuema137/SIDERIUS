@@ -884,6 +884,10 @@ _ACTIVE_PROFILE: ContextVar[DatasetProfile | None] = ContextVar(
 )
 
 
+class DatasetProfileBindingError(RuntimeError):
+    """Raised when execution requests dataset science without a binding."""
+
+
 def resolve_dataset_profile() -> DatasetProfile:
     """Return the dataset profile in effect for the current context.
 
@@ -898,10 +902,21 @@ def resolve_dataset_profile() -> DatasetProfile:
     the general injection mechanism, because an ambient lookup hides the
     dependency that the profile object exists to make visible.
 
-    With nothing bound it resolves the shipped TIDMAD profile, preserving
-    today's behaviour for every caller that predates the transport.
+    With nothing bound it refuses. Scientific topology belongs to the selected
+    task composition, so choosing a shipped task implicitly would let an
+    incomplete run execute plausible work under the wrong dataset semantics.
+
+    Raises:
+        DatasetProfileBindingError: No task composition or explicit profile
+            binding is active in the current context.
     """
-    return _ACTIVE_PROFILE.get() or TIDMAD_PROFILE
+    profile = _ACTIVE_PROFILE.get()
+    if profile is None:
+        raise DatasetProfileBindingError(
+            "no dataset profile is bound; compose a task or pass its resolved "
+            "DatasetProfile explicitly"
+        )
+    return profile
 
 
 def load_dataset_profile(path: str) -> DatasetProfile:

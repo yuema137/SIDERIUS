@@ -96,50 +96,6 @@ class TestContractIsTheAuthority:
         fc = ForwardContract(model_io=_model_io(), input_shape="[B, T] int64")
         assert fc.input_shape == "[B, T] int64"
 
-    def test_the_shipped_config_authors_the_contract_and_not_the_prose(self):
-        """The live migration: `configs/task_config.yaml` declares `model_io`
-        and no longer RESTATES the shapes.
-
-        Asserted against the YAML file itself, not the loaded config: the
-        loader deliberately returns the RESOLVED contract, so the derived
-        keys are present downstream. The claim here is about what is
-        AUTHORED — which is where duplicate authority would live.
-        """
-        import pathlib
-
-        import yaml
-
-        repo = pathlib.Path(__file__).resolve().parents[3]
-        authored = yaml.safe_load((repo / "configs" / "task_config.yaml").read_text())[
-            "forward_contract"
-        ]
-        assert "model_io" in authored
-        assert "input_shape" not in authored
-        assert "output_shape" not in authored
-        assert "num_classes" not in authored
-
-    def test_the_loader_returns_the_resolved_contract_not_the_raw_block(self):
-        """The derived fields must survive the loader.
-
-        Regression: the first M4 cut returned the raw YAML mapping, so
-        `cfg["forward_contract"]["num_classes"]` simply VANISHED for a
-        migrated task — the loader handed back something less resolved than
-        what it had just validated. Two Step-00 baselines caught it.
-        """
-        loaded = load_task_config()["forward_contract"]
-        assert loaded["input_shape"] == "[B, T] int64"
-        assert loaded["output_shape"] == "[B, 256, T] float32"
-        assert loaded["num_classes"] == 256
-        assert ForwardContract(**loaded).model_io is not None
-
-    def test_the_shipped_config_still_renders_the_expected_bytes(self):
-        """Hardcoded, so a failure names which side moved. The full byte
-        property is the A1 goldens' job; this is the cheap tripwire."""
-        fc = ForwardContract(**load_task_config()["forward_contract"])
-        assert fc.input_shape == "[B, T] int64"
-        assert fc.output_shape == "[B, 256, T] float32"
-        assert fc.num_classes == 256
-
 
 class TestRegimeAIsUntouched:
     """§5's Regime-A inventory — the legacy prose form keeps working."""
@@ -251,7 +207,12 @@ class TestResolutionIsWiredAtTheEntryPoint:
 
     def test_a_consistent_declaration_loads(self, tmp_path):
         config = load_task_config(self._write(tmp_path, preset="sequence", class_dim=256))
-        assert config["forward_contract"]["preset"] == "sequence"
+        resolved = config["forward_contract"]
+        assert resolved["preset"] == "sequence"
+        assert resolved["input_shape"] == "[B, T] int64"
+        assert resolved["output_shape"] == "[B, 256, T] float32"
+        assert resolved["num_classes"] == 256
+        assert ForwardContract(**resolved).model_io is not None
 
     def test_an_unknown_preset_fails_at_load(self, tmp_path):
         """FX-4's timing property at the PRODUCTION entry point: the failure
@@ -269,6 +230,5 @@ class TestResolutionIsWiredAtTheEntryPoint:
         with pytest.raises(DatasetContradictionError):
             load_task_config(self._write(tmp_path, preset="sequence", class_dim=10))
 
-    def test_the_shipped_config_resolves_through_the_same_path(self):
-        """The live one, not only synthetic fixtures."""
-        assert load_task_config()["forward_contract"]["preset"] == "sequence"
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

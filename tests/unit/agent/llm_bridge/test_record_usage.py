@@ -33,8 +33,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agent.llm_bridge import LLMBridge
-from tests.helpers.metric_fixtures import shipped_spec
-from tests.unit.agent.llm_bridge.test_step00_prompt_goldens import tidmad_task_render
+from tests.helpers.metric_fixtures import accuracy_like_spec
+from tests.helpers.tuner_prompt_fixtures import TASK_RENDER
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -314,8 +314,8 @@ def test_plan_uses_tuner_planner_label(tmp_path, capsys):
         current_round=1,
         max_rounds=3,
         # Step 07 PR 07b — required at a real render; this test pins the LABEL.
-        task_render=tidmad_task_render(),
-        metric_spec=shipped_spec(),
+        task_render=TASK_RENDER,
+        metric_spec=accuracy_like_spec(),
     )
 
     rows = _read_rows(bridge._token_usage_path)
@@ -332,7 +332,10 @@ def test_reflect_uses_tuner_reflector_label(tmp_path, capsys):
         usage=_usage(25, 8, 33),
     )
     bridge.reflect(
-        exp_id="exp1", hypothesis="h", actual_results={"score": 1.0}, metric_spec=shipped_spec()
+        exp_id="exp1",
+        hypothesis="h",
+        actual_results={"score": 1.0},
+        metric_spec=accuracy_like_spec(),
     )
 
     rows = _read_rows(bridge._token_usage_path)

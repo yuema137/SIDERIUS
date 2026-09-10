@@ -44,7 +44,7 @@ import inspect
 import math
 import signal
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import psutil
 import torch
@@ -62,6 +62,7 @@ from agent.skills.evaluate_vram_skill.overhead import (
 )
 from agent.skills.evaluate_vram_skill.probe_budgets import (
     ProbeBudgets,
+    ProbeOperation,
     ProbeTimeoutRecord,
     classify_host_memory_exception,
 )
@@ -120,7 +121,11 @@ _BUDGETS = ProbeBudgets()
 
 
 class ForwardPassTimeoutError(Exception):
-    """Raised when a probe's forward pass exceeds ``_FORWARD_PASS_TIMEOUT_S``."""
+    """One named footprint operation exceeded its workflow watchdog."""
+
+    def __init__(self, message: str, *, operation: str) -> None:
+        super().__init__(message)
+        self.operation = operation
 
 
 @contextmanager
@@ -146,7 +151,8 @@ def _forward_pass_timeout(seconds: float, label: str):
             f"This is an INCONCLUSIVE inspection result: the measurement did "
             f"not complete, so it says nothing about whether this model fits "
             f"or how fast it is. It is not a reason to reduce model capacity "
-            f"or batch size."
+            f"or batch size.",
+            operation=label,
         )
 
     old_handler = signal.signal(signal.SIGALRM, _handler)
@@ -714,6 +720,11 @@ def run_skill(sandbox, **kwargs):
                            declaration the run is not using. ``None`` is the
                            legacy no-contract path and is byte-identical to
                            every call before Step 05b.
+        probe_budgets     — typed per-operation watchdog budgets. ``None``
+                           preserves the framework defaults. Production
+                           callers transport workflow-owned overrides through
+                           the isolated-worker spec rather than mutating this
+                           module's defaults.
     """
     # Principle 2: no default architecture. If the caller failed to pass
     # ``model_type``, a ``KeyError`` is the right signal — silently
@@ -729,6 +740,9 @@ def run_skill(sandbox, **kwargs):
     probe_input_sample: torch.Tensor | None = kwargs.get("probe_input_sample")
     probe_target_sample: torch.Tensor | None = kwargs.get("probe_target_sample")
     max_inference_batch_size: int | None = kwargs.get("max_inference_batch_size")
+    probe_budgets = kwargs.get("probe_budgets") or _BUDGETS
+    if not isinstance(probe_budgets, ProbeBudgets):
+        probe_budgets = ProbeBudgets.model_validate(probe_budgets)
     if (probe_input_sample is None) != (probe_target_sample is None):
         raise ValueError("probe_input_sample and probe_target_sample must be supplied together")
     if max_inference_batch_size is not None and max_inference_batch_size < 1:
@@ -852,7 +866,7 @@ def run_skill(sandbox, **kwargs):
                 model_type=model_type,
                 model_io_contract=model_io_contract,
             )
-        with _forward_pass_timeout(_BUDGETS.single_probe_seconds, "training_probe"):
+        with _forward_pass_timeout(probe_budgets.single_probe_seconds, "training_probe"):
             training_probe = probe_activation_footprint(
                 model=model_for_train,
                 loss_module=loss_module,
@@ -903,7 +917,7 @@ def run_skill(sandbox, **kwargs):
                 segmentation_size=seg_size,
                 cap_bytes=cap_bytes,
                 max_batch_size=max_inference_batch_size,
-                budgets=_BUDGETS,
+                budgets=probe_budgets,
                 model_identity=model_type,
                 model_io_contract=model_io_contract,
             )
@@ -911,7 +925,7 @@ def run_skill(sandbox, **kwargs):
             gc.collect()
 
             model_for_bd = _build_model(model_type, model_cfg, loss_type)
-            with _forward_pass_timeout(_BUDGETS.single_probe_seconds, "inference_probe"):
+            with _forward_pass_timeout(probe_budgets.single_probe_seconds, "inference_probe"):
                 inference_probe = probe_activation_footprint(
                     model=model_for_bd,
                     loss_module=None,
@@ -1032,9 +1046,9 @@ def run_skill(sandbox, **kwargs):
         }
     except ForwardPassTimeoutError as e:
         record = ProbeTimeoutRecord(
-            operation="model_inspection",
-            budget_seconds=_BUDGETS.single_probe_seconds,
-            elapsed_seconds=_BUDGETS.single_probe_seconds,
+            operation=cast(ProbeOperation, e.operation),
+            budget_seconds=probe_budgets.single_probe_seconds,
+            elapsed_seconds=probe_budgets.single_probe_seconds,
             model_identity=model_type,
             disposition="inconclusive",
         )

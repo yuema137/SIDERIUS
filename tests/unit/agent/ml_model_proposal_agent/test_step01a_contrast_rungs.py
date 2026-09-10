@@ -31,11 +31,7 @@ from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
     _render_commit_system_prompt,
     _render_loss_legality,
 )
-from workflows.task_config import (
-    get_task_description,
-    load_task_config,
-    render_forward_contract,
-)
+from workflows.task_config import bind_task_config, render_forward_contract
 
 
 def _render_proposing_stage(fc: ForwardContract) -> str:
@@ -362,7 +358,7 @@ class TestSecondStepOneSurface:
         HISTORY. PR 01a froze the literal shape column AND the "256 amplitude
         bins" sentence as surviving every rung — "not an oversight to be
         cleaned up here". PR-12a C7-3 (D-12a-6) relocated the SENTENCE to
-        `configs/task_proposal/tidmad.yaml` behind
+        a task-owned proposal declaration behind
         `{OUTPUT_CONTRACT_GUIDANCE}` and deliberately declined to widen into
         the COLUMN. C12-P-P's P1-B then retired the column's TIDMAD literals,
         replacing them with the static task-neutral wording below. Nothing was
@@ -420,15 +416,10 @@ class TestSecondStepOneSurface:
 
 
 class TestContractReassertionContrast:
-    """The S1-D half of the re-targeted contract-reassertion pins
-    (child §11.1 row 1; `test_contract_reassertion.py:41-42`).
+    """Task-neutral contract-reassertion pins for the real commit render.
 
-    That module pins the Golden-Paragraph markers under the SHIPPED
-    profile. Byte-equality there cannot distinguish "the citation is
-    derived from the declaration" from "the citation happens to be the
-    frozen TIDMAD literal". This contrast supplies the missing half:
-    under B-ii the forward-contract citation must MOVE with the
-    declaration while the structural markers stay.
+    The forward-contract citation must move with the declaration while the
+    task-independent structural markers stay.
     """
 
     def _spec(self, fc: ForwardContract) -> str:
@@ -490,18 +481,21 @@ class TestRungAtomicity:
     def test_commit_surface_carries_no_task_description_prose(self):
         """The description axis belongs to PR 01b (rung FX-1).
 
-        Pinned by CONTENT, from source: the legacy commit surface states
-        the I/O contract but never the task narrative — it contains no
-        sentence of the shipped `task_description`, and none of its
-        domain nouns. That is exactly why a PR-01a rung can vary the
+        Pinned by CONTENT: the commit surface states the I/O contract but
+        never the task narrative. That is exactly why a PR-01a rung can vary the
         contract while holding the description fixed and still be
         single-axis: on this surface the description is not an axis at
         all. Should the JOIN later route description prose here, this
         fires and the rungs must be re-derived before they can still be
         called atomic.
         """
-        rendered = _render_commit_system_prompt(TestRungFX2.CONTRACT)
-        shipped_description = get_task_description(load_task_config())
-        assert shipped_description not in rendered
-        for domain_noun in ("SQUID", "TIDMAD", "dark-matter"):
-            assert domain_noun not in rendered
+        synthetic_description = "Forecast the next sensor frame from a short multichannel context."
+        task_config = {
+            "task_description": synthetic_description,
+            "forward_contract": TestRungFX2.CONTRACT.model_dump(),
+        }
+        with bind_task_config(task_config):
+            rendered = _render_commit_system_prompt(TestRungFX2.CONTRACT)
+        assert synthetic_description not in rendered
+        for task_noun in ("sensor frame", "multichannel context"):
+            assert task_noun not in rendered

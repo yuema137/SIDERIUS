@@ -1,10 +1,10 @@
 """The E1 import-resolution probe (P0 launch blocker, supervisor 2026-08-25).
 
-The venv's editable install maps packages to the MAIN checkout; an unpinned
-child whose cwd leaves the campaign tree imports THAT tree's code. The probe
-(`_import_resolution_probe.py`, run by preflight R2b from a neutral cwd)
-proves the PYTHONPATH pin. These tests run the REAL probe as a subprocess
-from a temp cwd — the actual failure mode's geometry, not a -c simulation.
+The exact checkout's uv-managed editable install must map packages back to the
+same checkout. The probe (``_import_resolution_probe.py``, run from a neutral
+working directory) verifies that binding. These tests use ``PYTHONPATH`` only
+to construct positive and negative probe fixtures; the production launcher
+removes it before invoking the same probe.
 """
 
 from __future__ import annotations

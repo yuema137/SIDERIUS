@@ -18,8 +18,6 @@ make that coincidence unmissable to a future reader.
 
 from __future__ import annotations
 
-from contextlib import nullcontext
-
 import pytest
 from pydantic import ValidationError
 
@@ -37,12 +35,10 @@ from execute_tools.dataset_config import (
 #: from ``TIDMAD.psd_segment_length`` would compare the rule to itself.
 TIDMAD_PSD = 10_000_000
 
-#: Pets' own declared default, ``examples/oxford_iiit_pet/plugins/
-#: pets_reference_cnn.py:29``. ``10_000_000 % 144 == 64``.
+#: A non-divisor image-task segmentation size. ``10_000_000 % 144 == 64``.
 PETS_SEGMENTATION_SIZE = 144
 
-#: DAVIS' own declared default, ``examples/davis_future_prediction/plugins/
-#: davis_reference_predictor.py:33``. ``10_000_000 % 128 == 0`` — a divisor.
+#: A divisor video-task segmentation size. ``10_000_000 % 128 == 0``.
 DAVIS_SEGMENTATION_SIZE = 128
 
 #: The value the production runs kept failing on under TIDMAD.
@@ -167,12 +163,9 @@ class TestATaskWithoutTidmadGeometrySkipsTheRule:
 
 
 class TestRegimeAParityIsUnchanged:
-    """Nothing bound, or TIDMAD bound: the rule and its diagnostic must not move."""
+    """An explicitly bound TIDMAD profile preserves the rule and diagnostic."""
 
-    @pytest.mark.parametrize("bind_tidmad", [False, True])
-    def test_a_tidmad_illegal_size_still_raises_with_the_same_diagnostic(
-        self, expert_advice, bind_tidmad
-    ):
+    def test_a_tidmad_illegal_size_still_raises_with_the_same_diagnostic(self, expert_advice):
         """Defect caught: "fixed by deleting the rule".
 
         A fix that removes the divisibility check outright, or that skips it
@@ -183,9 +176,9 @@ class TestRegimeAParityIsUnchanged:
         How it fails on regression: no ``ValidationError``, or one whose text
         has lost the remainder or the actionable divisor list.
         """
-        ctx = bind_dataset_profile(TIDMAD_PROFILE) if bind_tidmad else nullcontext()
-        with ctx, pytest.raises(ValidationError) as exc:
-            _propose(expert_advice, TIDMAD_ILLEGAL_SIZE)
+        with bind_dataset_profile(TIDMAD_PROFILE):
+            with pytest.raises(ValidationError) as exc:
+                _propose(expert_advice, TIDMAD_ILLEGAL_SIZE)
         msg = str(exc.value)
 
         # Hardcoded, not read back from the validator or from TIDMAD.

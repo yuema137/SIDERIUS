@@ -21,23 +21,56 @@ from __future__ import annotations
 import json
 import os
 
-import h5py
-import numpy as np
 import pytest
+import torch
+from torch.utils.data import Dataset
 
 import execute_tools.train_engine_sandbox as tes
 from core.runtime_control.adaptive import AdaptiveVerificationConfig
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.steady_state import SteadyStateConfig
-from execute_tools.dataset_config import (
-    TIDMAD_PROFILE,
-    bind_dataset_profile,
-    tidmad_topology,
+from execute_tools.task_data_path import (
+    DeliverableWriteRequest,
+    EpochSamplingParams,
+    EvalMaterializationParams,
+    EvaluationReadRequest,
+    bind_task_data_path,
 )
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, WaveNetConfig
+from tests.helpers.two_family_profile import make_two_family_profile
 
 SEG_SIZE = 1000
 N_PSD_SEGMENTS = 30  # 30 steps at batch_size=1
+
+
+class _VerificationDataset(Dataset):
+    """Small deterministic classification stream for timing verification."""
+
+    def __len__(self) -> int:
+        return N_PSD_SEGMENTS
+
+    def __getitem__(self, index: int):
+        values = (torch.arange(SEG_SIZE, dtype=torch.int64) + index) % 256
+        return values, values.clone()
+
+
+class _VerificationDataPath:
+    """Expose the timing fixture through the production task-data seam."""
+
+    task_data_path_id = "rt2c_indexed_fixture"
+
+    def training_dataset(self, scope: object, params: EpochSamplingParams):
+        assert isinstance(scope, dict)
+        return _VerificationDataset()
+
+    def validation_dataset(self, scope: object, params: EvalMaterializationParams):
+        raise AssertionError("RT2-C does not request validation data")
+
+    def write_deliverable(self, outputs, request: DeliverableWriteRequest) -> None:
+        raise AssertionError("RT2-C does not write deliverables")
+
+    def read_evaluation_payload(self, request: EvaluationReadRequest) -> object:
+        raise AssertionError("RT2-C does not read evaluation payloads")
 
 
 def _verification_config() -> AdaptiveVerificationConfig:
@@ -54,21 +87,11 @@ def _verification_config() -> AdaptiveVerificationConfig:
 @pytest.fixture
 def tiny_setup(tmp_path):
     """Streaming-mode setup with enough segments for live verification."""
-    # Geometry override is a DECLARATION. Was
-    # ``monkeypatch.setattr(tes, "PSD_SEGMENT_LENGTH", SEG_SIZE)`` until
-    # PR-02a C3 moved the loaders onto the resolved Dataset Profile, so the
-    # module constant is no longer the authority. Assertions unchanged.
-    n_samples = N_PSD_SEGMENTS * SEG_SIZE
-    rng = np.random.default_rng(7)
-    with h5py.File(tmp_path / "abra_training_0000.h5", "w") as f:
-        ts = f.create_group("timeseries")
-        ts.create_group("channel0001").create_dataset(
-            "timeseries", data=rng.integers(-128, 127, size=n_samples, dtype=np.int8)
-        )
-        ts.create_group("channel0002").create_dataset(
-            "timeseries", data=rng.integers(-128, 127, size=n_samples, dtype=np.int16)
-        )
-
+    profile = make_two_family_profile(
+        num_files=1,
+        psd_segment_length=SEG_SIZE,
+        segments_per_file=N_PSD_SEGMENTS,
+    )
     model_cfg = WaveNetConfig(
         segmentation_size=SEG_SIZE,
         input_channels=4,
@@ -86,16 +109,10 @@ def tiny_setup(tmp_path):
     }
     os.makedirs(sandbox_dirs["models"], exist_ok=True)
 
-    _tiny = TIDMAD_PROFILE.model_copy(
-        update={
-            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
-                update={"psd_segment_length": SEG_SIZE}
-            )
-        }
-    )
-    with bind_dataset_profile(_tiny):
+    with bind_task_data_path(_VerificationDataPath()):
         yield {
             "data_dir": str(tmp_path),
+            "profile": profile,
             "sample_set": {"0": list(range(N_PSD_SEGMENTS))},
             "model_cfg": model_cfg,
             "train_cfg": train_cfg,
@@ -114,6 +131,8 @@ def _run(setup, runtime_session, exp_id: str):
         sandbox_dirs=setup["sandbox_dirs"],
         exp_id=exp_id,
         runtime_session=runtime_session,
+        task_scope=setup["sample_set"],
+        profile=setup["profile"],
     )
 
 

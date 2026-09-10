@@ -570,3 +570,6 @@ class TestRenderVocabulary:
         rendered = MLModelProposalAgent._render_vocabulary(vocab)
         assert "Discoveries" in rendered
         assert "REFUTED" in rendered
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

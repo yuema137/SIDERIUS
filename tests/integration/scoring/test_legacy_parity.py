@@ -18,7 +18,7 @@ frozen decisions (global ``s_max`` ruler vs legacy file-local ``amax``;
 ``round(·, 2)`` removal; ``+1e-10`` offset removal), so it is
 unsatisfiable by design, and their signature had already drifted
 (missing the now-required ``s_max``). Their still-valid coverage is owned
-by ``tests/unit/test_compute_raw_baseline.py`` (1e-12 aggregation pins)
+by the TIDMAD task package's reference-tool tests (1e-12 aggregation pins)
 and the Step-00 NUM-1/NUM-4 full-precision committed-artifact pins.
 
 The remaining test IS the legacy-reproduction property: ``legacy_mode``

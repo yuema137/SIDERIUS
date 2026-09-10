@@ -227,3 +227,6 @@ class TestReachabilityThroughTheRealRun:
         lock = json.loads((workspace / "run_invariants_lock.json").read_text())
         for name in IDENTITY_NAMES:
             assert name not in lock, name
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

@@ -1,5 +1,12 @@
 # `advice/`
 
+> **Historical archive, not a framework default.** These files record advice
+> used by dated development and validation runs. SIDERIUS does not select any
+> of them implicitly, they are excluded from the Python distribution, and new
+> scientific tasks or experiments must keep active advice in their own
+> workspace or consumer repository. They remain here only while historical
+> tests and design ledgers cite their exact bytes.
+
 Operator-written JSON advice files passed to SIDERIUS agents at run time.
 Two levels exist and the distinction matters — they have different schemas
 and different injection points in the graph.
@@ -47,22 +54,12 @@ JSON with **multiple top-level keys**, one per agent in the 5-agent chain
 ```
 
 Partial files are supported and remain fully legal — an omitted key simply
-means "no advice for that agent" (e.g. `chain_v2_proposer_advice.json` ships
-only `propose` + `implement`, and `tidmad_collapse_advice.json` ships only
-`tune`). What is NOT legal is a key that is *present* and carries nothing;
-see "The key set is closed" below.
+means "no advice for that agent". What is NOT legal is a key that is *present*
+and carries nothing; see "The key set is closed" below.
 
-Current contents:
-
-| file | shape | purpose |
-|---|---|---|
-| `human_advice_chain_test.json` | all 5 keys | Smoke-test chain — tiny architectures, < 5 epoch budgets |
-| `human_advice_chain_formal.json` | all 5 keys | Real research chain — wavenet-anchored, full budgets |
-| `explore_novel_v{1..4}.json` | `mindset`/`propose`/`implement`/`tune` | Exploration lane — paradigm-shift architectures |
-| `exploit_cnn_v{1..4}.json` | `mindset`/`propose`/`implement`/`tune` | Exploit lane — hybridize on proven TCN/CNN backbones |
-| `exploration_adaptive_v{1,3}.json` | `propose`/`implement`/`tune` | Adaptive proposer (regime-aware) |
-| `chain_v2_proposer_advice.json` | `propose`/`implement` | Proposer hints for inheritance-aware chain runs |
-| `chain_v3_proposer_advice_time_sens.json` | `propose`/`implement`/`tune` | Time-sensitive proposer hints |
+SIDERIUS intentionally ships no active advice artifact. Advice is caller-owned
+experiment input and belongs beside the task or workflow that selects it. This
+document specifies the supported format only.
 
 ---
 
@@ -150,9 +147,9 @@ loader REFUSES, naming what was wrong:
 | `{"propose": "..."}` | **accepted** — sparse advice is legal |
 
 To carry a note the agents must never read, prefix its key with `_`, which
-declares it deliberately inert (`gate2_smoke_advice.json` uses `_meta` to
-record why that artifact exists). This is an explicit opt-out; an
-unrecognised key *without* it is treated as the typo it almost always is.
+declares it deliberately inert. For example, `_meta` may record why an
+artifact exists. This is an explicit opt-out; an unrecognised key *without*
+it is treated as the typo it almost always is.
 
 **Why this is a refusal and not a warning.** The artifact's sha256 is pinned
 into the run-invariants lock as the run's treatment identity, distributed to

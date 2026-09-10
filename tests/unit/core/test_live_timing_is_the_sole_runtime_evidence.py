@@ -40,13 +40,18 @@ import pytest
 
 import agent.skills.evaluate_time_skill.wrapper as time_wrapper
 from agent.skills.training_skill import estimator
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.two_family_profile import make_two_family_profile
 
 ESTIMATOR_SOURCE = Path(estimator.__file__).read_text()
 ESTIMATOR_TREE = ast.parse(ESTIMATOR_SOURCE)
 
 #: The legacy k API. None of it may be reachable from the estimate.
 LEGACY_K_NAMES = {"lookup_k", "load_table", "update_k", "save_table"}
+PROFILE = make_two_family_profile(
+    num_files=3,
+    psd_segment_length=40_000,
+    segments_per_file=200,
+)
 
 
 def _estimate(ms_per_step: float | None, *, gpu_name: str | None = "NVIDIA GeForce RTX 5090"):
@@ -56,11 +61,11 @@ def _estimate(ms_per_step: float | None, *, gpu_name: str | None = "NVIDIA GeFor
         model_config={"segmentation_size": 40000, "batch_size": 8},
         train_config={"batch_size": 8, "epochs": 1},
         loss_type="focal",
-        sample_set={"abra_training_0000.h5": list(range(200))},
+        sample_set={"training_0000.h5": list(range(200))},
         train_portion=1.0,
         ms_per_step=ms_per_step,
         gpu_name=gpu_name,
-        dataset_profile=TIDMAD_PROFILE,
+        dataset_profile=PROFILE,
     )
 
 

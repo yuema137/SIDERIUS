@@ -83,19 +83,6 @@ def test_file_order_is_never_parsed_through_datascope(path):
     )
 
 
-def test_run_comparison_forwards_the_override_only_when_set():
-    """Unset override must reproduce the pre-V19 tuner argv exactly."""
-    source = (REPO / "scripts/run_comparison.py").read_text()
-    assert '"--order_strategy_override", order_strategy_override' in source
-    assert "if order_strategy_override is not None:" in source
-    assert "if file_order_override is not None:" in source
-
-
-def test_baseline_phase_does_not_receive_the_override():
-    """The baseline is the frozen comparison anchor: its training stays on
-    the pre-V19 global shuffle no matter what the agent phase is asked to do."""
-    source = (REPO / "scripts/run_comparison.py").read_text()
-    baseline_fn = source[source.index("def run_baseline_trial(") :]
-    baseline_fn = baseline_fn[: baseline_fn.index("\ndef ")]
-    assert "order_strategy" not in baseline_fn
-    assert "file_order" not in baseline_fn
+# Task comparison argv and reference-baseline invariance are externally owned
+# by siderius-exp/tests/tasks/tidmad/test_comparison_ordering_boundary.py.
+# The framework lock and permutation guards above do not inspect that repo.

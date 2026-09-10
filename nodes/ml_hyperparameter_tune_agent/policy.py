@@ -309,6 +309,39 @@ def _should_bypass_formal_time_budget(
     return order.is_at_least(winner["denoising_score"], threshold)
 
 
+def resolve_measured_time_budget(
+    *,
+    base_budget_minutes: float | None,
+    admission_source: str,
+    is_formal_round: bool,
+    formal_trial_winner: dict | None,
+    bypass_threshold: float | None,
+    bypass_ceiling_minutes: float | None,
+    order: MetricOrder,
+) -> float | None:
+    """Resolve the single in-process ceiling for measured admission.
+
+    Forecast admission can re-evaluate an estimate after the normal ceiling
+    is exceeded. Measured admission has no advance estimate, so an approved
+    score-qualified Formal attempt receives its elevated ceiling before the
+    subprocess starts. Configuring a bypass never raises an unqualified run.
+    """
+    if (
+        admission_source != "measured"
+        or not is_formal_round
+        or bypass_ceiling_minutes is None
+        or not _should_bypass_formal_time_budget(
+            formal_trial_winner,
+            threshold=bypass_threshold,
+            order=order,
+        )
+    ):
+        return base_budget_minutes
+    if base_budget_minutes is None:
+        return bypass_ceiling_minutes
+    return max(base_budget_minutes, bypass_ceiling_minutes)
+
+
 def _resolve_formal_comparison_thresholds(
     *,
     reference_score: float | None,
@@ -1326,13 +1359,14 @@ class ScoringRoute(StrEnum):
 def resolve_scoring_route(anchor_map_data, task_scopes) -> ScoringRoute:
     """Decide the route from what each one actually REQUIRES.
 
-    Order is the specificity order, and each test names its own precondition:
-    anchor-normalized scoring cannot run without an anchor map; task-owned
-    scoring cannot run without the task's evaluation scope; the subprocess
-    legacy route needs neither.
+    An explicit task scope is the strongest authority: the task that built an
+    opaque evaluation scope must also decode and score it. The in-process
+    anchor route remains the compatibility path for an uncomposed run with a
+    legacy ``SampleSet`` and anchor map. The subprocess legacy route needs
+    neither.
     """
-    if anchor_map_data is not None:
-        return ScoringRoute.ANCHOR_NORMALIZED
     if getattr(task_scopes, "evaluation", None) is not None:
         return ScoringRoute.TASK_OWNED
+    if anchor_map_data is not None:
+        return ScoringRoute.ANCHOR_NORMALIZED
     return ScoringRoute.SUBPROCESS_LEGACY

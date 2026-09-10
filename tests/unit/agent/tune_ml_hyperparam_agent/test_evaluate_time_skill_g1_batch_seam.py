@@ -23,8 +23,8 @@ estimator_breakdown`` — the G1 half of the transport-contract evidence
 (G2 adds the tuner→wrapper hop and its own delete-the-hop test).
 
 Fixtures mirror ``test_inference_hint_path.py`` (phase stubs; rnn is
-registered with table batch 10; SEGMENT_LENGTH=10_000_000 and seg 16000
-give ml_per_psd = 625).
+registered with table batch 10; the neutral physical segment and model
+segment give ``ml_per_psd = 100``).
 """
 
 from __future__ import annotations
@@ -32,7 +32,14 @@ from __future__ import annotations
 import pytest
 
 from agent.skills.evaluate_time_skill import wrapper as ts
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.two_family_profile import make_two_family_profile
+
+PHYSICAL_SEGMENT_LENGTH = 1_600_000
+PROFILE = make_two_family_profile(
+    num_files=20,
+    psd_segment_length=PHYSICAL_SEGMENT_LENGTH,
+    segments_per_file=20,
+)
 
 
 class FakeSandbox:
@@ -50,7 +57,7 @@ def _base_kwargs(**overrides) -> dict:
         "time_budget_minutes": 60.0,
         # Step 05b: the run-bound topology is a REQUIRED kwarg — the skill
         # no longer resolves one of its own.
-        "dataset_profile": TIDMAD_PROFILE,
+        "dataset_profile": PROFILE,
     }
     kw.update(overrides)
     return kw
@@ -104,7 +111,7 @@ def _patch_phases(
     monkeypatch.setattr(ts, "_count_params", lambda mt, mc, lt: 100_000)
 
 
-ML_PER_PSD = 625  # 10_000_000 // 16000, hardcoded independently
+ML_PER_PSD = 100  # 1_600_000 // 16_000, hardcoded independently
 
 
 class TestDefaultParity:

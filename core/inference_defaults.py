@@ -23,8 +23,6 @@ Legitimate consumers of the table (the §0.B census, PR G design doc):
 - ``run_comparison.py`` baselines — no hint by design; entries are
   paper/VRAM-calibrated for the builtin types (``transformer: 1`` for
   O(T²) attention; ``rnn: 10``). Do not delete the table.
-- Legacy validation scripts (``c2_prephase_validation.py``,
-  ``pregate_runtime_control_validation.py``).
 - The proposer's advisory preflight (``proposer_preflight.py``) — no
   candidate exists yet, so no hint can; ``advisory_only`` and
   batch-insensitive up to the bounded ceil residual on its static path.

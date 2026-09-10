@@ -15,7 +15,7 @@ Source-type coverage (see docs/paper_resolver_pilot.md):
   doi        — same paper via its DataCite DOI; cross-checks ArXiv id.
   openreview — S2 does not currently index OpenReview forum URLs (no fallback
                yet); xfail until coverage lands. See external_agents §9.
-  local      — real file read of a committed reference_data fixture (offline).
+  local      — real file read of a caller-owned temporary fixture (offline).
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
+from agent.skills.paper_resolver_skill import wrapper as resolver_wrapper
 from agent.skills.paper_resolver_skill.wrapper import run_skill
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -94,14 +95,16 @@ def test_resolve_openreview_real():
     assert out["data"]["s2_metadata"] is not None
 
 
-def test_resolve_local_txt_offline():
-    # Offline: real file read of a committed fixture; no network/key needed,
-    # so this is intentionally NOT marked real_run.
+def test_resolve_local_txt_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # Offline: read a caller-owned local file with no network or API key.
+    source = tmp_path / "scientific_context.txt"
+    source.write_text("A compact scientific context fixture.\n", encoding="utf-8")
+    monkeypatch.setattr(resolver_wrapper, "_PROJECT_ROOT", tmp_path)
     out = run_skill(
         None,
         mode="resolve",
         source_type="local",
-        identifier="reference_data/tidmad_signal_frequencies.txt",
+        identifier=source.name,
         verbosity=1,
     )
     assert out["status"] == "ok", out["message"]

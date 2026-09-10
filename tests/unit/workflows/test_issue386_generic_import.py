@@ -1,4 +1,4 @@
-"""Regression for issue #386: generic import must not select TIDMAD config."""
+"""Regression for issue #386: generic import must not select a task config."""
 
 from __future__ import annotations
 
@@ -40,14 +40,11 @@ def test_generic_workflow_import_does_not_read_legacy_task_config() -> None:
 
 
 def test_explicit_data_root_refusal_does_not_fall_through_to_legacy_config(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Catch consulting TIDMAD config while validating a composed root."""
+    """Catch restoring a task-config fallback behind explicit root validation."""
     import execute_tools.data_paths as data_paths
 
-    data_paths._legacy_data_config.cache_clear()
-    monkeypatch.setattr(data_paths, "_CONFIG_PATH", str(tmp_path / "missing-real.yaml"))
-    monkeypatch.setattr(data_paths, "_EXAMPLE_CONFIG_PATH", str(tmp_path / "missing-template.yaml"))
+    assert not hasattr(data_paths, "_legacy_data_config")
     with pytest.raises(data_paths.DatasetDirectoryUnavailable, match="--data_dir"):
         data_paths.resolve_dataset_dir(str(tmp_path / "missing-data"), purpose="external task")

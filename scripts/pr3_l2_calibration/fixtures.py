@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 from agent.schemas.health_feedback import (
     CollapseFingerprintHistoryEntry,
@@ -134,10 +135,14 @@ def _simulated_run_metric_spec():
     sites. It calls the authoritative Step-06 constructor rather than
     hand-writing a spec, so the fixture cannot drift from the real one.
     """
-    from execute_tools.dataset_config import resolve_dataset_profile
-    from execute_tools.evaluation_metric import derive_tidmad_metric_spec
+    from tests.helpers.metric_fixtures import shipped_spec
+    from workflows.task_composition import compose_run_task_bindings
 
-    return derive_tidmad_metric_spec(resolve_dataset_profile())
+    repository_root = Path(__file__).resolve().parents[2]
+    composition = compose_run_task_bindings(
+        str(repository_root / "configs/task_composition/quickstart.yaml")
+    )
+    return shipped_spec(composition.dataset_profile)
 
 
 def _tune_output(model_type: str, records: list[ExperimentRecord]) -> HyperparamTuningOutput:

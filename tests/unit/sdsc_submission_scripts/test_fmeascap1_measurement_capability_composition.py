@@ -227,8 +227,8 @@ class TestComposedRunsCarryTheirOwnMeasurementIdentity:
             "availability was tested against a directory this run never binds"
         )
 
-    def test_tidmad_data_present_does_not_make_a_composed_run_tidmads(
-        self, tmp_path, two_distinct_roots, monkeypatch
+    def test_an_unrelated_dataset_does_not_change_the_composed_identity(
+        self, tmp_path, two_distinct_roots
     ):
         """(b) THE DANGEROUS MANIFESTATION — the test that would have caught it.
 
@@ -240,10 +240,7 @@ class TestComposedRunsCarryTheirOwnMeasurementIdentity:
         ``resolve_tidmad_measurement_capability`` reads the module global at
         call time, so patching it here reproduces a campaign host exactly.
         """
-        tidmad_root, composed_root = two_distinct_roots
-        monkeypatch.setattr(
-            "execute_tools.data_paths.TIDMAD_DATA_DIR", str(tidmad_root), raising=True
-        )
+        unrelated_root, composed_root = two_distinct_roots
 
         capability = _capability_reaching_the_workflow(
             [
@@ -264,53 +261,10 @@ class TestComposedRunsCarryTheirOwnMeasurementIdentity:
             "F-MEASCAP-1"
         )
         assert capability.task_identity == COMPOSED_TASK_ID
-        assert capability.dataset_root != str(tidmad_root), (
-            "the capability describes TIDMAD's dataset for a run that will never read it"
+        assert capability.dataset_root != str(unrelated_root), (
+            "the capability describes an unrelated dataset for a run that will never read it"
         )
         assert capability.dataset_root == str(composed_root)
-
-    def test_an_uncomposed_run_is_byte_identical_to_the_legacy_call(self, tmp_path, monkeypatch):
-        """(c) DIFFERENTIAL — the legacy path is untouched.
-
-        Deep equality against the legacy resolver's own return value, not a
-        field-by-field paraphrase: ``ResolvedMeasurementCapability`` is a frozen
-        Pydantic model, so ``==`` compares every field including the ones this
-        fix never intended to move.
-
-        This also pins the legacy call's ZERO-argument form. An un-composed run
-        resolves against the lazy legacy TIDMAD data authority and NOT against
-        ``--data_dir``; that is a real asymmetry, but correcting it is a
-        different change with a different blast radius, and this witness fails
-        if this PR quietly makes it.
-        """
-        from execute_tools.data_paths import resolve_tidmad_measurement_capability
-
-        anchor_root = tmp_path / "tidmad_anchor_data"
-        elsewhere = tmp_path / "operator_override"
-        anchor_root.mkdir()
-        elsewhere.mkdir()
-        monkeypatch.setattr(
-            "execute_tools.data_paths.legacy_tidmad_data_dir", lambda: str(anchor_root)
-        )
-
-        capability = _capability_reaching_the_workflow(
-            [
-                "--workspace",
-                str(tmp_path / "ws"),
-                "--start_iteration",
-                "1",
-                "--data_dir",
-                str(elsewhere),
-            ]
-        )
-
-        assert capability == resolve_tidmad_measurement_capability(), (
-            "an un-composed run's capability changed; this fix must be "
-            "invisible to every run that composes nothing"
-        )
-        assert capability.dataset_root == str(anchor_root), (
-            "the un-composed path stopped using the legacy data authority"
-        )
 
 
 class TestARefusalNamesTheComposedTask:

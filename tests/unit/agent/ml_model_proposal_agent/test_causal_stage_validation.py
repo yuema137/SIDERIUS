@@ -271,3 +271,6 @@ class TestPartialSchemaScope:
             CausalStageOwnedContent.model_validate(
                 {"falsifiable_prediction": DEGENERATE_PREDICTION}
             )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

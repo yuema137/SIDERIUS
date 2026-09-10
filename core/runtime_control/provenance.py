@@ -191,6 +191,7 @@ def classify_cache_state(
     expected_bytes: int | None,
     *,
     cold_read_fraction: float = COLD_READ_FRACTION,
+    filesystem_type: str | None = None,
 ) -> CacheState:
     """Classify the cache state of a completed setup read (§2.2).
 
@@ -209,6 +210,12 @@ def classify_cache_state(
         cold_read_fraction: Fraction of ``expected_bytes`` above which
                             the access counts as cold.
     """
+    normalized_fs = (filesystem_type or "").lower()
+    if normalized_fs == "virtiofs" or "fuse" in normalized_fs:
+        # /proc/self/io observes reads performed by this process. FUSE and
+        # virtiofs may perform the backing read in another process, so a zero
+        # delta is not evidence of a warm cache.
+        return "unknown"
     if bytes_read is None or expected_bytes is None:
         return "unknown"
     if expected_bytes <= 0:

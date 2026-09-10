@@ -245,8 +245,11 @@ The step files are a deliberate **capture-first ladder**: each Checkpoint-0
 baseline was written *before* the migration it certifies, precisely so it could
 not be back-fitted. `test_step00_numeric_baselines.py` declares zero production
 diff by construction; `test_step03_a2` and `test_step03_a6` say the same;
-`test_step02a_c1_baselines.py` pins what the dataset serves, which
-`test_step03_a6` documents as *upstream* of the engine cast it observes.
+At the time of this audit, `test_step02a_c1_baselines.py` pinned what the
+real task dataset served and `test_step03_a6` documented that boundary as
+*upstream* of the engine cast it observed. Repository separation later moved
+those task-specific runtime and scoring oracles to `siderius-exp`; the generic
+framework no longer carries that baseline module.
 
 **Do not treat the `stepNN` prefix as an obsolescence signal.** Whether the
 ladder is retired once its step merges is §18.3 — a policy question, not a
@@ -5271,4 +5274,3 @@ verifies every `AREA_OWNERS` prefix and suite path resolves. Ruff clean.
 | docs, read by tests | `docs/gates/gate_testing_standard.md` | 15 modules | — |
 | docs, read by nothing | `docs/architecture.md` | **13 modules** | — |
 | dashboard | `dashboard/main.py` | **15 modules** | — |
-

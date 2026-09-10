@@ -138,15 +138,6 @@ class Finding:
 # that file, or the test fails as stale.
 ALLOWLIST: tuple[tuple[str, str, str], ...] = (
     (
-        "docs/guides/operating-a-run.md",
-        "a code edit plus its regression test",
-        "Table-2 cell for the VRAM safety fraction: it states there is NO "
-        "runtime override ('none at runtime') and ends 'do not change' — "
-        "'edit' occurs only as a noun describing what a framework change "
-        "would require, and the imperative present is a negated "
-        "do-not-change instruction, i.e. the opposite of the defect.",
-    ),
-    (
         "examples/quickstart/README.md",
         "add `configs/task_composition/quickstart.yaml` binding it",
         "A struck-through (~~…~~), completed item of the pack's own "
@@ -364,6 +355,6 @@ class TestMatcherOracle:
         assert flag_units(extract_units(text)) == []
 
     def test_table_cells_are_units(self) -> None:
-        text = "| goal | do |\n|---|---|\n| stricter check | edit `configs/task_health/tidmad.yaml` |\n"
+        text = "| goal | do |\n|---|---|\n| stricter check | edit `configs/health_checks.yaml` |\n"
         flagged = [u for _, u in flag_units(extract_units(text))]
-        assert flagged == ["edit `configs/task_health/tidmad.yaml`"]
+        assert flagged == ["edit `configs/health_checks.yaml`"]

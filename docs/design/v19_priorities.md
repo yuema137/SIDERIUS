@@ -90,10 +90,10 @@ adaptation agenda is subordinate to the score target above.
 
 The target per band is the FCNet band aggregate: the scoped formal
 scalar `log_5.27(Σ_(f,i) per_segment[f,i] / Σ_f |S_f|)` computed over
-every segment of the band's files, derived from the committed per-file
-linear values in
-[`../../reference_data/official_paper_result/fcnet.md`](../../reference_data/official_paper_result/fcnet.md)
-(canonical `segment_anchors.json` s_max, 200 segments/file). Raw floors
+every segment of the band's files, derived from the then-committed per-file
+linear values in the now-external historical artifact
+`reference_data/official_paper_result/fcnet.md` (canonical
+`segment_anchors.json` s_max, 200 segments/file). Raw floors
 from `reference_data/raw_baseline/` by the same formula.
 
 | Band | Raw floor | **FCNet target** | Best SIDERIUS valid formal to date | Gap (log units) |

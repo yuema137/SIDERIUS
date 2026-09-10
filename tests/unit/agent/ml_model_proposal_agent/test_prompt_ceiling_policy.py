@@ -192,13 +192,11 @@ class TestGateExhaustionClosing:
         1. the VRAM-limit REQUIREMENT prose — deterministic capacity
            guidance is legitimate and stays;
         2. bare numerals with no capacity meaning;
-        3. the task-background block S1-C injects, which carries the
-           shipped description's ``256`` and ``[B, 256, T]``.
+        3. a task-background block carrying ordinary scientific numerals.
         """
         from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
             _render_pipeline_task_background,
         )
-        from workflows.task_config import get_task_description, load_task_config
 
         assert (
             _numeric_capacity_literals(
@@ -213,9 +211,11 @@ class TestGateExhaustionClosing:
             )
             == []
         )
-        joined = _render_pipeline_task_background(get_task_description(load_task_config()))
+        joined = _render_pipeline_task_background(
+            "Predict 12 response channels from 256 calibrated sensor readings."
+        )
         assert _numeric_capacity_literals(joined) == [], (
-            "the widened pattern fires on the shipped task description injected by S1-C"
+            "the widened pattern fires on ordinary task-description numerals"
         )
         # ...and it DOES fire on the thing it exists to catch.
         assert _numeric_capacity_literals("keep parameter_count_estimate under ~100M")

@@ -19,7 +19,7 @@
 # defect (see `resolve_scientific_gate_ids`).
 #
 # The gate roster, thresholds, peek set, value scale and reason prose are
-# task-owned and live in `configs/task_health/tidmad.yaml` — shared by both
+# task-owned and supplied through the task composition — shared by both
 # policy files, so observe mode cannot drift from production science.
 
 health_policy:

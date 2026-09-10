@@ -27,7 +27,13 @@ from __future__ import annotations
 import pytest
 
 from agent.skills.training_skill import estimator as est
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.two_family_profile import make_two_family_profile
+
+PROFILE = make_two_family_profile(
+    num_files=20,
+    psd_segment_length=1_600_000,
+    segments_per_file=20,
+)
 
 # ---------------------------------------------------------------------------
 # estimate_peak_bytes
@@ -175,7 +181,7 @@ class TestEstimateWallTimeSeconds:
             {"batch_size": 1, "epochs": 1},
             self._sample_set(),
             ms_per_step=1.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
         assert set(out.keys()) == {"phase", "seconds", "breakdown"}
         assert out["phase"] == "training"
@@ -200,9 +206,9 @@ class TestEstimateWallTimeSeconds:
 
         Arithmetic (Phase 6.8 §4.2 constants, SAFETY_MULTIPLIER recalibrated
         2026-04-30 from 2.0 → 1.3):
-          steps          = ceil(400 × (10_000_000 // 16000) × 1.0 / 1) × 1 = 250_000
+          steps          = ceil(400 × (1_600_000 // 16000) × 1.0 / 1) × 1 = 40_000
           ms/step static = max(100_000 × 16000 × 1 × 3e-9, 2.0)            = 4.8
-          seconds        = 250_000 × 4.8 × 1.3 / 1000                      = 1560.0
+          seconds        = 40_000 × 4.8 × 1.3 / 1000                       = 249.6
 
         The expected value is UNCHANGED by the 2026-08-03 removal of the
         legacy `k`: this is the static path, where `k` was always 1.0. That
@@ -215,10 +221,10 @@ class TestEstimateWallTimeSeconds:
             self._sample_set(400),
             num_params=100_000,
             ms_per_step=None,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
-        assert out["seconds"] == pytest.approx(1560.0, rel=1e-3)
-        assert out["breakdown"]["total_train_steps"] == 250_000
+        assert out["seconds"] == pytest.approx(249.6, rel=1e-3)
+        assert out["breakdown"]["total_train_steps"] == 40_000
         assert out["breakdown"]["ms_source"] == "static_uncalibrated"
 
     def test_ms_per_step_passthrough_no_gpu(self):
@@ -230,23 +236,23 @@ class TestEstimateWallTimeSeconds:
             self._sample_set(),
             ms_per_step=5.0,
             gpu_name=None,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
-        # steps = 250_000; seconds = 250_000 × 5.0 × 1.3 / 1000 = 1625
-        assert out["seconds"] == pytest.approx(1625.0, rel=1e-3)
+        # steps = 40,000; seconds = 40,000 × 5.0 × 1.3 / 1000 = 260
+        assert out["seconds"] == pytest.approx(260.0, rel=1e-3)
         assert out["breakdown"]["ms_source"] == "real_dataset_warmup"
 
     def test_a_gpu_name_no_longer_applies_historical_calibration(self, monkeypatch):
         """INVERTED 2026-08-03. This test previously asserted the opposite —
         that supplying `gpu_name` consulted `calibration.lookup_k` and scaled
-        the estimate (k=2.0 → 3250 s). The operator decision makes the current
+        the estimate (k=2.0 doubles the result). The operator decision makes the current
         live measurement the sole runtime evidence, so `gpu_name` must now be
         inert in the arithmetic.
 
         Kept rather than deleted: it is the one test that named the removed
         behaviour, so inverting it is what documents the change at the place a
         reader will look for it. The monkeypatched table is deliberately
-        extreme — if the lookup returned, 1625 would become 3250.
+        extreme — if the lookup returned, 260 would become 520.
         """
         from agent.skills.evaluate_time_skill import calibration
 
@@ -260,9 +266,9 @@ class TestEstimateWallTimeSeconds:
             self._sample_set(),
             ms_per_step=5.0,
             gpu_name="Test GPU",
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
-        assert out["seconds"] == pytest.approx(1625.0, rel=1e-3), (
+        assert out["seconds"] == pytest.approx(260.0, rel=1e-3), (
             "a historical k reached the estimate; the live measurement must be "
             "the sole runtime evidence"
         )
@@ -282,12 +288,12 @@ class TestEstimateWallTimeSeconds:
             {"segmentation_size": 16000},
             {"batch_size": 1, "epochs": 1},
             self._sample_set(),
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=PROFILE,
         )
         assert calls == [("tinynet", "ce")]
         # ms/step = max(50_000 × 16000 × 1 × 3e-9, 2.0) = 2.4
-        # seconds = 250_000 × 2.4 × 1.0 × 1.3 / 1000 = 780
-        assert out["seconds"] == pytest.approx(780.0, rel=1e-3)
+        # seconds = 40,000 × 2.4 × 1.0 × 1.3 / 1000 = 124.8
+        assert out["seconds"] == pytest.approx(124.8, rel=1e-3)
 
     def test_epochs_scales_linearly(self):
         kw = dict(
@@ -297,10 +303,10 @@ class TestEstimateWallTimeSeconds:
             ms_per_step=1.0,
         )
         a = est.estimate_wall_time_seconds(
-            train_config={"batch_size": 1, "epochs": 1}, **kw, dataset_profile=TIDMAD_PROFILE
+            train_config={"batch_size": 1, "epochs": 1}, **kw, dataset_profile=PROFILE
         )
         b = est.estimate_wall_time_seconds(
-            train_config={"batch_size": 1, "epochs": 3}, **kw, dataset_profile=TIDMAD_PROFILE
+            train_config={"batch_size": 1, "epochs": 3}, **kw, dataset_profile=PROFILE
         )
         assert b["seconds"] == pytest.approx(3 * a["seconds"], rel=1e-6)
 
@@ -312,11 +318,7 @@ class TestEstimateWallTimeSeconds:
             sample_set=self._sample_set(),
             ms_per_step=1.0,
         )
-        full = est.estimate_wall_time_seconds(
-            **kw, train_portion=1.0, dataset_profile=TIDMAD_PROFILE
-        )
-        half = est.estimate_wall_time_seconds(
-            **kw, train_portion=0.5, dataset_profile=TIDMAD_PROFILE
-        )
+        full = est.estimate_wall_time_seconds(**kw, train_portion=1.0, dataset_profile=PROFILE)
+        half = est.estimate_wall_time_seconds(**kw, train_portion=0.5, dataset_profile=PROFILE)
         assert half["seconds"] < full["seconds"]
         assert half["seconds"] == pytest.approx(full["seconds"] / 2, rel=1e-3)

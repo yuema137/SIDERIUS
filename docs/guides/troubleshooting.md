@@ -35,7 +35,7 @@ Two cheap triage tools, both free of GPU and API cost:
 
 ```bash
 python env_validation/test_agent_env.py     # environment + API reachability
-uv run pytest tests/unit/ -q                # is the checkout itself sound?
+.venv/bin/python -m pytest tests/unit/ -q    # is the checkout itself sound?
 ```
 
 And a $0 end-to-end wiring smoke: `--is_pseudo_llm --is_pseudo_training` swap

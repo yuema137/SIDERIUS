@@ -368,3 +368,6 @@ class TestRungsBAndCInOneGateEvaluation:
     def test_no_check_in_this_gate_reports_a_pass(self, declared_float_gate):
         """Inapplicable is not pass — asserted on the verdicts, not the count."""
         assert not any(r.verdict is CheckVerdict.PASSED for r in declared_float_gate.check_results)
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

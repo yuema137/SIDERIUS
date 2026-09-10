@@ -207,7 +207,7 @@ and then drives the composed metric through its scoreable, zero-accuracy and
 `test_deliverable_codec_and_metric_outcomes`) is:
 
 ```bash
-uv run pytest tests/unit/examples/test_quickstart_pack.py -q
+.venv/bin/python -m pytest tests/unit/examples/test_quickstart_pack.py -q
 ```
 
 Point the same machinery at your own manifest in a scratch test

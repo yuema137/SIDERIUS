@@ -393,3 +393,6 @@ class TestLinearWeightTotalInvariant:
             stored_total=sum(0.2 for _ in range(5)),
         )
         assert tbl.linear_weight_total == pytest.approx(1.0, abs=1e-9)
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

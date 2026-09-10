@@ -16,33 +16,29 @@ populations with different maintenance contracts: a small durable operator
 surface, and a large set of point-in-time investigation and gate harnesses
 kept as provenance for dated campaigns.
 
+The directory is excluded from the Python distribution. Task-specific scripts
+are historical source evidence only: active scientific utilities belong in
+the task or campaign package that owns their semantics. No framework launch
+may select a script or advice artifact from this archive by default.
+
 ## Public interface
 
 The durable operator surface:
 
 | script | role |
 |---|---|
-| `run_comparison.py` | ⚠ TIDMAD-only baseline/agent comparison harness (imports TIDMAD's dataset and sandbox directly; no `--task_composition`) |
 | `inspect_run_state.py` | the auto-resume inspector — `--next-iter` reports the first incomplete iteration from each `iter_NNN/manifest.json`; one of the three callers of the shared manifest-verification predicate |
-| `run_pets_gate2.py` · `run_davis_gate2.py` | the D14 direct-execution harnesses for the two contrast packs (real training/inference/scoring in-process; the historical Gate-2 evidence path that predates the composed chain reaching those tasks) |
-| `_gate2_health_stage.py` | the ONE shared Health evidence stage both D14 runners call (explicit binding, every selected gate persisted) |
-| `stage3/` | the Gold-campaign Stage-3 trio (`docs/campaign/stage_artifact_contract.md`): `stage3_common.py` (the ONE §4 `compose_and_score` wrapper — one `score_vector` call over the pooled 0..19 set, named refusals for missing/duplicate deliverables), `stage3_composed_best.py` (pools the four Stage-1 band winners' source-band deliverables), `stage3_strict_best.py` (fail-closed 4x4 Stage-2 verification, one composed score per design, MetricOrder selection), `stage3_terminal_eval.py` (terminal 100% champion re-evaluation, isolated under `stage3/terminal_eval/` with a read-closure guard). No per-band scalar exists anywhere in this package (F-SCAND-1; package-wide SRI-11 census) |
 | `rebuild_per_file_best.py` | rebuild the per-partition best-of table from records |
-| `record_wave_summary.py` · `build_diagnostic_summary.py` | wave/diagnostic summary builders |
 | `validate_path_component.py` | path-component hygiene used by launchers |
-| `campaign_admission.py` · `campaign_spend.py` · `runtime_campaign.py` · `runtime_bootstrap.py` · `runtime_replay/` | resumable-campaign bookkeeping and runtime-control operations |
-| `run_all_models.sh` · `run_all_models_trial.sh` | screen-based group orchestration of `run_comparison.py` across the five built-in TIDMAD models |
+| `campaign_admission.py` · `campaign_spend.py` · `runtime_campaign.py` · `runtime_replay/` | resumable-campaign bookkeeping and runtime-control operations |
 | `bg_gpu_sampler.sh` | background GPU utilisation sampler |
 
 Everything else — `fcnet_*`, `investigate_*`, `score_tidmad_official_*`,
-`official_paper_health_scan.py`, `compute_ground_truth.py`,
-`compute_raw_baseline.py`, `legacy_fcnet_timing.py`,
-`phase2_diagnostic_no_dynamic_search.py`, `pregate_runtime_control_validation.py`,
-`vram_preflight_validation.py`, `c2_prephase_validation.py`,
-`c12_stamp_failure_class.py`, `checkpoint_*`, `step10_p3_gate1.py`,
-`step12_pr12a_gate1.py` / `step12_pr12a_gate2_evaluate.py`,
-`finalize_recovered_diagnostic_round.py`, `render_*`, `v18_wave_summary.py`,
-`verify_iter005_estimator.py`, `fcnet_full_file_scan.py`,
+`phase2_diagnostic_no_dynamic_search.py`,
+`c12_stamp_failure_class.py`, `checkpoint_*`,
+`step12_pr12a_gate2_evaluate.py`,
+`render_*`,
+`verify_iter005_estimator.py`,
 `inspection_cost_study/`, `pr3_l2_calibration/` — is **point-in-time**: each
 was written for a dated investigation, campaign or gate whose evidence lives
 in `docs/design/` ledgers or `reports/`. They are kept because the evidence
@@ -51,8 +47,9 @@ trusting one against current source.
 
 ## Inputs
 
-Workspace paths, run names and data roots as CLI arguments; several scripts
-read the machine-local `tidmad_data_config.yaml`.
+Workspace paths, run names and data roots are explicit CLI inputs. The active
+framework launch does not load the retired task-specific machine path config;
+dated investigation scripts are not an alternative launch authority.
 
 ## Outputs
 
@@ -65,8 +62,6 @@ write full run workspaces.
   chain launcher trusts; its manifest verdicts come from the shared
   `core/iteration_manifest.py` predicate, so "trustworthy" has one
   definition everywhere.
-- `run_comparison.py` owns the paper-aligned baseline launch (its
-  `--max_epochs 1` posture is the TIDMAD paper spec).
 
 ## Non-owned semantics
 
@@ -92,8 +87,7 @@ workspaces; the campaign tools append manifests under their campaign roots.
 
 `inspect_run_state.py` reports a manifest problem verbatim from the shared
 predicate (a tampered or hash-less completed manifest is named, not
-admitted); `run_comparison.py` refuses non-TIDMAD use by construction —
-it has no composition entrypoint.
+admitted).
 
 ## Files normally edited
 
@@ -103,8 +97,9 @@ ledger names it), so the old evidence keeps pointing at what actually ran.
 
 ## Files normally NOT edited
 
-`_gate2_health_stage.py` binding semantics (explicit, keyword-only, no
-default); anything a design ledger cites as gate evidence.
+Anything a design ledger cites as historical gate evidence is preserved in
+the experiment provenance archive rather than treated as a current framework
+operator surface.
 
 ## Minimal example
 
@@ -114,6 +109,6 @@ default); anything a design ledger cites as gate evidence.
 
 ## Related tests
 
-`tests/unit/scripts/` (inspector, comparison harness, campaign admission,
-calibration preflight), plus the example-pack suites that pin the two D14
-harness declarations.
+`tests/unit/scripts/` (inspector, campaign admission, and calibration
+preflight), plus the minimal-example suites that exercise supported framework
+contracts.

@@ -4,21 +4,23 @@ Unit tests for execute_tools/sample_set_builder.py
 Pure logic tests — no I/O, no real data.
 """
 
-import hashlib
-import json
-from typing import ClassVar
-
 import pytest
 
-from execute_tools.dataset_config import TIDMAD_PROFILE, DataScope
+from execute_tools.dataset_config import DataScope, resolve_dataset_profile, tidmad_topology
 from execute_tools.sample_set_builder import build_sample_set
-from execute_tools.scoring_utils import NUM_FILES, SEGMENTS_PER_FILE
 
-# Step 02c: the anchor set is a TASK DECLARATION on the Dataset Profile,
-# not a module constant. Reading it from the shipped profile is what makes
-# these assertions follow a declaration change instead of pinning a literal
-# the production path no longer consults.
-ANCHOR_FILES = TIDMAD_PROFILE.anchor_selection_files
+
+def _segments_per_file() -> int:
+    return tidmad_topology(resolve_dataset_profile()).dataset.segments_per_file
+
+
+def _partition_count() -> int:
+    return resolve_dataset_profile().partition_count
+
+
+def _anchor_files() -> list[int]:
+    return list(resolve_dataset_profile().anchor_selection_files)
+
 
 # ---------------------------------------------------------------------------
 # Normal mode (is_trial=False)
@@ -32,12 +34,12 @@ class TestNormalMode:
 
     def test_all_segments_included(self):
         ss = build_sample_set(is_trial=False, file_index=6)
-        assert ss[6] == list(range(SEGMENTS_PER_FILE))
+        assert ss[6] == list(range(_segments_per_file()))
 
     def test_different_file_index(self):
         ss = build_sample_set(is_trial=False, file_index=0)
         assert list(ss.keys()) == [0]
-        assert len(ss[0]) == SEGMENTS_PER_FILE
+        assert len(ss[0]) == _segments_per_file()
 
     def test_trial_fields_ignored(self):
         """Trial params should be ignored when is_trial=False."""
@@ -56,9 +58,9 @@ class TestNormalMode:
 
 
 class TestSnapshotStrategy:
-    def test_all_20_files_present(self):
+    def test_all_declared_files_present(self):
         ss = build_sample_set(is_trial=True, trial_strategy="snapshot", seed=42)
-        assert sorted(ss.keys()) == list(range(NUM_FILES))
+        assert sorted(ss.keys()) == list(range(_partition_count()))
 
     def test_correct_segment_count(self):
         ss = build_sample_set(
@@ -67,7 +69,7 @@ class TestSnapshotStrategy:
             trial_portion=0.1,
             seed=42,
         )
-        expected = max(1, round(0.1 * SEGMENTS_PER_FILE))  # 20
+        expected = max(1, round(0.1 * _segments_per_file()))
         for fi, segs in ss.items():
             assert len(segs) == expected, f"File {fi}: expected {expected}, got {len(segs)}"
 
@@ -79,7 +81,9 @@ class TestSnapshotStrategy:
             seed=42,
         )
         for fi, segs in ss.items():
-            assert all(0 <= s < SEGMENTS_PER_FILE for s in segs), f"File {fi} has invalid segments"
+            assert all(0 <= s < _segments_per_file() for s in segs), (
+                f"File {fi} has invalid segments"
+            )
 
     def test_segments_are_sorted(self):
         ss = build_sample_set(
@@ -92,7 +96,7 @@ class TestSnapshotStrategy:
             assert segs == sorted(segs), f"File {fi} segments not sorted"
 
     def test_full_portion(self):
-        """portion=1.0 should include all 200 segments."""
+        """portion=1.0 should include every declared segment."""
         ss = build_sample_set(
             is_trial=True,
             trial_strategy="snapshot",
@@ -100,7 +104,7 @@ class TestSnapshotStrategy:
             seed=42,
         )
         for _fi, segs in ss.items():
-            assert len(segs) == SEGMENTS_PER_FILE
+            assert len(segs) == _segments_per_file()
 
     def test_deterministic_with_seed(self):
         ss1 = build_sample_set(is_trial=True, trial_strategy="snapshot", trial_portion=0.1, seed=42)
@@ -123,7 +127,7 @@ class TestSnapshotStrategy:
 class TestAnchorsStrategy:
     def test_only_anchor_files(self):
         ss = build_sample_set(is_trial=True, trial_strategy="anchors", seed=42)
-        assert sorted(ss.keys()) == sorted(ANCHOR_FILES)
+        assert sorted(ss.keys()) == sorted(_anchor_files())
 
     def test_correct_segment_count(self):
         ss = build_sample_set(
@@ -132,7 +136,7 @@ class TestAnchorsStrategy:
             trial_portion=0.1,
             seed=42,
         )
-        expected = max(1, round(0.1 * SEGMENTS_PER_FILE))
+        expected = max(1, round(0.1 * _segments_per_file()))
         for _fi, segs in ss.items():
             assert len(segs) == expected
 
@@ -160,7 +164,7 @@ class TestTargetStrategy:
             trial_portion=0.5,
             seed=42,
         )
-        expected = max(1, round(0.5 * SEGMENTS_PER_FILE))  # 100
+        expected = max(1, round(0.5 * _segments_per_file()))
         for _fi, segs in ss.items():
             assert len(segs) == expected
 
@@ -233,78 +237,6 @@ class TestEdgeCases:
 # ---------------------------------------------------------------------------
 
 
-def _sha16(ss) -> str:
-    return hashlib.sha256(json.dumps(ss, sort_keys=True).encode()).hexdigest()[:16]
-
-
-class TestDataScopeBehavioralIdentity:
-    """Full scope + fixed seed must reproduce the pre-DataScope SampleSets.
-
-    Golden sha16 digests captured from the pre-change builder at commit
-    56a54b8^ with seed=42, trial_portion=0.05.
-    """
-
-    GOLDEN: ClassVar[dict[str, str]] = {
-        "snapshot": "7a4c15ebefb59d55",
-        "anchors": "e025a270e0b1acc1",
-        "target": "99cf2acc582d1e17",
-    }
-    GOLDEN_FIRST_FILE_SEGS: ClassVar[list[int]] = [6, 26, 28, 35, 57]
-
-    @pytest.mark.parametrize("scope", [None, DataScope.default()])
-    @pytest.mark.parametrize("strategy", ["snapshot", "anchors", "target"])
-    def test_golden_digests(self, strategy, scope):
-        kw = {"target_files": [3, 11]} if strategy == "target" else {}
-        ss = build_sample_set(
-            is_trial=True,
-            trial_strategy=strategy,
-            trial_portion=0.05,
-            seed=42,
-            scope=scope,
-            **kw,
-        )
-        assert _sha16(ss) == self.GOLDEN[strategy]
-        assert ss[sorted(ss)[0]][:5] == self.GOLDEN_FIRST_FILE_SEGS
-
-    def test_explicit_full_range_scope_matches_none(self):
-        full = DataScope(file_indices=list(range(NUM_FILES)))
-        ss_none = build_sample_set(is_trial=True, trial_portion=0.05, seed=42)
-        ss_full = build_sample_set(is_trial=True, trial_portion=0.05, seed=42, scope=full)
-        assert ss_none == ss_full
-
-
-class TestStep00SelectionDigests:
-    """Step-00 DS-3 (STR): two additional atomic selection digests.
-
-    Design §13.2 / §15.1 (roadmap steps 02/05a). The pre-existing GOLDEN
-    digests cover the three trial strategies at one (seed, portion) under
-    full scope only; normal mode and partial scope previously had
-    structural asserts but no digest. Captured at clean tree on the 0B
-    capture commit (same ``_sha16`` convention). Known, accepted
-    environment assumption (design §13.2): digests bind to CPython's
-    ``random.sample`` implementation.
-    """
-
-    GOLDEN_NORMAL_MODE = "1cdcc3997db777b1"
-    GOLDEN_PARTIAL_SCOPE = "70481a8ad4ddeecb"
-
-    def test_normal_mode_digest(self):
-        ss = build_sample_set(is_trial=False, file_index=6)
-        assert _sha16(ss) == self.GOLDEN_NORMAL_MODE
-        assert sorted(ss) == [6] and len(ss[6]) == SEGMENTS_PER_FILE
-
-    def test_partial_scope_snapshot_digest(self):
-        ss = build_sample_set(
-            is_trial=True,
-            trial_strategy="snapshot",
-            trial_portion=0.05,
-            seed=42,
-            scope=DataScope(file_indices=[4, 5, 6, 7, 8, 9]),
-        )
-        assert _sha16(ss) == self.GOLDEN_PARTIAL_SCOPE
-        assert ss[4][:5] == [6, 26, 28, 35, 57]
-
-
 class TestDataScopePartial:
     SCOPE = DataScope(file_indices=[4, 5, 6, 7, 8, 9])
 
@@ -318,7 +250,7 @@ class TestDataScopePartial:
         ss = build_sample_set(
             is_trial=True, trial_strategy="snapshot", trial_portion=0.1, seed=42, scope=self.SCOPE
         )
-        expected = max(1, round(0.1 * SEGMENTS_PER_FILE))
+        expected = max(1, round(0.1 * _segments_per_file()))
         for _fi, segs in ss.items():
             assert len(segs) == expected
 
@@ -347,3 +279,6 @@ class TestDataScopePartial:
     def test_normal_mode_out_of_scope_raises(self):
         with pytest.raises(ValueError, match="file_index=2 is outside the DataScope"):
             build_sample_set(is_trial=False, file_index=2, scope=self.SCOPE)
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

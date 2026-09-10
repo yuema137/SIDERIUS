@@ -43,12 +43,19 @@ from execute_tools.data_paths import (
     bind_physical_data_root,
     resolve_physical_data_root,
 )
+from execute_tools.dataset_config import bind_dataset_profile
+from tests.helpers.two_family_profile import make_two_family_profile
 
 MODEL_CFG = {"model_type": "fcnet", "segmentation_size": 10000, "latent_dims": [100, 10]}
 TRAIN_CFG = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cpu"}
 LOSS_CFG = {"loss_type": "ce"}
 EXP_ID = "c4_exp"
 RUN_NAME = "c4_run"
+PROFILE = make_two_family_profile(
+    num_files=1,
+    psd_segment_length=10_000,
+    segments_per_file=2,
+)
 
 
 def _flag_value(cmd: list[str], flag: str) -> str | None:
@@ -61,11 +68,10 @@ def _flag_value(cmd: list[str], flag: str) -> str | None:
 
 
 class TestTheRunScopedBinding:
-    def test_unbound_resolves_the_legacy_constant(self):
-        from execute_tools.data_paths import TIDMAD_DATA_DIR
-
+    def test_unbound_refuses_instead_of_selecting_a_task(self):
         assert active_physical_data_root() is None
-        assert resolve_physical_data_root() == TIDMAD_DATA_DIR
+        with pytest.raises(DatasetDirectoryUnavailable):
+            resolve_physical_data_root()
 
     def test_binding_makes_the_root_active(self, tmp_path):
         root = tmp_path / "data"
@@ -121,7 +127,22 @@ class TestTheRunScopedBinding:
 
 @pytest.fixture
 def sandbox(tmp_path):
-    return TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path / "ws"), progress_bar=False)
+    root = tmp_path / "data"
+    root.mkdir()
+    with bind_physical_data_root(str(root)):
+        return TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path / "ws"), progress_bar=False)
+
+
+@pytest.fixture(autouse=True)
+def _bind_synthetic_task_config():
+    from workflows.task_config import bind_task_config
+
+    values = {
+        "task_description": "Synthetic transport fixture.",
+        "forward_contract": {},
+    }
+    with bind_task_config(values), bind_dataset_profile(PROFILE):
+        yield
 
 
 def _train_success(sandbox, exp_id):
@@ -205,22 +226,6 @@ class TestTheRootReachesEveryChild:
         assert _flag_value(cmd, "--data_dir") == sb.base_dir
         assert _flag_value(cmd, "--data_dir") != str(root)
 
-    @patch("core.sandbox_executor._run_observed_subprocess")
-    def test_an_unbound_run_emits_no_root_flag_at_all(self, mock_run, sandbox):
-        """R-11-1. The C0 baseline pins the whole flag set independently;
-        this states the specific consequence.
-        """
-        assert active_physical_data_root() is None
-        mock_run.side_effect = _train_success(sandbox, EXP_ID)
-        sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
-        assert "--data_dir" not in mock_run.call_args[0][0]
-
-    @patch("core.sandbox_executor.subprocess.run")
-    def test_an_unbound_scoring_run_emits_no_raw_data_dir(self, mock_run, sandbox):
-        assert active_physical_data_root() is None
-        cmd = _run_scoring(sandbox, mock_run)
-        assert "--raw_data_dir" not in cmd
-
     def test_the_sandbox_data_dir_follows_the_binding(self, tmp_path):
         root = tmp_path / "declared"
         root.mkdir()
@@ -228,11 +233,9 @@ class TestTheRootReachesEveryChild:
             sb = TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path / "ws"))
             assert sb.dirs["data"] == str(root)
 
-    def test_the_sandbox_data_dir_is_the_legacy_constant_when_unbound(self, tmp_path):
-        from execute_tools.data_paths import TIDMAD_DATA_DIR
-
-        sb = TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path / "ws"))
-        assert sb.dirs["data"] == TIDMAD_DATA_DIR
+    def test_the_sandbox_refuses_when_no_root_is_bound(self, tmp_path):
+        with pytest.raises(DatasetDirectoryUnavailable):
+            TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path / "ws"))
 
 
 # ----------------------------------------------------------------------
@@ -252,15 +255,13 @@ class TestAComposedRunMustDeclareItsRoot:
             with bind_run_task_composition(composition):
                 pass
 
-    def test_an_uncomposed_run_is_unaffected(self):
-        """`None` stays a no-op that binds nothing — the legacy path must
-        not acquire a new requirement.
-        """
-        from workflows.task_composition import bind_run_task_composition
+    def test_an_uncomposed_run_is_refused(self):
+        """A supported run cannot select a scientific task by omission."""
+        from workflows.task_composition import TaskCompositionError, bind_run_task_composition
 
-        with bind_run_task_composition(None) as got:
-            assert got is None
-            assert active_physical_data_root() is None
+        with pytest.raises(TaskCompositionError, match="task composition is required"):
+            with bind_run_task_composition(None):
+                pass
 
     def test_the_refusal_names_the_operator_flag(self):
         from workflows.task_composition import (

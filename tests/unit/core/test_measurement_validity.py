@@ -487,12 +487,14 @@ class TestTheProductionChainIsConnected:
         not passing it.
 
         Structural, because reaching this line needs a real chain round.
+        The mutually exclusive time-source migration retired the tuner's
+        REQUEST_PROBE hop. Device identity now reaches GPU admission through
+        the attempt policy, independently of wall-time admission choice.
         Checked per CALL NODE via AST rather than by substring: a text
         search would pass on the `device_identity=` that appears in the
         sandbox construction nearby.
         """
         import ast
-        from pathlib import Path
 
         # The node, not one of its files (C7).
         from tests.helpers.tuner_source import tuner_node_tree
@@ -504,18 +506,19 @@ class TestTheProductionChainIsConnected:
             if not isinstance(node, ast.Call):
                 continue
             name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-            if name != "_resolve_time_check_probe_request":
+            if name != "_build_admission_policy":
                 continue
             calls += 1
-            if "device_identity" not in {kw.arg for kw in node.keywords}:
+            identity = next((kw.value for kw in node.keywords if kw.arg == "device_identity"), None)
+            if (
+                identity is None
+                or ast.unparse(identity) != "getattr(sandbox, 'device_identity', None)"
+            ):
                 undeclared.append(node.lineno)
 
-        assert calls >= 1, "the probe-resolution helper is no longer called"
+        assert calls >= 1, "the attempt's GPU admission policy is no longer built"
         assert undeclared == [], (
-            f"_resolve_time_check_probe_request called without device_identity "
-            f"at lines {undeclared}; the probe would then build no occupancy "
-            f"window and every measurement would fall back to the "
-            f"conservative pre-PR-C rule"
+            f"GPU admission policy lost the resolved sandbox device identity at lines {undeclared}"
         )
 
 

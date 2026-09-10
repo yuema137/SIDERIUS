@@ -487,3 +487,6 @@ class TestNoViewMeansTheUnchangedCallPath:
     def test_nothing_is_bound_by_default(self):
         """A run that binds no provider has no capabilities bound at all."""
         assert bound_view_capabilities() == ()
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

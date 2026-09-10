@@ -52,10 +52,12 @@ from tests.unit.workflows.test_step09_5a_c4_single_writer import (
 )
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = REPO_ROOT / "workflows" / "model_exploration.py"
 RESUME = REPO_ROOT / "core" / "resume.py"
+QUICKSTART = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 KEY = "dilated_stack:long_range_context"
 
@@ -111,6 +113,7 @@ def _observe(tmp_path, *, iterations, start_iteration, run_name, restored_state,
     resolved from production config rather than hardcoded here.
     """
     observed = {"interp_in": [], "propose_ctx": []}
+    composition = compose_run_task_bindings(str(QUICKSTART))
 
     with (
         patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp,
@@ -159,27 +162,38 @@ def _observe(tmp_path, *, iterations, start_iteration, run_name, restored_state,
         MockImpl.return_value.run.return_value = _make_implementor_output()
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
         MockTune.return_value.run.side_effect = lambda inp: _make_tune_output(
-            model_type=inp.model_type, score=1.6
+            model_type=inp.model_type,
+            score=1.6,
+            fingerprint=composition.semantic_fingerprint,
+            metric_spec=composition.metric.spec,
         )
 
-        run_workflow(
-            launch=WorkflowLaunchConfig(
-                data_dir=str(tmp_path / "data"),
-                model_types=["punet"],
-                source_run_name="v1",
-                max_iterations=iterations,
-                start_iteration=start_iteration,
-            ),
-            workspace=str(tmp_path / "ws"),
-            run_name=run_name,
-            restored_state=restored_state,
-        )
+        with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=str(tmp_path / "data"),
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    max_iterations=iterations,
+                    start_iteration=start_iteration,
+                ),
+                workspace=str(tmp_path / "ws"),
+                run_name=run_name,
+                restored_state=restored_state,
+                task_composition=composition,
+            )
     return observed
 
 
 def _trajectory_uninterrupted(tmp_path):
     """A — one process, three iterations."""
-    _write_tuning_output(tmp_path, "punet")
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    _write_tuning_output(
+        tmp_path,
+        "punet",
+        fingerprint=composition.semantic_fingerprint,
+        metric_spec=composition.metric.spec,
+    )
     return _observe(
         tmp_path,
         iterations=3,
@@ -192,7 +206,13 @@ def _trajectory_uninterrupted(tmp_path):
 
 def _trajectory_resumed(tmp_path):
     """B — three processes, each restoring from what its predecessors committed."""
-    _write_tuning_output(tmp_path, "punet")
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    _write_tuning_output(
+        tmp_path,
+        "punet",
+        fingerprint=composition.semantic_fingerprint,
+        metric_spec=composition.metric.spec,
+    )
     workspace = tmp_path / "ws"
     merged = {"interp_in": [], "propose_ctx": []}
 

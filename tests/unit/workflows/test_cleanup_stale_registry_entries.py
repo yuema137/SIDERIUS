@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 
-from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+from core.capability_registry import CapabilityMetadata, CapabilityRegistry
 from workflows.model_exploration import _cleanup_stale_registry_entries
 
 

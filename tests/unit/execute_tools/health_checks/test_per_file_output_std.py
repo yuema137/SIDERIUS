@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 
-import h5py
 import numpy as np
+import pytest
 
 from execute_tools.health_checks._composition import (
     VALUE_SCALE_PARAMETER,
@@ -17,13 +17,11 @@ from execute_tools.health_checks._composition import (
 )
 from execute_tools.health_checks.per_file_output_std import PerFileOutputStdCheck
 from execute_tools.health_checks.schemas import HealthCheckContext
+from tests.helpers.two_family_profile import write_bound_timeseries
 
 
 def _write_ch1(path, ch1: np.ndarray) -> None:
-    with h5py.File(str(path), "w") as f:
-        ts = f.create_group("timeseries")
-        c1 = ts.create_group("channel0001")
-        c1.create_dataset("timeseries", data=ch1, chunks=True)
+    write_bound_timeseries(path, ch1)
 
 
 def _ctx(**overrides) -> HealthCheckContext:
@@ -125,3 +123,6 @@ class TestPerFileOutputStdCheck:
         r = PerFileOutputStdCheck().run(_ctx(), config=_cfg())
         assert r.passed is True
         assert "no files in context" in r.reason
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

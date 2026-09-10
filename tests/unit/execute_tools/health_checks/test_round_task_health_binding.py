@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import textwrap
 from pathlib import Path
 
 from execute_tools.health_checks import _plugin_binding
@@ -9,11 +10,63 @@ from execute_tools.health_checks.config import materialize_effective_config
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.registry import _PROVIDER_REGISTRY, _REGISTRY
 from execute_tools.health_checks.schemas import HealthCheckContext
-from workflows.task_composition import compose_run_task_bindings
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PETS_MANIFEST = REPO_ROOT / "tests" / "fixtures" / "step10_p1" / "pets" / "composition.yaml"
 PRODUCTION_POLICY = REPO_ROOT / "configs" / "health_checks.yaml"
+
+
+def _external_health_binding(root: Path) -> str:
+    """Build the smallest out-of-tree Health family this boundary needs."""
+    (root / "health_plugin.py").write_text(
+        textwrap.dedent(
+            """
+            from typing import ClassVar
+
+            from execute_tools.health_checks import register
+            from execute_tools.health_checks.schemas import (
+                CheckInputDeclaration,
+                HealthCheckResult,
+            )
+
+
+            class ExternalRoundCheck:
+                name: ClassVar[str] = "external_round_check"
+                declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
+                    consumes_view="synthetic.round_payload",
+                )
+
+                def run(self, ctx, config=None):
+                    return HealthCheckResult(
+                        check_name=self.name,
+                        passed=True,
+                        reason="synthetic round-boundary fixture",
+                    )
+
+
+            register(ExternalRoundCheck())
+            """
+        ),
+        encoding="utf-8",
+    )
+    config = root / "task_health.yaml"
+    config.write_text(
+        textwrap.dedent(
+            """
+            facts:
+              encoding_family: synthetic_round_payload
+            plugins:
+              - kind: file
+                ref: health_plugin.py
+            roster:
+              - gate_id: external_round_blocking
+                check: external_round_check
+                disposition: blocking
+                reason: Synthetic round-boundary fixture.
+            """
+        ),
+        encoding="utf-8",
+    )
+    return str(config)
 
 
 def test_production_policy_comparison_preserves_the_composed_task_binding(tmp_path):
@@ -28,24 +81,24 @@ def test_production_policy_comparison_preserves_the_composed_task_binding(tmp_pa
     providers = dict(_PROVIDER_REGISTRY)
     _plugin_binding.reset_run_scope()
     try:
-        composition = compose_run_task_bindings(str(PETS_MANIFEST))
+        task_health_binding = _external_health_binding(tmp_path)
         effective_path, _ = materialize_effective_config(
             None,
             None,
             str(tmp_path),
-            task_health_binding=composition.task_health_binding,
+            task_health_binding=task_health_binding,
         )
 
         evaluate_and_persist_health_gates(
             HealthCheckContext(model_name="candidate", run_name="run", round_index=1),
             config_path=effective_path,
             production_config_path=str(PRODUCTION_POLICY),
-            task_health_binding=composition.task_health_binding,
+            task_health_binding=task_health_binding,
             gate_ids=[],
         )
 
         assert [plugin.configured_ref for plugin in _plugin_binding.loaded_plugin_set()] == [
-            "../plugins/_pets_health_views.py"
+            "health_plugin.py"
         ]
     finally:
         _REGISTRY.clear()

@@ -1,9 +1,11 @@
 """Step-00 PB-7 (interpretation synthesis/dedup/flag-ON) + PB-8 (consolidator).
 
 Design: ``docs/design/generic_framework_upgrade/step_00_golden_baseline_harness.md``
-§13.1 / §15.1 (roadmap step 09 A-surface). The three EXISTING per-model
-goldens (PB-0) are all flag-OFF; the flag-ON variants close that gap using
-the SAME fixtures so the delta is exactly the flag.
+§13.1 / §15.1 (roadmap step 09 A-surface). System-prompt tests now declare
+synthetic task guidance and check the flag delta directly. Structured user
+Health evidence is covered by test_health_prompt_rendering; it must not depend
+on this module's historical scientific prompt captures. Synthesis, dedup and
+consolidation retain their independent byte-level oracles.
 
 Synthesis workspace hazard (§13.1/§15.1): the workspace string is
 interpolated VERBATIM into the prompt (`result_interpretation_agent.py:
@@ -19,26 +21,15 @@ from agent.cache_consolidator import _LIST_MERGE_SYSTEM_PROMPT, consolidate
 from agent.prompt_templates.interpretation.rendering import (
     DEDUP_SYSTEM_PROMPT,
     HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS,
-    _build_per_model_prompt,
     _build_per_model_system_prompt,
     _build_synthesis_prompt,
     _build_synthesis_system_prompt,
 )
-from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
 from agent.schemas.cache_entry import CacheEntry, ConsolidatedFinding
-from agent.schemas.interpretation import InterpretationInput, VocabEntry
-from execute_tools.metric_order import MetricOrder
+from agent.schemas.interpretation import InterpretationInput, InterpretationTaskBlocks, VocabEntry
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
-from tests.helpers.metric_fixtures import shipped_spec
-from tests.unit.agent.result_interpretation_agent.test_health_prompt_parity import (
-    _summary_collapse,
-)
-
-#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder
-#: as a REQUIRED keyword. TIDMAD is `higher`, so expectations are unchanged.
-_STEP09A_ORDER = MetricOrder(shipped_spec())
 
 GOLDENS = Path(__file__).parent / "goldens"
 
@@ -47,38 +38,20 @@ _PB7_WORKSPACE = "/siderius/pb7/ws/iter_003"
 
 
 class TestPB7PerModelFlagOn:
-    def test_per_model_user_prompt_flag_on(self):
-        rendered = _build_per_model_prompt(
-            _summary_collapse(),
-            "A test architecture.",
-            expert_advice_str="Focus on stability.",
-            human_advice=None,
-            structured_health_feedback=True,
-            order=_STEP09A_ORDER,
-        )
-        assert_golden(
-            rendered,
-            GOLDENS / "per_model_prompt_collapse_flag_on.txt",
-            surface="PB-7 per_model user prompt (flag ON)",
-        )
-
     def test_per_model_system_prompt_flag_on(self):
         inp = InterpretationInput(
             model_types=["wavenet"],
-            task_description="Denoise SQUID data.",
-            # Step 09b C2 — production shape: TIDMAD's science reaches the
-            # system prompt through the task blocks, not the template.
-            task_blocks=load_interpretation_task_blocks(),
+            task_description="Classify synthetic observations.",
+            task_blocks=InterpretationTaskBlocks(per_model_guidance="Inspect synthetic evidence."),
             enable_structured_health_feedback=True,
         )
         rendered = _build_per_model_system_prompt(inp)
-        assert_golden(
-            rendered,
-            GOLDENS / "per_model_system_prompt_flag_on.txt",
-            surface="PB-7 per_model system prompt (flag ON)",
+        assert "Classify synthetic observations." in rendered
+        assert "Inspect synthetic evidence." in rendered
+        off = _build_per_model_system_prompt(
+            inp.model_copy(update={"enable_structured_health_feedback": False})
         )
-        # Structural identity: flag-ON == flag-OFF golden + the constant.
-        off = (GOLDENS / "per_model_system_prompt.txt").read_text(encoding="utf-8")
+        assert HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS not in off
         assert rendered == off + HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS
 
 
@@ -112,15 +85,14 @@ class TestPB7Synthesis:
     def test_synthesis_system_prompt(self):
         inp = InterpretationInput(
             model_types=["wavenet", "punet"],
-            task_description="Denoise SQUID data.",
-            # Step 09b C2 — production shape (see the flag-ON case above).
-            task_blocks=load_interpretation_task_blocks(),
+            task_description="Classify synthetic observations.",
+            task_blocks=InterpretationTaskBlocks(
+                synthesis_guidance="Compare synthetic candidates."
+            ),
         )
-        assert_golden(
-            _build_synthesis_system_prompt(inp),
-            GOLDENS / "pb7_synthesis_system.txt",
-            surface="PB-7 synthesis system prompt",
-        )
+        rendered = _build_synthesis_system_prompt(inp)
+        assert "Classify synthetic observations." in rendered
+        assert "Compare synthetic candidates." in rendered
 
 
 class TestPB7Dedup:

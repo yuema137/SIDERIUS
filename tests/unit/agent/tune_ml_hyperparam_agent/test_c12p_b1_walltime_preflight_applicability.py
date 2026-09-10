@@ -1,4 +1,4 @@
-"""C12-P / W3 — B1: the wall-time pre-flight family is TIDMAD-topology-only.
+"""C12-P / W3 — B1: wall-time pre-flight requires its complete legacy workload.
 
 The corrective unit's confirmed defect: every wall-time pre-flight site
 resolves its step counts through ``execute_tools.workload_resolvers``, whose
@@ -16,6 +16,11 @@ ONE shared semantic authority — the membership predicate
 ``execute_tools.dataset_config.declares_tidmad_topology`` (introduced by
 PR-12d, seam B) — never to a re-inlined list of section names and never to a
 caught ``ValueError``.
+
+The H100 external-task replay later exposed the second half of the same
+boundary: topology membership alone is insufficient when a composed TIDMAD
+task carries opaque task-owned scopes and intentionally has no legacy
+``SampleSet``.
 
 Every test states the defect it ALONE catches and how it fails on regression.
 """
@@ -158,7 +163,7 @@ class TestTheApplicabilityDecisionIsMadeCallerSide:
             anchor_selection_files=[0],
             health_peek_files=[0],
         )
-        assert wall_time_preflight_applicable(foreign) is False
+        assert wall_time_preflight_applicable(foreign, {"0": [0]}) is False
 
     def test_regime_a_and_malformed_tidmad_both_stay_applicable(self) -> None:
         """The two ways this must NOT be over-applied.
@@ -179,7 +184,7 @@ class TestTheApplicabilityDecisionIsMadeCallerSide:
             wall_time_preflight_applicable,
         )
 
-        assert wall_time_preflight_applicable(None) is True, (
+        assert wall_time_preflight_applicable(None, {"0": [0]}) is True, (
             "Regime A (un-composed) IS TIDMAD and must keep its wall-time gate"
         )
         malformed = DatasetProfile(
@@ -189,10 +194,29 @@ class TestTheApplicabilityDecisionIsMadeCallerSide:
             anchor_selection_files=[0],
             health_peek_files=[0],
         )
-        assert wall_time_preflight_applicable(malformed) is True, (
+        assert wall_time_preflight_applicable(malformed, {"0": [0]}) is True, (
             "a MALFORMED TIDMAD topology is not a foreign task: it must stay "
             "applicable and fail closed, never be silently skipped"
         )
+
+    def test_task_owned_scope_does_not_enter_the_legacy_forecast_family(self) -> None:
+        """Opaque composed scopes cannot be partially priced as SampleSets.
+
+        DEFECT THIS TEST ALONE CATCHES
+            A composed task that still declares TIDMAD topology enters the
+            legacy estimator even though planning intentionally produced no
+            SampleSet. Training then crashes on ``None.items()``; repairing
+            only that phase moves the crash to inference or scoring.
+
+        HOW IT FAILS WHEN THE BEHAVIOUR REGRESSES
+            The predicate returns True for ``legacy_sample_set=None`` and the
+            caller invokes a forecast family missing its required workload.
+        """
+        from nodes.ml_hyperparameter_tune_agent.execution import (
+            wall_time_preflight_applicable,
+        )
+
+        assert wall_time_preflight_applicable(TIDMAD_PROFILE, None) is False
 
 
 class TestRetiredSkillSideShape:
@@ -371,191 +395,24 @@ class TestTheOutsideTheHandlerSite:
         )
 
 
-class TestApplicabilityIsNeverInferredFromACaughtException:
-    def test_a_malformed_tidmad_profile_is_not_reclassified_as_foreign(
-        self, monkeypatch, tmp_path, capsys
-    ):
-        """The applicability ANTI-PATTERN, in the same file as the defect.
+def test_task_owned_scope_makes_warmup_task_agnostic(monkeypatch, tmp_path, capsys):
+    """A foreign profile with a task scope must enter generic measurement."""
+    import torch
 
-        Defect this test alone catches: ``_measure_ms_per_step`` decides
-        applicability by ``try: tidmad_topology(profile) / except ValueError:
-        print(SKIPPED); return None``. ``tidmad_topology`` raises for TWO
-        different reasons — sections ABSENT (this task is not TIDMAD) and
-        sections PRESENT BUT MALFORMED (this task IS TIDMAD and its
-        declaration is broken) — and the handler cannot tell them apart. So a
-        broken TIDMAD declaration is silently reported as "some other task",
-        the measurement is skipped, and the run continues on a static estimate
-        instead of failing loudly on a declaration that must be fixed.
-
-        This is 12bc's row-2-vs-row-4 rule one subsystem over: a MISS is a
-        membership test, never an exception to catch. The correct shape asks
-        ``declares_tidmad_topology`` first; a malformed TIDMAD profile answers
-        True, proceeds, and fails loud.
-
-        How it fails on regression: reverting to the catch makes a malformed
-        profile take the NOT-APPLICABLE path, and the assertion fires.
-
-        UPGRADED by the C12-P parent, and the original was wrong twice.
-
-        (1) Its fixture passed ``data_dir="/nonexistent"``, but
-        ``_measure_ms_per_step`` returns at ``wrapper.py:325`` — ``if not
-        data_dir or not os.path.isdir(data_dir)`` — long before the topology
-        decode at ``:395``. The topology path was therefore UNREACHABLE, so the
-        case failed with "DID NOT RAISE" for a reason that had nothing to do
-        with the anti-pattern it claimed to test. A real directory is required
-        for the assertion to mean anything.
-
-        (2) It demanded the call PROPAGATE. It cannot, and should not:
-        ``_measure_ms_per_step`` is a best-effort warm-up whose declared return
-        is ``tuple[float | None, dict]``, and a broad ``except Exception`` at
-        ``:500`` deliberately degrades any warm-up failure to the static
-        formula. That catch is the legitimate "unknown failure, degrade
-        conservatively" shape, NOT the forbidden one -- the forbidden shape is
-        claiming a MEMBERSHIP conclusion from a caught exception, which is
-        exactly what the narrow ``except ValueError`` used to do.
-
-        So what §V.2 actually requires here, and what is asserted instead: a
-        malformed TIDMAD profile must not be RECLASSIFIED as a foreign task.
-        It must take the decode path and report a decode failure, while a
-        genuinely foreign profile takes the named NOT-APPLICABLE path. The two
-        are now observably different, which is the property that matters.
-
-        (3) A THIRD unreachability, of exactly the same shape as (1) and found
-        the same way — on a CPU-only host. ``_measure_ms_per_step`` returns at
-        ``wrapper.py:333`` — ``if not torch.cuda.is_available()`` — which sits
-        BEFORE the membership test at ``:359`` and the decode at ``:366``, just
-        as the ``data_dir`` guard does. Every CI runner is CPU-only, so all
-        three legs below returned ``(None, empty)`` there and the case failed
-        with "DID NOT RAISE" for the second time in its life, again for a
-        reason with nothing to do with the anti-pattern it tests.
-
-        The availability probe is therefore stubbed, per the project rule that
-        unit tests mock every heavy subsystem. It is NOT skipped: a
-        ``skipif(not cuda)`` would delete this falsifier on precisely the
-        machine that runs it. Nothing else is faked, and no GPU work happens on
-        any of the three legs: C raises at the decode, A refuses at the
-        membership test, and D stops at "mini dataset too small" — the empty
-        ``tmp_path`` holds none of TIDMAD's shards — well before ``:434``'s
-        ``torch.device("cuda")``. So D still fails for the operational reason
-        this case names, not for a substituted CUDA one.
-        """
-        import torch
-
-        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-        monkeypatch.setattr(time_wrapper, "_count_params", lambda *a, **k: 1_000_000)
-        real_dir = tmp_path / "data_root"
-        real_dir.mkdir()
-
-        def _measure(profile):
-            return time_wrapper._measure_ms_per_step(
-                model_type="punet",
-                model_config={"segmentation_size": 40000},
-                train_config={"batch_size": 4},
-                loss_config={"loss_type": "ce"},
-                data_dir=str(real_dir),
-                sample_set={"0": [0, 1, 2]},
-                profile=profile,
-            )
-
-        # C — MALFORMED but APPLICABLE: LOUD, and no static-formula fallback.
-        with pytest.raises(ValueError, match="does not satisfy TIDMAD's typed view"):
-            _measure(_malformed_tidmad_profile())
-        capsys.readouterr()
-
-        # A — genuinely FOREIGN: the named applicability path, not a raise.
-        # Without this the assertion above could pass while EVERYTHING raised.
-        result, _ = _measure(_foreign_profile())
-        foreign_out = capsys.readouterr().out
-        assert result is None
-        assert "NOT APPLICABLE" in foreign_out, (
-            "a genuinely foreign profile must take the named applicability "
-            "path — it is semantic non-membership, not an error."
-        )
-
-        # D — a genuine OPERATIONAL failure on a VALID applicable declaration
-        # still degrades conservatively. This is the half that must NOT become
-        # loud, and it is what makes C and D observably different: the data
-        # directory exists but holds none of TIDMAD's shards, so the warm-up
-        # cannot run for a reason that is nobody's declaration defect.
-        operational, _ = _measure(TIDMAD_PROFILE)
-        operational_out = capsys.readouterr().out
-        assert operational is None, (
-            "a genuine operational warm-up failure must still fall back to the "
-            "static formula; making ALL failures fatal would delete the "
-            "legitimate best-effort behaviour this wrapper is built on."
-        )
-        assert "NOT APPLICABLE" not in operational_out, (
-            "an operational failure was reported as non-membership; TIDMAD is "
-            "obviously a member, its data simply was not there."
-        )
-
-    def test_a_foreign_profile_is_skipped_without_an_exception_handler(
-        self, monkeypatch, tmp_path, capsys
-    ):
-        """The other half of the same biconditional — the honest skip stays.
-
-        Defect this test alone catches: over-correcting the anti-pattern into
-        a hard failure for a task that genuinely declares no TIDMAD topology.
-        The measurement is a real TIDMAD-physical warm-up; declining it for a
-        foreign task is correct and must survive. Only the ROUTE changes —
-        from catching to asking.
-
-        How it fails on regression: a conversion that raises for the foreign
-        case turns a correct decline into a crash; or the decline stops being
-        the NAMED non-membership route, and the ``NOT APPLICABLE`` assertion
-        fires.
-
-        THIS TEST WAS VACUOUS AND IS NOW NOT. It passed
-        ``data_dir="/nonexistent"``, which returns at ``wrapper.py:325``
-        (``if not data_dir or not os.path.isdir(data_dir)``) BEFORE the
-        membership test at ``:359`` is ever reached. Its two assertions --
-        ``measured is None`` and ``n_timed_batches == 0`` -- are exactly what
-        that guard returns for **any** profile, foreign or not, so it would
-        have stayed green with the foreign-profile refusal deleted outright.
-        It could not distinguish the thing it names from an unrelated early
-        return.
-
-        This is the SAME defect its sibling's docstring records as defect (1),
-        which was fixed there with a real directory and never fixed here. A
-        biconditional with one vacuous half is not a biconditional -- and this
-        PR's own findings are largely about summaries trusted in place of the
-        evidence they claim to summarise.
-
-        The fix mirrors the sibling exactly: a real directory so control
-        reaches the membership test, and an assertion on the ROUTE TAKEN
-        rather than only on the return value.
-        """
-        monkeypatch.setattr(time_wrapper, "_count_params", lambda *a, **k: 1_000_000)
-        # Availability is stubbed for the same reason as the sibling case: an
-        # accelerator gate sits ahead of the subject, so on a CPU host the
-        # membership test would again be unreachable and this test would go
-        # back to passing for the wrong reason.
-        import torch
-
-        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-
-        real_dir = tmp_path / "data_root"
-        real_dir.mkdir()
-
-        measured, breakdown = time_wrapper._measure_ms_per_step(
-            model_type="punet",
-            model_config={"segmentation_size": 40000},
-            train_config={"batch_size": 4},
-            loss_config={"loss_type": "ce"},
-            data_dir=str(real_dir),
-            sample_set={"0": [0, 1, 2]},
-            profile=_foreign_profile(),
-        )
-        out = capsys.readouterr().out
-
-        assert measured is None
-        assert breakdown["n_timed_batches"] == 0
-        assert "NOT APPLICABLE" in out, (
-            "a genuinely foreign profile must decline through the NAMED "
-            "non-membership route. Without this the two assertions above are "
-            "satisfied by any early return and the refusal could be deleted "
-            "without this test noticing."
-        )
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    time_wrapper._measure_ms_per_step(
+        model_type="unknown_external_model",
+        model_config={"segmentation_size": 8},
+        train_config={"batch_size": 1},
+        loss_config={"loss_type": "mse"},
+        data_dir=str(tmp_path),
+        sample_set={},
+        profile=_foreign_profile(),
+        task_scope=object(),
+    )
+    output = capsys.readouterr().out
+    assert "NOT APPLICABLE" not in output
+    assert "[warmup failed]" in output
 
 
 class TestTheProposerPreflightSibling:

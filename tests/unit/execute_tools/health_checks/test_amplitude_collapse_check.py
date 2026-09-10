@@ -21,7 +21,9 @@ import json
 
 import h5py
 import numpy as np
+import pytest
 
+from execute_tools.dataset_config import resolve_dataset_profile, tidmad_topology
 from execute_tools.health_checks.amplitude_collapse import AmplitudeCollapseCheck
 from execute_tools.health_checks.schemas import HealthCheckContext
 
@@ -32,10 +34,11 @@ def _per_file(result) -> list[dict]:
 
 
 def _write_denoised_h5(path, ch1: np.ndarray) -> None:
-    """Write a minimal denoised HDF5 with ``channel0001/timeseries`` populated."""
+    """Write a minimal deliverable using the bound profile's output channel."""
+    channel = tidmad_topology(resolve_dataset_profile()).channels.input_channel
     with h5py.File(str(path), "w") as f:
         ts = f.create_group("timeseries")
-        c1 = ts.create_group("channel0001")
+        c1 = ts.create_group(channel)
         c1.create_dataset("timeseries", data=ch1, chunks=True)
 
 
@@ -270,3 +273,6 @@ class TestCustomThreshold:
         # threshold=0.95 → 0.60 < 0.95 → not flagged
         loose = AmplitudeCollapseCheck().run(ctx, {"collapse_threshold": 0.95})
         assert loose.passed is True
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

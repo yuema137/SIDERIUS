@@ -22,11 +22,10 @@ dependencies = [
     "openai>=2.26.0",
     "pandas>=3.0.1",
     "pdfplumber>=0.11.0",
-    # Direct dependency: the Pets and DAVIS data paths decode images with PIL
-    # at module scope, and those modules are imported by the training,
-    # inference and scoring subprocess entrypoints. Previously satisfied only
-    # transitively (matplotlib, pdfplumber), so dropping either would have
-    # broken the execution path.
+    # Direct dependency: externally supplied image-task plugins may decode
+    # samples with PIL through the supported task data-path interface. Do not
+    # rely on matplotlib or pdfplumber to install that public dependency
+    # transitively.
     "pillow>=11.0.0",
     "pydantic>=2.12.5",
     "pylatexenc>=2.10,<3",
@@ -47,8 +46,9 @@ dependencies = [
 where = ["."]
 include = [
     "agent*", "nodes*", "core*", "execute_tools*", "ml_models*",
-    "tools*", "scripts*", "workflows*", "dashboard*",
+    "tools*", "workflows*", "dashboard*",
 ]
+exclude = ["agent_generated*", "scripts*"]
 namespaces = true
 
 [dependency-groups]
@@ -62,8 +62,8 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
-    "real_run: requires API keys and real TIDMAD data. Skipped unless a real-mode flag is passed. Run locally only with: pytest -m real_run --real-api-call",
-    "real_data: uses real TIDMAD HDF5 files instead of synthetic data. Enable with: pytest --real-data",
+    "real_run: requires external services or task data. Skipped unless a real-mode flag is passed. Run locally only with: pytest -m real_run --real-api-call",
+    "real_data: uses externally configured task data instead of synthetic data. Enable with: pytest --real-data",
     "allow_real_subprocess: this unit test intentionally launches a real training/inference/scoring script. Without it, tests/unit/conftest.py fails fast rather than letting a missing stub start real work.",
 ]
 

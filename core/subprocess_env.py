@@ -49,9 +49,11 @@ def subprocess_env(
 ) -> dict[str, str]:
     """Env for any subprocess that must resolve SIDERIUS models or losses.
 
-    Adds `ml_models` and `execute_tools` to `PYTHONPATH` so the flat
-    imports in those scripts resolve regardless of working directory, and
-    forwards the run-scoped plugin directories when supplied.
+    Preserves the exact-checkout virtualenv selected by the launcher and
+    forwards the run-scoped plugin directories when supplied. Framework
+    source is never injected through ``PYTHONPATH``; installed package imports
+    must resolve through that virtualenv, while generated model and loss roots
+    travel through their dedicated environment variables.
 
     **The model-plugin variable is UNIONED, not assigned** (Step 12 /
     PR-12d, seam P). It used to be assigned while `PYTHONPATH` two lines
@@ -101,15 +103,8 @@ def subprocess_env(
         union_plugin_roots,
     )
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    extra_paths = [
-        project_root,
-        os.path.join(project_root, "ml_models"),
-        os.path.join(project_root, "execute_tools"),
-    ]
     env = os.environ.copy()
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = os.pathsep.join(extra_paths + ([existing] if existing else []))
+    env.pop("PYTHONPATH", None)
     plugin_roots = union_plugin_roots(
         [plugin_dir] if plugin_dir else (),
         active_run_model_plugin_roots(),

@@ -21,6 +21,7 @@ All tests mock ``subprocess.run`` — no GPU, no real process spawning.
 
 import os
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -33,6 +34,8 @@ from core.sandbox_executor import (
     _limited_preexec,
     _subprocess_rss_gb,
 )
+from execute_tools.data_paths import bind_physical_data_root
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 # ==========================================
 # Fixtures
@@ -43,15 +46,24 @@ TRAIN_CFG = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cpu"}
 LOSS_CFG = {"loss_type": "ce"}
 EXP_ID = "oom_test_001"
 RUN_NAME = "test_run"
+QUICKSTART = Path(__file__).resolve().parents[3] / "configs/task_composition/quickstart.yaml"
 
 
 @pytest.fixture
 def sandbox(tmp_path):
-    return TidmadSandbox(
-        run_name=RUN_NAME,
-        workspace=str(tmp_path),
-        progress_bar=False,
-    )
+    composition = compose_run_task_bindings(str(QUICKSTART))
+    with (
+        bind_physical_data_root(str(tmp_path), purpose="sandbox ceiling test"),
+        bind_run_task_composition(
+            composition,
+            physical_data_root=str(tmp_path),
+        ),
+    ):
+        yield TidmadSandbox(
+            run_name=RUN_NAME,
+            workspace=str(tmp_path),
+            progress_bar=False,
+        )
 
 
 def _ok_result(stdout="done\n", stderr=""):

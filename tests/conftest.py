@@ -29,23 +29,26 @@ Note on synthetic vs real data
 """
 
 import os
+from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
-try:
-    from execute_tools.data_paths import TIDMAD_DATA_DIR
+from execute_tools.data_paths import bind_physical_data_root
+from execute_tools.dataset_config import (
+    bind_dataset_profile,
+    resolve_dataset_profile,
+    tidmad_topology,
+)
+from execute_tools.evaluation_metric import bind_run_metric
+from tests.helpers.metric_fixtures import accuracy_like_metric
+from tests.helpers.two_family_profile import make_two_family_profile
+from workflows.task_config import bind_task_config, load_task_config
 
-    REAL_DATA_DIR: str | None = TIDMAD_DATA_DIR
-except (FileNotFoundError, ImportError):
-    # Reached only by a corrupted checkout: `data_paths` falls back to the
-    # TRACKED `tidmad_data_config.example.yaml` with a warning and only raises
-    # when that template is missing too (execute_tools/data_paths.py:27-43).
-    # `None` rather than any concrete path — a test must never silently fall
-    # back to a developer-specific location (CLAUDE.md). The two consumers
-    # below turn `None` into a named skip.
-    REAL_DATA_DIR = None
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+REAL_DATA_DIR: str | None = os.environ.get("SIDERIUS_TEST_DATA_DIR")
 REAL_DATA_FILE = "abra_training_0000.h5"
 
 
@@ -57,10 +60,8 @@ def _require_real_data_dir(flag: str) -> str:
     """
     if REAL_DATA_DIR is None:
         pytest.skip(
-            f"{flag} requires TIDMAD_DATA_DIR, but execute_tools.data_paths "
-            "could not be imported — tidmad_data_config.yaml is absent AND the "
-            "tracked tidmad_data_config.example.yaml template is missing. "
-            "Restore the template or create the config."
+            f"{flag} requires an explicit SIDERIUS_TEST_DATA_DIR. "
+            "Framework tests do not select a scientific dataset by default."
         )
     return REAL_DATA_DIR
 
@@ -162,6 +163,66 @@ def pytest_collection_modifyitems(config, items):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def synthetic_dataset_profile():
+    """Bind the neutral indexed-data profile for tests that request it.
+
+    This fixture is deliberately not autouse.  A test module that exercises a
+    profile-sensitive boundary must opt in with either a fixture argument or
+    ``pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")``.
+    Keeping the dependency visible prevents framework tests from recreating an
+    ambient scientific-task default merely to make legacy fixtures pass.
+    """
+    profile = make_two_family_profile(num_files=20, psd_segment_length=200_000)
+    with bind_dataset_profile(profile):
+        yield profile
+
+
+@pytest.fixture(scope="module")
+def synthetic_task_config(synthetic_dataset_profile):
+    """Bind the framework's explicit, task-neutral configuration example.
+
+    Depending on ``synthetic_dataset_profile`` makes both prerequisites
+    visible and orders their context bindings before broader module/class
+    fixtures execute.  This is still opt-in; it is not a repository-wide
+    scientific default.
+    """
+    config_path = _REPO_ROOT / "configs" / "task_config.example.yaml"
+    config = load_task_config(str(config_path))
+    patcher = pytest.MonkeyPatch()
+    patcher.setattr(
+        "workflows.task_config.default_task_config_path",
+        lambda: str(config_path),
+    )
+    try:
+        with bind_task_config(config):
+            yield config
+    finally:
+        patcher.undo()
+
+
+@pytest.fixture(scope="module")
+def synthetic_run_authorities(synthetic_task_config):
+    """Bind the neutral primary metric required by composed-run unit tests."""
+    metric = accuracy_like_metric()
+    with bind_run_metric(metric):
+        yield metric
+
+
+@pytest.fixture(scope="module")
+def synthetic_physical_data_root(tmp_path_factory):
+    """Bind an empty, caller-owned data root for executor plumbing tests.
+
+    The directory is intentionally empty: tests using this fixture exercise
+    command construction, persistence, or a stub executor and must not read a
+    scientific dataset.  A test that needs bytes must create its own declared
+    fixture and bind the corresponding task data-path implementation instead.
+    """
+    root = tmp_path_factory.mktemp("explicit_physical_data_root")
+    with bind_physical_data_root(str(root)):
+        yield root
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -267,21 +328,22 @@ def synthetic_h5(tmp_path):
     """
 
     def _make(seg_size: int):
-        fpath = tmp_path / REAL_DATA_FILE
+        topology = tidmad_topology(resolve_dataset_profile())
+        filename = topology.dataset.training_file_name(0)
+        fpath = tmp_path / filename
         n_samples = SYNTH_SAMPLE_SIZE * seg_size
 
         rng = np.random.default_rng(42)
-        channel1 = rng.integers(-128, 127, size=n_samples, dtype=np.int8)
-        channel2 = rng.integers(-128, 127, size=n_samples, dtype=np.int16)
+        values = rng.integers(-128, 127, size=n_samples, dtype=np.int16)
 
         with h5py.File(fpath, "w") as f:
             ts = f.create_group("timeseries")
-            ch1 = ts.create_group("channel0001")
-            ch1.create_dataset("timeseries", data=channel1)
-            ch2 = ts.create_group("channel0002")
-            ch2.create_dataset("timeseries", data=channel2)
+            input_group = ts.create_group(topology.channels.input_channel)
+            input_group.create_dataset("timeseries", data=values)
+            target_group = ts.create_group(topology.channels.target_channel)
+            target_group.create_dataset("timeseries", data=values.copy())
 
-        return str(tmp_path), REAL_DATA_FILE
+        return str(tmp_path), filename
 
     return _make
 

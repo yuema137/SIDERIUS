@@ -376,3 +376,6 @@ class TestREC4ExpIdFormat:
             counters.append(int(m.group(1)))
         assert counters == sorted(counters)
         assert len(set(counters)) == len(counters)
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

@@ -250,7 +250,7 @@ a real collapse through the direct-execution harnesses (Step 08c evidence).
 Deterministic suites you can run today, no key, no GPU:
 
 ```bash
-uv run pytest tests/unit/examples/test_pets_health_family.py \
+.venv/bin/python -m pytest tests/unit/examples/test_pets_health_family.py \
               tests/unit/examples/test_davis_health_family.py \
               tests/unit/examples/test_quickstart_pack.py -q
 ```

@@ -209,6 +209,7 @@ def _handle_prephase_gpu_measurement(
     attempt_in_round: int,
     run_profile: Any = None,
     run_model_io: Any = None,
+    task_probe_data: Any = None,
 ) -> PrephaseOutcome:
     """Measure this candidate on this card before a formal GPU launch.
 
@@ -233,20 +234,13 @@ def _handle_prephase_gpu_measurement(
     to take a driver-visible reading from, and admission has nothing to
     decide. Unchanged behaviour there, not a refusal.
 
-    *A task declaring no TIDMAD topology has no batch this probe can build.*
-    Step 12 / PR-12d, **B12 / F-12d-25**, operator-ruled 2026-08-24
-    (option B). The worker's batch builder
-    (`probe_batch.build_bounded_probe_batch`) has a TIDMAD-SPECIFIC INPUT
-    CONTRACT -- `abra_training_????.h5`, `tidmad_topology(...).channels`,
-    h5py group layout -- and deliberately refuses synthetic data (F-1a).
-    Pets and DAVIS have no semantically valid input to that legacy probe, so
-    applicability must REFUSE TO RUN IT rather than fabricate a TIDMAD input;
-    reporting `STOP_INFRASTRUCTURE_FAILURE` (what happened before this rule)
-    claimed the ENVIRONMENT was broken when it was healthy. This is the same
-    correction Step 08a made when it introduced `CheckVerdict.inapplicable`
-    instead of "passed=True with prose", and applicability is decided HERE,
-    before the worker is spawned, so an inapplicable measurement opens no
-    artifact.
+    *A composed task must provide its task-owned probe batch.* The same typed
+    projection used by the isolated VRAM preflight is carried into this
+    authoritative measurement. A non-TIDMAD task without that projection is
+    still inapplicable rather than measured against fabricated array data.
+    The legacy physical-array loader remains available for un-composed runs.
+    Applicability is decided HERE, before the worker is spawned, so a composed
+    run missing its task projection opens no artifact.
 
     **This rule is a MEMBERSHIP TEST, never a caught exception, and the
     distinction is load-bearing.** `declares_tidmad_topology` asks whether
@@ -268,9 +262,8 @@ def _handle_prephase_gpu_measurement(
     ALREADY-SUPPORTED state, not a new one: `sandbox_executor.py:552-565`
     returns `(None, None)` when no requirement table was attached.
 
-    **Option A -- making bounded probe-batch construction fully
-    task-composable so arbitrary topologies can be measured -- is recorded as
-    explicit post-Step-12 debt and is deliberately NOT absorbed here.**
+    The task projection is opaque to this coordinator. Dataset vocabulary and
+    materialization remain owned by the bound TaskDataPath implementation.
     """
     if is_trial:
         return PrephaseOutcome.PROCEED
@@ -293,11 +286,14 @@ def _handle_prephase_gpu_measurement(
     # TIDMAD topology reaches the inapplicable path.
     from execute_tools.dataset_config import DatasetProfile, declares_tidmad_topology
 
-    if isinstance(run_profile, DatasetProfile) and not declares_tidmad_topology(run_profile):
+    if (
+        isinstance(run_profile, DatasetProfile)
+        and not declares_tidmad_topology(run_profile)
+        and task_probe_data is None
+    ):
         print(
             "  Pre-phase GPU measurement NOT APPLICABLE: this task declares no "
-            "TIDMAD topology, and the bounded probe batch is TIDMAD-physical "
-            "(h5 training family / declared input channel). No measured "
+            "TIDMAD topology, and no task-owned probe batch was supplied. No measured "
             "requirement is attached for this run; the VRAM capacity gate is "
             "unaffected. This is an applicability decision, not a probe failure."
         )
@@ -357,6 +353,7 @@ def _handle_prephase_gpu_measurement(
         # the shipped TIDMAD declaration. The tuner already holds the object
         # (`RunBindings.run_profile`); nothing is resolved here.
         dataset_profile=run_profile,
+        task_probe_data=task_probe_data,
         # 07c C3. Same reason, for the dtype authority's input. A task that
         # declares no `model_io` passes `None`, which is Regime-A parity.
         model_io_contract=run_model_io,
@@ -644,6 +641,27 @@ def _run_time_preflight(
     )
 
 
+def apply_forecast_time_authority(time_check: dict) -> None:
+    """Make the completed forecast the attempt's sole admission decision.
+
+    ``evaluate_time_skill`` also reports the shared evidence-policy verdict,
+    which deliberately treats static estimates as advisory.  A workflow that
+    explicitly selects forecast admission has made a different trade-off: it
+    accepts that rough estimate as authoritative so it can avoid executing-
+    device measurement.  The raw budget comparison is already computed once
+    by the skill as ``over_effective_budget``; this boundary only selects that
+    existing result and never recomputes estimator arithmetic.
+    """
+    breakdown = time_check.get("breakdown")
+    over_budget = breakdown.get("over_effective_budget") if isinstance(breakdown, dict) else None
+    if not isinstance(over_budget, bool):
+        raise RuntimeEvidenceChannelError(
+            "forecast wall-time admission did not produce a boolean over_effective_budget decision"
+        )
+    time_check["feasible"] = not over_budget
+    breakdown["selected_admission_authority"] = "forecast"
+
+
 def _resolve_time_check_probe_request(
     time_check: dict,
     *,
@@ -657,6 +675,7 @@ def _resolve_time_check_probe_request(
     device_identity: Any | None = None,
     result_authority: str | None = None,
     vram_threshold_gb: float | None = None,
+    measurement_capability: Any | None = None,
 ) -> str:
     """C9d: turn a REQUEST_PROBE pre-flight into a terminal decision.
 
@@ -726,14 +745,20 @@ def _resolve_time_check_probe_request(
     )
     from core.runtime_control.provenance import capture_software_stack
 
-    # V20 PR C1 / C-C3b. The capability is resolved by the TASK layer, which
-    # knows which dataset it needs; generic runtime-control used to import
-    # `TIDMAD_DATA_DIR` itself and so refused silently on any other task.
-    # `data_dir` is already this function's parameter, so the resolved root
-    # is the one the probe will actually use.
-    from execute_tools.data_paths import resolve_tidmad_measurement_capability
+    capability = measurement_capability
+    if capability is None:
+        from core.runtime_control.measurement_capability import (
+            ResolvedMeasurementCapability,
+        )
 
-    capability = resolve_tidmad_measurement_capability(dataset_root=data_dir)
+        capability = ResolvedMeasurementCapability(
+            task_identity="unresolved_task",
+            dataset_adapter="unresolved_dataset_adapter",
+            data_shape_class="unresolved_data_shape",
+            probe_available=False,
+            unavailability_reason="no measurement capability was supplied by the caller",
+            dataset_root=data_dir,
+        )
     available, detail = probe_runner_availability(capability)
     if not available:
         breakdown["probe_resolution"] = "unavailable"
@@ -1230,12 +1255,19 @@ def _build_admission_policy(agent_input, *, is_trial: bool, device_identity: Any
 
 
 def _build_runtime_policy(
-    agent_input, *, chosen_time_budget: float | None, is_trial: bool, base_dir: str
+    agent_input,
+    *,
+    chosen_time_budget: float | None,
+    admission_source: str = "measured",
+    is_trial: bool,
+    base_dir: str,
 ) -> dict:
     """Assemble the attempt's RuntimeControlPolicy dict (RT2-G/RT6).
 
-    Formal rounds enforce the operator budget; trial rounds run
-    record-only (None budget). Operator-visible policy values —
+    ``measured`` rounds enforce the operator budget from executing-device
+    evidence; ``forecast`` rounds keep in-process verification record-only so
+    the advance forecast remains the single admission authority. Trial and
+    Formal select this posture independently. Operator-visible policy values —
     safety factor and watchdog enable/floor — come from the input
     schema (Gate 2 wiring, 2026-07-24); watchdog grace/poll keep
     their WatchdogConfig schema defaults (10 s / 1 s), which the
@@ -1259,10 +1291,13 @@ def _build_runtime_policy(
     effective_safety = (
         phase_specific if phase_specific is not None else agent_input.runtime_safety_factor
     )
-    return {
+    policy: dict[str, Any] = {
         "operator_budget_seconds": (
-            chosen_time_budget * 60.0 if (not is_trial and chosen_time_budget is not None) else None
+            chosen_time_budget * 60.0
+            if admission_source == "measured" and chosen_time_budget is not None
+            else None
         ),
+        "time_admission_source": admission_source,
         # VALIDATION POSTURE, None in every campaign. The Gate workload
         # envelope: the trainer builds a smaller epoch, so the bound is
         # spent before execution rather than enforced by killing a run.
@@ -1293,6 +1328,14 @@ def _build_runtime_policy(
             "max_phase_seconds": agent_input.validation_max_phase_seconds,
         },
     }
+    verification_window_seconds = getattr(
+        agent_input, "runtime_verification_max_wall_seconds", None
+    )
+    if verification_window_seconds is not None:
+        policy["verification"] = {
+            "max_wall_ms": verification_window_seconds * 1000.0,
+        }
+    return policy
 
 
 def _check_and_record_guardrail_skip(
@@ -1690,49 +1733,6 @@ def _append_runtime_observation(sandbox, run_name: str, rv_block: dict | None) -
         print(f"[runtime_control] observation-store append failed (non-fatal): {exc}")
 
 
-def _tidmad_calibration_identity_applicable(run_profile: Any) -> bool:
-    """May this run's calibration be labelled with TIDMAD's identity?
-
-    C12-P B5. ``resolve_tidmad_measurement_capability`` answers for TIDMAD and
-    for TIDMAD only -- ``task_identity="tidmad_denoise"`` and the
-    ``psd..._seg..._files...`` shape class are LITERALS over the module-level
-    TIDMAD profile (``execute_tools/data_paths.py``), and only ``dataset_root``
-    is parameterised. Consulting it for a task that declares no TIDMAD topology
-    does not produce a weaker identity; it produces a CONFIDENT WRONG one, and
-    the calibration bucket does not separate tasks (``calibration_policy
-    .bucket_components`` keys on ``model_family``, never on ``task_identity``),
-    so a foreign record would sit in the same promotion bucket as genuine
-    TIDMAD evidence.
-
-    The bounded rule, therefore: *no applicable declared measurement identity
-    under the existing supported contract => DO NOT EXPORT calibration state
-    for that task.* **Absence of a valid identity is not a licence to call the
-    task TIDMAD.** The measurement itself is still preserved -- it quarantines
-    with a reason (O-2) -- it simply never becomes authority.
-
-    **A MEMBERSHIP TEST, never a caught ``ValueError``.** ``tidmad_topology()``
-    raises for sections ABSENT and for sections PRESENT-but-MALFORMED alike, so
-    inferring "this is some other task" from catching it would silently
-    reclassify a BROKEN TIDMAD declaration as inapplicable and quietly stop
-    exporting evidence that must instead stay visible. A malformed TIDMAD
-    profile therefore returns ``True`` here and still fails loudly downstream.
-
-    Regime A -- ``run_profile`` that is not a ``DatasetProfile`` -- is an
-    UN-COMPOSED run, which IS TIDMAD, so it stays applicable and TIDMAD's
-    behaviour is bit-for-bit what it was.
-
-    Deliberately the same three-line shape as
-    ``execution.wall_time_preflight_applicable`` and the prephase rule above:
-    this consumes an existing authority rather than inventing a generic
-    measurement-identity capability family.
-    """
-    from execute_tools.dataset_config import DatasetProfile, declares_tidmad_topology
-
-    if not isinstance(run_profile, DatasetProfile):
-        return True
-    return declares_tidmad_topology(run_profile)
-
-
 def _derive_calibration_from_observation(
     sandbox,
     *,
@@ -1740,6 +1740,7 @@ def _derive_calibration_from_observation(
     device_identity,
     data_dir: str | None,
     run_profile: Any = None,
+    measurement_capability: Any | None = None,
 ) -> None:
     """Derive a v2 calibration record from a SUCCESSFUL attempt's observation.
 
@@ -1791,7 +1792,6 @@ def _derive_calibration_from_observation(
         )
         from core.runtime_control.provenance import capture_software_stack
         from core.runtime_control.records import RuntimeObservation
-        from execute_tools.data_paths import resolve_tidmad_measurement_capability
 
         observation = RuntimeObservation.model_validate(rv_block)
         uuid = getattr(device_identity, "uuid", None)
@@ -1827,8 +1827,8 @@ def _derive_calibration_from_observation(
         # topology. A second guard there would imply the first one is not
         # trusted. Do not reintroduce it.
         identity = None
-        if _tidmad_calibration_identity_applicable(run_profile) and uuid:
-            capability = resolve_tidmad_measurement_capability(dataset_root=data_dir)
+        if measurement_capability is not None and uuid:
+            capability = measurement_capability
             identity = IdentityContext(
                 task_identity=capability.task_identity,
                 data_shape_class=capability.data_shape_class,

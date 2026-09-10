@@ -20,13 +20,13 @@ what a task means — task semantics live in
 | `resume.py` | `restore_prior_state(workspace, current_iter, seed_paths, …) -> RestoredState` · `union_key_findings` (THE findings-union authority) · the digest projections (`project_knowledge`, `project_prediction_memory`, `project_vocab_link_confirmations`, …) |
 | `chain_state.py` | `ChainState` — the chain's mutable cross-iteration state; `chain_state_field_names()` feeds the carriers' deny-lists |
 | `sandbox_executor.py` | `TidmadSandbox` / `StubSandbox` — the GPU child launch surface: `execute_training`, `execute_inference`, `evaluate_metric`, `execute_scoring`; every child goes through one observed-subprocess seam |
-| `execution_calibration.py` | `ROLE_CEILINGS` (training 40 · inference 60 · scoring 24 GiB, with derivation provenance) · `resolve_role_ceiling_gb(role)` (two layers: `SIDERIUS_SUBPROCESS_RSS_GB` global override, else the declared default; `0` disables; malformed **refuses**) · `calibration_provenance()` |
+| `execution_calibration.py` | `ROLE_CEILINGS` (training 40 · inference 60 · scoring 24 GiB, with derivation provenance) · `resolve_role_ceiling_gb(role)` (two layers: `SIDERIUS_SUBPROCESS_RSS_GB` caller override, else the declared default; the override is either one global integer or one complete role mapping; `0` disables the selected role; malformed **refuses**) · `calibration_provenance()` |
 | `hardware_context.py` | `get_or_create(workspace, run_name)` — discovery + the per-run `{run_name}_hardware.json` manifest; the only `torch.cuda.get_device_properties` call site |
 | `subprocess_env.py` | the one environment a child needs to see generated plugins (`SIDERIUS_PLUGIN_DIRS` / `SIDERIUS_LOSS_DIRS` transport) |
 | `runtime_control/` | measurement, admission, watchdog, calibration registry, `launch_guard.run_launch_self_test`, estimator/policy identity |
 | `server_configs/` | per-server calibration registry (`_base.py` schema; one module per host) |
 | `campaign*` / `campaign/` | resumable-campaign manifests, identity, slot scheduling |
-| `committed_digests.py` · `memory_probe.py` · `wave_records.py` · `inference_defaults.py` · `scientific_authority.py` | single-purpose authorities (read their docstrings) |
+| `committed_digests.py` · `memory_probe.py` · `inference_defaults.py` · `scientific_authority.py` | single-purpose authorities (read their docstrings) |
 
 ## Inputs
 
@@ -69,10 +69,13 @@ workflow · calibration observations.
 
 - A new host: add `server_configs/{hostname}.py` (unknown hosts fall back with
   a one-time warning — only time forecasts are affected).
-- Host-RAM posture: `SIDERIUS_SUBPROCESS_RSS_GB` (all roles at once, an
-  operator decision).
-- There is deliberately **no** per-role override layer — a third layer was
-  implemented and removed; do not reintroduce it.
+- Host-RAM posture: `SIDERIUS_SUBPROCESS_RSS_GB`, an operator decision. Use
+  one non-negative integer to set every role, or one complete mapping such as
+  `training=0,inference=96,scoring=24` when a host needs different ceilings.
+  A mapping must name all three roles exactly once; `0` disables that role.
+- There is deliberately **one caller-owned override layer**, not a hierarchy
+  of global and per-role variables. The role mapping is a value carried by
+  that existing layer; do not add another precedence level.
 
 ## State and filesystem effects
 
@@ -108,7 +111,7 @@ launch seam and role sites; `resume.py`'s union/projection authorities.
 
 ```python
 from core.execution_calibration import resolve_role_ceiling_gb
-resolve_role_ceiling_gb("training")   # -> 40, or the global override
+resolve_role_ceiling_gb("training")   # -> 40, or the caller override
 ```
 
 ## Related tests

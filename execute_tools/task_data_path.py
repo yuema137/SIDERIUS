@@ -51,6 +51,7 @@ and it is never an operator-facing selection knob.
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import sys
 from collections.abc import Iterator, Mapping
@@ -67,7 +68,7 @@ from typing import (
     runtime_checkable,
 )
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 if TYPE_CHECKING:  # torch is heavyweight; the seam only names the type
     from torch.utils.data import Dataset
@@ -192,6 +193,18 @@ class EpochSamplingParams(BaseModel):
     epoch_seed: int | None = None
     train_portion: float | None = Field(default=None, gt=0.0, le=1.0)
     max_samples: int | None = Field(default=None, ge=1)
+
+
+class TaskProbeDataSpec(BaseModel):
+    """Run-bound task data needed to materialize one resource-probe batch."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    manifest_path: str = Field(min_length=1)
+    semantic_fingerprint: str = Field(min_length=1)
+    training_scope_payload: str = Field(min_length=1)
+    sampling: EpochSamplingParams
+    max_inference_batch_size: int | None = Field(default=None, ge=1)
 
 
 class EvalMaterializationParams(BaseModel):
@@ -394,6 +407,20 @@ class EvaluationReadRequest(BaseModel):
     model_type: str = Field(min_length=1)
 
 
+class TaskEvaluationPayload(BaseModel):
+    """A decoded task value plus every artifact scoreability must inspect.
+
+    Most tasks have one declared deliverable and can keep returning their
+    decoded value directly. A task whose scientific result spans multiple
+    files can return this carrier without adding another protocol method.
+    """
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True, extra="forbid")
+
+    value: Any
+    deliverables: dict[int, str]
+
+
 # ---------------------------------------------------------------------------
 # The contract
 # ---------------------------------------------------------------------------
@@ -431,7 +458,8 @@ class TaskDataPath(Protocol):
     def read_evaluation_payload(self, request: EvaluationReadRequest) -> object:
         """Decode the persisted deliverable into the payload handed to the
         Step-06 evaluation authority. Codec only, by construction and by name
-        (parent Amendment 2)."""
+        (parent Amendment 2). Return ``TaskEvaluationPayload`` when the result
+        spans multiple artifacts that scoreability must inspect."""
         ...
 
 
@@ -514,6 +542,47 @@ class TaskInferenceBatching(Protocol):
     def max_inference_batch_size(self) -> int:
         """Return the inclusive task-semantic inference batch ceiling."""
         ...
+
+
+class StorageReadScope(BaseModel):
+    """Task-owned description of the physical bytes read during setup.
+
+    Paths and byte volume are physical provenance, not scientific semantics.
+    The task computes them because only the task can interpret its opaque
+    scope; the framework records the validated result without inspecting the
+    scope itself.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    file_paths: tuple[str, ...]
+    expected_on_disk_bytes: int = Field(ge=0)
+
+    @field_validator("file_paths")
+    @classmethod
+    def require_absolute_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not os.path.isabs(path) for path in value):
+            raise ValueError("storage provenance file paths must be absolute")
+        return value
+
+
+@runtime_checkable
+class TaskStorageReadScope(Protocol):
+    """Optional capability for provenance over an opaque task scope."""
+
+    def storage_read_scope(self, data_dir: str, scope: object) -> StorageReadScope:
+        """Describe the files and on-disk byte volume setup will read."""
+        ...
+
+
+def resolve_storage_read_scope(
+    impl: object, data_dir: str, scope: object
+) -> StorageReadScope | None:
+    """Resolve optional task-owned storage provenance without reading scope internals."""
+    method = getattr(impl, "storage_read_scope", None)
+    if not callable(method):
+        return None
+    return StorageReadScope.model_validate(method(data_dir, scope))
 
 
 def declares_inference_batching(impl: object) -> TypeGuard[TaskInferenceBatching]:
@@ -625,18 +694,10 @@ def deserialize_rows_scope(payload: str, kind: str, row_model, scope_model):
 
 
 def require_bound_task_data_path() -> TaskDataPath:
-    """The EXPLICITLY bound implementation — never the regime-A fallback.
+    """Return the explicitly bound implementation or fail closed.
 
-    Step 12 / PR-12bc B5/B7. :func:`resolve_bound_task_data_path` falls back to
-    the TIDMAD compatibility implementation when nothing is bound, which is
-    correct for a legacy caller and CATASTROPHIC for a composed one: a run that
-    declared a task and then failed to bind it would silently build TIDMAD's
-    scopes and train on TIDMAD's data, which is C-P56-1 exactly.
-
-    A composed caller asks for THIS instead. It lives here rather than at the
-    call site because ``active_task_data_path`` is an ambient read that the
-    tuner package is censused against — the ambient lookup belongs in the
-    module that owns the binding, and callers get a fail-closed answer.
+    The ambient lookup lives with the binding authority so callers cannot
+    invent a fallback when composition was missed.
 
     Raises:
         TaskDataPathResolutionError: Nothing is bound. The caller said the run
@@ -647,10 +708,8 @@ def require_bound_task_data_path() -> TaskDataPath:
     if bound is None:
         raise TaskDataPathResolutionError(
             "an EXPLICITLY bound task data path was required, but none is "
-            "bound. This caller declared the run composed, so falling back to "
-            f"the {TIDMAD_COMPATIBILITY_ID!r} compatibility implementation "
-            "would silently execute another task's data path — refusing "
-            "instead."
+            "bound. Falling back would silently execute another task's data "
+            "path, so execution is refused."
         )
     return bound
 
@@ -706,11 +765,6 @@ _REGISTRY: dict[str, TaskDataPath] = {}
 #: same key set; :func:`registry_invariant_holds` states that, and C1's tests
 #: assert it after every lifecycle operation.
 _CONTENT: dict[str, str] = {}
-
-#: The id the legacy regime-A compatibility path resolves to. A constant, not
-#: a branch: regime-A detection is the ABSENCE of a binding context (child
-#: §4.2), and this names which registered implementation that absence means.
-TIDMAD_COMPATIBILITY_ID = "tidmad"
 
 
 def content_identity(impl: object) -> str:
@@ -828,11 +882,9 @@ def registered_task_data_path_ids() -> list[str]:
 class TaskBindingContext(BaseModel):
     """An EXPLICIT task binding. Its very PRESENCE is the discriminator.
 
-    ``None`` where a context is expected IS the legacy regime-A compatibility
-    path — the launch surfaces that predate task binding. A future Pets run
-    necessarily constructs one of these, so a missed binding step fails
-    closed instead of silently training on TIDMAD's path (child §4.2). Never
-    discriminate by task name.
+    Supported execution always supplies this context. ``None`` is retained as
+    an input shape only so old callers receive a named refusal rather than an
+    attribute error; it never selects a scientific task.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -841,22 +893,17 @@ class TaskBindingContext(BaseModel):
 
 
 def resolve_task_data_path(context: TaskBindingContext | None) -> TaskDataPath:
-    """The frozen truth table (child §4.2), row by row."""
+    """Resolve an explicitly declared task data path, or fail closed."""
     if context is None:
-        # Legacy regime-A compatibility: the absence of any explicit binding.
-        impl = _REGISTRY.get(TIDMAD_COMPATIBILITY_ID)
-        if impl is None:
-            raise TaskDataPathResolutionError(
-                "Legacy regime-A resolution requires the compatibility "
-                f"implementation {TIDMAD_COMPATIBILITY_ID!r}, which is not "
-                f"registered. Currently registered: {sorted(_REGISTRY)}."
-            )
-        return impl
+        raise TaskDataPathResolutionError(
+            "No task data path was declared. Supply a task composition whose "
+            "task_data_path identifies a registered implementation; SIDERIUS "
+            "does not select a scientific task by default."
+        )
     if context.task_data_path_id is None:
         raise TaskDataPathResolutionError(
             "An explicit task binding was supplied with NO task_data_path_id. "
-            "Explicitly bound tasks never fall back to the TIDMAD "
-            "compatibility path (parent Amendment 3) — declare the task's "
+            "Explicitly bound tasks never fall back to another task. Declare the task's "
             f"data-path id. Currently registered: {sorted(_REGISTRY)}."
         )
     impl = _REGISTRY.get(context.task_data_path_id)
@@ -864,24 +911,9 @@ def resolve_task_data_path(context: TaskBindingContext | None) -> TaskDataPath:
         raise TaskDataPathResolutionError(
             f"Unknown task data path id {context.task_data_path_id!r}. "
             f"Currently registered: {sorted(_REGISTRY)}. Unknown ids fail "
-            "closed — they never fall back to the TIDMAD compatibility path."
+            "closed; they never fall back to another task."
         )
     return impl
-
-
-def bootstrap_legacy_tidmad_data_path() -> TaskDataPath:
-    """Register and return the bounded legacy TIDMAD compatibility path.
-
-    Real-task modules no longer register as an import side effect. Composed
-    runs must therefore resolve their implementation from their transported
-    manifest, while an explicitly un-composed application edge calls this
-    adapter to preserve the historical TIDMAD path.
-    """
-    from execute_tools.tidmad_data_path import TidmadTaskDataPath
-
-    if TIDMAD_COMPATIBILITY_ID not in _REGISTRY:
-        register_task_data_path(TidmadTaskDataPath())
-    return resolve_task_data_path(None)
 
 
 # ---------------------------------------------------------------------------
@@ -908,15 +940,15 @@ def bind_task_data_path(impl: TaskDataPath) -> Iterator[TaskDataPath]:
 
 
 def resolve_bound_task_data_path() -> TaskDataPath:
-    """What a production call site asks for.
-
-    A bound implementation wins; an unbound context IS the legacy regime-A
-    path and resolves through the truth table's first row.
-    """
+    """Return the run-bound implementation, or refuse an uncomposed call."""
     bound = _ACTIVE_TASK_DATA_PATH.get()
     if bound is not None:
         return bound
-    return resolve_task_data_path(None)
+    raise TaskDataPathResolutionError(
+        "No task data path is bound for this execution. Enter the task "
+        "composition binding before training, inference, or scoring; "
+        "SIDERIUS does not select a scientific task by default."
+    )
 
 
 def active_task_data_path() -> TaskDataPath | None:

@@ -235,26 +235,9 @@ _TIDMAD_DEFAULT_SYMBOLS = frozenset(
     }
 )
 
-#: The legacy regime-A rows that legitimately default to a TIDMAD semantic,
-#: pinned by file AND exact count so a NEW one anywhere is red.
-#:
-#: Neither is a composed-run fallback, which is what §I.3 bullet 4 forbids.
-#: Both are the *declared* pre-composition compatibility path — the state
-#: 08b names ``LEGACY_OMITTED``: a caller that said nothing about a task gets
-#: today's behaviour, and Step 11 explicitly did NOT claim the removal of the
-#: import-time ``data_paths`` fallback. Recorded here rather than excluded by
-#: surface, so the exemption is visible and countable.
-#:
-#: OBSERVED / OWNER: the standing legacy-compatibility debt (Step 11 carried
-#: list) / NO DUPLICATE REPAIR — 12e edits zero production source.
-_ALLOWED_LEGACY_DEFAULTS: dict[str, int] = {
-    # `return _ACTIVE_PROFILE.get() or TIDMAD_PROFILE` — the documented
-    # "nothing bound resolves the shipped TIDMAD profile" accessor.
-    "execute_tools/dataset_config.py": 1,
-    # `handle = metric if metric is not None else derive_tidmad_metric(...)`
-    # — Step 06's Regime-A row inside the legacy scoring entry point.
-    "core/sandbox_executor.py": 1,
-}
+#: No production failure path may choose scientific task semantics. The empty
+#: mapping is intentional and exact: a newly introduced fallback is red.
+_ALLOWED_LEGACY_DEFAULTS: dict[str, int] = {}
 
 
 # ======================================================================
@@ -1591,19 +1574,6 @@ class TestNoHiddenFallbackToTidmad:
             f"cannot resolve a family must refuse — silently scoring with "
             f"TIDMAD's semantics is C-P56-1 one layer down."
         )
-
-    def test_the_two_exempted_rows_still_exist(self):
-        """The half that stops the pin above from passing by vacuity. If both
-        legacy rows were removed, ``counted == {}`` would fail loudly rather
-        than silently — but only because this states the expected count is
-        non-zero. Without it, deleting the detector's symbol set would leave
-        the pin comparing ``{}`` to ``{}``... which it would not, because this
-        asserts the exempt files really do produce the findings claimed."""
-        for rel, expected in _ALLOWED_LEGACY_DEFAULTS.items():
-            hits = find_silent_task_fallback(
-                ast.parse((REPO_ROOT / rel).read_text(encoding="utf-8"))
-            )
-            assert len(hits) == expected, f"{rel}: {hits}"
 
     @pytest.mark.parametrize(
         "source",

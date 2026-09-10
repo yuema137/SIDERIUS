@@ -114,9 +114,9 @@ must equal the implementation's own declared id, and a mismatch is refused.
 
 ```yaml
 task_data_path:
-  module: execute_tools.tidmad_data_path      # or `file:`
-  symbol: TidmadTaskDataPath
-  id: tidmad                                   # optional
+  file: ./plugins/my_data_path.py
+  symbol: MyTaskDataPath
+  id: my_task                                  # optional
 
 dataset_profile:
   config: ./declared/dataset_profile.json
@@ -124,8 +124,8 @@ dataset_profile:
 metric:
   declaration: ./declared/metric_spec.json
   implementation:
-    module: execute_tools.evaluation_metric    # or `file:`
-    symbol: TidmadDenoisingMetric
+    file: ./plugins/my_metrics.py
+    symbol: MyMetric
 
 secondary_metrics:                             # optional; ORDER IS SEMANTIC
   - declaration: ./declared/metric_macro_f1.json
@@ -203,6 +203,30 @@ Notes:
   `loss_config`, and a parameter rule targeting that subtree is refused.
   The independent epoch ceiling remains a safety authority: a rule that would
   raise `train_config.epochs` above it is refused rather than weakening it.
+- A workflow may add a second rule set through
+  `--workflow_parameter_rules '<json>'`, using the same shape. Task and
+  workflow rules are enforced together: the workflow may narrow a task rule
+  but cannot escape or overwrite it. Omission keeps the workflow
+  unconstrained. For example, a campaign can lock a task-supported window
+  size without changing the static task package:
+
+  ```bash
+  --workflow_parameter_rules \
+    '{"model_config.segmentation_size":{"exact":40000}}'
+  ```
+
+  A different workflow can leave the value agent-controlled while enforcing
+  an admissible set:
+
+  ```bash
+  --workflow_parameter_rules \
+    '{"model_config.segmentation_size":{"allowed":[20000,40000,50000]}}'
+  ```
+
+  The validated canonical rule set is part of the workspace run identity, so
+  changing it requires a fresh workspace. This is deterministic enforcement,
+  not prompt advice: `exact` controls the executed value; `range`, `allowed`,
+  and `predicate` reject a non-conforming proposal.
 - `dynamic_observables` / `static_observables` are the two **observable**
   families (`R-OBS-1`, `D-BUD-16`). The split is a **type**, not a naming
   convention: an implementation subclasses either
@@ -273,6 +297,21 @@ run declared but can never drop it.
 
 ## What happens at composition time
 
+Custom scoreability checks are part of task identity, not just executable
+helpers. A metric's `scoreability_contracts` mapping selects the classes that
+decide whether an artifact may be scored. Changing a selected implementation,
+its file contents, or which metric/contract uses it must change the composition
+fingerprint. Primary and secondary metrics follow the same rule; relocating
+the whole task package without changing its logical bindings or contents does
+not change that identity. Importable `module:` bindings remain subject to the
+existing pinned-environment contract rather than a recursive dependency hash.
+
+**Compatibility correction (#425):** older framework revisions omitted custom
+scoreability implementations from the fingerprint. Affected old run records
+must not be re-stamped to match the corrected identity. Start a fresh workspace
+and rerun; no automatic old-result migration is provided. Tasks with no custom
+scoreability mapping retain their previous fingerprint through this correction.
+
 1. The manifest is read; unknown keys refuse; required keys are checked.
 2. Each section resolves — files loaded, symbols imported or executed by path,
    types checked.
@@ -283,22 +322,17 @@ run declared but can never drop it.
 5. `verify_composition_is_bound` asserts the bindings are actually live. A
    half-composed run is fatal, not degraded.
 
-If no manifest is supplied, none of this happens and the run takes the ⚠ legacy
-un-composed path with byte-identical child argv.
+The supported chain/iteration launch requires an explicit task composition and
+physical data directory. Do not omit the manifest expecting a scientific task
+or a legacy child command to be selected automatically.
 
 ## Worked example
 
-`configs/task_composition/tidmad.yaml` is the shipped reference manifest. It
-declares eight of the fifteen sections — no `secondary_metrics` (TIDMAD has
-none), no `deliverable` (it *is* the shipped indexed default — resolution
-state 3 above), no `model_plugins`/`loss_plugins` (TIDMAD's models are the
-built-ins plus run-generated plugins) and no `objective` (the planner chooses).
-Nothing in it is special-cased: the id `tidmad` is an ordinary declared id and
-the built-in metric class is reached by the same `module:`/`symbol:` mechanism
-an external task uses. `configs/task_composition/pets.yaml` and `davis.yaml`
-are the shipped contrast manifests — both declare `model_plugins:`, and
-`davis.yaml` additionally declares `loss_plugins:` and an authoritative
-`objective:`.
+`configs/task_composition/quickstart.yaml` is the shipped reference manifest.
+It binds only framework-owned synthetic declarations and demonstrates the same
+resolution, plugin, objective, Health, and identity surfaces an external task
+uses. Real scientific manifests live with their task packages outside this
+repository.
 
 ---
 

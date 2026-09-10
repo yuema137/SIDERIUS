@@ -34,6 +34,8 @@ import pytest
 
 from ml_models.plugin_loader import UnknownOutputContractError
 
+pytestmark = pytest.mark.usefixtures("synthetic_task_config", "synthetic_physical_data_root")
+
 _UNREGISTERED = "c1_consumer_probe_unregistered_model"
 
 

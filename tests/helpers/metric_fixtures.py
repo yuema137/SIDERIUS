@@ -12,12 +12,10 @@ still tests exactly what it tested before.
 
 from __future__ import annotations
 
-from execute_tools.dataset_config import TIDMAD_PROFILE
 from execute_tools.evaluation_metric import (
+    EvaluationMetric,
     MetricSpec,
     PresenceScoreabilityContract,
-    TidmadDenoisingMetric,
-    derive_tidmad_metric_spec,
 )
 
 #: The one-axis ``lower`` variant of the shipped TIDMAD spec (Step 06 C6a).
@@ -27,7 +25,21 @@ DIRECTION_ONLY_ID = "step06_tidmad_denoising_score_lower"
 CONTRAST_ID = "step06_mean_abs_amplitude"
 
 
-def direction_only_spec(profile=TIDMAD_PROFILE) -> MetricSpec:
+def shipped_spec(profile=None) -> MetricSpec:
+    """A stable higher-is-better fixture with no scientific task dependency."""
+    del profile
+    return MetricSpec(
+        id="tidmad_denoising_score",
+        direction="higher",
+        aggregation="fixture_aggregate",
+        transform="log",
+        transform_params={"log_base": 5.27},
+        references=("fixture_reference",),
+        scoreability=PresenceScoreabilityContract(),
+    )
+
+
+def direction_only_spec(profile=None) -> MetricSpec:
     """The shipped TIDMAD spec with ONLY ``direction`` (and the id) changed.
 
     Everything else — scoreability contract, references, transform,
@@ -36,19 +48,18 @@ def direction_only_spec(profile=TIDMAD_PROFILE) -> MetricSpec:
     difference in behaviour cannot be attributed to anything but the declared
     direction.
     """
-    return derive_tidmad_metric_spec(profile).model_copy(
-        update={"id": DIRECTION_ONLY_ID, "direction": "lower"}
-    )
+    return shipped_spec(profile).model_copy(update={"id": DIRECTION_ONLY_ID, "direction": "lower"})
 
 
-def direction_only_metric(profile=TIDMAD_PROFILE) -> TidmadDenoisingMetric:
-    """:func:`direction_only_spec` bound to the shipped TIDMAD arithmetic."""
-    return TidmadDenoisingMetric(direction_only_spec(profile))
+class _FixtureMetric(EvaluationMetric):
+    def _compute(self, deliverables, /, **compute_kwargs):
+        del deliverables, compute_kwargs
+        return 0.0, None, ()
 
 
-def shipped_spec(profile=TIDMAD_PROFILE) -> MetricSpec:
-    """The shipped TIDMAD ``higher``-is-better spec, unmodified."""
-    return derive_tidmad_metric_spec(profile)
+def direction_only_metric(profile=None) -> EvaluationMetric:
+    """:func:`direction_only_spec` bound to inert fixture arithmetic."""
+    return _FixtureMetric(direction_only_spec(profile))
 
 
 def accuracy_like_spec(metric_id: str = "fixture_accuracy") -> MetricSpec:
@@ -64,6 +75,11 @@ def accuracy_like_spec(metric_id: str = "fixture_accuracy") -> MetricSpec:
         aggregation="mean_over_deliverables",
         scoreability=PresenceScoreabilityContract(),
     )
+
+
+def accuracy_like_metric(metric_id: str = "fixture_accuracy") -> EvaluationMetric:
+    """An inert metric handle for run-binding tests on a neutral scale."""
+    return _FixtureMetric(accuracy_like_spec(metric_id))
 
 
 def error_like_spec(metric_id: str = "fixture_mse") -> MetricSpec:

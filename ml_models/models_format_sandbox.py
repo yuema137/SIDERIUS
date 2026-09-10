@@ -845,15 +845,10 @@ class TrainConfig(BaseModel):
     Agent can optimize learning rate, optimizer type, and epochs.
     """
 
-    # F-SCANA-1 — the default an OMITTED LLM `lr` key resolves to is the
-    # paper-spec baseline value: TIDMAD train.py uses
-    # `torch.optim.Adam(..., lr=0.0005)` for every model, and
-    # `ml_models/legacy_baseline_configs.json` (the paper-spec source of
-    # truth) pins `lr: 5e-4` throughout. Pre-fix this default was 1e-4, so a
-    # plan that simply omitted the key departed 5x from spec THROUGH the
-    # validation gate. The collapse-recovery prompt's "reset to the
-    # known-working baseline: ... `lr=5e-4`" (agent/prompts.py) states the
-    # same value; a regression test pins both surfaces to the paper literal.
+    # The established compatibility default remains stable during repository
+    # separation. Scientific tasks may constrain or override it through their
+    # declared parameter rules; moving task-owned baseline artifacts must not
+    # silently change the generic schema's resolved value.
     lr: float = Field(default=5e-4, ge=1e-6, le=1e-1)
     epochs: int = Field(default=10, ge=1, le=100)
     # --- Add batch ---

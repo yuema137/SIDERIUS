@@ -28,6 +28,7 @@ actually invalidate anything".
 from __future__ import annotations
 
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -36,10 +37,11 @@ from execute_tools.health_checks.launch_policy import (
     validate_formal_launch,
 )
 from execute_tools.metric_order import MetricOrder
-from tests.helpers.metric_fixtures import shipped_spec
+from tests.helpers.metric_fixtures import accuracy_like_spec
 
-BLOCKING = "configs/health_checks.yaml"
-OBSERVE = "configs/health_checks_baseline_observe_mode.yaml"
+FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "health"
+BLOCKING = str(FIXTURES / "mixed_blocking.yaml")
+OBSERVE = str(FIXTURES / "mixed_observe_only.yaml")
 
 
 def _check(**overrides) -> None:
@@ -191,7 +193,7 @@ class TestTheDeclarationMustMatchTheConfig:
             _check(health_checks_config=OBSERVE)
         message = str(exc.value)
         assert "cannot invalidate" in message
-        assert "output_diversity_blocking" in message
+        assert "synthetic_stability_blocking" in message
 
     def test_observe_only_declared_over_a_blocking_config(self):
         """The other direction: an observe-only run must not be able to
@@ -201,9 +203,8 @@ class TestTheDeclarationMustMatchTheConfig:
         assert "still invalidate" in str(exc.value)
 
     def test_a_mixed_role_config_is_legal(self):
-        """Mixed roles are the NORMAL case — three blocking, three
-        observational. Only the blocking-role gates must enforce; the
-        observational ones continuing is correct, not a mismatch."""
+        """Mixed roles are the normal case. Only blocking-role gates enforce;
+        observational gates continuing is correct, not a mismatch."""
         _check()
 
     def test_a_role_less_config_cannot_be_declared_blocking(self, tmp_path):
@@ -218,7 +219,7 @@ class TestTheDeclarationMustMatchTheConfig:
         body = load_health_gates_config(BLOCKING).model_dump(mode="json")
         for gate in body["health_gates"]:
             gate.pop("gate_role", None)
-        body["health_gates"][0]["checks"][0]["config"]["min_unique_ratio"] = 0.123456
+        body["health_gates"][0]["checks"][0]["config"]["fixture_marker"] = 0.123456
         path = tmp_path / "unaudited.yaml"
         with open(path, "w", encoding="utf-8") as handle:
             yaml.safe_dump(body, handle, sort_keys=False)
@@ -353,7 +354,7 @@ class TestTheBootstrapIsNotRefused:
             skip_min_delta=0.0,
             bypass_min_delta=0.5,
             gates_enabled=True,
-            order=MetricOrder(shipped_spec()),
+            order=MetricOrder(accuracy_like_spec()),
         )
         assert reference == float("-inf")
         assert source == "negative_infinity_bootstrap"

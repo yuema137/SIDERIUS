@@ -1,25 +1,12 @@
-"""Which persisted experiment records are FORMAL, and what formal evidence exists.
+"""Classify persisted experiment records by trial or formal role.
 
-ONE authority for the frozen contract rule in
-``docs/campaign/stage_artifact_contract.md`` section 1 ("FORMAL round" row):
-a record is formal iff ``is_trial`` is ABSENT or ``False``.
+One framework authority interprets the persisted ``is_trial`` field. A record
+is formal when ``is_trial`` is absent or ``False``. Keeping the predicate here
+ensures manifests, result scanners, and operator views classify the same
+serialized record identically.
 
-The predicate used to live in ``sdsc_submission_scripts/gold_campaign_state.py``
-as ``_is_formal_role``. It moved here unchanged when a SECOND consumer appeared
-(the iteration manifest, F-SCANB-3): the campaign scanner and the manifest
-writer must answer "is this record formal?" the same way, and two copies of a
-three-case rule is exactly how the ``"is_trial" in rec`` variant — which
-discarded every real formal record — survived (#316 B2).
-
-``formal_evidence_of`` is the reporting half. An iteration that produced only
-trial rounds has no scientifically authoritative result, and until F-SCANB-3
-nothing in the manifest or the operator view said so: ``best_denoising_score``
-is ``top_record`` over ALL records, trial and formal mixed
-(``nodes/ml_hyperparameter_tune_agent/records.py``), and both the iteration
-status and the reported ``best_score`` were derived from it. This module gives
-that question a typed answer, computed over the SAME serialization the frozen
-winner rule reads — ``ExperimentRecord.model_dump()``, which materialises
-``is_trial: False`` onto every persisted formal record.
+``formal_evidence_of`` reports whether an iteration contains authoritative
+formal evidence without mixing trial-only scores into that answer.
 """
 
 from __future__ import annotations
@@ -43,37 +30,11 @@ class RecordRoleError(RuntimeError):
 
 
 def is_formal_role(record: Mapping[str, Any], where: str) -> bool:
-    """True iff ``record`` is a FORMAL record — ``is_trial`` absent OR ``False``.
+    """Return whether ``record`` has a formal persisted role.
 
-    The FROZEN contract rule (``docs/campaign/stage_artifact_contract.md``
-    section 1, "FORMAL round" row), as three cases:
-
-    ==================  ========
-    ``is_trial``        role
-    ==================  ========
-    ``True``            trial (excluded)
-    ``False``           FORMAL
-    key absent          FORMAL
-    ==================  ========
-
-    The superseded wording ("formal == ABSENCE of the ``is_trial`` key")
-    described the BUILDER's IN-MEMORY dicts, where the key is set only on
-    trial records. It does NOT describe the shape any consumer reads.
-    ``HyperparamTuningOutput.all_records: list[ExperimentRecord]``
-    re-validates every dict into the model, so ``model_dump()``
-    (``nodes/ml_hyperparameter_tune_agent/records.py``: ``model_validate``
-    -> ``model_dump`` -> ``publish_json_atomically``) MATERIALIZES the field
-    defaults ``is_trial: False`` and ``trial_portion: None`` onto EVERY
-    PERSISTED formal record. Under the absence test every real formal record
-    was discarded, so the Gold scanner's champion set was permanently empty —
-    and an empty champion set is silent, not loud: Stage 1 still exits 0 and
-    burns its whole horizon, and Stage 2 refuses all 16 units.
-
-    The falsy-tolerant test matches the two sibling readers that already got
-    this right — the ``BestTracks`` authority
-    (``nodes/ml_hyperparameter_tune_agent/policy.py``:
-    ``not r.get("is_trial", False)``) and Stage-3's ``_formal_role``
-    (``scripts/stage3/stage3_composed_best.py``, Q-S3-3).
+    ``True`` means trial and is excluded. ``False`` or an absent field means
+    formal. Any other value, or a formal-shaped record with ``trial_portion``,
+    is refused because production does not write that shape.
 
     Args:
         record: One persisted record, as a mapping.

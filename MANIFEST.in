@@ -1,0 +1,3 @@
+prune scripts
+prune agent_generated
+global-exclude __pycache__ *.py[cod]

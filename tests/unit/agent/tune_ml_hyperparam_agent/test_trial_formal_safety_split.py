@@ -1,9 +1,6 @@
-"""
-Wave-1A trial/formal safety-factor split (operator decision, 2026-07-24).
+"""Trial/Formal runtime safety-factor resolution.
 
-The Wave-1A diagnostic showed trial attempts running a systematic
-1.54-1.61x past stable verification under 2-way concurrency, so the
-production posture splits the §2.10 factor:
+A caller may declare different runtime safety factors for Trial and Formal:
 
     trial  attempts → 2.0   (--runtime_trial_safety_factor)
     formal attempts → 1.5   (legacy --runtime_safety_factor)
@@ -20,6 +17,7 @@ watchdog deadline provider against a synthetic sidecar.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -29,12 +27,19 @@ from core.sandbox_executor import _watchdog_deadline_provider
 from nodes.ml_hyperparameter_tune_agent import _build_runtime_policy
 from sdsc_submission_scripts.run_one_iteration import build_parser
 
-# The V18r relaunch posture flags, as emitted by launch_v18_wave1.sh.
-V18R_POSTURE_ARGV = [
+REPO_ROOT = Path(__file__).resolve().parents[4]
+QUICKSTART_MANIFEST = REPO_ROOT / "configs/task_composition/quickstart.yaml"
+
+# A complete caller-owned safety posture.
+CALLER_POSTURE_ARGV = [
     "--workspace",
-    "/tmp/v18r_ws",
+    "/tmp/qualification_workspace",
     "--run_name",
-    "v18r_loss_04_09",
+    "qualification_run",
+    "--task_composition",
+    str(QUICKSTART_MANIFEST),
+    "--data_dir",
+    "/tmp/qualification_data",
     "--runtime_watchdog",
     "--runtime_safety_factor",
     "1.5",
@@ -58,23 +63,29 @@ def _input_from_args(a) -> HyperparamTuningInput:
 
 @pytest.fixture
 def posture_input():
-    return _input_from_args(build_parser().parse_args(V18R_POSTURE_ARGV))
+    return _input_from_args(build_parser().parse_args(CALLER_POSTURE_ARGV))
 
 
 class TestPhaseResolution:
     def test_trial_uses_trial_factor(self, posture_input):
         policy = RuntimeControlPolicy(
             **_build_runtime_policy(
-                posture_input, chosen_time_budget=20.0, is_trial=True, base_dir="/tmp/v18r_ws"
+                posture_input,
+                chosen_time_budget=20.0,
+                is_trial=True,
+                base_dir="/tmp/qualification_workspace",
             )
         )
         assert policy.safety_factor == 2.0
-        assert policy.operator_budget_seconds is None  # trials stay record-only
+        assert policy.operator_budget_seconds == pytest.approx(1200.0)
 
     def test_formal_falls_back_to_legacy_factor(self, posture_input):
         policy = RuntimeControlPolicy(
             **_build_runtime_policy(
-                posture_input, chosen_time_budget=120.0, is_trial=False, base_dir="/tmp/v18r_ws"
+                posture_input,
+                chosen_time_budget=120.0,
+                is_trial=False,
+                base_dir="/tmp/qualification_workspace",
             )
         )
         assert policy.safety_factor == 1.5  # no formal-specific flag → legacy
@@ -89,7 +100,10 @@ class TestPhaseResolution:
             runtime_watchdog_floor_seconds=60.0,
         )
         policy_dict = _build_runtime_policy(
-            agent_input, chosen_time_budget=120.0, is_trial=False, base_dir="/tmp/v18r_ws"
+            agent_input,
+            chosen_time_budget=120.0,
+            is_trial=False,
+            base_dir="/tmp/qualification_workspace",
         )
         assert policy_dict["safety_factor"] == 1.25
 
@@ -100,7 +114,7 @@ class TestPhaseResolution:
                     posture_input,
                     chosen_time_budget=None,
                     is_trial=is_trial,
-                    base_dir="/tmp/v18r_ws",
+                    base_dir="/tmp/qualification_workspace",
                 )
             )
             assert policy.trial_safety_factor == 2.0
@@ -110,7 +124,18 @@ class TestPhaseResolution:
 class TestLegacyCompatibility:
     def test_legacy_caller_without_phase_flags_keeps_prior_behavior(self):
         a = build_parser().parse_args(
-            ["--workspace", "/tmp/w", "--run_name", "r", "--runtime_safety_factor", "1.5"]
+            [
+                "--workspace",
+                "/tmp/w",
+                "--run_name",
+                "r",
+                "--task_composition",
+                str(QUICKSTART_MANIFEST),
+                "--data_dir",
+                "/tmp/qualification_data",
+                "--runtime_safety_factor",
+                "1.5",
+            ]
         )
         assert a.runtime_trial_safety_factor is None
         assert a.runtime_formal_safety_factor is None

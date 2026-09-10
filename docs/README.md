@@ -81,15 +81,12 @@ Node contracts:
 [validator](../nodes/ml_code_validator_agent/ml_code_validator_agent.md) ·
 [tuner](../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md)
 
-## Example task packages
+## Framework example
 
-[TIDMAD](../examples/tidmad/README.md) ·
-[Oxford-IIIT Pet](../examples/oxford_iiit_pet/README.md) ·
-[DAVIS 2017](../examples/davis_future_prediction/README.md) ·
-[quickstart](../examples/quickstart/README.md)
-
-Each carries a `STATUS.md` declaring its maturity and a `PROVENANCE.md`
-recording its dataset source and licence.
+[Quickstart](../examples/quickstart/README.md) is the only shipped example
+package. It is a small synthetic specification of public framework contracts,
+not a scientific benchmark or default task. Real scientific tasks and their
+campaigns live in external consumer repositories.
 
 ## Design and decision history
 
@@ -105,8 +102,7 @@ landed — read the status markers.
 
 | document | topic |
 |---|---|
-| [`docs/audit/documentation_gap_audit.md`](audit/documentation_gap_audit.md) | the source-grounded audit this documentation system was built from |
-| [`docs/audit/unit_tests_rubric_audit.md`](audit/unit_tests_rubric_audit.md) | ⚠ point-in-time unit-test rubric audit (2026-05-25) |
+| [`docs/audit/`](audit/README.md) | archived point-in-time audits; evidence, not current behavior |
 | [`docs/development/claude_context_continuity.md`](development/claude_context_continuity.md) | how a coding session survives context compaction |
 | [`docs/testing/schema_tier_consolidation.md`](testing/schema_tier_consolidation.md) | evidence record for a schema-test consolidation |
 | [`tests/pseudo_data/README.md`](../tests/pseudo_data/README.md) | pseudo-mode fixtures for dual-mode tests |
@@ -114,6 +110,11 @@ landed — read the status markers.
 | [`advice/README.md`](../advice/README.md) | human advice JSON schema and injection points |
 | [`sdsc_submission_scripts/README.md`](../sdsc_submission_scripts/README.md) | chain launcher internals |
 | [`reports/`](../reports/) | frozen point-in-time run reports |
+
+`reports/` is an approved historical-provenance exception: it is ignored for
+new runtime output, excluded from distributions, and never consulted by
+framework execution. Existing tracked reports describe their named revisions;
+they are evidence, not current behavior or reusable task assets.
 
 ## Conventions
 

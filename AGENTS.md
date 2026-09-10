@@ -33,8 +33,10 @@ framework source.
 
 ## Environment, in one line
 
-Always use the project virtualenv (`.venv/bin/python`). The system `python3` on
-several machines is 3.8 and will fail on modern syntax.
+Run `uv sync --group dev --frozen` in the exact checkout, then use its
+`.venv/bin/python` for tests and campaigns. Never reuse another checkout's
+virtualenv, editable install, `site-packages`, or source through `PYTHONPATH`;
+the full binding rule lives in [`CLAUDE.md`](CLAUDE.md).
 
 ## Four things that are enforced, not aspirational
 

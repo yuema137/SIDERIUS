@@ -24,7 +24,7 @@ from core.runtime_control.observation_store import ObservationStore
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.steady_state import SteadyStateConfig
 from core.runtime_control.workload import ResolvedPhaseWorkload
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.two_family_profile import make_two_family_profile
 
 _OK = dict(
     is_trial_round=True,
@@ -83,6 +83,11 @@ class TestPolicyMatrix:
 _PARAMS = 100_000
 _SEG = 10_000
 _BATCH = 8
+PROFILE = make_two_family_profile(
+    num_files=1,
+    psd_segment_length=40_000,
+    segments_per_file=4,
+)
 _CONTEXT = {
     "precision": "float32",
     "optimizer_type": "adamw",
@@ -170,7 +175,7 @@ class TestWrapperStoreReuse:
                 data_dir=data_dir,
                 allow_store_reuse=True,
                 observation_store_root=store_root,
-                dataset_profile=TIDMAD_PROFILE,
+                dataset_profile=PROFILE,
             )
         result["_warmup_calls"] = len(warmup_calls)
         assert os.path.isdir(store_root) or seed_unit_ms is None

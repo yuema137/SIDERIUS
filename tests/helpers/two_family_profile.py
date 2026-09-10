@@ -1,17 +1,12 @@
-"""Synthetic TWO-FAMILY contrast profile for the Step-07a trainer tests.
+"""Synthetic two-family physical profile for trainer tests.
 
-A small Dataset Profile derived from ``TIDMAD_PROFILE`` by varying ONLY the
-dataset geometry / count (`num_files`, `psd_segment_length`,
-`segments_per_file`) — the Step-02 contrast-fixture pattern
-(`tests/unit/execute_tools/test_step02a_c6_contrast_rungs.py`) — with BOTH
-file families written to disk: ``abra_training_000i.h5`` and
-``abra_validation_000i.h5`` hold DISTINCT payloads, so an R3 observed on
-the validation family cannot coincide with an R2 observed on the training
-family by accident.
+A small Dataset Profile with both training and validation file families.
+Their payloads are distinct, so an R3 observed on the validation family cannot
+coincide with an R2 observed on the training family by accident.
 
-Honestly labelled a contrast-profile fixture, NOT Track B / Track C: it is
-TIDMAD-shaped (two parallel families, one index space), which is what the
-production trainer reads today.
+This is a framework fixture, not a scientific task: its neutral filenames,
+channels, geometry, and values exist only to exercise the legacy indexed-file
+execution contract while that contract remains supported.
 """
 
 from __future__ import annotations
@@ -23,12 +18,43 @@ import h5py
 import numpy as np
 
 from execute_tools.dataset_config import (
-    TIDMAD_PROFILE,
+    ChannelIdentity,
+    DatasetConfig,
     DatasetProfile,
+    ValueEncoding,
+    resolve_dataset_profile,
     tidmad_topology,
 )
 
 DEFAULT_SEG_SIZE = 1000
+
+
+def _base_profile() -> DatasetProfile:
+    dataset = DatasetConfig(
+        psd_segment_length=2000,
+        segments_per_file=4,
+        num_files=3,
+        sampling_frequency=1000.0,
+        training_file_pattern="training_{file_index:04d}.h5",
+        validation_file_pattern="validation_{file_index:04d}.h5",
+    )
+    channels = ChannelIdentity(input_channel="input", target_channel="target")
+    encoding = ValueEncoding(
+        storage_dtype="int8",
+        compute_dtype="int16",
+        value_offset=128,
+        num_classes=256,
+    )
+    return DatasetProfile(
+        partition_count=dataset.num_files,
+        topology={
+            "dataset": dataset.model_dump(),
+            "channels": channels.model_dump(),
+            "encoding": encoding.model_dump(),
+        },
+        anchor_selection_files=[0, 1, 2],
+        health_peek_files=[0, 1, 2],
+    )
 
 
 @dataclass(frozen=True)
@@ -64,8 +90,9 @@ def make_two_family_profile(
     num_files: int = 3,
     psd_segment_length: int = 2000,
     segments_per_file: int = 4,
+    sampling_frequency: float = 1000.0,
 ) -> DatasetProfile:
-    """``TIDMAD_PROFILE`` with only the dataset count / geometry varied.
+    """Build a neutral two-family profile with varied count and geometry.
 
     Built through ``model_validate`` (not ``model_copy``) so the result is
     exactly what the subprocess boundary reloads from JSON — a profile that
@@ -74,12 +101,13 @@ def make_two_family_profile(
     inside the smaller index space, as any bound task with ``num_files``
     files would declare them.
     """
-    payload = TIDMAD_PROFILE.to_wire()
+    payload = _base_profile().to_wire()
     payload["dataset"].update(
         {
             "psd_segment_length": psd_segment_length,
             "segments_per_file": segments_per_file,
             "num_files": num_files,
+            "sampling_frequency": sampling_frequency,
         }
     )
     payload["anchor_selection_files"] = list(range(min(num_files, 3)))
@@ -96,6 +124,24 @@ def _write_file(path: str, profile: DatasetProfile, n_samples: int, seed: int) -
         ts = f.create_group("timeseries")
         ts.create_group(ch.input_channel).create_dataset("timeseries", data=a)
         ts.create_group(ch.target_channel).create_dataset("timeseries", data=b)
+
+
+def write_bound_timeseries(
+    path: str | os.PathLike[str],
+    input_values: np.ndarray,
+    target_values: np.ndarray | None = None,
+) -> None:
+    """Write channels named by the explicitly bound synthetic profile."""
+    channels = tidmad_topology(resolve_dataset_profile()).channels
+    with h5py.File(path, "w") as handle:
+        timeseries = handle.create_group("timeseries")
+        timeseries.create_group(channels.input_channel).create_dataset(
+            "timeseries", data=input_values, chunks=True
+        )
+        if target_values is not None:
+            timeseries.create_group(channels.target_channel).create_dataset(
+                "timeseries", data=target_values, chunks=True
+            )
 
 
 def write_two_family_fixture(

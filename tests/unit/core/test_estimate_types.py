@@ -310,3 +310,6 @@ class TestAdapters:
             from_runtime_observation({"components": {}})
         with pytest.raises(ValueError):
             from_legacy_calibration_entry({"actual_minutes": 0})
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

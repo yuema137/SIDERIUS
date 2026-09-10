@@ -12,8 +12,8 @@
 # Doc    : docs/running_chain_test.md is the operator runbook.
 # ---------------------------------------------------------------------------
 # What lives here (and not in _chain_common.sh):
-#   * Python interpreter resolution (.venv > uv run > system python3) +
-#     version guard (>= 3.10) + env passthrough for child processes
+#   * exact-checkout virtualenv resolution + version guard (>= 3.10) +
+#     env passthrough for child processes
 #   * --auto_resume — query scripts/inspect_run_state.py for --next-iter
 #   * --force_fresh / stale-fresh safety guard
 #   * --start_iter manual pin + idempotency check
@@ -42,11 +42,13 @@
 #   --auto_resume        pick up where a partial chain left off (default ON)
 #   --no_auto_resume     force fresh start regardless of workspace state
 #   --start_iter N       manual pin (overrides auto-resume)
-#   --task_composition F  YAML task-composition manifest. Omitted = the legacy
-#                        un-composed run (byte-identical child argv). Supplying
-#                        it binds the task's data path, dataset profile, metric,
+#   --task_composition F  required YAML task-composition manifest;
+#                        binds the task's data path, dataset profile, metric,
 #                        declared secondaries, Health family and task config for
-#                        the whole run. Shipped: configs/task_composition/tidmad.yaml
+#                        the whole run. Shipped example: configs/task_composition/quickstart.yaml
+#   --workflow_parameter_rules JSON
+#                        optional workflow-owned exact/range/allowed/predicate
+#                        constraints using the task manifest's ParameterRules shape
 #
 # Usage examples:
 #
@@ -89,53 +91,28 @@ SLURM_SCRIPT="${SCRIPT_DIR}/submit_one_iteration.slurm"
 
 source "${SCRIPT_DIR}/_chain_common.sh"
 
-# Resolve the Python interpreter. Priority (canonical SIDERIUS dev setup
-# hardened in 13.D):
-#   1. activated venv ($VIRTUAL_ENV)         — operator-asserted env
-#   2. project-local ${PROJECT_DIR}/.venv    — the standard repo layout
-#   3. uv run python                          — lilab fallback when no .venv
-#   4. system python3                         — last resort, prominent warn
-# THE PRECEDENCE SELECTS AN INTERPRETER (dependencies), NOT A SOURCE TREE:
-# with an editable install the venv would otherwise also pick which
-# checkout's framework code executes (Lane F / F5). After resolution,
-# three guards run unconditionally:
+# Resolve the exact checkout's frozen virtualenv. Tests and campaigns share
+# one environment contract: ``uv sync --group dev --frozen`` creates
+# ``${PROJECT_DIR}/.venv`` and every Python child uses it. A foreign activated
+# environment, ``uv run`` fallback, system interpreter, or PYTHONPATH source
+# pin would make the reported checkout revision weaker than the executed
+# dependency/source identity, so none is an execution fallback.
+# Three guards run unconditionally:
 #   - enforce_py_version_guard: SIDERIUS requires Python 3.10+
 #   - setup_py_env_passthrough: ensure subprocesses inherit the same venv
-#   - enforce_source_tree_authority: framework source is PYTHONPATH-pinned
-#     to THIS checkout, verified by a neutral-cwd import probe, and the
-#     launch is REFUSED if the pin does not hold — foreign source never
-#     executes silently.
-# Sets PY_CMD (array) + PY_SOURCE (label) + PY_VENV_ROOT (path or empty).
-# PY_VENV_ROOT empty means "no venv to passthrough" (uv or system python3).
+#   - enforce_source_tree_authority: remove ambient PYTHONPATH and verify the
+#     installed framework source from a neutral working directory.
+# Sets PY_CMD (array) + PY_SOURCE (label) + PY_VENV_ROOT (path).
 resolve_py_cmd() {
-    PY_VENV_ROOT=""
-    if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then
-        PY_CMD=("$VIRTUAL_ENV/bin/python")
-        PY_SOURCE="\$VIRTUAL_ENV ($VIRTUAL_ENV)"
-        PY_VENV_ROOT="$VIRTUAL_ENV"
-    elif [ -x "${PROJECT_DIR}/.venv/bin/python" ]; then
-        PY_CMD=("${PROJECT_DIR}/.venv/bin/python")
-        PY_SOURCE="${PROJECT_DIR}/.venv"
-        PY_VENV_ROOT="${PROJECT_DIR}/.venv"
-    elif command -v uv >/dev/null 2>&1; then
-        PY_CMD=(uv run --project "$PROJECT_DIR" python)
-        PY_SOURCE="uv run"
-        # uv injects its own env per invocation; we leave PY_VENV_ROOT empty.
-    elif command -v python3 >/dev/null 2>&1; then
-        PY_CMD=(python3)
-        PY_SOURCE="system python3 (NO venv detected — reproducibility risk)"
-        echo "############################################################" >&2
-        echo "WARNING: falling back to SYSTEM python3" >&2
-        echo "  No \$VIRTUAL_ENV, no ${PROJECT_DIR}/.venv, no 'uv' available." >&2
-        echo "  System python may be stale or missing required packages." >&2
-        echo "  This path is reproducibility-hostile — fix by:" >&2
-        echo "    cd ${PROJECT_DIR} && python3.10 -m venv .venv" >&2
-        echo "    .venv/bin/pip install -e ." >&2
-        echo "############################################################" >&2
-    else
-        echo "ERROR: no python interpreter found (no \$VIRTUAL_ENV, no .venv, no uv, no python3)" >&2
+    PY_VENV_ROOT="${PROJECT_DIR}/.venv"
+    if [ ! -x "$PY_VENV_ROOT/bin/python" ]; then
+        echo "ERROR: exact-checkout virtualenv is missing: $PY_VENV_ROOT" >&2
+        echo "  Build it from the committed lock before tests or campaigns:" >&2
+        echo "    cd $PROJECT_DIR && uv sync --group dev --frozen" >&2
         exit 1
     fi
+    PY_CMD=("$PY_VENV_ROOT/bin/python")
+    PY_SOURCE="exact checkout ($PY_VENV_ROOT)"
 }
 
 # Enforce SIDERIUS's Python ≥ 3.10 floor. Runs the resolved interpreter
@@ -159,10 +136,6 @@ enforce_py_version_guard() {
 # parent shell never activated it, VIRTUAL_ENV is unset and PATH won't
 # have .venv/bin first — fix that here.
 setup_py_env_passthrough() {
-    if [ -z "$PY_VENV_ROOT" ]; then
-        # uv-run or system python3 paths — nothing to passthrough.
-        return 0
-    fi
     export VIRTUAL_ENV="$PY_VENV_ROOT"
     case ":$PATH:" in
         *":$PY_VENV_ROOT/bin:"*) ;;  # already first or present; idempotent
@@ -170,34 +143,12 @@ setup_py_env_passthrough() {
     esac
 }
 
-# Lane F / F5 (fresh-user witness, 2026-08-26) — SOURCE-TREE AUTHORITY.
-# resolve_py_cmd selects an INTERPRETER; with an editable install (the
-# layout the quickstart creates) the venv's .pth finder ALSO silently
-# selects which checkout's framework source executes — launching THIS
-# checkout's script with another checkout's venv active ran the other
-# tree's core/, workflows/ and execute_tools/ with only a "Python : ..."
-# line printed. CLAUDE.md's portability rule names the class: a green run
-# is meaningful only if it executes the code from the checkout it claims
-# to. The repair (not a refusal — the shared-venv worktree workflow is
-# legitimate and common): PIN framework source to THIS checkout via
-# PYTHONPATH (the established E1 pattern the band launchers use), then
-# VERIFY the pin with the neutral-cwd import probe — a `-c` probe is
-# blind because cwd itself sits on sys.path — and REFUSE the launch if
-# the pin did not hold. The venv keeps serving DEPENDENCIES either way.
+# SOURCE-TREE AUTHORITY. The exact checkout's uv-managed editable install must
+# resolve back to that same checkout without a source-path override. The probe
+# runs from a neutral directory because invoking Python from the repository
+# root would put that root on ``sys.path`` and make the check self-fulfilling.
 enforce_source_tree_authority() {
-    export PYTHONPATH="${PROJECT_DIR}${PYTHONPATH:+:$PYTHONPATH}"
-    # NOTE the premise carefully: a dry-run is NOT execution-free —
-    # resolve_start_iter runs scripts/inspect_run_state.py through PY_CMD
-    # whenever auto-resume meets an existing workspace, dry-run included.
-    # So the probe ALWAYS runs and FOREIGN resolution ALWAYS refuses; what
-    # DRY_RUN relaxes is only the MISSING-DEPENDENCIES class (the
-    # quickstart's published pre-venv dry-run flow), where nothing can
-    # execute silently: any framework call in a dep-less env fails loudly.
-    if [ -n "$PY_VENV_ROOT" ] && [[ "$PY_VENV_ROOT" != "$PROJECT_DIR"/* ]]; then
-        echo "[source-authority] venv lives OUTSIDE this checkout ($PY_VENV_ROOT):" >&2
-        echo "  its packages serve dependencies; framework SOURCE is pinned to" >&2
-        echo "  this checkout via PYTHONPATH and verified below." >&2
-    fi
+    unset PYTHONPATH
     local probe_src="${SCRIPT_DIR}/_import_resolution_probe.py"
     if [ ! -f "$probe_src" ]; then
         echo "ERROR: source-authority probe missing: $probe_src" >&2
@@ -212,40 +163,27 @@ enforce_source_tree_authority() {
     echo "$probe_out" >&2
     # STRICT cause-keying on the probe's EXIT-CODE CONTRACT (its docstring):
     # 0 verified · 4 foreign · 3 deps-unavailable · anything else
-    # UNCLASSIFIED. The DRY_RUN relaxation applies to exit 3 and NOTHING
-    # else — an unclassified failure fails CLOSED even on a dry-run,
-    # because "not provably foreign" is not "provably safe".
+    # UNCLASSIFIED. Every non-zero result fails closed, dry-run included.
     case "$probe_rc" in
         0)
-            echo "[source-authority] framework source: $PROJECT_DIR (PYTHONPATH-pinned, probe-verified)" >&2
+            echo "[source-authority] framework source: $PROJECT_DIR (exact-venv, probe-verified)" >&2
             return 0
             ;;
         4)
             echo "ERROR: SOURCE-TREE AUTHORITY REFUSED — the resolved interpreter imports" >&2
-            echo "  framework code from OUTSIDE this checkout even after the PYTHONPATH pin" >&2
-            echo "  (probe output above names the foreign path). Refused on dry-runs too:" >&2
-            echo "  auto-resume executes the inspector through this interpreter." >&2
+            echo "  framework code from OUTSIDE this checkout (probe output above names" >&2
+            echo "  the foreign path). Refused on dry-runs too: auto-resume may execute" >&2
+            echo "  the inspector through this interpreter." >&2
             echo "  Interpreter: ${PY_CMD[*]}  (source: $PY_SOURCE)" >&2
             echo "  This checkout: $PROJECT_DIR" >&2
-            echo "  Fix: deactivate the foreign venv, or create this checkout's own venv" >&2
-            echo "  (cd $PROJECT_DIR && python3 -m venv .venv && .venv/bin/pip install -e .)." >&2
+            echo "  Fix: cd $PROJECT_DIR && uv sync --group dev --frozen" >&2
             ;;
         3)
-            if [ "${DRY_RUN:-0}" -eq 1 ]; then
-                # The quickstart's pre-venv dry-run: nothing can execute
-                # SILENTLY in a dep-less env — a framework call fails
-                # loudly, never foreign.
-                echo "[source-authority] dry-run: interpreter lacks framework deps (probe exit 3);" >&2
-                echo "  nothing executes silently; full verification applies at the real launch." >&2
-                echo "  PYTHONPATH pinned." >&2
-                return 0
-            fi
             echo "ERROR: LAUNCH ENVIRONMENT REFUSED — the resolved interpreter cannot" >&2
             echo "  import the SIDERIUS framework (probe exit 3: missing dependencies," >&2
             echo "  not a foreign checkout)." >&2
             echo "  Interpreter: ${PY_CMD[*]}  (source: $PY_SOURCE)" >&2
-            echo "  Fix: create this checkout's venv and install dependencies:" >&2
-            echo "    cd $PROJECT_DIR && python3 -m venv .venv && .venv/bin/pip install -e ." >&2
+            echo "  Fix: cd $PROJECT_DIR && uv sync --group dev --frozen" >&2
             ;;
         *)
             echo "ERROR: SOURCE-AUTHORITY PROBE UNCLASSIFIED (exit $probe_rc) — refusing," >&2
@@ -331,6 +269,14 @@ SUBMITTED_JOBS=()
 
 parse_chain_args "$@"
 load_advice_file
+if [ -z "$TASK_COMPOSITION" ]; then
+    echo "Required: --task_composition FILE" >&2
+    exit 1
+fi
+if [ -z "$DATA_DIR" ]; then
+    echo "Required: --data_dir DIRECTORY" >&2
+    exit 1
+fi
 
 if [ -z "$MODE" ]; then
     echo "Required: --mode {lilab,sdsc}" >&2

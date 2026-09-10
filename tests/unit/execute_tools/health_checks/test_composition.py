@@ -6,11 +6,8 @@ step_08_health_check_task_profile/pr_08b_extension_architecture.md`` §3.6,
 
 Defect classes owned here:
 
-* **A silent change to every existing workspace's pin.** The effective
-  config's body sha is workspace-immutable and fail-closed on mismatch, so
-  adding even an empty key to the default body would make every existing
-  workspace refuse to resume for no scientific reason. The parity test
-  compares against a sha CAPTURED BEFORE this commit, not one read back.
+* **An artifact pin that does not describe the written file.** The effective
+  config's body sha is workspace-immutable and fail-closed on mismatch.
 * **A plugin edited in place under an unchanged config.** If plugin bytes
   were recorded only in the unhashed header, the same config with different
   code would resume happily and evaluate different gates.
@@ -27,7 +24,6 @@ Defect classes owned here:
 from __future__ import annotations
 
 import hashlib
-import json
 import textwrap
 from pathlib import Path
 
@@ -36,8 +32,6 @@ import yaml
 
 from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks._composition import (
-    VALUE_SCALE_PARAMETER,
-    VALUE_SCALE_UNIT_PARAMETER,
     HealthBindingState,
     HealthCompositionError,
     body_markers,
@@ -55,23 +49,6 @@ from execute_tools.health_checks.config import (
     materialize_effective_config,
     read_effective_config_body_sha,
 )
-
-PRE_C5_DEFAULT_BODY_SHA = "c933bceeb04a06df4c3e06ecbbe3ae4aa9eb5594ecf17e0d9b511e571784855d"
-"""State A's body sha at the C4 head, before the C5 ownership migration.
-
-It is now the sha the artifact must NO LONGER have: C5 moved TIDMAD's roster
-into its own config, so the composed document legitimately differs. Q-08b-2
-authorises that move explicitly — "do not distort serialization to preserve
-the old one" — and requires the delta to be recorded and parity measured on
-EXECUTED SEMANTICS instead, which
-:class:`TestTidmadOwnershipMigrationPreservesExecutedSemantics` does against a
-golden captured before the migration."""
-
-PRE_C5_EXECUTED_SEMANTICS = (
-    Path(__file__).resolve().parent / "goldens" / "pre_c5_tidmad_executed_semantics.json"
-)
-"""The six gates as the framework YAML carried them at the C4 head."""
-
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -141,91 +118,15 @@ def _empty_framework_yaml(tmp_path: Path) -> str:
     return str(path)
 
 
-class TestTidmadOwnershipMigrationPreservesExecutedSemantics:
-    """C5's parity criterion — the EXECUTED sequence, never the bytes.
+class TestUndeclaredTaskHealthIsEmpty:
+    """The framework must not select scientific Health checks for a caller."""
 
-    Q-08b-2 authorised the composed artifact's sha to move, so byte identity
-    would be the wrong question and preserving it would mean distorting the
-    serialization. What must not move is what the run actually does: which
-    gates fire, in which order, with which roles, actions, short-circuit,
-    check names, thresholds and parameters.
-    """
+    def test_omitted_binding_materializes_no_gates(self, tmp_path):
+        path, sha = materialize_effective_config(None, None, str(tmp_path))
+        body = yaml.safe_load(Path(path).read_text())
 
-    @staticmethod
-    def _composed_gates(tmp_path) -> list[dict]:
-        path, _ = materialize_effective_config(None, None, str(tmp_path))
-        return yaml.safe_load(Path(path).read_text())["health_gates"]
-
-    def test_the_sha_moved_and_the_delta_is_the_recorded_one(self, tmp_path):
-        """The move is asserted, not merely tolerated.
-
-        A test that simply stopped checking the sha would also pass if
-        composition silently reverted to reading the framework roster.
-        """
-        _, sha = materialize_effective_config(None, None, str(tmp_path))
-
-        assert sha != PRE_C5_DEFAULT_BODY_SHA
-
-    def test_every_gate_field_that_decides_behaviour_is_unchanged(self, tmp_path):
-        """Field-by-field against a golden captured BEFORE the migration."""
-        expected = json.loads(PRE_C5_EXECUTED_SEMANTICS.read_text())["gates"]
-        actual = self._composed_gates(tmp_path)
-
-        assert [g["id"] for g in actual] == [g["id"] for g in expected], "gate order"
-        for want, got in zip(expected, actual, strict=True):
-            assert got["gate_role"] == want["gate_role"], want["id"]
-            assert got["after_round"] == want["after_round"], want["id"]
-            assert got["short_circuit"] == want["short_circuit"], want["id"]
-            assert got["on_pass"]["action"] == want["on_pass"], want["id"]
-            assert got["on_fail"]["action"] == want["on_fail"], want["id"]
-            assert [c["name"] for c in got["checks"]] == [c["name"] for c in want["checks"]], want[
-                "id"
-            ]
-
-    def test_every_threshold_and_parameter_survives_the_move(self, tmp_path):
-        """Only the injected value scale may be new; nothing may change or vanish.
-
-        This is the assertion that would catch a threshold mistyped during
-        the migration — the single highest risk in Step 08 (R-08b-1).
-
-        ONE declared value delta, asserted rather than tolerated (the C2
-        flip, operator-frozen 2026-08-26): blocking ``aggregation`` moved
-        ``any_pass`` → ``all_pass``. The golden stays the honest pre-C5
-        capture, so the delta is pinned HERE — the golden must still say
-        ``any_pass`` and the composed config must now say ``all_pass``;
-        any other movement of the key, in either file, stays red.
-        """
-        expected = json.loads(PRE_C5_EXECUTED_SEMANTICS.read_text())["gates"]
-        actual = self._composed_gates(tmp_path)
-        injected = {VALUE_SCALE_PARAMETER, VALUE_SCALE_UNIT_PARAMETER}
-
-        for want, got in zip(expected, actual, strict=True):
-            before = want["checks"][0]["config"]
-            after = got["checks"][0]["config"]
-            assert set(after) - set(before) <= injected, want["id"]
-            assert not set(before) - set(after), f"{want['id']}: keys lost"
-            for key, value in before.items():
-                if key == "aggregation":
-                    assert value == "any_pass", f"{want['id']}: golden edited"
-                    assert after[key] == "all_pass", f"{want['id']}: C2 flip"
-                    continue
-                assert after[key] == value, f"{want['id']}: {key}"
-
-    def test_the_scale_reaches_exactly_the_checks_that_declare_it(self, tmp_path):
-        """The factor is delivered by DECLARATION, never by check name."""
-        scale_consuming = {
-            "output_std",
-            "per_file_output_std",
-            "pearson_dispersion",
-            "spectral_peak_ratio",
-        }
-        for gate in self._composed_gates(tmp_path):
-            check = gate["checks"][0]
-            has_scale = VALUE_SCALE_PARAMETER in check["config"]
-            assert has_scale is (check["name"] in scale_consuming), check["name"]
-            if has_scale:
-                assert check["config"][VALUE_SCALE_PARAMETER] == 40.0 / 128.0
-                assert check["config"][VALUE_SCALE_UNIT_PARAMETER] == "mV"
+        assert body["health_gates"] == []
+        assert read_effective_config_body_sha(path) == sha
 
     def test_the_framework_config_carries_no_task_identity(self):
         """The forbidden failure mode, asserted on the shipped files.
@@ -267,18 +168,6 @@ class TestTidmadOwnershipMigrationPreservesExecutedSemantics:
                     offenders.append(f"{source.name}: 40.0 / 128.0")
 
         assert offenders == [], offenders
-
-    def test_the_task_config_declares_the_scale_exactly_once(self):
-        """And the number is the one the four checks used to hold."""
-        import yaml as _yaml
-
-        from execute_tools.health_checks._composition import (
-            LEGACY_DEFAULT_TASK_HEALTH_CONFIG,
-        )
-
-        body = _yaml.safe_load((REPO_ROOT / LEGACY_DEFAULT_TASK_HEALTH_CONFIG).read_text())
-
-        assert body["value_scale"] == {"unit": "mV", "units_per_sample": 40.0 / 128.0}
 
     def test_the_pinned_sha_describes_the_file_the_run_reads(self, tmp_path):
         """Re-read and re-hash the artifact rather than trusting the return.
@@ -563,6 +452,42 @@ class TestPluginBytesAreInThePinnedIdentity:
 
         assert str(tmp_path) not in body
 
+    def test_rematerializing_an_effective_config_preserves_the_plugin_pin(
+        self, tmp_path, clean_registry
+    ):
+        """A child workspace must retain the chain's resolved plugin identity."""
+        config_path = _task_package(tmp_path / "pkg")
+        first_path, first_sha = materialize_effective_config(
+            _empty_framework_yaml(tmp_path),
+            None,
+            str(tmp_path / "chain"),
+            task_health_binding=str(config_path),
+        )
+
+        _plugin_binding.reset_run_scope()
+        second_path, second_sha = materialize_effective_config(
+            first_path,
+            None,
+            str(tmp_path / "child"),
+            task_health_binding=str(config_path),
+        )
+
+        assert second_sha == first_sha
+        assert (
+            yaml.safe_load(Path(second_path).read_text())["resolved_plugins"]
+            == (yaml.safe_load(Path(first_path).read_text())["resolved_plugins"])
+        )
+
+        none_path, _ = materialize_effective_config(
+            first_path,
+            None,
+            str(tmp_path / "explicit_none"),
+            task_health_binding=HealthBindingState.EXPLICIT_NONE,
+        )
+        none_body = yaml.safe_load(Path(none_path).read_text())
+        assert none_body["task_health_binding"] == "explicit_none"
+        assert "resolved_plugins" not in none_body
+
     def test_mutated_plugin_bytes_change_the_pin_and_fail_a_resume_closed(
         self, tmp_path, clean_registry
     ):
@@ -683,8 +608,8 @@ class TestPluginBytesAreInThePinnedIdentity:
 class TestExistingReadersStillWork:
     """The composed artifact must not break its downstream consumers."""
 
-    def test_the_wave_summary_reader_shape_survives(self, tmp_path, clean_registry):
-        """``scripts/v18_wave_summary.py`` walks health_gates → checks → config."""
+    def test_materialized_check_config_shape_survives(self, tmp_path, clean_registry):
+        """Materialized checks retain their declared config payload."""
         config_path = _task_package(tmp_path / "pkg")
         path, _ = materialize_effective_config(
             _empty_framework_yaml(tmp_path),

@@ -25,6 +25,7 @@ Tests cover:
 import pytest
 
 from agent.schemas.hyperparam_tuning import ExpertAdvice, HyperparamTuningInput
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import (
     database_validated_model,
@@ -110,6 +111,21 @@ class TestLocalValidatedModel:
         assert "VRAM < 8 GB" in result.expert_advice.constraints
         assert result.storage.local.workspace == "/tmp/tune_test"
         assert result.storage.local.run_name == "r2"
+
+    def test_workflow_parameter_rules_cross_the_protocol_boundary(
+        self, validator_output, proposal_output, storage
+    ):
+        """Catches validated workflow rules being dropped before tuner planning."""
+        rules = ParameterRules.model_validate({"model_config.segmentation_size": {"exact": 40_000}})
+
+        result = local_validated_model(
+            validator_output,
+            proposal_output,
+            storage,
+            workflow_parameter_rules=rules,
+        )
+
+        assert result.workflow_parameter_rules == rules
 
     @pytest.mark.parametrize(
         "attr, expected_default",
@@ -229,6 +245,27 @@ class TestLocalValidatedModel:
         assert typed.bypass_formal_time_budget_minutes == 200.0
         omitted = local_validated_model(validator_output, proposal_output, storage)
         assert omitted.bypass_formal_time_budget_minutes is None
+
+    def test_trial_and_formal_time_authorities_do_not_collapse_in_protocol(
+        self,
+        validator_output,
+        proposal_output,
+        storage,
+    ):
+        """The protocol must preserve two independent role decisions.
+
+        This fails if a single shared field or a dropped kwarg makes Trial's
+        forecast selection overwrite Formal's measured selection.
+        """
+        result = local_validated_model(
+            validator_output,
+            proposal_output,
+            storage,
+            trial_time_admission_source="forecast",
+            formal_time_admission_source="measured",
+        )
+        assert result.trial_time_admission_source == "forecast"
+        assert result.formal_time_admission_source == "measured"
 
     def test_trial_mode_snapshot_kwargs_fan_out(
         self,
@@ -514,6 +551,27 @@ class TestVramBudgetFanOut:
         result = local_validated_model(validator_output, proposal_output, storage)
         assert result.trial_vram_budget_gb is None
         assert result.formal_vram_budget_gb is None
+
+    def test_preflight_watchdogs_are_independent_workflow_values(
+        self, validator_output, proposal_output, storage
+    ):
+        """A workflow override must survive without changing other budgets."""
+        result = local_validated_model(
+            validator_output,
+            proposal_output,
+            storage,
+            vram_probe_step_timeout_seconds=321.0,
+            vram_preflight_total_timeout_seconds=987.0,
+            vram_preflight_host_memory_limit_gb=42.5,
+        )
+
+        assert result.vram_probe_step_timeout_seconds == 321.0
+        assert result.vram_preflight_total_timeout_seconds == 987.0
+        assert result.vram_preflight_host_memory_limit_gb == 42.5
+        assert result.trial_vram_budget_gb is None
+        assert result.formal_vram_budget_gb is None
+        assert result.trial_time_budget_minutes is None
+        assert result.formal_time_budget_minutes is None
 
 
 # ---------------------------------------------------------------------------

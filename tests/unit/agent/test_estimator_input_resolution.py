@@ -30,9 +30,14 @@ from agent.skills.training_skill.estimator import (
     resolve_model_field,
     resolve_train_field,
 )
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.two_family_profile import make_two_family_profile
 
 _UNDECLARED = "b1_generated_model_declaring_nothing"
+_PROFILE = make_two_family_profile(
+    num_files=20,
+    psd_segment_length=1_600_000,
+    segments_per_file=20,
+)
 
 
 class TestResolutionOrder:
@@ -229,7 +234,7 @@ class TestPhaseMarginsDifferDeliberately:
                 sample,
                 ms_per_step=1.0,
                 num_params=10**6,
-                dataset_profile=TIDMAD_PROFILE,
+                dataset_profile=_PROFILE,
             )
             # Both resolved the same field; recover each one's view of it.
             declared = resolve_model_field(mt, {}, "segmentation_size", safety_margin=-1)
@@ -353,7 +358,7 @@ class TestProductionReachability:
             sample_set={str(i): list(range(20)) for i in range(20)},
             train_portion=1.0,
             time_budget_minutes=60.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
 
     def test_an_absent_segmentation_size_is_priced_as_the_declaration(self, monkeypatch):
@@ -373,7 +378,7 @@ class TestProductionReachability:
         Asserted on the **step count**, not on estimated minutes. In the
         static path the two cancel exactly — ``total_steps ∝ 1/seg`` and
         ``_static_ms_per_step ∝ seg`` — so 40000 and 1000 yield the same
-        minutes (100,000 × 120 ms == 4,000,000 × 3 ms) while describing
+        minutes (16,000 × 120 ms == 640,000 × 3 ms) while describing
         completely different runs. That cancellation is precisely why
         §0.6.3 found this site neutral rather than optimistic, and why an
         assertion on minutes here would have passed for the wrong reason.
@@ -387,8 +392,8 @@ class TestProductionReachability:
             absent["breakdown"]["total_train_steps"]
             != old_literal["breakdown"]["total_train_steps"]
         )
-        assert absent["breakdown"]["total_train_steps"] == 100_000
-        assert old_literal["breakdown"]["total_train_steps"] == 4_000_000
+        assert absent["breakdown"]["total_train_steps"] == 16_000
+        assert old_literal["breakdown"]["total_train_steps"] == 640_000
 
     def test_the_store_calibration_key_is_built_from_the_declaration(self, monkeypatch):
         """Added after mutation **M9** survived.
@@ -429,7 +434,7 @@ class TestProductionReachability:
             time_budget_minutes=60.0,
             allow_store_reuse=True,
             observation_store_root="/nonexistent-store-root-for-this-test",
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
 
         declared = get_config_class("rnn").model_fields["segmentation_size"].default
@@ -468,18 +473,18 @@ class TestProductionReachability:
             num_params=1_000_000,
             gpu_name=None,
         )
-        ts._store_reuse_decision(train_config={"batch_size": 1}, **common, profile=TIDMAD_PROFILE)
+        ts._store_reuse_decision(train_config={"batch_size": 1}, **common, profile=_PROFILE)
         absent = seen.get("n_steps")
 
         seen.clear()
         ts._store_reuse_decision(
-            train_config={"batch_size": 1, "epochs": 10}, **common, profile=TIDMAD_PROFILE
+            train_config={"batch_size": 1, "epochs": 10}, **common, profile=_PROFILE
         )
         ten = seen.get("n_steps")
 
         seen.clear()
         ts._store_reuse_decision(
-            train_config={"batch_size": 1, "epochs": 1}, **common, profile=TIDMAD_PROFILE
+            train_config={"batch_size": 1, "epochs": 1}, **common, profile=_PROFILE
         )
         one = seen.get("n_steps")
 
@@ -514,7 +519,7 @@ class TestProductionReachability:
             sample_set={str(i): list(range(20)) for i in range(20)},
             train_portion=1.0,
             time_budget_minutes=60.0,
-            dataset_profile=TIDMAD_PROFILE,
+            dataset_profile=_PROFILE,
         )
         banner = capsys.readouterr().out
         assert "epochs=10" in banner
@@ -543,7 +548,7 @@ class TestProductionReachability:
                 sample_set={str(i): list(range(20)) for i in range(20)},
                 train_portion=1.0,
                 time_budget_minutes=60.0,
-                dataset_profile=TIDMAD_PROFILE,
+                dataset_profile=_PROFILE,
             )
 
         absent = run({"batch_size": 1, "device": "cpu"})

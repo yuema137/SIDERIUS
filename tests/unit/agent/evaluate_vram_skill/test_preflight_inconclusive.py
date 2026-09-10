@@ -22,8 +22,6 @@ Two invariants are asserted throughout:
 
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 
 import pytest
@@ -179,6 +177,28 @@ class TestAgentFacingText:
         assert "nn.Module.forward" not in message
         assert "not a reason to reduce" in message
 
+    def test_the_timeout_record_names_the_operation_that_expired(self, monkeypatch):
+        """Training and inference timeouts must not both claim inspection."""
+        from agent.skills.evaluate_vram_skill import wrapper
+
+        error = wrapper.ForwardPassTimeoutError(
+            "timed out",
+            operation="inference_probe",
+        )
+        monkeypatch.setattr(
+            wrapper, "_build_model", lambda *_args, **_kwargs: (_ for _ in ()).throw(error)
+        )
+
+        result = wrapper.run_skill(
+            None,
+            model_type="synthetic_model",
+            model_config={},
+            train_config={},
+            loss_config={},
+        )
+
+        assert result["timeout_record"]["operation"] == "inference_probe"
+
 
 class TestPromptSafety:
     """An inconclusive attempt must not become a silent size ceiling."""
@@ -238,39 +258,3 @@ class TestFailureClassification:
 # ValidationError. That is a `Literal` refusing an unknown string, which
 # Pydantic enforces by declaration; per CLAUDE.md's test-justification rule
 # it is not something pytest should re-check.
-
-
-class TestFormalAdviceLimits:
-    ADVICE = (
-        REPO_ROOT / "advice/workflow/v18r_arch_explorer.json",
-        REPO_ROOT / "advice/workflow/v18r_loss_explorer.json",
-    )
-
-    @pytest.mark.parametrize("path", ADVICE, ids=lambda p: p.name)
-    def test_no_stale_16_gb_language(self, path):
-        assert "16 GB" not in path.read_text()
-
-    @pytest.mark.parametrize("path", ADVICE, ids=lambda p: p.name)
-    def test_states_the_12_gib_hard_cap(self, path):
-        body = path.read_text()
-        assert "12 GiB" in body
-        assert re.search(r"12 GiB (per-chain )?(HARD CAP|hard cap)", body)
-
-    @pytest.mark.parametrize("path", ADVICE, ids=lambda p: p.name)
-    def test_keeps_the_fcnet_reference_with_the_measured_peak(self, path):
-        body = path.read_text()
-        assert "323" in body
-        assert "6.04 GiB" in body
-
-    @pytest.mark.parametrize("path", ADVICE, ids=lambda p: p.name)
-    def test_encourages_the_10m_to_100m_range_without_mandating_300m(self, path):
-        body = path.read_text()
-        assert "10M-100M" in body
-        assert "must be 323M" not in body
-        assert "minimum parameter count" not in body
-
-    @pytest.mark.parametrize("path", ADVICE, ids=lambda p: p.name)
-    def test_the_advice_is_still_valid_json_with_the_expected_sections(self, path):
-        d = json.loads(path.read_text())
-        assert set(d) == {"mindset", "propose", "implement", "tune", "validate"}
-        assert all(isinstance(v, list) and v for v in d.values())

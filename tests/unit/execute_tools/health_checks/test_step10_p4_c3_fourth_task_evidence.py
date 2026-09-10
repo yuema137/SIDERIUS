@@ -25,7 +25,6 @@ from __future__ import annotations
 import re
 import textwrap
 from pathlib import Path
-from typing import ClassVar
 
 import pytest
 import yaml
@@ -269,47 +268,3 @@ class TestFourthTaskGetsCompleteEvidence:
         assert offenders == [], "fixture identifiers leaked into production:\n  " + "\n  ".join(
             offenders
         )
-
-
-class TestThreeTaskEvidenceCompleteness:
-    """TIDMAD, Pets and DAVIS through ONE evidence path — same mechanism,
-    different declarations, no task-name branch anywhere."""
-
-    PETS = REPO_ROOT / "examples" / "oxford_iiit_pet" / "declared" / "task_health.yaml"
-    DAVIS = REPO_ROOT / "examples" / "davis_future_prediction" / "declared" / "task_health.yaml"
-
-    #: Every gate that declares a threshold now renders a complete row. The
-    #: three TIDMAD recording gates are absent BY DESIGN and asserted
-    #: separately in the C0 baseline.
-    EXPECTED_METRICS: ClassVar[dict[str, str]] = {
-        "output_diversity_blocking": "n_unique_int8_values",
-        "output_std_blocking": "output_std_mv",
-        "amplitude_collapse_blocking": "dominant_mode_fraction",
-        "pets_distinct_symbols_blocking": "distinct_symbols",
-        "pets_dominant_fraction_blocking": "dominant_fraction",
-        "davis_dispersion_blocking": "dispersion",
-    }
-
-    def _rows(self, binding):
-        from tests.unit.execute_tools.health_checks.test_step10_p4_c0_evidence_baseline import (
-            _persist_every_gate,
-        )
-
-        return {
-            gate_id: persisted.threshold
-            for gate_id, persisted in _persist_every_gate(binding).items()
-        }
-
-    def test_every_declaring_gate_across_three_tasks_renders_a_complete_row(self):
-        rows: dict[str, dict | None] = {}
-        rows.update(self._rows(None))
-        _plugin_binding.reset_run_scope()
-        rows.update(self._rows(str(self.PETS)))
-        _plugin_binding.reset_run_scope()
-        rows.update(self._rows(str(self.DAVIS)))
-
-        declaring = {gate_id: row for gate_id, row in rows.items() if row is not None}
-        assert {g: r["metric"] for g, r in declaring.items()} == self.EXPECTED_METRICS
-        for gate_id, row in declaring.items():
-            assert row["operator"] in {">", ">=", "<", "<="}, gate_id
-            assert row["value"] is not None, gate_id

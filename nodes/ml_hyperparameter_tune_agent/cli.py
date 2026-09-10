@@ -240,33 +240,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Delete denoised HDF5 files after scoring each round to save disk space.",
     )
 
-    # evaluate_time_skill gate (Phase E1, Phase I two-budget split). Each
-    # default is None, which keeps that mode's gate off — matches the
-    # chain-runner CLI defaults.
+    # Trial and Formal own independent budgets and authority selections.
     parser.add_argument(
         "--trial_time_budget_minutes",
         type=float,
         default=None,
-        help="Wall-time budget (minutes) for the evaluate_time_skill "
-        "gate on rounds where plan.is_trial=True. None disables "
-        "the trial gate.",
+        help="Trial wall-time budget in minutes. None disables Trial time admission.",
     )
     parser.add_argument(
         "--formal_time_budget_minutes",
         type=float,
         default=None,
-        help="Wall-time budget (minutes) for the evaluate_time_skill "
-        "gate on rounds where plan.is_trial=False. None disables "
-        "the formal gate. Sized independently from the trial "
-        "budget because formal runs use the full dataset and "
-        "are 50-100x longer.",
+        help="Formal wall-time budget in minutes. None disables Formal time admission.",
     )
     parser.add_argument(
         "--data_dir",
         type=str,
-        default=None,
-        help="TIDMAD data directory used by evaluate_time_skill's real-dataset "
-        "warmup. None makes the skill fall back to its static formula.",
+        required=True,
+        help="Physical data directory for the declared task. ",
     )
     parser.add_argument(
         "--health_checks_config",
@@ -285,6 +276,26 @@ def build_parser() -> argparse.ArgumentParser:
             "scope only 'snapshot' sampling is legal and "
             "--health_gate_files is required when gates are enabled. "
             "See docs/design/enable_partial_file_list.md."
+        ),
+    )
+    parser.add_argument(
+        "--trial_time_admission_source",
+        choices=("forecast", "measured"),
+        default="measured",
+        help=(
+            "Single Trial wall-time admission authority. Forecast skips "
+            "executing-device enforcement; measured skips advance forecast "
+            "admission."
+        ),
+    )
+    parser.add_argument(
+        "--formal_time_admission_source",
+        choices=("forecast", "measured"),
+        default="measured",
+        help=(
+            "Single Formal wall-time admission authority. Forecast skips "
+            "executing-device enforcement; measured skips advance forecast "
+            "admission."
         ),
     )
     parser.add_argument(
@@ -376,6 +387,32 @@ def build_parser() -> argparse.ArgumentParser:
             "in the round loop). Default None = no clamp (LLM plan unchanged). "
             "Per-mode overrides: --trial_max_epochs / --formal_max_epochs "
             "take precedence for their round role (D-BUD-6)."
+        ),
+    )
+    parser.add_argument(
+        "--vram_probe_step_timeout_seconds",
+        type=float,
+        default=180.0,
+        help=(
+            "Maximum wall time for one training-mode or inference VRAM "
+            "footprint forward (default 180). It is not a training-step or "
+            "epoch budget."
+        ),
+    )
+    parser.add_argument(
+        "--vram_preflight_total_timeout_seconds",
+        type=float,
+        default=900.0,
+        help=("Maximum wall time for the complete isolated VRAM preflight worker (default 900)."),
+    )
+    parser.add_argument(
+        "--vram_preflight_host_memory_limit_gb",
+        type=float,
+        default=None,
+        help=(
+            "Maximum resident host memory in GiB for the complete isolated "
+            "VRAM-preflight process tree. Omission preserves the deployment "
+            "default, normally 24 GiB. This is not the GPU VRAM ceiling."
         ),
     )
     parser.add_argument(
@@ -471,6 +508,13 @@ def build_parser() -> argparse.ArgumentParser:
         "(schema-mirroring); V18 production posture is 120.0.",
     )
     parser.add_argument(
+        "--runtime_verification_max_wall_seconds",
+        type=float,
+        default=None,
+        help="Maximum wall time for adaptive in-subprocess runtime verification. "
+        "Omit to preserve the verifier default.",
+    )
+    parser.add_argument(
         "--enable_chain_incumbent_formal_gates",
         action="store_true",
         help="V19 PR 1: consumption-only switch. When set, the two "
@@ -505,10 +549,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--task_composition",
         type=str,
-        default=None,
+        required=True,
         help=(
-            "Path to a YAML task-composition manifest. Omitted = the legacy "
-            "un-composed run, byte-identical to its pre-Step-10 behaviour. "
+            "Path to a required YAML task-composition manifest. "
             "Supplied, it binds this run's task data path, dataset profile, "
             "metric, declared secondaries, Health family and task "
             "description/forward contract EXPLICITLY, and every "
@@ -644,6 +687,8 @@ def build_agent_input(
         input_dict["trial_time_budget_minutes"] = args.trial_time_budget_minutes
     if args.formal_time_budget_minutes is not None:
         input_dict["formal_time_budget_minutes"] = args.formal_time_budget_minutes
+    input_dict["trial_time_admission_source"] = args.trial_time_admission_source
+    input_dict["formal_time_admission_source"] = args.formal_time_admission_source
     if args.max_epochs is not None:
         input_dict["max_epochs"] = args.max_epochs
     # D-BUD-6 — forwarded only when set, so an unset per-mode cap leaves the
@@ -659,6 +704,9 @@ def build_agent_input(
         input_dict["trial_vram_budget_gb"] = args.trial_vram_budget_gb
     if args.formal_vram_budget_gb is not None:
         input_dict["formal_vram_budget_gb"] = args.formal_vram_budget_gb
+    input_dict["vram_probe_step_timeout_seconds"] = args.vram_probe_step_timeout_seconds
+    input_dict["vram_preflight_total_timeout_seconds"] = args.vram_preflight_total_timeout_seconds
+    input_dict["vram_preflight_host_memory_limit_gb"] = args.vram_preflight_host_memory_limit_gb
 
     # Phase L (§11) — per-round attempt budget. Always forwarded so a CLI
     # invocation matches the workflow path. Schema validators enforce ge=1.
@@ -675,6 +723,7 @@ def build_agent_input(
     input_dict["runtime_trial_safety_factor"] = args.runtime_trial_safety_factor
     input_dict["runtime_formal_safety_factor"] = args.runtime_formal_safety_factor
     input_dict["runtime_watchdog_floor_seconds"] = args.runtime_watchdog_floor_seconds
+    input_dict["runtime_verification_max_wall_seconds"] = args.runtime_verification_max_wall_seconds
 
     # Step 12 / PR-12d D8a. `run_composition` is the SAME object `main()`
     # binds around `.run()` — passed in rather than re-composed here, so

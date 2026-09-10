@@ -312,13 +312,25 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
         # training filename family -- come from the profile the PARENT
         # transported. This process is clean, so an ambient resolution here
         # would always answer TIDMAD regardless of the bound task.
-        bounded = load_bounded_probe_batch(
-            data_dir=spec.data_dir,
-            batch_size=input_batch,
-            segment_length=seg,
-            profile=spec.dataset_profile,
-        )
-        batch = bounded.tensor.to(spec.device)
+        task_target = None
+        if spec.task_probe_data is not None:
+            from execute_tools.task_probe_batch import load_task_probe_batch
+
+            task_input, task_target = load_task_probe_batch(spec.task_probe_data, input_batch)
+            batch = task_input.to(spec.device)
+            bounded_evidence: Any = {
+                "source": "task_data_path",
+                "semantic_fingerprint": spec.task_probe_data.semantic_fingerprint,
+            }
+        else:
+            bounded = load_bounded_probe_batch(
+                data_dir=spec.data_dir,
+                batch_size=input_batch,
+                segment_length=seg,
+                profile=spec.dataset_profile,
+            )
+            batch = bounded.tensor.to(spec.device)
+            bounded_evidence = bounded.evidence
 
         # 07c C3 / Q-07c-8. The dtype authority, not a model name. The site
         # preference stays `int32` -- the MEASUREMENT site's historical dtype,
@@ -347,8 +359,12 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
                 model_input=model_input,
             )
         target_dtype = get_target_torch_dtype(loss_cfg)
-        loss_target = batch.to(dtype=target_dtype)
-        if loss_target is batch:
+        loss_target = (
+            task_target.to(device=spec.device, dtype=target_dtype)
+            if task_target is not None
+            else batch.to(dtype=target_dtype)
+        )
+        if task_target is None and loss_target is batch:
             # `.to()` on a matching dtype returns the SAME object, which
             # would leave one fewer tensor resident than the trainer holds.
             loss_target = batch.clone()
@@ -382,7 +398,7 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
             parameter_count=total,
             trainable_parameter_count=trainable,
             realized_identity=realized,
-            bounded_read=bounded.evidence,
+            bounded_read=bounded_evidence,
         )
 
     return _build

@@ -436,8 +436,8 @@ partial `--data_scope` (anything narrower than the full 20 files),
    DS8's `validate_health_scope` refuses to launch when the shipped
    `configs/health_checks.yaml`'s `peek_file_indices` fall outside
    the resolved scope OR when any check omits an explicit peek list
-   under partial scope. `sdsc_submission_scripts/launch_v18_wave1.sh:121`
-   is the canonical pairing.
+   under partial scope. The external task workflow must derive both arguments
+   from one declared scope authority.
 
 2. **Always cold-start real-training gate runs (operator rule,
    2026-07-27).** Omit `--seed_paths` entirely. Rationale:
@@ -558,10 +558,9 @@ Notes:
   training 1-5 min (unknown LLM-invented model, 25-100 ms/step band)
   + inference ~10-25 s + scoring ~3 s + ~50 s subprocess startups.
 - Pathological/rejection demonstrations should NOT run the workload:
-  drive the executor directly (e.g.
-  `scripts/pregate_runtime_control_validation.py`-style, no LLM) with
-  guardrails overridden and the production budget — rejection arrives
-  in ~2 min (setup + live verification only).
+  drive the supported executor API directly with no LLM, guardrails
+  overridden, and the production budget — rejection should stop after setup
+  and live verification rather than executing the full workload.
 
 **Failure handling**:
 - If all proposals fail validation → LLM quality issue, not a feature bug.

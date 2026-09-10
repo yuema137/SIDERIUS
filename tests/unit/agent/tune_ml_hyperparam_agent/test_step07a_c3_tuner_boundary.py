@@ -343,3 +343,6 @@ class TestExpectedValidationMutationHalf2:
         assert sandbox.training_kwargs and all(
             kw.get("eval_sample_set") for kw in sandbox.training_kwargs
         )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

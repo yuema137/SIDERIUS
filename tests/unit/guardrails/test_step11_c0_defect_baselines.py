@@ -363,19 +363,7 @@ class TestTheSpawnParentIsCensused:
         ):
             assert child in _DATA_PATH_SURFACE
 
-    def test_the_widening_had_something_to_look_at(self):
-        """Recorded rather than claimed: the parent genuinely carries task
-        identity, so the census is not covering an empty surface.
-
-        What the widening PROVES is narrower than "the parent is generic":
-        it proves no task-name COMPARISON and no task-implementation IMPORT.
-        The identity NAMES below remain — `TidmadSandbox` as a class name,
-        `_tidmad_data_dir`, and a `"tidmad_db"` Mongo collection literal —
-        and renaming a class is Step 12's class-level genericization, not
-        Step 11's. Stated here so nobody reads the green census as a
-        stronger claim than it is.
-        """
-        src = _OOM_PRODUCER.read_text(encoding="utf-8")
-        assert "class TidmadSandbox:" in src
-        assert "def _tidmad_data_dir()" in src
-        assert '"tidmad_db"' in src
+    # The old third test required legacy task names to remain in production.
+    # Their removal is the separation's purpose, not a guardrail failure.
+    # Parent/child inclusion above and TestTaskIdentityGuardrail in
+    # test_task_data_path_census own the surviving regression boundary.

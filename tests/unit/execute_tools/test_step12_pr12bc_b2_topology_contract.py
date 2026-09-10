@@ -176,7 +176,6 @@ class TestExactlyOneSemanticAuthority:
 #: silently skipped a module would be the F-P2b-4 failure mode.
 GENERIC_CORE_MODULES = (
     "core/resume.py",
-    "core/campaign_artifacts.py",
     "execute_tools/health_checks/config.py",
     "execute_tools/health_checks/pearson_dispersion.py",
     "execute_tools/health_checks/per_file_output_std.py",
@@ -375,12 +374,24 @@ class TestLegacyBehaviourIsIdentical:
         """The generic identity and the task topology are read from ONE
         profile, so a selection cannot straddle two topologies.
         """
-        got = build_sample_set(is_trial=True, trial_strategy="snapshot", trial_portion=0.01, seed=7)
+        got = build_sample_set(
+            is_trial=True,
+            trial_strategy="snapshot",
+            trial_portion=0.01,
+            seed=7,
+            profile=TIDMAD_PROFILE,
+        )
         assert sorted(got) == list(range(NUM_FILES))
         assert all(len(v) == 2 for v in got.values())
 
     def test_the_anchor_strategy_still_reads_the_tasks_own_declaration(self):
-        got = build_sample_set(is_trial=True, trial_strategy="anchors", trial_portion=0.01, seed=7)
+        got = build_sample_set(
+            is_trial=True,
+            trial_strategy="anchors",
+            trial_portion=0.01,
+            seed=7,
+            profile=TIDMAD_PROFILE,
+        )
         assert sorted(got) == TIDMAD_PROFILE.anchor_selection_files
 
     def test_scope_resolution_is_unchanged_for_the_shipped_topology(self):

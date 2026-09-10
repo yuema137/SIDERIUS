@@ -46,7 +46,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from dataclasses import fields as dataclass_fields
 
-from agent.schemas.hyperparam_tuning import HealthGateMode, ResultAuthority
+from agent.schemas.hyperparam_tuning import (
+    HealthGateMode,
+    ResultAuthority,
+    TimeAdmissionSource,
+)
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import OutputTypeName
 from core.runtime_control.admission import AdmissionEnforcement
 from workflows.strategy_modes import ExplorationMode, FormalRoundStrategy, StrategyMode
@@ -114,13 +119,19 @@ class WorkflowLaunchConfig:
     # grants NO extension (the schema default's safety semantics).
     bypass_formal_time_budget_minutes: float | None = None
     plan_overrides: dict | None = None
+    workflow_parameter_rules: ParameterRules | None = None
     trial_time_budget_minutes: float | None = None
     formal_time_budget_minutes: float | None = None
+    trial_time_admission_source: TimeAdmissionSource = "measured"
+    formal_time_admission_source: TimeAdmissionSource = "measured"
     gpu_admission_measurement_source: str | None = None
     gpu_admission_enforcement: AdmissionEnforcement = "observe_only"
     gpu_pair_ceiling_gib: float | None = None
     trial_vram_budget_gb: float | None = None
     formal_vram_budget_gb: float | None = None
+    vram_probe_step_timeout_seconds: float = 180.0
+    vram_preflight_total_timeout_seconds: float = 900.0
+    vram_preflight_host_memory_limit_gb: float | None = None
     formal_strategy: StrategyMode = "snapshot"
     formal_portion: float = 0.1
     formal_train_portion: float = 1.0
@@ -140,6 +151,7 @@ class WorkflowLaunchConfig:
     runtime_formal_safety_factor: float | None = None
     runtime_watchdog_safety_factor: float | None = None
     runtime_watchdog_floor_seconds: float = 60.0
+    runtime_verification_max_wall_seconds: float | None = None
     exploration_mode: ExplorationMode = "auto"
     minimum_boldness: float = 0.05
     n_candidates: int | None = None
@@ -154,7 +166,7 @@ class WorkflowLaunchConfig:
     health_feedback_history_window_iterations: int = 3
     health_feedback_history_max_entries_per_model: int = 8
     lit_review_enabled: bool = False
-    lit_review_config_path: str = "configs/lit_review_config.yaml"
+    lit_review_config_path: str | None = None
     require_probe_runner: bool = False
     # arXiv U1 (#254) — the OPAQUE experiment-arm label. Pure transit: the
     # workflow locks it and forwards it to the tuner; it never interprets

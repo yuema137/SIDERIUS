@@ -6,7 +6,7 @@ Each family names the defect only it catches:
 
   * the ONE declared argv delta — `--eval_sample_set_json <path>` emitted
     iff streaming AND an eval set is given, immediately after the
-    `--sample_set_json` pair; the LEGACY argv (05c golden) unchanged;
+    `--sample_set_json` pair, with an explicitly bound synthetic profile/root;
   * the written eval-set file has the SAME compact byte form as the train
     set's and is `validate_sample_set`-clean;
   * an eval set violating DataScope → the executor's existing scope
@@ -40,12 +40,14 @@ import execute_tools.train_engine_sandbox as tes
 from core.sandbox_executor import StubSandbox, TidmadSandbox
 from execute_tools.dataset_config import DataScope, bind_dataset_profile
 from execute_tools.scoring_utils import validate_sample_set
+from execute_tools.task_data_path import EvalMaterializationParams
 from execute_tools.training_history import TrainingHistory, interpret_training_results
 from ml_models.loss_models_sandbox import get_criterion
 from ml_models.models_format_sandbox import LossConfig
 from ml_models.models_sandbox import MODEL_REGISTRY
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import _run_skill
 from tests.helpers.recording_sandbox import RecordingSandbox
+from tests.helpers.trainer_subprocess_binding import attempt_scopes, bound_trainer_task
 from tests.helpers.two_family_profile import write_two_family_fixture
 
 EXP_ID = "c2exp"
@@ -55,7 +57,7 @@ MODEL_CFG = {"model_type": "fcnet", "segmentation_size": 10000, "latent_dims": [
 TRAIN_CFG = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cpu"}
 LOSS_CFG = {"loss_type": "ce"}
 TRAIN_SS = {0: [0, 1], 1: [2]}
-EVAL_SS = {0: [3], 1: [4, 5]}
+EVAL_SS = {0: [3], 1: [0, 1]}
 
 PYTHON = "<PYTHON>"
 WORKSPACE = "<WS>"
@@ -101,7 +103,7 @@ def _mock_result(returncode: int = 0):
 
 
 @pytest.fixture
-def sandbox(tmp_path):
+def sandbox(tmp_path, synthetic_run_authorities, synthetic_physical_data_root):
     return TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path), progress_bar=False)
 
 
@@ -122,13 +124,15 @@ def _launch_ok(sandbox):
 
 class TestArgvDelta:
     @patch("core.sandbox_executor._run_observed_subprocess")
-    def test_streaming_argv_with_an_eval_set_is_the_pre_c2_list_plus_exactly_the_declared_pair(
+    def test_streaming_argv_transports_explicit_root_and_ordered_eval_pair(
         self, mock_run, sandbox, tmp_path
     ):
-        """The COMPLETE ordered streaming argv (05c-style golden). The delta
-        versus the pre-07a list is exactly `--eval_sample_set_json <path>`
-        immediately after the `--sample_set_json` pair (design §3.4,
-        Q-07a-7). Any other inserted, moved or dropped flag shows here."""
+        """The complete ordered argv under the declared synthetic authorities.
+
+        The 07a invariant remains: the eval pair immediately follows the
+        training pair. Physical-root transport is now mandatory, and this
+        profile deliberately has no optional ModelIO contract.
+        """
         mock_run.side_effect = _launch_ok(sandbox)
         sandbox.execute_training(
             EXP_ID,
@@ -162,8 +166,8 @@ class TestArgvDelta:
             "<WS>",
             "--file_index",
             "6",
-            "--model_io_json",
-            "<WS>/configs/c2run/model_io_c2exp.json",
+            "--data_dir",
+            sandbox.dirs["data"],
             "--sample_set_json",
             "<WS>/configs/c2run/train_sample_set_c2exp.json",
             "--eval_sample_set_json",
@@ -178,8 +182,7 @@ class TestArgvDelta:
 
     @patch("core.sandbox_executor._run_observed_subprocess")
     def test_streaming_without_an_eval_set_emits_no_flag(self, mock_run, sandbox):
-        """A caller predating the transport (no eval set) launches the exact
-        pre-07a streaming argv — the flag is never emitted empty."""
+        """An omitted eval set must not become an empty child flag."""
         mock_run.side_effect = _launch_ok(sandbox)
         sandbox.execute_training(
             EXP_ID, RUN_NAME, MODEL_TYPE, MODEL_CFG, TRAIN_CFG, LOSS_CFG, sample_set=TRAIN_SS
@@ -191,9 +194,11 @@ class TestArgvDelta:
     def test_legacy_mode_never_emits_the_flag_even_when_an_eval_set_is_given(
         self, mock_run, sandbox
     ):
-        """Legacy single-file mode has no validation scope; the 05c legacy
-        golden (`test_c0_training_argv_ordered_golden`) stays byte-identical
-        and this pins the documented edge: eval set without train set → no flag."""
+        """The legacy SampleSet emitter still requires the training leg.
+
+        This argv-only witness does not claim the uncomposed child can run;
+        the real child witness below supplies explicit task-owned scopes.
+        """
         mock_run.side_effect = _launch_ok(sandbox)
         sandbox.execute_training(
             EXP_ID, RUN_NAME, MODEL_TYPE, MODEL_CFG, TRAIN_CFG, LOSS_CFG, eval_sample_set=EVAL_SS
@@ -233,7 +238,9 @@ class TestArgvDelta:
         )  # child accepts it
 
     @patch("core.sandbox_executor._run_observed_subprocess")
-    def test_an_eval_set_outside_the_data_scope_is_refused_before_launch(self, mock_run, tmp_path):
+    def test_an_eval_set_outside_the_data_scope_is_refused_before_launch(
+        self, mock_run, tmp_path, synthetic_run_authorities, synthetic_physical_data_root
+    ):
         """The SAME rule as the train set: an eval set naming a file outside
         the run's DataScope is a scope violation — never launched, never
         silently trimmed."""
@@ -327,7 +334,9 @@ class TestWrapperForwardsTheEvalSet:
 
 
 class TestStubSandboxParity:
-    def test_the_stub_accepts_and_scope_validates_the_eval_set(self, tmp_path):
+    def test_the_stub_accepts_and_scope_validates_the_eval_set(
+        self, tmp_path, synthetic_run_authorities, synthetic_physical_data_root
+    ):
         stub = StubSandbox(
             run_name="s", workspace=str(tmp_path), data_scope=DataScope(file_indices=[0, 1])
         )
@@ -366,9 +375,9 @@ class TestRungB07a2ValidationScopeAxis:
     by the executor; launch primitive un-mocked; CPU; seconds), reads the eval
     SampleSet from the VALIDATION family and emits R2 + R3.
 
-    The only test seam: `--data_dir <fixture>` is appended to the executor's
-    argv (a REAL child flag) because the child otherwise resolves the
-    machine's TIDMAD directory — the fixture lives in `tmp_path`.
+    The parent binds an importable synthetic task manifest and physical root.
+    Both scopes cross through production serialization; the subprocess argv
+    is observed but never patched to add a missing input.
     """
 
     def test_real_trainer_emits_r2_and_r3_over_the_validation_family(self, tmp_path, monkeypatch):
@@ -377,15 +386,14 @@ class TestRungB07a2ValidationScopeAxis:
         real_launch = sandbox_module._run_observed_subprocess
         launched: list[list[str]] = []
 
-        def launch_with_data_dir(cmd, **kwargs):
-            cmd = [*cmd, "--data_dir", fx.data_dir]
+        def record_launch(cmd, **kwargs):
             launched.append(cmd)
             return real_launch(cmd, **kwargs)
 
-        monkeypatch.setattr(sandbox_module, "_run_observed_subprocess", launch_with_data_dir)
+        monkeypatch.setattr(sandbox_module, "_run_observed_subprocess", record_launch)
         train_ss = {0: [0, 1, 2, 3], 1: [0, 1, 2, 3], 2: [0, 1, 2, 3]}
         eval_ss = {0: [0, 1], 2: [1, 3]}  # a DISTINCT validation scope: 4 PSD × 2 = 8 rows
-        with bind_dataset_profile(fx.profile):
+        with bound_trainer_task(tmp_path, fx) as adapter:
             sb = TidmadSandbox(run_name="rung", workspace=str(tmp_path / "ws"), progress_bar=False)
             out = sb.execute_training(
                 "b07a2",
@@ -400,12 +408,13 @@ class TestRungB07a2ValidationScopeAxis:
                     "device": "cpu",
                 },
                 {"loss_type": "focal"},
-                sample_set=train_ss,
-                eval_sample_set=eval_ss,
+                task_scopes=attempt_scopes(adapter, train_ss, eval_ss),
                 train_base_seed=5,
             )
         assert out["status"] == "success", out.get("message")
-        assert launched and "--eval_sample_set_json" in launched[0]
+        assert launched and "--task_eval_scope_ref" in launched[0]
+        assert "--task_manifest" in launched[0]
+        assert launched[0][launched[0].index("--data_dir") + 1] == fx.data_dir
 
         results = out["results"]
         res = interpret_training_results(results, expected_validation=True)
@@ -427,15 +436,10 @@ class TestRungB07a2ValidationScopeAxis:
         criterion = get_criterion(LossConfig(loss_type="focal"), None)
 
         def _mean_over(family: str) -> float:
-            with bind_dataset_profile(fx.profile):
-                ds = tes.TIDMADEpochDataset(
-                    fx.data_dir,
-                    {str(k): v for k, v in eval_ss.items()},
-                    fx.seg_size,
-                    train_portion=None,
-                    profile=fx.profile,
-                    file_family=family,  # type: ignore[arg-type]
-                )
+            ds = adapter.validation_dataset(
+                adapter.scope(eval_ss, family=family),
+                EvalMaterializationParams(data_dir=fx.data_dir),
+            )
             vals = []
             with torch.no_grad():
                 for x, y in DataLoader(ds, batch_size=1, shuffle=False):

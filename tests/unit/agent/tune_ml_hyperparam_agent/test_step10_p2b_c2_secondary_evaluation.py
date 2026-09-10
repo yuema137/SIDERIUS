@@ -34,32 +34,44 @@ import pytest
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
 from execute_tools.dataset_config import ScopeViolationError
 from execute_tools.evaluation_metric import (
+    EvaluationMetric,
     MetricResult,
+    MetricSpec,
     NotScoreableError,
     NotScoreableResult,
+    PresenceScoreabilityContract,
     bind_run_secondary_metrics,
 )
 from nodes.ml_hyperparameter_tune_agent.execution import _evaluate_secondary_metrics
 from tests.helpers.recording_sandbox import RecordingSandbox
 from tests.helpers.step00_pseudo_iteration import run_bounded_pseudo_iteration
-from workflows.task_composition import compose_run_task_bindings
 
-DAVIS_MANIFEST = "tests/fixtures/step10_p1/davis/composition.yaml"
+
+class _FixtureMetric(EvaluationMetric):
+    """Inert arithmetic: these tests script outcomes at the sandbox boundary."""
+
+    def _compute(self, deliverables, /, **compute_kwargs):
+        del deliverables, compute_kwargs
+        return 0.0, None, ()
 
 
 @pytest.fixture(scope="module")
-def davis_secondaries():
-    """The REAL declared DAVIS pair — psnr (higher) and mae (lower).
-
-    Composed through the production edge rather than hand-built, so these
-    fixtures cannot drift from what a DAVIS run would actually bind.
-    """
-    secondaries = compose_run_task_bindings(DAVIS_MANIFEST).secondary_metrics
-    assert [(m.spec.id, m.spec.direction) for m in secondaries] == [
-        ("psnr", "higher"),
-        ("mae", "lower"),
-    ]
-    return secondaries
+def secondary_metrics():
+    """Two neutral observational metrics with opposite declared directions."""
+    return tuple(
+        _FixtureMetric(
+            MetricSpec(
+                id=metric_id,
+                direction=direction,
+                aggregation="mean_over_deliverables",
+                scoreability=PresenceScoreabilityContract(),
+            )
+        )
+        for metric_id, direction in (
+            ("fixture_quality", "higher"),
+            ("fixture_error", "lower"),
+        )
+    )
 
 
 def _refusal(metric_id: str, direction: str) -> NotScoreableResult:
@@ -112,39 +124,43 @@ def _evaluate(secondaries, outcomes):
 
 
 class TestTheFrozenExceptionTaxonomy:
-    def test_each_secondary_is_evaluated_under_its_OWN_identity(self, davis_secondaries):
+    def test_each_secondary_is_evaluated_under_its_OWN_identity(self, secondary_metrics):
         sandbox, (results, refusals, errors) = _evaluate(
-            davis_secondaries, {"psnr": 31.5, "mae": 0.017}
+            secondary_metrics, {"fixture_quality": 31.5, "fixture_error": 0.017}
         )
-        assert sandbox.seen == ["psnr", "mae"]
+        assert sandbox.seen == ["fixture_quality", "fixture_error"]
         assert [(r.metric_id, r.direction, r.scalar) for r in results] == [
-            ("psnr", "higher", 31.5),
-            ("mae", "lower", 0.017),
+            ("fixture_quality", "higher", 31.5),
+            ("fixture_error", "lower", 0.017),
         ]
         assert (refusals, errors) == ([], {})
 
-    def test_a_refusal_is_a_typed_scientific_outcome(self, davis_secondaries):
+    def test_a_refusal_is_a_typed_scientific_outcome(self, secondary_metrics):
         _s, (results, refusals, errors) = _evaluate(
-            davis_secondaries,
-            {"psnr": 31.5, "mae": NotScoreableError(_refusal("mae", "lower"))},
+            secondary_metrics,
+            {
+                "fixture_quality": 31.5,
+                "fixture_error": NotScoreableError(_refusal("fixture_error", "lower")),
+            },
         )
-        assert [r.metric_id for r in results] == ["psnr"]
-        assert [r.metric_id for r in refusals] == ["mae"]
+        assert [r.metric_id for r in results] == ["fixture_quality"]
+        assert [r.metric_id for r in refusals] == ["fixture_error"]
         assert refusals[0].verdict.contract_id == "deliverable_presence"
         assert errors == {}
 
-    def test_a_crash_is_diagnostic_provenance_and_NEVER_a_refusal(self, davis_secondaries):
+    def test_a_crash_is_diagnostic_provenance_and_NEVER_a_refusal(self, secondary_metrics):
         _s, (results, refusals, errors) = _evaluate(
-            davis_secondaries, {"psnr": 31.5, "mae": ValueError("shape mismatch")}
+            secondary_metrics,
+            {"fixture_quality": 31.5, "fixture_error": ValueError("shape mismatch")},
         )
-        assert [r.metric_id for r in results] == ["psnr"]
+        assert [r.metric_id for r in results] == ["fixture_quality"]
         assert refusals == [], (
             "a crash produced no contract verdict; recording one would fabricate "
             "a measurement nothing made"
         )
-        assert errors == {"mae": "ValueError: shape mismatch"}
+        assert errors == {"fixture_error": "ValueError: shape mismatch"}
 
-    def test_a_scope_violation_is_RE_RAISED_not_downgraded(self, davis_secondaries):
+    def test_a_scope_violation_is_RE_RAISED_not_downgraded(self, secondary_metrics):
         """The bounded meaning of "observational" (Q-P2b-2), and the CATCH ORDER.
 
         DataScope validation runs inside EVERY `evaluate_metric` call, so a
@@ -163,33 +179,33 @@ class TestTheFrozenExceptionTaxonomy:
             "the catch-order claim below depends on this relation; if it ever "
             "stops holding, the ordering constraint must be re-derived"
         )
-        sandbox = _ScriptedSandbox({"psnr": ScopeViolationError("file 7 outside scope")})
+        sandbox = _ScriptedSandbox({"fixture_quality": ScopeViolationError("file 7 outside scope")})
         with pytest.raises(ScopeViolationError, match="outside scope"):
             _evaluate_secondary_metrics(
                 sandbox,
-                davis_secondaries,
+                secondary_metrics,
                 sample_set={0: [0]},
                 anchor_map={},
                 s_max=1.0,
                 denoised_filename_fn=lambda i: "",
             )
 
-    def test_one_secondary_crashing_does_not_stop_the_others(self, davis_secondaries):
+    def test_one_secondary_crashing_does_not_stop_the_others(self, secondary_metrics):
         sandbox, (results, _refusals, errors) = _evaluate(
-            davis_secondaries, {"psnr": RuntimeError("boom"), "mae": 0.017}
+            secondary_metrics, {"fixture_quality": RuntimeError("boom"), "fixture_error": 0.017}
         )
-        assert sandbox.seen == ["psnr", "mae"]
-        assert [r.metric_id for r in results] == ["mae"]
-        assert set(errors) == {"psnr"}
+        assert sandbox.seen == ["fixture_quality", "fixture_error"]
+        assert [r.metric_id for r in results] == ["fixture_error"]
+        assert set(errors) == {"fixture_quality"}
 
     def test_no_declared_secondary_means_no_work_and_no_evidence(self):
         sandbox, (results, refusals, errors) = _evaluate((), {})
         assert (sandbox.seen, results, refusals, errors) == ([], [], [], {})
 
-    def test_a_crash_is_reported_on_the_diagnostic_surface(self, davis_secondaries, capsys):
-        _evaluate(davis_secondaries, {"psnr": 31.5, "mae": ValueError("boom")})
+    def test_a_crash_is_reported_on_the_diagnostic_surface(self, secondary_metrics, capsys):
+        _evaluate(secondary_metrics, {"fixture_quality": 31.5, "fixture_error": ValueError("boom")})
         printed = capsys.readouterr().out
-        assert "mae" in printed and "crashed" in printed, (
+        assert "fixture_error" in printed and "crashed" in printed, (
             "a secondary crash must never be silent — it is an operator-facing "
             f"fact about the implementation: {printed!r}"
         )
@@ -216,9 +232,9 @@ class TestTheRecordCarriers:
             {
                 **self.BASE,
                 "secondary_metric_results": [
-                    {"metric_id": "psnr", "direction": "higher", "scalar": 31.5}
+                    {"metric_id": "fixture_quality", "direction": "higher", "scalar": 31.5}
                 ],
-                "secondary_metric_refusals": [_refusal("mae", "lower").model_dump()],
+                "secondary_metric_refusals": [_refusal("fixture_error", "lower").model_dump()],
                 "secondary_metric_errors": {"macro_f1": "ValueError: boom"},
             }
         )
@@ -230,17 +246,17 @@ class TestTheRecordCarriers:
             (
                 {
                     "secondary_metric_results": [
-                        {"metric_id": "psnr", "direction": "higher", "scalar": 1.0}
+                        {"metric_id": "fixture_quality", "direction": "higher", "scalar": 1.0}
                     ],
-                    "secondary_metric_errors": {"psnr": "boom"},
+                    "secondary_metric_errors": {"fixture_quality": "boom"},
                 },
                 "in both secondary_metric_results and secondary_metric_errors",
             ),
             (
                 {
                     "secondary_metric_results": [
-                        {"metric_id": "psnr", "direction": "higher", "scalar": 1.0},
-                        {"metric_id": "psnr", "direction": "higher", "scalar": 2.0},
+                        {"metric_id": "fixture_quality", "direction": "higher", "scalar": 1.0},
+                        {"metric_id": "fixture_quality", "direction": "higher", "scalar": 2.0},
                     ]
                 },
                 "twice in secondary_metric_results",
@@ -248,9 +264,11 @@ class TestTheRecordCarriers:
             (
                 {
                     "secondary_metric_results": [
-                        {"metric_id": "psnr", "direction": "higher", "scalar": 1.0}
+                        {"metric_id": "fixture_quality", "direction": "higher", "scalar": 1.0}
                     ],
-                    "secondary_metric_refusals": [_refusal("psnr", "higher").model_dump()],
+                    "secondary_metric_refusals": [
+                        _refusal("fixture_quality", "higher").model_dump()
+                    ],
                 },
                 "in both secondary_metric_results and secondary_metric_refusals",
             ),
@@ -371,10 +389,13 @@ def _lifecycle(output, bridge):
 
 class TestTheProductionLifecycle:
     def test_the_declared_family_is_evaluated_and_lands_on_every_scored_record(
-        self, tmp_path, monkeypatch, davis_secondaries
+        self, tmp_path, monkeypatch, secondary_metrics
     ):
         output, _bridge, _sandbox, calls = _run(
-            tmp_path, monkeypatch, davis_secondaries, {"psnr": 31.5, "mae": 0.017}
+            tmp_path,
+            monkeypatch,
+            secondary_metrics,
+            {"fixture_quality": 31.5, "fixture_error": 0.017},
         )
         scored = [r for r in output.all_records if r.metric_result is not None]
         assert scored, "the fixture must produce at least one primary-scored record"
@@ -384,48 +405,58 @@ class TestTheProductionLifecycle:
         assert [
             [(s.metric_id, s.direction, s.scalar) for s in r.secondary_metric_results]
             for r in scored
-        ] == [[("psnr", "higher", 31.5), ("mae", "lower", 0.017)] for _ in scored]
+        ] == [
+            [("fixture_quality", "higher", 31.5), ("fixture_error", "lower", 0.017)] for _ in scored
+        ]
         assert all(r.secondary_metric_refusals == [] for r in scored)
         assert all(r.secondary_metric_errors == {} for r in scored)
         # Q-P2b-1: evaluated wherever the primary evaluates — once per scored
         # record, for BOTH trial and formal rounds, with no round-type branch.
-        assert calls == [("psnr", "higher"), ("mae", "lower")] * len(scored)
+        assert calls == [("fixture_quality", "higher"), ("fixture_error", "lower")] * len(scored)
         assert {r.is_trial for r in scored} == {True, False}, (
             "the fixture must exercise both a trial and a formal scored round, "
             "or Q-P2b-1's 'no round-type branch' claim is untested"
         )
 
     def test_the_output_stamps_the_DECLARED_set_in_order(
-        self, tmp_path, monkeypatch, davis_secondaries
-    ):
-        output, *_ = _run(tmp_path, monkeypatch, davis_secondaries, {"psnr": 31.5, "mae": 0.017})
-        assert output.secondary_metric_specs is not None
-        assert [(s.id, s.direction) for s in output.secondary_metric_specs] == [
-            ("psnr", "higher"),
-            ("mae", "lower"),
-        ]
-
-    def test_a_mixed_outcome_run_records_each_id_in_its_own_carrier(
-        self, tmp_path, monkeypatch, davis_secondaries
+        self, tmp_path, monkeypatch, secondary_metrics
     ):
         output, *_ = _run(
             tmp_path,
             monkeypatch,
-            davis_secondaries,
-            {"psnr": NotScoreableError(_refusal("psnr", "higher")), "mae": ValueError("boom")},
+            secondary_metrics,
+            {"fixture_quality": 31.5, "fixture_error": 0.017},
+        )
+        assert output.secondary_metric_specs is not None
+        assert [(s.id, s.direction) for s in output.secondary_metric_specs] == [
+            ("fixture_quality", "higher"),
+            ("fixture_error", "lower"),
+        ]
+
+    def test_a_mixed_outcome_run_records_each_id_in_its_own_carrier(
+        self, tmp_path, monkeypatch, secondary_metrics
+    ):
+        output, *_ = _run(
+            tmp_path,
+            monkeypatch,
+            secondary_metrics,
+            {
+                "fixture_quality": NotScoreableError(_refusal("fixture_quality", "higher")),
+                "fixture_error": ValueError("boom"),
+            },
         )
         scored = [r for r in output.all_records if r.metric_result is not None]
         assert scored
         for record in scored:
             assert record.secondary_metric_results == []
-            assert [r.metric_id for r in record.secondary_metric_refusals] == ["psnr"]
-            assert record.secondary_metric_errors == {"mae": "ValueError: boom"}
+            assert [r.metric_id for r in record.secondary_metric_refusals] == ["fixture_quality"]
+            assert record.secondary_metric_errors == {"fixture_error": "ValueError: boom"}
             # Both ids stay DECLARED on the stamp, so the interpreter can still
             # name them — a refused or crashed secondary is not an undeclared one.
-        assert [s.id for s in output.secondary_metric_specs] == ["psnr", "mae"]
+        assert [s.id for s in output.secondary_metric_specs] == ["fixture_quality", "fixture_error"]
 
     def test_the_attempt_lifecycle_is_byte_identical_with_and_without_secondaries(
-        self, tmp_path, monkeypatch, davis_secondaries
+        self, tmp_path, monkeypatch, secondary_metrics
     ):
         """The claim that makes "observational" safe, measured on the outcome
         rather than on prints. A refusal AND a crash are in play, so this also
@@ -437,8 +468,8 @@ class TestTheProductionLifecycle:
             with_secondaries, bridge_b, _s, _c = _run(
                 tmp_path / "b",
                 m,
-                davis_secondaries,
-                {"psnr": 31.5, "mae": ValueError("boom")},
+                secondary_metrics,
+                {"fixture_quality": 31.5, "fixture_error": ValueError("boom")},
             )
         assert _lifecycle(with_secondaries, bridge_b) == _lifecycle(without, bridge_a)
 
@@ -467,9 +498,11 @@ class TestTheHiddenPayloadBoundary:
         "status": "success",
         "denoising_score": -2.0,
         "metric_result": {"metric_id": "m", "direction": "higher", "scalar": -2.0},
-        "secondary_metric_results": [{"metric_id": "psnr", "direction": "higher", "scalar": 31.5}],
+        "secondary_metric_results": [
+            {"metric_id": "fixture_quality", "direction": "higher", "scalar": 31.5}
+        ],
         "secondary_metric_refusals": [],
-        "secondary_metric_errors": {"mae": "ValueError: boom"},
+        "secondary_metric_errors": {"fixture_error": "ValueError: boom"},
     }
 
     def test_the_planner_prompt_carries_none_of_the_three_keys(self):
@@ -490,7 +523,7 @@ class TestTheHiddenPayloadBoundary:
             "secondary_metric_errors",
         ):
             assert key not in prompt, f"the planner prompt renders {key}"
-        assert "psnr" not in prompt and "31.5" not in prompt
+        assert "fixture_quality" not in prompt and "31.5" not in prompt
         assert "boom" not in prompt
         # ...while the planner still sees the record it is supposed to reason
         # about, so this is an exclusion test and not an empty-prompt test.
@@ -517,3 +550,6 @@ class TestTheHiddenPayloadBoundary:
             "a secondary reached `score_res['results']`, which is json-dumped "
             "verbatim into the reflector prompt"
         )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

@@ -3,8 +3,8 @@
 C2's byte-parity oracle proves the refactor did not MOVE the bytes. It cannot
 prove the bytes are actually derived from the profile: a builder that ignored
 its `profile` argument and kept the old constants would pass every parity
-assertion in this PR, because under TIDMAD the profile's declarations and the
-deleted constants are the same values.
+assertion when the baseline profile's declarations and deleted constants have
+the same values.
 
 So this rung moves the DECLARATION and requires the bytes to follow — and, in
 the SAME test, requires the identity keys and the comparability stamp to stay
@@ -23,18 +23,15 @@ import hashlib
 import pytest
 import torch
 
-from execute_tools.dataset_config import (
-    TIDMAD_PROFILE,
-    DatasetProfile,
-    tidmad_topology,
-)
+from execute_tools.dataset_config import DatasetProfile
 from execute_tools.probe_batch import build_bounded_probe_batch
 from execute_tools.training_history import stamp_comparability
 from ml_models.models_format_sandbox import LossConfig
-from tests.helpers.two_family_profile import write_two_family_fixture
+from tests.helpers.two_family_profile import make_two_family_profile, write_two_family_fixture
 
 SEG = 32
 BATCH = 3
+DECLARED_CHANNELS = make_two_family_profile().to_wire()["channels"]
 
 
 def _profile_with(base: DatasetProfile, **overrides) -> DatasetProfile:
@@ -71,15 +68,15 @@ def _identity_projection(profile: DatasetProfile) -> dict[str, str]:
     from core.runtime_control.registry_schemas import MeasurementIdentity
 
     shape_class = (
-        f"psd{tidmad_topology(profile).dataset.psd_segment_length}"
-        f"_seg{tidmad_topology(profile).dataset.segments_per_file}"
-        f"_files{tidmad_topology(profile).dataset.num_files}"
+        f"psd{profile.to_wire()['dataset']['psd_segment_length']}"
+        f"_seg{profile.to_wire()['dataset']['segments_per_file']}"
+        f"_files{profile.to_wire()['dataset']['num_files']}"
     )
     identity = MeasurementIdentity(
         measurement_kind="gpu_requirement",
-        task_identity="tidmad_denoise",
+        task_identity="synthetic_indexed_stream",
         data_shape_class=shape_class,
-        model_family="wavenet",
+        model_family="synthetic_sequence_model",
         candidate_config_hash="deadbeef",
         phase="training",
         hardware_uuid="GPU-x",
@@ -94,7 +91,7 @@ def _identity_projection(profile: DatasetProfile) -> dict[str, str]:
             torch_version="2.10.0",
             precision="float32",
             optimizer_type="adamw",
-            model_family="wavenet",
+            model_family="synthetic_sequence_model",
             param_count=1024,
             seg_size=SEG,
             batch_size=BATCH,
@@ -133,12 +130,8 @@ class TestB07c1TheMeasurementDataFeedingAxis:
             (
                 "other_channel",
                 {
-                    "channels.input_channel": tidmad_topology(
-                        TIDMAD_PROFILE
-                    ).channels.target_channel,
-                    "channels.target_channel": tidmad_topology(
-                        TIDMAD_PROFILE
-                    ).channels.input_channel,
+                    "channels.input_channel": DECLARED_CHANNELS["target_channel"],
+                    "channels.target_channel": DECLARED_CHANNELS["input_channel"],
                 },
             ),
             # NON-INT8 storage. The fixture holds int8 payloads, so reading
@@ -226,10 +219,10 @@ class TestTheFileFamilyComesFromTheDeclarationToo:
             batch_size=BATCH,
             segment_length=SEG,
         )
-        assert result.evidence.source_file == tidmad_topology(
-            contrast.profile
-        ).dataset.training_file_name(0)
-        assert result.evidence.channel == tidmad_topology(contrast.profile).channels.input_channel
+        dataset = contrast.profile.to_wire()["dataset"]
+        channels = contrast.profile.to_wire()["channels"]
+        assert result.evidence.source_file == dataset["training_file_pattern"].format(file_index=0)
+        assert result.evidence.channel == channels["input_channel"]
 
 
 class TestTheBatchIsStillWellFormed:
@@ -240,8 +233,8 @@ class TestTheBatchIsStillWellFormed:
         for overrides in (
             {"encoding.value_offset": 200, "encoding.num_classes": 328},
             {
-                "channels.input_channel": tidmad_topology(TIDMAD_PROFILE).channels.target_channel,
-                "channels.target_channel": tidmad_topology(TIDMAD_PROFILE).channels.input_channel,
+                "channels.input_channel": DECLARED_CHANNELS["target_channel"],
+                "channels.target_channel": DECLARED_CHANNELS["input_channel"],
             },
         ):
             variant = _profile_with(contrast.profile, **overrides)

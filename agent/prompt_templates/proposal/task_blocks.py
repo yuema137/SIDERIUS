@@ -1,5 +1,5 @@
 # agent/prompt_templates/proposal/task_blocks.py
-"""The bounded Regime-A adapter for task-owned PROPOSER guidance.
+"""Loader for task-owned PROPOSER guidance.
 
 Step 12 / PR-12a C7 (D-12a-6). Deliberately the same module as 09b's
 ``agent/prompt_templates/interpretation/task_blocks.py``, one node over: it
@@ -10,47 +10,19 @@ extension mechanism: an external task supplies the same typed value directly
 (or its own file anywhere on disk) with zero SIDERIUS edits, and the
 composition root replaces the CALL SITE, never this contract.
 
-It must never become a registry, a task catalog, a config manager or a plugin
-system. The one task-identity occurrence below is a self-labelled default-path
-CONSTANT, not a branch: it feeds no ``if``/``match``, no dispatch, no task-id
-inference. The PR-12a census turns RED on a second task constant, a task
-table, or any conditional that reads it.
+It must never become a registry, task catalog, config manager, or plugin
+system. An omitted path means no guidance; an explicit path is validated.
 """
 
-import os
-
-from agent.prompt_templates._task_blocks_loader import (
-    SIDERIUS_ROOT,
-    load_task_blocks_declaration,
-)
+from agent.prompt_templates._task_blocks_loader import load_task_blocks_declaration
 from agent.schemas.proposal import ProposalTaskBlocks
-
-#: The bounded legacy compatibility path (the 08b
-#: ``LEGACY_DEFAULT_TASK_HEALTH_CONFIG`` / 09b
-#: ``LEGACY_DEFAULT_TASK_INTERPRETATION_CONFIG`` idiom — a CONSTANT, not a
-#: branch). There is no ``if task == …`` anywhere: one unconditional default,
-#: quarantined here so the Regime-A workflow resolves TIDMAD's proposer
-#: guidance without naming the task itself. An external task passes its own
-#: path — or constructs the typed value directly — and never touches this.
-#:
-#: Anchored to THIS checkout, not to the caller's working directory (F-7,
-#: second occurrence — see ``_task_blocks_loader.SIDERIUS_ROOT``). The
-#: workflow calls the loader zero-arg on the un-composed branch, so a
-#: relative default made the proposer die in any launch that did not happen
-#: to start at the repo root.
-LEGACY_DEFAULT_TASK_PROPOSAL_CONFIG: str = os.path.join(
-    SIDERIUS_ROOT, "configs", "task_proposal", "tidmad.yaml"
-)
 
 
 def load_proposal_task_blocks(path: str | None = None) -> ProposalTaskBlocks:
     """Parse a task-owned declaration file into ``ProposalTaskBlocks``.
 
-    ``path=None`` resolves the ONE unconditional default above. FAIL-CLOSED on
-    a missing, unreadable or malformed file, an unknown key or a non-string
-    section — the Regime-A workflow must never silently propose for TIDMAD
-    without its science, and a typo'd section name must never silently render
-    nothing.
+    ``path=None`` returns an empty typed declaration. An explicit path remains
+    fail-closed on missing, unreadable, or malformed content.
 
     Step 12 / PR-12a C7-4 shares the deterministic mechanics with the
     implementor adapter; the SCHEMAS stay separate, because the two families
@@ -59,6 +31,5 @@ def load_proposal_task_blocks(path: str | None = None) -> ProposalTaskBlocks:
     return load_task_blocks_declaration(
         ProposalTaskBlocks,
         path=path,
-        default_path=LEGACY_DEFAULT_TASK_PROPOSAL_CONFIG,
         kind="proposal",
     )

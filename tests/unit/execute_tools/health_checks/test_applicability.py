@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from execute_tools.dataset_config import resolve_dataset_profile
+from execute_tools.dataset_config import bind_dataset_profile
 from execute_tools.health_checks._regime_a_facts import derive_health_facts, resolve_health_facts
 from execute_tools.health_checks.schemas import (
     APPLICABLE,
@@ -40,6 +40,7 @@ from execute_tools.health_checks.schemas import (
     TaskHealthFacts,
     applicability,
 )
+from tests.helpers.two_family_profile import make_two_family_profile
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 """tests/unit/execute_tools/health_checks/<this file> → four hops to the root.
@@ -68,12 +69,15 @@ def _full_ctx() -> HealthCheckContext:
     )
 
 
-# The facts TIDMAD's profile implies, and a contrast task's declaration.
-TIDMAD_FACTS = TaskHealthFacts(
+# Facts implied by the neutral indexed profile, and a contrasting declaration.
+INDEXED_PROFILE = make_two_family_profile(
+    num_files=5, psd_segment_length=2_000, segments_per_file=4
+)
+INDEXED_FACTS = TaskHealthFacts(
     encoding_family="int8_symbol_stream",
     symbol_cardinality=256,
-    file_group_size=20,
-    sampling_frequency_hz=10_000_000.0,
+    file_group_size=5,
+    sampling_frequency_hz=1_000.0,
 )
 CONTRAST_FACTS = TaskHealthFacts(
     encoding_family="continuous_float",
@@ -84,20 +88,20 @@ CONTRAST_FACTS = TaskHealthFacts(
 # Stand-ins for the six shipped checks' declarations. C4 replaces these with
 # the real ClassVars; here they only have to be SHAPED like them.
 INT8_PEEK_DECLARATION = CheckInputDeclaration(
-    consumes_view="tidmad.int8_prefix_peek",
+    consumes_view="indexed.int8_prefix_peek",
     required_context_inputs=("denoised_source",),
     required_facts=(FactRequirement(axis="encoding_family", equals="int8_symbol_stream"),),
     threshold_parameter_names=("min_unique_int8_values",),
 )
 TARGET_COMPARISON_DECLARATION = CheckInputDeclaration(
-    consumes_view="tidmad.target_comparison_peek",
+    consumes_view="indexed.target_comparison_peek",
     required_context_inputs=("denoised_source", "target_source"),
     required_facts=(FactRequirement(axis="encoding_family", equals="int8_symbol_stream"),),
 )
 
 
-class TestApplicableUnderTidmadFacts:
-    """Every TIDMAD-shaped declaration applies under TIDMAD facts.
+class TestApplicableUnderIndexedFacts:
+    """Every indexed-stream declaration applies under matching facts.
 
     This is the parity claim in its pure form: if any of these flipped, the
     wiring commit would silently stop running a production check.
@@ -109,7 +113,7 @@ class TestApplicableUnderTidmadFacts:
         ids=["int8_peek", "target_comparison"],
     )
     def test_declaration_is_applicable(self, declaration: CheckInputDeclaration):
-        verdict = applicability(declaration, TIDMAD_FACTS, _full_ctx())
+        verdict = applicability(declaration, INDEXED_FACTS, _full_ctx())
         assert verdict.applicable is True
         assert verdict.axis is None
         assert verdict.reason == ""
@@ -147,7 +151,7 @@ class TestFactAxisMismatch:
             consumes_view="v", required_facts=(FactRequirement(axis="value_scale_unit"),)
         )
         assert applicability(declaration, CONTRAST_FACTS, _ctx()).applicable is True
-        verdict = applicability(declaration, TIDMAD_FACTS, _ctx())
+        verdict = applicability(declaration, INDEXED_FACTS, _ctx())
         assert verdict.applicable is False
         assert verdict.axis == "value_scale_unit"
 
@@ -156,7 +160,7 @@ class TestContextInputPresence:
     def test_absent_target_source_names_the_missing_input(self):
         """Today's ``pearson_dispersion`` NA case, decided before the check runs."""
         ctx = _ctx(denoised_paths={0: "/tmp/d.h5"})  # no target_path_fn
-        verdict = applicability(TARGET_COMPARISON_DECLARATION, TIDMAD_FACTS, ctx)
+        verdict = applicability(TARGET_COMPARISON_DECLARATION, INDEXED_FACTS, ctx)
         assert verdict.applicable is False
         assert verdict.axis == "target_source"
         assert verdict.reason == "not applicable — required context input 'target_source' is absent"
@@ -168,17 +172,17 @@ class TestContextInputPresence:
         )
         by_paths = _ctx(denoised_paths={0: "/tmp/d.h5"})
         by_callable = _ctx(denoised_filename_fn=lambda fi: "/tmp/d.h5")
-        assert applicability(declaration, TIDMAD_FACTS, by_paths).applicable is True
-        assert applicability(declaration, TIDMAD_FACTS, by_callable).applicable is True
-        assert applicability(declaration, TIDMAD_FACTS, _ctx()).applicable is False
+        assert applicability(declaration, INDEXED_FACTS, by_paths).applicable is True
+        assert applicability(declaration, INDEXED_FACTS, by_callable).applicable is True
+        assert applicability(declaration, INDEXED_FACTS, _ctx()).applicable is False
 
     def test_empty_collections_count_as_absent(self):
         """An empty file_vector is no evidence, not evidence of emptiness."""
         declaration = CheckInputDeclaration(
             consumes_view="v", required_context_inputs=("file_vector",)
         )
-        assert applicability(declaration, TIDMAD_FACTS, _ctx(file_vector=[])).applicable is False
-        assert applicability(declaration, TIDMAD_FACTS, _ctx(file_vector=[1.0])).applicable is True
+        assert applicability(declaration, INDEXED_FACTS, _ctx(file_vector=[])).applicable is False
+        assert applicability(declaration, INDEXED_FACTS, _ctx(file_vector=[1.0])).applicable is True
 
 
 class TestEvaluationOrder:
@@ -201,7 +205,7 @@ class TestEvaluationOrder:
             consumes_view="v",
             required_context_inputs=("file_vector", "target_source"),
         )
-        assert applicability(declaration, TIDMAD_FACTS, _ctx()).axis == "file_vector"
+        assert applicability(declaration, INDEXED_FACTS, _ctx()).axis == "file_vector"
 
     def test_reason_strings_are_deterministic(self):
         """Reasons are persisted evidence; identical inputs must give identical bytes."""
@@ -241,29 +245,28 @@ class TestAuthoringTimeFailClosed:
 class TestRegimeADerivation:
     """The derived facts are pinned to HARDCODED values, never read back."""
 
-    def test_tidmad_profile_derives_the_expected_facts(self):
-        facts = derive_health_facts(resolve_dataset_profile())
+    def test_indexed_profile_derives_the_expected_facts(self):
+        facts = derive_health_facts(INDEXED_PROFILE)
         assert facts.encoding_family == "int8_symbol_stream"
         assert facts.symbol_cardinality == 256
-        assert facts.file_group_size == 20
-        assert facts.sampling_frequency_hz == 10_000_000.0
+        assert facts.file_group_size == 5
+        assert facts.sampling_frequency_hz == 1_000.0
 
     def test_value_scale_unit_is_deliberately_absent(self):
         """The mV scale is a check-local literal, not a task declaration.
 
-        Deriving it would invent a declaration the task never made; REQUIRING
-        it would flip TIDMAD's std checks to inapplicable. Ownership moves
-        with the thresholds in 08b.
+        Deriving it would invent a declaration the profile never made.
         """
-        assert derive_health_facts(resolve_dataset_profile()).value_scale_unit is None
+        assert derive_health_facts(INDEXED_PROFILE).value_scale_unit is None
 
     def test_resolved_facts_match_the_explicit_derivation(self):
-        assert resolve_health_facts() == derive_health_facts(resolve_dataset_profile())
+        with bind_dataset_profile(INDEXED_PROFILE):
+            assert resolve_health_facts() == derive_health_facts(INDEXED_PROFILE)
 
-    def test_derived_tidmad_facts_satisfy_the_int8_family_declaration(self):
+    def test_derived_indexed_facts_satisfy_the_int8_family_declaration(self):
         """Ties the derivation to the parity claim rather than to a literal."""
         verdict = applicability(
-            INT8_PEEK_DECLARATION, derive_health_facts(resolve_dataset_profile()), _full_ctx()
+            INT8_PEEK_DECLARATION, derive_health_facts(INDEXED_PROFILE), _full_ctx()
         )
         assert verdict.applicable is True
 

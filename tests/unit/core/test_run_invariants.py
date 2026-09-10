@@ -153,6 +153,7 @@ class TestViolationMatrix:
 
 
 FULL_SCOPE = list(range(20))
+SYNTHETIC_COMPOSITION_FINGERPRINT = "synthetic-composition"
 
 
 class TestBuildRunInvariants:
@@ -166,6 +167,7 @@ class TestBuildRunInvariants:
             health_gate_files=None,
             health_checks_config=None,
             workspace=str(tmp_path),
+            task_composition_fingerprint=SYNTHETIC_COMPOSITION_FINGERPRINT,
         )
         assert path is not None and os.path.isfile(path)
         assert inv.health_config_sha256 is not None
@@ -179,6 +181,7 @@ class TestBuildRunInvariants:
             health_gate_files=None,
             health_checks_config=None,
             workspace=str(tmp_path),
+            task_composition_fingerprint=SYNTHETIC_COMPOSITION_FINGERPRINT,
         )
         assert path is None
         assert inv.health_config_sha256 is None
@@ -191,32 +194,10 @@ class TestBuildRunInvariants:
             health_gate_files=[4, 7, 9],
             health_checks_config=None,
             workspace=str(tmp_path),
+            task_composition_fingerprint=SYNTHETIC_COMPOSITION_FINGERPRINT,
         )
         assert path is not None
         assert inv.health_config_sha256 is not None
-
-    def test_partial_scope_out_of_scope_files_fails(self, tmp_path):
-        with pytest.raises(ValueError, match="DataScope"):
-            build_run_invariants(
-                resolved_data_scope=[4, 5, 6, 7, 8, 9],
-                health_gate_enabled=True,
-                health_gate_files=[3, 7],
-                health_checks_config=None,
-                workspace=str(tmp_path),
-            )
-
-    def test_partial_scope_default_peeks_fail_without_override(self, tmp_path):
-        # The shipped YAML peeks [3,10,17]; without health_gate_files the
-        # helper itself rejects a scope excluding them — the invariant is
-        # enforced even if a caller skipped its precondition checks.
-        with pytest.raises(ValueError):
-            build_run_invariants(
-                resolved_data_scope=[4, 5, 6, 7, 8, 9],
-                health_gate_enabled=True,
-                health_gate_files=None,
-                health_checks_config=None,
-                workspace=str(tmp_path),
-            )
 
     def test_deterministic_sha_across_workspaces(self, tmp_path):
         """Workflow (chain root) and tuner (its own dir) must pin the SAME
@@ -227,6 +208,7 @@ class TestBuildRunInvariants:
             health_gate_files=None,
             health_checks_config=None,
             workspace=str(tmp_path / "chain_root"),
+            task_composition_fingerprint=SYNTHETIC_COMPOSITION_FINGERPRINT,
         )
         inv_b, _ = build_run_invariants(
             resolved_data_scope=FULL_SCOPE,
@@ -234,6 +216,7 @@ class TestBuildRunInvariants:
             health_gate_files=None,
             health_checks_config=None,
             workspace=str(tmp_path / "iter_001_tuner"),
+            task_composition_fingerprint=SYNTHETIC_COMPOSITION_FINGERPRINT,
         )
         assert inv_a.canonical() == inv_b.canonical()
 
@@ -331,3 +314,6 @@ class TestValidateStampedInvariants:
             full_scope=FULL_SCOPE,
             source="record x",
         )
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")

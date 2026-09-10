@@ -1,26 +1,19 @@
-"""Lane F3 / F-BYPASS-WD-1 — the bypass raises the WATCHDOG ceiling, not
-just the admission flag; witnessed at the runtime consumer (SRI-2, both
-directions).
+"""Lane F3 — a forecast bypass raises only the forecast admission ceiling.
 
-The defect (campaign ledger P7-C): the bypass mutated
-``time_check["feasible"] = True`` in place — forecast overridden, while the
-runtime policy's ``operator_budget_seconds`` stayed at the normal formal
-budget. Admitted on the promise of extra time, killed at the normal
-deadline. The fix: ONE resolved value (``chosen_time_budget``) is raised at
-the bypass site and read by BOTH admission and the runtime policy; feasibility
-is RE-EVALUATED against the elevated ceiling, never flag-forced.
-
-Every leg reads the verdict from the TRAINING CALL's captured
-``runtime_policy["operator_budget_seconds"]`` — the value the watchdog
-actually enforces — never from a config fingerprint. Frozen campaign
-numbers: normal formal 120 → ceiling 120; bypass-qualified 200 → ceiling
-200; the watchdog is never disabled; 200 is never global.
+Forecast and measured admission are exclusive authorities.  A forecast-selected
+attempt therefore keeps in-process runtime verification record-only; the
+training policy must not acquire a measured watchdog budget as a side effect of
+the bypass.  The elevated value governs the forecast decision and is recorded
+on the admitted attempt, while an untriggered or unqualified attempt cannot
+inherit it.
 """
 
 from __future__ import annotations
 
 import tempfile
 from unittest.mock import patch
+
+import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
@@ -45,6 +38,7 @@ TRIAL_TIME_OK = {
     "limit_minutes": 20.0,
     "verdict": "FITS",
     "suggestion": "",
+    "breakdown": {"over_effective_budget": False},
 }
 
 
@@ -56,6 +50,7 @@ def _formal_over(estimated: float) -> dict:
         "limit_minutes": 120.0,
         "verdict": f"OVER BUDGET — Est {estimated} min vs budget 120.0 min.",
         "suggestion": "Reduce model depth/width.",
+        "breakdown": {"over_effective_budget": True},
     }
 
 
@@ -131,6 +126,8 @@ def _run(tmp_path, *, formal_check, bypass_minutes, bypass_delta=0.0, trial_chec
             progress_bar=False,
             trial_time_budget_minutes=20.0,
             formal_time_budget_minutes=120.0,
+            trial_time_admission_source="forecast",
+            formal_time_admission_source="forecast",
             bypass_formal_time_budget_minutes=bypass_minutes,
             bypass_formal_time_budget_min_delta=bypass_delta,
             # DS5 waiver: disabled HealthGate mode stamps records
@@ -146,31 +143,22 @@ def _run(tmp_path, *, formal_check, bypass_minutes, bypass_delta=0.0, trial_chec
         return saved_records, skill_calls
 
 
-def _training_budgets(skill_calls) -> list[float | None]:
-    """operator_budget_seconds of every TRAINING call, in order — the value
-    the watchdog enforces (trial trainings carry None by design)."""
+def _training_policies(skill_calls) -> list[dict]:
+    """Runtime policies delivered to training, in execution order."""
     return [
-        p["runtime_policy"]["operator_budget_seconds"]
+        p["runtime_policy"]
         for s, p in skill_calls
         if s == "training_skill" and "runtime_policy" in p
     ]
 
 
-def test_bypass_raises_the_watchdog_ceiling_at_the_runtime_consumer(tmp_path):
-    """THE witness, direction 1 — the defect only this catches: P7-C itself.
-    A qualified bypass whose forecast (150) fits the elevated ceiling (200)
-    must execute with operator_budget_seconds == 200*60 — the ceiling MOVED
-    with the admission verdict. Fails by: the formal training call carrying
-    120*60 (admitted on a promise, killed at the normal deadline — the
-    original defect, which the restored flag-flip reproduces exactly)."""
-    records, calls = _run(tmp_path, formal_check=_formal_over(150.0), bypass_minutes=200.0)
-    budgets = _training_budgets(calls)
-    formal_budgets = [b for b in budgets if b is not None]
-    assert formal_budgets, "the formal round must have trained (bypass admitted it)"
-    assert formal_budgets == [200.0 * 60.0]
-    # Provenance rides the record's time_check.
-    bypassed = [r for r in records if (r.get("time_check") or {}).get("bypass_ceiling_minutes")]
-    assert not bypassed or bypassed[0]["time_check"]["bypass_ceiling_minutes"] == 200.0
+def test_bypass_raises_the_forecast_ceiling_without_arming_a_measured_watchdog(tmp_path):
+    """A qualified forecast proceeds and records 200 without changing authority."""
+    _records, calls = _run(tmp_path, formal_check=_formal_over(150.0), bypass_minutes=200.0)
+    policies = _training_policies(calls)
+    assert len(policies) == 2, "trial and admitted formal rounds must both train"
+    assert policies[1]["time_admission_source"] == "forecast"
+    assert policies[1]["operator_budget_seconds"] is None
 
 
 def test_untriggered_bypass_leaves_the_normal_ceiling_the_global_raise_catch(tmp_path):
@@ -187,17 +175,12 @@ def test_untriggered_bypass_leaves_the_normal_ceiling_the_global_raise_catch(tmp
         "limit_minutes": 120.0,
         "verdict": "FITS",
         "suggestion": "",
+        "breakdown": {"over_effective_budget": False},
     }
     _, calls = _run(tmp_path, formal_check=formal_fits, bypass_minutes=200.0)
-    budgets = _training_budgets(calls)
-    formal_budgets = [b for b in budgets if b is not None]
-    assert formal_budgets == [120.0 * 60.0], (
-        "a FEASIBLE formal attempt with the bypass value merely CONFIGURED "
-        "must run at the NORMAL ceiling — anything else is a global raise"
-    )
-    assert [b for b in budgets if b is None], (
-        "trial trainings must still ship operator_budget_seconds=None"
-    )
+    policies = _training_policies(calls)
+    assert len(policies) == 2
+    assert all(policy["operator_budget_seconds"] is None for policy in policies)
 
 
 def test_unqualified_attempt_cannot_reach_the_elevated_ceiling(tmp_path):
@@ -218,6 +201,7 @@ def test_unqualified_attempt_cannot_reach_the_elevated_ceiling(tmp_path):
         "limit_minutes": 20.0,
         "verdict": "OVER BUDGET",
         "suggestion": "",
+        "breakdown": {"over_effective_budget": True},
     }
     records, calls = _run(
         tmp_path,
@@ -228,7 +212,7 @@ def test_unqualified_attempt_cannot_reach_the_elevated_ceiling(tmp_path):
     assert any(r.get("status") == "skipped_time_risk" for r in records), (
         "the unqualified (winner-less) infeasible formal attempt must be refused"
     )
-    assert 200.0 * 60.0 not in _training_budgets(calls)
+    assert all(policy["operator_budget_seconds"] is None for policy in _training_policies(calls))
 
 
 def test_qualified_but_no_ceiling_configured_grants_nothing(tmp_path):
@@ -239,7 +223,7 @@ def test_qualified_but_no_ceiling_configured_grants_nothing(tmp_path):
     all, or any non-trial budget appearing."""
     records, calls = _run(tmp_path, formal_check=_formal_over(150.0), bypass_minutes=None)
     assert any(r.get("status") == "skipped_time_risk" for r in records)
-    assert [b for b in _training_budgets(calls) if b is not None] == []
+    assert all(policy["operator_budget_seconds"] is None for policy in _training_policies(calls))
 
 
 def test_forecast_past_even_the_elevated_ceiling_is_refused(tmp_path):
@@ -249,4 +233,7 @@ def test_forecast_past_even_the_elevated_ceiling_is_refused(tmp_path):
     promise, killed at 200). Fails by: the formal attempt training."""
     records, calls = _run(tmp_path, formal_check=_formal_over(260.0), bypass_minutes=200.0)
     assert any(r.get("status") == "skipped_time_risk" for r in records)
-    assert [b for b in _training_budgets(calls) if b is not None] == []
+    assert all(policy["operator_budget_seconds"] is None for policy in _training_policies(calls))
+
+
+pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

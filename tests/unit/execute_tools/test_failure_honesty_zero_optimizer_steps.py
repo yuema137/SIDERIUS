@@ -27,31 +27,30 @@ validity system is introduced, and the record fields that were already
 honest (`train_objective [null]`, `scientific_authority.authoritative
 false`) keep their meaning.
 
-Scope note: this is a small-sample-task defect, NOT a TIDMAD campaign
-one. TIDMAD's minimum is 8,000 samples/epoch, so emptying its epoch would
-take `batch_size > 8000`. The refusal is generic -- it reads the executed
-step count, not any task's row geometry -- and nothing here is tuned for
-a task.
+The refusal is generic: it reads the executed step count, not any task's row
+geometry, and nothing here is tuned for a scientific dataset.
 """
 
 from __future__ import annotations
 
 import os
 
-import h5py
 import numpy as np
 import pytest
 import torch
 from torch.utils.data import DataLoader, Dataset
 
 import execute_tools.train_engine_sandbox as tes
-from execute_tools.dataset_config import (
-    TIDMAD_PROFILE,
-    bind_dataset_profile,
-    tidmad_topology,
+from execute_tools.task_data_path import (
+    DeliverableWriteRequest,
+    EpochSamplingParams,
+    EvalMaterializationParams,
+    EvaluationReadRequest,
+    TrainingScopeError,
+    bind_task_data_path,
 )
-from execute_tools.task_data_path import TrainingScopeError
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_class
+from tests.helpers.two_family_profile import make_two_family_profile
 
 SEG = 1024
 
@@ -60,6 +59,7 @@ SEG = 1024
 #: cost six CPU trainings.
 MODEL_TYPE = "punet"
 TINY = {"multi": 8, "depth": 2, "embedding_dim": 8, "kernel_size": 3}
+PAIR_PROFILE = make_two_family_profile(num_files=6, psd_segment_length=2_048, segments_per_file=2)
 
 
 def _cfg():
@@ -91,6 +91,26 @@ class _Pairs(Dataset):
     def __getitem__(self, idx: int):
         x = torch.full((SEG,), 100 + idx, dtype=torch.int16)
         return x, x.clone()
+
+
+class _PairTaskDataPath:
+    """Minimal in-memory task seam for streaming-engine reachability."""
+
+    task_data_path_id = "zero_step_pair_fixture"
+
+    def training_dataset(self, scope: object, params: EpochSamplingParams) -> Dataset:
+        assert isinstance(scope, list)
+        return _Pairs(len(scope))
+
+    def validation_dataset(self, scope: object, params: EvalMaterializationParams) -> Dataset:
+        assert isinstance(scope, list)
+        return _Pairs(len(scope))
+
+    def write_deliverable(self, outputs, request: DeliverableWriteRequest) -> None:
+        raise AssertionError("zero-step training must not write a deliverable")
+
+    def read_evaluation_payload(self, request: EvaluationReadRequest) -> object:
+        raise AssertionError("zero-step training must not read an evaluation payload")
 
 
 # ---------------------------------------------------------------------------
@@ -183,61 +203,40 @@ class TestEpochEngineRefuses:
         assert "_OK_one_batch" in os.listdir(dirs["models"])
 
 
-@pytest.fixture
-def one_file_scope(tmp_path):
-    """One tiny training file, two segments -- the streaming engine's input."""
-    rng = np.random.default_rng(0)
-    path = tmp_path / tidmad_topology(TIDMAD_PROFILE).dataset.training_file_name(4)
-    n = 2 * SEG
-    with h5py.File(path, "w") as f:
-        ts = f.create_group("timeseries")
-        ts.create_group("channel0001").create_dataset(
-            "timeseries", data=rng.integers(-128, 127, size=n, dtype=np.int8)
-        )
-        ts.create_group("channel0002").create_dataset(
-            "timeseries", data=rng.integers(-128, 127, size=n, dtype=np.int8)
-        )
-    tiny = TIDMAD_PROFILE.model_copy(
-        update={
-            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
-                update={"psd_segment_length": SEG}
-            )
-        }
-    )
-    with bind_dataset_profile(tiny):
-        yield str(tmp_path), {"4": [0, 1]}
-
-
 class TestStreamingEngineRefuses:
     """THE production training path, so its own reachability is required."""
 
-    def test_a_batch_larger_than_the_scope_fails_the_attempt(self, tmp_path, one_file_scope):
-        data_dir, sample_set = one_file_scope
-        with pytest.raises(TrainingScopeError):
-            tes.run_experiment_streaming(
-                _cfg(),
-                # The scope materializes 2 rows; 8 cannot fill a batch.
-                _train_cfg(batch_size=8),
-                LossConfig(),
-                sample_set=sample_set,
-                data_dir=data_dir,
-                sandbox_dirs=_sandbox_dirs(tmp_path),
-                exp_id="streaming_zero_step",
-                train_base_seed=42,
-            )
+    def test_a_batch_larger_than_the_scope_fails_the_attempt(self, tmp_path):
+        with bind_task_data_path(_PairTaskDataPath()):
+            with pytest.raises(TrainingScopeError):
+                tes.run_experiment_streaming(
+                    _cfg(),
+                    # The scope materializes 6 rows; 8 cannot fill a batch.
+                    _train_cfg(batch_size=8),
+                    LossConfig(),
+                    sample_set={},
+                    task_scope=list(range(6)),
+                    data_dir=str(tmp_path),
+                    sandbox_dirs=_sandbox_dirs(tmp_path),
+                    exp_id="streaming_zero_step",
+                    train_base_seed=42,
+                    profile=PAIR_PROFILE,
+                )
 
-    def test_a_scope_that_fills_a_batch_still_trains(self, tmp_path, one_file_scope):
+    def test_a_scope_that_fills_a_batch_still_trains(self, tmp_path):
         """Parity guard: the refusal must not touch a trainable streaming run."""
-        data_dir, sample_set = one_file_scope
-        out = tes.run_experiment_streaming(
-            _cfg(),
-            _train_cfg(batch_size=1),
-            LossConfig(),
-            sample_set=sample_set,
-            data_dir=data_dir,
-            sandbox_dirs=_sandbox_dirs(tmp_path),
-            exp_id="streaming_ok",
-            train_base_seed=42,
-        )
+        with bind_task_data_path(_PairTaskDataPath()):
+            out = tes.run_experiment_streaming(
+                _cfg(),
+                _train_cfg(batch_size=6),
+                LossConfig(),
+                sample_set={},
+                task_scope=list(range(6)),
+                data_dir=str(tmp_path),
+                sandbox_dirs=_sandbox_dirs(tmp_path),
+                exp_id="streaming_ok",
+                train_base_seed=42,
+                profile=PAIR_PROFILE,
+            )
         assert out is not None
         assert not np.isnan(out["final_loss"])

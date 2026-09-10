@@ -20,9 +20,9 @@ Design points that matter:
   a post-hoc edit is visible in the report rather than invisible in a
   diff.
 
-Track B (official legacy FCNet) has its own driver,
-`scripts/legacy_fcnet_timing.py`, because its read-only constraints
-around /home/tidmad/TIDMAD are stricter than anything here.
+Track B (official legacy FCNet) is task-owned and lives in the external
+experiment repository because its scientific source and read-only constraints
+are not framework responsibilities.
 """
 
 from __future__ import annotations

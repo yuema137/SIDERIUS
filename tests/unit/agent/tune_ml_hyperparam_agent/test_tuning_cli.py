@@ -62,6 +62,10 @@ class TestSeedPluginPathCLI:
             str(workspace),
             "--run_name",
             "cli_test",
+            "--task_composition",
+            str(REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"),
+            "--data_dir",
+            str(workspace),
             *extra,
         ]
 
@@ -152,14 +156,16 @@ class TestTaskCompositionCLI:
             str(workspace),
             "--run_name",
             "cli_test",
+            "--task_composition",
+            str(REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"),
+            "--data_dir",
+            str(workspace),
             *extra,
         ]
 
     @patch("nodes.ml_hyperparameter_tune_agent.HyperparamTuningAgent")
-    def test_omitting_it_leaves_the_ref_NONE_byte_identical_to_before(
-        self, mock_agent_cls, tmp_path
-    ):
-        """The legacy path — every launch before this flag existed."""
+    def test_required_manifest_populates_the_ref(self, mock_agent_cls, tmp_path):
+        """The shared helper supplies the required Quickstart declaration."""
         mock_agent = MagicMock()
         mock_agent_cls.return_value = mock_agent
 
@@ -167,19 +173,19 @@ class TestTaskCompositionCLI:
             main()
 
         agent_input = mock_agent.run.call_args[0][0]
-        assert agent_input.task_composition_ref is None
+        assert agent_input.task_composition_ref.task_data_path_id == "quickstart_tabular"
 
     @patch("nodes.ml_hyperparameter_tune_agent.HyperparamTuningAgent")
     def test_a_composed_launch_populates_the_ref(self, mock_agent_cls, tmp_path):
         mock_agent = MagicMock()
         mock_agent_cls.return_value = mock_agent
-        manifest = str(REPO_ROOT / "configs" / "task_composition" / "pets.yaml")
+        manifest = str(REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml")
 
         argv = self._argv_for(
-            "pets_reference_cnn",
+            "quickstart_reference_mlp",
             tmp_path,
             "--seed_plugin_path",
-            str(REPO_ROOT / "examples" / "oxford_iiit_pet" / "plugins" / "pets_reference_cnn.py"),
+            str(REPO_ROOT / "examples" / "quickstart" / "plugins" / "quickstart_reference_mlp.py"),
             "--task_composition",
             manifest,
             "--data_dir",
@@ -190,7 +196,7 @@ class TestTaskCompositionCLI:
 
         agent_input = mock_agent.run.call_args[0][0]
         assert agent_input.task_composition_ref is not None
-        assert agent_input.task_composition_ref.task_data_path_id == "oxford_iiit_pet"
+        assert agent_input.task_composition_ref.task_data_path_id == "quickstart_tabular"
 
     @patch("nodes.ml_hyperparameter_tune_agent.HyperparamTuningAgent")
     def test_the_binding_is_ACTIVE_during_run_and_unwinds_after(self, mock_agent_cls, tmp_path):
@@ -207,13 +213,13 @@ class TestTaskCompositionCLI:
         mock_agent = MagicMock()
         mock_agent.run.side_effect = _capture
         mock_agent_cls.return_value = mock_agent
-        manifest = str(REPO_ROOT / "configs" / "task_composition" / "pets.yaml")
+        manifest = str(REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml")
 
         argv = self._argv_for(
-            "pets_reference_cnn",
+            "quickstart_reference_mlp",
             tmp_path,
             "--seed_plugin_path",
-            str(REPO_ROOT / "examples" / "oxford_iiit_pet" / "plugins" / "pets_reference_cnn.py"),
+            str(REPO_ROOT / "examples" / "quickstart" / "plugins" / "quickstart_reference_mlp.py"),
             "--task_composition",
             manifest,
             "--data_dir",
@@ -223,7 +229,7 @@ class TestTaskCompositionCLI:
             main()
 
         assert seen["during"] is not None
-        assert seen["during"].task_data_path_id == "oxford_iiit_pet"
+        assert seen["during"].task_data_path_id == "quickstart_tabular"
         assert active_task_data_path() is None, "the binding must unwind after main() returns"
 
     @patch("nodes.ml_hyperparameter_tune_agent.HyperparamTuningAgent")
@@ -243,8 +249,8 @@ class TestTaskCompositionCLI:
         mock_agent_cls.assert_not_called()
 
     @patch("nodes.ml_hyperparameter_tune_agent.HyperparamTuningAgent")
-    def test_an_UNCOMPOSED_launch_never_enters_the_binding(self, mock_agent_cls, tmp_path):
-        """The other half of the reachability proof: no flag, no context."""
+    def test_required_composition_enters_the_binding(self, mock_agent_cls, tmp_path):
+        """The required declaration is active during the agent call."""
         from execute_tools.task_data_path import active_task_data_path
 
         seen = {}
@@ -260,4 +266,4 @@ class TestTaskCompositionCLI:
         with patch.object(sys, "argv", self._argv_for("fcnet", tmp_path)):
             main()
 
-        assert seen["during"] is None
+        assert seen["during"].task_data_path_id == "quickstart_tabular"

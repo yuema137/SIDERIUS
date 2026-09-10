@@ -14,7 +14,7 @@ model_config:
 }
 
 train_config (for context only — do not implement training logic):
-  segmentation_size: 40000 (if present)
+  segmentation_size: 64 (if present)
   batch_size: 1
 
 ## Forward contract (non-negotiable)

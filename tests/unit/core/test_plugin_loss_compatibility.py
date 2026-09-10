@@ -32,6 +32,8 @@ from core.sandbox_executor import TidmadSandbox
 from ml_models import plugin_loader
 from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
 
+pytestmark = pytest.mark.usefixtures("synthetic_task_config")
+
 CLASSIFICATION_LOSSES = ["ce", "focal", "focal_cw"]
 
 

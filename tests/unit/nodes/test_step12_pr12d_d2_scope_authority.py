@@ -46,12 +46,12 @@ import pytest
 from execute_tools.dataset_config import (
     NUM_FILES,
     SEGMENTS_PER_FILE,
+    TIDMAD_PROFILE,
     ChannelIdentity,
     DatasetConfig,
     DatasetProfile,
     ValueEncoding,
     declares_tidmad_topology,
-    resolve_dataset_profile,
     tidmad_topology,
 )
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
@@ -91,7 +91,7 @@ class TestProjectionAuthority:
     """One projection; a MISS is a membership test, not an exception to catch."""
 
     def test_a_tidmad_profile_yields_its_physical_dataset(self):
-        facts = project_attempt_topology_facts(resolve_dataset_profile())
+        facts = project_attempt_topology_facts(TIDMAD_PROFILE)
         assert facts.declares_physical_geometry
         assert isinstance(facts.physical_dataset, DatasetConfig)
 
@@ -115,7 +115,7 @@ class TestProjectionAuthority:
             project_attempt_topology_facts(profile)
 
     def test_the_predicate_and_the_decoder_agree_on_TIDMAD(self):
-        profile = resolve_dataset_profile()
+        profile = TIDMAD_PROFILE
         assert declares_tidmad_topology(profile)
         assert tidmad_topology(profile).dataset is not None
 
@@ -186,13 +186,15 @@ class TestConsumerSitesReadFacts:
         for task in ("pets", "oxford", "davis"):
             assert task not in lowered
 
-    def test_the_sample_set_builder_is_reached_only_when_geometry_is_DECLARED(self):
-        """B2's positive contract.
+    def test_the_legacy_sample_set_builder_is_not_a_composed_task_transport(self):
+        """A composed task transports its opaque task-owned scopes only.
 
-        ``build_sample_set`` is, and stays, TIDMAD's scope builder — D2 did
-        not genericize it, it stopped calling it for a task whose profile
-        declares nothing it could build from. The guard is on the CALL's
-        guard condition, because that is what changed.
+        The legacy ``build_sample_set`` remains available to an uncomposed
+        caller whose profile declares the old physical geometry.  A composed
+        task already owns training and evaluation scopes, so sending the
+        legacy sample-set pair beside those scopes creates two authorities and
+        the task-generic training engine must refuse it.  This assertion fails
+        if planning reintroduces that contradictory transport.
         """
         tree = ast.parse((TUNER / "planning.py").read_text(encoding="utf-8"))
         prepare = next(
@@ -212,9 +214,10 @@ class TestConsumerSitesReadFacts:
             )
         ]
         assert guards, "the builder is still called from prepare_attempt"
-        assert any("declares_physical_geometry" in guard for guard in guards), (
-            f"the builder's guard does not consult the projection: {guards}"
-        )
+        assert any(
+            "declares_physical_geometry" in guard and "task_composition_ref is None" in guard
+            for guard in guards
+        ), f"the legacy builder can still run for a composed task: {guards}"
 
     def test_the_builder_itself_still_fails_closed_without_topology(self):
         """PRESERVED. Its refusal is what makes the guard above necessary."""
@@ -241,7 +244,7 @@ class TestDifferentialOracleUnderTidmad:
     """
 
     def test_the_physical_dataset_is_the_same_object_the_decode_produced(self):
-        profile = resolve_dataset_profile()
+        profile = TIDMAD_PROFILE
         assert (
             project_attempt_topology_facts(profile).physical_dataset
             == tidmad_topology(profile).dataset
@@ -250,7 +253,7 @@ class TestDifferentialOracleUnderTidmad:
     def test_the_legacy_segment_count_is_unchanged(self):
         from nodes.ml_hyperparameter_tune_agent.planning import _psd_segment_counts
 
-        profile = resolve_dataset_profile()
+        profile = TIDMAD_PROFILE
         facts = project_attempt_topology_facts(profile)
         train, evaluation = _psd_segment_counts(None, None, facts)
         expected = tidmad_topology(profile).dataset.segments_per_file
@@ -259,7 +262,7 @@ class TestDifferentialOracleUnderTidmad:
     def test_a_built_sample_set_still_reports_what_it_holds(self):
         from nodes.ml_hyperparameter_tune_agent.planning import _psd_segment_counts
 
-        facts = project_attempt_topology_facts(resolve_dataset_profile())
+        facts = project_attempt_topology_facts(TIDMAD_PROFILE)
         assert _psd_segment_counts({0: [1, 2], 3: [0]}, {5: [4]}, facts) == (3, 1)
 
     def test_the_full_scope_reference_volume_is_unchanged(self):
@@ -268,7 +271,7 @@ class TestDifferentialOracleUnderTidmad:
             render_full_scope_segments_token,
         )
 
-        dataset = tidmad_topology(resolve_dataset_profile()).dataset
+        dataset = tidmad_topology(TIDMAD_PROFILE).dataset
         value = render_full_scope_segments(dataset)
         assert value == NUM_FILES * SEGMENTS_PER_FILE
         assert render_full_scope_segments_token(value) == str(value)
@@ -284,22 +287,14 @@ class TestDifferentialOracleUnderTidmad:
             derive_tidmad_deliverable_spec,
         )
 
-        profile = resolve_dataset_profile()
+        profile = TIDMAD_PROFILE
         assert derive_run_deliverable_spec(profile) == derive_tidmad_deliverable_spec(profile)
 
-    def test_the_run_metric_resolution_is_unchanged_for_an_unbound_run(self):
-        from execute_tools.deliverable_spec import derive_tidmad_deliverable_spec
-        from execute_tools.evaluation_metric import (
-            TIDMAD_METRIC_ID,
-            derive_tidmad_metric,
-            resolve_run_metric,
-        )
+    def test_run_metric_resolution_refuses_an_unbound_run(self):
+        from execute_tools.evaluation_metric import NoRunMetricError, resolve_run_metric
 
-        profile = resolve_dataset_profile()
-        spec = derive_tidmad_deliverable_spec(profile)
-        resolved = resolve_run_metric(profile, spec)
-        assert resolved.spec == derive_tidmad_metric(profile, spec).spec
-        assert resolved.spec.id == TIDMAD_METRIC_ID
+        with pytest.raises(NoRunMetricError, match="no metric bound from a task composition"):
+            resolve_run_metric()
 
 
 class TestDeclaredAbsence:
@@ -391,13 +386,6 @@ class TestFailClosed:
             facts.require_physical_dataset("resolving a raw validation-file path for a Health peek")
         assert "Health peek" in str(excinfo.value)
 
-    def test_a_composed_run_that_declares_no_metric_and_no_geometry_REFUSES(self):
-        """The legacy metric branch must never be reached by a composed task."""
-        from execute_tools.evaluation_metric import NoRunMetricError, resolve_run_metric
-
-        with pytest.raises(NoRunMetricError, match="nothing to derive"):
-            resolve_run_metric(contrast_profile(), None)
-
     def test_the_channel_identity_and_encoding_are_untouched_by_the_projection(self):
         """The projection carries the DATASET half only.
 
@@ -408,5 +396,5 @@ class TestFailClosed:
         remove.
         """
         assert set(AttemptTopologyFacts.model_fields) == {"physical_dataset"}
-        assert isinstance(tidmad_topology(resolve_dataset_profile()).channels, ChannelIdentity)
-        assert isinstance(tidmad_topology(resolve_dataset_profile()).encoding, ValueEncoding)
+        assert isinstance(tidmad_topology(TIDMAD_PROFILE).channels, ChannelIdentity)
+        assert isinstance(tidmad_topology(TIDMAD_PROFILE).encoding, ValueEncoding)
