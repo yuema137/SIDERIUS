@@ -1,11 +1,9 @@
 """Which unit-test modules a set of changed paths can affect.
 
-Phase C of the test-architecture work
-(`docs/design/pruning_test_rule.md`). **Nothing here is wired into CI yet, and
-that is deliberate**: CI continues to run the whole unit suite, so this module
-cannot skip anything. It exists so the ownership model is checked in, executable
-and kept honest *before* anything depends on it. Flipping PR CI to consume it is
-a separate, later decision (Q5).
+Originated in Phase C of the test-architecture work
+(`docs/design/pruning_test_rule.md`). Pull-request CI now consumes this authority
+through `tools.ci`; master, scheduled runs, selector changes and unresolved
+impact still run the full unit suite.
 
 Never imported by production — same rule as `tools/example_packs/`.
 

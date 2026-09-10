@@ -1,8 +1,10 @@
 """CI entry point: turn a changed-file list into a pytest invocation.
 
-Reads changed paths on stdin (one per line, as `git diff --name-only` emits)
-and writes two lines to `$GITHUB_OUTPUT` when it is set, plus a human-readable
-justification to stderr:
+By default, reads one changed path per stdin line. CI passes
+`--name-status-z` to consume `git diff --name-status -z`, preserving both paths
+of a rename, and `--write-paths-json` to give the normalized list to the
+execution harness. The command writes two lines to `$GITHUB_OUTPUT` when it is
+set, plus a human-readable justification to stderr:
 
     full_suite=true|false
     pytest_args=<args for the pytest step>
@@ -15,7 +17,8 @@ failure mode worse than having no selector at all, because it produces a
 confident green.
 
 Usage in CI:
-    git diff --name-only "$BASE" "$HEAD" | uv run python -m tools.ci_selection
+    git diff --name-status -z "$BASE...$HEAD" | uv run python -m \
+        tools.ci_selection --name-status-z --write-paths-json "$CHANGED_JSON"
 """
 
 from __future__ import annotations

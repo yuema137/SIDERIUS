@@ -1,8 +1,8 @@
 # CI Parity — the execution contract
 
 **Lane**: CI Parity & Hermetic Test Harness.
-**Status**: Phase 1. This document is the §4 parity contract and the §20
-manifest schema. Usage/workflow sections arrive in Phase 9.
+**Status**: Phase 1 parity contract and manifest schema, plus the current
+selective-PR usage added after the harness was connected.
 **Base**: `84d74280` (landed master).
 
 A test result is meaningful only if you can say what environment produced it.
@@ -15,14 +15,14 @@ must **not** contain.
 
 | authority | question it answers | owner |
 |---|---|---|
-| `tools/ci_selection/` | **WHAT** should run? | existing, unchanged |
+| `tools/ci_selection/` | **WHAT** should run? | selector authority |
 | hermetic execution (this lane) | **HOW** does it run reproducibly? | `tools/ci/` |
 | failure attribution (this lane) | **WHY** did local / base / remote outcomes differ? | `tools/ci/` |
 
 `tools/ci_selection/` is the sole changed-files→pytest mapping. It is
-fail-closed by construction: `.github/workflows/ci.yml:80-111` omits `set -e`
-so that an unmapped path, a declared hub, a change to the selector itself, or
-any exception all resolve to the full suite, and selection runs on
+fail-closed by construction: the workflow's selection step deliberately omits
+`set -e` so that an unmapped path, a declared hub, a change to the selector
+itself, or any exception all resolve to the full suite. Selection runs on
 `pull_request` only. The harness **composes** it. A second selector is an
 architecture violation, not an optimisation.
 
@@ -474,3 +474,51 @@ Environment variables are recorded **by name only**, and any name matching
 `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` or `AUTH` is omitted
 entirely — recording that a credential variable *exists* still advertises which
 secrets a runner holds. That is a tested property, not a convention.
+
+---
+
+## 10. Current selective pull-request usage
+
+The required CI workflow always starts. It installs the frozen environment and
+runs repository-wide Ruff and Pyright before choosing the unit-test file set.
+Only pull requests may narrow unit tests. Pushes to `master`, scheduled runs and
+manual workflow dispatches continue to run the full unit suite.
+
+For a pull request, the workflow computes one NUL-delimited
+`git diff --name-status -z` against the base. Rename and copy records contribute
+both their old and new paths. The selector writes the normalized list as JSON;
+the harness consumes that same file instead of computing another diff.
+
+Selection is conservative:
+
+- tracked Markdown selects the always-on repository guards and document
+  readers, plus any test with a literal contract-file edge;
+- Python changes select direct tests, tests of explicit transitive callers,
+  declared dynamic readers and the changed area's owning suite;
+- shared hubs, CI/selector infrastructure, dependencies, missing/deleted paths,
+  unmapped importable files, inventory/parse errors and malformed transport run
+  the full suite with a reason;
+- finding one cheap document or direct-test edge never suppresses a FULL trigger
+  or the additive area owner from another changed path.
+
+The selector reports its causal reasons. The harness preserves them in stderr
+and its provenance manifest, then expands only to test files tracked by Git. An
+empty expansion fails closed to the full suite.
+
+After running `uv sync --group dev --frozen`, inspect a branch selection locally
+without executing tests:
+
+```bash
+git diff --name-status -z origin/master...HEAD \
+  | .venv/bin/python -m tools.ci_selection \
+      --name-status-z \
+      --write-paths-json /tmp/siderius-ci-changed.json
+
+.venv/bin/python -m tools.ci plan \
+  --root . \
+  --changed-from /tmp/siderius-ci-changed.json
+```
+
+`plan` prints selection and shard metadata only. Use `bulk` in place of `plan`
+only when the selected tests should actually execute. An absent or invalid
+changed-path file deliberately produces a full plan.

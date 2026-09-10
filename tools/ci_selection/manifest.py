@@ -5,7 +5,8 @@ it exists, and a reason is the part that rots first when it lives in a data file
 nobody reads. `tests/unit/tools/ci_selection/` asserts every path here still
 resolves, so a rename cannot orphan a rule silently.
 
-**This is not wired into CI.** See `resolver.py`.
+Pull-request CI consumes these declarations through `resolver.py`; changes to
+this selector package remain full-suite triggers.
 """
 
 from __future__ import annotations

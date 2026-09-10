@@ -1,9 +1,9 @@
 """The selection model must be honest before anything is allowed to trust it.
 
-Phase C. `tools/ci_selection/` is **not wired into CI** — the full unit suite
-still runs on every push, so nothing here can currently cause a test to be
-skipped. These tests exist so the model is proven correct *before* that changes,
-which is the only order in which a selector is safe to adopt.
+These tests began before `tools/ci_selection/` was wired into CI. Pull requests
+now consume it through `tools.ci`, so the reachability, freshness and independent
+oracle checks below are live protections against under-selection. Master,
+scheduled runs and ambiguous changes still run the full suite.
 
 Three tests, each naming a defect only it catches:
 
