@@ -220,7 +220,7 @@ def rev3_vocab_and_tee_checks() -> dict:
     # 1-2: non-empty + byte-equivalent to the production static seed file.
     seed = production_vocab_seed()
     checks["vocab_nonempty"] = len(seed) > 0
-    with open(REPO / "agent" / "schemas" / "vocab_seed.json") as fh:
+    with open(REPO / "src" / "agent" / "schemas" / "vocab_seed.json") as fh:
         raw_file = _json.load(fh)
     loaded = [v.model_dump(mode="json") if hasattr(v, "model_dump") else v for v in seed]
     raw_names = (
