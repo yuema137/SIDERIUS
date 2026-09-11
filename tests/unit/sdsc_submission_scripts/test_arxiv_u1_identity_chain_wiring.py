@@ -36,17 +36,17 @@ if str(_REPO) not in sys.path:
 
 _spec = importlib.util.spec_from_file_location(
     "run_one_iteration_for_identity_test",
-    _REPO / "sdsc_submission_scripts" / "run_one_iteration.py",
+    _REPO / "src" / "workflows" / "run_one_iteration.py",
 )
 roi = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(roi)
 
-_CHAIN_COMMON = _REPO / "sdsc_submission_scripts" / "_chain_common.sh"
+_CHAIN_COMMON = _REPO / "scripts" / "launch" / "_chain_common.sh"
 
 LOCK_SITES = {
     "tuner": _REPO / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
     "workflow": _REPO / "src/workflows/model_exploration.py",
-    "chain": _REPO / "sdsc_submission_scripts/run_one_iteration.py",
+    "chain": _REPO / "src/workflows/run_one_iteration.py",
 }
 
 IDENTITY_KWARGS = (

@@ -33,7 +33,7 @@ from core.resume import RestoredState
 from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-LAUNCHER = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
+LAUNCHER = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
 WORKFLOW = REPO_ROOT / "src/workflows" / "model_exploration.py"
 
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"

@@ -50,7 +50,7 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-COMMON = REPO_ROOT / "sdsc_submission_scripts" / "_chain_common.sh"
+COMMON = REPO_ROOT / "scripts" / "launch" / "_chain_common.sh"
 
 #: The five variables the frozen row names. Hardcoded on purpose: reading
 #: them back out of the shell source would compare the file to itself and

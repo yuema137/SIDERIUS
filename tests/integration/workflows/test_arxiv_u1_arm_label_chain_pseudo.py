@@ -47,7 +47,7 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 _spec = importlib.util.spec_from_file_location(
     "run_one_iteration_for_arm_chain_test",
-    _REPO / "sdsc_submission_scripts" / "run_one_iteration.py",
+    _REPO / "src" / "workflows" / "run_one_iteration.py",
 )
 roi = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(roi)

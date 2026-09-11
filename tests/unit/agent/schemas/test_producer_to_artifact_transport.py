@@ -276,7 +276,7 @@ class TestTheLaunchDeclarationSurvivesEveryBranch:
         from pathlib import Path
 
         launcher = (
-            Path(__file__).resolve().parents[4] / "sdsc_submission_scripts" / "run_one_iteration.py"
+            Path(__file__).resolve().parents[4] / "src" / "workflows" / "run_one_iteration.py"
         )
         tree = ast.parse(launcher.read_text(encoding="utf-8"))
         undeclared: list[int] = []
