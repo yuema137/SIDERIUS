@@ -15,7 +15,7 @@ Refactor the three blocking health checks (`output_diversity`, `output_std`, `am
 
 ## 2. Empirical motivation
 
-The M8 full-file scan ([`reports/health_metrics_scan.md`](../../reports/health_metrics_scan.md) + [`paper_and_collapse_reference_baselines.md`](./paper_and_collapse_reference_baselines.md)) established that **single-file peek is sufficient for FCNet** — FCNet's `unique_int8` floor is 52 across all 20 files, well above M8's threshold of 25. But two future scenarios motivate Strategy C:
+The M8 full-file scan ([experiment report](https://github.com/Galileo-Sandbox/siderius-exp/blob/e9e5063b/reports/health_metrics_scan.md) + [`paper_and_collapse_reference_baselines.md`](./paper_and_collapse_reference_baselines.md)) established that **single-file peek is sufficient for FCNet** — FCNet's `unique_int8` floor is 52 across all 20 files, well above M8's threshold of 25. But two future scenarios motivate Strategy C:
 
 1. **Partial-collapse** — a V17 model with real learning on high-signal files (10-19) but collapsed output on low-signal files (0-3). Single-file peek with `min(denoised_paths)` would peek file 0 and reject the whole run, discarding the useful high-signal-file learning.
 2. **Weaker-than-FCNet models** — V17 architectures may legitimately produce lower diversity than FCNet on low-signal files (files 0-3 have narrowest FCNet margin). A single-file peek keyed to file 3 (52 uniq) sits close to the M8 threshold of 25; a triplet peek spanning frequency bands provides a more robust verdict.
@@ -286,5 +286,5 @@ All must pass. If pyright is unavailable locally (Node.js issues on this environ
 - **Parent design**: [`docs/design/collapse_detection_framework_generic.md`](./collapse_detection_framework_generic.md), [`docs/design/paper_and_collapse_reference_baselines.md`](./paper_and_collapse_reference_baselines.md)
 - **Framework rev-6 architecture**: [`docs/design/pluggable_health_checks.md`](./pluggable_health_checks.md)
 - **Prior execution plans**: [`m7_loss_implementor_contract_execution_plan.md`](./m7_loss_implementor_contract_execution_plan.md), [`m8_gate_coverage_and_diversity_metrics_execution_plan.md`](./m8_gate_coverage_and_diversity_metrics_execution_plan.md)
-- **Empirical basis**: [`reports/health_metrics_scan.md`](../../reports/health_metrics_scan.md)
+- **Empirical basis**: [experiment report](https://github.com/Galileo-Sandbox/siderius-exp/blob/e9e5063b/reports/health_metrics_scan.md)
 - **Priorities**: [`docs/design/v17_priorities.md`](./v17_priorities.md) — add M9 row after issue opens

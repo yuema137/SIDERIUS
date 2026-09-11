@@ -85,7 +85,7 @@ Two experiments on 2026-07-16 established the empirical basis for this replaceme
 - [x] Decision A (target_path_fn context extension): **YES** — added `HealthCheckContext.target_path_fn` and `get_target_path()`. Test at `tests/unit/execute_tools/health_checks/test_context_target_path.py`.
 - [x] Decision B (metrics schema): **JSON strings** — checks serialise per-file dicts into a `*_json` metric entry. Schema unchanged.
 - [x] Decision C (peek helper): **YES** — added `peek_int8_at_channel(path, channel, peek_samples)`; existing `peek_int8_at_path` is now a thin wrapper. Tests at `tests/unit/execute_tools/health_checks/test_peek.py::TestPeekInt8AtChannel` (5 cases).
-- [x] ~~Created `execute_tools/health_checks/pearson_correlation.py`~~ — **REPLACED 2026-07-16** by `pearson_dispersion.py` per full-file scan findings ([`reports/health_metrics_scan.md`](../../reports/health_metrics_scan.md) §6.3, [`paper_and_collapse_reference_baselines.md`](./paper_and_collapse_reference_baselines.md) §6.3). Per-file pearson is noise-limited on files 0-9; per-file value is uninformative. `pearson_dispersion` = stdev(per-file pearsons) provides a 24× discrimination between real learning and paper-spec collapse, exposed as a single scalar.
+- [x] ~~Created `execute_tools/health_checks/pearson_correlation.py`~~ — **REPLACED 2026-07-16** by `pearson_dispersion.py` per full-file scan findings ([experiment report](https://github.com/Galileo-Sandbox/siderius-exp/blob/e9e5063b/reports/health_metrics_scan.md) §6.3, [`paper_and_collapse_reference_baselines.md`](./paper_and_collapse_reference_baselines.md) §6.3). Per-file pearson is noise-limited on files 0-9; per-file value is uninformative. `pearson_dispersion` = stdev(per-file pearsons) provides a 24× discrimination between real learning and paper-spec collapse, exposed as a single scalar.
 - [x] Created `execute_tools/health_checks/spectral_peak_ratio.py`. Imports `find_peak` from `execute_tools/scoring_utils.py`; same peak-finder as production scoring.
 - [x] Created `execute_tools/health_checks/per_file_output_std.py`. Per-file std distribution.
 - [x] Registered all three in `execute_tools/health_checks/__init__.py`.
@@ -183,7 +183,7 @@ Re-run the diagnostic wavenet chain with the new YAML. Assert:
 
 ## Appendix A — Empirical threshold calibration
 
-See [`docs/design/paper_and_collapse_reference_baselines.md`](./paper_and_collapse_reference_baselines.md) and [`reports/health_metrics_scan.md`](../../reports/health_metrics_scan.md) for the full 20-file three-way scan (FCNet / paper-spec baseline / agent_012).
+See [`docs/design/paper_and_collapse_reference_baselines.md`](./paper_and_collapse_reference_baselines.md) and the [experiment report](https://github.com/Galileo-Sandbox/siderius-exp/blob/e9e5063b/reports/health_metrics_scan.md) for the full 20-file three-way scan (FCNet / paper-spec baseline / agent_012).
 
 Key numbers used to set M8 thresholds:
 

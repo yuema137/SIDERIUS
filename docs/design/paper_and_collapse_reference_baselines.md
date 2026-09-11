@@ -7,7 +7,7 @@
 - **Related**:
   - [`docs/design/m8_gate_coverage_and_diversity_metrics_execution_plan.md`](./m8_gate_coverage_and_diversity_metrics_execution_plan.md)
   - [`docs/design/tidmad_collapse_advice_and_forensics.md`](./tidmad_collapse_advice_and_forensics.md)
-  - [`reports/health_metrics_scan.md`](../../reports/health_metrics_scan.md) — full scan methodology and raw log
+  - [experiment reports/health_metrics_scan.md](https://github.com/Galileo-Sandbox/siderius-exp/blob/e9e5063b/reports/health_metrics_scan.md) — full scan methodology and raw log
 
 ## 1. Purpose
 
@@ -192,5 +192,5 @@ The low-frequency band is the natural weak point for any real-learning model on 
 - [`docs/design/m8_gate_coverage_and_diversity_metrics_execution_plan.md`](./m8_gate_coverage_and_diversity_metrics_execution_plan.md)
 - [`docs/design/tidmad_collapse_advice_and_forensics.md`](./tidmad_collapse_advice_and_forensics.md)
 - [`docs/design/collapse_detection_framework_generic.md`](./collapse_detection_framework_generic.md)
-- [`reports/health_metrics_scan.md`](../../reports/health_metrics_scan.md) — full scan methodology, raw logs, audit trail
+- [experiment reports/health_metrics_scan.md](https://github.com/Galileo-Sandbox/siderius-exp/blob/e9e5063b/reports/health_metrics_scan.md) — full scan methodology, raw logs, audit trail
 - `reports/v16_20260630.md` — earlier v16 forensic (5.5763 phantom); **unpublished** — the v16 report was never committed to the repository.
