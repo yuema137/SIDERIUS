@@ -7,7 +7,9 @@
 Trial anchor maps are explicit caller/task-owned JSON inputs. This framework
 reads them through `execute_tools.trial_anchor_map.load_anchor_map`; the former
 task-specific builder, checkout default, and root `reference_data/` anchor are
-retired. Task consumers must prepare and pass their own artifact path.
+retired. TIDMAD task construction/default lookup lives in the experiment
+repository at `tasks/tidmad/runtime/anchor_map`; other tasks prepare and pass
+their own artifact path.
 
 - **Node type**: **standalone-capable** — `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py` exposes a CLI `main()` that takes the model + budgets + LLM config as flags, builds a `HyperparamTuningInput`, runs the full optimization loop, and writes `run_output_{run_name}.json` to the workspace. The CLI is the historical TIDMAD-style invocation and is what `scripts/run_comparison.py` calls.
 - **Upstream**: `ml_code_validator_agent` and `ml_model_proposal_agent`, through ONE fan-in protocol — `local_validated_model` in `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` — which takes the validator's `ValidatorOutput` (the validated `model_type`; the workflow traverses this edge only when `passed=True`) beside the `ProposalOutput` (which supplies `expert_advice`, with the validator's deviation notes prepended, and `baseline_config`). There is no separate proposal→tuner protocol module.

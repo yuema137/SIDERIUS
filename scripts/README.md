@@ -11,10 +11,9 @@ Template:
 
 Python/bash utilities that are *not* the chain. **The chain launchers live in
 [`sdsc_submission_scripts/`](../sdsc_submission_scripts/README.md), not
-here** — several older documents said otherwise. This directory mixes two
-populations with different maintenance contracts: a small durable operator
-surface, and a large set of point-in-time investigation and gate harnesses
-kept as provenance for dated campaigns.
+here** — several older documents said otherwise. This directory contains the
+small durable operator surface. Historical investigation and gate harnesses
+are maintained by their owning experiment repository, not shipped here.
 
 The directory is excluded from the Python distribution. Task-specific scripts
 are historical source evidence only: active scientific utilities belong in
