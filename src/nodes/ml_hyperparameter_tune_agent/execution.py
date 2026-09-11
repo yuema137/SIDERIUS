@@ -1408,7 +1408,7 @@ def run_inference_scoring_health(
             enabled=agent_input.health_gate_enabled,
             round_index=round_index,
             config_path=agent_input.health_checks_config,
-            production_config_path=checkout_path("configs", "health_checks.yaml"),
+            production_config_path=checkout_path("configs", "health", "health_checks.yaml"),
             task_health_binding=(
                 agent_input.task_composition_ref.task_health_binding
                 if agent_input.task_composition_ref is not None

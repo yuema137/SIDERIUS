@@ -400,9 +400,7 @@ def test_repo_policy_never_consulted(tmp_path, monkeypatch):
     impossible to repeat.
     """
     real = resume.resolve_scientific_gate_ids
-    repo_config = str(
-        pathlib.Path(resume.__file__).resolve().parents[1] / "configs" / "health_checks.yaml"
-    )
+    repo_config = str(pathlib.Path(__file__).resolve().parents[3] / "configs" / "health" / "health_checks.yaml")
     calls: list[str] = []
 
     def guarded(config_path):

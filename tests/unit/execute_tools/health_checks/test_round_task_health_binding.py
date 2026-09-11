@@ -12,7 +12,7 @@ from execute_tools.health_checks.registry import _PROVIDER_REGISTRY, _REGISTRY
 from execute_tools.health_checks.schemas import HealthCheckContext
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PRODUCTION_POLICY = REPO_ROOT / "configs" / "health_checks.yaml"
+PRODUCTION_POLICY = REPO_ROOT / "configs" / "health" / "health_checks.yaml"
 
 
 def _external_health_binding(root: Path) -> str:
