@@ -84,7 +84,7 @@ channel.
 
 ## Auto-resume
 
-On by default. The chain launcher asks `scripts/inspect_run_state.py --next-iter`
+On by default. The chain launcher asks `scripts/launch/inspect_run_state.py --next-iter`
 for the first incomplete iteration; if all are complete it exits cleanly rather
 than redoing work.
 
@@ -129,7 +129,7 @@ start.
 | findings union authority | `core/resume.py::union_key_findings` |
 | lock construction ordering | `workflows/model_exploration.py:2196` (`build_run_invariants`) → `:2281` (`ensure_run_invariants`) |
 | chain state carry | `workflows/model_exploration.py` (`ChainState`) |
-| resume inspector | `scripts/inspect_run_state.py` |
+| resume inspector | `scripts/launch/inspect_run_state.py` |
 
 ## Related
 

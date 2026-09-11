@@ -602,7 +602,7 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
 (commits 1-6).
 
 - **Config (Step 08b, 2026-08-18 — split by OWNER)**:
-  `configs/health_checks.yaml` now carries FRAMEWORK POLICY ONLY — a
+  `configs/health/health_checks.yaml` now carries FRAMEWORK POLICY ONLY — a
   `health_policy` block mapping each disposition (`blocking` / `recording`)
   to gate role, cadence, short-circuit, `on_pass`/`on_fail` and per-check
   policy keys such as `aggregation`. It must NEVER carry a task identity,

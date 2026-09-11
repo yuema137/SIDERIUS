@@ -185,7 +185,7 @@ SIDERIUS/
 │                            # ml_models, dashboard, tools
 ├── examples/                # synthetic executable specifications
 ├── configs/                  # policy, manifests, runtime and LLM routing
-├── sdsc_submission_scripts/ # existing chain/iteration and scheduler entrypoints
+├── scripts/                 # launch, Slurm, and runtime utility entrypoints
 ├── tests/ + scripts/        # validation and checkout utilities
 ├── docs/                    # guides, references and design history
 └── .github/                 # automatic CI

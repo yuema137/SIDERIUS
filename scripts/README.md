@@ -97,7 +97,7 @@ operator surface.
 ## Minimal example
 
 ```bash
-.venv/bin/python scripts/inspect_run_state.py --workspace /path/to/ws --next-iter
+.venv/bin/python scripts/launch/inspect_run_state.py --workspace /path/to/ws --next-iter
 ```
 
 ## Related tests

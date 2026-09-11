@@ -50,7 +50,7 @@ the problem is in your keys, data or GPU — not the wiring.
 | `SyntaxError` on an f-string, or errors mentioning Python 3.8 | you ran the system `python3`. Use the project venv: `source .venv/bin/activate` or `.venv/bin/python`. The chain launcher guards this itself (it refuses Python < 3.10) — standalone scripts do not |
 | `ModuleNotFoundError` for a project package | run from the repository root with the venv active; re-run `uv sync` |
 | LLM auth errors at startup | keys missing from `.env` — see [installation](../getting-started/installation.md#api-keys) |
-| **Gemini auth errors although you only configured OpenAI** | you launched without `--llm_config`. The legacy default silently routes every stage to Gemini. Always pass an explicit routing config — `--llm_config llm_configs/openai_tiered_pro.json` is the canonical example |
+| **Gemini auth errors although you only configured OpenAI** | you launched without `--llm_config`. The legacy default silently routes every stage to Gemini. Always pass an explicit routing config — `--llm_config configs/llm/openai_tiered_pro.json` is the canonical example |
 | `check_agent_environment.py` reports one provider failed | that provider's key or network path; the run only needs the providers your `--llm_config` JSON routes to. Read the printed summary: the diagnostic currently exits zero even when checks fail |
 
 ## The run seems hung
