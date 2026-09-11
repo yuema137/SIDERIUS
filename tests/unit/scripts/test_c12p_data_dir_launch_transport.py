@@ -53,7 +53,7 @@ AUTHORITY = "resolve_dataset_dir"
 #: explicitly rather than globbed: a census that
 #: silently skipped a launcher would be the exact blindness this file exists to
 #: correct (F-12bc-9 / F-P2b-4, and PR-04a's guard one launcher over).
-LAUNCH_BOUNDARIES: tuple[str, ...] = ("sdsc_submission_scripts/run_one_iteration.py",)
+LAUNCH_BOUNDARIES: tuple[str, ...] = ("src/workflows/run_one_iteration.py",)
 
 
 def _calls(rel: str) -> set[str]:

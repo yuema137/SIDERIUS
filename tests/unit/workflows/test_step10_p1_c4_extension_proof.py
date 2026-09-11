@@ -250,7 +250,7 @@ class TestP1OwnedSurfacesCarryNoAmbientTaskAuthority:
         surfaces = (
             *P1_OWNED_SURFACE,
             "src/workflows/model_exploration.py",
-            "sdsc_submission_scripts/run_one_iteration.py",
+            "src/workflows/run_one_iteration.py",
             "src/core/resume.py",
         )
         offenders: dict[str, list[str]] = {}
