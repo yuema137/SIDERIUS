@@ -202,7 +202,7 @@ class TestCase1WorkspaceAFlagOn:
         if str(repo) not in sys.path:
             sys.path.insert(0, str(repo))
         spec = importlib.util.spec_from_file_location(
-            "roi_ws_cases", repo / "sdsc_submission_scripts" / "run_one_iteration.py"
+            "roi_ws_cases", repo / "src" / "workflows" / "run_one_iteration.py"
         )
         roi = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(roi)

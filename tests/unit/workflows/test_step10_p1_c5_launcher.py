@@ -195,7 +195,7 @@ class TestSignatureAndCallers:
         offenders: dict[str, list[str]] = {}
         for rel in (
             "src/workflows/model_exploration.py",
-            "sdsc_submission_scripts/run_one_iteration.py",
+            "src/workflows/run_one_iteration.py",
         ):
             tree = ast.parse((REPO_ROOT / rel).read_text(encoding="utf-8"))
             for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:

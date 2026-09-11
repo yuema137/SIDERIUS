@@ -42,10 +42,10 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
 from tests.helpers.tuner_source import tuner_node_source
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SDSC = REPO_ROOT / "sdsc_submission_scripts"
+SDSC = REPO_ROOT / "scripts" / "launch"
 CHAIN_COMMON = SDSC / "_chain_common.sh"
-SLURM = SDSC / "submit_one_iteration.slurm"
-RUNNER = SDSC / "run_one_iteration.py"
+SLURM = REPO_ROOT / "scripts" / "slurm" / "submit_one_iteration.slurm"
+RUNNER = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
 
 ADMISSION_FLAGS = ("--gpu_admission_measurement_source", "--gpu_pair_ceiling_gib")
 

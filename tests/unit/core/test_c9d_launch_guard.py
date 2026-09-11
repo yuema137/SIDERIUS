@@ -413,7 +413,7 @@ class TestProbeRequirementIsExplicit:
         from pathlib import Path
 
         source = (
-            Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_one_iteration.py"
+            Path(__file__).resolve().parents[3] / "src" / "workflows" / "run_one_iteration.py"
         ).read_text(encoding="utf-8")
         assert "require_probe_runner=not (args.is_pseudo_training or args.is_pseudo_llm)" in source
 

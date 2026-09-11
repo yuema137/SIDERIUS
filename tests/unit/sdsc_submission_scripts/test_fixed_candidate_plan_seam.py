@@ -102,7 +102,7 @@ class TestProvenanceIsRecorded:
         from pathlib import Path
 
         launcher = (
-            Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_one_iteration.py"
+            Path(__file__).resolve().parents[3] / "src" / "workflows" / "run_one_iteration.py"
         )
         tree = ast.parse(launcher.read_text(encoding="utf-8"))
         calls, undeclared = 0, []
@@ -267,7 +267,7 @@ class TestOnlyTheProposerIsBypassed:
         from pathlib import Path
 
         launcher = (
-            Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_one_iteration.py"
+            Path(__file__).resolve().parents[3] / "src" / "workflows" / "run_one_iteration.py"
         )
         # Step 09.5a C3: the launcher binds it one level deeper, inside the
         # WorkflowLaunchConfig it constructs. Same forwarding invariant.

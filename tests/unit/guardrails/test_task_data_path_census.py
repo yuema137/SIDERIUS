@@ -72,7 +72,7 @@ class TestNoDualPath:
         it, or forward it, so an operator can never supply a binding that
         bypasses resolution."""
         offenders: list[str] = []
-        for root in ("sdsc_submission_scripts", "scripts"):
+        for root in ("src/workflows", "scripts/launch", "scripts/slurm", "scripts"):
             base = _REPO_ROOT / root
             if not base.exists():
                 continue

@@ -175,7 +175,7 @@ class TestEveryParticipatingEntryPointThreadsIt:
             "formal_eval_portion=agent_input.formal_eval_portion,"
         ),
         "src/workflows/model_exploration.py": "formal_eval_portion=launch.formal_eval_portion,",
-        "sdsc_submission_scripts/run_one_iteration.py": (
+        "src/workflows/run_one_iteration.py": (
             "formal_eval_portion=args.formal_eval_portion,"
         ),
     }
