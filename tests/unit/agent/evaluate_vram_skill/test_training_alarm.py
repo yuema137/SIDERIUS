@@ -68,4 +68,3 @@ def test_native_training_alarm_is_reachable_through_wrapper(monkeypatch):
     assert result["timeout_record"]["operation"] == "training_probe"
     assert result["timeout_record"]["budget_seconds"] == 1.0
     assert elapsed < 3.5
-
