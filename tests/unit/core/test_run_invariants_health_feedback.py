@@ -24,7 +24,7 @@ from core.run_invariants import (
 from tests.helpers.tuner_source import tuner_node_source
 
 REPO = Path(__file__).resolve().parents[3]
-_TUNER = REPO / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
+_TUNER = REPO / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
 
 
 def _invariants(**overrides) -> RunInvariants:

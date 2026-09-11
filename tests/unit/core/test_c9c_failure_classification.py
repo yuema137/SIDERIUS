@@ -215,6 +215,6 @@ class TestExecutorStatusRouting:
         """Guard the real routing code, not only this mirror of it."""
         from pathlib import Path
 
-        source = Path("core/sandbox_executor.py").read_text(encoding="utf-8")
+        source = Path("src/core/sandbox_executor.py").read_text(encoding="utf-8")
         assert 'admission_block.get("failure_class") == "infrastructure"' in source
         assert '"status": "aborted_infrastructure"' in source

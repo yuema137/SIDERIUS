@@ -219,7 +219,7 @@ class TestConfiguredConstruction:
 
     def test_the_authority_routes_on_no_task_owned_config_key(self):
         module = ast.parse(
-            (REPO_ROOT / "workflows" / "task_composition.py").read_text(encoding="utf-8")
+            (REPO_ROOT / "src/workflows" / "task_composition.py").read_text(encoding="utf-8")
         )
         docstrings = {
             ast.get_docstring(node, clean=False)

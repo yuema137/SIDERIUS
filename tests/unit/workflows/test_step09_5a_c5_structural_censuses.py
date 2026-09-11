@@ -26,11 +26,11 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 #: The structural surface Step 09.5a created or reshaped. Task identity must
 #: not appear in any of it.
 NEW_STRUCTURAL_SURFACE = (
-    "core/chain_state.py",
-    "core/committed_digests.py",
-    "workflows/run_bindings.py",
-    "workflows/run_config.py",
-    "workflows/strategy_modes.py",
+    "src/core/chain_state.py",
+    "src/core/committed_digests.py",
+    "src/workflows/run_bindings.py",
+    "src/workflows/run_config.py",
+    "src/workflows/strategy_modes.py",
 )
 
 TASK_NAMES = ("tidmad", "pets", "davis", "oxford")
@@ -48,7 +48,7 @@ class TestNoCompatibilityWrapper:
 
         retired = launch_config_field_names()
         offenders: dict[str, int] = {}
-        for rel in ("workflows/model_exploration.py", "workflows/run_bindings.py"):
+        for rel in ("src/workflows/model_exploration.py", "src/workflows/run_bindings.py"):
             tree = ast.parse((REPO_ROOT / rel).read_text(encoding="utf-8"))
             for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
                 declared = {a.arg for a in fn.args.args} | {a.arg for a in fn.args.kwonlyargs}
@@ -131,7 +131,7 @@ class TestRunBindingsProductionAdoption:
 
     def _run_workflow_source(self) -> tuple[str, str]:
         """(source before the carrier is constructed, source after)."""
-        src = (REPO_ROOT / "workflows" / "model_exploration.py").read_text(encoding="utf-8")
+        src = (REPO_ROOT / "src/workflows" / "model_exploration.py").read_text(encoding="utf-8")
         lines = src.splitlines()
         start = next(i for i, ln in enumerate(lines) if ln.startswith("def run_workflow("))
         end = next(
@@ -167,14 +167,19 @@ class TestRunBindingsProductionAdoption:
         excluding tests` returned nothing.
         """
         sites = []
-        for path in REPO_ROOT.glob("**/*.py"):
+        sources = [*REPO_ROOT.glob("*.py")]
+        for root in ("src", "scripts", "sdsc_submission_scripts"):
+            files = list((REPO_ROOT / root).rglob("*.py"))
+            assert files, f"empty production scan: {root}"
+            sources.extend(files)
+        for path in sources:
             rel = path.relative_to(REPO_ROOT).as_posix()
             if rel.startswith(("tests/", ".venv/", "docs/")):
                 continue
             if "WorkflowRunBindings(" in path.read_text(encoding="utf-8", errors="ignore"):
                 sites.append(rel)
         assert sites, "no production module constructs WorkflowRunBindings"
-        assert sites == ["workflows/model_exploration.py"], sites
+        assert sites == ["src/workflows/model_exploration.py"], sites
 
     #: Authorities the carrier owns whose local name is identical to the field.
     #: Reading one as a bare local AFTER construction is a second source of

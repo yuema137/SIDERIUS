@@ -135,7 +135,7 @@ class TestTheConstructorRuleIsOneSharedAuthority:
         import ast
 
         module = ast.parse(
-            (REPO_ROOT / "agent" / "skills" / "training_skill" / "estimator.py").read_text(
+            (REPO_ROOT / "src/agent" / "skills" / "training_skill" / "estimator.py").read_text(
                 encoding="utf-8"
             )
         )

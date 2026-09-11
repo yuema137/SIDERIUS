@@ -28,13 +28,13 @@ EXAMPLES_ROOT = REPO_ROOT / "examples"
 #: Production packages that must never depend on the example packs or the
 #: PR0 tooling (roadmap §22.23.9 separability; design C4 (c)).
 PRODUCTION_PACKAGES = (
-    "core",
-    "agent",
-    "nodes",
-    "execute_tools",
-    "workflows",
-    "ml_models",
-    "dashboard",
+    "src/core",
+    "src/agent",
+    "src/nodes",
+    "src/execute_tools",
+    "src/workflows",
+    "src/ml_models",
+    "src/dashboard",
     "scripts",
     "sdsc_submission_scripts",
 )
@@ -130,7 +130,13 @@ def _production_importers(repo_root: Path) -> dict[str, list[str]]:
 
 
 def _pack_dirs(examples_root: Path) -> list[Path]:
-    return sorted(p for p in examples_root.iterdir() if p.is_dir())
+    # Shipped packs are tracked; ignored remnants of retired packs are user state.
+    names = {
+        Path(p).parts[1]
+        for p in _tracked(examples_root.parent, examples_root.name)
+        if len(Path(p).parts) > 2
+    }
+    return sorted(examples_root / name for name in names)
 
 
 def _tracked(repo_root: Path, rel: str) -> list[str]:
@@ -294,8 +300,8 @@ def test_production_packages_never_import_examples_or_pack_tooling() -> None:
 
 def test_negative_fake_production_importer_is_detected(tmp_path: Path) -> None:
     """Proves guard (c) fires for each import form and stays silent for prose."""
-    core = tmp_path / "core"
-    core.mkdir()
+    core = tmp_path / "src/core"
+    core.mkdir(parents=True)
     (core / "a.py").write_text("import examples.tidmad\n")
     (core / "b.py").write_text("from tools.example_packs import projection\n")
     (core / "c.py").write_text("from tools import example_packs\n")
@@ -303,7 +309,7 @@ def test_negative_fake_production_importer_is_detected(tmp_path: Path) -> None:
         '"""mentions examples and tools.example_packs in prose"""\nimport os\n'
     )
     offenders = _production_importers(tmp_path)
-    assert set(offenders) == {"core/a.py", "core/b.py", "core/c.py"}
+    assert set(offenders) == {"src/core/a.py", "src/core/b.py", "src/core/c.py"}
 
 
 # ---------------------------------------------------------------------------

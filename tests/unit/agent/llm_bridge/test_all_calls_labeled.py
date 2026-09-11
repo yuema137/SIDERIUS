@@ -31,7 +31,7 @@ import ast
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_NODES_DIR = _REPO_ROOT / "nodes"
+_NODES_DIR = _REPO_ROOT / "src/nodes"
 
 # Methods on the bridge that must always carry a label= kwarg. Mirrors
 # the public API exposed in agent/llm_bridge.py (generate / generate_text

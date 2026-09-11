@@ -325,18 +325,18 @@ EXPECTED_PRESENTATION_SURFACE: tuple[tuple[str, str], ...] = ()
 #: The pre-12e surface, recorded verbatim so "migrated" stays a visible act.
 #: Each row is ``(file, the exact text that used to be there)``.
 MIGRATED_PRESENTATION_SITES: tuple[tuple[str, str], ...] = (
-    ("dashboard/static/app.js", "best = best === null ? score : Math.max(best, score);"),
-    ("dashboard/static/app.js", "if (score != null && (best === null || score > best)) {"),
+    ("src/dashboard/static/app.js", "best = best === null ? score : Math.max(best, score);"),
+    ("src/dashboard/static/app.js", "if (score != null && (best === null || score > best)) {"),
     (
-        "dashboard/static/app.js",
+        "src/dashboard/static/app.js",
         "if (score != null) best = best === null ? score : Math.max(best, score);",
     ),
     (
-        "dashboard/static/app.js",
+        "src/dashboard/static/app.js",
         "const scoreLayout  = makePlotLayout('Denoising score (higher = better)');",
     ),
     (
-        "dashboard/static/index.html",
+        "src/dashboard/static/index.html",
         "Solid = cumulative best · Dashed = current experiment · Higher is better",
     ),
 )
@@ -375,11 +375,11 @@ class TestThePresentationSurfaceIsClean:
         """
         files = presentation_files()
         relative = {str(p.relative_to(REPO_ROOT)) for p in files}
-        assert "dashboard/static/app.js" in relative, (
+        assert "src/dashboard/static/app.js" in relative, (
             "the presentation census does not see app.js — the exact blindness "
             "(F-12e-UX-8) this module exists to close"
         )
-        assert "dashboard/static/index.html" in relative
+        assert "src/dashboard/static/index.html" in relative
         assert len(files) >= 2
 
     def test_the_python_census_and_this_one_partition_the_tree(self):
@@ -434,7 +434,9 @@ class TestThePresentationSurfaceIsClean:
         finding below it — the census would go green by not looking, which is
         the failure mode this whole module is about.
         """
-        lines = _blank_comments((REPO_ROOT / "dashboard/static/app.js").read_text(encoding="utf-8"))
+        lines = _blank_comments(
+            (REPO_ROOT / "src/dashboard/static/app.js").read_text(encoding="utf-8")
+        )
         region = _authority_lines(lines)
         assert region, "the permitted direction authority `orderFor` was not found in app.js"
         assert len(region) <= 25, (
@@ -484,7 +486,7 @@ class TestTheRetiredSitesAreRealAndWouldStillBeCaught:
 
         Without this, deleting the charts outright would satisfy the census.
         """
-        source = (REPO_ROOT / "dashboard/static/app.js").read_text(encoding="utf-8")
+        source = (REPO_ROOT / "src/dashboard/static/app.js").read_text(encoding="utf-8")
         consumers = len(re.findall(rf"\b{PRESENTATION_ORDER_AUTHORITY}\s*\(", source))
         assert consumers >= 4, (
             f"app.js consults the direction authority only {consumers} times; "
@@ -514,7 +516,7 @@ class TestTheScannerCatchesTheHistoricalOffenders:
         ],
     )
     def test_a_planted_offender_is_caught(self, planted: str, kind: str):
-        found = scan_presentation_source(planted, "dashboard/static/planted.js")
+        found = scan_presentation_source(planted, "src/dashboard/static/planted.js")
         assert any(f.kind == kind for f in found), (
             f"the scanner did not flag {planted!r} as {kind}; findings={found}"
         )
@@ -540,11 +542,11 @@ class TestThePrecisionContract:
             "/* score > best was wrong under a minimised metric. */\n"
             "const x = 1;\n"
         )
-        assert scan_presentation_source(source, "dashboard/static/x.js") == []
+        assert scan_presentation_source(source, "src/dashboard/static/x.js") == []
 
     def test_an_html_comment_about_direction_is_not_an_offender(self):
         source = "<!-- used to say Higher is better -->\n<div>ok</div>\n"
-        assert scan_presentation_source(source, "dashboard/static/x.html") == []
+        assert scan_presentation_source(source, "src/dashboard/static/x.html") == []
 
     def test_a_null_check_is_not_an_ordering_decision(self):
         """``!==``/``!=``/``===`` are not order operators.
@@ -553,21 +555,21 @@ class TestThePrecisionContract:
         that flagged them would report the whole data path and be useless.
         """
         source = "if (score !== null && score !== undefined) { best = score; }\n"
-        assert scan_presentation_source(source, "dashboard/static/x.js") == []
+        assert scan_presentation_source(source, "src/dashboard/static/x.js") == []
 
     def test_an_arrow_function_is_not_an_ordering_decision(self):
         source = "const ys = records.map(r => r.denoising_score ?? null);\n"
-        assert scan_presentation_source(source, "dashboard/static/x.js") == []
+        assert scan_presentation_source(source, "src/dashboard/static/x.js") == []
 
     def test_a_loss_comparison_is_not_flagged(self):
         """A loss is lower-is-better by definition — the P2a rule, unchanged."""
         source = "if (r.final_loss < bestLoss) { bestLoss = r.final_loss; }\n"
-        assert scan_presentation_source(source, "dashboard/static/x.js") == []
+        assert scan_presentation_source(source, "src/dashboard/static/x.js") == []
 
     def test_an_unrelated_maximum_is_not_flagged(self):
         """``Math.max(0, countdown)`` carries no score token and must pass."""
         source = "el.textContent = Math.max(0, state.countdownValue);\n"
-        assert scan_presentation_source(source, "dashboard/static/x.js") == []
+        assert scan_presentation_source(source, "src/dashboard/static/x.js") == []
 
     def test_html_markup_is_not_an_ordering_decision(self):
         """A tag's ``<``/``>`` are delimiters, not operators.
@@ -585,7 +587,7 @@ class TestThePrecisionContract:
             "<td>${fmt(r.denoising_score, 3)}</td>\n"
             '<span id="score-direction-note"></span>\n'
         )
-        assert scan_presentation_source(source, "dashboard/static/x.js") == []
+        assert scan_presentation_source(source, "src/dashboard/static/x.js") == []
 
     def test_a_multiline_tag_terminator_is_not_an_ordering_decision(self):
         """``app.js`` builds its series tags across lines.
@@ -598,7 +600,7 @@ class TestThePrecisionContract:
             "      onclick=\"App.toggleHighlight('${s.id}')\" "
             'title="Highlight new-best points">★</button>\n'
         )
-        assert scan_presentation_source(source, "dashboard/static/x.js") == []
+        assert scan_presentation_source(source, "src/dashboard/static/x.js") == []
 
     def test_the_markup_exclusion_does_not_hide_a_real_comparison(self):
         """MUTATION TARGET: make ``_HTML_TAG_RE`` accept bare attributes.
@@ -612,7 +614,7 @@ class TestThePrecisionContract:
             'html += `<td class="x">ok</td>`;\n'
             "if (r.denoising_score > best) { best = r.denoising_score; }\n"
         )
-        found = scan_presentation_source(source, "dashboard/static/x.js")
+        found = scan_presentation_source(source, "src/dashboard/static/x.js")
         assert [f.lineno for f in found] == [2], (
             f"the markup exclusion swallowed a real comparison; findings={found}"
         )
@@ -627,7 +629,7 @@ class TestThePrecisionContract:
         exactly half of F-12e-UX-3.
         """
         source = "<div>Solid = cumulative best · Higher is better</div>\n"
-        found = scan_presentation_source(source, "dashboard/static/x.html")
+        found = scan_presentation_source(source, "src/dashboard/static/x.html")
         assert [f.kind for f in found] == ["hardcoded_direction"]
 
     def test_the_authority_body_is_excluded_but_only_there(self):
@@ -640,7 +642,7 @@ class TestThePrecisionContract:
             "  return records.reduce((best, r) => Math.max(best, r.denoising_score), null);\n"
             "}\n"
         )
-        found = scan_presentation_source(source, "dashboard/static/x.js")
+        found = scan_presentation_source(source, "src/dashboard/static/x.js")
         assert [f.lineno for f in found] == [5], (
             "the authority's own body must be excluded and the site outside it "
             f"must not be; findings={found}"

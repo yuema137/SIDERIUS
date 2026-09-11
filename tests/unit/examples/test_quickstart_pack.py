@@ -137,7 +137,7 @@ def test_composition_authority_resolves_from_this_checkout() -> None:
     import workflows.task_composition as tc
 
     resolved = Path(tc.__file__).resolve()
-    assert resolved == REPO_ROOT / "workflows" / "task_composition.py", (
+    assert resolved == REPO_ROOT / "src/workflows" / "task_composition.py", (
         f"workflows.task_composition resolved to {resolved}, not this checkout "
         f"({REPO_ROOT}). The interpreter is importing a DIFFERENT clone (an "
         "editable install?); every result in this test session describes that "

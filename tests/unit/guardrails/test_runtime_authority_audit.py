@@ -23,10 +23,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 #: (path, must import the shared policy) — the C8-rewired consumers.
 CONSUMERS = [
-    ("nodes/ml_model_proposal_agent/ml_model_proposal_agent.py", True),
-    ("agent/skills/evaluate_time_skill/wrapper.py", True),
-    ("core/sandbox_executor.py", False),
-    ("core/runtime_control/watchdog_deadline.py", True),
+    ("src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py", True),
+    ("src/agent/skills/evaluate_time_skill/wrapper.py", True),
+    ("src/core/sandbox_executor.py", False),
+    ("src/core/runtime_control/watchdog_deadline.py", True),
 ]
 
 POLICY_MARKERS = (
@@ -87,7 +87,7 @@ def test_consumer_resolves_the_shared_policy(rel: str, needs_policy: bool):
 
 def test_timeeval_feasibility_is_derived_from_the_policy():
     """``feasible`` must be the policy's verdict, not a local comparison."""
-    source = _source("agent/skills/evaluate_time_skill/wrapper.py")
+    source = _source("src/agent/skills/evaluate_time_skill/wrapper.py")
     assert 'feasible = runtime_decision["kind"] != "REJECT"' in source, (
         "the TimeEval gate must derive feasibility from the shared policy "
         "decision; a direct `total_min <= budget` assignment to `feasible` "
@@ -107,10 +107,10 @@ def test_timeeval_feasibility_is_derived_from_the_policy():
 
 def test_proposer_cannot_reject_on_static_evidence():
     """The proposer's advisory path asserts the invariant at runtime."""
-    source = _source("nodes/ml_model_proposal_agent/ml_model_proposal_agent.py")
+    source = _source("src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py")
     assert 'if decision.kind in ("REJECT", "ABORT")' in source
     assert "advisory-only invariant is broken" in source
-    code = _code_only("nodes/ml_model_proposal_agent/ml_model_proposal_agent.py")
+    code = _code_only("src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py")
     assert "factor > 1.0" not in code, (
         "the private `factor > 1.0` proposal gate is back in EXECUTABLE code "
         "— the C1/C8 contract is that static evidence is advisory only"
@@ -118,7 +118,7 @@ def test_proposer_cannot_reject_on_static_evidence():
 
 
 def test_watchdog_deadline_requires_measurement_backed_evidence():
-    source = _source("core/runtime_control/watchdog_deadline.py")
+    source = _source("src/core/runtime_control/watchdog_deadline.py")
     assert "def has_measured_prediction" in source
     assert 'prediction.get("source") in MEASUREMENT_BACKED_SOURCES' in source
     assert "if has_measured_prediction(component)" in source, (
@@ -133,7 +133,7 @@ def test_no_second_authoritative_contention_classifier():
     from core.runtime_control import probe
 
     assert not hasattr(probe, "classify_concurrency")
-    source = _source("core/runtime_control/probe.py")
+    source = _source("src/core/runtime_control/probe.py")
     assert "sample_contention_window" in source
 
 

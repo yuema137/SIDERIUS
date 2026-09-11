@@ -27,7 +27,7 @@ from agent.schemas.health_feedback import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-HEALTH_FEEDBACK = REPO_ROOT / "agent" / "schemas" / "health_feedback.py"
+HEALTH_FEEDBACK = REPO_ROOT / "src/agent" / "schemas" / "health_feedback.py"
 
 
 class TestDerivation:

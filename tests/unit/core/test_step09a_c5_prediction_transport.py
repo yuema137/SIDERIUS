@@ -317,7 +317,7 @@ class TestTheScopeStayedNarrow:
         """
         import re
 
-        source = (Path(__file__).resolve().parents[3] / "core/resume.py").read_text(
+        source = (Path(__file__).resolve().parents[3] / "src/core/resume.py").read_text(
             encoding="utf-8"
         )
         restorers = re.findall(r"^def ((?:load|project)_[a-z_]*prediction[a-z_]*)\(", source, re.M)
@@ -328,7 +328,7 @@ class TestTheScopeStayedNarrow:
         how to write itself anywhere."""
         assert not hasattr(PredictionMemory, "save")
         assert not hasattr(PredictionMemory, "persist")
-        source = (Path(__file__).resolve().parents[3] / "core/resume.py").read_text(
+        source = (Path(__file__).resolve().parents[3] / "src/core/resume.py").read_text(
             encoding="utf-8"
         )
         projection = source[source.index("def project_prediction_memory") :]
@@ -338,9 +338,9 @@ class TestTheScopeStayedNarrow:
         # construction. The single read lives in the shared authority, which
         # opens in the default read mode and never takes a write mode.
         assert "open(" not in projection, "the projection must do no I/O of its own"
-        authority = (Path(__file__).resolve().parents[3] / "core/committed_digests.py").read_text(
-            encoding="utf-8"
-        )
+        authority = (
+            Path(__file__).resolve().parents[3] / "src/core/committed_digests.py"
+        ).read_text(encoding="utf-8")
         assert "open(path)" in authority, "the shared authority is the one reader"
         assert '"w"' not in authority and "'w'" not in authority, (
             "the committed-digest authority must never write"

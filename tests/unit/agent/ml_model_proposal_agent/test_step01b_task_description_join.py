@@ -50,7 +50,7 @@ from tests.unit.agent.ml_model_proposal_agent.test_step00_prompt_goldens import 
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-TEMPLATE_DIR = REPO_ROOT / "agent" / "prompt_templates" / "proposal"
+TEMPLATE_DIR = REPO_ROOT / "src/agent" / "prompt_templates" / "proposal"
 
 #: The three pipeline stage base templates the JOIN targets (OD-S1-3(a)).
 STAGE_TEMPLATES = (

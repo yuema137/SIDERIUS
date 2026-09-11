@@ -2,7 +2,7 @@
 
 **Audience**: a coding agent or engineer changing what flows between nodes.
 **Authority**: the source. Template:
-[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
+[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 
 ## Purpose
 
@@ -47,8 +47,8 @@ no hidden contracts, no silent defaults.
 ## Non-owned semantics
 
 - Node behaviour → `nodes/`; execution → `execute_tools/`; storage layout
-  narrative → [workspaces and resume](../../docs/guides/workspaces-and-resume.md);
-  the graph rules → [architecture](../../docs/architecture.md).
+  narrative → [workspaces and resume](../../../docs/guides/workspaces-and-resume.md);
+  the graph rules → [architecture](../../../docs/architecture.md).
 
 ## Extension points
 

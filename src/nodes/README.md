@@ -4,7 +4,7 @@
 **Authority**: the source, and per node its `<node>/<node>.md` contract doc.
 Template for those docs: [`NODE_TEMPLATE.md`](NODE_TEMPLATE.md). Directory
 map template:
-[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../docs/agent-reference/MODULE_README_TEMPLATE.md).
+[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 
 ## Purpose
 
@@ -85,7 +85,7 @@ framework change.
 
 Per-node output records under the workspace; the tuner additionally owns its
 working directory (round records, configs, cached models — layout in
-[workspaces and resume](../docs/guides/workspaces-and-resume.md)).
+[workspaces and resume](../../docs/guides/workspaces-and-resume.md)).
 
 ## Failure modes
 

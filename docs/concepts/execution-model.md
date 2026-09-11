@@ -111,5 +111,5 @@ capability instead of a template it never writes.
 
 - [Operating a run](../guides/operating-a-run.md) — budgets, scope, refusal table
 - [Execution mechanism reference](../agent-reference/mechanisms/execution.md) — spawn sites and source map
-- [`core/README.md`](../../core/README.md) — the execution substrate's module map
+- [`core/README.md`](../../src/core/README.md) — the execution substrate's module map
 - [Data paths](data-paths.md) — the task side of the same boundary

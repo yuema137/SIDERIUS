@@ -5,7 +5,7 @@ checkpoint. The current node contract, schemas, invocation, behavior, and
 limitations live beside the implementation:
 
 - [Current tuner node contract](ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md)
-- [Historical former document](../docs/design/history/legacy-tuner-node.md) —
+- [Historical former document](../../docs/design/history/legacy-tuner-node.md) —
   retained for provenance only; its task-specific commands and examples are
   not current instructions.
 

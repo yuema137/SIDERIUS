@@ -61,7 +61,14 @@ executed from (CLAUDE.md portability rule) — and asserted below, because 08a
 recorded an off-by-one here that ran ``git grep`` outside the repository and
 let the same guard pass vacuously."""
 
-PRODUCTION_PACKAGES = ("execute_tools", "nodes", "agent", "core", "scripts", "workflows")
+PRODUCTION_PACKAGES = (
+    "src/execute_tools",
+    "src/nodes",
+    "src/agent",
+    "src/core",
+    "scripts",
+    "src/workflows",
+)
 
 
 def _tidmad_shaped_document() -> dict[str, object]:
@@ -594,16 +601,16 @@ class TestTaskHealthConfigIsConsumedOnlyThroughTheBindingSeam:
     brand-new production module cannot hide.
     """
 
-    DEFINING_MODULE = "execute_tools/health_checks/_task_health_config.py"
+    DEFINING_MODULE = "src/execute_tools/health_checks/_task_health_config.py"
 
     ALLOWED_CONSUMERS = (
         # C2 — resolves and loads the plugin refs the document declares.
-        "execute_tools/health_checks/_plugin_binding.py",
+        "src/execute_tools/health_checks/_plugin_binding.py",
         # C4 — composes the roster with framework policy.
-        "execute_tools/health_checks/_composition.py",
+        "src/execute_tools/health_checks/_composition.py",
         # C4 — the one materialization entry point, which parses the bound
         # document and hands it to composition.
-        "execute_tools/health_checks/config.py",
+        "src/execute_tools/health_checks/config.py",
     )
 
     @staticmethod
@@ -631,7 +638,9 @@ class TestTaskHealthConfigIsConsumedOnlyThroughTheBindingSeam:
     def test_repo_root_resolves_to_this_checkout(self):
         """Guards the guard: a wrong root would make the grep below vacuous."""
         assert (REPO_ROOT / ".git").exists()
-        assert (REPO_ROOT / "execute_tools" / "health_checks" / "_task_health_config.py").is_file()
+        assert (
+            REPO_ROOT / "src/execute_tools" / "health_checks" / "_task_health_config.py"
+        ).is_file()
 
     def test_the_grep_probe_actually_finds_things(self):
         """Proves the search works, so its emptiness below is real evidence."""

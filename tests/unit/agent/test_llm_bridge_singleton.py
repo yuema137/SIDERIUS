@@ -16,8 +16,8 @@ import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SCAN_DIRS = ["agent", "nodes", "workflows"]
-ALLOWED_FILE = REPO_ROOT / "agent" / "llm_bridge.py"
+SCAN_DIRS = ["src/agent", "src/nodes", "src/workflows"]
+ALLOWED_FILE = REPO_ROOT / "src/agent" / "llm_bridge.py"
 
 # Match `OpenAI(` as a constructor call. Avoids matching `from openai import OpenAI`
 # (no parenthesis) and string literals containing the word.
@@ -28,9 +28,9 @@ def _scan_for_openai_constructors() -> list[tuple[Path, int, str]]:
     hits: list[tuple[Path, int, str]] = []
     for d in SCAN_DIRS:
         root = REPO_ROOT / d
-        if not root.is_dir():
-            continue
-        for py in root.rglob("*.py"):
+        sources = tuple(root.rglob("*.py"))
+        assert root.is_dir() and sources, f"missing production scan subject: {root}"
+        for py in sources:
             if py == ALLOWED_FILE:
                 continue
             with open(py, encoding="utf-8") as f:

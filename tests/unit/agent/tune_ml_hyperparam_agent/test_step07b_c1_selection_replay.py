@@ -318,7 +318,7 @@ def count_run_branch_nodes() -> int:
     """AST branch-node count of ``HyperparamTuningAgent.run``."""
     source = (
         Path(__file__).resolve().parents[4]
-        / "nodes"
+        / "src/nodes"
         / "ml_hyperparameter_tune_agent"
         / "ml_hyperparameter_tune_agent.py"
     ).read_text(encoding="utf-8")

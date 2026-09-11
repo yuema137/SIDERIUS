@@ -13,7 +13,7 @@ from pathlib import Path
 
 from workflows.model_exploration import run_workflow
 
-_SRC = (Path(__file__).resolve().parents[3] / "workflows/model_exploration.py").read_text()
+_SRC = (Path(__file__).resolve().parents[3] / "src/workflows/model_exploration.py").read_text()
 
 
 class TestRunWorkflowSignature:
@@ -104,7 +104,9 @@ class TestThreading:
         # reverse construction anywhere.
         from pathlib import Path as _P
 
-        chain_state_src = (_P(__file__).resolve().parents[3] / "core/chain_state.py").read_text()
+        chain_state_src = (
+            _P(__file__).resolve().parents[3] / "src/core/chain_state.py"
+        ).read_text()
         flat_state = re.sub(r"\s+", " ", chain_state_src)
         assert (
             "state.current_collapse_fingerprint_history = dict( "

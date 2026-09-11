@@ -209,7 +209,7 @@ class TestD2TheAuthoringExample:
 
         template = (
             Path(__file__).resolve().parents[4]
-            / "agent/prompt_templates/proposal/causal_reasoning_stage.md"
+            / "src/agent/prompt_templates/proposal/causal_reasoning_stage.md"
         ).read_text(encoding="utf-8")
         assert "denoising_score" not in template
 
@@ -237,7 +237,7 @@ class TestD3TheComparisonSotaWording:
 
         return (
             Path(__file__).resolve().parents[4]
-            / "agent/prompt_templates/proposal/comparison_stage.md"
+            / "src/agent/prompt_templates/proposal/comparison_stage.md"
         ).read_text(encoding="utf-8")
 
     def test_the_rule_defines_sota_by_direction(self) -> None:
@@ -287,7 +287,7 @@ class TestThePlaceholderWiring:
         from pathlib import Path
 
         return (
-            Path(__file__).resolve().parents[4] / "agent/prompt_templates/proposal" / name
+            Path(__file__).resolve().parents[4] / "src/agent/prompt_templates/proposal" / name
         ).read_text(encoding="utf-8")
 
     @pytest.mark.parametrize(
@@ -418,7 +418,7 @@ class TestTheDeltaIsConfinedToD1D2D3:
 
         source = (
             Path(__file__).resolve().parents[4]
-            / "nodes/ml_model_proposal_agent/evidence_rendering.py"
+            / "src/nodes/ml_model_proposal_agent/evidence_rendering.py"
         ).read_text(encoding="utf-8")
         offenders = []
         for node in ast.walk(ast.parse(source)):

@@ -81,7 +81,7 @@ class TestLegalityRuleIsNotRestated:
         """Anti-regression: re-inlining the enumeration would restore both
         the drift risk and the 10M-iteration loop."""
         source = (
-            REPO_ROOT / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
+            REPO_ROOT / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
         ).read_text()
         offenders = [
             line.strip()
@@ -110,7 +110,7 @@ class TestLegalityRuleIsNotRestated:
         now guards the half this one is structurally blind to; neither replaces
         the other.
         """
-        for rel in ("agent/prompts.py", "agent/schemas/proposal.py"):
+        for rel in ("src/agent/prompts.py", "src/agent/schemas/proposal.py"):
             assert "valid_segmentation_sizes()" in (REPO_ROOT / rel).read_text(), rel
 
     def test_the_proposal_schema_asks_the_resolved_profile_not_the_singleton(self):
@@ -127,7 +127,7 @@ class TestLegalityRuleIsNotRestated:
         It fails on regression by the banned import re-appearing in the source,
         or by the resolution seam disappearing from it.
         """
-        source = (REPO_ROOT / "agent/schemas/proposal.py").read_text()
+        source = (REPO_ROOT / "src/agent/schemas/proposal.py").read_text()
         assert "TIDMAD as DATASET_CONFIG" not in source
         assert "DATASET_CONFIG" not in source
         assert "resolve_dataset_profile" in source
@@ -232,7 +232,7 @@ class TestReferenceArtifactFileCount:
     def test_loader_derives_the_count_from_the_bound_profile(self):
         import nodes.scoring_reference as reference
 
-        source = (REPO_ROOT / "nodes/scoring_reference.py").read_text()
+        source = (REPO_ROOT / "src/nodes/scoring_reference.py").read_text()
         assert "resolve_dataset_profile" in source
         code = [
             line

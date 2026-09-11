@@ -354,7 +354,7 @@ class TestF14ReviewBlockers:
 
         src = (
             Path(__file__).resolve().parents[4]
-            / "nodes"
+            / "src/nodes"
             / "ml_hyperparameter_tune_agent"
             / "planning.py"
         ).read_text()

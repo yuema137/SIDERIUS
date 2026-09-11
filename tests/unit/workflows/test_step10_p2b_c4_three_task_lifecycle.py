@@ -345,11 +345,11 @@ class TestTheObservationalInvariantAtTheFinalHead:
     @pytest.mark.parametrize(
         "rel",
         [
-            "workflows/task_composition.py",
-            "execute_tools/evaluation_metric.py",
-            "nodes/ml_hyperparameter_tune_agent/execution.py",
-            "nodes/result_interpretation_agent/evidence.py",
-            "nodes/result_interpretation_agent/result_interpretation_agent.py",
+            "src/workflows/task_composition.py",
+            "src/execute_tools/evaluation_metric.py",
+            "src/nodes/ml_hyperparameter_tune_agent/execution.py",
+            "src/nodes/result_interpretation_agent/evidence.py",
+            "src/nodes/result_interpretation_agent/result_interpretation_agent.py",
         ],
         ids=["composition", "binding", "evaluation", "projection", "carry"],
     )

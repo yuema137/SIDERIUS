@@ -174,18 +174,17 @@ STRUCTURAL_BASELINE: dict[str, tuple[int, int, int, int]] = {
     # prepare_attempt (OI-2) as decomposition debt — the second budget
     # this week consumed to its ceiling by accumulation; deliberately NOT
     # split in a narrow lane.
-    "workflows/model_exploration.py::run_workflow": (377, 144, 1662, 21),
-    "workflows/model_exploration.py::_register_plugin": (60, 19, 175, 4),
-    "workflows/model_exploration.py::should_run_literature_review": (4, 0, 29, 2),
+    "src/workflows/model_exploration.py::run_workflow": (377, 144, 1662, 21),
+    "src/workflows/model_exploration.py::_register_plugin": (60, 19, 175, 4),
+    "src/workflows/model_exploration.py::should_run_literature_review": (4, 0, 29, 2),
     (
-        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
-        "::HyperparamTuningAgent.run"
+        "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py::HyperparamTuningAgent.run"
     ): (258, 67, 1085, 2),
     # RE-RECORDED 2026-08-26 (Lane F / F14): 471 → landed master 551 (+80
     # accumulated, exactly at the growth ceiling) → +6 disclosure call →
     # 557; branch 32 → 31. Same ledger as the 12bc B0 twin row; the
     # decomposition-debt flag lives there.
-    "nodes/ml_hyperparameter_tune_agent/planning.py::prepare_attempt": (117, 31, 557, 7),
+    "src/nodes/ml_hyperparameter_tune_agent/planning.py::prepare_attempt": (117, 31, 557, 7),
     # RE-RECORDED 2026-08-26 (Lane F3 / F-BYPASS-WD-1) — the ledger:
     # era-pin (107, 36, 521, 6) → landed master 8f0cc9f3-era measured 541
     # LOC (+20 accumulated) → F3's bypass block +35 LOC and +7 branch
@@ -196,24 +195,24 @@ STRUCTURAL_BASELINE: dict[str, tuple[int, int, int, int]] = {
     # each arm printed and witnessed. Zero param growth. This function
     # joins the decomposition-debt family (OI-2's siblings) — deliberately
     # NOT split in a narrow lane.
-    "nodes/ml_hyperparameter_tune_agent/execution.py::run_admission_preflight": (
+    "src/nodes/ml_hyperparameter_tune_agent/execution.py::run_admission_preflight": (
         119,
         43,
         576,
         6,
     ),
-    "nodes/ml_hyperparameter_tune_agent/execution.py::run_inference_scoring_health": (
+    "src/nodes/ml_hyperparameter_tune_agent/execution.py::run_inference_scoring_health": (
         109,
         26,
         474,
         6,
     ),
     "sdsc_submission_scripts/run_one_iteration.py::compute_expected_invariants": (6, 3, 64, 2),
-    "core/resume.py::restore_prior_state": (100, 47, 383, 4),
-    "core/run_invariants.py::build_run_invariants": (8, 3, 103, 13),
-    "core/run_invariants.py::validate_stamped_invariants": (25, 14, 101, 4),
-    "ml_models/plugin_loader.py::_load_plugin": (23, 7, 46, 1),
-    "ml_models/plugin_loader.py::register_model_in_memory": (16, 3, 48, 1),
+    "src/core/resume.py::restore_prior_state": (100, 47, 383, 4),
+    "src/core/run_invariants.py::build_run_invariants": (8, 3, 103, 13),
+    "src/core/run_invariants.py::validate_stamped_invariants": (25, 14, 101, 4),
+    "src/ml_models/plugin_loader.py::_load_plugin": (23, 7, 46, 1),
+    "src/ml_models/plugin_loader.py::register_model_in_memory": (16, 3, 48, 1),
     # RETIRED FROM THE TABLE by C5 (D16), in the commit that did it — the same
     # rule C0 wrote down for `_add_plugin_to_registries`:
     #

@@ -68,7 +68,7 @@ write full run workspaces.
 
 - Launching the real multi-iteration chain →
   [`sdsc_submission_scripts/`](../sdsc_submission_scripts/README.md).
-- The workflow itself → [`workflows/`](../workflows/README.md).
+- The workflow itself → [`workflows/`](../src/workflows/README.md).
 - Record/manifest integrity rules → `core/record_log.py` /
   `core/iteration_manifest.py`
   ([persistence concepts](../docs/concepts/persistence-and-records.md)).

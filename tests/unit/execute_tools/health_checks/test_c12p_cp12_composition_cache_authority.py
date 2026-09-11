@@ -181,8 +181,8 @@ def test_memo_key_observes_all_run_scoped_binding_globals():
         tree = ast.parse((REPO_ROOT / relative).read_text())
         return next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name)
 
-    reset = function("execute_tools/health_checks/_plugin_binding.py", "reset_run_scope")
-    key = function("execute_tools/health_checks/config.py", "_resolved_binding_identity")
+    reset = function("src/execute_tools/health_checks/_plugin_binding.py", "reset_run_scope")
+    key = function("src/execute_tools/health_checks/config.py", "_resolved_binding_identity")
     cleared = {
         name
         for node in ast.walk(reset)

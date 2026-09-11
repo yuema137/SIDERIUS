@@ -295,9 +295,16 @@ class TestTheProjectionHasExactlyOneAuthority:
     #: Where the projection legitimately lives. Anything else defining a
     #: same-named function, or a second consumer-view class over the
     #: interpretation, is the second authority parent §11.2 forbids.
-    OWNER = "agent/schemas/proposer_evidence.py"
+    OWNER = "src/agent/schemas/proposer_evidence.py"
 
-    SEARCH_DIRS = ("agent", "nodes", "workflows", "core", "execute_tools", "scripts")
+    SEARCH_DIRS = (
+        "src/agent",
+        "src/nodes",
+        "src/workflows",
+        "src/core",
+        "src/execute_tools",
+        "scripts",
+    )
 
     def _production_sources(self) -> dict[str, str]:
         """Every production module, as ``relative path -> source``.
@@ -376,17 +383,17 @@ class TestTheProjectionHasExactlyOneAuthority:
         baseline = self._definitions_in(sources, name)
         assert [d.split(":")[0] for d in baseline] == [self.OWNER]
 
-        sources["nodes/proposal_helpers.py"] += "\n\n" + planted
+        sources["src/nodes/proposal_helpers.py"] += "\n\n" + planted
         with_plant = self._definitions_in(sources, name)
         owners = [d.split(":")[0] for d in with_plant]
-        assert owners == [self.OWNER, "nodes/proposal_helpers.py"], (
+        assert owners == [self.OWNER, "src/nodes/proposal_helpers.py"], (
             f"the census did not report the planted second definition of {name}: {owners}"
         )
 
     def test_the_census_refuses_to_skip_a_file_it_cannot_parse(self) -> None:
         """A silent skip is how a census reports 'one owner' having not looked."""
         sources = self._production_sources()
-        sources["nodes/proposal_helpers.py"] = "def broken(:\n"
+        sources["src/nodes/proposal_helpers.py"] = "def broken(:\n"
         with pytest.raises(AssertionError, match="could not parse"):
             self._definitions_in(sources, "build_proposer_evidence")
 
@@ -410,7 +417,7 @@ class TestTheVocabEntryRelocation:
         both spellings resolve to the same object, so only reading the import
         statement can show which module the edge points at.
         """
-        source = (REPO_ROOT / "agent/schemas/interpretation.py").read_text(encoding="utf-8")
+        source = (REPO_ROOT / "src/agent/schemas/interpretation.py").read_text(encoding="utf-8")
         assert "from agent.schemas.vocab import VocabEntry" in source
         assert "from agent.schemas.proposal import VocabEntry" not in source
 

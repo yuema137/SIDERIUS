@@ -26,7 +26,7 @@ from agent.prompt_templates.proposal import (
 )
 
 PROPOSAL_PROMPT_DIR = (
-    Path(__file__).resolve().parents[4] / "agent" / "prompt_templates" / "proposal"
+    Path(__file__).resolve().parents[4] / "src/agent" / "prompt_templates" / "proposal"
 )
 
 BASE_FILES = (

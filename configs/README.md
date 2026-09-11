@@ -60,7 +60,7 @@ pair.
   [task composition reference](../docs/reference/task-composition.md) and its
   authority `workflows/task_composition.py`.
 - What each health field means →
-  [`execute_tools/health_checks/`](../execute_tools/health_checks/README.md).
+  [`execute_tools/health_checks/`](../src/execute_tools/health_checks/README.md).
 - Machine-local dashboards and secrets (`dashboard_config.yaml`, `.env`) —
   gitignored siblings at the repository root, not here. Physical dataset
   roots are explicit caller inputs (`--data_dir`), never framework config.

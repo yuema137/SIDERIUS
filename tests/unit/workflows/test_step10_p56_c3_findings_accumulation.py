@@ -330,7 +330,7 @@ def test_the_retired_bare_local_has_no_remaining_reads():
     import ast
     from pathlib import Path
 
-    workflow = Path(__file__).resolve().parents[3] / "workflows" / "model_exploration.py"
+    workflow = Path(__file__).resolve().parents[3] / "src/workflows" / "model_exploration.py"
     tree = ast.parse(workflow.read_text(encoding="utf-8"))
     fn = next(
         n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "run_workflow"
@@ -372,8 +372,8 @@ def test_the_union_rule_has_exactly_ONE_authority_and_both_consumers_call_it():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[3]
-    resume_src = (root / "core" / "resume.py").read_text(encoding="utf-8")
-    workflow_src = (root / "workflows" / "model_exploration.py").read_text(encoding="utf-8")
+    resume_src = (root / "src/core" / "resume.py").read_text(encoding="utf-8")
+    workflow_src = (root / "src/workflows" / "model_exploration.py").read_text(encoding="utf-8")
 
     # 1. Exactly one definition, and it is in core.resume.
     defs = [
@@ -389,8 +389,8 @@ def test_the_union_rule_has_exactly_ONE_authority_and_both_consumers_call_it():
     # 2. Both consumers call it. `project_knowledge` is the projection half;
     #    `run_workflow`'s loop closure is the in-process half.
     for src, fn_name, path in (
-        (resume_src, "project_knowledge", "core/resume.py"),
-        (workflow_src, "run_workflow", "workflows/model_exploration.py"),
+        (resume_src, "project_knowledge", "src/core/resume.py"),
+        (workflow_src, "run_workflow", "src/workflows/model_exploration.py"),
     ):
         fn = next(
             n
@@ -410,7 +410,7 @@ def test_the_union_rule_has_exactly_ONE_authority_and_both_consumers_call_it():
 
     # 3. Neither consumer still carries a hand-rolled dedup append. The old
     #    shape appended inside a membership test; require that it is gone.
-    for src, path in ((resume_src, "core/resume.py"), (workflow_src, "model_exploration.py")):
+    for src, path in ((resume_src, "src/core/resume.py"), (workflow_src, "model_exploration.py")):
         assert "not in state.accumulated_key_findings" not in src, (
             f"{path} re-inlined the membership test the authority owns"
         )

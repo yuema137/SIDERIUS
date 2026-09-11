@@ -36,7 +36,7 @@ from core.run_invariants import (
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-RESUME = REPO_ROOT / "core" / "resume.py"
+RESUME = REPO_ROOT / "src/core" / "resume.py"
 
 FULL_SCOPE = [0, 1, 2, 3]
 FINGERPRINT_A = "a" * 64
@@ -109,7 +109,7 @@ class TestResumeCarriesNoTaskToken:
         """The sibling was already composition-aware; the two now derive the
         same way, which is the point of removing the divergence.
         """
-        sibling = (REPO_ROOT / "workflows" / "model_exploration.py").read_text(encoding="utf-8")
+        sibling = (REPO_ROOT / "src/workflows" / "model_exploration.py").read_text(encoding="utf-8")
         assert "_run_partitions = resolve_dataset_profile().partition_count" in sibling
 
 
@@ -223,7 +223,7 @@ class TestTheStampIsProduced:
         """One place, for the reason `candidate_id` is stamped there: nine
         construction sites, and a per-site stamp is one someone forgets.
         """
-        src = (REPO_ROOT / "nodes/ml_hyperparameter_tune_agent/records.py").read_text(
+        src = (REPO_ROOT / "src/nodes/ml_hyperparameter_tune_agent/records.py").read_text(
             encoding="utf-8"
         )
         assert 'record["task_composition_fingerprint"] = active_composition_fingerprint()' in src
@@ -275,7 +275,7 @@ class TestTheStampIsProduced:
         """
         import ast
 
-        src = (REPO_ROOT / "nodes/ml_hyperparameter_tune_agent/records.py").read_text(
+        src = (REPO_ROOT / "src/nodes/ml_hyperparameter_tune_agent/records.py").read_text(
             encoding="utf-8"
         )
         tree = ast.parse(src)

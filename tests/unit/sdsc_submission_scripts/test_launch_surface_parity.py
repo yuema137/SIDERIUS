@@ -37,8 +37,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CHAIN_LIB = REPO_ROOT / "sdsc_submission_scripts" / "_chain_common.sh"
 RUN_ONE_ITERATION = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
-WORKFLOW = REPO_ROOT / "workflows" / "model_exploration.py"
-PROTOCOL_DIR = REPO_ROOT / "agent" / "schemas" / "protocols"
+WORKFLOW = REPO_ROOT / "src/workflows" / "model_exploration.py"
+PROTOCOL_DIR = REPO_ROOT / "src/agent" / "schemas" / "protocols"
 
 # Protocol functions run_workflow calls (workflows/model_exploration.py
 # imports, lines 87-90 + 533). Update when the workflow gains an edge.

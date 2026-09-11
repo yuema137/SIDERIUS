@@ -54,7 +54,7 @@ def test_both_readers_resolve_the_stage_directory_through_the_authority():
     import ast
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[3] / "execute_tools"
+    root = Path(__file__).resolve().parents[3] / "src/execute_tools"
     for module in ("funnel_assembly.py", "workflow_validation.py"):
         tree = ast.parse((root / module).read_text(encoding="utf-8"))
         calls = [

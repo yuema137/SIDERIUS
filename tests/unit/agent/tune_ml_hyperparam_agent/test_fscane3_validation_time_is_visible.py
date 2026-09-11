@@ -577,10 +577,10 @@ class TestOneAuthorityForFourSurfaces:
 
     #: Every surface that states what the split means.
     _CONSUMERS = (
-        "agent/prompts.py",
-        "nodes/interpretation_helpers.py",
-        "agent/schemas/hyperparam_tuning.py",
-        "agent/schemas/interpretation.py",
+        "src/agent/prompts.py",
+        "src/nodes/interpretation_helpers.py",
+        "src/agent/schemas/hyperparam_tuning.py",
+        "src/agent/schemas/interpretation.py",
     )
     _REPO = Path(__file__).resolve().parents[4]
 

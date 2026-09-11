@@ -49,7 +49,15 @@ from execute_tools.health_checks.schemas import (
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
-PRODUCTION_PACKAGES = ("execute_tools", "nodes", "agent", "core", "scripts", "workflows", "configs")
+PRODUCTION_PACKAGES = (
+    "src/execute_tools",
+    "src/nodes",
+    "src/agent",
+    "src/core",
+    "scripts",
+    "src/workflows",
+    "configs",
+)
 
 # Every identifier the synthetic task invents. None may appear in production
 # source — that absence IS the extension proof.
@@ -270,7 +278,7 @@ class TestNoInfrastructureEditWasRequired:
     def test_repo_root_resolves_to_this_checkout(self):
         """Guards the guard: a wrong root makes every census below vacuous."""
         assert (REPO_ROOT / ".git").exists()
-        assert (REPO_ROOT / "execute_tools" / "health_checks" / "registry.py").is_file()
+        assert (REPO_ROOT / "src/execute_tools" / "health_checks" / "registry.py").is_file()
 
     def test_the_grep_probe_actually_finds_things(self):
         """Proves the search works, so its emptiness below is real evidence."""
@@ -293,7 +301,7 @@ class TestNoInfrastructureEditWasRequired:
 
     def test_the_central_import_list_registers_only_built_ins(self):
         """``__init__`` keeps its bootstrap, but it is no longer the extension path."""
-        source = (REPO_ROOT / "execute_tools" / "health_checks" / "__init__.py").read_text()
+        source = (REPO_ROOT / "src/execute_tools" / "health_checks" / "__init__.py").read_text()
 
         for identifier in FIXTURE_IDENTIFIERS:
             assert identifier not in source

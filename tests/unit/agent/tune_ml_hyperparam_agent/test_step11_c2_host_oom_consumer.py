@@ -85,7 +85,7 @@ class TestTheFailurePredicate:
         string. Two independently-spelled statuses is how the defect
         existed at all.
         """
-        src = (REPO_ROOT / "core" / "sandbox_executor.py").read_text(encoding="utf-8")
+        src = (REPO_ROOT / "src/core" / "sandbox_executor.py").read_text(encoding="utf-8")
         assert (
             src.count(f'status = "{HOST_RAM_OOM_STATUS}" if _is_oom_failure(e) else "error"') == 3
         )
@@ -100,7 +100,7 @@ class TestBothProductionBranchesAskIt:
     @staticmethod
     def _execution_tree() -> ast.Module:
         return ast.parse(
-            (REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "execution.py").read_text(
+            (REPO_ROOT / "src/nodes" / "ml_hyperparameter_tune_agent" / "execution.py").read_text(
                 encoding="utf-8"
             )
         )
@@ -120,7 +120,7 @@ class TestBothProductionBranchesAskIt:
 
     def test_no_branch_compares_the_status_string_directly(self):
         """The replaced form must not come back beside the authority."""
-        src = (REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "execution.py").read_text(
+        src = (REPO_ROOT / "src/nodes" / "ml_hyperparameter_tune_agent" / "execution.py").read_text(
             encoding="utf-8"
         )
         assert 'train_status.get("status") == "error"' not in src

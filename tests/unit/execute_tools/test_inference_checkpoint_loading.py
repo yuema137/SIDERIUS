@@ -36,7 +36,9 @@ from pathlib import Path
 import pytest
 import torch
 
-_INFERENCE_SOURCE = Path(__file__).resolve().parents[3] / "execute_tools" / "inference_single.py"
+_INFERENCE_SOURCE = (
+    Path(__file__).resolve().parents[3] / "src/execute_tools" / "inference_single.py"
+)
 
 
 def _main_function() -> ast.FunctionDef:

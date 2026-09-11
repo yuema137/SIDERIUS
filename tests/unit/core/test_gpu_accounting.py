@@ -253,7 +253,9 @@ class TestTelemetryGaps:
 class TestGenericity:
     """§1.4 — the module must not know what task it is serving."""
 
-    SOURCE = Path(__file__).resolve().parents[3] / "core" / "runtime_control" / "gpu_accounting.py"
+    SOURCE = (
+        Path(__file__).resolve().parents[3] / "src/core" / "runtime_control" / "gpu_accounting.py"
+    )
 
     def test_imports_no_task_specific_module(self):
         tree = ast.parse(self.SOURCE.read_text(encoding="utf-8"))

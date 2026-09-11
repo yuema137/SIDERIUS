@@ -57,7 +57,7 @@ class TestComposedRenderAuthority:
 
 class TestAssemblyDoesNotOwnComposition:
     def test_llm_bridge_does_not_read_a_composition_authority(self):
-        source = (REPO_ROOT / "agent" / "llm_bridge.py").read_text(encoding="utf-8")
+        source = (REPO_ROOT / "src/agent" / "llm_bridge.py").read_text(encoding="utf-8")
         for forbidden in (
             "active_task_data_path",
             "active_composition_fingerprint",
@@ -67,6 +67,6 @@ class TestAssemblyDoesNotOwnComposition:
             assert forbidden not in source, forbidden
 
     def test_prompt_module_is_composition_free(self):
-        source = (REPO_ROOT / "agent" / "prompts.py").read_text(encoding="utf-8")
+        source = (REPO_ROOT / "src/agent" / "prompts.py").read_text(encoding="utf-8")
         assert "task_composition" not in source
         assert "active_task_data_path" not in source

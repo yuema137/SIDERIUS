@@ -7,8 +7,8 @@ import pytest
 from core.layout import _checkout_for, require_checkout
 
 
-@pytest.mark.parametrize("prefix", [".", "src"])
-def test_exact_declared_layout_survives_foreign_cwd_and_symlink(tmp_path, monkeypatch, prefix):
+def test_exact_declared_layout_survives_foreign_cwd_and_symlink(tmp_path, monkeypatch):
+    prefix = "src"
     root = tmp_path / "checkout"
     source = root / prefix / "core/layout.py"
     source.parent.mkdir(parents=True)

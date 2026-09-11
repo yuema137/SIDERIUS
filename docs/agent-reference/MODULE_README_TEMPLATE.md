@@ -7,14 +7,14 @@ README is a **map of the directory and its boundaries** — the cross-cutting
 *semantics* stay in the [mechanism references](README.md#mechanisms), which the
 module README links instead of restating. One home per concept.
 
-Instantiated for: [`workflows/`](../../workflows/README.md) ·
-[`core/`](../../core/README.md) ·
-[`execute_tools/`](../../execute_tools/README.md) ·
-[`execute_tools/health_checks/`](../../execute_tools/health_checks/README.md) ·
-[`ml_models/`](../../ml_models/README.md) ·
-[`agent/schemas/`](../../agent/schemas/README.md). Node directories are the exception:
+Instantiated for: [`workflows/`](../../src/workflows/README.md) ·
+[`core/`](../../src/core/README.md) ·
+[`execute_tools/`](../../src/execute_tools/README.md) ·
+[`execute_tools/health_checks/`](../../src/execute_tools/health_checks/README.md) ·
+[`ml_models/`](../../src/ml_models/README.md) ·
+[`agent/schemas/`](../../src/agent/schemas/README.md). Node directories are the exception:
 their `<node>.md` contract docs predate this template and are governed by
-[`nodes/NODE_TEMPLATE.md`](../../nodes/NODE_TEMPLATE.md).
+[`nodes/NODE_TEMPLATE.md`](../../src/nodes/NODE_TEMPLATE.md).
 
 Rules:
 

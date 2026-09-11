@@ -245,7 +245,7 @@ class TestDeclaredModelPlugins:
 
     def test_the_module_names_no_task(self):
         """Zero task-name dispatch, asserted on the authority's own source."""
-        source = (REPO_ROOT / "ml_models" / "plugin_binding.py").read_text(encoding="utf-8")
+        source = (REPO_ROOT / "src/ml_models" / "plugin_binding.py").read_text(encoding="utf-8")
         lowered = source.lower()
         for task in ("tidmad", "pets", "oxford", "davis"):
             assert task not in lowered, f"seam P's authority names the task {task!r}"
@@ -424,7 +424,7 @@ class TestUnionPropagation:
         """
         import ast as _ast
 
-        source = (REPO_ROOT / "core" / "sandbox_executor.py").read_text(encoding="utf-8")
+        source = (REPO_ROOT / "src/core" / "sandbox_executor.py").read_text(encoding="utf-8")
         tree = _ast.parse(source)
         target = next(
             node
@@ -842,13 +842,15 @@ class TestRealChildProcess:
 
 def test_this_module_and_the_authority_agree_on_one_merge_implementation():
     """No duplicated child-side merge logic (§E.2's explicit prohibition)."""
-    loader = (REPO_ROOT / "ml_models" / "plugin_loader.py").read_text(encoding="utf-8")
-    transport = (REPO_ROOT / "core" / "subprocess_env.py").read_text(encoding="utf-8")
+    loader = (REPO_ROOT / "src/ml_models" / "plugin_loader.py").read_text(encoding="utf-8")
+    transport = (REPO_ROOT / "src/core" / "subprocess_env.py").read_text(encoding="utf-8")
     for source in (loader, transport):
         assert "union_plugin_roots" in source
     merge_definitions = [
         node.name
-        for node in ast.walk(ast.parse((REPO_ROOT / "ml_models" / "plugin_binding.py").read_text()))
+        for node in ast.walk(
+            ast.parse((REPO_ROOT / "src/ml_models" / "plugin_binding.py").read_text())
+        )
         if isinstance(node, ast.FunctionDef) and node.name == "union_plugin_roots"
     ]
     assert merge_definitions == ["union_plugin_roots"], "exactly one merge authority"

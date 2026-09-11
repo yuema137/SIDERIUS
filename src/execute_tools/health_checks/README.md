@@ -2,10 +2,10 @@
 
 **Audience**: a coding agent or engineer touching the Health subsystem, or a
 task author writing a custom check. **Authority**: the source. Template:
-[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
-Concepts for humans: [health gates](../../docs/concepts/health-gates.md);
+[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../../docs/agent-reference/MODULE_README_TEMPLATE.md).
+Concepts for humans: [health gates](../../../docs/concepts/health-gates.md);
 cross-cutting semantics:
-[health-gates mechanism](../../docs/agent-reference/mechanisms/health-gates.md).
+[health-gates mechanism](../../../docs/agent-reference/mechanisms/health-gates.md).
 
 ## Purpose
 

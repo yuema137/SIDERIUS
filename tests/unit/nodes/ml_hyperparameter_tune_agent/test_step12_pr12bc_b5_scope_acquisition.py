@@ -224,7 +224,7 @@ class TestNoTaskNameDispatch:
 
         src = (
             pathlib.Path(__file__).resolve().parents[4]
-            / "nodes"
+            / "src/nodes"
             / "ml_hyperparameter_tune_agent"
             / "scope_acquisition.py"
         ).read_text(encoding="utf-8")

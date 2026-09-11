@@ -2,7 +2,7 @@
 
 **Audience**: a coding agent or engineer about to modify the execution
 substrate. **Authority**: the source. Template:
-[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../docs/agent-reference/MODULE_README_TEMPLATE.md).
+[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 
 ## Purpose
 
@@ -58,12 +58,12 @@ workflow · calibration observations.
 ## Non-owned semantics
 
 - What the children *do* → [`execute_tools/`](../execute_tools/README.md)
-  engines; [execution mechanism](../docs/agent-reference/mechanisms/execution.md).
+  engines; [execution mechanism](../../docs/agent-reference/mechanisms/execution.md).
 - What the lock's health hash *means* →
   [`execute_tools/health_checks/`](../execute_tools/health_checks/README.md).
 - When gates fire, round policy → the tuner node.
 - The workspace layout narrative →
-  [workspaces and resume](../docs/guides/workspaces-and-resume.md).
+  [workspaces and resume](../../docs/guides/workspaces-and-resume.md).
 
 ## Extension points
 

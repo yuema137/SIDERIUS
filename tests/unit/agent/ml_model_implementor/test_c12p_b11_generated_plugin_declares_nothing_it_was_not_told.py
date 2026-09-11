@@ -548,13 +548,13 @@ class TestOneProbeConstructionAuthority:
 
     #: Production trees a second copy could plausibly be written into.
     _PRODUCTION_TREES = (
-        "agent",
-        "core",
-        "execute_tools",
-        "ml_models",
-        "nodes",
+        "src/agent",
+        "src/core",
+        "src/execute_tools",
+        "src/ml_models",
+        "src/nodes",
         "scripts",
-        "workflows",
+        "src/workflows",
     )
 
     def test_the_rule_is_defined_exactly_once_in_production(self):
@@ -573,7 +573,7 @@ class TestOneProbeConstructionAuthority:
         import ast
         from pathlib import Path
 
-        repo_root = Path(_impl.__file__).resolve().parents[2]
+        repo_root = Path(__file__).resolve().parents[4]
         definitions: list[str] = []
         for tree in self._PRODUCTION_TREES:
             for path in sorted((repo_root / tree).rglob("*.py")):
@@ -585,7 +585,7 @@ class TestOneProbeConstructionAuthority:
                     if isinstance(node, ast.FunctionDef) and node.name == "probe_config_kwargs":
                         definitions.append(str(path.relative_to(repo_root)))
 
-        assert definitions == ["agent/skills/model_io_probe_skill.py"], (
+        assert definitions == ["src/agent/skills/model_io_probe_skill.py"], (
             "the probe's config-construction rule is defined somewhere other "
             f"than (or as well as) the Step-04 recipe module: {definitions}"
         )

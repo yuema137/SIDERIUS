@@ -34,8 +34,8 @@ import pathlib
 import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-CHILD = REPO_ROOT / "execute_tools" / "denoising_score_single.py"
-TUNER_EXEC = REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "execution.py"
+CHILD = REPO_ROOT / "src/execute_tools" / "denoising_score_single.py"
+TUNER_EXEC = REPO_ROOT / "src/nodes" / "ml_hyperparameter_tune_agent" / "execution.py"
 
 
 def _fn(path: pathlib.Path, name: str) -> ast.FunctionDef:

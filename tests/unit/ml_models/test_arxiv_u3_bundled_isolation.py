@@ -49,7 +49,7 @@ class TestLoaderUnderIsolation:
             get_model_description("punet", baseline_isolation=True)
         msg = str(exc.value)
         assert "baseline_isolation" in msg
-        assert "ml_models/punet/description.md" in msg.replace("\\", "/")
+        assert "src/ml_models/punet/description.md" in msg.replace("\\", "/")
 
     def test_isolation_still_resolves_a_workspace_plugin_description(self, tmp_path, monkeypatch):
         plugin_dir = tmp_path / "plugins" / "iter_001" / "my_plugin_tcn"
@@ -68,8 +68,8 @@ class TestLoaderCallSitesForwardTheFlag:
     @pytest.mark.parametrize(
         "rel",
         [
-            "nodes/result_interpretation_agent/result_interpretation_agent.py",
-            "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+            "src/nodes/result_interpretation_agent/result_interpretation_agent.py",
+            "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
         ],
     )
     def test_every_production_loader_call_forwards_the_flag(self, rel):

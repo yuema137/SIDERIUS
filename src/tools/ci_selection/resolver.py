@@ -46,6 +46,10 @@ from core.layout import checkout_root, require_checkout
 REPO_ROOT = require_checkout(checkout_root())
 TESTS_ROOT = REPO_ROOT / "tests" / "unit"
 
+INSTALLED_PACKAGES = frozenset(
+    {"agent", "nodes", "core", "execute_tools", "ml_models", "workflows", "dashboard", "tools"}
+)
+
 #: Top-level packages that count as "production" for edge purposes.
 REPO_PACKAGES = frozenset(
     {
@@ -92,7 +96,7 @@ def _rel(path: Path) -> str:
 
 
 def _module_name(path: Path) -> str:
-    return _rel(path).removesuffix(".py").replace("/", ".")
+    return _rel(path).removeprefix("src/").removesuffix(".py").replace("/", ".")
 
 
 def _imported_targets(tree: ast.AST, own_module: str) -> set[str]:
@@ -166,8 +170,9 @@ def _resolved_import_paths(
     """Tracked Python files imported by one parsed module."""
     out: set[str] = set()
     for dotted in _imported_targets(tree, own_module):
-        as_module = dotted.replace(".", "/") + ".py"
-        as_package = dotted.replace(".", "/") + "/__init__.py"
+        prefix = "src/" if dotted.split(".")[0] in INSTALLED_PACKAGES else ""
+        as_module = prefix + dotted.replace(".", "/") + ".py"
+        as_package = prefix + dotted.replace(".", "/") + "/__init__.py"
         if as_module in known_files:
             out.add(as_module)
         if as_package in known_files:
@@ -246,7 +251,9 @@ def _build_source_edges() -> dict[str, set[str]]:
     """
     known = _tracked_repository_files()
     sources = sorted(
-        rel for rel in known if rel.endswith(".py") and rel.split("/", 1)[0] in REPO_PACKAGES
+        rel
+        for rel in known
+        if rel.endswith(".py") and rel.removeprefix("src/").split("/", 1)[0] in REPO_PACKAGES
     )
     edges: dict[str, set[str]] = {}
     for rel in sources:
@@ -286,7 +293,7 @@ def _derived_owners(
 ) -> set[str]:
     """Import-derived owners, preserving the package-prefix over-approximation."""
     owners = transitive_test_owners({changed}, test_edges, source_edges)
-    dotted = changed.removesuffix(".py").replace("/", ".")
+    dotted = changed.removeprefix("src/").removesuffix(".py").replace("/", ".")
     owners |= {
         module
         for module, targets in test_edges.items()

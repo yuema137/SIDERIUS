@@ -115,7 +115,7 @@ class TestTheLegacyWireBytesArePinned:
         """The transport site itself. `model_dump()` would now emit
         `partition_count` + `topology` and change every child's config file.
         """
-        src = (REPO_ROOT / "core" / "sandbox_executor.py").read_text(encoding="utf-8")
+        src = (REPO_ROOT / "src/core" / "sandbox_executor.py").read_text(encoding="utf-8")
         assert "resolve_dataset_profile().to_wire()" in src
         assert "resolve_dataset_profile().model_dump()" not in src
 
@@ -125,7 +125,7 @@ class TestTheLegacyWireBytesArePinned:
         into the payload would fail every existing composed resume for a
         reason that has nothing to do with the task's semantics.
         """
-        src = (REPO_ROOT / "workflows" / "task_composition.py").read_text(encoding="utf-8")
+        src = (REPO_ROOT / "src/workflows" / "task_composition.py").read_text(encoding="utf-8")
         assert '"dataset_profile": dataset_profile.to_wire(),' in src
 
 
@@ -175,14 +175,14 @@ class TestExactlyOneSemanticAuthority:
 #: a census over "everything" would be unmaintainable, and a census that
 #: silently skipped a module would be the F-P2b-4 failure mode.
 GENERIC_CORE_MODULES = (
-    "core/resume.py",
-    "execute_tools/health_checks/config.py",
-    "execute_tools/health_checks/pearson_dispersion.py",
-    "execute_tools/health_checks/per_file_output_std.py",
-    "nodes/ml_hyperparameter_tune_agent/records.py",
-    "nodes/scoring_reference.py",
-    "agent/schemas/score_table.py",
-    "execute_tools/scoring_helpers.py",
+    "src/core/resume.py",
+    "src/execute_tools/health_checks/config.py",
+    "src/execute_tools/health_checks/pearson_dispersion.py",
+    "src/execute_tools/health_checks/per_file_output_std.py",
+    "src/nodes/ml_hyperparameter_tune_agent/records.py",
+    "src/nodes/scoring_reference.py",
+    "src/agent/schemas/score_table.py",
+    "src/execute_tools/scoring_helpers.py",
 )
 
 #: The one function that decodes the opaque payload. A generic module calling
@@ -229,7 +229,7 @@ class TestNoGenericConsumerReadsTaskTopology:
         the payload is detected by the same census. Without this the two
         tests above would pass on an empty intersection forever — the
         anchored-symbol lesson (F-P2b-4)."""
-        known_reader = "execute_tools/train_engine_sandbox.py"
+        known_reader = "src/execute_tools/train_engine_sandbox.py"
         assert _calls(known_reader) & set(TOPOLOGY_READERS), (
             "the census cannot see a topology read at all — it would report "
             "every generic module clean for the wrong reason"

@@ -213,7 +213,7 @@ class TestAdapter:
 
         root = pathlib.Path(__file__).resolve().parents[3]
         rivals = []
-        for path in (root / "core").rglob("*.py"):
+        for path in (root / "src/core").rglob("*.py"):
             if path.name == "gpu_accounting.py":
                 continue
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

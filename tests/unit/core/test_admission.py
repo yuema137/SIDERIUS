@@ -25,11 +25,11 @@ from core.runtime_control.admission import (
 from core.runtime_control.gpu_accounting import DeviceIdentity, GpuAccountingSnapshot
 from tests.helpers.tuner_source import tuner_node_source
 
-SOURCE = Path(__file__).resolve().parents[3] / "core" / "runtime_control" / "admission.py"
-EXECUTOR = Path(__file__).resolve().parents[3] / "core" / "sandbox_executor.py"
+SOURCE = Path(__file__).resolve().parents[3] / "src/core" / "runtime_control" / "admission.py"
+EXECUTOR = Path(__file__).resolve().parents[3] / "src/core" / "sandbox_executor.py"
 TUNER = (
     Path(__file__).resolve().parents[3]
-    / "nodes"
+    / "src/nodes"
     / "ml_hyperparameter_tune_agent"
     / "ml_hyperparameter_tune_agent.py"
 )

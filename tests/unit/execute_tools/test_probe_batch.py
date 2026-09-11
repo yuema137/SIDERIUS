@@ -140,9 +140,9 @@ class TestTheMeasurementPathHoldsNoTaskLiterals:
 
     #: Every module 07c C2 routed through the profile.
     SCANNED = (
-        "execute_tools/probe_batch.py",
-        "core/runtime_control/gpu_measurement_data.py",
-        "core/runtime_control/probe_production.py",
+        "src/execute_tools/probe_batch.py",
+        "src/core/runtime_control/gpu_measurement_data.py",
+        "src/core/runtime_control/probe_production.py",
     )
 
     @pytest.mark.parametrize("relative_path", SCANNED)
@@ -176,7 +176,7 @@ class TestTheMeasurementPathHoldsNoTaskLiterals:
         """`+128` specifically: it is the one fact whose reintroduction would
         keep every shape and dtype correct and change every measured value."""
         module = ast.parse(
-            (REPO_ROOT / "execute_tools" / "probe_batch.py").read_text(encoding="utf-8")
+            (REPO_ROOT / "src/execute_tools" / "probe_batch.py").read_text(encoding="utf-8")
         )
         offsets = [
             n

@@ -27,7 +27,7 @@ import pytest
 from core.chain_state import chain_state_field_names
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW = REPO_ROOT / "workflows" / "model_exploration.py"
+WORKFLOW = REPO_ROOT / "src/workflows" / "model_exploration.py"
 
 
 def _run_workflow_ast() -> ast.FunctionDef:

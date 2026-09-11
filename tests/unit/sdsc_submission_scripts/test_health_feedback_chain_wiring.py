@@ -26,8 +26,8 @@ roi = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(roi)
 
 LOCK_SITES = {
-    "tuner": _REPO / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
-    "workflow": _REPO / "workflows/model_exploration.py",
+    "tuner": _REPO / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+    "workflow": _REPO / "src/workflows/model_exploration.py",
     "chain": _REPO / "sdsc_submission_scripts/run_one_iteration.py",
 }
 

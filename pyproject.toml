@@ -43,13 +43,20 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = [
     "agent*", "nodes*", "core*", "execute_tools*", "ml_models*",
     "tools*", "workflows*", "dashboard*",
 ]
 exclude = ["agent_generated*", "scripts*"]
 namespaces = true
+
+[tool.setuptools.package-data]
+agent = ["schemas/*.json", "prompt_templates/**/*.md", "skills/*/skill_config.json"]
+nodes = ["*.md", "*/*.md"]
+ml_models = ["*.md", "*/description.md"]
+dashboard = ["static/*.html", "static/*.js", "static/*.css"]
+tools = ["ci/weights.json", "claude_hooks/templates/*.md"]
 
 [dependency-groups]
 dev = [

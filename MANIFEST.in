@@ -1,3 +1,10 @@
 prune scripts
 prune agent_generated
+prune .structured-coding
+prune tests
+prune examples
+prune configs
+prune reference_data
+prune reports
+prune sdsc_submission_scripts
 global-exclude __pycache__ *.py[cod]

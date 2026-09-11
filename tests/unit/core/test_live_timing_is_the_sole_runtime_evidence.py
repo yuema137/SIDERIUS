@@ -253,10 +253,16 @@ class TestProductionNeverWritesTheLegacyTable:
         """Scanned across production trees, not just the one file that used to
         do it -- a writer moved elsewhere would satisfy the import guard."""
         repo = Path(__file__).resolve().parents[3]
-        legacy_module = repo / "agent" / "skills" / "evaluate_time_skill" / "calibration.py"
+        legacy_module = repo / "src/agent" / "skills" / "evaluate_time_skill" / "calibration.py"
 
         offenders: dict[str, set[str]] = {}
-        for tree_root in ("core", "nodes", "agent", "execute_tools", "workflows"):
+        for tree_root in (
+            "src/core",
+            "src/nodes",
+            "src/agent",
+            "src/execute_tools",
+            "src/workflows",
+        ):
             for path in (repo / tree_root).rglob("*.py"):
                 if path == legacy_module or "__pycache__" in path.parts:
                     continue

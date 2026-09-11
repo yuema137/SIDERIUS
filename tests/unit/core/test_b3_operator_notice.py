@@ -150,11 +150,11 @@ class TestTheNoticeChangesNothing:
 
         repo = pathlib.Path(__file__).resolve().parents[3]
         for rel in (
-            "core/runtime_control/decision_policy.py",
-            "core/runtime_control/gpu_requirement.py",
-            "core/runtime_control/total_assembly.py",
-            "core/runtime_control/probe_lifecycle.py",
-            "agent/skills/evaluate_vram_skill/wrapper.py",
+            "src/core/runtime_control/decision_policy.py",
+            "src/core/runtime_control/gpu_requirement.py",
+            "src/core/runtime_control/total_assembly.py",
+            "src/core/runtime_control/probe_lifecycle.py",
+            "src/agent/skills/evaluate_vram_skill/wrapper.py",
         ):
             text = (repo / rel).read_text(encoding="utf-8")
             assert "threshold_exceedance_notice" not in text, (

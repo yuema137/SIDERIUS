@@ -80,5 +80,5 @@ class TestAssertInferenceBatchRegistered:
     def test_error_message_points_to_defaults_file(self):
         """The message must point at ``core/inference_defaults.py`` so
         the reader knows exactly where to register the batch."""
-        with pytest.raises(ValueError, match=r"core/inference_defaults.py"):
+        with pytest.raises(ValueError, match=r"core/inference_defaults\.py"):
             assert_inference_batch_registered("another_plugin")

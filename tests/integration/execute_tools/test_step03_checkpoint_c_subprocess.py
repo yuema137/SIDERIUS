@@ -180,7 +180,7 @@ def _child_env() -> dict[str, str]:
 def _train(ws, model_io: dict | None, exp_id: str) -> subprocess.CompletedProcess:
     argv = [
         PYTHON,
-        "execute_tools/train_engine_sandbox.py",
+        "src/execute_tools/train_engine_sandbox.py",
         "--model_cfg",
         str(ws["cfg_dir"] / "model.json"),
         "--train_cfg",
@@ -309,7 +309,7 @@ class TestTransportFailsClosed:
         path.write_text("{ not json")
         argv = [
             PYTHON,
-            "execute_tools/train_engine_sandbox.py",
+            "src/execute_tools/train_engine_sandbox.py",
             "--model_cfg",
             str(workspace["cfg_dir"] / "model.json"),
             "--train_cfg",

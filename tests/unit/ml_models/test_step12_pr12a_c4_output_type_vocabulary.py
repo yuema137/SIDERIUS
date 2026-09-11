@@ -104,7 +104,7 @@ class TestTheVocabularyIsOneAuthority:
 
         validator = ast.parse(
             (
-                REPO_ROOT / "nodes" / "ml_code_validator_agent" / "ml_code_validator_agent.py"
+                REPO_ROOT / "src/nodes" / "ml_code_validator_agent" / "ml_code_validator_agent.py"
             ).read_text(encoding="utf-8")
         )
         bindings = [
@@ -122,7 +122,7 @@ class TestTheVocabularyIsOneAuthority:
         assert bindings[0].id == "PLUGIN_LEGAL_OUTPUT_TYPES"
 
     def test_the_loader_declares_each_set_exactly_once(self):
-        loader = (REPO_ROOT / "ml_models" / "plugin_loader.py").read_text(encoding="utf-8")
+        loader = (REPO_ROOT / "src/ml_models" / "plugin_loader.py").read_text(encoding="utf-8")
         assert loader.count('("classifier", "regressor")') == 1
         assert loader.count('("classifier", "regressor", "hybrid")') == 1
 
@@ -174,7 +174,9 @@ class TestHybridStaysLoadBearingForBuiltins:
     def test_a_real_consumer_still_branches_on_it(self):
         """Reachability for the reason `hybrid` stays in the vocabulary: it is
         not decoration, it routes regression in the inference child."""
-        source = (REPO_ROOT / "execute_tools" / "inference_single.py").read_text(encoding="utf-8")
+        source = (REPO_ROOT / "src/execute_tools" / "inference_single.py").read_text(
+            encoding="utf-8"
+        )
         assert 'output_type == "hybrid"' in source
 
 

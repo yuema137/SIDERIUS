@@ -5,6 +5,8 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXPECTED_PACKAGE_ROOTS = {
     "agent*",
@@ -47,12 +49,33 @@ def test_production_never_imports_the_legacy_generated_tree():
     production_roots = tuple(path.removesuffix("*") for path in EXPECTED_PACKAGE_ROOTS)
     offenders: list[str] = []
     for root_name in production_roots:
-        root = REPO_ROOT / root_name
-        for source in root.rglob("*.py"):
+        root = REPO_ROOT / "src" / root_name
+        sources = sorted(root.rglob("*.py"))
+        assert root.is_dir() and sources, f"missing production scan subject: {root}"
+        for source in sources:
             text = source.read_text(encoding="utf-8")
             if "from agent_generated" in text or "import agent_generated" in text:
                 offenders.append(str(source.relative_to(REPO_ROOT)))
     assert offenders == []
+
+
+def test_distribution_scan_detects_a_forbidden_import_and_a_missing_root(tmp_path, monkeypatch):
+    """A retired-root scan or ignored forbidden import must turn this control red."""
+    monkeypatch.setitem(globals(), "REPO_ROOT", tmp_path)
+    for pattern in EXPECTED_PACKAGE_ROOTS:
+        package = tmp_path / "src" / pattern.removesuffix("*")
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("")
+    test_production_never_imports_the_legacy_generated_tree()
+    plant = tmp_path / "src/core/rogue.py"
+    plant.write_text("import agent_generated\n")
+    with pytest.raises(AssertionError):
+        test_production_never_imports_the_legacy_generated_tree()
+    plant.unlink()
+    (tmp_path / "src/core/__init__.py").unlink()
+    (tmp_path / "src/core").rmdir()
+    with pytest.raises(AssertionError, match="missing production scan subject"):
+        test_production_never_imports_the_legacy_generated_tree()
 
 
 def test_distribution_roots_are_an_explicit_framework_allowlist():
@@ -64,4 +87,5 @@ def test_distribution_roots_are_an_explicit_framework_allowlist():
     """
     config = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     discovery = config["tool"]["setuptools"]["packages"]["find"]
+    assert discovery["where"] == ["src"]
     assert set(discovery["include"]) == EXPECTED_PACKAGE_ROOTS

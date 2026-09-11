@@ -135,7 +135,9 @@ class TestTheProducerStatementSurvivesTheBridge:
         from pathlib import Path
 
         repo_root = Path(__file__).resolve().parents[4]
-        source = (repo_root / "nodes" / "ml_hyperparameter_tune_agent" / "execution.py").read_text()
+        source = (
+            repo_root / "src/nodes" / "ml_hyperparameter_tune_agent" / "execution.py"
+        ).read_text()
 
         assert "PerSampleEvidence.for_per_sample(per_sample)" in source, (
             "the tuner bridge no longer derives the per-sample statement"

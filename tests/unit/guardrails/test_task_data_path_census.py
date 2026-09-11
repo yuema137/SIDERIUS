@@ -9,17 +9,17 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 #: The data-path surface for the task-identity token guardrail.
 _DATA_PATH_SURFACE = (
-    "execute_tools/task_data_path.py",
-    "execute_tools/train_engine_sandbox.py",
-    "execute_tools/inference_single.py",
-    "execute_tools/denoising_score_single.py",
+    "src/execute_tools/task_data_path.py",
+    "src/execute_tools/train_engine_sandbox.py",
+    "src/execute_tools/inference_single.py",
+    "src/execute_tools/denoising_score_single.py",
     # Step 11 C9 (F-11-8) — the SPAWN PARENT. It was absent while every one
     # of its children was listed, so the module that decides what the
     # children read was the one place this guardrail could not see. Bringing
     # it in is the point of the finding, not a formality: it carries
     # `TidmadSandbox`, `_tidmad_data_dir` and a `"tidmad_db"` literal, none
     # of which the census had ever examined.
-    "core/sandbox_executor.py",
+    "src/core/sandbox_executor.py",
 )
 
 _TASK_NAME_TOKENS = {"tidmad", "pet", "pets", "davis"}
@@ -45,7 +45,7 @@ class TestNoDualPath:
         dynamic half): each relocated caller must reach the data path through
         resolution, and the seam methods must actually be invoked."""
         engine = ast.parse(
-            (_REPO_ROOT / "execute_tools/train_engine_sandbox.py").read_text(encoding="utf-8")
+            (_REPO_ROOT / "src/execute_tools/train_engine_sandbox.py").read_text(encoding="utf-8")
         )
         assert _count_calls(engine, "resolve_bound_task_data_path") >= 1, (
             "the engine no longer resolves the run-bound TaskDataPath — the "
@@ -55,13 +55,13 @@ class TestNoDualPath:
         assert _count_calls(engine, "validation_dataset") >= 1
 
         inference = ast.parse(
-            (_REPO_ROOT / "execute_tools/inference_single.py").read_text(encoding="utf-8")
+            (_REPO_ROOT / "src/execute_tools/inference_single.py").read_text(encoding="utf-8")
         )
         assert _count_calls(inference, "resolve_child_task_data_path") >= 1
         assert _count_calls(inference, "write_deliverable") >= 1
 
         scoring = ast.parse(
-            (_REPO_ROOT / "execute_tools/denoising_score_single.py").read_text(encoding="utf-8")
+            (_REPO_ROOT / "src/execute_tools/denoising_score_single.py").read_text(encoding="utf-8")
         )
         assert _count_calls(scoring, "read_evaluation_payload") >= 1
 

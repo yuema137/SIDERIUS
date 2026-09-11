@@ -3,7 +3,7 @@
 **Audience**: a coding agent or engineer about to modify the workflow layer.
 **Authority**: the source. This README is a map; where they disagree, the
 module is right. Template:
-[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../docs/agent-reference/MODULE_README_TEMPLATE.md).
+[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 
 ## Purpose
 
@@ -12,7 +12,7 @@ task-composition manifest that binds a whole run to one task's declarations.
 A workflow is a script with a fixed sequence — *"a workflow, not an
 orchestrator"* — never an agent choosing its own tools. This package contains
 no shell entrypoints: the chain launchers live in
-[`sdsc_submission_scripts/`](../sdsc_submission_scripts/README.md), which call
+[`sdsc_submission_scripts/`](../../sdsc_submission_scripts/README.md), which call
 into here one iteration at a time.
 
 ## Public interface
@@ -36,7 +36,7 @@ JSON; a `RestoredState` when resuming; pseudo-mode factories for $0 smokes.
 
 A list of `HyperparamTuningOutput`; the workspace record tree
 (`{workspace}/{run_name}/…` — layout in
-[workspaces and resume](../docs/guides/workspaces-and-resume.md)); the run
+[workspaces and resume](../../docs/guides/workspaces-and-resume.md)); the run
 invariants lock and effective health config (written via `core` /
 `execute_tools.health_checks` authorities at startup).
 
@@ -57,20 +57,20 @@ invariants lock and effective health config (written via `core` /
 
 ## Non-owned semantics
 
-- Node internals → each node's `.md` under [`nodes/`](../nodes/).
+- Node internals → each node's `.md` under [`nodes/`](../nodes).
 - Subprocess execution, resource ceilings → `core/sandbox_executor.py`
-  ([execution mechanism](../docs/agent-reference/mechanisms/execution.md)).
+  ([execution mechanism](../../docs/agent-reference/mechanisms/execution.md)).
 - Health policy and gate actions →
   [`execute_tools/health_checks/`](../execute_tools/health_checks/README.md).
 - Lock and resume mechanics → `core/run_invariants.py`, `core/resume.py`
-  ([persistence and resume](../docs/agent-reference/mechanisms/persistence-and-resume.md)).
+  ([persistence and resume](../../docs/agent-reference/mechanisms/persistence-and-resume.md)).
 - Metric direction → `execute_tools/metric_order.py` (one authority).
 
 ## Extension points
 
 - **A new task never edits this package.** It authors a manifest + out-of-tree
-  plugins — see [define a task](../docs/guides/define-a-task.md) and the
-  [composition mechanism](../docs/agent-reference/mechanisms/composition.md).
+  plugins — see [define a task](../../docs/guides/define-a-task.md) and the
+  [composition mechanism](../../docs/agent-reference/mechanisms/composition.md).
 - Adding a *manifest section* is a framework change to `task_composition.py`
   with its resolver, fingerprint entry and censuses — not routine.
 
@@ -83,7 +83,7 @@ workflow summary; calls `ensure_run_invariants` (chain-level lock). Sets
 **promotes them into the checkout-level `agent_generated/` library, which every
 later run on the same checkout preloads** — workspace state is isolated, that
 library is not (recorded product gap; see
-[workspaces and resume](../docs/guides/workspaces-and-resume.md)).
+[workspaces and resume](../../docs/guides/workspaces-and-resume.md)).
 
 ## Failure modes
 
@@ -119,7 +119,7 @@ weakening a refusal into a fallback is the defect class the guards exist for.
 ```
 
 For real runs use the chain launcher
-([entrypoints](../docs/reference/entrypoints.md)); start with `--dry-run`.
+([entrypoints](../../docs/reference/entrypoints.md)); start with `--dry-run`.
 
 ## Related tests
 

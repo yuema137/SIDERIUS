@@ -266,7 +266,7 @@ class TestTheWriteIsAtomic:
         behaviour above, so a refactor that reverts to a bare write fails here
         even if a mocked test still passed.
         """
-        src = (REPO_ROOT / "execute_tools" / "scope_artifact.py").read_text(encoding="utf-8")
+        src = (REPO_ROOT / "src/execute_tools" / "scope_artifact.py").read_text(encoding="utf-8")
         assert "os.replace(" in src
         assert "tempfile.mkstemp(" in src
 
@@ -291,13 +291,13 @@ class TestExactlyOneDigestAuthority:
             # Step 12 / PR-12bc C1: the sha256 of an implementation's MODULE
             # SOURCE, which answers "is this the same code?" for the
             # registration lifecycle. It never sees a scope.
-            "execute_tools/task_data_path.py": "content_identity",
+            "src/execute_tools/task_data_path.py": "content_identity",
         }
         offenders = []
         for rel in (
-            "core/sandbox_executor.py",
-            "execute_tools/train_engine_sandbox.py",
-            "execute_tools/task_data_path.py",
+            "src/core/sandbox_executor.py",
+            "src/execute_tools/train_engine_sandbox.py",
+            "src/execute_tools/task_data_path.py",
         ):
             src = (REPO_ROOT / rel).read_text(encoding="utf-8")
             if "scope" not in src or "hashlib.sha256" not in src:
@@ -327,7 +327,7 @@ class TestExactlyOneDigestAuthority:
         hash. A `json.loads` here would be the framework reading task
         vocabulary — the exact defect Q-12-4 removed.
         """
-        src = (REPO_ROOT / "execute_tools" / "scope_artifact.py").read_text(encoding="utf-8")
+        src = (REPO_ROOT / "src/execute_tools" / "scope_artifact.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
         called = {
             n.func.attr

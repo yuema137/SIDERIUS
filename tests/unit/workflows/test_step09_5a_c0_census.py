@@ -215,21 +215,21 @@ EXPECTED_PRODUCTION_CALLERS = frozenset(
     {
         "sdsc_submission_scripts/run_one_iteration.py",
         "sdsc_submission_scripts/run_exploration_test.py",
-        "workflows/model_exploration.py",
+        "src/workflows/model_exploration.py",
     }
 )
 
 _PRODUCTION_DIRS = (
-    "agent",
-    "core",
-    "nodes",
-    "workflows",
+    "src/agent",
+    "src/core",
+    "src/nodes",
+    "src/workflows",
     "scripts",
-    "execute_tools",
+    "src/execute_tools",
     "sdsc_submission_scripts",
-    "tools",
-    "dashboard",
-    "ml_models",
+    "src/tools",
+    "src/dashboard",
+    "src/ml_models",
 )
 
 
@@ -278,7 +278,7 @@ class TestCallerCensus:
 
 #: Production modules that may legitimately mention the digest path convention.
 #: Anything else resolving it is a second reader.
-_DIGEST_PATH_OWNERS = ("core/committed_digests.py", "core/resume.py")
+_DIGEST_PATH_OWNERS = ("src/core/committed_digests.py", "src/core/resume.py")
 
 
 def _digest_openers() -> dict[str, list[str]]:
@@ -312,7 +312,7 @@ def _digest_openers() -> dict[str, list[str]]:
 #: MEASURED at the design anchor, then REDUCED by C1. The A-2 finding was four
 #: duplicated read/parse/soft-fail implementations; after C1 there is exactly
 #: ONE, and the four carried values became pure projections over its output.
-DIGEST_IO_AUTHORITIES = frozenset({"core/committed_digests.py::read_committed_digests"})
+DIGEST_IO_AUTHORITIES = frozenset({"src/core/committed_digests.py::read_committed_digests"})
 
 #: The four projections that consume the authority's output. They must remain
 #: distinct — their validators, merge rules and failure policies genuinely
@@ -346,7 +346,7 @@ class TestCommittedDigestAuthorityCensus:
         """Amendment D: a projection may re-emit a diagnostic, never reopen."""
         from core import resume
 
-        src = (REPO_ROOT / "core" / "resume.py").read_text(encoding="utf-8")
+        src = (REPO_ROOT / "src/core" / "resume.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
         for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
             if fn.name not in PROJECTIONS:
@@ -375,8 +375,8 @@ class TestCommittedDigestAuthorityCensus:
         `_proposal_path`, reverse iteration, first-parseable-wins (§3.4/§14.4).
         Name similarity is the trap; this pins that it stays separate.
         """
-        assert "core/resume.py::load_latest_proposal" not in _digest_openers()
-        src = (REPO_ROOT / "core" / "resume.py").read_text(encoding="utf-8")
+        assert "src/core/resume.py::load_latest_proposal" not in _digest_openers()
+        src = (REPO_ROOT / "src/core" / "resume.py").read_text(encoding="utf-8")
         body = src[src.index("def load_latest_proposal") :]
         body = body[: body.index("\ndef ")]
         assert "read_committed_digests" not in body

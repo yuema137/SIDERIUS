@@ -65,7 +65,7 @@ GPU UUID
 **A measurement from one accelerator is not evidence for another.** Moving to
 new hardware invalidates every stored figure for admission purposes, even for a
 byte-identical candidate. See
-[resource qualification](../../../docs/guides/operating-a-run.md#resource-qualification)
+[resource qualification](../../../../docs/guides/operating-a-run.md#resource-qualification)
 for the caller-owned qualification boundary.
 
 **This skill does not promote anything.** It measures and returns. It
@@ -166,4 +166,4 @@ GPU.
   out-of-memory says anything about the candidate at all.
 - `docs/design/v20_priorities/pr_b_gpu_aggregation_attribution.md` —
   the measurement/attribution design and the cross-hardware section.
-- [`docs/getting-started/installation.md`](../../../docs/getting-started/installation.md) — new-machine bring-up.
+- [`docs/getting-started/installation.md`](../../../../docs/getting-started/installation.md) — new-machine bring-up.

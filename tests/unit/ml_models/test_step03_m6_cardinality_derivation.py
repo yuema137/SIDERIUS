@@ -186,7 +186,7 @@ class TestNoConstructionLiteralSurvives:
         # portability rule exists because a test that reads a different tree
         # than the one under test is worse than no test.
         repo_root = pathlib.Path(__file__).resolve().parents[3]
-        source = (repo_root / "ml_models" / "models_sandbox.py").read_text()
+        source = (repo_root / "src/ml_models" / "models_sandbox.py").read_text()
         offenders = []
         for lineno, line in enumerate(source.splitlines(), start=1):
             code = line.split("#", 1)[0]

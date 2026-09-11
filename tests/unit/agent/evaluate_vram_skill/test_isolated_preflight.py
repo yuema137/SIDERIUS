@@ -277,7 +277,7 @@ class TestParentStaysSmall:
     """A limit applied after the model is resident protects nothing."""
 
     def test_the_parent_module_never_imports_torch(self):
-        source = (REPO_ROOT / "agent/skills/evaluate_vram_skill/isolated_probe.py").read_text()
+        source = (REPO_ROOT / "src/agent/skills/evaluate_vram_skill/isolated_probe.py").read_text()
         assert "import torch" not in source
 
     def test_the_worker_does_not_use_rlimit_as(self):
@@ -287,7 +287,7 @@ class TestParentStaysSmall:
         at 3.9-5.7 GiB RSS (2026-07-31, SHA d83f397)."""
         import ast
 
-        path = REPO_ROOT / "agent/skills/evaluate_vram_skill/preflight_worker_main.py"
+        path = REPO_ROOT / "src/agent/skills/evaluate_vram_skill/preflight_worker_main.py"
         tree = ast.parse(path.read_text())
         # Executable code only: the module docstring and one log line
         # deliberately NAME RLIMIT_AS to record why it is not used.
@@ -307,12 +307,12 @@ class TestParentStaysSmall:
 
     def test_the_worker_states_who_bounds_its_memory(self):
         source = (
-            REPO_ROOT / "agent/skills/evaluate_vram_skill/preflight_worker_main.py"
+            REPO_ROOT / "src/agent/skills/evaluate_vram_skill/preflight_worker_main.py"
         ).read_text()
         assert "parent RSS monitor" in source
 
     def test_the_worker_runs_in_its_own_process_group(self):
-        source = (REPO_ROOT / "agent/skills/evaluate_vram_skill/isolated_probe.py").read_text()
+        source = (REPO_ROOT / "src/agent/skills/evaluate_vram_skill/isolated_probe.py").read_text()
         assert "start_new_session=True" in source
 
     def test_only_bounded_metadata_crosses_the_boundary(self):
@@ -343,12 +343,12 @@ class TestMemoryLimitPolicy:
 
 class TestIpcBounds:
     def test_worker_output_is_written_to_a_file_not_an_undrained_pipe(self):
-        source = (REPO_ROOT / "agent/skills/evaluate_vram_skill/isolated_probe.py").read_text()
+        source = (REPO_ROOT / "src/agent/skills/evaluate_vram_skill/isolated_probe.py").read_text()
         assert "subprocess.PIPE" not in source
         assert "log_path.open(" in source
 
     def test_detail_fields_are_truncated(self, tmp_path):
-        worker = REPO_ROOT / "agent/skills/evaluate_vram_skill/preflight_worker_main.py"
+        worker = REPO_ROOT / "src/agent/skills/evaluate_vram_skill/preflight_worker_main.py"
         source = worker.read_text()
         assert "[:800]" in source or "[:400]" in source
 
@@ -592,9 +592,9 @@ class TestOneClassifierEverywhere:
     @pytest.mark.parametrize(
         "path",
         [
-            "agent/skills/evaluate_vram_skill/batch_resolver.py",
-            "agent/skills/evaluate_vram_skill/wrapper.py",
-            "agent/skills/evaluate_vram_skill/preflight_worker_main.py",
+            "src/agent/skills/evaluate_vram_skill/batch_resolver.py",
+            "src/agent/skills/evaluate_vram_skill/wrapper.py",
+            "src/agent/skills/evaluate_vram_skill/preflight_worker_main.py",
         ],
     )
     def test_every_path_uses_the_shared_helper_and_defines_no_other(self, path):
@@ -684,13 +684,13 @@ class TestInconclusiveIsNotTimeout:
         assert result.timeout_elapsed_seconds >= 1.0
 
     def test_the_wrapper_separates_timeout_from_inconclusive_status(self):
-        source = (REPO_ROOT / "agent/skills/evaluate_vram_skill/wrapper.py").read_text()
+        source = (REPO_ROOT / "src/agent/skills/evaluate_vram_skill/wrapper.py").read_text()
         assert '"status": "timeout"' in source, "a real deadline needs its own status"
         assert '"status": "inconclusive"' in source, "tracing failure keeps inconclusive"
 
     def test_the_worker_no_longer_maps_inconclusive_to_timeout(self):
         source = (
-            REPO_ROOT / "agent/skills/evaluate_vram_skill/preflight_worker_main.py"
+            REPO_ROOT / "src/agent/skills/evaluate_vram_skill/preflight_worker_main.py"
         ).read_text()
         start = source.index('if status == "inconclusive":')
         block = source[start : source.index("if status ==", start + 10)]

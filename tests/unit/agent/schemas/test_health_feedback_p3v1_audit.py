@@ -75,8 +75,8 @@ class TestPolicyIsAlwaysAParameter:
         # the single-file scan would never see it — the guard would still be
         # green while the rule it protects was broken.
         renderers = [
-            *sorted((REPO / "nodes/result_interpretation_agent").glob("*.py")),
-            REPO / "nodes/ml_model_proposal_agent/ml_model_proposal_agent.py",
+            *sorted((REPO / "src/nodes/result_interpretation_agent").glob("*.py")),
+            REPO / "src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py",
         ]
         assert len(renderers) >= 4, (
             "expected the interpreter package to contain its main module plus "

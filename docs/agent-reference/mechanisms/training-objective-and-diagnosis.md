@@ -160,4 +160,4 @@ otherwise `decreasing` or `increasing`. There is no hidden smoothing.
 
 - [Metrics](metrics.md) — the other kind of number
 - [Objectives and metrics, for humans](../../concepts/objectives-and-metrics.md)
-- [Tuner node](../../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md)
+- [Tuner node](../../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md)

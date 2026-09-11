@@ -306,7 +306,7 @@ class TestOneAuthorityPerFamily:
     )
 
     def test_each_family_has_exactly_one_definition(self):
-        source = (REPO_ROOT / "agent/prompt_templates/interpretation/rendering.py").read_text()
+        source = (REPO_ROOT / "src/agent/prompt_templates/interpretation/rendering.py").read_text()
         tree = ast.parse(source)
         defined = [
             n.name
@@ -317,7 +317,7 @@ class TestOneAuthorityPerFamily:
 
     def test_the_builders_do_not_inline_the_family_formatting(self):
         """The builders CALL the renderers; they must not re-format inline."""
-        source = (REPO_ROOT / "agent/prompt_templates/interpretation/rendering.py").read_text()
+        source = (REPO_ROOT / "src/agent/prompt_templates/interpretation/rendering.py").read_text()
         tree = ast.parse(source)
         for fn in ast.walk(tree):
             if not isinstance(fn, ast.FunctionDef) or fn.name not in (
@@ -357,7 +357,7 @@ def test_direction_words_come_from_the_order_authority(direction, expected):
     """No literal 'higher'/'lower' decision is made in this module."""
     line = render_metric_identity(MetricIdentity(metric_id="m", direction=direction))
     assert expected in line
-    source = (REPO_ROOT / "agent/prompt_templates/interpretation/rendering.py").read_text()
+    source = (REPO_ROOT / "src/agent/prompt_templates/interpretation/rendering.py").read_text()
     tree = ast.parse(source)
     fn = next(
         n

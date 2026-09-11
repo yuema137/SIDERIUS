@@ -1099,24 +1099,24 @@ class TestTheMeasurementHalf:
     def test_a_modified_byte_is_reported_as_modified(self, tmp_path):
         root = _mirror(tmp_path)
         before = tree_manifest(root)
-        (root / "core" / "benign.py").write_text("VALUE = 2\n", encoding="utf-8")
-        assert manifest_delta(before, tree_manifest(root))["modified"] == ["core/benign.py"]
+        (root / "src/core" / "benign.py").write_text("VALUE = 2\n", encoding="utf-8")
+        assert manifest_delta(before, tree_manifest(root))["modified"] == ["src/core/benign.py"]
 
     def test_a_file_the_run_created_is_reported_as_added(self, tmp_path):
         """§I.2's whole point: *if the run creates a repo file, the census
         fails*. No exclusion list — the run writes to the workspace."""
         root = _mirror(tmp_path)
         before = tree_manifest(root)
-        (root / "workflows" / "generated_by_the_run.json").write_text("{}", encoding="utf-8")
+        (root / "src/workflows" / "generated_by_the_run.json").write_text("{}", encoding="utf-8")
         assert manifest_delta(before, tree_manifest(root))["added"] == [
-            "workflows/generated_by_the_run.json"
+            "src/workflows/generated_by_the_run.json"
         ]
 
     def test_a_deleted_file_is_reported_as_removed(self, tmp_path):
         root = _mirror(tmp_path)
         before = tree_manifest(root)
-        (root / "agent" / "benign.py").unlink()
-        assert manifest_delta(before, tree_manifest(root))["removed"] == ["agent/benign.py"]
+        (root / "src/agent" / "benign.py").unlink()
+        assert manifest_delta(before, tree_manifest(root))["removed"] == ["src/agent/benign.py"]
 
     def test_the_manifest_covers_non_python_production_files(self, tmp_path):
         """The measurement half inherits the file set's immunity: a shell
@@ -1135,8 +1135,8 @@ class TestTheMeasurementHalf:
         that returned ``True`` unconditionally would pass the Gate's census
         while the tree was full of edits."""
         root = tmp_path / "repo"
-        (root / "core").mkdir(parents=True)
-        (root / "core" / "m.py").write_text("x = 1\n", encoding="utf-8")
+        (root / "src/core").mkdir(parents=True)
+        (root / "src/core" / "m.py").write_text("x = 1\n", encoding="utf-8")
         env = {
             **os.environ,
             "GIT_AUTHOR_NAME": "t",
@@ -1147,7 +1147,7 @@ class TestTheMeasurementHalf:
         for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "base"]):
             subprocess.run(["git", *args], cwd=str(root), check=True, env=env, capture_output=True)
         assert working_tree_is_clean(root)
-        (root / "core" / "leaked.py").write_text("y = 2\n", encoding="utf-8")
+        (root / "src/core" / "leaked.py").write_text("y = 2\n", encoding="utf-8")
         assert not working_tree_is_clean(root)
         assert "leaked.py" in git_status_porcelain(root)
 
@@ -1156,8 +1156,8 @@ class TestTheMeasurementHalf:
         the whole PR turns on**, so it is proven to fire rather than assumed
         to."""
         root = tmp_path / "repo"
-        (root / "core").mkdir(parents=True)
-        (root / "core" / "m.py").write_text("x = 1\n", encoding="utf-8")
+        (root / "src/core").mkdir(parents=True)
+        (root / "src/core" / "m.py").write_text("x = 1\n", encoding="utf-8")
         env = {
             **os.environ,
             "GIT_AUTHOR_NAME": "t",
@@ -1173,7 +1173,7 @@ class TestTheMeasurementHalf:
 
         with pytest.raises(AssertionError, match="edited SIDERIUS production source"):
             with zero_infrastructure_edit(root):
-                (root / "core" / "accommodation.py").write_text("z = 3\n", encoding="utf-8")
+                (root / "src/core" / "accommodation.py").write_text("z = 3\n", encoding="utf-8")
 
 
 # ======================================================================
@@ -1199,7 +1199,7 @@ class TestTheIdentifierMatcherCannotBeFooledBySpelling:
         ],
     )
     def test_the_matcher_sees_every_spelling_of_one_identifier(self, line, tmp_path):
-        root = _mirror(tmp_path, {"core/x.py": line + "\n"})
+        root = _mirror(tmp_path, {"src/core/x.py": line + "\n"})
         findings = find_identifier_mentions(decodable_text_files(root), PLANT_NEEDLES, root)
         assert findings, f"{line!r} went undetected"
 
@@ -1207,7 +1207,7 @@ class TestTheIdentifierMatcherCannotBeFooledBySpelling:
         """The cost of normalizing is a fusion false positive. Matching is
         per-WORD precisely so that ``eventseq`` beside ``probe_v0`` is two
         identifiers, not one needle."""
-        root = _mirror(tmp_path, {"core/x.py": "a = eventseq(); b = probe_v0\n"})
+        root = _mirror(tmp_path, {"src/core/x.py": "a = eventseq(); b = probe_v0\n"})
         assert find_identifier_mentions(decodable_text_files(root), PLANT_NEEDLES, root) == []
 
     def test_a_short_identifier_is_not_a_needle(self):
@@ -1329,10 +1329,10 @@ class TestNoProductionSourceMentionsTheFourthTask:
     @pytest.mark.parametrize(
         "rel",
         [
-            "dashboard/app.js",
+            "src/dashboard/app.js",
             "sdsc_submission_scripts/run_x.sh",
             "sdsc_submission_scripts/job.slurm",
-            "dashboard/index.html",
+            "src/dashboard/index.html",
         ],
     )
     def test_a_plant_in_a_NON_PYTHON_file_is_caught_exactly_once(self, rel, tmp_path):
@@ -1346,9 +1346,9 @@ class TestNoProductionSourceMentionsTheFourthTask:
     def test_the_baseline_is_green_once_the_plant_is_removed(self, tmp_path):
         """The other half of every mutation proof. Without it, a census that
         reports a finding on ANY input looks identical to one that works."""
-        root = _mirror(tmp_path, {"core/planted.py": f"TASK = '{PLANT_NEEDLE}'\n"})
+        root = _mirror(tmp_path, {"src/core/planted.py": f"TASK = '{PLANT_NEEDLE}'\n"})
         assert len(find_identifier_mentions(decodable_text_files(root), PLANT_NEEDLES, root)) == 1
-        (root / "core" / "planted.py").write_text("TASK = 'something_else'\n", encoding="utf-8")
+        (root / "src/core" / "planted.py").write_text("TASK = 'something_else'\n", encoding="utf-8")
         assert find_identifier_mentions(decodable_text_files(root), PLANT_NEEDLES, root) == []
 
 
@@ -1751,13 +1751,13 @@ class TestNoPackageConstantWasCopiedIntoProduction:
         assert findings == [], f"a package constant was copied into production: {findings}"
 
     def test_a_copied_constant_plant_is_caught_exactly_once(self, tmp_path):
-        root = _mirror(tmp_path, {"core/planted.py": "VOCAB = 7919\n"})
+        root = _mirror(tmp_path, {"src/core/planted.py": "VOCAB = 7919\n"})
         _one(find_copied_values(decodable_text_files(root), (7919.0,), root), "constant plant")
 
     def test_a_substring_of_a_larger_number_is_not_a_finding(self, tmp_path):
         """``7919`` inside ``179190`` is not the constant, and a census that
         said so would be switched off inside a week."""
-        root = _mirror(tmp_path, {"core/planted.py": "N = 179190\nM = 0.79191\n"})
+        root = _mirror(tmp_path, {"src/core/planted.py": "N = 179190\nM = 0.79191\n"})
         assert find_copied_values(decodable_text_files(root), (7919.0,), root) == []
 
     def test_the_distinctiveness_filter_is_the_documented_one(self):
@@ -1883,7 +1883,7 @@ class TestTheRealTreeCensusIsReachableBeforeThePackageExists:
         assert findings, (
             "the real-tree identifier census reported nothing for a name production holds — it is walking an empty file set"
         )
-        assert any(f.path == "execute_tools/deliverable_spec.py" for f in findings)
+        assert any(f.path == "src/execute_tools/deliverable_spec.py" for f in findings)
 
 
 class TestTheCensusReadsBytesNotImports:
@@ -2013,8 +2013,8 @@ class TestTheGateEntryPoint:
     @staticmethod
     def _repo(tmp_path: Path) -> Path:
         root = tmp_path / "repo"
-        (root / "core").mkdir(parents=True)
-        (root / "core" / "m.py").write_text("x = 1\n", encoding="utf-8")
+        (root / "src/core").mkdir(parents=True)
+        (root / "src/core" / "m.py").write_text("x = 1\n", encoding="utf-8")
         env = {
             **os.environ,
             "GIT_AUTHOR_NAME": "t",
@@ -2036,10 +2036,10 @@ class TestTheGateEntryPoint:
     def test_verify_FAILS_when_the_run_wrote_into_a_production_dir(self, tmp_path):
         root = self._repo(tmp_path)
         baseline = census_snapshot(root)
-        (root / "core" / "written_by_the_run.py").write_text("y = 2\n", encoding="utf-8")
+        (root / "src/core" / "written_by_the_run.py").write_text("y = 2\n", encoding="utf-8")
         ok, report = census_verify(baseline, root)
         assert not ok
-        assert report["delta"]["added"] == ["core/written_by_the_run.py"]
+        assert report["delta"]["added"] == ["src/core/written_by_the_run.py"]
         assert not report["clean"]
 
     def test_verify_FAILS_when_the_BASELINE_was_taken_from_a_dirty_tree(self, tmp_path):
@@ -2048,7 +2048,7 @@ class TestTheGateEntryPoint:
         afterwards — otherwise a Gate could launder a dirty tree by
         snapshotting it."""
         root = self._repo(tmp_path)
-        (root / "core" / "already_dirty.py").write_text("z = 3\n", encoding="utf-8")
+        (root / "src/core" / "already_dirty.py").write_text("z = 3\n", encoding="utf-8")
         baseline = census_snapshot(root)
         assert not baseline["clean"]
         ok, _ = census_verify(baseline, root)
@@ -2060,7 +2060,7 @@ class TestTheGateEntryPoint:
         baseline = tmp_path / "base.json"
         root = self._repo(tmp_path)
         payload = census_snapshot(root)
-        payload["manifest"]["core/ghost.py"] = "0" * 64
+        payload["manifest"]["src/core/ghost.py"] = "0" * 64
         baseline.write_text(json.dumps(payload), encoding="utf-8")
         result = subprocess.run(
             [sys.executable, "-m", _CLI_MODULE, "verify", str(baseline)],

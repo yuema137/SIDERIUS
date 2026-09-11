@@ -2,9 +2,9 @@
 
 **Audience**: a coding agent or engineer touching model/loss loading, or
 writing a model plugin by hand. **Authority**: the source. Template:
-[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../docs/agent-reference/MODULE_README_TEMPLATE.md).
+[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 Plugin identity/provenance semantics:
-[plugins mechanism](../docs/agent-reference/mechanisms/plugins.md).
+[plugins mechanism](../../docs/agent-reference/mechanisms/plugins.md).
 
 ## Purpose
 
@@ -114,7 +114,7 @@ production promotion does not write to checkout-level `agent_generated/`.
 Low-level unbound calls retain the home-library default and legacy read
 fallbacks described above. Resolution itself creates no directory; writers
 create storage when needed. See
-[workspaces and resume](../docs/guides/workspaces-and-resume.md).
+[workspaces and resume](../../docs/guides/workspaces-and-resume.md).
 
 ## Failure modes
 

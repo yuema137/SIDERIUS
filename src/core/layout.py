@@ -17,14 +17,16 @@ def package_root() -> Path:
 def _checkout_for(source: Path) -> Path | None:
     source = source.resolve()
     packages = source.parent.parent
-    candidate = packages.parent if packages.name == "src" else packages
+    if packages.name != "src":
+        return None
+    candidate = packages.parent
     if not (candidate / ".git").exists():
         return None
     manifest = candidate / "pyproject.toml"
     try:
         config = tomllib.loads(manifest.read_text(encoding="utf-8"))
         discovery = config["tool"]["setuptools"]["packages"]["find"]
-        expected = "src" if packages.name == "src" else "."
+        expected = "src"
         if config["project"]["name"] != "siderius" or discovery["where"] != [expected]:
             return None
         if (candidate / expected / "core" / "layout.py").resolve() != source:

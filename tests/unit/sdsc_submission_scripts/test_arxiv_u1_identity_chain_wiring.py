@@ -44,8 +44,8 @@ _spec.loader.exec_module(roi)
 _CHAIN_COMMON = _REPO / "sdsc_submission_scripts" / "_chain_common.sh"
 
 LOCK_SITES = {
-    "tuner": _REPO / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
-    "workflow": _REPO / "workflows/model_exploration.py",
+    "tuner": _REPO / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+    "workflow": _REPO / "src/workflows/model_exploration.py",
     "chain": _REPO / "sdsc_submission_scripts/run_one_iteration.py",
 }
 
@@ -118,16 +118,16 @@ class TestLockSiteCensus:
         expected = {p.resolve() for p in LOCK_SITES.values()}
         found: set[Path] = set()
         for top in (
-            "agent",
-            "core",
-            "execute_tools",
-            "nodes",
+            "src/agent",
+            "src/core",
+            "src/execute_tools",
+            "src/nodes",
             "scripts",
-            "workflows",
+            "src/workflows",
             "sdsc_submission_scripts",
-            "tools",
-            "dashboard",
-            "ml_models",
+            "src/tools",
+            "src/dashboard",
+            "src/ml_models",
         ):
             root = _REPO / top
             if not root.exists():

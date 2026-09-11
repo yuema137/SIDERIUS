@@ -307,7 +307,9 @@ class TestTheChildActuallyBindsOnEveryNamingRoute:
         Counts CALLS (``name(``), so the import statement is not miscounted as
         a second site.
         """
-        source = (REPO_ROOT / "execute_tools" / "inference_single.py").read_text(encoding="utf-8")
+        source = (REPO_ROOT / "src/execute_tools" / "inference_single.py").read_text(
+            encoding="utf-8"
+        )
         assert source.count("compose_deliverable_naming_from_manifest(") == 1
 
 
@@ -316,7 +318,7 @@ class TestTheScoringChildStillOwnsItsOwnBinding:
     deleting the sibling that already had a binding."""
 
     def test_scoring_still_composes_and_binds_its_declared_naming(self):
-        source = (REPO_ROOT / "execute_tools" / "denoising_score_single.py").read_text(
+        source = (REPO_ROOT / "src/execute_tools" / "denoising_score_single.py").read_text(
             encoding="utf-8"
         )
         assert "compose_deliverable_naming_from_manifest" in source
@@ -487,7 +489,7 @@ class TestTheScoringChildBindsEveryNamingConsumer:
         ],
     )
     def test_each_scoring_naming_consumer_is_inside_the_binding(self, consumer):
-        source = (REPO_ROOT / "execute_tools" / "denoising_score_single.py").read_text(
+        source = (REPO_ROOT / "src/execute_tools" / "denoising_score_single.py").read_text(
             encoding="utf-8"
         )
         assert consumer in source, (
@@ -501,7 +503,7 @@ class TestTheScoringChildBindsEveryNamingConsumer:
     def test_the_scoring_declaration_is_composed_exactly_once(self):
         """One compose, three bindings. Two composes could read a manifest
         that changed underneath the run — the disagreement class itself."""
-        source = (REPO_ROOT / "execute_tools" / "denoising_score_single.py").read_text(
+        source = (REPO_ROOT / "src/execute_tools" / "denoising_score_single.py").read_text(
             encoding="utf-8"
         )
         assert source.count("compose_deliverable_naming_from_manifest(") == 1
@@ -520,7 +522,7 @@ class TestTheNoOpRuleHasOneOwner:
 
     def test_both_children_use_the_shared_factory(self):
         for child in ("inference_single.py", "denoising_score_single.py"):
-            source = (REPO_ROOT / "execute_tools" / child).read_text(encoding="utf-8")
+            source = (REPO_ROOT / "src/execute_tools" / child).read_text(encoding="utf-8")
             assert "declared_naming_binding" in source, child
             assert "bind_deliverable_naming(" not in source, (
                 f"{child} re-inlined the bind/no-op rule instead of calling the "

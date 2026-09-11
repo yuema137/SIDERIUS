@@ -45,7 +45,7 @@ class TestFingerprintScope:
         handoff — the exact blindness this system exists to remove.
         """
         before = cs.working_tree_fingerprint(repo)
-        target = repo / "tools" / "claude_hooks" / "context_state.py"
+        target = repo / "src/tools" / "claude_hooks" / "context_state.py"
         target.parent.mkdir(parents=True)
         target.write_text("# tracked hook source\n", encoding="utf-8")
         assert cs.working_tree_fingerprint(repo) != before
@@ -125,8 +125,8 @@ class TestTemplateLookup:
         resolves its template.
         """
         fresh = tmp_path / "fresh"
-        (fresh / "tools").mkdir(parents=True)
-        shutil.copytree(Path(cs.__file__).resolve().parent, fresh / "tools" / "claude_hooks")
+        (fresh / "src/tools").mkdir(parents=True)
+        shutil.copytree(Path(cs.__file__).resolve().parent, fresh / "src/tools" / "claude_hooks")
         assert not (fresh / ".claude").exists()
 
         template = cs.template_path().read_text(encoding="utf-8")

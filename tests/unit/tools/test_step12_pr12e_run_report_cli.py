@@ -73,7 +73,7 @@ class TestTheFrozenCommandContract:
         still passes.
         """
         assert (
-            Path(__file__).resolve().parents[2].parent / "tools/run_report/__main__.py"
+            Path(__file__).resolve().parents[2].parent / "src/tools/run_report/__main__.py"
         ).is_file()
 
 
@@ -289,7 +289,14 @@ class TestTheRendererOwnsNoSemantics:
         """
         repo_root = Path(__file__).resolve().parents[3]
         offenders: list[str] = []
-        for package in ("agent", "core", "execute_tools", "nodes", "workflows", "dashboard"):
+        for package in (
+            "src/agent",
+            "src/core",
+            "src/execute_tools",
+            "src/nodes",
+            "src/workflows",
+            "src/dashboard",
+        ):
             for path in (repo_root / package).rglob("*.py"):
                 if "tools.run_report" in path.read_text(encoding="utf-8"):
                     offenders.append(str(path.relative_to(repo_root)))

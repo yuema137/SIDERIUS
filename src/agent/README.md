@@ -3,7 +3,7 @@
 **Audience**: a coding agent or engineer about to modify how nodes reach an
 LLM, what prompts render, or which atomic tools agents invoke.
 **Authority**: the source. Template:
-[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../docs/agent-reference/MODULE_README_TEMPLATE.md).
+[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 
 ## Purpose
 

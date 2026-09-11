@@ -2,7 +2,7 @@
 
 **Audience**: a coding agent or engineer about to modify the execution layer
 or implement a task's data path / metric. **Authority**: the source. Template:
-[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../docs/agent-reference/MODULE_README_TEMPLATE.md).
+[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 
 ## Purpose
 
@@ -66,14 +66,14 @@ records (`metric_result` / `metric_refusal`), typed training results.
   [`health_checks/`](health_checks/README.md).
 - When engines run, retries, round policy → the tuner node.
 - Manifest resolution / binding lifecycle → `workflows/task_composition.py`
-  ([composition mechanism](../docs/agent-reference/mechanisms/composition.md)).
+  ([composition mechanism](../../docs/agent-reference/mechanisms/composition.md)).
 - Ceilings and child spawning → [`core/`](../core/README.md).
 
 ## Extension points
 
 - **A task supplies its own `TaskDataPath` and `EvaluationMetric` as
   out-of-tree `file:` plugins** declared in its manifest — no edit here
-  ([define a task](../docs/guides/define-a-task.md)). Data not shaped like
+  ([define a task](../../docs/guides/define-a-task.md)). Data not shaped like
   "N partitions of M units" adds the `TaskScopeCapability` sibling; the four
   base methods are frozen and never grow.
 - **Scoreability contract classes are the one closed vocabulary**: only the
@@ -119,7 +119,7 @@ production loop has executed them end to end (Step 12 / PR-12d, landed
 One declared residual: composed-path **HealthGate enforcement** is recorded
 debt (PR-12d ledger, finding A1) — see
 [`health_checks/README.md`](health_checks/README.md). See
-[supported tasks](../docs/concepts/supported-tasks.md) for the authoritative
+[supported tasks](../../docs/concepts/supported-tasks.md) for the authoritative
 current-vs-target table.
 
 ## Minimal example

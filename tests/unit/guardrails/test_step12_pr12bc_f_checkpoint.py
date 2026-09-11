@@ -46,7 +46,7 @@ def _production_files() -> list[str]:
 #:
 #: The landed tree is clean under the wider scope: 52 additional files, zero
 #: offenders in all three checks. Nothing is exempted to make that true.
-GENERIC_PREFIXES = ("core/", "workflows/", "nodes/", "agent/", "execute_tools/")
+GENERIC_PREFIXES = ("src/core/", "src/workflows/", "src/nodes/", "src/agent/", "src/execute_tools/")
 TASK_NAMES = {"tidmad", "oxford_iiit_pet", "davis_future_prediction", "pets", "davis"}
 
 
@@ -109,7 +109,7 @@ class TestItem9NoHiddenTaskOrScopeIdentityDispatch:
         handles bytes and a hash.
         """
         tree = ast.parse(
-            (REPO_ROOT / "execute_tools" / "scope_artifact.py").read_text(encoding="utf-8")
+            (REPO_ROOT / "src/execute_tools" / "scope_artifact.py").read_text(encoding="utf-8")
         )
         called = {
             n.func.attr
@@ -123,17 +123,17 @@ class TestItem9NoHiddenTaskOrScopeIdentityDispatch:
     ("rel", "needle", "label"),
     [
         (
-            "workflows/task_composition.py",
+            "src/workflows/task_composition.py",
             "if declared in registered_task_data_path_ids():",
             "F-12-3 early return",
         ),
         (
-            "execute_tools/task_data_path.py",
+            "src/execute_tools/task_data_path.py",
             "_REGISTRY: dict[str, TaskDataPath] = {}",
             "the registry",
         ),
         (
-            "execute_tools/task_data_path.py",
+            "src/execute_tools/task_data_path.py",
             "is already registered with DIFFERENT",
             "duplicate refusal (C1: two-phase — identical content is idempotent)",
         ),

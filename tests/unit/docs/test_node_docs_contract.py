@@ -42,23 +42,23 @@ import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-PROTOCOLS_DIR = REPO_ROOT / "agent" / "schemas" / "protocols"
-PROTOCOLS_INIT = REPO_ROOT / "agent" / "schemas" / "protocols" / "__init__.py"
+PROTOCOLS_DIR = REPO_ROOT / "src/agent" / "schemas" / "protocols"
+PROTOCOLS_INIT = REPO_ROOT / "src/agent" / "schemas" / "protocols" / "__init__.py"
 AGENT_REFERENCE_README = REPO_ROOT / "docs" / "agent-reference" / "README.md"
 
 #: The node docs, literally — so the CI selector derives an edge from each
 #: to this module, and so a new node must be registered here to be guarded
 #: (`test_node_docs_tuple_matches_the_checkout` enforces that).
 NODE_DOCS: tuple[str, ...] = (
-    "nodes/ml_code_validator_agent/ml_code_validator_agent.md",
-    "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md",
-    "nodes/ml_literature_review/ml_literature_review.md",
-    "nodes/ml_model_implementor/ml_model_implementor.md",
-    "nodes/ml_model_proposal_agent/ml_model_proposal_agent.md",
-    "nodes/result_interpretation_agent/result_interpretation_agent.md",
+    "src/nodes/ml_code_validator_agent/ml_code_validator_agent.md",
+    "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md",
+    "src/nodes/ml_literature_review/ml_literature_review.md",
+    "src/nodes/ml_model_implementor/ml_model_implementor.md",
+    "src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.md",
+    "src/nodes/result_interpretation_agent/result_interpretation_agent.md",
 )
 
-PRODUCTION_ROOTS = ("agent", "nodes", "core", "execute_tools", "workflows")
+PRODUCTION_ROOTS = ("src/agent", "src/nodes", "src/core", "src/execute_tools", "src/workflows")
 
 _PROTOCOL_MODULE = re.compile(r"^ml_[a-z0-9_]+_to_ml_[a-z0-9_]+$")
 #: An identifier-shaped token containing `_to_`, optionally cited as
@@ -69,12 +69,12 @@ _TO_TOKEN = re.compile(
 )
 _NODE_TYPE = re.compile(r"\*\*Node type\*\*: \*\*(standalone-capable|workflow-only)\*\*")
 _MAIN_GUARD = re.compile(r'^if __name__ == "__main__":', re.MULTILINE)
-_CLI_CELL = re.compile(r"`(nodes/[A-Za-z0-9_/]+\.py):(\d+)`")
+_CLI_CELL = re.compile(r"`(src/nodes/[A-Za-z0-9_/]+\.py):(\d+)`")
 
 
 def _node_doc_paths_in_checkout() -> tuple[str, ...]:
     out: list[str] = []
-    for md in sorted((REPO_ROOT / "nodes").glob("*/*.md")):
+    for md in sorted((REPO_ROOT / "src/nodes").glob("*/*.md")):
         if md.stem == md.parent.name:
             out.append(md.relative_to(REPO_ROOT).as_posix())
     return tuple(out)

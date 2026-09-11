@@ -38,11 +38,11 @@ ALWAYS_ON: tuple[str, ...] = (
 #: suite carries all of the risk and almost none of the benefit, so these run
 #: everything and say so.
 HUBS: tuple[str, ...] = (
-    "agent/schemas/",
-    "core/runtime_control/records.py",
-    "core/runtime_control/estimate_types.py",
-    "execute_tools/dataset_config.py",
-    "execute_tools/scoring_utils.py",
+    "src/agent/schemas/",
+    "src/core/runtime_control/records.py",
+    "src/core/runtime_control/estimate_types.py",
+    "src/execute_tools/dataset_config.py",
+    "src/execute_tools/scoring_utils.py",
 )
 
 # ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ HUBS: tuple[str, ...] = (
 #: (`tests/unit/conftest.py` installs `forbid_real_heavy_subprocess`), so their
 #: blast radius is the whole suite by construction.
 FULL_SUITE_TRIGGERS: tuple[str, ...] = (
-    "tools/ci_selection/",
+    "src/tools/ci_selection/",
     "tests/unit/tools/ci_selection/",
     "tests/conftest.py",
     "tests/unit/conftest.py",
@@ -75,15 +75,19 @@ DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
     "tests/unit/agent_generated/test_stub_plugin_template_loads.py": (
         "tests/fixtures/generated_capabilities/",
     ),
-    "tests/unit/guardrails/test_no_hardcoded_device_literals.py": ("core/", "agent/", "nodes/"),
-    "tests/unit/guardrails/test_no_model_name_branches.py": (
-        "agent/skills/evaluate_vram_skill/",
-        "agent/skills/training_skill/estimator.py",
-        "agent/skills/inference_skill/estimator.py",
-        "core/inference_defaults.py",
-        "core/runtime_control/gpu_measurement_worker_main.py",
+    "tests/unit/guardrails/test_no_hardcoded_device_literals.py": (
+        "src/core/",
+        "src/agent/",
+        "src/nodes/",
     ),
-    "tests/unit/agent/llm_bridge/test_all_calls_labeled.py": ("nodes/",),
+    "tests/unit/guardrails/test_no_model_name_branches.py": (
+        "src/agent/skills/evaluate_vram_skill/",
+        "src/agent/skills/training_skill/estimator.py",
+        "src/agent/skills/inference_skill/estimator.py",
+        "src/core/inference_defaults.py",
+        "src/core/runtime_control/gpu_measurement_worker_main.py",
+    ),
+    "tests/unit/agent/llm_bridge/test_all_calls_labeled.py": ("src/nodes/",),
     # Step 12 / PR-12e -- the presentation-layer ordering census. It derives NO
     # import edge (its subjects are `.js` and `.html`). The repository inventory
     # indexes the files, but literal-path extraction still finds no reference.
@@ -109,24 +113,24 @@ DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
     # every area fallback intact. The underlying "an explicit scan replaces
     # rather than augments the area owner" behaviour is recorded as a finding.
     "tests/unit/execute_tools/test_step12_pr12e_presentation_ordering_census.py": (
-        "dashboard/static/",
+        "src/dashboard/static/",
     ),
     # Reaches the tuner through `importlib` with a computed name (`:36`), which
     # the AST cannot resolve -- found by the mutation oracle, not by review: a
     # change to `policy.py` would otherwise NOT have run the suite guarding its
     # MetricOrder consumers.
     "tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c2_order_consumers.py": (
-        "nodes/ml_hyperparameter_tune_agent/",
-        "execute_tools/metric_order.py",
+        "src/nodes/ml_hyperparameter_tune_agent/",
+        "src/execute_tools/metric_order.py",
     ),
     # Helper -> production declarations. A helper is the indirection that HIDES
     # a production dependency, so each one states what it reaches.
-    "tests/helpers/step00_pseudo_iteration.py": ("nodes/ml_hyperparameter_tune_agent/",),
-    "tests/helpers/tuner_source.py": ("nodes/ml_hyperparameter_tune_agent/",),
+    "tests/helpers/step00_pseudo_iteration.py": ("src/nodes/ml_hyperparameter_tune_agent/",),
+    "tests/helpers/tuner_source.py": ("src/nodes/ml_hyperparameter_tune_agent/",),
     # Imports the focused private module through a computed importlib name, so
     # the AST cannot derive the production edge.
     "tests/unit/nodes/ml_hyperparameter_tune_agent/test_issue_384_probe_data.py": (
-        "nodes/ml_hyperparameter_tune_agent/probe_data.py",
+        "src/nodes/ml_hyperparameter_tune_agent/probe_data.py",
     ),
 }
 
@@ -148,23 +152,23 @@ CONFTEST_SCOPES: tuple[str, ...] = (
 #: `tests/unit/guardrails/test_gate_standard_contract.py` parses that document;
 #: this table must be checked against it rather than restating it from memory.
 GATE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
-    "agent/prompts.py": ("gate1",),
-    "agent/prompt_templates/": ("gate1",),
-    "nodes/ml_model_proposal_agent/": ("gate1",),
-    "nodes/ml_model_implementor/": ("gate1", "gate2-at-checkpoint"),
-    "nodes/ml_code_validator_agent/": ("gate1", "gate2-at-checkpoint"),
-    "nodes/result_interpretation_agent/": ("gate1",),
-    "workflows/": ("gate1", "gate2-at-checkpoint"),
-    "nodes/ml_hyperparameter_tune_agent/": ("gate2",),
-    "core/runtime_control/": ("gate2",),
-    "core/sandbox_executor.py": ("gate2",),
-    "execute_tools/": ("gate2",),
-    "ml_models/": ("gate2",),
+    "src/agent/prompts.py": ("gate1",),
+    "src/agent/prompt_templates/": ("gate1",),
+    "src/nodes/ml_model_proposal_agent/": ("gate1",),
+    "src/nodes/ml_model_implementor/": ("gate1", "gate2-at-checkpoint"),
+    "src/nodes/ml_code_validator_agent/": ("gate1", "gate2-at-checkpoint"),
+    "src/nodes/result_interpretation_agent/": ("gate1",),
+    "src/workflows/": ("gate1", "gate2-at-checkpoint"),
+    "src/nodes/ml_hyperparameter_tune_agent/": ("gate2",),
+    "src/core/runtime_control/": ("gate2",),
+    "src/core/sandbox_executor.py": ("gate2",),
+    "src/execute_tools/": ("gate2",),
+    "src/ml_models/": ("gate2",),
     "sdsc_submission_scripts/": ("gate2",),
     "scripts/": ("gate2",),
-    "dashboard/": (),
+    "src/dashboard/": (),
     "examples/": (),
-    "tools/": (),
+    "src/tools/": (),
 }
 
 # ---------------------------------------------------------------------------
@@ -177,17 +181,17 @@ GATE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
 #: Ordered longest-prefix-first. Only a path matching NOTHING here, and having
 #: no derived edge, is genuinely unmapped and runs everything.
 AREA_OWNERS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("dashboard/", ("tests/unit/dashboard/",)),
-    ("tools/claude_hooks/", ("tests/unit/tools/claude_hooks/",)),
+    ("src/dashboard/", ("tests/unit/dashboard/",)),
+    ("src/tools/claude_hooks/", ("tests/unit/tools/claude_hooks/",)),
     ("examples/", ("tests/unit/examples/",)),
     ("sdsc_submission_scripts/", ("tests/unit/sdsc_submission_scripts/",)),
     ("scripts/", ("tests/unit/scripts/",)),
-    ("workflows/", ("tests/unit/workflows/",)),
-    ("ml_models/", ("tests/unit/ml_models/",)),
-    ("execute_tools/", ("tests/unit/execute_tools/",)),
-    ("core/", ("tests/unit/core/",)),
-    ("nodes/", ("tests/unit/agent/", "tests/unit/nodes/")),
-    ("agent/", ("tests/unit/agent/",)),
+    ("src/workflows/", ("tests/unit/workflows/",)),
+    ("src/ml_models/", ("tests/unit/ml_models/",)),
+    ("src/execute_tools/", ("tests/unit/execute_tools/",)),
+    ("src/core/", ("tests/unit/core/",)),
+    ("src/nodes/", ("tests/unit/agent/", "tests/unit/nodes/")),
+    ("src/agent/", ("tests/unit/agent/",)),
 )
 
 #: Suffixes that CANNOT be imported — they reach a test only by a literal path

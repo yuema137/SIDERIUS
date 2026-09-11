@@ -289,10 +289,10 @@ class TestObservationOnly:
 
         repo = pathlib.Path(__file__).resolve().parents[3]
         decision_sites = [
-            repo / "core/runtime_control/decision_policy.py",
-            repo / "core/runtime_control/gpu_requirement.py",
-            repo / "core/runtime_control/total_assembly.py",
-            repo / "agent/skills/evaluate_vram_skill/wrapper.py",
+            repo / "src/core/runtime_control/decision_policy.py",
+            repo / "src/core/runtime_control/gpu_requirement.py",
+            repo / "src/core/runtime_control/total_assembly.py",
+            repo / "src/agent/skills/evaluate_vram_skill/wrapper.py",
         ]
         checked = 0
         for path in decision_sites:

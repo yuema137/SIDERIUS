@@ -96,15 +96,15 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 #: the design's §10.3 post-P1 re-scan used, and it INCLUDES
 #: ``workflows/task_composition.py`` (added by P1) and ``dashboard/``.
 PRODUCTION_DIRS = (
-    "agent",
-    "core",
-    "dashboard",
-    "execute_tools",
-    "ml_models",
-    "nodes",
+    "src/agent",
+    "src/core",
+    "src/dashboard",
+    "src/execute_tools",
+    "src/ml_models",
+    "src/nodes",
     "scripts",
     "sdsc_submission_scripts",
-    "workflows",
+    "src/workflows",
 )
 
 #: Identifier tokens that ARE the primary golden metric.
@@ -437,56 +437,56 @@ EXPECTED_ORDERING_SURFACE: tuple[tuple[str, str, str], ...] = ()
 MIGRATED_SITES: tuple[tuple[str, str, str], ...] = (
     (
         "C1",
-        "workflows/model_exploration.py",
+        "src/workflows/model_exploration.py",
         "tune_output.best_formal_denoising_score > state.best_score_overall"
         "  ->  _iter_order.is_better(...)",
     ),
     (
         "C1",
-        "workflows/model_exploration.py",
+        "src/workflows/model_exploration.py",
         "_iter_valid_formal > state.chain_formal_incumbent_reference"
         "  ->  _iter_order.is_better(...)",
     ),
     (
         "C1",
-        "workflows/model_exploration.py",
+        "src/workflows/model_exploration.py",
         "state.best_score_overall >= launch.target_score  ->  _iter_order.is_at_least(...)",
     ),
     (
         "C2",
-        "core/resume.py",
+        "src/core/resume.py",
         "score > best_score  ->  order.is_better(score, best_score)",
     ),
     (
         "C2",
-        "core/resume.py",
+        "src/core/resume.py",
         "formal_cand['score'] > state.chain_best_valid_formal_score"
         "  ->  _chain_order.is_better(...)",
     ),
     (
         "C2",
-        "core/resume.py",
+        "src/core/resume.py",
         "trial_cand['score'] > state.chain_best_trial_score  ->  _chain_order.is_better(...)",
     ),
     (
         "C2",
-        "execute_tools/per_file_best.py",
+        "src/execute_tools/per_file_best.py",
         "new.best_linear > current.best_linear  ->  order.is_better(...)",
     ),
     (
         "C3",
-        "dashboard/data_sources/local_json.py",
+        "src/dashboard/data_sources/local_json.py",
         "score > best_score  ->  order.is_better(score, best_score)",
     ),
     (
         "C3",
-        "dashboard/data_sources/local_json.py",
+        "src/dashboard/data_sources/local_json.py",
         "entries.sort(key=lambda e: e['denoising_score'], reverse=True)"
         "  ->  sort(key=order.rank(...))",
     ),
     (
         "C4",
-        "nodes/proposal_helpers.py",
+        "src/nodes/proposal_helpers.py",
         "scored.sort(key=lambda m: m['best_score'], reverse=True)  ->  sorted(key=order.rank(...))",
     ),
 )
@@ -535,7 +535,11 @@ class TestTheScannerFindsTheWholeSurface:
             f"the scanner walked only {len(files)} production files; the surface "
             "it claims to hold is larger than that"
         )
-        walked = {p.relative_to(REPO_ROOT).parts[0] for p in files}
+        walked = {
+            root
+            for root in PRODUCTION_DIRS
+            if any(p.is_relative_to(REPO_ROOT / root) for p in files)
+        }
         assert walked == set(PRODUCTION_DIRS), (
             f"a declared production directory produced no files: {set(PRODUCTION_DIRS) - walked}"
         )

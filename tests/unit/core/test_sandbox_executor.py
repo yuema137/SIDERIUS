@@ -956,7 +956,7 @@ class TestBothSandboxesHonourTheDeviceIdentityContract:
 
         tuner = (
             Path(__file__).resolve().parents[3]
-            / "nodes"
+            / "src/nodes"
             / "ml_hyperparameter_tune_agent"
             / "ml_hyperparameter_tune_agent.py"
         )

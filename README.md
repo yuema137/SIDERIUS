@@ -188,11 +188,11 @@ SIDERIUS
 runtime results belong to caller-owned storage, outside the source inventory.
 
 The major modules carry their own contract READMEs —
-[`workflows/`](workflows/README.md) · [`core/`](core/README.md) ·
-[`execute_tools/`](execute_tools/README.md) ·
-[`execute_tools/health_checks/`](execute_tools/health_checks/README.md) ·
-[`ml_models/`](ml_models/README.md) ·
-[`agent/schemas/`](agent/schemas/README.md) — all following one
+[`workflows/`](src/workflows/README.md) · [`core/`](src/core/README.md) ·
+[`execute_tools/`](src/execute_tools/README.md) ·
+[`execute_tools/health_checks/`](src/execute_tools/health_checks/README.md) ·
+[`ml_models/`](src/ml_models/README.md) ·
+[`agent/schemas/`](src/agent/schemas/README.md) — all following one
 [template](docs/agent-reference/MODULE_README_TEMPLATE.md).
 
 ## Key invariants

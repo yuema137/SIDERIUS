@@ -194,7 +194,7 @@ class TestDeclaredProvenance:
         import pathlib
 
         src = (
-            pathlib.Path(__file__).resolve().parents[3] / "core" / "sandbox_executor.py"
+            pathlib.Path(__file__).resolve().parents[3] / "src/core" / "sandbox_executor.py"
         ).read_text(encoding="utf-8")
         assert "inference_single.py:325-331" not in src
         assert "core/execution_calibration.py" in src

@@ -224,7 +224,7 @@ class TestComparisonStageMdContent:
     def _md_path(self) -> Path:
         return (
             Path(__file__).resolve().parents[4]
-            / "agent/prompt_templates/proposal/comparison_stage.md"
+            / "src/agent/prompt_templates/proposal/comparison_stage.md"
         )
 
     def test_tidmad_no_longer_mentioned(self):
@@ -247,7 +247,7 @@ class TestLitReviewSearchDecisionPersona:
     def _md_path(self) -> Path:
         return (
             Path(__file__).resolve().parents[4]
-            / "agent/prompt_templates/literature_review/search_decision_system.md"
+            / "src/agent/prompt_templates/literature_review/search_decision_system.md"
         )
 
     def test_persona_is_generic(self):

@@ -178,7 +178,7 @@ class TestOneAuthorityTwoConsumers:
         made a pure relocation look like a regression, which is what it did
         until this guard was re-pointed.
         """
-        node = REPO_ROOT / "nodes/ml_model_proposal_agent"
+        node = REPO_ROOT / "src/nodes/ml_model_proposal_agent"
         sources = {p.name: p.read_text(encoding="utf-8") for p in node.glob("*.py")}
         assert any("render_prediction_track_record" in src for src in sources.values()), (
             "no module in the proposer node calls the shared track-record "
@@ -190,7 +190,7 @@ class TestOneAuthorityTwoConsumers:
 
 
 class TestFrameworkTaskLiteralsRemoved:
-    HELPERS = REPO_ROOT / "nodes/interpretation_helpers.py"
+    HELPERS = REPO_ROOT / "src/nodes/interpretation_helpers.py"
 
     def test_the_discovery_metric_fallback_is_not_a_task_name(self):
         source = self.HELPERS.read_text()

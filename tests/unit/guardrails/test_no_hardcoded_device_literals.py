@@ -41,7 +41,7 @@ _DEVICE_TOKEN_PATTERN = re.compile(
 )
 
 # §5.1 scope: every ``.py`` under these three trees.
-_SCAN_DIRS: list[str] = ["core", "agent", "nodes"]
+_SCAN_DIRS: list[str] = ["src/core", "src/agent", "src/nodes"]
 
 # Allow-list markers that classify a token-bearing line as documentation
 # rather than live code.
@@ -161,7 +161,9 @@ def _iter_tree(scan_dir: str):
     definition — excluding the scan's own backstop keeps the test
     self-consistent)."""
     root = _REPO_ROOT / scan_dir
-    for path in sorted(root.rglob("*.py")):
+    sources = sorted(root.rglob("*.py"))
+    assert root.is_dir() and sources, f"missing production scan subject: {root}"
+    for path in sources:
         # Skip caches.
         if "__pycache__" in path.parts:
             continue

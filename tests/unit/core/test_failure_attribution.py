@@ -35,7 +35,9 @@ from core.runtime_control.gpu_accounting import (
 )
 from core.runtime_control.gpu_observer import GpuEvidenceBundle, GpuObservationPolicy
 
-SOURCE = Path(__file__).resolve().parents[3] / "core" / "runtime_control" / "failure_attribution.py"
+SOURCE = (
+    Path(__file__).resolve().parents[3] / "src/core" / "runtime_control" / "failure_attribution.py"
+)
 DEV = DeviceIdentity(uuid="GPU-aaaa-0000", physical_index=0)
 OTHER_DEV = DeviceIdentity(uuid="GPU-bbbb-1111", physical_index=1)
 OOM = "CUDA out of memory. Tried to allocate 11.31 GiB (GPU 0; 31.75 GiB total capacity)"

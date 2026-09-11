@@ -32,8 +32,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CORE = REPO_ROOT / "core"
-MODEL_EXPLORATION = REPO_ROOT / "workflows" / "model_exploration.py"
+CORE = REPO_ROOT / "src/core"
+MODEL_EXPLORATION = REPO_ROOT / "src/workflows" / "model_exploration.py"
 
 
 def _import_sources(path: Path) -> list[str]:

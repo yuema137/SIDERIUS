@@ -34,12 +34,20 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-NODES_DIR = REPO_ROOT / "nodes"
+NODES_DIR = REPO_ROOT / "src/nodes"
 
 #: Directories holding PRODUCTION code. Tests are deliberately excluded: a
 #: structural or reachability test may legitimately import an internal module
 #: to assert something about it.
-PRODUCTION_DIRS = ("nodes", "agent", "core", "execute_tools", "workflows", "scripts", "dashboard")
+PRODUCTION_DIRS = (
+    "src/nodes",
+    "src/agent",
+    "src/core",
+    "src/execute_tools",
+    "src/workflows",
+    "scripts",
+    "src/dashboard",
+)
 
 
 def _node_packages() -> list[Path]:
@@ -74,7 +82,9 @@ def _imported_modules(path: Path) -> set[str]:
 def _production_files() -> list[Path]:
     out: list[Path] = []
     for d in PRODUCTION_DIRS:
-        out.extend(sorted((REPO_ROOT / d).rglob("*.py")))
+        sources = sorted((REPO_ROOT / d).rglob("*.py"))
+        assert sources, f"missing production scan subject: {d}"
+        out.extend(sources)
     return out
 
 

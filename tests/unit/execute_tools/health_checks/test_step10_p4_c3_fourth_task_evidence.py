@@ -40,7 +40,15 @@ from execute_tools.health_checks.schemas import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PRODUCTION_PACKAGES = ("execute_tools", "nodes", "agent", "core", "scripts", "workflows", "configs")
+PRODUCTION_PACKAGES = (
+    "src/execute_tools",
+    "src/nodes",
+    "src/agent",
+    "src/core",
+    "scripts",
+    "src/workflows",
+    "configs",
+)
 
 #: Every identifier the synthetic task invents. None may appear in production
 #: source — that absence IS the zero-central-edit proof.

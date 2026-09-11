@@ -71,7 +71,7 @@ class TestBudgetsAreSeparate:
         assert b.batch_search_seconds >= candidates * 60.0
 
     def test_the_old_single_shared_budget_is_no_longer_used(self):
-        source = (REPO_ROOT / "agent/skills/evaluate_vram_skill/wrapper.py").read_text()
+        source = (REPO_ROOT / "src/agent/skills/evaluate_vram_skill/wrapper.py").read_text()
         block = source[source.index("resolve_inference_batch(") :]
         assert "_FORWARD_PASS_TIMEOUT_S" not in block.split(")")[0]
 
@@ -169,7 +169,7 @@ class TestAgentFacingText:
         """Checks the RAISED string, not the surrounding comments — the
         comment there deliberately quotes the old wording to explain why
         it was removed."""
-        source = (REPO_ROOT / "agent/skills/evaluate_vram_skill/wrapper.py").read_text()
+        source = (REPO_ROOT / "src/agent/skills/evaluate_vram_skill/wrapper.py").read_text()
         handler = source[source.index("def _handler") : source.index("old_handler =")]
         raised = handler[handler.index("ForwardPassTimeoutError(") :]
         message = raised[: raised.index("\n        )")]
@@ -204,12 +204,12 @@ class TestPromptSafety:
     """An inconclusive attempt must not become a silent size ceiling."""
 
     def test_the_prompt_explains_inconclusive_records(self):
-        source = (REPO_ROOT / "agent/prompts.py").read_text()
+        source = (REPO_ROOT / "src/agent/prompts.py").read_text()
         assert "inconclusive_preflight" in source
         assert "{inconclusive_note}" in source
 
     def test_the_note_forbids_capacity_reduction(self):
-        source = (REPO_ROOT / "agent/prompts.py").read_text()
+        source = (REPO_ROOT / "src/agent/prompts.py").read_text()
         block = source[source.index("inconclusive_note = (") :][:1400]
         assert "Do NOT reduce model capacity" in block
         assert "NOT a measurement of your model" in block
@@ -217,7 +217,7 @@ class TestPromptSafety:
     def test_inconclusive_does_not_trigger_the_oom_warning(self):
         """The OOM warning keys off `skipped_oom_risk`, which demands a
         smaller config. An inconclusive attempt must never reach it."""
-        source = (REPO_ROOT / "agent/prompts.py").read_text()
+        source = (REPO_ROOT / "src/agent/prompts.py").read_text()
         oom = source[source.index("oom_records = [") :][:400]
         assert 'status") == "skipped_oom_risk"' in oom
         assert "inconclusive" not in oom
@@ -230,7 +230,7 @@ class TestFailureClassification:
 
         spec = importlib.util.spec_from_file_location(
             "tuner_mod",
-            REPO_ROOT / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+            REPO_ROOT / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
         )
         mod = importlib.util.module_from_spec(spec)
         sys.modules["tuner_mod"] = mod

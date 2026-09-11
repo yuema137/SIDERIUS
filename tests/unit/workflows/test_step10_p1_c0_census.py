@@ -59,14 +59,14 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 #: parent census uses, §3.8), so this census and the parent's speak about the
 #: same tree.
 PRODUCTION_DIRS = (
-    "nodes",
-    "agent",
-    "core",
-    "execute_tools",
-    "ml_models",
-    "workflows",
+    "src/nodes",
+    "src/agent",
+    "src/core",
+    "src/execute_tools",
+    "src/ml_models",
+    "src/workflows",
     "scripts",
-    "dashboard",
+    "src/dashboard",
     "sdsc_submission_scripts",
 )
 
@@ -121,7 +121,10 @@ class TestCensusAFiveDefaultMechanisms:
     def test_default_4_the_tuner_has_exactly_one_declared_metric_acquisition_site(self):
         """The tuner resolves one bound metric and contains no task fallback."""
         source = (
-            REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "ml_hyperparameter_tune_agent.py"
+            REPO_ROOT
+            / "src/nodes"
+            / "ml_hyperparameter_tune_agent"
+            / "ml_hyperparameter_tune_agent.py"
         ).read_text(encoding="utf-8")
         tree = ast.parse(source)
         assignments = [
@@ -144,7 +147,7 @@ class TestCensusAFiveDefaultMechanisms:
         resolver = next(
             node
             for node in ast.walk(
-                ast.parse((REPO_ROOT / "execute_tools" / "evaluation_metric.py").read_text())
+                ast.parse((REPO_ROOT / "src/execute_tools" / "evaluation_metric.py").read_text())
             )
             if isinstance(node, ast.FunctionDef) and node.name == "resolve_run_metric"
         )
@@ -161,8 +164,8 @@ class TestCensusAFiveDefaultMechanisms:
         workflow caller becomes composition-aware in C2; the standalone node
         CLI deliberately stays legacy (Q-P1-1)."""
         expected = {
-            "workflows/model_exploration.py": 1,
-            "nodes/result_interpretation_agent/result_interpretation_agent.py": 1,
+            "src/workflows/model_exploration.py": 1,
+            "src/nodes/result_interpretation_agent/result_interpretation_agent.py": 1,
         }
         found: dict[str, int] = {}
         for rel in expected:
@@ -214,7 +217,7 @@ class TestCensusBTransportEmissionSites:
             ]
             if calls:
                 offenders[str(path.relative_to(REPO_ROOT))] = len(calls)
-        assert offenders == {"core/sandbox_executor.py": 1}, (
+        assert offenders == {"src/core/sandbox_executor.py": 1}, (
             "transport_argv must be emitted from exactly ONE production module "
             f"(the sandbox executor's single argv helper); found {offenders}."
         )
@@ -249,9 +252,9 @@ class TestCensusBTransportEmissionSites:
         ``model_exploration.py`` resolves NOTHING.
         """
         child_or_runner = {
-            "execute_tools/train_engine_sandbox.py",
-            "execute_tools/inference_single.py",
-            "execute_tools/denoising_score_single.py",
+            "src/execute_tools/train_engine_sandbox.py",
+            "src/execute_tools/inference_single.py",
+            "src/execute_tools/denoising_score_single.py",
         }
         #: Step 12 / PR-12d: exempt by ENCLOSING FUNCTION, not by file.
         #:
@@ -302,13 +305,13 @@ class TestCensusBTransportEmissionSites:
             # C2: the composition edge's ExitStack — the ONE place a composed
             # run's authorities are activated. A second bind site anywhere
             # else would mean two answers to "what is this run bound to".
-            "workflows/task_composition.py": 1
+            "src/workflows/task_composition.py": 1
         }, f"an unexpected parent-side bind site appeared; found {binds}"
         assert resolves == {
             # Pre-existing (D14-1 C5), and already binding-aware.
-            "agent/skills/evaluate_time_skill/wrapper.py": 1,
+            "src/agent/skills/evaluate_time_skill/wrapper.py": 1,
             # C1: the composition edge's own idempotent re-resolution.
-            "workflows/task_composition.py": 1,
+            "src/workflows/task_composition.py": 1,
             # Step 12 / PR-12bc. EXTENDED deliberately, never exempted by name
             # (the Step-11 C9 rule). Two parent-side resolves were added, and
             # both are asking the BOUND implementation for something only it
@@ -326,9 +329,9 @@ class TestCensusBTransportEmissionSites:
             #   #389 probe-data projection — the isolated resource worker
             #       must receive the active task's semantic inference-batch
             #       maximum instead of selecting from memory evidence alone.
-            "nodes/ml_hyperparameter_tune_agent/scope_acquisition.py": 1,
-            "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py": 2,
-            "nodes/ml_hyperparameter_tune_agent/probe_data.py": 1,
+            "src/nodes/ml_hyperparameter_tune_agent/scope_acquisition.py": 1,
+            "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py": 2,
+            "src/nodes/ml_hyperparameter_tune_agent/probe_data.py": 1,
         }, f"an unexpected parent-side resolve appeared; found {resolves}"
 
     def test_the_workflow_itself_resolves_no_task_data_path(self):
@@ -342,7 +345,7 @@ class TestCensusBTransportEmissionSites:
         report as fine.
         """
         tree = ast.parse(
-            (REPO_ROOT / "workflows" / "model_exploration.py").read_text(encoding="utf-8")
+            (REPO_ROOT / "src/workflows" / "model_exploration.py").read_text(encoding="utf-8")
         )
         offenders = [
             node.func.id
@@ -363,9 +366,9 @@ class TestCensusBTransportEmissionSites:
         from execute_tools.task_data_path import TASK_DATA_PATH_ARGV_FLAG
 
         for rel in (
-            "execute_tools/train_engine_sandbox.py",
-            "execute_tools/inference_single.py",
-            "execute_tools/denoising_score_single.py",
+            "src/execute_tools/train_engine_sandbox.py",
+            "src/execute_tools/inference_single.py",
+            "src/execute_tools/denoising_score_single.py",
         ):
             text = (REPO_ROOT / rel).read_text(encoding="utf-8")
             assert f'"{TASK_DATA_PATH_ARGV_FLAG}"' in text, f"{rel} stopped parsing the flag"

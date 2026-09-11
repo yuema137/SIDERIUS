@@ -50,7 +50,7 @@ executed from (CLAUDE.md portability rule) — and asserted below, because an
 off-by-one here would run ``git grep`` outside the repository and let the
 guard pass vacuously."""
 
-PRODUCTION_PACKAGES = ("execute_tools", "nodes", "agent", "core", "scripts")
+PRODUCTION_PACKAGES = ("src/execute_tools", "src/nodes", "src/agent", "src/core", "scripts")
 
 
 def _ctx(**overrides) -> HealthCheckContext:
@@ -282,7 +282,7 @@ class TestEngineIsWiredExactlyOnce:
     right up until one of them changed.
     """
 
-    ONE_CALL_SITE = "execute_tools/health_checks/runner.py"
+    ONE_CALL_SITE = "src/execute_tools/health_checks/runner.py"
 
     @staticmethod
     def _git_grep(pattern: str) -> list[str]:
@@ -305,7 +305,7 @@ class TestEngineIsWiredExactlyOnce:
     def test_repo_root_resolves_to_this_checkout(self):
         """Guards the guard: a wrong root would make every grep below vacuous."""
         assert (REPO_ROOT / ".git").exists()
-        assert (REPO_ROOT / "execute_tools" / "health_checks" / "schemas.py").is_file()
+        assert (REPO_ROOT / "src/execute_tools" / "health_checks" / "schemas.py").is_file()
 
     def test_the_grep_probe_actually_finds_things(self):
         """Proves the search works, so its results below are real evidence."""

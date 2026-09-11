@@ -41,7 +41,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 # R-11-11 — structural baseline (NOT inverted; C9 compares against it)
 # ----------------------------------------------------------------------
 
-_SANDBOX = REPO_ROOT / "core" / "sandbox_executor.py"
+_SANDBOX = REPO_ROOT / "src/core" / "sandbox_executor.py"
 
 # Frozen at base `c1caa609`. Reproduces §4a R-11-11 exactly.
 #   name -> (stmts, branch, loc, params)
@@ -215,8 +215,8 @@ class TestStructuralBudget:
 # independently-spelled comparison cannot creep back in.
 
 _OOM_STATUS = "oom_host_ram"
-_OOM_PRODUCER = REPO_ROOT / "core" / "sandbox_executor.py"
-_TUNER_NODE = REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent"
+_OOM_PRODUCER = REPO_ROOT / "src/core" / "sandbox_executor.py"
+_TUNER_NODE = REPO_ROOT / "src/nodes" / "ml_hyperparameter_tune_agent"
 
 
 def _code_string_literals(path: pathlib.Path) -> set[str]:
@@ -272,13 +272,20 @@ class TestTheHostOomStatusHasExactlyOneConsumingAuthority:
         would be a code literal and would turn this RED.
         """
         namers: list[str] = []
-        for root in ("core", "execute_tools", "agent", "nodes", "workflows", "dashboard"):
+        for root in (
+            "src/core",
+            "src/execute_tools",
+            "src/agent",
+            "src/nodes",
+            "src/workflows",
+            "src/dashboard",
+        ):
             for path in sorted((REPO_ROOT / root).rglob("*.py")):
                 if path == _OOM_PRODUCER:
                     continue
                 if _OOM_STATUS in _code_string_literals(path):
                     namers.append(str(path.relative_to(REPO_ROOT)))
-        assert namers == ["nodes/ml_hyperparameter_tune_agent/records.py"], (
+        assert namers == ["src/nodes/ml_hyperparameter_tune_agent/records.py"], (
             "the status must be spelled in exactly one consumer authority; a "
             f"second speller is how F-11-1 happened. Found: {namers}"
         )
@@ -350,16 +357,16 @@ class TestTheSpawnParentIsCensused:
     def test_the_spawn_parent_is_on_the_surface(self):
         from tests.unit.guardrails.test_task_data_path_census import _DATA_PATH_SURFACE
 
-        assert "core/sandbox_executor.py" in _DATA_PATH_SURFACE
+        assert "src/core/sandbox_executor.py" in _DATA_PATH_SURFACE
 
     def test_all_three_children_are_still_there_too(self):
         """Widening must not have traded one blind spot for another."""
         from tests.unit.guardrails.test_task_data_path_census import _DATA_PATH_SURFACE
 
         for child in (
-            "execute_tools/train_engine_sandbox.py",
-            "execute_tools/inference_single.py",
-            "execute_tools/denoising_score_single.py",
+            "src/execute_tools/train_engine_sandbox.py",
+            "src/execute_tools/inference_single.py",
+            "src/execute_tools/denoising_score_single.py",
         ):
             assert child in _DATA_PATH_SURFACE
 

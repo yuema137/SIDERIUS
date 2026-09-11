@@ -39,22 +39,22 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_DIRS = (
-    "nodes",
-    "agent",
-    "core",
-    "execute_tools",
-    "ml_models",
-    "workflows",
+    "src/nodes",
+    "src/agent",
+    "src/core",
+    "src/execute_tools",
+    "src/ml_models",
+    "src/workflows",
     "scripts",
-    "dashboard",
+    "src/dashboard",
 )
-METRIC_MODULE = "execute_tools/evaluation_metric.py"
+METRIC_MODULE = "src/execute_tools/evaluation_metric.py"
 #: Step 07 PR 07b added the ONE order authority. It is the only production
 #: module besides the metric module that may execute a direction literal,
 #: because interpreting ``MetricSpec.direction`` is precisely its job — and
 #: doing it in exactly one place is the property 07b bought. Every consumer
 #: asks this module instead of re-deriving the convention.
-ORDER_MODULE = "execute_tools/metric_order.py"
+ORDER_MODULE = "src/execute_tools/metric_order.py"
 
 
 def _production_files():
@@ -145,7 +145,7 @@ def test_per_file_best_emits_the_precedent_identity_only_when_it_is_declared():
     assert build_table(str(ws))["metric_id"] is None
 
     assert "tidmad_denoising_score" not in _executed(
-        REPO_ROOT / "execute_tools" / "per_file_best.py"
+        REPO_ROOT / "src/execute_tools" / "per_file_best.py"
     )
 
 
@@ -251,19 +251,19 @@ def test_the_not_reached_direction_consumers_still_hold_their_literal(relative, 
 # to prevent.
 MIGRATED_TO_THE_ORDER_AUTHORITY = (
     (
-        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+        "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
         'max(candidates, key=lambda r: r["denoising_score"])',
     ),
     (
-        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+        "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
         'max(successful, key=lambda r: r["denoising_score"]) if successful else None',
     ),
     (
-        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+        "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
         'max(successful_records, key=lambda r: r["denoising_score"])',
     ),
     (
-        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+        "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
         "current_score > best_score",
     ),
     # --- Step 09a C3: the INTERPRETER surface, same rule, same evidence ---
@@ -271,39 +271,39 @@ MIGRATED_TO_THE_ORDER_AUTHORITY = (
     # deleted, so the migration leaves a trace that a later edit cannot
     # silently undo.
     (
-        "nodes/result_interpretation_agent/ordering.py",
+        "src/nodes/result_interpretation_agent/ordering.py",
         "s.best_denoising_score > current_best",
     ),
     (
-        "nodes/result_interpretation_agent/ordering.py",
+        "src/nodes/result_interpretation_agent/ordering.py",
         "s.worst_denoising_score < current_worst",
     ),
     (
-        "nodes/result_interpretation_agent/ordering.py",
+        "src/nodes/result_interpretation_agent/ordering.py",
         "best > overall_best_score",
     ),
     (
-        "nodes/result_interpretation_agent/evidence.py",
+        "src/nodes/result_interpretation_agent/evidence.py",
         "max(valid_records, key=_required_denoising_score)",
     ),
     (
-        "nodes/result_interpretation_agent/evidence.py",
+        "src/nodes/result_interpretation_agent/evidence.py",
         "min(valid_scores)",
     ),
     (
-        "nodes/interpretation_helpers.py",
+        "src/nodes/interpretation_helpers.py",
         "scored.sort(key=lambda x: (-x[1], x[0]))",
     ),
     (
-        "nodes/interpretation_helpers.py",
+        "src/nodes/interpretation_helpers.py",
         "max(sota_from_prediction, overall_best_score)",
     ),
     (
-        "nodes/interpretation_helpers.py",
+        "src/nodes/interpretation_helpers.py",
         "best_score > sota_score * 0.95",
     ),
     (
-        "workflows/model_exploration.py",
+        "src/workflows/model_exploration.py",
         'scored.sort(key=lambda x: x[1] if x[1] is not None else float("-inf"), reverse=True)',
     ),
     # --- Step 10 P2a C1: the live-workflow surface (sites 1-3) ---
@@ -312,34 +312,37 @@ MIGRATED_TO_THE_ORDER_AUTHORITY = (
     # `MetricOrder` per iteration and ask it; the first of these is the row
     # that moved out of NOT_REACHED_DIRECTION_CONSUMERS above.
     (
-        "workflows/model_exploration.py",
+        "src/workflows/model_exploration.py",
         "tune_output.best_formal_denoising_score > state.best_score_overall",
     ),
     (
-        "workflows/model_exploration.py",
+        "src/workflows/model_exploration.py",
         "_iter_valid_formal > state.chain_formal_incumbent_reference",
     ),
     (
-        "workflows/model_exploration.py",
+        "src/workflows/model_exploration.py",
         "state.best_score_overall >= launch.target_score",
     ),
     # --- Step 10 P2a C2: resume selection and per-file best ---
     # `_pick_best` and `_row_beats` now take a keyword-only `MetricOrder`, and
     # the chain-level incumbent fold (found by the P2a scanner, absent from the
     # frozen site table) asks the same authority.
-    ("core/resume.py", "if score > best_score or ("),
-    ("core/resume.py", 'or formal_cand["score"] > state.chain_best_valid_formal_score'),
-    ("core/resume.py", 'or trial_cand["score"] > state.chain_best_trial_score'),
-    ("execute_tools/per_file_best.py", "return new.best_linear > current.best_linear"),
+    ("src/core/resume.py", "if score > best_score or ("),
+    ("src/core/resume.py", 'or formal_cand["score"] > state.chain_best_valid_formal_score'),
+    ("src/core/resume.py", 'or trial_cand["score"] > state.chain_best_trial_score'),
+    ("src/execute_tools/per_file_best.py", "return new.best_linear > current.best_linear"),
     # --- Step 10 P2a C3: the persisted-artifact consumers ---
     # The dashboard and the two diagnostic scripts now read the direction from
     # each record's persisted metric identity. The prose row is here too: it
     # stated a direction that was only ever true of TIDMAD.
     (
-        "dashboard/data_sources/local_json.py",
+        "src/dashboard/data_sources/local_json.py",
         'entries.sort(key=lambda e: e["denoising_score"], reverse=True)',
     ),
-    ("dashboard/data_sources/base.py", "ranked by denoising_score descending (higher is better)"),
+    (
+        "src/dashboard/data_sources/base.py",
+        "ranked by denoising_score descending (higher is better)",
+    ),
 )
 
 
@@ -353,12 +356,12 @@ MIGRATED_TO_THE_ORDER_AUTHORITY = (
 #: failing. The marker is per row so "reaches the authority" stays an
 #: ASSERTED property rather than becoming an unchecked exemption.
 _AUTHORITY_MARKERS: dict[str, str] = {
-    "dashboard/data_sources/local_json.py": "persisted_ranking",
+    "src/dashboard/data_sources/local_json.py": "persisted_ranking",
     # A prose-only row: an abstract method's docstring, which names no
     # authority because it executes nothing. What must be true of it is that
     # it no longer STATES a fixed direction — asserted below by the absence of
     # its old literal, and positively by the C3 prose test.
-    "dashboard/data_sources/base.py": "metric identity",
+    "src/dashboard/data_sources/base.py": "metric identity",
 }
 
 

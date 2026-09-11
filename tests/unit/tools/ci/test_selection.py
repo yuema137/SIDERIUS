@@ -36,7 +36,7 @@ class TestFailClosed:
         monkeypatch.setattr(
             resolver, "select", lambda changed: (_ for _ in ()).throw(RuntimeError("boom"))
         )
-        s = sel.resolve_selection(REPO, ["core/x.py"])
+        s = sel.resolve_selection(REPO, ["src/core/x.py"])
         assert s.full_suite and "failing closed" in s.reason
 
     def test_a_selection_expanding_to_zero_files_fails_closed(self, monkeypatch):
@@ -56,7 +56,7 @@ class TestFailClosed:
                 return ""
 
         monkeypatch.setattr(resolver, "select", lambda changed: _R())
-        s = sel.resolve_selection(REPO, ["core/x.py"])
+        s = sel.resolve_selection(REPO, ["src/core/x.py"])
         assert s.full_suite and s.files
 
 
@@ -87,9 +87,9 @@ class TestExpansion:
         Fails as: the harness replaces causal selector evidence with a generic
         'full suite' summary, leaving CI operators unable to audit the choice.
         """
-        result = sel.resolve_selection(REPO, ["agent/schemas/hyperparam_tuning.py"])
+        result = sel.resolve_selection(REPO, ["src/agent/schemas/hyperparam_tuning.py"])
         assert result.full_suite
-        assert "declared hub (agent/schemas/)" in result.reason
+        assert "declared hub (src/agent/schemas/)" in result.reason
 
 
 class TestChangedPathTransport:

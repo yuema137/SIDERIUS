@@ -572,7 +572,7 @@ class TestAdmissionIsUnchangedByConstruction:
         import ast
 
         source = (
-            Path(__file__).resolve().parents[3] / "execute_tools" / "train_engine_sandbox.py"
+            Path(__file__).resolve().parents[3] / "src/execute_tools" / "train_engine_sandbox.py"
         ).read_text(encoding="utf-8")
         tree = ast.parse(source)
 
@@ -633,7 +633,7 @@ class TestAdmissionIsUnchangedByConstruction:
         import ast
 
         source = (
-            Path(__file__).resolve().parents[3] / "execute_tools" / "train_engine_sandbox.py"
+            Path(__file__).resolve().parents[3] / "src/execute_tools" / "train_engine_sandbox.py"
         ).read_text(encoding="utf-8")
         tree = ast.parse(source)
         for node in ast.walk(tree):

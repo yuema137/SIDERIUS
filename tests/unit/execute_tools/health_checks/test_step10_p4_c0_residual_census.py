@@ -52,9 +52,9 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
-EVALUATION = REPO_ROOT / "execute_tools" / "health_checks" / "evaluation.py"
-HEALTH_FEEDBACK = REPO_ROOT / "agent" / "schemas" / "health_feedback.py"
-PROMPTS = REPO_ROOT / "agent" / "prompts.py"
+EVALUATION = REPO_ROOT / "src/execute_tools" / "health_checks" / "evaluation.py"
+HEALTH_FEEDBACK = REPO_ROOT / "src/agent" / "schemas" / "health_feedback.py"
+PROMPTS = REPO_ROOT / "src/agent" / "prompts.py"
 
 
 # ---------------------------------------------------------------------------
