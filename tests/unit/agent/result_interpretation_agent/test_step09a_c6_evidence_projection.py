@@ -438,11 +438,11 @@ class TestSecondariesCannotReachOrdering:
 
     #: The Step-09a surface: where secondary EVIDENCE is projected and ranked.
     INTERPRETER_FILES: ClassVar[list[str]] = [
-        "nodes/result_interpretation_agent/result_interpretation_agent.py",
-        "nodes/result_interpretation_agent/evidence.py",
-        "nodes/result_interpretation_agent/ordering.py",
-        "nodes/result_interpretation_agent/prediction.py",
-        "nodes/interpretation_helpers.py",
+        "src/nodes/result_interpretation_agent/result_interpretation_agent.py",
+        "src/nodes/result_interpretation_agent/evidence.py",
+        "src/nodes/result_interpretation_agent/ordering.py",
+        "src/nodes/result_interpretation_agent/prediction.py",
+        "src/nodes/interpretation_helpers.py",
     ]
 
     #: The Step-10 / P2b production surface: declaration, binding, evaluation
@@ -450,16 +450,16 @@ class TestSecondariesCannotReachOrdering:
     #: files P2b ends up not modifying stay listed deliberately — the claim is
     #: about the whole lifecycle, not about one diff.
     PRODUCTION_FILES: ClassVar[list[str]] = [
-        "workflows/task_composition.py",
-        "execute_tools/evaluation_metric.py",
-        "nodes/ml_hyperparameter_tune_agent/execution.py",
-        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
-        "nodes/ml_hyperparameter_tune_agent/contracts.py",
-        "nodes/ml_hyperparameter_tune_agent/records.py",
-        "nodes/ml_hyperparameter_tune_agent/policy.py",
-        "agent/schemas/hyperparam_tuning.py",
-        "agent/schemas/interpretation.py",
-        "agent/prompt_templates/interpretation/rendering.py",
+        "src/workflows/task_composition.py",
+        "src/execute_tools/evaluation_metric.py",
+        "src/nodes/ml_hyperparameter_tune_agent/execution.py",
+        "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+        "src/nodes/ml_hyperparameter_tune_agent/contracts.py",
+        "src/nodes/ml_hyperparameter_tune_agent/records.py",
+        "src/nodes/ml_hyperparameter_tune_agent/policy.py",
+        "src/agent/schemas/hyperparam_tuning.py",
+        "src/agent/schemas/interpretation.py",
+        "src/agent/prompt_templates/interpretation/rendering.py",
     ]
 
     #: The Step-10 / P3 PROPOSER surface: the typed evidence boundary and every
@@ -474,11 +474,11 @@ class TestSecondariesCannotReachOrdering:
     #: commits that create them, because the census asserts every scanned file
     #: EXISTS.
     PROPOSER_FILES: ClassVar[list[str]] = [
-        "nodes/ml_model_proposal_agent/ml_model_proposal_agent.py",
-        "nodes/proposal_helpers.py",
-        "agent/schemas/proposal.py",
-        "agent/schemas/proposer_evidence.py",
-        "agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py",
+        "src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py",
+        "src/nodes/proposal_helpers.py",
+        "src/agent/schemas/proposal.py",
+        "src/agent/schemas/proposer_evidence.py",
+        "src/agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py",
     ]
 
     SCANNED_FILES: ClassVar[list[str]] = INTERPRETER_FILES + PRODUCTION_FILES + PROPOSER_FILES
@@ -758,7 +758,7 @@ class TestQ097StaysBinding:
         """
         offenders: dict[str, list[str]] = {}
         owners: dict[str, list[str]] = {}
-        for root in ("nodes", "agent", "core", "execute_tools", "workflows"):
+        for root in ("src/nodes", "src/agent", "src/core", "src/execute_tools", "src/workflows"):
             for path in sorted((REPO_ROOT / root).rglob("*.py")):
                 source = path.read_text(encoding="utf-8")
                 hits = self._secondary_evaluators_in(source)
@@ -776,12 +776,12 @@ class TestQ097StaysBinding:
                         owners.setdefault(rel, []).append(fn.name)
 
         assert offenders == {
-            "nodes/ml_hyperparameter_tune_agent/execution.py": ["_evaluate_secondary_metrics"],
-            "execute_tools/denoising_score_single.py": ["_evaluate_task_owned_secondaries"],
-            "execute_tools/evaluation_metric.py": ["evaluate_declared_secondaries"],
+            "src/nodes/ml_hyperparameter_tune_agent/execution.py": ["_evaluate_secondary_metrics"],
+            "src/execute_tools/denoising_score_single.py": ["_evaluate_task_owned_secondaries"],
+            "src/execute_tools/evaluation_metric.py": ["evaluate_declared_secondaries"],
         }, f"the census's own reachable set moved — update BOTH sides deliberately: {offenders}"
         assert owners == {
-            "execute_tools/evaluation_metric.py": ["evaluate_declared_secondaries"]
+            "src/execute_tools/evaluation_metric.py": ["evaluate_declared_secondaries"]
         }, (
             f"exactly one function may CONTAIN the try/except taxonomy; found it in: {owners}. "
             "Every other name-matching function must be a thin adapter that DELEGATES to it."

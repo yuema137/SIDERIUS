@@ -26,7 +26,7 @@ import pytest
 # Resolve the bridge file relative to this test, so the test still works
 # when pytest is invoked from anywhere.
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_BRIDGE_PATH = _REPO_ROOT / "agent" / "llm_bridge.py"
+_BRIDGE_PATH = _REPO_ROOT / "src/agent" / "llm_bridge.py"
 
 
 def _collect_handlers_naming(tree: ast.AST, forbidden_name: str) -> list[tuple[int, str]]:

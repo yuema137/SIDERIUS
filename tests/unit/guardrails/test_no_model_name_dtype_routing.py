@@ -40,8 +40,8 @@ import pytest
 #: The execution surfaces Step 03 migrated. Extending this list is how a
 #: future step declares a surface contract-routed.
 MIGRATED_SURFACES = (
-    "execute_tools/train_engine_sandbox.py",
-    "execute_tools/inference_single.py",
+    "src/execute_tools/train_engine_sandbox.py",
+    "src/execute_tools/inference_single.py",
 )
 
 #: Architecture names, matching the sibling guardrail's vocabulary.
@@ -261,6 +261,6 @@ class TestTheGuardActuallyDetects:
         disappearance.
         """
         assert set(MIGRATED_SURFACES) == {
-            "execute_tools/train_engine_sandbox.py",
-            "execute_tools/inference_single.py",
+            "src/execute_tools/train_engine_sandbox.py",
+            "src/execute_tools/inference_single.py",
         }

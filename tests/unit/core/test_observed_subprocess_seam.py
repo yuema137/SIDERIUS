@@ -36,7 +36,7 @@ from core.sandbox_executor import _run_observed_subprocess
 
 pytestmark = pytest.mark.usefixtures("synthetic_run_authorities", "synthetic_physical_data_root")
 
-SOURCE = Path(__file__).resolve().parents[3] / "core" / "sandbox_executor.py"
+SOURCE = Path(__file__).resolve().parents[3] / "src/core" / "sandbox_executor.py"
 
 
 def _child(body: str) -> list[str]:

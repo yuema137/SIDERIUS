@@ -170,7 +170,7 @@ class TestExactlyOneReconciliationImplementation:
         from pathlib import Path
 
         repo_root = Path(__file__).resolve().parents[3]
-        module = repo_root / "nodes/result_interpretation_agent/evidence.py"
+        module = repo_root / "src/nodes/result_interpretation_agent/evidence.py"
         tree = ast.parse(module.read_text(encoding="utf-8"))
         functions = [
             node
@@ -205,7 +205,14 @@ class TestExactlyOneReconciliationImplementation:
 
         repo_root = Path(__file__).resolve().parents[3]
         raisers: list[str] = []
-        for directory in ("agent", "core", "execute_tools", "nodes", "scripts", "workflows"):
+        for directory in (
+            "src/agent",
+            "src/core",
+            "src/execute_tools",
+            "src/nodes",
+            "scripts",
+            "src/workflows",
+        ):
             for path in sorted((repo_root / directory).rglob("*.py")):
                 tree = ast.parse(path.read_text(encoding="utf-8"))
                 for node in ast.walk(tree):
@@ -213,7 +220,7 @@ class TestExactlyOneReconciliationImplementation:
                         continue
                     if "MetricIdentityConflictError(" in ast.unparse(node.exc):
                         raisers.append(str(path.relative_to(repo_root)))
-        assert raisers == ["execute_tools/evaluation_metric.py"] * len(raisers), (
+        assert raisers == ["src/execute_tools/evaluation_metric.py"] * len(raisers), (
             f"metric-identity conflicts are constructed outside the one authority: {raisers}"
         )
         assert raisers, "the census found no raiser at all — it is looking at nothing"
@@ -227,7 +234,7 @@ class TestExactlyOneReconciliationImplementation:
         from pathlib import Path
 
         repo_root = Path(__file__).resolve().parents[3]
-        source = (repo_root / "execute_tools/metric_order.py").read_text(encoding="utf-8")
+        source = (repo_root / "src/execute_tools/metric_order.py").read_text(encoding="utf-8")
         assert "reconcile" not in source.lower().replace("reconciliation", "")
         assert "MetricIdentityConflictError" not in source
 
@@ -252,7 +259,7 @@ class TestTheCanonicalUnavailableNotice:
         from pathlib import Path
 
         repo_root = Path(__file__).resolve().parents[3]
-        source = (repo_root / "execute_tools/metric_order.py").read_text(encoding="utf-8")
+        source = (repo_root / "src/execute_tools/metric_order.py").read_text(encoding="utf-8")
         assert "METRIC_IDENTITY_UNAVAILABLE" not in source
 
 

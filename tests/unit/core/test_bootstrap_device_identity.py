@@ -56,7 +56,7 @@ class TestTheProbeCallSiteNamesTheDevice:
         import ast
         from pathlib import Path
 
-        src = Path(__file__).resolve().parents[3] / "core" / "runtime_control" / "bootstrap.py"
+        src = Path(__file__).resolve().parents[3] / "src/core" / "runtime_control" / "bootstrap.py"
         tree = ast.parse(src.read_text(encoding="utf-8"))
 
         calls = 0
@@ -83,7 +83,7 @@ class TestTheProbeCallSiteNamesTheDevice:
         import ast
         from pathlib import Path
 
-        src = Path(__file__).resolve().parents[3] / "core" / "runtime_control" / "bootstrap.py"
+        src = Path(__file__).resolve().parents[3] / "src/core" / "runtime_control" / "bootstrap.py"
         tree = ast.parse(src.read_text(encoding="utf-8"))
 
         forwarded = False
@@ -245,7 +245,7 @@ class TestTheIdentityIsResolvedBeforeTheWindowIsSampled:
         from pathlib import Path
 
         src = (
-            Path(__file__).resolve().parents[3] / "core" / "runtime_control" / "bootstrap.py"
+            Path(__file__).resolve().parents[3] / "src/core" / "runtime_control" / "bootstrap.py"
         ).read_text(encoding="utf-8")
 
         resolve_at = src.index("_identity = device_identity_from_hardware(hardware)")

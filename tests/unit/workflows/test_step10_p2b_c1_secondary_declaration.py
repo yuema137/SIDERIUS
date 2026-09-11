@@ -350,13 +350,13 @@ class TestTheBinderHasExactlyOneOwner:
     asserted this shape did not exist anywhere. P2b C1 INVERTS the binder
     half: it must now exist, in its named owner, and nowhere else."""
 
-    OWNER = "execute_tools/evaluation_metric.py"
+    OWNER = "src/execute_tools/evaluation_metric.py"
 
     def test_the_binder_pair_lives_only_in_evaluation_metric(self):
         import re
 
         offenders: dict[str, list[str]] = {}
-        for root in ("nodes", "agent", "core", "execute_tools", "workflows"):
+        for root in ("src/nodes", "src/agent", "src/core", "src/execute_tools", "src/workflows"):
             for path in sorted((REPO_ROOT / root).rglob("*.py")):
                 hits = re.findall(
                     r"^def ((?:bind|resolve)\w*secondary\w*)\(",

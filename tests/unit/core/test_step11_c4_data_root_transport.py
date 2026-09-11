@@ -283,7 +283,7 @@ class TestAComposedRunMustDeclareItsRoot:
         repo = pathlib.Path(__file__).resolve().parents[3]
         for rel in (
             "sdsc_submission_scripts/run_one_iteration.py",
-            "workflows/model_exploration.py",
+            "src/workflows/model_exploration.py",
         ):
             src = (repo / rel).read_text(encoding="utf-8")
             assert "bind_run_task_composition(run_composition, physical_data_root=" in src, (
@@ -324,7 +324,7 @@ class TestTheTunerReadsOneAuthority:
 
         repo = pathlib.Path(__file__).resolve().parents[3]
         src = (
-            repo / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
+            repo / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
         ).read_text(encoding="utf-8")
         assert "_bound_data_root = active_physical_data_root()" in src
         assert (

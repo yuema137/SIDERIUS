@@ -34,7 +34,7 @@ from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LAUNCHER = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
-WORKFLOW = REPO_ROOT / "workflows" / "model_exploration.py"
+WORKFLOW = REPO_ROOT / "src/workflows" / "model_exploration.py"
 
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 FOURTH_MANIFEST = FIXTURES / "fourth_task" / "composition.yaml"
@@ -194,7 +194,7 @@ class TestSignatureAndCallers:
         }
         offenders: dict[str, list[str]] = {}
         for rel in (
-            "workflows/model_exploration.py",
+            "src/workflows/model_exploration.py",
             "sdsc_submission_scripts/run_one_iteration.py",
         ):
             tree = ast.parse((REPO_ROOT / rel).read_text(encoding="utf-8"))

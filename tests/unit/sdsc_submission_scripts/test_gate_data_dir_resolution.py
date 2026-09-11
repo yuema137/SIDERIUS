@@ -97,7 +97,7 @@ class TestTheLaunchBoundary:
 def test_no_machine_specific_dataset_path_is_tracked():
     repo = Path(__file__).resolve().parents[3]
     code_surfaces = [
-        repo / "execute_tools/data_paths.py",
+        repo / "src/execute_tools/data_paths.py",
         repo / "sdsc_submission_scripts/run_one_iteration.py",
         repo / "sdsc_submission_scripts/_chain_common.sh",
         repo / "sdsc_submission_scripts/run_chain.sh",

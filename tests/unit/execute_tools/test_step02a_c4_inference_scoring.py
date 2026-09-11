@@ -190,9 +190,9 @@ class TestAllThreeEntriesShareOneTransport:
     @pytest.mark.parametrize(
         ("module_path", "allows_uncomposed_profile"),
         [
-            ("execute_tools/train_engine_sandbox.py", True),
-            ("execute_tools/inference_single.py", True),
-            ("execute_tools/denoising_score_single.py", False),
+            ("src/execute_tools/train_engine_sandbox.py", True),
+            ("src/execute_tools/inference_single.py", True),
+            ("src/execute_tools/denoising_score_single.py", False),
         ],
     )
     def test_each_entry_declares_the_flag_and_fails_closed(
@@ -210,10 +210,10 @@ class TestAllThreeEntriesShareOneTransport:
 
     # Migrated production modules that read the RAW validation file.
     MIGRATED_ENTRIES: ClassVar[tuple[str, ...]] = (
-        "execute_tools/train_engine_sandbox.py",
-        "execute_tools/inference_single.py",
-        "execute_tools/denoising_score_single.py",
-        "execute_tools/scoring_utils.py",
+        "src/execute_tools/train_engine_sandbox.py",
+        "src/execute_tools/inference_single.py",
+        "src/execute_tools/denoising_score_single.py",
+        "src/execute_tools/scoring_utils.py",
     )
 
     @pytest.mark.parametrize("module_path", MIGRATED_ENTRIES)

@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RUNTIME_CONTROL = REPO_ROOT / "core" / "runtime_control"
+RUNTIME_CONTROL = REPO_ROOT / "src/core" / "runtime_control"
 
 
 class TestGenericRuntimeControlNamesNoTaskDataset:

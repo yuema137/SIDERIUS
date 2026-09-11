@@ -25,7 +25,7 @@ from core.runtime_control.gpu_accounting import (
 from core.runtime_control.gpu_observer import GpuEvidenceBundle, GpuObservationPolicy
 from core.sandbox_executor import _has_host_memory_evidence, _with_failure_attribution
 
-EXECUTOR_SOURCE = Path(__file__).resolve().parents[3] / "core" / "sandbox_executor.py"
+EXECUTOR_SOURCE = Path(__file__).resolve().parents[3] / "src/core" / "sandbox_executor.py"
 DEV = DeviceIdentity(uuid="GPU-aaaa-0000", physical_index=0)
 OOM_STDERR = (
     "torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 11.31 GiB "

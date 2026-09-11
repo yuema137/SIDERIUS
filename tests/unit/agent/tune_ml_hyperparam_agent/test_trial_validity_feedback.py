@@ -260,7 +260,7 @@ class TestProducerToConsumerReachability:
 
         template = (
             Path(__file__).resolve().parents[4]
-            / "agent"
+            / "src/agent"
             / "prompt_templates"
             / "proposal"
             / "proposing_stage.md"
@@ -394,7 +394,7 @@ class TestBothPromptPathsCarryTheBlock:
 
         template = (
             Path(__file__).resolve().parents[4]
-            / "agent"
+            / "src/agent"
             / "prompt_templates"
             / "proposal"
             / "proposing_stage.md"

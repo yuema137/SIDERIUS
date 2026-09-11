@@ -134,8 +134,8 @@ class TestBothSidesStillGoThroughTheOneAuthority:
     @pytest.mark.parametrize(
         "rel",
         [
-            "core/runtime_control/gpu_measurement_identity.py",
-            "core/runtime_control/gpu_measurement_worker_main.py",
+            "src/core/runtime_control/gpu_measurement_identity.py",
+            "src/core/runtime_control/gpu_measurement_worker_main.py",
         ],
     )
     def test_the_site_resolves_through_resolve_model_field(self, rel: str) -> None:

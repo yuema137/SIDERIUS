@@ -61,7 +61,7 @@ from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-TUNER = REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent"
+TUNER = REPO_ROOT / "src/nodes" / "ml_hyperparameter_tune_agent"
 
 
 def contrast_profile() -> DatasetProfile:

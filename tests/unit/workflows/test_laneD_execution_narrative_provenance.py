@@ -416,7 +416,10 @@ class TestProductionActuallyRoutesThroughTheBoundary:
     def test_the_tuner_routes_its_reflection_through_that_one_boundary(self):
         """`run()` must not regain a second, un-provenanced reflect call."""
         source = (
-            REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "ml_hyperparameter_tune_agent.py"
+            REPO_ROOT
+            / "src/nodes"
+            / "ml_hyperparameter_tune_agent"
+            / "ml_hyperparameter_tune_agent.py"
         ).read_text(encoding="utf-8")
         assert "brain.reflect(" not in source
         assert source.count("invoke_reflection(") == 1
@@ -592,9 +595,9 @@ class TestTheProductionProducerEntryPointIsWitnessed:
         is executing `prepare_attempt`, whose fixture cost buys no extra
         confidence about which method name appears at one line.
         """
-        source = (REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "planning.py").read_text(
-            encoding="utf-8"
-        )
+        source = (
+            REPO_ROOT / "src/nodes" / "ml_hyperparameter_tune_agent" / "planning.py"
+        ).read_text(encoding="utf-8")
 
         assert source.count("finish_with_model(") == 1
         assert "resolution.finish(" not in source

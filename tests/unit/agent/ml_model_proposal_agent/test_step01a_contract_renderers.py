@@ -195,7 +195,7 @@ class TestS1BProposingStageDerivation:
 
     TEMPLATE = (
         pathlib.Path(__file__).resolve().parents[4]
-        / "agent"
+        / "src/agent"
         / "prompt_templates"
         / "proposal"
         / "proposing_stage.md"

@@ -106,9 +106,14 @@ class TestFX3PresetResolution:
         import pathlib
 
         repo = pathlib.Path(__file__).resolve().parents[4]
-        resolver = repo / "agent" / "schemas" / "model_io_resolution.py"
+        resolver = repo / "src/agent" / "schemas" / "model_io_resolution.py"
         offenders: list[str] = []
-        for path in repo.glob("*/**/*.py"):
+        sources = [*repo.glob("*.py")]
+        for root in ("src", "scripts", "sdsc_submission_scripts"):
+            files = list((repo / root).rglob("*.py"))
+            assert files, f"empty production scan: {root}"
+            sources.extend(files)
+        for path in sources:
             parts = path.parts
             if any(p in {"tests", ".venv", "agent_generated", "docs"} for p in parts):
                 continue

@@ -38,9 +38,9 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 TEST_ROOT = REPO_ROOT / "tests"
 
 CHILDREN = (
-    "execute_tools/train_engine_sandbox.py",
-    "execute_tools/inference_single.py",
-    "execute_tools/denoising_score_single.py",
+    "src/execute_tools/train_engine_sandbox.py",
+    "src/execute_tools/inference_single.py",
+    "src/execute_tools/denoising_score_single.py",
 )
 
 
@@ -288,7 +288,7 @@ class TestStructuralBudgets:
         What must NOT be there is the registration overlay. It has its own
         module, and this is what says so.
         """
-        src = (REPO_ROOT / "workflows" / "task_composition.py").read_text(encoding="utf-8")
+        src = (REPO_ROOT / "src/workflows" / "task_composition.py").read_text(encoding="utf-8")
         for owned_elsewhere in (
             "def run_registration_scope",
             "def retire_registrations",

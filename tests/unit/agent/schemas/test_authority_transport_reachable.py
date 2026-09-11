@@ -332,7 +332,7 @@ class TestTheLauncherCallSite:
         import pathlib
 
         source = (
-            pathlib.Path(__file__).resolve().parents[4] / "workflows" / "model_exploration.py"
+            pathlib.Path(__file__).resolve().parents[4] / "src/workflows" / "model_exploration.py"
         ).read_text(encoding="utf-8")
 
         forwarding: list[dict[str, ast.expr]] = []

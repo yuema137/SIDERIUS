@@ -287,7 +287,7 @@ class TestNoChannelLiteralsSurviveInHealthCode:
 
     @staticmethod
     def _health_checks_dir() -> Path:
-        return Path(__file__).resolve().parents[4] / "execute_tools" / "health_checks"
+        return Path(__file__).resolve().parents[4] / "src/execute_tools" / "health_checks"
 
     #: The ONE syntactic position where the persisted label may appear.
     LABEL_DECLARATION: ClassVar[str] = "sampling_method_label="

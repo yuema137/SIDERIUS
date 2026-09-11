@@ -150,7 +150,7 @@ class TestUndeclaredTaskHealthIsEmpty:
         """
         import ast
 
-        package = REPO_ROOT / "execute_tools" / "health_checks"
+        package = REPO_ROOT / "src/execute_tools" / "health_checks"
         offenders: list[str] = []
         for source in package.glob("*.py"):
             tree = ast.parse(source.read_text())

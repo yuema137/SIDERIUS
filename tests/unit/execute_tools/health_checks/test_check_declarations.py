@@ -250,7 +250,7 @@ class TestProductionNeverReliesOnTheCompatibilityBridge:
     """
 
     PRODUCTION_FILES = tuple(
-        Path("execute_tools/health_checks") / name
+        Path("src/execute_tools/health_checks") / name
         for name in (
             "output_diversity.py",
             "output_std.py",

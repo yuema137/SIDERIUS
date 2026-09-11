@@ -29,9 +29,9 @@ import pytest
 from tests.helpers.tuner_source import tuner_node_tree
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-TUNER = REPO_ROOT / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
-ADAPTER = REPO_ROOT / "agent/skills/evaluate_vram_skill/preflight_adapter.py"
-WORKER = REPO_ROOT / "agent/skills/evaluate_vram_skill/preflight_worker_main.py"
+TUNER = REPO_ROOT / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
+ADAPTER = REPO_ROOT / "src/agent/skills/evaluate_vram_skill/preflight_adapter.py"
+WORKER = REPO_ROOT / "src/agent/skills/evaluate_vram_skill/preflight_worker_main.py"
 
 
 def _tree(path: Path) -> ast.Module:
@@ -160,5 +160,5 @@ class TestSubprocessPathsUnchanged:
     )
     def test_training_and_inference_still_run_as_subprocesses(self, script):
         """PR A must not touch the paths that already behave correctly."""
-        source = (REPO_ROOT / "core/sandbox_executor.py").read_text(encoding="utf-8")
+        source = (REPO_ROOT / "src/core/sandbox_executor.py").read_text(encoding="utf-8")
         assert script in source

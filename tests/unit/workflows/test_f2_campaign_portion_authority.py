@@ -84,7 +84,7 @@ def test_the_merge_is_wired_at_the_tuner_input_construction():
     ``model_exploration``: the keyword ``plan_overrides`` at some Call must
     be ``frozen_portion_overrides(launch)``. Fails by: no such keyword
     value anywhere."""
-    src = (REPO_ROOT / "workflows" / "model_exploration.py").read_text()
+    src = (REPO_ROOT / "src/workflows" / "model_exploration.py").read_text()
     wired = []
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.Call):

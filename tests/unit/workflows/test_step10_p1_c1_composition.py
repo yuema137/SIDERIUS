@@ -134,7 +134,13 @@ class TestFourthTaskNeedsNoFrameworkEdit:
 
         production_sources = "\n".join(
             path.read_text(encoding="utf-8", errors="ignore")
-            for directory in ("workflows", "core", "execute_tools", "nodes", "agent")
+            for directory in (
+                "src/workflows",
+                "src/core",
+                "src/execute_tools",
+                "src/nodes",
+                "src/agent",
+            )
             for path in (REPO_ROOT / directory).rglob("*.py")
             if "__pycache__" not in path.parts
         )

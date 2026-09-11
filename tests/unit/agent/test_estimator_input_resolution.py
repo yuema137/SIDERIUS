@@ -152,9 +152,9 @@ class TestLossType:
 
         repo = pathlib.Path(__file__).resolve().parents[3]
         for rel in (
-            "agent/skills/training_skill/estimator.py",
-            "agent/skills/evaluate_time_skill/wrapper.py",
-            "agent/utils/proposer_preflight.py",
+            "src/agent/skills/training_skill/estimator.py",
+            "src/agent/skills/evaluate_time_skill/wrapper.py",
+            "src/agent/utils/proposer_preflight.py",
         ):
             text = (repo / rel).read_text(encoding="utf-8")
             assert 'loss_config.get("loss_type", "ce")' not in text, (

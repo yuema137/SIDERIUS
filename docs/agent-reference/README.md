@@ -11,6 +11,9 @@ does not re-audit every linked mechanism document.
 
 ---
 
+Package-relative source citations in the mechanism guides map under `src/`.
+Python imports keep their existing names; see the [source guide](../../src/README.md).
+
 ## Rules of engagement
 
 1. **The source is the authority.** These documents are projections of it. Where
@@ -34,15 +37,15 @@ does not re-audit every linked mechanism document.
 | understand `TaskDataPath` | [mechanisms/data-path-and-scope](mechanisms/data-path-and-scope.md) |
 | understand or debug scope transport | [mechanisms/data-path-and-scope](mechanisms/data-path-and-scope.md) → [mechanisms/execution](mechanisms/execution.md) |
 | debug child-subprocess plugin loading | [mechanisms/execution](mechanisms/execution.md) → [mechanisms/plugins](mechanisms/plugins.md) |
-| change tuner behaviour | [tuner node doc](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) → [mechanisms/metrics](mechanisms/metrics.md) |
+| change tuner behaviour | [tuner node doc](../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) → [mechanisms/metrics](mechanisms/metrics.md) |
 | understand `TrainingHistory` / `TrainingDiagnosis` | [mechanisms/training-objective-and-diagnosis](mechanisms/training-objective-and-diagnosis.md) |
-| change what the interpreter reads | [interpreter node doc](../../nodes/result_interpretation_agent/result_interpretation_agent.md) |
-| change what the proposer reads | [proposer node doc](../../nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) |
+| change what the interpreter reads | [interpreter node doc](../../src/nodes/result_interpretation_agent/result_interpretation_agent.md) |
+| change what the proposer reads | [proposer node doc](../../src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) |
 | find which manifest sections are required | [reference/task-composition](../reference/task-composition.md) |
 | create a new external task package | [guides/define-a-task](../guides/define-a-task.md) → [reference/task-composition](../reference/task-composition.md) |
 | understand plugin identity / provenance | [mechanisms/plugins](mechanisms/plugins.md) |
 | understand resume / why a workspace refuses | [mechanisms/persistence-and-resume](mechanisms/persistence-and-resume.md) |
-| add a node to the graph | [nodes/NODE_TEMPLATE.md](../../nodes/NODE_TEMPLATE.md) → [architecture](../architecture.md) |
+| add a node to the graph | [nodes/NODE_TEMPLATE.md](../../src/nodes/NODE_TEMPLATE.md) → [architecture](../architecture.md) |
 | know what is landed vs planned | [concepts/supported-tasks](../concepts/supported-tasks.md) |
 
 ## Mechanisms
@@ -66,12 +69,12 @@ Each node owns one stage. Its `.md` is the contract.
 
 | node | role | LLM | CLI (`main()`) |
 |---|---|:---:|---|
-| [`result_interpretation_agent`](../../nodes/result_interpretation_agent/result_interpretation_agent.md) | synthesise evidence across records; state what it supports | ✅ | `nodes/result_interpretation_agent/result_interpretation_agent.py:1297` |
-| [`ml_literature_review`](../../nodes/ml_literature_review/ml_literature_review.md) | surface papers as soft priors (optional stage) | ✅ | `nodes/ml_literature_review/ml_literature_review.py:1051` (upstream record read from disk by naming convention — #303) |
-| [`ml_model_proposal_agent`](../../nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) | propose an architecture and an explicit prediction | ✅ | `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py:2358` |
-| [`ml_model_implementor`](../../nodes/ml_model_implementor/ml_model_implementor.md) | write the model plugin (and optional loss plugin) | ✅ | `nodes/ml_model_implementor/ml_model_implementor.py:2362` |
-| [`ml_code_validator_agent`](../../nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ | `nodes/ml_code_validator_agent/ml_code_validator_agent.py:896` |
-| [`ml_hyperparameter_tune_agent`](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1741` (parser and input builder in `cli.py`) |
+| [`result_interpretation_agent`](../../src/nodes/result_interpretation_agent/result_interpretation_agent.md) | synthesise evidence across records; state what it supports | ✅ | `src/nodes/result_interpretation_agent/result_interpretation_agent.py:1297` |
+| [`ml_literature_review`](../../src/nodes/ml_literature_review/ml_literature_review.md) | surface papers as soft priors (optional stage) | ✅ | `src/nodes/ml_literature_review/ml_literature_review.py:1052` (upstream record read from disk by naming convention — #303) |
+| [`ml_model_proposal_agent`](../../src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) | propose an architecture and an explicit prediction | ✅ | `src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py:2358` |
+| [`ml_model_implementor`](../../src/nodes/ml_model_implementor/ml_model_implementor.md) | write the model plugin (and optional loss plugin) | ✅ | `src/nodes/ml_model_implementor/ml_model_implementor.py:2362` |
+| [`ml_code_validator_agent`](../../src/nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ | `src/nodes/ml_code_validator_agent/ml_code_validator_agent.py:896` |
+| [`ml_hyperparameter_tune_agent`](../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1742` (parser and input builder in `cli.py`) |
 
 All six nodes are standalone-capable — each exposes an `argparse` `main()`
 behind `if __name__ == "__main__":` at the line cited
@@ -81,7 +84,7 @@ verified by `tests/unit/docs/test_node_docs_contract.py`: exactly six
 doc's declared type must match its module's `__main__` reality. Invocation
 details live in each node's own `.md`.
 
-Adding a node: [`nodes/NODE_TEMPLATE.md`](../../nodes/NODE_TEMPLATE.md) — all
+Adding a node: [`nodes/NODE_TEMPLATE.md`](../../src/nodes/NODE_TEMPLATE.md) — all
 eight steps, including the connection audit.
 
 ## Architecture and standards

@@ -166,7 +166,7 @@ class TestTheTwoPathsAgree:
         import ast
 
         src = (
-            REPO_ROOT / "core" / "runtime_control" / "gpu_measurement_worker_main.py"
+            REPO_ROOT / "src/core" / "runtime_control" / "gpu_measurement_worker_main.py"
         ).read_text()
         tree = ast.parse(src)
 

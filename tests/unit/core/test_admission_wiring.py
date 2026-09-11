@@ -20,7 +20,7 @@ from core.runtime_control.admission import AdmissionDecision
 from core.runtime_control.gpu_accounting import DeviceIdentity, GpuAccountingSnapshot
 from tests.helpers.tuner_source import tuner_node_source
 
-EXECUTOR = Path(__file__).resolve().parents[3] / "core" / "sandbox_executor.py"
+EXECUTOR = Path(__file__).resolve().parents[3] / "src/core" / "sandbox_executor.py"
 DEV = DeviceIdentity(uuid="GPU-aaaa-0000", physical_index=0)
 
 REFUSED = AdmissionDecision(
@@ -286,7 +286,7 @@ class TestProduceAndConsumeStaySeparate:
 
     TUNER = (
         Path(__file__).resolve().parents[3]
-        / "nodes"
+        / "src/nodes"
         / "ml_hyperparameter_tune_agent"
         / "ml_hyperparameter_tune_agent.py"
     )

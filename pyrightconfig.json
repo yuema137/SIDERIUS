@@ -1,14 +1,14 @@
 {
   "include": [
-    "nodes",
-    "agent",
-    "core",
-    "execute_tools",
-    "ml_models",
-    "dashboard",
-    "tools",
+    "src/nodes",
+    "src/agent",
+    "src/core",
+    "src/execute_tools",
+    "src/ml_models",
+    "src/dashboard",
+    "src/tools",
     "scripts",
-    "workflows"
+    "src/workflows"
   ],
   "exclude": [
     "**/__pycache__",

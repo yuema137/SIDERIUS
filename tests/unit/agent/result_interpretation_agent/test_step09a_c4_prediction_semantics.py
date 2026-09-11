@@ -467,10 +467,10 @@ class TestTheSemanticsIdsHaveOneAuthority:
     #: Every production module that reads these ids. `prediction.py` implements
     #: the v2 rule and re-exports; the other three consume.
     _CONSUMERS = (
-        "nodes/result_interpretation_agent/prediction.py",
-        "nodes/result_interpretation_agent/result_interpretation_agent.py",
-        "nodes/interpretation_helpers.py",
-        "core/resume.py",
+        "src/nodes/result_interpretation_agent/prediction.py",
+        "src/nodes/result_interpretation_agent/result_interpretation_agent.py",
+        "src/nodes/interpretation_helpers.py",
+        "src/core/resume.py",
     )
 
     def _repo_root(self) -> Path:
@@ -492,7 +492,7 @@ class TestTheSemanticsIdsHaveOneAuthority:
             OUTCOME_UNEVALUATED,
         ):
             sites: list[str] = []
-            for rel in ("agent/schemas/interpretation.py", *self._CONSUMERS):
+            for rel in ("src/agent/schemas/interpretation.py", *self._CONSUMERS):
                 tree = ast.parse((root / rel).read_text(encoding="utf-8"))
                 docstrings = {
                     ast.get_docstring(n, clean=False)
@@ -506,9 +506,9 @@ class TestTheSemanticsIdsHaveOneAuthority:
                         and node.value not in docstrings
                     ):
                         sites.append(f"{rel}:{node.lineno}")
-            assert sites == [s for s in sites if s.startswith("agent/schemas/interpretation.py")], (
-                f"{value!r} is spelled outside its declaration: {sites}"
-            )
+            assert sites == [
+                s for s in sites if s.startswith("src/agent/schemas/interpretation.py")
+            ], f"{value!r} is spelled outside its declaration: {sites}"
             assert len(sites) == 1, f"{value!r} has {len(sites)} declarations: {sites}"
 
     def test_every_consumer_imports_the_declaration(self):

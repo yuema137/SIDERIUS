@@ -325,6 +325,6 @@ class TestRawProposalJsonCarriesOutputContract:
 
         template = (
             Path(__file__).resolve().parents[3]
-            / "agent/prompt_templates/proposal/proposing_stage.md"
+            / "src/agent/prompt_templates/proposal/proposing_stage.md"
         )
         assert '"output_type"' in template.read_text(encoding="utf-8")

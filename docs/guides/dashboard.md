@@ -6,7 +6,7 @@ show today, and why a page might be empty.
 
 The dashboard is a read-only FastAPI + Plotly browser over the JSON records a
 run writes. It never touches the experiment pipeline. Endpoint and
-configuration reference: [`dashboard/README.md`](../../dashboard/README.md).
+configuration reference: [`dashboard/README.md`](../../src/dashboard/README.md).
 
 ---
 
@@ -14,7 +14,7 @@ configuration reference: [`dashboard/README.md`](../../dashboard/README.md).
 
 ```bash
 cp dashboard_config.example.yaml dashboard_config.yaml   # once; then edit
-.venv/bin/python dashboard/main.py                       # http://localhost:8000
+.venv/bin/python src/dashboard/main.py                       # http://localhost:8000
 ```
 
 Set one key in `dashboard_config.yaml`:
@@ -112,6 +112,6 @@ post-PR-12e fix candidates lives in the
 
 ## Next
 
-- [`dashboard/README.md`](../../dashboard/README.md) — endpoints, configuration, tests
+- [`dashboard/README.md`](../../src/dashboard/README.md) — endpoints, configuration, tests
 - [Workspaces and resume](workspaces-and-resume.md) — reading records directly
 - [Troubleshooting](troubleshooting.md)

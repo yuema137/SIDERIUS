@@ -58,8 +58,8 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-SPAWN_MODULE = REPO_ROOT / "core" / "sandbox_executor.py"
-CHILD_MODULE = REPO_ROOT / "execute_tools" / "train_engine_sandbox.py"
+SPAWN_MODULE = REPO_ROOT / "src/core" / "sandbox_executor.py"
+CHILD_MODULE = REPO_ROOT / "src/execute_tools" / "train_engine_sandbox.py"
 
 #: The argv flag whose transport is the gate on B8's reachability.
 ORDER_STRATEGY_FLAG = "--order_strategy"

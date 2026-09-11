@@ -55,8 +55,8 @@ from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW = REPO_ROOT / "workflows" / "model_exploration.py"
-RESUME = REPO_ROOT / "core" / "resume.py"
+WORKFLOW = REPO_ROOT / "src/workflows" / "model_exploration.py"
+RESUME = REPO_ROOT / "src/core" / "resume.py"
 QUICKSTART = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 KEY = "dilated_stack:long_range_context"

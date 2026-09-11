@@ -104,6 +104,10 @@ Use this checkout's `.venv/bin/python`; do not reuse another checkout's venv
 or source through `PYTHONPATH`. The API diagnostic requires configured
 credentials. For a credential-free introduction, use the synthetic pack below.
 
+Installation exposes the eight packages from `src/`. Existing imports such as
+`from core.layout import package_root` keep their names. See the
+[source guide](src/README.md) for package, checkout and workspace ownership.
+
 Then see what a real run would execute, without executing it:
 
 ```bash
@@ -170,29 +174,34 @@ Full map: [`docs/README.md`](docs/README.md). Glossary:
 
 ## Repository layout
 
-These are navigation groups; the physical root directories remain peers.
+The eight framework packages live under `src/`; user inputs, examples and
+developer tests remain separate at the root.
 The [repository map](docs/repository-map.md) lists every tracked root, source
 owners, launch paths, external data/workspaces and retained exceptions.
 
 ```text
-SIDERIUS
-├── Start and operate: examples/, configs/, llm_configs/, sdsc_submission_scripts/, dashboard/
-├── Agents and composition: nodes/, agent/, workflows/
-├── Execution and extensions: core/, execute_tools/, ml_models/
-├── Development and validation: tests/, tools/, scripts/, .github/
-└── Documentation and retained material: docs/, reports/, reference_data/
+SIDERIUS/
+├── src/                     # agent, nodes, workflows, core, execute_tools,
+│                            # ml_models, dashboard, tools
+├── examples/                # synthetic executable specifications
+├── configs/ + llm_configs/   # existing policy, manifests and routing
+├── sdsc_submission_scripts/ # existing chain/iteration and scheduler entrypoints
+├── tests/ + scripts/        # validation and checkout utilities
+├── docs/                    # guides, references and design history
+├── reports/ + reference_data/ # retained evidence and compatibility resources
+└── .github/                 # automatic CI
 ```
 
-`scripts/`, `execute_tools/` and `configs/` contain mixed material;
+`scripts/`, `src/execute_tools/` and `configs/` contain mixed material;
 `reference_data/` still has an executable reader. Generated libraries and
 runtime results belong to caller-owned storage, outside the source inventory.
 
 The major modules carry their own contract READMEs —
-[`workflows/`](workflows/README.md) · [`core/`](core/README.md) ·
-[`execute_tools/`](execute_tools/README.md) ·
-[`execute_tools/health_checks/`](execute_tools/health_checks/README.md) ·
-[`ml_models/`](ml_models/README.md) ·
-[`agent/schemas/`](agent/schemas/README.md) — all following one
+[`workflows/`](src/workflows/README.md) · [`core/`](src/core/README.md) ·
+[`execute_tools/`](src/execute_tools/README.md) ·
+[`execute_tools/health_checks/`](src/execute_tools/health_checks/README.md) ·
+[`ml_models/`](src/ml_models/README.md) ·
+[`agent/schemas/`](src/agent/schemas/README.md) — all following one
 [template](docs/agent-reference/MODULE_README_TEMPLATE.md).
 
 ## Key invariants

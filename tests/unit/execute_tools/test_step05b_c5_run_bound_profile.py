@@ -72,10 +72,10 @@ def _contrast_profile():
 #: is in this module too but is DEAD (zero callers anywhere); it is threaded
 #: for signature coherence, not genericized.
 LIVE_RESOURCE_MODULES = (
-    "execute_tools/workload_resolvers.py",
-    "agent/skills/inference_skill/estimator.py",
-    "agent/skills/training_skill/estimator.py",
-    "agent/skills/evaluate_time_skill/wrapper.py",
+    "src/execute_tools/workload_resolvers.py",
+    "src/agent/skills/inference_skill/estimator.py",
+    "src/agent/skills/training_skill/estimator.py",
+    "src/agent/skills/evaluate_time_skill/wrapper.py",
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]

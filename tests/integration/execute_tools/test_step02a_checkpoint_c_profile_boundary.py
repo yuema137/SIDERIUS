@@ -190,7 +190,7 @@ def test_the_child_imports_this_checkout():
 def _training_argv(ws, profile_path: str | None) -> list[str]:
     argv = [
         PYTHON,
-        "execute_tools/train_engine_sandbox.py",
+        "src/execute_tools/train_engine_sandbox.py",
         "--model_cfg",
         str(ws["cfg_dir"] / "model.json"),
         "--train_cfg",
@@ -299,9 +299,9 @@ class TestAllThreeEntriesLoadTheSameProfileFile:
     """
 
     ENTRIES = (
-        "execute_tools/train_engine_sandbox.py",
-        "execute_tools/inference_single.py",
-        "execute_tools/denoising_score_single.py",
+        "src/execute_tools/train_engine_sandbox.py",
+        "src/execute_tools/inference_single.py",
+        "src/execute_tools/denoising_score_single.py",
     )
 
     @pytest.mark.parametrize("entry", ENTRIES)

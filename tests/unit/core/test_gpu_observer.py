@@ -26,7 +26,7 @@ from core.runtime_control.gpu_observer import (
 )
 
 DEV = DeviceIdentity(uuid="GPU-aaaa-0000", physical_index=0)
-SOURCE = Path(__file__).resolve().parents[3] / "core" / "runtime_control" / "gpu_observer.py"
+SOURCE = Path(__file__).resolve().parents[3] / "src/core" / "runtime_control" / "gpu_observer.py"
 
 
 def snap(own: int, other: int = 0, *, ok: bool = True) -> GpuAccountingSnapshot:

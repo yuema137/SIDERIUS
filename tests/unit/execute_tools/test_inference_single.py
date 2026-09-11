@@ -36,7 +36,9 @@ from execute_tools.inference_single import (
 )
 from tests.helpers.two_family_profile import write_bound_timeseries
 
-_INFERENCE_SOURCE = Path(__file__).resolve().parents[3] / "execute_tools" / "inference_single.py"
+_INFERENCE_SOURCE = (
+    Path(__file__).resolve().parents[3] / "src/execute_tools" / "inference_single.py"
+)
 
 
 # =============================================================================

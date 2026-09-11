@@ -33,7 +33,7 @@ import ast
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-MODULE = REPO_ROOT / "workflows" / "model_exploration.py"
+MODULE = REPO_ROOT / "src/workflows" / "model_exploration.py"
 
 _BINDING = "bind_run_task_composition"
 _WORKFLOW = "run_workflow"

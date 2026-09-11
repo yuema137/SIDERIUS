@@ -483,11 +483,11 @@ class TestNoBehaviouralKeyUsage:
 
     def test_no_registry_dispatch_or_path_reads_the_id(self):
         forbidden_files = [
-            "ml_models/plugin_loader.py",
-            "core/sandbox_executor.py",
-            "execute_tools/scoring_utils.py",
-            "core/resume.py",
-            "core/scientific_authority.py",
+            "src/ml_models/plugin_loader.py",
+            "src/core/sandbox_executor.py",
+            "src/execute_tools/scoring_utils.py",
+            "src/core/resume.py",
+            "src/core/scientific_authority.py",
         ]
         for rel in forbidden_files:
             src = (_REPO / rel).read_text()

@@ -57,7 +57,10 @@ build_evaluation_payload_fn = round_health.build_evaluation_payload_fn
 BOUNDARY_CALL = "apply_round_health"
 
 EXECUTION_PY = (
-    Path(__file__).resolve().parents[3] / "nodes" / "ml_hyperparameter_tune_agent" / "execution.py"
+    Path(__file__).resolve().parents[3]
+    / "src/nodes"
+    / "ml_hyperparameter_tune_agent"
+    / "execution.py"
 )
 
 

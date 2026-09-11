@@ -69,7 +69,7 @@ def test_override_crosses_the_typed_launch_boundaries() -> None:
     assert launcher_value == "args.runtime_verification_max_wall_seconds"
 
     workflow_value = _call_keyword_value(
-        REPO_ROOT / "workflows" / "model_exploration.py",
+        REPO_ROOT / "src/workflows" / "model_exploration.py",
         "local_validated_model",
         FIELD,
     )

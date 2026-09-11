@@ -162,7 +162,14 @@ class TestTheTransportIsWhatMakesItWork:
         )
 
 
-_PRODUCTION_ROOTS = ("core", "execute_tools", "agent", "nodes", "workflows", "dashboard")
+_PRODUCTION_ROOTS = (
+    "src/core",
+    "src/execute_tools",
+    "src/agent",
+    "src/nodes",
+    "src/workflows",
+    "src/dashboard",
+)
 
 
 def _production_popen_sites() -> list[tuple[str, int, set[str]]]:
@@ -290,7 +297,7 @@ class TestEveryProductionWorkerSpawnerTransportsTheEnvironment:
     def test_env_construction_has_exactly_one_home(self):
         # Two copies of "which variables a SIDERIUS subprocess needs" is how
         # the worker came to be missing one.
-        exec_src = (REPO_ROOT / "core" / "sandbox_executor.py").read_text()
+        exec_src = (REPO_ROOT / "src/core" / "sandbox_executor.py").read_text()
         assert "from core.subprocess_env import subprocess_env" in exec_src
         assert exec_src.count('env["SIDERIUS_PLUGIN_DIRS"]') == 0, (
             "sandbox_executor must delegate to core.subprocess_env, not build "

@@ -238,7 +238,14 @@ def test_profile_mode_calibrated_applies_the_profile_with_field_overrides(tmp_pa
 
 #: Every production root, execute_tools included (the F-12bc-9 lesson: a
 #: census whose FILE SET omits a directory is green for the wrong reason).
-_PRODUCTION_ROOTS = ("core", "agent", "execute_tools", "nodes", "workflows", "scripts")
+_PRODUCTION_ROOTS = (
+    "src/core",
+    "src/agent",
+    "src/execute_tools",
+    "src/nodes",
+    "src/workflows",
+    "scripts",
+)
 
 _DEVICE_TOKENS = ("h100", "5090", "a100", "rtx")
 
@@ -299,7 +306,7 @@ def test_one_resolution_authority_for_runtime_profiles():
     layer that IMPORTS it (whose flag help/banner may name the config path
     for discoverability). Fails by: naming the new file."""
     allowed = {
-        Path("core/runtime_control/watchdog_profile.py"),
+        Path("src/core/runtime_control/watchdog_profile.py"),
         Path("sdsc_submission_scripts/run_one_iteration.py"),
     }
     mentions: set[Path] = set()
@@ -311,6 +318,6 @@ def test_one_resolution_authority_for_runtime_profiles():
         f"unexpected runtime-profile reader(s) {sorted(str(p) for p in mentions - allowed)} — "
         "core/runtime_control/watchdog_profile.py is the ONE authority (#261)"
     )
-    assert Path("core/runtime_control/watchdog_profile.py") in mentions, (
+    assert Path("src/core/runtime_control/watchdog_profile.py") in mentions, (
         "the census lost sight of the authority itself — its file set is broken"
     )

@@ -42,8 +42,8 @@ from core.chain_state import ChainState, chain_state_field_names
 from core.resume import RestoredState
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-MODEL_EXPLORATION = REPO_ROOT / "workflows" / "model_exploration.py"
-RESUME = REPO_ROOT / "core" / "resume.py"
+MODEL_EXPLORATION = REPO_ROOT / "src/workflows" / "model_exploration.py"
+RESUME = REPO_ROOT / "src/core" / "resume.py"
 
 FIELD = "vocab_link_confirmations"
 

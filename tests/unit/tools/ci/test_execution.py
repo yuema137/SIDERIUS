@@ -344,7 +344,7 @@ class TestTheHarnessNeverWritesInsideTheSourceTree:
         Fails as: the default returns to `<root>/.ci_parity` and the defect
         reappears for every local run.
         """
-        src = (Path(__file__).resolve().parents[4] / "tools/ci/__main__.py").read_text(
+        src = (Path(__file__).resolve().parents[4] / "src/tools/ci/__main__.py").read_text(
             encoding="utf-8"
         )
         assert 'root / ".ci_parity"' not in src

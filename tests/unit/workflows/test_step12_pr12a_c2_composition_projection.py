@@ -45,7 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 QUICKSTART = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 MASKED_REGRESSION = REPO_ROOT / "configs" / "task_composition" / "synthetic_masked_regression.yaml"
-TUNER_PACKAGE = REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent"
+TUNER_PACKAGE = REPO_ROOT / "src/nodes" / "ml_hyperparameter_tune_agent"
 
 
 @pytest.fixture(autouse=True)

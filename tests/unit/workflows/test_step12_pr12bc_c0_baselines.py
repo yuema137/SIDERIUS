@@ -54,8 +54,8 @@ from tests.unit.guardrails.test_step12_pr12a_c0_defect_baselines import (
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-COMPOSITION = REPO_ROOT / "workflows" / "task_composition.py"
-DATA_PATH = REPO_ROOT / "execute_tools" / "task_data_path.py"
+COMPOSITION = REPO_ROOT / "src/workflows" / "task_composition.py"
+DATA_PATH = REPO_ROOT / "src/execute_tools" / "task_data_path.py"
 
 
 # ======================================================================
@@ -198,11 +198,11 @@ class TestTheRegistrationLifecycleToday:
 # ======================================================================
 
 PHASE_C_STRUCTURAL_BASELINE: dict[str, tuple[int, int, int, int]] = {
-    "workflows/task_composition.py::_compose_task_data_path": (19, 9, 63, 2),
-    "workflows/task_composition.py::_load_symbol": (33, 13, 85, 3),
-    "workflows/task_composition.py::bind_run_task_composition": (25, 4, 80, 2),
-    "execute_tools/task_data_path.py::register_task_data_path": (11, 5, 26, 1),
-    "execute_tools/task_data_path.py::resolve_task_data_path": (13, 4, 27, 1),
+    "src/workflows/task_composition.py::_compose_task_data_path": (19, 9, 63, 2),
+    "src/workflows/task_composition.py::_load_symbol": (33, 13, 85, 3),
+    "src/workflows/task_composition.py::bind_run_task_composition": (25, 4, 80, 2),
+    "src/execute_tools/task_data_path.py::register_task_data_path": (11, 5, 26, 1),
+    "src/execute_tools/task_data_path.py::resolve_task_data_path": (13, 4, 27, 1),
 }
 
 #: §J: "per-family composers stay <= the current largest; the overlay is its

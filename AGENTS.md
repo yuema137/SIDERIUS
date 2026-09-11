@@ -28,7 +28,7 @@ framework source.
 | what a user must declare | [`docs/reference/task-composition.md`](docs/reference/task-composition.md) |
 | what is landed vs planned | [`docs/concepts/supported-tasks.md`](docs/concepts/supported-tasks.md) |
 | the system's shape | [`docs/architecture.md`](docs/architecture.md) |
-| to add a node | [`nodes/NODE_TEMPLATE.md`](nodes/NODE_TEMPLATE.md) |
+| to add a node | [`nodes/NODE_TEMPLATE.md`](src/nodes/NODE_TEMPLATE.md) |
 | why something is the way it is | [`docs/design/README.md`](docs/design/README.md) — history, not current behaviour |
 
 ## Environment, in one line

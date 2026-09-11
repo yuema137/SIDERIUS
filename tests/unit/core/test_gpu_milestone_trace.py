@@ -53,10 +53,10 @@ from core.runtime_control.gpu_milestone_trace import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-INFERENCE_SOURCE = REPO_ROOT / "execute_tools" / "inference_single.py"
-WORKER_SOURCE = REPO_ROOT / "core" / "runtime_control" / "gpu_measurement_worker_main.py"
-PHASES_SOURCE = REPO_ROOT / "core" / "runtime_control" / "gpu_measurement_phases.py"
-TRACE_SOURCE = REPO_ROOT / "core" / "runtime_control" / "gpu_milestone_trace.py"
+INFERENCE_SOURCE = REPO_ROOT / "src/execute_tools" / "inference_single.py"
+WORKER_SOURCE = REPO_ROOT / "src/core" / "runtime_control" / "gpu_measurement_worker_main.py"
+PHASES_SOURCE = REPO_ROOT / "src/core" / "runtime_control" / "gpu_measurement_phases.py"
+TRACE_SOURCE = REPO_ROOT / "src/core" / "runtime_control" / "gpu_milestone_trace.py"
 
 UUID = "GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef"
 

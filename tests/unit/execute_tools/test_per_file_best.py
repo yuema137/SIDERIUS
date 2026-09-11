@@ -919,7 +919,7 @@ class TestTheProducerSerializationBoundary:
         """Reachability. If `records.py` stops coercing, coerces AFTER
         serialising, or goes back to a truncating `open(path, "w")` write,
         the round-trip below stops describing production."""
-        src = (REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "records.py").read_text(
+        src = (REPO_ROOT / "src/nodes" / "ml_hyperparameter_tune_agent" / "records.py").read_text(
             encoding="utf-8"
         )
         assert "coerce_nonfinite_to_none(agent_output.model_dump())" in src

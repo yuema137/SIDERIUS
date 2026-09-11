@@ -47,7 +47,15 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 # Mirrors the out-of-tree extension census: every package a production
 # reference could hide in, configs included (a YAML naming a standard key
 # would be a production consumer too).
-PRODUCTION_PACKAGES = ("execute_tools", "nodes", "agent", "core", "scripts", "workflows", "configs")
+PRODUCTION_PACKAGES = (
+    "src/execute_tools",
+    "src/nodes",
+    "src/agent",
+    "src/core",
+    "scripts",
+    "src/workflows",
+    "configs",
+)
 
 
 class TestKeySpellings:
@@ -225,14 +233,14 @@ EXACT_STANDARD_NAMES = (
 SUBSTRING_STANDARD_NAMES = ("standard_views",)
 
 ENGINE_MODULES = (
-    "execute_tools/health_checks/runner.py",
-    "execute_tools/health_checks/_view_provider.py",
-    "execute_tools/health_checks/_plugin_binding.py",
-    "execute_tools/health_checks/_composition.py",
+    "src/execute_tools/health_checks/runner.py",
+    "src/execute_tools/health_checks/_view_provider.py",
+    "src/execute_tools/health_checks/_plugin_binding.py",
+    "src/execute_tools/health_checks/_composition.py",
 )
 
-DEFINITION_MODULE = "execute_tools/health_checks/standard_views.py"
-EXPORT_MODULE = "execute_tools/health_checks/__init__.py"
+DEFINITION_MODULE = "src/execute_tools/health_checks/standard_views.py"
+EXPORT_MODULE = "src/execute_tools/health_checks/__init__.py"
 
 
 def _git_grep(pattern: str) -> list[str]:
@@ -361,10 +369,10 @@ class TestEngineOpacity:
 #: stays out of this set permanently (TestEngineOpacity).
 CONSUMER_MODULES = frozenset(
     {
-        "execute_tools/health_checks/_categorical_validity.py",
-        "execute_tools/health_checks/categorical_distinct_symbols.py",
-        "execute_tools/health_checks/categorical_dominant_fraction.py",
-        "execute_tools/health_checks/sample_dispersion_floor.py",
+        "src/execute_tools/health_checks/_categorical_validity.py",
+        "src/execute_tools/health_checks/categorical_distinct_symbols.py",
+        "src/execute_tools/health_checks/categorical_dominant_fraction.py",
+        "src/execute_tools/health_checks/sample_dispersion_floor.py",
     }
 )
 

@@ -40,9 +40,9 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 #: mechanism that stops the sentinel escaping. A NEW site is a new place the
 #: sentinel can leak, so the set is pinned rather than counted.
 SANCTIONED_ZERO_SENTINEL_SITES = {
-    "nodes/ml_hyperparameter_tune_agent/planning.py",
-    "nodes/ml_hyperparameter_tune_agent/runtime.py",
-    "core/runtime_control/bootstrap.py",
+    "src/nodes/ml_hyperparameter_tune_agent/planning.py",
+    "src/nodes/ml_hyperparameter_tune_agent/runtime.py",
+    "src/core/runtime_control/bootstrap.py",
 }
 
 
@@ -126,7 +126,7 @@ class TestTheProbeSitesAreUnreachableForAnUndeclaredModel:
         on this host and prove nothing. What matters is that the refusal
         precedes the construction, which is a property of the source.
         """
-        src = (REPO_ROOT / "core" / "runtime_control" / "probe_production.py").read_text(
+        src = (REPO_ROOT / "src/core" / "runtime_control" / "probe_production.py").read_text(
             encoding="utf-8"
         )
         guard = src.index("if config_cls is None:")
@@ -172,7 +172,7 @@ class TestPlanningConvertsTheSentinelAway:
             ``or None`` disappears from the resolution and the assertion names
             the line.
         """
-        src = (REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "planning.py").read_text(
+        src = (REPO_ROOT / "src/nodes" / "ml_hyperparameter_tune_agent" / "planning.py").read_text(
             encoding="utf-8"
         )
         tree = ast.parse(src)

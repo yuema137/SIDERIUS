@@ -49,6 +49,20 @@ installs) and **CUDA GPUs only** for real training. The broader accelerator
 matrix (CPU-only training, ROCm, MPS) is tracked in issue #291 — that issue,
 not this page, owns the deeper answer.
 
+### Installed packages and checkout resources
+
+The frozen sync installs the eight framework packages editably from `src/`.
+Import names are unchanged (`core`, `agent`, `nodes`, `workflows`,
+`execute_tools`, `ml_models`, `dashboard`, `tools`); do not prepend `src` or
+inject source paths through `PYTHONPATH`.
+
+A wheel contains these packages and their adjacent runtime resources. It does
+not contain root launch scripts, examples, policy YAML or machine configuration.
+Library consumers supply explicit external task/config/data/workspace inputs;
+the checkout remains necessary for the documented chain launcher. Installed
+synthetic CPU execution is qualified separately from real scientific tasks or
+accelerator support. See [source ownership and the installation witness](../../src/README.md).
+
 ## Machine-local configuration
 
 Declare the physical dataset root with `--data_dir` and the run-output root

@@ -55,8 +55,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 #: The proposer's own modules — the surface parent §11.2 talks about.
 PROPOSER_MODULES: tuple[str, ...] = (
-    "nodes/ml_model_proposal_agent/ml_model_proposal_agent.py",
-    "nodes/proposal_helpers.py",
+    "src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py",
+    "src/nodes/proposal_helpers.py",
 )
 
 #: Names that, when subscripted or ``.get()``-ed, ARE a raw read of the
@@ -82,8 +82,8 @@ RAW_INTERPRETATION_NAMES = frozenset({"interp", "interpretation"})
 #: bypass has no input to read — but a future field could reintroduce one, and
 #: the census is what would notice.
 EXPECTED_RAW_READS: dict[str, int] = {
-    "nodes/ml_model_proposal_agent/ml_model_proposal_agent.py": 0,
-    "nodes/proposal_helpers.py": 0,
+    "src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py": 0,
+    "src/nodes/proposal_helpers.py": 0,
 }
 
 
@@ -187,7 +187,7 @@ class TestTheRawReaderInventory:
         Planted into the REAL module source rather than a toy snippet, so the
         proof is about this file's scanner running over this repository's code.
         """
-        source = _read_module("nodes/proposal_helpers.py")
+        source = _read_module("src/nodes/proposal_helpers.py")
         baseline = len(raw_interpretation_reads(source))
         assert baseline == 0, "the module is expected to be clean before planting"
         planted_count = len(
@@ -206,7 +206,7 @@ class TestTheRawReaderInventory:
         objects. A census that counted them would be noise nobody keeps
         green, and would hide a real read inside a large number.
         """
-        source = _read_module("nodes/proposal_helpers.py")
+        source = _read_module("src/nodes/proposal_helpers.py")
         baseline = len(raw_interpretation_reads(source))
         noise = (
             "\n\ndef _noise(accumulated, entry, interp_summary):\n"

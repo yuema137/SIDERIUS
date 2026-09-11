@@ -389,9 +389,9 @@ def test_the_record_cross_check_still_rejects_a_genuinely_different_series(tmp_p
 #: * ``opaque``    — the list is passed through (json/dict copy/len) and no
 #:                   element is ever indexed or arithmetic-ed.
 _ELEMENT_READERS: dict[str, str] = {
-    "agent/schemas/training_diagnosis.py::_all_finite": "refuses",
-    "agent/schemas/hyperparam_tuning.py::_same_score": "none_safe",
-    "execute_tools/training_history.py::_same_float": "none_safe",
+    "src/agent/schemas/training_diagnosis.py::_all_finite": "refuses",
+    "src/agent/schemas/hyperparam_tuning.py::_same_score": "none_safe",
+    "src/execute_tools/training_history.py::_same_float": "none_safe",
 }
 
 
@@ -412,9 +412,9 @@ def test_the_only_element_level_readers_are_none_aware():
     from execute_tools.training_history import _same_float
 
     assert set(_ELEMENT_READERS) == {
-        "agent/schemas/training_diagnosis.py::_all_finite",
-        "agent/schemas/hyperparam_tuning.py::_same_score",
-        "execute_tools/training_history.py::_same_float",
+        "src/agent/schemas/training_diagnosis.py::_all_finite",
+        "src/agent/schemas/hyperparam_tuning.py::_same_score",
+        "src/execute_tools/training_history.py::_same_float",
     }
 
     # refuses — judged as the non-finite value it stands for, never skipped.
@@ -457,13 +457,20 @@ def test_no_production_module_averages_or_sums_the_objective_series():
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[3]
-    assert (repo_root / "execute_tools" / "training_history.py").is_file(), (
+    assert (repo_root / "src/execute_tools" / "training_history.py").is_file(), (
         f"census anchored at the wrong root: {repo_root}"
     )
 
     # The FILE SET is the whole production tree; a census that names only the
     # files it expects to be clean cannot fail (F-12bc-9).
-    production_dirs = ("agent", "core", "execute_tools", "nodes", "scripts", "workflows")
+    production_dirs = (
+        "src/agent",
+        "src/core",
+        "src/execute_tools",
+        "src/nodes",
+        "scripts",
+        "src/workflows",
+    )
     reducers = {"mean", "sum", "min", "max", "median", "average", "nanmean", "fsum", "sorted"}
     fields = {"loss_history", "train_objective", "validation_objective"}
     # No exemption list, deliberately. The census is green with ZERO

@@ -44,8 +44,8 @@ from core.sandbox_executor import (
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-SANDBOX = REPO_ROOT / "core" / "sandbox_executor.py"
-TRAINER = REPO_ROOT / "execute_tools" / "train_engine_sandbox.py"
+SANDBOX = REPO_ROOT / "src/core" / "sandbox_executor.py"
+TRAINER = REPO_ROOT / "src/execute_tools" / "train_engine_sandbox.py"
 
 
 # ----------------------------------------------------------------------
@@ -84,7 +84,7 @@ class TestParentAndChildDeriveTheSamePaths:
         up until one of them changed.
         """
         offenders: list[str] = []
-        for root in ("core", "execute_tools", "agent", "nodes", "workflows"):
+        for root in ("src/core", "src/execute_tools", "src/agent", "src/nodes", "src/workflows"):
             for path in sorted((REPO_ROOT / root).rglob("*.py")):
                 tree = ast.parse(path.read_text(encoding="utf-8"))
                 for node in ast.walk(tree):
@@ -100,7 +100,7 @@ class TestParentAndChildDeriveTheSamePaths:
                             SANDBOX_SUBDIR_RECORDS,
                         }:
                             rel = path.relative_to(REPO_ROOT)
-                            if rel.as_posix() == "core/sandbox_executor.py":
+                            if rel.as_posix() == "src/core/sandbox_executor.py":
                                 continue  # the declaration itself
                             offenders.append(f"{rel}:{node.lineno} ({arg.value})")
         assert offenders == [], (
@@ -121,8 +121,8 @@ class TestParentAndChildDeriveTheSamePaths:
 
 
 class TestScriptPathsAreAnchored:
-    def test_the_root_is_the_repository(self):
-        assert pathlib.Path(SIDERIUS_ROOT) == REPO_ROOT
+    def test_the_root_is_the_installed_package_location(self):
+        assert pathlib.Path(SIDERIUS_ROOT) == REPO_ROOT / "src"
 
     @pytest.mark.parametrize(
         "script",

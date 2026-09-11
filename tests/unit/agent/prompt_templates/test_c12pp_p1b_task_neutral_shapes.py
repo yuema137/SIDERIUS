@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-TEMPLATE = REPO_ROOT / "agent" / "prompt_templates" / "proposal" / "proposing_stage.md"
+TEMPLATE = REPO_ROOT / "src/agent" / "prompt_templates" / "proposal" / "proposing_stage.md"
 
 #: The generic vocabulary that must SURVIVE. Removing the examples must not
 #: remove the concept.

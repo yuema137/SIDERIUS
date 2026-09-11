@@ -139,7 +139,7 @@ class TestBothBlockedConsumersReadTheTransportedValue:
         HOW IT FAILS WHEN THE BEHAVIOUR REGRESSES
             The read disappears from runtime.py and the assertion says so.
         """
-        src = (REPO_ROOT / "nodes/ml_hyperparameter_tune_agent/runtime.py").read_text(
+        src = (REPO_ROOT / "src/nodes/ml_hyperparameter_tune_agent/runtime.py").read_text(
             encoding="utf-8"
         )
         assert 'getattr(agent_input, "data_dir", None)' in src, (
@@ -160,7 +160,7 @@ class TestBothBlockedConsumersReadTheTransportedValue:
             The threading disappears from execution.py and the assertion
             names it.
         """
-        src = (REPO_ROOT / "nodes/ml_hyperparameter_tune_agent/execution.py").read_text(
+        src = (REPO_ROOT / "src/nodes/ml_hyperparameter_tune_agent/execution.py").read_text(
             encoding="utf-8"
         )
         assert "data_dir=time_data_dir" in src, (

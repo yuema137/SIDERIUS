@@ -41,7 +41,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-HEALTH_CORE = REPO_ROOT / "execute_tools" / "health_checks"
+HEALTH_CORE = REPO_ROOT / "src/execute_tools" / "health_checks"
 
 #: TIDMAD-family surfaces, excluded from the GENERIC census BY LISTED NAME.
 #: The six check modules + the peek/regime-A readers own TIDMAD's science

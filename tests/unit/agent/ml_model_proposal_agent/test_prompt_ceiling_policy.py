@@ -35,7 +35,7 @@ from tests.unit.agent.ml_model_proposal_agent._health_feedback_fixtures import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-TEMPLATE_DIR = REPO_ROOT / "agent" / "prompt_templates" / "proposal"
+TEMPLATE_DIR = REPO_ROOT / "src/agent" / "prompt_templates" / "proposal"
 
 # The retired mandate, in every observed phrasing.
 _MANDATE_PATTERNS = [

@@ -33,6 +33,8 @@ from tools.ci_selection import manifest as mf
 from tools.ci_selection.__main__ import parse_name_status_z
 from tools.ci_selection.resolver import (
     REPO_ROOT,
+    _module_name,
+    _resolved_import_paths,
     _tracked_repository_files,
     build_edges,
     build_source_edges,
@@ -42,23 +44,58 @@ from tools.ci_selection.resolver import (
 )
 
 
+def test_src_is_a_physical_prefix_for_modules_and_namespace_packages():
+    """Catch lost relative/submodule edges after src becomes the physical root."""
+    import ast
+
+    known = {
+        "src/core/layout.py",
+        "src/agent/__init__.py",
+        "src/agent/schemas/proposal.py",
+    }
+    assert _module_name(REPO_ROOT / "src/core/layout.py") == "core.layout"
+    tree = ast.parse("from . import layout\nfrom agent.schemas import proposal")
+    assert _resolved_import_paths(tree, "core.consumer", known) == known - {"src/agent/__init__.py"}
+    assert _resolved_import_paths(ast.parse("import agent"), "core.consumer", known) == {
+        "src/agent/__init__.py"
+    }
+
+
+def test_moved_asset_and_rename_retain_their_consumers():
+    """Catch lost presentation coverage or a rename blessing an unknown old side."""
+    asset = "src/dash" + "board/static/app.js"
+    result = select([asset])
+    assert (
+        "tests/unit/execute_tools/test_step12_pr12e_presentation_ordering_census.py"
+        in result.modules
+    )
+    renamed = parse_name_status_z(
+        b"R100\0core/inference_defaults.py\0src/core/inference_defaults.py\0"
+    )
+    result = select(renamed)
+    assert result.full_suite, result.describe()
+    from tools.ci.selection import resolve_selection
+
+    assert resolve_selection(REPO_ROOT, renamed).files
+
+
 class TestTheModelIsFailClosed:
     """The one property that makes an unadopted selector safe to keep."""
 
     def test_an_unmapped_production_path_runs_everything(self):
         """The default must be "run everything", never "run nothing"."""
-        result = select(["core/some_module_that_does_not_exist.py"])
+        result = select(["src/core/some_module_that_does_not_exist.py"])
         assert result.full_suite is True
 
     def test_a_declared_hub_runs_everything(self):
         """Selecting 59% of the suite carries all the risk and little of the
         benefit, so hubs say so instead of pretending."""
-        assert select(["agent/schemas/hyperparam_tuning.py"]).full_suite is True
+        assert select(["src/agent/schemas/hyperparam_tuning.py"]).full_suite is True
 
     def test_changing_the_selector_itself_runs_everything(self):
         """A broken selector can select nothing and report green. This is the
         one rule that must be hard-coded rather than derived."""
-        assert select(["tools/ci_selection/resolver.py"]).full_suite is True
+        assert select(["src/tools/ci_selection/resolver.py"]).full_suite is True
         assert select(["tests/unit/tools/ci_selection/test_selection_model.py"]).full_suite is True
 
     def test_the_root_conftests_run_everything(self):
@@ -69,8 +106,8 @@ class TestTheModelIsFailClosed:
     def test_no_non_empty_diff_ever_selects_nothing(self):
         """The failure mode worse than having no selector at all."""
         for diff in (
-            ["execute_tools/probe_batch.py"],
-            ["ml_models/loss_models_sandbox.py"],
+            ["src/execute_tools/probe_batch.py"],
+            ["src/ml_models/loss_models_sandbox.py"],
             ["sdsc_submission_scripts/run_chain.sh"],
             ["docs/gates/gate_testing_standard.md"],
         ):
@@ -101,7 +138,7 @@ class TestTheModelIsFailClosed:
         its AREA has an owning suite — noise is what gets a selector switched
         off."""
         # Concatenated for the same reason as the doc case above.
-        result = select(["dash" + "board/main.py"])
+        result = select(["src/dash" + "board/main.py"])
         assert not result.full_suite, "an area-owned module triggered the full suite"
         assert any(m.startswith("tests/unit/dash" + "board/") for m in result.modules)
 
@@ -151,7 +188,7 @@ class TestTheModelIsFailClosed:
         Fails as: the selector returns a narrow document set when the same PR
         changes a shared schema hub.
         """
-        result = select(["README.md", "agent/schemas/hyperparam_tuning.py"])
+        result = select(["README.md", "src/agent/schemas/hyperparam_tuning.py"])
         assert result.full_suite, result.describe()
 
 
@@ -205,7 +242,7 @@ class TestAffectedCallerCoverage:
         Fails as: the declaration adds only `tests/helpers/tuner_source.py`,
         expansion drops that helper, and its importing tests never run.
         """
-        result = select(["nodes/ml_hyperparameter_tune_agent/policy.py"])
+        result = select(["src/nodes/ml_hyperparameter_tune_agent/policy.py"])
         assert not result.full_suite
         assert "tests/unit/core/test_admission.py" in result.modules
         assert (
@@ -219,7 +256,7 @@ class TestAffectedCallerCoverage:
         Fails as: changing a directly imported core module omits an unrelated
         core test that may consume it through dynamic test infrastructure.
         """
-        result = select(["core/sandbox_executor.py"])
+        result = select(["src/core/sandbox_executor.py"])
         assert not result.full_suite
         assert "tests/unit/core/test_calibration_quarantine.py" in result.modules
 
@@ -229,7 +266,7 @@ class TestAffectedCallerCoverage:
         Fails as: a source-import hop is removed from the production graph and
         the named agent regression disappears from selection.
         """
-        changed = "core/inference_defaults.py"
+        changed = "src/core/inference_defaults.py"
         result = select([changed])
         assert not result.full_suite
         assert (
@@ -310,23 +347,23 @@ def test_every_manifest_path_still_resolves() -> None:
 #: filename heuristic maps it to the wrong owner.
 SELECTION_ORACLE: tuple[tuple[str, str], ...] = (
     (
-        "nodes/ml_hyperparameter_tune_agent/policy.py",
+        "src/nodes/ml_hyperparameter_tune_agent/policy.py",
         "tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c2_order_consumers.py",
     ),
     (
-        "execute_tools/metric_order.py",
+        "src/execute_tools/metric_order.py",
         "tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c2_order_consumers.py",
     ),
     (
-        "core/sandbox_executor.py",
+        "src/core/sandbox_executor.py",
         "tests/unit/core/test_watchdog.py",
     ),
     (
-        "ml_models/loss_models_sandbox.py",
+        "src/ml_models/loss_models_sandbox.py",
         "tests/unit/ml_models/test_loss_functions.py",
     ),
     (
-        "execute_tools/train_engine_sandbox.py",
+        "src/execute_tools/train_engine_sandbox.py",
         "tests/unit/execute_tools/test_pr07c_validation_persistence_timing.py",
     ),
 )
@@ -355,7 +392,7 @@ def test_gate_requirements_are_advisory_and_never_executed() -> None:
     """CI must never trigger a Gate: they cost money and need operator approval
     (`docs/gates/gate_testing_standard.md`). This function returns strings for a
     human to read, and nothing more."""
-    gates = gates_required(["core/runtime_control/session.py"])
+    gates = gates_required(["src/core/runtime_control/session.py"])
     assert gates == ("gate2",)
     assert all(isinstance(g, str) for g in gates)
     # The manifest must not be able to LAUNCH anything -- checked against code,

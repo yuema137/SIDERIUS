@@ -370,7 +370,7 @@ validate.
   operator-approved case-by-case only.
 - **Node/skill doc sync before merge (operator rule, 2026-07-28)**:
   every PR that updates a node or a skill must update the relevant
-  `.md` (the node's `nodes/{node}/{node}.md`, the skill's doc, and any
+  `.md` (the node's `src/nodes/{node}/{node}.md`, the skill's doc, and any
   operator-surface doc such as `docs/reference/entrypoints.md` or
   `docs/guides/operating-a-run.md`) so CLI
   arguments, default values, and behavior explanations stay current —
@@ -499,8 +499,8 @@ complete.
 | Step | Artefact | Location |
 |------|----------|----------|
 | 0 | **Graph placement** — decide which existing nodes feed into this node (upstream) and which nodes consume its output (downstream). Draw or write out the directed edges explicitly: `A → new_node → B`. Confirm the input schema can be fully populated from the upstream node's output schema, and that the output schema covers everything the downstream node needs. No file is generated at this step. | (design only) |
-| 1 | Node implementation | `nodes/{node_name}/{node_name}.py` (one directory per node) |
-| 2 | Protocol(s) for each edge this node participates in | `agent/schemas/protocols/{source}_to_{target}.py` |
+| 1 | Node implementation | `src/nodes/{node_name}/{node_name}.py` (one directory per node) |
+| 2 | Protocol(s) for each edge this node participates in | `src/agent/schemas/protocols/{source}_to_{target}.py` |
 | 3 | Node unit tests (mocked LLM) | `tests/unit/agent/{node_name}/test_{node_name}.py` |
 | 4 | Protocol unit tests | `tests/unit/agent/protocols/test_{source}_to_{target}.py` |
 | 5 | Node integration test (real API, Tier 1) | `tests/integration/nodes/test_{node_name}.py` |
@@ -590,10 +590,10 @@ Orchestrator  (LLM-powered, goal-driven, selects skills autonomously)
   as sub-skills), apply protocols, and iterate until the goal is met. This is
   the long-term target.
 
-**Current naming convention**: `agent/skills/` holds atomic tools (training,
+**Current naming convention**: `src/agent/skills/` holds atomic tools (training,
 inference, etc.) used internally by agents. The earlier `agent/tools/` rename
 was a proposal, not a landed path or a current instruction. P0 preserves
-`agent/skills/`; see `docs/architecture.md` for the conceptual design.
+`src/agent/skills/`; see `docs/architecture.md` for the conceptual design.
 
 ## HealthGate System (Pluggable Health Checks)
 
@@ -620,7 +620,7 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   EFFECTIVE config to `{workspace}/health_checks_effective.yaml` (sha256
   pinned by the run-invariants lock) and every path-based loader reads
   that file — never override the config in memory.
-- **Skills**: `execute_tools/health_checks/` — each check is a
+- **Skills**: `src/execute_tools/health_checks/` — each check is a
   `HealthCheckSkill` conforming to
   `run(ctx, config, *, view=None) -> HealthCheckResult`. A check that does
   not require a view is invoked as `run(ctx, config)` exactly as before;
@@ -637,7 +637,7 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   either now refuses at validation. Gate actions classify the round;
   they carry no loop control.)
 - **Firing point**: gates fire at **tuner round boundaries** in
-  `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`, NOT
+  `src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`, NOT
   inside `score_vector`.
 - **Design doc**: `docs/design/pluggable_health_checks.md`.
 
@@ -651,7 +651,7 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   `.get(default)` (these keys are no longer produced by score_vector, though
   `StubSandbox` still injects them for pseudo-mode compatibility).
 - **Production scoring goes THROUGH the evaluation-metric handle (Step 06,
-  2026-08)** — `execute_tools/evaluation_metric.py`. The tuner binds
+  2026-08)** — `src/execute_tools/evaluation_metric.py`. The tuner binds
   `run_metric` once at run scope and calls
   `TidmadSandbox.evaluate_metric(run_metric, …)`; the scoring subprocess
   (`denoising_score_single.py`) reconstructs the same TIDMAD instance from
@@ -668,22 +668,22 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   Records carry the additive `metric_result` / `metric_refusal`; the frozen
   `denoising_score` / `file_vector` / `score_table` names are unchanged (D1).
 - **RLIMIT_AS for inference subprocess = 60 GiB**
-  (`core/sandbox_executor.py:_ROLE_DEFAULT_RSS_GB["inference"] = 60`).
+  (`src/core/sandbox_executor.py:_ROLE_DEFAULT_RSS_GB["inference"] = 60`).
   Training uses 40 GiB, scoring uses 24 GiB. The inference bump (commit
   `4acb5b5`) is required for full-scope baseline inference on RTX 5090 — CUDA
   static VA is ~18-20 GiB, plus ~7.4 GiB numpy peak per-file (four ~1.86 GiB
   int8 arrays — the `np.zeros((dim1, input_size), dtype=_storage_dtype)`
-  `denoised`/`injected` pairs in `execute_tools/inference_single.py`), plus
+  `denoised`/`injected` pairs in `src/execute_tools/inference_single.py`), plus
   the transient `.flatten().astype(int8)` copies `create_abra_file` emits,
   plus caching-allocator
   overhead. Do not lower this back to 40 without re-verifying full-scope
   baseline inference passes.
-- **Focal loss implementation** (`ml_models/loss_models_sandbox.py`, class
+- **Focal loss implementation** (`src/ml_models/loss_models_sandbox.py`, class
   `FocalLoss1D`)
   is line-for-line identical to TIDMAD's `network.py:FocalLoss1D`. If you
   change the loss math, verify against the paper implementation first.
 - **DataScope (partial-file runs) is enforced in layers — never by prompts.**
-  `DataScope` (`execute_tools/dataset_config.py`) restricts a run to a file
+  `DataScope` (`src/execute_tools/dataset_config.py`) restricts a run to a file
   subset (`--data_scope 4-9` or `4,5,6,7,8,9`). Enforcement: constructive
   (`build_sample_set(scope=)`), boundary (`validate_sample_set` at the
   sandbox before ALL file I/O — train/inference/`score_vector`; violations
@@ -693,7 +693,7 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   startup; LLM plans are normalized with recorded provenance. **Aggregate
   scalars are only comparable within one scope** — the resolved scope +
   `health_gate_enabled` + effective-config sha256 are pinned per workspace
-  by `{workspace}/run_invariants_lock.json` (`core/run_invariants.py`);
+  by `{workspace}/run_invariants_lock.json` (`src/core/run_invariants.py`);
   mismatched resumes/seeds/reuse fail at startup. Default (no scope) is
   behaviorally identical to pre-feature runs. See
   `docs/design/enable_partial_file_list.md`.

@@ -200,7 +200,7 @@ class TestTheSandboxAndGateAcceptIt:
         """Two sources would otherwise be able to disagree. The typed one
         wins; the duck-typed reads remain only as the pre-B-G3 path and
         the validation harness's seam."""
-        src = Path(REPO_ROOT / "core" / "sandbox_executor.py").read_text()
+        src = Path(REPO_ROOT / "src/core" / "sandbox_executor.py").read_text()
         gate = src[src.index("def _admission_refusal") : src.index("def _has_host_memory_evidence")]
         assert "policy.mode if policy is not None" in gate
         assert "admission_policy" in gate
@@ -208,7 +208,7 @@ class TestTheSandboxAndGateAcceptIt:
     def test_the_gate_passes_the_configured_ceiling(self):
         """It accepted `ceiling_gib` but the call site omitted it, so the
         ceiling reached the gate only through os.environ."""
-        src = Path(REPO_ROOT / "core" / "sandbox_executor.py").read_text()
+        src = Path(REPO_ROOT / "src/core" / "sandbox_executor.py").read_text()
         gate = src[src.index("def _admission_refusal") : src.index("def _has_host_memory_evidence")]
         assert "ceiling_gib=ceiling_gib" in gate
 
@@ -269,7 +269,7 @@ class TestReachabilityGuardrails:
     def test_the_validation_sandbox_is_not_the_production_mechanism(self):
         """`_ValidationSandbox` may never become the configuration
         channel (§4d.3d)."""
-        prod = Path(REPO_ROOT / "core" / "sandbox_executor.py").read_text()
+        prod = Path(REPO_ROOT / "src/core" / "sandbox_executor.py").read_text()
         tuner = tuner_node_source()
         assert "_ValidationSandbox" not in prod
         assert "_ValidationSandbox" not in tuner
@@ -288,7 +288,7 @@ class TestReachabilityGuardrails:
                 "tuner -> sandbox",
             ),
             (
-                Path(REPO_ROOT / "core" / "sandbox_executor.py").read_text(),
+                Path(REPO_ROOT / "src/core" / "sandbox_executor.py").read_text(),
                 "admission_policy",
                 "sandbox -> gate",
             ),
@@ -305,7 +305,7 @@ class TestReachabilityGuardrails:
 
     def test_the_compatibility_ceiling_default_is_unchanged(self):
         """B-G3 wires the ceiling; it does not move it."""
-        src = Path(REPO_ROOT / "core" / "runtime_control" / "pair_admission.py").read_text()
+        src = Path(REPO_ROOT / "src/core" / "runtime_control" / "pair_admission.py").read_text()
         assert re.search(r"DEFAULT_PAIR_CEILING_GIB\s*=\s*28\.0", src)
 
 
@@ -360,7 +360,9 @@ class TestTheProtocolHopIsNotSkipped:
     every launcher-side test still passes.
     """
 
-    PROTOCOL = REPO_ROOT / "agent" / "schemas" / "protocols" / "ml_model_valid_to_ml_model_tune.py"
+    PROTOCOL = (
+        REPO_ROOT / "src/agent" / "schemas" / "protocols" / "ml_model_valid_to_ml_model_tune.py"
+    )
 
     @pytest.mark.parametrize("field", ["gpu_admission_measurement_source", "gpu_pair_ceiling_gib"])
     def test_the_protocol_accepts_and_maps_the_field(self, field):
@@ -376,7 +378,7 @@ class TestTheProtocolHopIsNotSkipped:
     def test_run_workflow_accepts_and_forwards_the_field(self, field):
         # Step 09.5a C3: these are transit configuration, so the workflow
         # forwards them as `field=launch.field`. Same forwarding invariant.
-        src = code_only(REPO_ROOT / "workflows" / "model_exploration.py")
+        src = code_only(REPO_ROOT / "src/workflows" / "model_exploration.py")
         assert f"{field}=launch.{field}" in src or f"{field}={field}" in src
 
     def test_no_field_is_declared_on_the_schema_without_reaching_the_protocol(self):

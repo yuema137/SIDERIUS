@@ -5,7 +5,7 @@
 > `cfc978e7e0021a03b8deb88b8e04deba4c6fbe2d`. Its task-specific modes,
 > commands, paths, and examples describe an earlier SIDERIUS revision and must
 > not be used as current operating instructions. Use the
-> [current tuner node contract](../../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md)
+> [current tuner node contract](../../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md)
 > instead.
 
 # ml_hyperparameter_tune_agent — Node Documentation

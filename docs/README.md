@@ -51,7 +51,7 @@ A progressive path. Each level assumes the one before it.
 - [Architecture](architecture.md) — the graph, node contract, protocols, skills,
   testing strategy
 - [`CLAUDE.md`](../CLAUDE.md) — binding coding standards and subsystem invariants
-- [`nodes/NODE_TEMPLATE.md`](../nodes/NODE_TEMPLATE.md) — the eight-step contract
+- [`nodes/NODE_TEMPLATE.md`](../src/nodes/NODE_TEMPLATE.md) — the eight-step contract
   for adding a node
 - [Gate testing standard](gates/gate_testing_standard.md) — Gate 1 / Gate 2
   commands and pass criteria
@@ -68,21 +68,21 @@ Mechanism references, by semantic owner:
 
 Module maps (directory-level contracts, one
 [template](agent-reference/MODULE_README_TEMPLATE.md)):
-[`workflows/`](../workflows/README.md) · [`core/`](../core/README.md) ·
-[`execute_tools/`](../execute_tools/README.md) ·
-[`execute_tools/health_checks/`](../execute_tools/health_checks/README.md) ·
-[`ml_models/`](../ml_models/README.md) ·
-[`agent/schemas/`](../agent/schemas/README.md).
+[`workflows/`](../src/workflows/README.md) · [`core/`](../src/core/README.md) ·
+[`execute_tools/`](../src/execute_tools/README.md) ·
+[`execute_tools/health_checks/`](../src/execute_tools/health_checks/README.md) ·
+[`ml_models/`](../src/ml_models/README.md) ·
+[`agent/schemas/`](../src/agent/schemas/README.md).
 Point-in-time UX audit:
 [dashboard first-run UX](agent-reference/dashboard_ux_audit.md).
 
 Node contracts:
-[interpreter](../nodes/result_interpretation_agent/result_interpretation_agent.md) ·
-[literature review](../nodes/ml_literature_review/ml_literature_review.md) ·
-[proposer](../nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) ·
-[implementor](../nodes/ml_model_implementor/ml_model_implementor.md) ·
-[validator](../nodes/ml_code_validator_agent/ml_code_validator_agent.md) ·
-[tuner](../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md)
+[interpreter](../src/nodes/result_interpretation_agent/result_interpretation_agent.md) ·
+[literature review](../src/nodes/ml_literature_review/ml_literature_review.md) ·
+[proposer](../src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) ·
+[implementor](../src/nodes/ml_model_implementor/ml_model_implementor.md) ·
+[validator](../src/nodes/ml_code_validator_agent/ml_code_validator_agent.md) ·
+[tuner](../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md)
 
 ## Framework examples
 
@@ -111,7 +111,7 @@ landed — read the status markers.
 | [`docs/development/claude_context_continuity.md`](development/claude_context_continuity.md) | how a coding session survives context compaction |
 | [`docs/testing/schema_tier_consolidation.md`](testing/schema_tier_consolidation.md) | evidence record for a schema-test consolidation |
 | [`tests/pseudo_data/README.md`](../tests/pseudo_data/README.md) | pseudo-mode fixtures for dual-mode tests |
-| [`dashboard/README.md`](../dashboard/README.md) | the result browser |
+| [`dashboard/README.md`](../src/dashboard/README.md) | the result browser |
 | [Human advice guide](guides/advice.md) | human advice JSON schema and injection points |
 | [`sdsc_submission_scripts/README.md`](../sdsc_submission_scripts/README.md) | chain launcher internals |
 | [`reports/`](../reports/) | frozen point-in-time run reports |

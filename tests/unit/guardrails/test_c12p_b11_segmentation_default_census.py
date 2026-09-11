@@ -114,15 +114,15 @@ _FIELD = "segmentation_size"
 #: fallbacks), and excluding a root because "nothing should be there" is the
 #: exact shape of F-12bc-9.
 _PRODUCTION_ROOTS = (
-    "nodes",
-    "core",
-    "agent",
-    "execute_tools",
-    "ml_models",
-    "workflows",
+    "src/nodes",
+    "src/core",
+    "src/agent",
+    "src/execute_tools",
+    "src/ml_models",
+    "src/workflows",
     "scripts",
-    "tools",
-    "dashboard",
+    "src/tools",
+    "src/dashboard",
 )
 
 #: The directories every offender this census has EVER confirmed lives in --
@@ -131,10 +131,10 @@ _PRODUCTION_ROOTS = (
 #: census; narrowing this tuple to "where the offenders are today" is exactly
 #: the F-12bc-9 shape, because a returning literal would then be invisible.
 _REQUIRED_COVERAGE = (
-    "nodes",
-    "core/runtime_control",
-    "agent/skills",
-    "agent/schemas",
+    "src/nodes",
+    "src/core/runtime_control",
+    "src/agent/skills",
+    "src/agent/schemas",
 )
 
 #: repo-relative path -> exact number of authored literals allowed there, with
@@ -306,8 +306,12 @@ class TestTheFileSetCoversWhereTheDefectLives:
         HOW IT FAILS: a renamed or removed directory leaves its name in
         ``_PRODUCTION_ROOTS`` and this test names it.
         """
-        walked = {p.relative_to(_REPO_ROOT).parts[0] for p in _iter_production_files()}
-        missing = [r for r in _PRODUCTION_ROOTS if r not in walked]
+        walked = tuple(_iter_production_files())
+        missing = [
+            r
+            for r in _PRODUCTION_ROOTS
+            if not any(p.is_relative_to(_REPO_ROOT / r) for p in walked)
+        ]
         assert missing == [], f"declared production roots walked no files: {missing}"
 
     def test_the_required_directories_are_covered(self):

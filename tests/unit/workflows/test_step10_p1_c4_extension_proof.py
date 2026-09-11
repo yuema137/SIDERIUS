@@ -41,14 +41,14 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 #: The repository's own production directory set (parent §3.8's definition).
 PRODUCTION_DIRS = (
-    "nodes",
-    "agent",
-    "core",
-    "execute_tools",
-    "ml_models",
-    "workflows",
+    "src/nodes",
+    "src/agent",
+    "src/core",
+    "src/execute_tools",
+    "src/ml_models",
+    "src/workflows",
     "scripts",
-    "dashboard",
+    "src/dashboard",
     "sdsc_submission_scripts",
 )
 
@@ -59,9 +59,9 @@ TASK_NAMES = ("tidmad", "pets", "davis", "oxford_iiit_pet", "spectro_segmentatio
 #: behavioural position — they are the ones a future task-specific special
 #: case would most naturally be added to.
 P1_OWNED_SURFACE = (
-    "workflows/task_composition.py",
-    "workflows/run_bindings.py",
-    "workflows/task_config.py",
+    "src/workflows/task_composition.py",
+    "src/workflows/run_bindings.py",
+    "src/workflows/task_config.py",
 )
 
 
@@ -126,7 +126,7 @@ class TestNoTaskIdentityDispatchInProduction:
         inside the Pets implementation.
         """
         allowed = {
-            "execute_tools/evaluation_metric.py",
+            "src/execute_tools/evaluation_metric.py",
         }
         offenders: dict[str, list[tuple[int, str]]] = {}
         for path in _production_py_files():
@@ -199,10 +199,10 @@ class TestTheFourthTaskIsUnknownToTheFramework:
         path — Step 08's sentence, which P1 must be able to repeat.
         """
         for rel in (
-            "execute_tools/task_data_path.py",
-            "execute_tools/health_checks/__init__.py",
-            "execute_tools/evaluation_metric.py",
-            "workflows/task_composition.py",
+            "src/execute_tools/task_data_path.py",
+            "src/execute_tools/health_checks/__init__.py",
+            "src/execute_tools/evaluation_metric.py",
+            "src/workflows/task_composition.py",
         ):
             text = (REPO_ROOT / rel).read_text(encoding="utf-8")
             assert "spectro" not in text.lower(), f"{rel} names the fourth task"
@@ -220,7 +220,7 @@ class TestTheFourthTaskIsUnknownToTheFramework:
         assert composition.task_data_path_id in registered_task_data_path_ids()
         # ...and the framework's own registry module still contains no list
         # of known tasks — the ids in it are whatever registered themselves.
-        registry_source = (REPO_ROOT / "execute_tools" / "task_data_path.py").read_text(
+        registry_source = (REPO_ROOT / "src/execute_tools" / "task_data_path.py").read_text(
             encoding="utf-8"
         )
         assert "spectro_segmentation_v0" not in registry_source
@@ -249,9 +249,9 @@ class TestP1OwnedSurfacesCarryNoAmbientTaskAuthority:
         """
         surfaces = (
             *P1_OWNED_SURFACE,
-            "workflows/model_exploration.py",
+            "src/workflows/model_exploration.py",
             "sdsc_submission_scripts/run_one_iteration.py",
-            "core/resume.py",
+            "src/core/resume.py",
         )
         offenders: dict[str, list[str]] = {}
         for rel in surfaces:

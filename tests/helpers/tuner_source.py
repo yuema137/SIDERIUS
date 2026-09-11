@@ -29,7 +29,7 @@ import ast
 from pathlib import Path
 
 #: The node's package directory.
-TUNER_PACKAGE = Path(__file__).resolve().parents[2] / "nodes" / "ml_hyperparameter_tune_agent"
+TUNER_PACKAGE = Path(__file__).resolve().parents[2] / "src/nodes" / "ml_hyperparameter_tune_agent"
 
 #: The main module — still the node's entrypoint and orchestrator.
 TUNER_MAIN = TUNER_PACKAGE / "ml_hyperparameter_tune_agent.py"

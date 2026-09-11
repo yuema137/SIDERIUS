@@ -55,7 +55,7 @@ INFER_SHRINK = "reduce batch_size or model size."
 
 TUNER_SOURCE = (
     Path(__file__).resolve().parents[4]
-    / "nodes"
+    / "src/nodes"
     / "ml_hyperparameter_tune_agent"
     / "ml_hyperparameter_tune_agent.py"
 )

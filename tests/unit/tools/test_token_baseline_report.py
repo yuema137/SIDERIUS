@@ -373,7 +373,7 @@ def test_corrupted_jsonl_blocks_publication(tmp_path: Path):
     proc = subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "tools" / "build_token_baseline_report.py"),
+            str(REPO_ROOT / "src/tools" / "build_token_baseline_report.py"),
             "--workspace",
             str(ws),
             "--output-dir",

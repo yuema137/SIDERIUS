@@ -152,4 +152,4 @@ capabilities for resume and reuse.
 - [Plugins mechanism reference](../agent-reference/mechanisms/plugins.md) — the full family table and source map
 - [Task composition reference](../reference/task-composition.md) — `module:` vs `file:` shapes
 - [Bring your own metric](../guides/bring-your-own-metric.md) · [Bring your own health checks](../guides/bring-your-own-health-checks.md)
-- [`ml_models/README.md`](../../ml_models/README.md) — the model registry and plugin loader
+- [`ml_models/README.md`](../../src/ml_models/README.md) — the model registry and plugin loader

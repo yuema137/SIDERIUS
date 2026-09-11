@@ -134,7 +134,7 @@ class TestReachability:
     """
 
     SRC = (
-        REPO_ROOT / "nodes" / "ml_model_proposal_agent" / "ml_model_proposal_agent.py"
+        REPO_ROOT / "src/nodes" / "ml_model_proposal_agent" / "ml_model_proposal_agent.py"
     ).read_text()
 
     def test_both_parse_sites_pass_the_constraint_context(self):

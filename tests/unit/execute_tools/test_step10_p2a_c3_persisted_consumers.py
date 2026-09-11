@@ -110,7 +110,7 @@ class TestTheFourArtifactCases:
         from pathlib import Path
 
         source = (
-            Path(__file__).resolve().parents[3] / "execute_tools/persisted_ranking.py"
+            Path(__file__).resolve().parents[3] / "src/execute_tools/persisted_ranking.py"
         ).read_text(encoding="utf-8")
         for node in ast.walk(ast.parse(source)):
             if isinstance(node, ast.Compare):
@@ -289,7 +289,7 @@ class TestTheOperatorProseStatesNoFixedDirection:
 
     @pytest.mark.parametrize(
         "relative",
-        ["dashboard/data_sources/base.py", "dashboard/api/router.py"],
+        ["src/dashboard/data_sources/base.py", "src/dashboard/api/router.py"],
     )
     def test_the_prose_no_longer_asserts_a_universal_direction(self, relative):
         from pathlib import Path

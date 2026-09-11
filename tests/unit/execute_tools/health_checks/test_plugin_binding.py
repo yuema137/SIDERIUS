@@ -159,7 +159,7 @@ class TestAnOutOfTreeFileRegistersACheck:
         check that just resolved is not mentioned by the module whose import
         list used to BE the extension mechanism.
         """
-        init = Path(__file__).resolve().parents[4] / "execute_tools/health_checks/__init__.py"
+        init = Path(__file__).resolve().parents[4] / "src/execute_tools/health_checks/__init__.py"
 
         assert "vendor_check" not in init.read_text()
 

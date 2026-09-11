@@ -538,12 +538,12 @@ SCORE_TOKEN = re.compile(r"denoising_score|best_score|worst_score|sota|_score\b"
 #: selection is an order consumer (09a row 13), and moving a censused file out
 #: of the scanned surface must never silently shrink coverage.
 INTERPRETER_FILES = [
-    "nodes/result_interpretation_agent/result_interpretation_agent.py",
-    "nodes/result_interpretation_agent/evidence.py",
-    "nodes/result_interpretation_agent/ordering.py",
-    "nodes/result_interpretation_agent/prediction.py",
-    "nodes/interpretation_helpers.py",
-    "agent/prompt_templates/interpretation/rendering.py",
+    "src/nodes/result_interpretation_agent/result_interpretation_agent.py",
+    "src/nodes/result_interpretation_agent/evidence.py",
+    "src/nodes/result_interpretation_agent/ordering.py",
+    "src/nodes/result_interpretation_agent/prediction.py",
+    "src/nodes/interpretation_helpers.py",
+    "src/agent/prompt_templates/interpretation/rendering.py",
 ]
 
 #: Comparisons on the interpreter surface that are NOT metric-direction
@@ -638,7 +638,7 @@ class TestTheDirectionCensus:
         )
 
     def _cap_offenders(self) -> list[str]:
-        src = (REPO_ROOT / "workflows/model_exploration.py").read_text(encoding="utf-8")
+        src = (REPO_ROOT / "src/workflows/model_exploration.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
         for node in tree.body:
             if isinstance(node, ast.FunctionDef) and node.name == "_cap_knowledge_cache":

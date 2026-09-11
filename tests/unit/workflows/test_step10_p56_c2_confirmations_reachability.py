@@ -55,7 +55,7 @@ from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-MODEL_EXPLORATION = REPO_ROOT / "workflows" / "model_exploration.py"
+MODEL_EXPLORATION = REPO_ROOT / "src/workflows" / "model_exploration.py"
 QUICKSTART = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 FEATURE = "dilated_stack"

@@ -17,7 +17,7 @@ from workflows.task_composition import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-TUNER = REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "ml_hyperparameter_tune_agent.py"
+TUNER = REPO_ROOT / "src/nodes" / "ml_hyperparameter_tune_agent" / "ml_hyperparameter_tune_agent.py"
 DECLARED_PREFIX = "contract_test_predictions"
 
 

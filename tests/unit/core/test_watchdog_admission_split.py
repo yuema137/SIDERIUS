@@ -389,7 +389,7 @@ class TestWorkflowKwargParity:
         (same-named variable) into the local_validated_model(...) call."""
         import ast
 
-        source_path = REPO_ROOT / "workflows" / "model_exploration.py"
+        source_path = REPO_ROOT / "src/workflows" / "model_exploration.py"
         tree = ast.parse(source_path.read_text())
         for node in ast.walk(tree):
             if (
