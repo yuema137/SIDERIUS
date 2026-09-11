@@ -12,6 +12,7 @@
 #   sbatch --partition=gpu-shared --nodes=1 --ntasks=1 --gpus=1 --mem=24G \
 #          --time=04:00:00 --cpus-per-task=8 \
 #          scripts/slurm/submit_one_iteration.slurm \
+#          --siderius-checkout /absolute/path/to/SIDERIUS \
 #          --workspace /expanse/lustre/projects/ddp433/ym137/exploration_v1 \
 #          --iteration 3 \
 #          --source_paths /scratch/.../seed_punet.json /scratch/.../seed_wavenet.json \
@@ -58,12 +59,12 @@ if [ ! -x "$PYTHON_BIN" ]; then
 fi
 export VIRTUAL_ENV="$PROJECT_DIR/.venv"
 
+unset PYTHONPATH
+
 if ! "$PYTHON_BIN" -c 'import sys; from pathlib import Path; raise SystemExit(0 if Path(sys.prefix).resolve() == Path(sys.argv[1]).resolve() else 1)' "$PROJECT_DIR/.venv"; then
     echo "[CRITICAL] selected Python is not owned by $PROJECT_DIR/.venv" >&2
     exit 1
 fi
-
-unset PYTHONPATH
 
 # Force Python stdout/stderr to be unbuffered so progress lines appear in the
 # slurm .out file in real time, instead of being block-buffered in memory and
