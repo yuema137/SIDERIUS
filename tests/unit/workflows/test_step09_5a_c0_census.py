@@ -214,7 +214,6 @@ class TestParameterOwnershipCensus:
 EXPECTED_PRODUCTION_CALLERS = frozenset(
     {
         "sdsc_submission_scripts/run_one_iteration.py",
-        "sdsc_submission_scripts/run_exploration_test.py",
         "src/workflows/model_exploration.py",
     }
 )
@@ -268,7 +267,7 @@ class TestCallerCensus:
 
     def test_the_caller_census_is_not_vacuous(self):
         sites = _production_call_sites()
-        assert len(sites) >= 3, f"expected >= 3 production call sites, found {sites}"
+        assert len(sites) >= 2, f"expected >= 2 production call sites, found {sites}"
 
 
 # ---------------------------------------------------------------------------

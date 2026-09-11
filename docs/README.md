@@ -114,12 +114,11 @@ landed — read the status markers.
 | [`dashboard/README.md`](../src/dashboard/README.md) | the result browser |
 | [Human advice guide](guides/advice.md) | human advice JSON schema and injection points |
 | [`sdsc_submission_scripts/README.md`](../sdsc_submission_scripts/README.md) | chain launcher internals |
-| [`reports/`](../reports/) | frozen point-in-time run reports |
+| [External reports/ history](https://github.com/Galileo-Sandbox/siderius-exp/tree/e9e5063b/provenance/legacy_siderius/p0_03c1/reports) | frozen point-in-time run reports owned by the experiment repository |
 
-`reports/` is an approved historical-provenance exception: it is ignored for
-new runtime output, excluded from distributions, and never consulted by
-framework execution. Existing tracked reports describe their named revisions;
-they are evidence, not current behavior or reusable task assets.
+Historical reports are owned by the experiment repository and are not a
+framework checkout surface. They are evidence for their named revisions, not
+current behavior or reusable task assets.
 
 ## Conventions
 

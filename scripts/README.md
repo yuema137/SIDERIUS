@@ -11,10 +11,9 @@ Template:
 
 Python/bash utilities that are *not* the chain. **The chain launchers live in
 [`sdsc_submission_scripts/`](../sdsc_submission_scripts/README.md), not
-here** — several older documents said otherwise. This directory mixes two
-populations with different maintenance contracts: a small durable operator
-surface, and a large set of point-in-time investigation and gate harnesses
-kept as provenance for dated campaigns.
+here** — several older documents said otherwise. This directory contains the
+small durable operator surface. Historical investigation and gate harnesses
+are maintained by their owning experiment repository, not shipped here.
 
 The directory is excluded from the Python distribution. Task-specific scripts
 are historical source evidence only: active scientific utilities belong in
@@ -34,17 +33,10 @@ The durable operator surface:
 | `bg_gpu_sampler.sh` | background GPU utilisation sampler |
 | [`diagnostics/check_agent_environment.py`](diagnostics/README.md) | opt-in provider environment diagnostic; source-checkout-only and network-capable |
 
-Everything else — `fcnet_*`, `investigate_*`, `score_tidmad_official_*`,
-`phase2_diagnostic_no_dynamic_search.py`,
-`c12_stamp_failure_class.py`, `checkpoint_*`,
-`step12_pr12a_gate2_evaluate.py`,
-`render_*`,
-`verify_iter005_estimator.py`,
-`inspection_cost_study/`, `pr3_l2_calibration/` — is **point-in-time**: each
-was written for a dated investigation, campaign or gate whose evidence lives
-in `docs/design/` ledgers or `reports/`. They are kept because the evidence
-cites them, not because they are products. Read the header docstring before
-trusting one against current source.
+The dated study and calibration tooling formerly under
+`inspection_cost_study/` and `pr3_l2_calibration/`, along with retired
+diagnostic launch helpers, is no longer shipped in this checkout. Historical
+evidence remains linked from `docs/design/`; it is not an active script API.
 
 ## Inputs
 
@@ -54,8 +46,8 @@ dated investigation scripts are not an alternative launch authority.
 
 ## Outputs
 
-Summaries and tables under the workspace or `reports/`; the gate harnesses
-write full run workspaces.
+Active summaries belong under caller-owned workspaces; historical `reports/`
+files are evidence only.
 
 ## Owned semantics
 

@@ -43,10 +43,10 @@ SENSITIVE_FILES: MappingProxyType[str, str] = MappingProxyType(
             "`elapsed < 10.0` (:122) and `elapsed < cap + grace + 5.0` (:144). "
             "Under saturation the hard cap it verifies can be missed."
         ),
-        "tests/unit/scripts/test_inspection_cost_study.py": (
-            "`elapsed < 3.5` (:152), guarding that the native alarm preempts. "
-            'Its own message — "a relaxation snuck in" — is why the bound must '
-            "not be widened to accommodate a loaded host."
+        "tests/unit/agent/evaluate_vram_skill/test_training_alarm.py": (
+            "`elapsed < 3.5`, guarding that the real wrapper's native training "
+            "alarm preempts a slow probe. This timing-sensitive witness must "
+            "remain isolated; its bound must not be widened for host load."
         ),
         "tests/unit/agent/evaluate_vram_skill/test_isolated_preflight.py": (
             "`elapsed < 45.0` (:120), asserting the memory bound fires well before the deadline."
@@ -62,21 +62,12 @@ SENSITIVE_FILES: MappingProxyType[str, str] = MappingProxyType(
             "extended: a race two schedulers can lose is load-fragile even "
             "though no wall-clock BOUND appears in the assertion."
         ),
-        "tests/unit/scripts/test_pr3_l2p_preflight.py": (
-            "NOT timing — git state. `test_preflight_all_invariants` calls "
-            "`preflight_main()` unpatched (:11-12), which runs "
-            "`git diff --name-only` with cwd=REPO "
-            "(scripts/pr3_l2_calibration/preflight.py:297). It reads the LIVE "
-            "working tree, so it needs an exclusive, un-mutated checkout: a "
-            "sibling shard writing into the same tree fails it invalidly."
-        ),
     }
 )
 
-#: Why each file is here, by lane. Timing files need a quiesced host; the
-#: git-state file needs an exclusive checkout. They are different requirements
-#: and the harness must not conflate them.
-GIT_STATE_FILES: frozenset[str] = frozenset({"tests/unit/scripts/test_pr3_l2p_preflight.py"})
+#: Why each file is here: timing-sensitive files need a quiesced host. The
+#: timing lane is deliberately explicit so the harness cannot dilute bounds.
+GIT_STATE_FILES: frozenset[str] = frozenset()
 
 TIMING_FILES: frozenset[str] = frozenset(SENSITIVE_FILES) - GIT_STATE_FILES
 

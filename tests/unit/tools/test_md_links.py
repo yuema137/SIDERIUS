@@ -52,8 +52,6 @@ REGRESSION_ANCHORS: tuple[str, ...] = (
     "docs/design/m7_loss_implementor_contract_execution_plan.md",
     "docs/design/m8_gate_coverage_and_diversity_metrics_execution_plan.md",
     "docs/design/paper_and_collapse_reference_baselines.md",
-    "reports/health_metrics_scan.md",
-    "reports/v17_20260717.md",
 )
 
 _FENCE = re.compile(r"^\s*(```|~~~)")

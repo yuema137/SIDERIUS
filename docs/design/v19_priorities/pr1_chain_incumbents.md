@@ -28,7 +28,7 @@
 - **Depends on**: nothing in the V19 ladder
 - **Audit evidence**: §2 below (code audit 2026-07-27, branch
   @ `ea8c599`); V18r campaign audit
-  [`../../../reports/v18r_campaign_audit_20260725.md`](../../../reports/v18r_campaign_audit_20260725.md) §15.10
+  [experiment report](https://github.com/Galileo-Sandbox/siderius-exp/blob/e9e5063b/provenance/legacy_siderius/p0_03c1/reports/v18r_campaign_audit_20260725.md) §15.10
 
 ## Development principles
 

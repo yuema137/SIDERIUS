@@ -22,7 +22,6 @@ semantics and experiment treatment belong to caller-owned packages.
 | `task_config.example.yaml` | copyable shape example; never a runtime default | task-config documentation |
 | `health_checks.yaml` | **framework policy only**: per-disposition gate role, cadence, short-circuit, `on_pass`/`on_fail`, and the default `aggregation` | `execute_tools/health_checks/config.py` |
 | `health_checks_baseline_observe_mode.yaml` | same policy with blocking failures downgraded to observation (differs only in `blocking.on_fail`) | selected via `--healthgate_mode observe_only` |
-| `v17_pregate_threshold_review.json` | a frozen point-in-time review artifact | nothing at runtime |
 
 ## Inputs
 

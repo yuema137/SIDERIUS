@@ -248,4 +248,4 @@ Items dropped or absorbed during the M8/M9/PR#117/PR#119 landings — retained h
 - [`v18_priorities.md`](./v18_priorities.md) — deferred items with rationale and dependencies
 - [`pluggable_health_checks.md`](./pluggable_health_checks.md) — HealthGate framework reference
 - [`collapse_detection_framework_generic.md`](./collapse_detection_framework_generic.md) — generic framework contract
-- [`../reports/health_metrics_scan.md`](../../reports/health_metrics_scan.md) — 20-file FCNet observation scan
+- [Experiment report: health_metrics_scan.md](https://github.com/Galileo-Sandbox/siderius-exp/blob/e9e5063b/provenance/legacy_siderius/p0_03c1/reports/health_metrics_scan.md) — 20-file FCNet observation scan

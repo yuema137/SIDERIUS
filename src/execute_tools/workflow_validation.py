@@ -1,9 +1,7 @@
-"""Shared validation helper for the full 5-agent exploration workflow.
+"""Shared validation helper for the generic multi-stage workflow.
 
-Extracted from ``tests/integration/workflows/test_full_exploration_loop.py``
-so the pytest test and the standalone Slurm runner
-(``sdsc_submission_scripts/run_exploration_test.py``) consume the same code
-path without one importing from the other across the package boundary.
+Extracted from workflow integration tests so callers consume the same
+validation path without importing test harnesses across the package boundary.
 """
 
 from __future__ import annotations

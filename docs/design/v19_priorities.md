@@ -49,7 +49,7 @@
   (bands 4-9 / 10-14) was externally terminated on 2026-07-25 at
   iterations 6/7/4/4 of 20 (container replacement), leaving 17 closed
   iterations with `run_output` records
-  ([`../../reports/v18r_campaign_audit_20260725.md`](../../reports/v18r_campaign_audit_20260725.md));
+  ([experiment report](https://github.com/Galileo-Sandbox/siderius-exp/blob/e9e5063b/provenance/legacy_siderius/p0_03c1/reports/v18r_campaign_audit_20260725.md));
   bands 15-19 and 0-3 never launched (queue fully pending). Candidates A
   and C could begin on the 17 closed iterations if promoted; full-band coverage (and
   the band 15-19 / 0-3 rows of §1.1) requires the V18r restart after

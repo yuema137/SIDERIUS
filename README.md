@@ -188,13 +188,14 @@ SIDERIUS/
 ├── sdsc_submission_scripts/ # existing chain/iteration and scheduler entrypoints
 ├── tests/ + scripts/        # validation and checkout utilities
 ├── docs/                    # guides, references and design history
-├── reports/ + reference_data/ # retained evidence and compatibility resources
 └── .github/                 # automatic CI
 ```
 
-`scripts/`, `src/execute_tools/` and `configs/` contain mixed material;
-`reference_data/` still has an executable reader. Generated libraries and
-runtime results belong to caller-owned storage, outside the source inventory.
+`scripts/`, `src/execute_tools/` and `configs/` contain mixed material.
+Trial anchor maps are explicit caller/task-owned inputs read by
+`execute_tools.trial_anchor_map.load_anchor_map`; this checkout provides no
+scientific default or builder. Generated libraries and runtime results belong
+to caller-owned storage, outside the source inventory.
 
 The major modules carry their own contract READMEs —
 [`workflows/`](src/workflows/README.md) · [`core/`](src/core/README.md) ·
