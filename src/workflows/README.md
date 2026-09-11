@@ -12,7 +12,7 @@ task-composition manifest that binds a whole run to one task's declarations.
 A workflow is a script with a fixed sequence — *"a workflow, not an
 orchestrator"* — never an agent choosing its own tools. This package contains
 no shell entrypoints: the chain launchers live in
-[`sdsc_submission_scripts/`](../../sdsc_submission_scripts/README.md), which call
+  [`scripts/launch/`](../../scripts/launch/README.md), which call
 into here one iteration at a time.
 
 ## Public interface

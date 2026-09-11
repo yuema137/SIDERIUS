@@ -4,7 +4,7 @@ Use this page to find an existing capability, its source owner and its entrypoin
 The current physical source layout places eight packages under `src/`, with
 unchanged Python import names. PR 03A relocated the advice guide and optional
 provider diagnostic; PR 03B relocates the packages and their resources. Chain
-and iteration CLI paths remain in `sdsc_submission_scripts/`.
+and iteration CLI paths are under `scripts/launch/` and `src/workflows/`.
 
 ## Start here
 
@@ -12,15 +12,15 @@ and iteration CLI paths remain in `sdsc_submission_scripts/`.
 | --- | --- |
 | Learn without external data or credentials | [Quickstart](../examples/quickstart/README.md), then [masked regression](../examples/synthetic_masked_regression/README.md) |
 | Declare a task | [Task composition reference](reference/task-composition.md), [define a task](guides/define-a-task.md) |
-| Start a chain | [run_chain.sh](../sdsc_submission_scripts/run_chain.sh); [entrypoint reference](reference/entrypoints.md) |
-| Inspect or resume a workspace | [inspect_run_state.py](../scripts/inspect_run_state.py); [workspace guide](guides/workspaces-and-resume.md) |
+| Start a chain | [run_chain.sh](../scripts/launch/run_chain.sh); [entrypoint reference](reference/entrypoints.md) |
+| Inspect or resume a workspace | [inspect_run_state.py](../scripts/launch/inspect_run_state.py); [workspace guide](guides/workspaces-and-resume.md) |
 | Supply human advice | [Advice format and ownership](guides/advice.md) |
 | Extend a model or loss | [Model and plugin loaders](../src/ml_models/README.md) |
 | Develop the framework | [CLAUDE.md](../CLAUDE.md), then [agent reference](agent-reference/README.md) |
 
 The launch chain is
-[`run_chain.sh`](../sdsc_submission_scripts/run_chain.sh) →
-[`run_one_iteration.py`](../sdsc_submission_scripts/run_one_iteration.py) →
+[`run_chain.sh`](../scripts/launch/run_chain.sh) →
+[`run_one_iteration.py`](../src/workflows/run_one_iteration.py) →
 [`run_workflow`](../src/workflows/model_exploration.py).
 The workflow selects node order; each node receives typed input and returns
 typed output. Standalone node CLIs exist, but callers must supply their declared
@@ -48,7 +48,7 @@ SIDERIUS/
 | [examples/](../examples/) | Two synthetic specifications; no shipped real scientific task |
 | [configs/](../configs/) | Framework policy, runtime profiles and synthetic manifests; also dated review material |
 | [configs/llm/](../configs/llm/) | Provider/model routing, separate from scientific treatment |
-| [sdsc_submission_scripts/](../sdsc_submission_scripts/) | Existing chain/iteration launch, checkout environment binding and scheduler support |
+| [scripts/launch/](../scripts/launch/) | Chain launch, checkout environment binding and auto-resume support |
 | [tests/](../tests/) | Unit, integration and helpers; presence does not establish CI execution |
 | [scripts/](../scripts/) | Active inspection/resume tools alongside dated diagnostic harnesses; [diagnostics](../scripts/diagnostics/README.md) remains opt-in |
 | [docs/](./) | User/agent documentation and design history; includes the [advice guide](guides/advice.md) |
