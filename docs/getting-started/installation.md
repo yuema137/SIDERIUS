@@ -83,7 +83,7 @@ EOF
 ## Verify
 
 ```bash
-python env_validation/test_agent_env.py     # environment + API reachability
+.venv/bin/python scripts/diagnostics/check_agent_environment.py  # opt-in; calls provider APIs
 .venv/bin/python -m pytest tests/unit/ -q    # no GPU, no API calls, mocked LLM
 ```
 

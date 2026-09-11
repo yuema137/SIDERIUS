@@ -77,7 +77,8 @@ Loop Error: worker tree reached 24.881 GiB against a 24.0 GiB allowance
 That was a POSTURE defect, not candidate bad luck — `advice/gate/` already
 existed and already said the right thing. See
 `docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07b_tuner_policy.md`
-§14.11, and `advice/README.md` for the `advice/gate/` contract.
+§14.11, and the [human advice guide](../guides/advice.md) for the historical
+`advice/gate/` contract.
 
 **Applies to Gate 1 and Gate 2**, and to any future real-LLM gate, until an
 explicit operator decision changes it.

@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 from agent.llm_bridge import LLMBridge
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
 
 
 def test_openai():
