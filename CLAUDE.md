@@ -74,7 +74,7 @@
   this checkout or restore a scientific default to make it work.
 - **Generic chain dry-run**:
   ```bash
-  bash sdsc_submission_scripts/run_chain.sh \
+  bash scripts/launch/run_chain.sh \
       --mode lilab \
       --workspace /path/to/workspace \
       --run_name quickstart_v1 \

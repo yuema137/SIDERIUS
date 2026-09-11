@@ -111,7 +111,7 @@ Installation exposes the eight packages from `src/`. Existing imports such as
 Then see what a real run would execute, without executing it:
 
 ```bash
-bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+bash scripts/launch/run_chain.sh --mode lilab \
     --workspace /path/to/workspace --run_name first_run_v1 \
     --task_composition configs/task_composition/quickstart.yaml \
     --data_dir /path/to/workspace/quickstart_data \
