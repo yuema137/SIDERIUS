@@ -438,8 +438,8 @@ class TestShippedJsonConfigsParse:
     def test_all_4_llm_configs_parse_with_lit_review_block(self):
         import pathlib
 
-        paths = sorted(pathlib.Path("llm_configs").glob("*.json"))
-        assert len(paths) == 4, f"Expected 4 configs in llm_configs/, found {len(paths)}"
+        paths = sorted((pathlib.Path("configs") / "llm").glob("*.json"))
+        assert len(paths) == 4, f"Expected 4 configs in configs/llm/, found {len(paths)}"
         for path in paths:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
