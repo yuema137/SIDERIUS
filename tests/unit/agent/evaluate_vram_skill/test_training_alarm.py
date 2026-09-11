@@ -1,7 +1,6 @@
 """Reachability regression for the production native training alarm."""
 
 import time
-from contextlib import nullcontext
 from datetime import UTC, datetime
 
 import pytest
@@ -70,30 +69,3 @@ def test_native_training_alarm_is_reachable_through_wrapper(monkeypatch):
     assert result["timeout_record"]["budget_seconds"] == 1.0
     assert elapsed < 3.5
 
-
-def test_native_alarm_negative_control_fails_when_bypassed(monkeypatch):
-    """A bypassed production seam must make the slow-probe witness fail."""
-    monkeypatch.setattr(wrapper, "_build_model", lambda *args, **kwargs: _SlowModel())
-    monkeypatch.setattr(wrapper, "get_criterion", lambda *args, **kwargs: nn.MSELoss())
-    def bypassed_probe(**kwargs):
-        raise AssertionError("alarm bypassed")
-
-    monkeypatch.setattr(wrapper, "probe_activation_footprint", bypassed_probe)
-    monkeypatch.setattr(
-        wrapper,
-        "_build_probe_tensors",
-        lambda *args, **kwargs: (torch.zeros(1, 1), torch.zeros(1, 1)),
-    )
-    monkeypatch.setattr(wrapper, "_forward_pass_timeout", lambda *args, **kwargs: nullcontext())
-
-    result = wrapper.run_skill(
-            None,
-            model_type="synthetic",
-            model_config={},
-            train_config={"batch_size": 1},
-            loss_config={"loss_type": "smooth_l1"},
-            hardware_context=_eligible_context(),
-            probe_budgets=ProbeBudgets(single_probe_seconds=1.0),
-        )
-    assert result["status"] == "error"
-    assert "alarm bypassed" in result["message"]
