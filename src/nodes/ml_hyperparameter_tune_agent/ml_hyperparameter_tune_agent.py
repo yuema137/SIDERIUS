@@ -46,7 +46,7 @@ from core.run_invariants import (
 )
 from core.runtime_control.gpu_accounting import device_identity_from_hardware
 from core.sandbox_executor import TidmadSandbox
-from execute_tools.build_anchor_map import load_anchor_map
+from execute_tools.trial_anchor_map import load_anchor_map
 from execute_tools.data_paths import active_physical_data_root
 from execute_tools.dataset_config import (
     resolve_dataset_profile,
@@ -486,7 +486,7 @@ def _load_trial_anchor_map(*, composed: bool, data_root: str) -> dict | None:
     if not os.path.exists(anchor_map_path):
         raise FileNotFoundError(
             f"Trial mode requires {os.path.basename(anchor_map_path)} at "
-            f"{anchor_map_path}. Run execute_tools/build_anchor_map.py first."
+            f"{anchor_map_path}. Prepare the task-owned anchor artifact first."
         )
     print("Trial mode enabled: anchor map loaded.")
     return load_anchor_map(anchor_map_path)
