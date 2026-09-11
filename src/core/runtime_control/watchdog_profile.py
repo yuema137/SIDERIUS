@@ -75,7 +75,7 @@ from core.layout import checkout_path
 
 #: The committed defaults. Relative to the repository root (derived from this
 #: file's location — never the caller's cwd).
-SHIPPED_PROFILES_PATH = checkout_path("configs", "runtime_profiles.yaml")
+SHIPPED_PROFILES_PATH = checkout_path("configs", "runtime", "runtime_profiles.yaml")
 
 ExecutionRegime = Literal["single", "dual_coresident", "four_way_coresident"]
 

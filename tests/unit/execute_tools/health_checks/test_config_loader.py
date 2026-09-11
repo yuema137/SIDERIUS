@@ -349,7 +349,7 @@ class TestTheShippedDefaultsDoNotDependOnTheWorkingDirectory:
     def test_framework_default_points_into_this_checkout(self):
         repo_root = Path(__file__).resolve().parents[4]
 
-        assert Path(_DEFAULT_CONFIG_PATH) == repo_root / "configs" / "health_checks.yaml"
+        assert Path(_DEFAULT_CONFIG_PATH) == repo_root / "configs" / "health" / "health_checks.yaml"
 
 
 class TestAMaterializedConfigDoesNotRecordWhichCheckoutProducedIt:
@@ -379,8 +379,8 @@ class TestAMaterializedConfigDoesNotRecordWhichCheckoutProducedIt:
     def _second_checkout(tmp_path: Path) -> Path:
         """A second checkout of the same framework config, at another path."""
         root = tmp_path / "another" / "checkout" / "at" / "a" / "much" / "longer" / "path"
-        (root / "configs").mkdir(parents=True)
-        shutil.copyfile(Path(_DEFAULT_CONFIG_PATH), root / "configs" / "health_checks.yaml")
+        (root / "configs" / "health").mkdir(parents=True)
+        shutil.copyfile(Path(_DEFAULT_CONFIG_PATH), root / "configs" / "health" / "health_checks.yaml")
         return root
 
     def test_the_artifact_is_byte_identical_across_two_checkout_roots(self, tmp_path, monkeypatch):
@@ -396,7 +396,7 @@ class TestAMaterializedConfigDoesNotRecordWhichCheckoutProducedIt:
         root_b = self._second_checkout(tmp_path)
         monkeypatch.setattr(config_module, "SIDERIUS_ROOT", str(root_b))
         monkeypatch.setattr(
-            config_module, "_DEFAULT_CONFIG_PATH", str(root_b / "configs" / "health_checks.yaml")
+            config_module, "_DEFAULT_CONFIG_PATH", str(root_b / "configs" / "health" / "health_checks.yaml")
         )
         clear_health_gates_config_cache()
         from_other = Path(
@@ -407,7 +407,7 @@ class TestAMaterializedConfigDoesNotRecordWhichCheckoutProducedIt:
             "the materialized effective config differs between two checkouts of "
             "the same framework config — it is recording which machine produced it"
         )
-        assert b"# source: configs/health_checks.yaml\n" in from_real
+        assert b"# source: configs/health/health_checks.yaml\n" in from_real
 
     def test_an_external_config_keeps_its_absolute_path(self, tmp_path):
         """The deliberate exception, pinned so it reads as a decision.
