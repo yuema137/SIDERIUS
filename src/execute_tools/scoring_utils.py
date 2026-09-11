@@ -8,7 +8,7 @@ Two layers:
    segment-aware scorer, and (indirectly) the legacy scoring path.
 
 2. ANCHOR-NORMALIZED SCORING: score_segments() and score_vector() use a
-   pre-computed anchor map (from build_anchor_map.py) for normalization
+   pre-computed anchor map supplied by the caller for normalization
    instead of file-local normalization. This makes scores from trial mode
    (sparse sampling) directly comparable to formal mode (all 20 files).
 

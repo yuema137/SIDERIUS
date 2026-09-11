@@ -74,7 +74,7 @@ class ExecutionRoot(BaseModel):
 
     path: Path
     #: Require a committed, non-dirty tree. The dirty-tree guard
-    #: (scripts/pr3_l2_calibration/preflight.py:297) reads the live worktree,
+    #: The historical calibration preflight read the live worktree,
     #: so a shard sharing a mutated tree produces invalid evidence.
     expect_clean: bool = True
     #: Require ``<root>/.venv/bin/python``. Two unit tests execute it.

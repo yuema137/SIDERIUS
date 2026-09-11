@@ -38,7 +38,7 @@ SIDERIUS/
 ├── configs/ + llm_configs/
 ├── sdsc_submission_scripts/
 ├── tests/ + scripts/
-├── docs/ + reports/ + reference_data/
+├── docs/ + reports/
 └── .github/
 ```
 
@@ -53,7 +53,6 @@ SIDERIUS/
 | [scripts/](../scripts/) | Active inspection/resume tools alongside dated diagnostic harnesses; [diagnostics](../scripts/diagnostics/README.md) remains opt-in |
 | [docs/](./) | User/agent documentation and design history; includes the [advice guide](guides/advice.md) |
 | [reports/](../reports/) | Retained reports for named revisions; not new runtime storage |
-| [reference_data/](../reference_data/) | `segment_anchors.json`, still read by scientific compatibility code |
 | [.github/](../.github/) | Automatic CI workflow |
 
 The initial audit at `2091acdf` counted 19 visible tracked roots. PR 03A retired
@@ -183,7 +182,7 @@ Recovered trajectories and plots must not be presented as complete provenance.
 
 | Material | Actual reader/evidence and disposition |
 | --- | --- |
-| `reference_data/segment_anchors.json` | [`build_anchor_map.py`](../src/execute_tools/build_anchor_map.py) resolves this retained anchor reference; executable compatibility, not an inert archive |
+| Trial anchor maps | [`trial_anchor_map.py`](../src/execute_tools/trial_anchor_map.py) reads an explicit caller/task-owned JSON artifact; no infra default or builder is shipped |
 | Scientific scoring/Health compatibility | [`scoring_utils.py`](../src/execute_tools/scoring_utils.py) and [`Health evaluation`](../src/execute_tools/health_checks/evaluation.py) retain task-specific behavior; existing [#423](https://github.com/Galileo-Sandbox/SIDERIUS/issues/423) tracks the Health boundary |
 | Default policy package resources | Existing [#424](https://github.com/Galileo-Sandbox/SIDERIUS/issues/424); exact-checkout entry checks do not qualify wheel-only execution |
 | Mixed scripts/configs | `scripts/inspect_run_state.py` is active; dated harnesses and review material require caller-by-caller audit, not directory-wide deletion |
