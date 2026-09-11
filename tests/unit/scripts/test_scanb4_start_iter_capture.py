@@ -29,8 +29,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CHAIN_COMMON = REPO_ROOT / "sdsc_submission_scripts" / "_chain_common.sh"
-RUN_CHAIN = REPO_ROOT / "sdsc_submission_scripts" / "run_chain.sh"
+CHAIN_COMMON = REPO_ROOT / "scripts" / "launch" / "_chain_common.sh"
+RUN_CHAIN = REPO_ROOT / "scripts" / "launch" / "run_chain.sh"
 
 #: Realistic pollution: the plugin loader prints per-plugin lines on import.
 _PLUGIN_CHATTER = "\n".join(

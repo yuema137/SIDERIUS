@@ -183,7 +183,7 @@ class TestNoFormalProducedMeansNoVerdict:
     """
 
     def test_a_no_records_manifest_has_no_authority_block(self, tmp_path):
-        from sdsc_submission_scripts.run_one_iteration import write_manifest
+        from workflows.run_one_iteration import write_manifest
 
         manifest = write_manifest(iter_dir=str(tmp_path), run_name="r", results=[])
 
@@ -191,7 +191,7 @@ class TestNoFormalProducedMeansNoVerdict:
         assert "scientific_authority" not in manifest
 
     def test_a_failed_manifest_has_no_authority_block(self, tmp_path):
-        from sdsc_submission_scripts.run_one_iteration import write_manifest
+        from workflows.run_one_iteration import write_manifest
 
         manifest = write_manifest(iter_dir=str(tmp_path), run_name="r", results=[], crashed=True)
 
@@ -202,7 +202,7 @@ class TestNoFormalProducedMeansNoVerdict:
         """D-C1a's rule, re-asserted here because it is what makes the
         absence above readable: `null` says "no tuner output", which is
         different from "authority was refused"."""
-        from sdsc_submission_scripts.run_one_iteration import write_manifest
+        from workflows.run_one_iteration import write_manifest
 
         manifest = write_manifest(iter_dir=str(tmp_path), run_name="r", results=[])
 

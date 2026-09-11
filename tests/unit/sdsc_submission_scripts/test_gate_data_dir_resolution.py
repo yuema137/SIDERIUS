@@ -63,7 +63,7 @@ class TestTheLaunchBoundary:
 
     @staticmethod
     def _main(argv):
-        from sdsc_submission_scripts import run_one_iteration as runner
+        from workflows import run_one_iteration as runner
 
         with patch.object(sys, "argv", argv):
             try:
@@ -73,7 +73,7 @@ class TestTheLaunchBoundary:
         return 0
 
     def test_an_omitted_dataset_refuses_before_workflow(self, tmp_path, capsys):
-        from sdsc_submission_scripts import run_one_iteration as runner
+        from workflows import run_one_iteration as runner
 
         with patch.object(runner, "run_workflow") as spy:
             code = self._main(self._argv(tmp_path))
@@ -85,7 +85,7 @@ class TestTheLaunchBoundary:
     def test_the_explicit_value_reaches_the_workflow_unchanged(self, tmp_path):
         dataset = tmp_path / "dataset"
         dataset.mkdir()
-        from sdsc_submission_scripts import run_one_iteration as runner
+        from workflows import run_one_iteration as runner
 
         with patch.object(runner, "run_workflow", side_effect=SystemExit(0)) as spy:
             self._main(self._argv(tmp_path, "--data_dir", str(dataset)))

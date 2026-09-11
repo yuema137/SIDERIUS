@@ -18,7 +18,7 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RUN_CHAIN = REPO_ROOT / "sdsc_submission_scripts" / "run_chain.sh"
+RUN_CHAIN = REPO_ROOT / "scripts" / "launch" / "run_chain.sh"
 
 
 def _run_dry(extra_args: list[str], tmp_path: Path) -> subprocess.CompletedProcess:

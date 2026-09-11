@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CHAIN_COMMON = REPO_ROOT / "sdsc_submission_scripts" / "_chain_common.sh"
+CHAIN_COMMON = REPO_ROOT / "scripts" / "launch" / "_chain_common.sh"
 
 
 def _build(*args: str) -> list[str]:

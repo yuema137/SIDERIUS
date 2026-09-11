@@ -43,7 +43,7 @@ from unittest.mock import patch
 
 import pytest
 
-import sdsc_submission_scripts.run_one_iteration as runner
+import workflows.run_one_iteration as runner
 from tests.helpers.launcher_bindings import effective_workflow_kwargs
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]

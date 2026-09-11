@@ -302,7 +302,7 @@ class TestREC3ArtifactShapes:
     def test_manifest_key_sets_all_three_branches(self, pseudo_run, tmp_path):
         """REC-3: manifest.json key sets per status branch, produced by
         the REAL ``write_manifest`` (the resume contract's producer)."""
-        from sdsc_submission_scripts.run_one_iteration import write_manifest
+        from workflows.run_one_iteration import write_manifest
 
         output, _bridge, _sandbox, _ws = pseudo_run
         branches = {}

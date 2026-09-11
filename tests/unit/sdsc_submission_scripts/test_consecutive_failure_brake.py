@@ -31,7 +31,7 @@ from typing import Optional
 
 import pytest
 
-from sdsc_submission_scripts.run_one_iteration import (
+from workflows.run_one_iteration import (
     _check_consecutive_failure_brake,
     _check_halt_marker,
 )

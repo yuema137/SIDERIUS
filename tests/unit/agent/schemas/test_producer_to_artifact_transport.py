@@ -34,7 +34,7 @@ from typing import ClassVar
 import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
-from sdsc_submission_scripts.run_one_iteration import write_manifest
+from workflows.run_one_iteration import write_manifest
 from tests.helpers.tuner_source import tuner_lifecycle_source
 
 # (field, where it lives, the value the producer writes)
@@ -209,7 +209,7 @@ class TestTheLaunchDeclarationSurvivesEveryBranch:
         Both branches produce no usable tuner output, which is precisely
         when the old code wrote null.
         """
-        from sdsc_submission_scripts.run_one_iteration import write_manifest
+        from workflows.run_one_iteration import write_manifest
 
         manifest = write_manifest(
             iter_dir=str(tmp_path),
@@ -224,7 +224,7 @@ class TestTheLaunchDeclarationSurvivesEveryBranch:
     def test_the_caller_declaration_outranks_a_null_tuner_output(self, tmp_path):
         """The exact Gate 2 shape: a tuner output EXISTS but carries no
         declaration. The validated launch fact must still win."""
-        from sdsc_submission_scripts.run_one_iteration import write_manifest
+        from workflows.run_one_iteration import write_manifest
 
         manifest = write_manifest(
             iter_dir=str(tmp_path),
@@ -240,7 +240,7 @@ class TestTheLaunchDeclarationSurvivesEveryBranch:
         a caller outside the new contract still records null, which
         downstream reads as 'authority not establishable' — never as a
         silent `blocking`."""
-        from sdsc_submission_scripts.run_one_iteration import write_manifest
+        from workflows.run_one_iteration import write_manifest
 
         manifest = write_manifest(iter_dir=str(tmp_path), run_name="decl", results=[], crashed=True)
         assert manifest["healthgate_mode"] is None

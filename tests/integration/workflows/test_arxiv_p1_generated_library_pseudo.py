@@ -51,7 +51,7 @@ from core.capability_registry import CapabilityMetadata
 from core.resume import restore_prior_state
 from core.run_invariants import RUN_INVARIANTS_BASENAME
 from core.scientific_authority import ScientificAuthority
-from sdsc_submission_scripts.run_one_iteration import write_manifest
+from workflows.run_one_iteration import write_manifest
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings

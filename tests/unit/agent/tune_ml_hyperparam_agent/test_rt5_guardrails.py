@@ -155,7 +155,7 @@ class TestRT6CliMapping:
     def test_tuner_cli_operational_defaults_and_zero_disable(self):
         # The generic parser keeps the step ceiling, but the Formal-only batch
         # floor is opt-in so an executable Trial batch is not silently refused.
-        from sdsc_submission_scripts.run_one_iteration import build_parser
+        from workflows.run_one_iteration import build_parser
 
         parser = build_parser()
         defaults = {a.dest: a.default for a in parser._actions if a.option_strings}

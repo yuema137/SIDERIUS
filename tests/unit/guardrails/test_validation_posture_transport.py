@@ -36,7 +36,7 @@ import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
-from sdsc_submission_scripts.run_one_iteration import build_parser, main
+from workflows.run_one_iteration import build_parser, main
 from workflows.run_config import WorkflowLaunchConfig
 
 #: Every hop between the CLI and the tuner input that declares its parameters

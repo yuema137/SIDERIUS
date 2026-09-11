@@ -35,7 +35,7 @@ from unittest.mock import patch
 import pytest
 
 from agent.schemas.health_feedback import TrialValidityFeedback
-from sdsc_submission_scripts import run_one_iteration as runner
+from workflows import run_one_iteration as runner
 from tests.helpers.launcher_bindings import effective_workflow_kwargs
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -1979,7 +1979,7 @@ class TestFormalLaunchPolicyIsEnforcedAtTheChainBoundary:
         """Invoke the real `main()` and return its exit code."""
         import sys as _sys
 
-        from sdsc_submission_scripts import run_one_iteration as runner
+        from workflows import run_one_iteration as runner
 
         argv = [*argv, *_QUICKSTART_ARGS]
         argv = ["run_one_iteration.py", *argv]

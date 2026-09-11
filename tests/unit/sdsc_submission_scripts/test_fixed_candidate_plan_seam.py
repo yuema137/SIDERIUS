@@ -25,7 +25,7 @@ import json
 
 import pytest
 
-from sdsc_submission_scripts.run_one_iteration import (
+from workflows.run_one_iteration import (
     load_validation_fixed_candidate_plan,
 )
 
@@ -125,7 +125,7 @@ class TestProvenanceIsRecorded:
     def test_the_manifest_carries_the_key_even_when_absent(self, tmp_path):
         """`None` must be recorded explicitly, so a reader can tell
         "the proposer chose" from "nobody wrote the field"."""
-        from sdsc_submission_scripts.run_one_iteration import write_manifest
+        from workflows.run_one_iteration import write_manifest
 
         manifest = write_manifest(iter_dir=str(tmp_path), run_name="prov", results=[], crashed=True)
         assert "fixed_candidate_provenance" in manifest
