@@ -97,7 +97,7 @@ uv sync --group dev --frozen
 cp dashboard_config.example.yaml   dashboard_config.yaml
 printf 'OPENAI_API_KEY=...\n' > .env
 
-.venv/bin/python env_validation/test_agent_env.py  # optional; calls provider APIs
+.venv/bin/python scripts/diagnostics/check_agent_environment.py  # optional; calls provider APIs
 ```
 
 Use this checkout's `.venv/bin/python`; do not reuse another checkout's venv
@@ -179,7 +179,7 @@ SIDERIUS
 ├── Start and operate: examples/, configs/, llm_configs/, sdsc_submission_scripts/, dashboard/
 ├── Agents and composition: nodes/, agent/, workflows/
 ├── Execution and extensions: core/, execute_tools/, ml_models/
-├── Development and validation: tests/, tools/, scripts/, env_validation/, .github/
+├── Development and validation: tests/, tools/, scripts/, .github/
 └── Documentation and retained material: docs/, advice/, reports/, reference_data/
 ```
 

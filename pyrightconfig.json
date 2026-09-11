@@ -6,7 +6,6 @@
     "execute_tools",
     "ml_models",
     "dashboard",
-    "env_validation",
     "tools",
     "scripts",
     "workflows"

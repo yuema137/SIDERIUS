@@ -56,9 +56,11 @@ What you will see when the key is wrong, so you recognise it:
 - Quota exhaustion (429), by contrast, retries indefinitely by design: top up
   the balance and a long chain resumes on its own.
 
-`python env_validation/test_agent_env.py` checks each configured provider and
+`.venv/bin/python scripts/diagnostics/check_agent_environment.py` checks each configured provider and
 prints `<PROVIDER>_API_KEY not found in .env` or the provider's own error for
-a bad one.
+a bad one. It is an opt-in network diagnostic, not an offline checkout smoke;
+its printed summary is authoritative because even a critical failure currently
+exits zero. The former `env_validation/test_agent_env.py` path is retired.
 
 ## Level 1 — a dry run
 

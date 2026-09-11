@@ -32,6 +32,7 @@ The durable operator surface:
 | `validate_path_component.py` | path-component hygiene used by launchers |
 | `campaign_admission.py` · `campaign_spend.py` · `runtime_campaign.py` · `runtime_replay/` | resumable-campaign bookkeeping and runtime-control operations |
 | `bg_gpu_sampler.sh` | background GPU utilisation sampler |
+| [`diagnostics/check_agent_environment.py`](diagnostics/README.md) | opt-in provider environment diagnostic; source-checkout-only and network-capable |
 
 Everything else — `fcnet_*`, `investigate_*`, `score_tidmad_official_*`,
 `phase2_diagnostic_no_dynamic_search.py`,

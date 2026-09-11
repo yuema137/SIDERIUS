@@ -34,7 +34,7 @@ faults, stalls, and how to locate the evidence.
 Two cheap triage tools, both free of GPU and API cost:
 
 ```bash
-python env_validation/test_agent_env.py     # environment + API reachability
+.venv/bin/python scripts/diagnostics/check_agent_environment.py  # opt-in; calls provider APIs
 .venv/bin/python -m pytest tests/unit/ -q    # is the checkout itself sound?
 ```
 
@@ -51,7 +51,7 @@ the problem is in your keys, data or GPU — not the wiring.
 | `ModuleNotFoundError` for a project package | run from the repository root with the venv active; re-run `uv sync` |
 | LLM auth errors at startup | keys missing from `.env` — see [installation](../getting-started/installation.md#api-keys) |
 | **Gemini auth errors although you only configured OpenAI** | you launched without `--llm_config`. The legacy default silently routes every stage to Gemini. Always pass an explicit routing config — `--llm_config llm_configs/openai_tiered_pro.json` is the canonical example |
-| `test_agent_env.py` fails on one provider only | that provider's key or network path; the run only needs the providers your `--llm_config` JSON routes to |
+| `check_agent_environment.py` reports one provider failed | that provider's key or network path; the run only needs the providers your `--llm_config` JSON routes to. Read the printed summary: the diagnostic currently exits zero even when checks fail |
 
 ## The run seems hung
 

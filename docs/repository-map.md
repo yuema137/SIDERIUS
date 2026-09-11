@@ -45,7 +45,7 @@ SIDERIUS (navigation, not physical directories)
 ├── Development and validation
 │   ├── tests/
 │   ├── tools/ + scripts/
-│   ├── env_validation/
+│   │   └── diagnostics/
 │   └── .github/
 └── Documentation and retained material
     ├── docs/
@@ -73,7 +73,7 @@ Counts refer to the audited base, before this documentation addition.
 | [`tests/`](../tests/) | 999 | Unit, integration and helpers; presence does not establish CI execution |
 | [`tools/`](../tools/) | 28 | CI selection/execution, reports and optional session tooling |
 | [`scripts/`](../scripts/) | 35 | Active inspection/resume tools alongside dated diagnostic harnesses |
-| [`env_validation/`](../env_validation/) | 1 | Environment diagnostic that can call provider APIs; not an offline smoke |
+| Former `env_validation/` root at the audited base | 1 | Diagnostic moved to [`scripts/diagnostics/`](../scripts/diagnostics/README.md); old command retired, still opt-in and network-capable |
 | [`.github/`](../.github/) | 1 | CI workflow |
 | [`docs/`](./) | 164 | User/agent documentation plus design history; freshness varies |
 | Former `advice/` root at the audited base | 1 | Its format README moved to [`docs/guides/advice.md`](guides/advice.md); no advice artifacts or subdirectories were shipped |
