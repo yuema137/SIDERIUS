@@ -15,11 +15,12 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.layout import checkout_path
+
 # ---------------------------------------------------------------------------
 # Project root = parent of this file's directory
 # ---------------------------------------------------------------------------
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_CONFIG_PATH = os.path.join(_PROJECT_ROOT, "dashboard_config.yaml")
+DEFAULT_CONFIG_PATH = checkout_path("dashboard_config.yaml")
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +92,7 @@ def load_settings(config_path: str | None = None) -> DashboardSettings:
     """
     path = config_path or DEFAULT_CONFIG_PATH
 
-    if not os.path.exists(path):
+    if path is None or not os.path.exists(path):
         print(f"[dashboard] Config file not found at {path} — using defaults.")
         return DashboardSettings()
 

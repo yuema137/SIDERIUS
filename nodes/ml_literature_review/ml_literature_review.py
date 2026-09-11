@@ -64,6 +64,7 @@ from agent.schemas.literature_review import (
 )
 from agent.schemas.proposal import AgentCard, ExpertContextItem
 from agent.skills.paper_resolver_skill.wrapper import run_skill
+from core.layout import checkout_root, require_checkout
 
 logger = logging.getLogger(__name__)
 
@@ -952,7 +953,7 @@ class MLLiteratureReviewAgent:
 # Repo root for anchoring a relative --lit_review_config path, mirroring the
 # workflow's SIDERIUS_ROOT anchor (workflows/model_exploration.py). Derived
 # from this file's location per the portability rule — never hardcoded.
-_SIDERIUS_ROOT = Path(__file__).resolve().parents[2]
+_SIDERIUS_ROOT = checkout_root()
 
 
 def load_experiment_history(path: str | Path) -> InterpretationOutput:
@@ -1073,7 +1074,7 @@ def main() -> None:
 
     config_path = Path(args.lit_review_config)
     if not config_path.is_absolute():
-        config_path = _SIDERIUS_ROOT / config_path
+        config_path = require_checkout(_SIDERIUS_ROOT) / config_path
     with open(config_path, encoding="utf-8") as f:
         lit_review_config = yaml.safe_load(f) or {}
 

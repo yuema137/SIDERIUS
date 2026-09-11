@@ -52,8 +52,6 @@ from pathlib import Path
 
 # Import through the repository root so the module has ONE identity
 # whether this file is executed as a script or imported by tests.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
 from tools.claude_hooks import rescue_snapshot
 from tools.claude_hooks.context_state import (
     MEMORY_BASENAME,

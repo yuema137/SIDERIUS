@@ -17,12 +17,13 @@ by the interpretation and proposal agents.
 
 import os
 
+from core.layout import checkout_path
+
 _ML_MODELS_DIR = os.path.dirname(os.path.abspath(__file__))
-_SIDERIUS_ROOT = os.path.dirname(_ML_MODELS_DIR)
 # LEGACY CHECKOUT plugin-descriptions dir (arXiv P1: read-only compatibility
 # — promotion writes descriptions under the resolved generated-library
 # models dir now; this location keeps resolving pre-migration copies).
-_PLUGIN_DESCRIPTIONS_DIR = os.path.join(_SIDERIUS_ROOT, "agent_generated", "models")
+_PLUGIN_DESCRIPTIONS_DIR = checkout_path("agent_generated", "models")
 
 
 def _scan_bundled_model_types() -> frozenset[str]:
@@ -142,7 +143,7 @@ def get_model_description(model_type: str, *, baseline_isolation: bool = False) 
     bundled = os.path.join(_ML_MODELS_DIR, model_type, "description.md")
     legacy_candidates = (
         []
-        if generated_library_is_workspace_bound()
+        if generated_library_is_workspace_bound() or _PLUGIN_DESCRIPTIONS_DIR is None
         else [os.path.join(_PLUGIN_DESCRIPTIONS_DIR, model_type, "description.md")]
     )
     candidates = [

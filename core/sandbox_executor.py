@@ -39,6 +39,7 @@ from core.execution_calibration import (
     resolve_role_ceiling_gb,
 )
 from core.inference_defaults import inference_batch_for
+from core.layout import package_root
 
 # Re-export (R-11-11 recorder extraction): existing import paths keep working.
 from core.recorders import BaseRecorder as BaseRecorder
@@ -297,11 +298,11 @@ def sandbox_records_dir(base_dir: str) -> str:
 #: because every launcher happened to chdir to the repository first. Every
 #: peer module already anchors this way (`core/subprocess_env.py:68`,
 #: `execute_tools/data_paths.py:23`); this module was the exception.
-SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SIDERIUS_ROOT = str(package_root())
 
 
 def child_script_path(relative_path: str) -> str:
-    """Absolute path to a child script, anchored at the repository root.
+    """Absolute path to a child script, anchored at the installed package root.
 
     ``cwd`` semantics are deliberately UNCHANGED: the children still run
     with the caller's working directory, because relative paths in their

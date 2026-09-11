@@ -27,13 +27,13 @@ from __future__ import annotations
 import logging
 import os
 import time
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import requests
 
 from agent.skills.paper_resolver_skill.arxiv_source import parse_arxiv_source
+from core.layout import checkout_root
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ S2_RETRY_BACKOFF_BASE_S = 1.0  # exp-backoff base when no Retry-After header
 # Repo root, resolved relative to this file. ``local`` source paths are
 # resolved against this; absolute paths and ``..`` segments are rejected
 # both here (defence-in-depth) and at the ``PaperSource`` schema layer.
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_PROJECT_ROOT = checkout_root()
 
 # Per-process cache. Key shape:
 #   resolve: ("resolve", source_type, identifier, verbosity)
@@ -294,6 +294,8 @@ def _read_local_paper(identifier: str) -> tuple[str | None, str | None]:
         return None, f"local identifier must be repo-relative, got absolute: {identifier!r}"
     if ".." in identifier.split("/"):
         return None, f"local identifier may not contain '..': {identifier!r}"
+    if _PROJECT_ROOT is None:
+        return None, "local papers require the SIDERIUS source checkout"
     path = (_PROJECT_ROOT / identifier).resolve()
     try:
         path.relative_to(_PROJECT_ROOT)

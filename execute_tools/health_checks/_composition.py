@@ -55,12 +55,12 @@ state — never by a task name, which appears nowhere in this module.
 
 from __future__ import annotations
 
-import os
 from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.layout import checkout_root
 from execute_tools.health_checks._plugin_binding import ResolvedHealthPlugin
 from execute_tools.health_checks._task_health_config import (
     TASK_DECLARABLE_POLICY_KEYS,
@@ -99,7 +99,7 @@ TaskHealthBinding = HealthBindingState | str
 """Either a binding state, or a path to a task health config (state C)."""
 
 
-SIDERIUS_ROOT: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SIDERIUS_ROOT = checkout_root()
 """This checkout's repository root, derived from this file's own location.
 
 **F-7.** The two shipped-config defaults below and in ``config.py`` were

@@ -36,6 +36,7 @@ from agent.schemas.hyperparam_tuning import (
     validate_runtime_config,
 )
 from core.hardware_context import get_or_create
+from core.layout import checkout_root
 from core.run_invariants import (
     LockLaunchIdentity,
     RunHealthMaterialization,
@@ -363,7 +364,7 @@ _COMPATIBILITY_REEXPORTS = (
 )
 
 
-SIDERIUS_ROOT = str(Path(__file__).resolve().parents[2])
+SIDERIUS_ROOT = checkout_root()
 
 
 # `AttemptTransition` and `AttemptDecision` used to live here. Step 07 PR 07b

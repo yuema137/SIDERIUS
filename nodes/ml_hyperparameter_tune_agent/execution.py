@@ -29,7 +29,6 @@ import os
 import time
 from collections.abc import Mapping
 from importlib import import_module as _import_module
-from pathlib import Path as _Path
 from typing import Any
 
 from pydantic import ValidationError
@@ -40,6 +39,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
+from core.layout import checkout_path, checkout_root
 from execute_tools.dataset_config import (
     ScopeViolationError,
 )
@@ -161,7 +161,7 @@ def _emit_attempt_record(sandbox, record: dict, agent_input, *, status: dict | N
         )
 
 
-SIDERIUS_ROOT = str(_Path(__file__).resolve().parents[2])
+SIDERIUS_ROOT = checkout_root()
 
 
 def wall_time_preflight_applicable(
@@ -1408,7 +1408,7 @@ def run_inference_scoring_health(
             enabled=agent_input.health_gate_enabled,
             round_index=round_index,
             config_path=agent_input.health_checks_config,
-            production_config_path=os.path.join(SIDERIUS_ROOT, "configs", "health_checks.yaml"),
+            production_config_path=checkout_path("configs", "health_checks.yaml"),
             task_health_binding=(
                 agent_input.task_composition_ref.task_health_binding
                 if agent_input.task_composition_ref is not None

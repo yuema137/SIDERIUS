@@ -71,11 +71,11 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from agent.skills.evaluate_time_skill.calibration import calibration_dir, gpu_slug
+from core.layout import checkout_path
 
 #: The committed defaults. Relative to the repository root (derived from this
 #: file's location — never the caller's cwd).
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-SHIPPED_PROFILES_PATH = _REPO_ROOT / "configs" / "runtime_profiles.yaml"
+SHIPPED_PROFILES_PATH = checkout_path("configs", "runtime_profiles.yaml")
 
 ExecutionRegime = Literal["single", "dual_coresident", "four_way_coresident"]
 
@@ -251,10 +251,10 @@ def _validate_entry(raw: Any, *, key: str, source: str) -> _ProfileEntry:
 
 
 def _load_shipped() -> dict[str, Any]:
-    if not SHIPPED_PROFILES_PATH.exists():
+    if SHIPPED_PROFILES_PATH is None or not Path(SHIPPED_PROFILES_PATH).exists():
         return {}
     try:
-        raw = yaml.safe_load(SHIPPED_PROFILES_PATH.read_text(encoding="utf-8")) or {}
+        raw = yaml.safe_load(Path(SHIPPED_PROFILES_PATH).read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
         raise MalformedRuntimeProfile(
             f"shipped runtime profiles at {SHIPPED_PROFILES_PATH} do not parse: {exc}"

@@ -19,9 +19,8 @@ from nodes.proposal_helpers import load_model_source
 def library_and_legacy(tmp_path, monkeypatch):
     """Pin the resolved library env AND relocate the legacy checkout root to
     tmp (matrix F: seeded fake legacy artifacts, never the real checkout).
-    Relocating ``_SIDERIUS_ROOT`` also moves the built-in models_sandbox
-    candidate to a missing path, which is fine here — every test targets the
-    plugin candidates that precede it."""
+    The installed built-in source stays independent of this legacy root;
+    these tests target plugin candidates that precede it."""
     monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
     monkeypatch.setattr(proposal_helpers, "_SIDERIUS_ROOT", str(tmp_path / "fake_root"))
     lib_models = tmp_path / "lib" / "models"

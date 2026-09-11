@@ -16,11 +16,12 @@ from agent.schemas.proposal import (
     ReasoningPipelineConfig,
 )
 from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
+from core.layout import checkout_root, package_root
 from execute_tools.evaluation_metric import metric_identity_unavailable_notice
 from execute_tools.metric_order import MetricOrder
 
 # Root of the SIDERIUS project
-_SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SIDERIUS_ROOT = checkout_root()
 
 
 def evidence_order(evidence: ProposerInterpretationEvidence) -> MetricOrder | None:
@@ -195,10 +196,9 @@ def load_model_source(model_type: str) -> str | None:
     from core.generated_library import generated_library_is_workspace_bound, generated_models_dir
 
     # Try agent-generated plugin first (more specific).
-    legacy_models_dir = os.path.join(_SIDERIUS_ROOT, "agent_generated", "models")
     model_dirs = [generated_models_dir()]
-    if not generated_library_is_workspace_bound():
-        model_dirs.append(legacy_models_dir)
+    if not generated_library_is_workspace_bound() and _SIDERIUS_ROOT is not None:
+        model_dirs.append(os.path.join(_SIDERIUS_ROOT, "agent_generated", "models"))
     plugin_candidates = [
         candidate
         for models_dir in model_dirs
@@ -213,7 +213,7 @@ def load_model_source(model_type: str) -> str | None:
                 return f.read()
 
     # Try built-in models — extract from models_sandbox.py
-    sandbox_path = os.path.join(_SIDERIUS_ROOT, "ml_models", "models_sandbox.py")
+    sandbox_path = package_root() / "ml_models" / "models_sandbox.py"
     if not os.path.isfile(sandbox_path):
         return None
 

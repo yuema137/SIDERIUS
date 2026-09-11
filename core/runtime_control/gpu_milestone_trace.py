@@ -88,6 +88,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from core.layout import checkout_root, require_checkout
 from core.runtime_control.gpu_accounting import (
     DeviceIdentity,
     ProcessOccupancy,
@@ -326,7 +327,7 @@ class MilestoneRecord(BaseModel):
 
 def _repo_root() -> Path:
     """This checkout, from this file's location. Never a fixed path."""
-    return Path(__file__).resolve().parents[2]
+    return require_checkout(checkout_root())
 
 
 def resolve_git_sha() -> str:

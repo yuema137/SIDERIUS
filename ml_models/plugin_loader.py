@@ -21,17 +21,15 @@ import importlib.util
 import os
 import sys
 
+from core.layout import checkout_path
+
 # LEGACY CHECKOUT model-plugin directory: the repository's
 # ``agent_generated/models``. arXiv P1: this is a READ-ONLY compatibility
 # fallback — promotions write to the resolved generated-library root
 # (``core.generated_library.generated_models_dir()``), and this dir is
 # scanned AFTER it so a pre-migration checkout keeps resolving what it
 # already promoted while never being written to again.
-AGENT_GENERATED_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "agent_generated",
-    "models",
-)
+AGENT_GENERATED_DIR = checkout_path("agent_generated", "models")
 
 # Env var name used to opt into run-scoped plugin directories. When set to a
 # non-empty ``os.pathsep``-separated list of directory paths, plugin loading
@@ -194,7 +192,7 @@ def _resolve_plugin_dirs() -> list[str]:
         return list(union_plugin_roots(declared, env))
     if env:
         return [p for p in env.split(os.pathsep) if p.strip()]
-    if generated_library_is_workspace_bound():
+    if generated_library_is_workspace_bound() or AGENT_GENERATED_DIR is None:
         return [generated_models_dir()]
     return [generated_models_dir(), AGENT_GENERATED_DIR]
 
@@ -446,7 +444,7 @@ def preload_global_models() -> list[str]:
     loaded: list[str] = []
     seen_basenames: set[str] = set()
     model_dirs = [generated_models_dir()]
-    if not generated_library_is_workspace_bound():
+    if not generated_library_is_workspace_bound() and AGENT_GENERATED_DIR is not None:
         model_dirs.append(AGENT_GENERATED_DIR)
     for models_dir in model_dirs:
         if not os.path.isdir(models_dir):

@@ -41,9 +41,10 @@ from typing import Any
 import numpy as np
 
 from agent.schemas.telemetry import TokenUsageRow
+from core.layout import checkout_root, require_checkout
 from tools.validate_token_usage_jsonl import lint as lint_jsonl
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = checkout_root()
 
 DEFAULT_RATE_PROMPT = 10.0  # USD per 1M prompt tokens (gpt-5.4 placeholder)
 DEFAULT_RATE_COMPLETION = 30.0  # USD per 1M completion tokens
@@ -632,7 +633,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "reports",
+        default=None,
         help="Where to write the two markdown reports.",
     )
     p.add_argument(
@@ -671,7 +672,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Skip the JSONL pre-flight lint (use only for testing).",
     )
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.output_dir is None:
+        args.output_dir = require_checkout(REPO_ROOT) / "reports"
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -14,14 +14,14 @@ load_stage_prompt() and render_expert_context().
 
 import os
 
+from core.layout import checkout_path
+
 _PROMPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # LEGACY CHECKOUT global losses dir (arXiv P1: read-only compatibility —
 # promotions now land in the resolved generated-library losses dir, and
 # ``live_loss_metadata`` accepts entries from EITHER location because both
 # are on the training subprocesses' scan union).
-_GLOBAL_LOSS_DIR = os.path.abspath(
-    os.path.join(_PROMPT_DIR, "..", "..", "..", "agent_generated", "losses")
-)
+_GLOBAL_LOSS_DIR = checkout_path("agent_generated", "losses")
 
 
 def load_prompt(filename: str) -> str:
@@ -299,7 +299,7 @@ def live_loss_metadata(registry) -> list:
     from core.generated_library import generated_library_is_workspace_bound, generated_losses_dir
 
     global_loss_dirs = {os.path.abspath(generated_losses_dir())}
-    if not generated_library_is_workspace_bound():
+    if not generated_library_is_workspace_bound() and _GLOBAL_LOSS_DIR is not None:
         global_loss_dirs.add(_GLOBAL_LOSS_DIR)
     live = []
     for meta in registry.list(capability_type="loss"):

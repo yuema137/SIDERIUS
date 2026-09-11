@@ -45,6 +45,8 @@ from pathlib import Path
 import torch
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from core.layout import checkout_root
+
 logger = logging.getLogger(__name__)
 
 
@@ -215,13 +217,17 @@ def _probe_driver_version(errors: list[str]) -> str | None:
 
 def _probe_repo_commit(errors: list[str]) -> str | None:
     """``git rev-parse HEAD`` of the checkout containing this module (O1a)."""
+    root = checkout_root()
+    if root is None:
+        errors.append("repo_commit: installed package has no source checkout")
+        return None
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             timeout=_PROBE_TIMEOUT_S,
-            cwd=Path(__file__).resolve().parent,
+            cwd=root,
         )
         if result.returncode != 0:
             errors.append(f"repo_commit: git exit {result.returncode}")

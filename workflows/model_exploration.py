@@ -106,6 +106,7 @@ from agent.utils.proposer_preflight import (
 )
 from core.chain_state import ChainState
 from core.hardware_context import get_or_create as get_or_create_hardware_context
+from core.layout import checkout_root, package_root, require_checkout
 
 # Step 12 / PR-12a C6 — `core.resume` no longer imports a private symbol from
 # THIS module, so the cycle that forced `RestoredState` under TYPE_CHECKING and
@@ -159,7 +160,7 @@ from workflows.task_composition import (
 )
 from workflows.task_config import get_task_description, load_task_config
 
-SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SIDERIUS_ROOT = checkout_root()
 
 
 def _log_rss(step: str) -> None:
@@ -218,7 +219,7 @@ def _load_vocab_seed() -> list:
     Returns a list of VocabEntry objects. Returns empty list if the file
     is missing (backward compat — legacy workflows without vocab).
     """
-    seed_path = os.path.join(SIDERIUS_ROOT, "agent", "schemas", "vocab_seed.json")
+    seed_path = package_root() / "agent" / "schemas" / "vocab_seed.json"
     if not os.path.exists(seed_path):
         return []
     try:
@@ -713,7 +714,7 @@ def resolve_lit_review_config_path(config_path: str) -> str:
     """
     if os.path.isabs(config_path):
         return config_path
-    return os.path.join(SIDERIUS_ROOT, config_path)
+    return str(require_checkout(SIDERIUS_ROOT) / config_path)
 
 
 def lit_review_config_sha256(config_path: str | None, *, enabled: bool) -> str | None:
@@ -1479,7 +1480,7 @@ def _promote_loss_to_global(impl_output) -> None:
     # migration is neither duplicated nor clobbered, and is never written to.
     library_losses_dir = generated_losses_dir()
     loss_library_dirs = [library_losses_dir]
-    if not generated_library_is_workspace_bound():
+    if not generated_library_is_workspace_bound() and LOSSES_DIR is not None:
         loss_library_dirs.append(LOSSES_DIR)
     dest_basename = f"{loss_prov.loss_name}.py"
     global_dest = os.path.join(library_losses_dir, dest_basename)
@@ -1655,7 +1656,7 @@ def _promote_model_to_global(impl_output) -> None:
     # neither duplicated nor clobbered — and is never written to.
     library_models_dir = generated_models_dir()
     model_library_dirs = [library_models_dir]
-    if not generated_library_is_workspace_bound():
+    if not generated_library_is_workspace_bound() and LEGACY_MODELS_DIR is not None:
         model_library_dirs.append(LEGACY_MODELS_DIR)
 
     # Branch B reuse path: model_file_path already points into EITHER library

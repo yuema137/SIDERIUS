@@ -30,6 +30,7 @@ import os
 
 from tqdm import tqdm
 
+from core.layout import checkout_root, require_checkout
 from execute_tools.scoring_utils import (
     NUM_FILES,
     SEGMENTS_PER_FILE,
@@ -114,8 +115,7 @@ def default_anchor_map_path() -> str:
     independent of the caller's current working directory, so the committed
     artifact is used automatically regardless of where a process is launched.
     """
-    pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(pkg_root, "reference_data", "segment_anchors.json")
+    return str(require_checkout(checkout_root()) / "reference_data" / "segment_anchors.json")
 
 
 def resolve_anchor_map_path(explicit: str | None) -> str:

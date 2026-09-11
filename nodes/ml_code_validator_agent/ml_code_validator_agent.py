@@ -725,11 +725,11 @@ class MLCodeValidatorAgent:
             vocab_for_check = None
             try:
                 import json as _json
-                from pathlib import Path as _Path
 
-                # parents[2]: nodes/<agent>/<agent>.py → nodes/<agent> → nodes → repo root
+                from core.layout import package_root
+
                 seed_path = os.path.join(
-                    _Path(__file__).resolve().parents[2],
+                    package_root(),
                     "agent",
                     "schemas",
                     "vocab_seed.json",

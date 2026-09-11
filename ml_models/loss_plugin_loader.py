@@ -46,6 +46,8 @@ import os
 import sys
 from typing import Any
 
+from core.layout import checkout_path
+
 # LEGACY CHECKOUT loss-plugin directory: the repository's
 # ``agent_generated/losses/``, computed from the repository root beside this
 # package so the resolver works regardless of the caller's cwd. arXiv P1: this is a READ-ONLY
@@ -53,11 +55,7 @@ from typing import Any
 # root (``core.generated_library.generated_losses_dir()``), and this dir is
 # scanned LAST so a pre-migration checkout keeps resolving what it already
 # promoted while never being written to again.
-LOSSES_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "agent_generated",
-    "losses",
-)
+LOSSES_DIR = checkout_path("agent_generated", "losses")
 
 # Env var name for run-scoped loss-plugin directories. Distinct from
 # ``SIDERIUS_PLUGIN_DIRS`` — see module docstring for why.
@@ -204,7 +202,7 @@ def _resolve_loss_dirs() -> list[str]:
     from core.generated_library import generated_library_is_workspace_bound, generated_losses_dir
 
     library_dirs = [generated_losses_dir()]
-    if not generated_library_is_workspace_bound():
+    if not generated_library_is_workspace_bound() and LOSSES_DIR is not None:
         library_dirs.append(LOSSES_DIR)
     env = os.environ.get(_LOSS_DIRS_ENV_VAR, "").strip()
     if env:

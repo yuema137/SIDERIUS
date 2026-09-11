@@ -41,7 +41,9 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from core.layout import checkout_root, require_checkout
+
+REPO_ROOT = require_checkout(checkout_root())
 TESTS_ROOT = REPO_ROOT / "tests" / "unit"
 
 #: Top-level packages that count as "production" for edge purposes.

@@ -149,7 +149,7 @@ def preload_global_losses() -> list[str]:
     loaded: list[str] = []
     seen_basenames: set[str] = set()
     loss_dirs = [generated_losses_dir()]
-    if not generated_library_is_workspace_bound():
+    if not generated_library_is_workspace_bound() and LOSSES_DIR is not None:
         loss_dirs.append(LOSSES_DIR)
     for losses_dir in loss_dirs:
         if not os.path.isdir(losses_dir):

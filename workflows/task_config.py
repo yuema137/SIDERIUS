@@ -41,6 +41,7 @@ import yaml
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.model_io_resolution import resolve_model_io_contract
 from agent.schemas.task_config import ForwardContract
+from core.layout import checkout_root, require_checkout
 
 # F-SCANA-2 — repository root, derived from this file's own location (the
 # established root-derivation idiom, same as
@@ -53,7 +54,7 @@ from agent.schemas.task_config import ForwardContract
 # address a DIFFERENT file than the one the snapshot preserves. One
 # root-anchored resolution authority now serves all three; tests that need
 # a fixture config monkeypatch ``_SIDERIUS_ROOT`` instead of chdir'ing.
-_SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SIDERIUS_ROOT = checkout_root()
 
 
 def default_task_config_path() -> str:
@@ -70,7 +71,7 @@ def default_task_config_path() -> str:
     Returns:
         Absolute path of the canonical task-config file.
     """
-    return os.path.join(_SIDERIUS_ROOT, "configs", "task_config.yaml")
+    return str(require_checkout(_SIDERIUS_ROOT) / "configs" / "task_config.yaml")
 
 
 # Module-level cache: ``load_task_config()`` short-circuits to the cached

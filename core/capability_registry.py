@@ -37,6 +37,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from core.layout import checkout_path
+
 # LEGACY CHECKOUT index path: the repository's
 # ``agent_generated/_capability_index.json``, computed from the repository
 # root beside this package. arXiv P1: this is a READ-ONLY compatibility fallback — the
@@ -45,11 +47,7 @@ from pydantic import BaseModel, Field
 # CONSTRUCTION time so env changes and test monkeypatching take effect),
 # and this legacy file is consulted only when a default-constructed
 # registry finds no resolved index yet. It is never written.
-_LEGACY_CHECKOUT_INDEX_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "agent_generated",
-    "_capability_index.json",
-)
+_LEGACY_CHECKOUT_INDEX_PATH = checkout_path("agent_generated", "_capability_index.json")
 
 # Supported capability types. Loss is the first concrete type. ``model`` is
 # reserved for a future opt-in registration of agent-generated model plugins;

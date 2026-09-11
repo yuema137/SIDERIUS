@@ -23,6 +23,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from core.layout import checkout_path, require_checkout
 from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks._composition import (
@@ -44,7 +45,7 @@ from execute_tools.health_checks.schemas import GateAction
 # what gets WRITTEN into a persisted artifact goes through `_record_path`,
 # which renders an in-repo config repo-relative so the artifact does not carry
 # the path of whichever checkout produced it.
-_DEFAULT_CONFIG_PATH: str = os.path.join(SIDERIUS_ROOT, "configs", "health_checks.yaml")
+_DEFAULT_CONFIG_PATH = checkout_path("configs", "health_checks.yaml")
 
 # Basename of the per-workspace materialized effective config — the single
 # path every downstream loader reads once the run-level monitored-file
@@ -461,13 +462,20 @@ def _resolved_binding_identity(path: str | None) -> tuple[Any, ...]:
     )
 
 
+def _resolve_config_path(path: str | None) -> str:
+    """Resolve an explicit policy or the same-checkout default, never CWD."""
+    if path or _DEFAULT_CONFIG_PATH:
+        return path or str(_DEFAULT_CONFIG_PATH)
+    return str(require_checkout(SIDERIUS_ROOT) / "configs" / "health_checks.yaml")
+
+
 def _load_raw_health_config(path: str | None = None) -> HealthChecksConfig:
     """Parse one config file verbatim. No composition, no binding.
 
     Split out at Step 08b C5 so composition has something to build FROM
     without recursing through the public loader.
     """
-    resolved = path or _DEFAULT_CONFIG_PATH
+    resolved = _resolve_config_path(path)
     with open(resolved) as f:
         raw = yaml.safe_load(f) or {}
     return HealthChecksConfig.model_validate(raw)
@@ -792,6 +800,8 @@ def _record_path(path: str) -> str:
         absolute path.
     """
     absolute = Path(path).resolve()
+    if SIDERIUS_ROOT is None:
+        return str(absolute)
     root = Path(SIDERIUS_ROOT).resolve()
     if absolute.is_relative_to(root):
         return str(absolute.relative_to(root))
@@ -865,7 +875,7 @@ def materialize_effective_config(
         # provenance for a human reader and is never parsed back, but it IS
         # written, so it must not make the artifact's bytes depend on which
         # checkout produced them.
-        f"# source: {_record_path(source_path or _DEFAULT_CONFIG_PATH)}\n"
+        f"# source: {_record_path(_resolve_config_path(source_path))}\n"
         f"# health_gate_files: {files_repr}\n"
         f"# sha256: {sha}\n"
     )
