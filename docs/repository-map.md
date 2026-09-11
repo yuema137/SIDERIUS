@@ -2,8 +2,9 @@
 
 Use this page to find an existing capability, its source owner and its entrypoint.
 Source inventory: infra `2091acdfcb24eb9c8d3953ee7ba1e3ba99926aa0`, inspected
-2026-09-10. The groups below are navigation categories. Physical directories,
-imports and CLI paths have not moved.
+2026-09-10. The groups below are navigation categories. PR 03A later relocated
+the advice guide and opt-in provider diagnostic as recorded below; core package
+imports and the chain/iteration CLI paths have not moved.
 
 ## Start here
 
@@ -54,8 +55,10 @@ SIDERIUS (navigation, not physical directories)
     └── reference_data/
 ```
 
-All 19 visible tracked directory roots and `.github` are accounted for below.
-Counts refer to the audited base, before this documentation addition.
+At the audited base, all 19 visible tracked directory roots plus `.github` were
+accounted for below. Counts in the table remain that dated inventory. After the
+two PR 03A relocations, the current tracked tree has 17 visible roots plus
+`.github`; `advice/` and `env_validation/` are the two retired roots.
 
 | Actual root | Tracked files | Responsibility and status |
 | --- | ---: | --- |

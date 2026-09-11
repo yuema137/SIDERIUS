@@ -180,7 +180,7 @@ SIDERIUS
 ├── Agents and composition: nodes/, agent/, workflows/
 ├── Execution and extensions: core/, execute_tools/, ml_models/
 ├── Development and validation: tests/, tools/, scripts/, .github/
-└── Documentation and retained material: docs/, advice/, reports/, reference_data/
+└── Documentation and retained material: docs/, reports/, reference_data/
 ```
 
 `scripts/`, `execute_tools/` and `configs/` contain mixed material;
