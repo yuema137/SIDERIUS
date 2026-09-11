@@ -78,6 +78,7 @@ from core.iteration_manifest import (
     manifest_path,
     publish_iteration_manifest,
 )
+from core.layout import checkout_root
 from core.record_role import formal_evidence_of
 from core.resume import ResumeError, restore_prior_state
 from core.run_invariants import (
@@ -114,7 +115,8 @@ from workflows.task_composition import (
     resolve_composed_measurement_capability,
 )
 
-SIDERIUS_ROOT = str(Path(__file__).resolve().parents[2])
+_CHECKOUT_ROOT = checkout_root()
+SIDERIUS_ROOT = str(_CHECKOUT_ROOT) if _CHECKOUT_ROOT is not None else str(Path(__file__).resolve().parents[2])
 load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
 
 

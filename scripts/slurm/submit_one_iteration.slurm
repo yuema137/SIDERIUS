@@ -29,11 +29,14 @@ set -o pipefail
 
 # --- Project Paths & Validation ---
 PROJECT_DIR=""
-CHECKOUT_BINDINGS=1
 
 # The submission node passes the exact checkout immediately after this script.
 # Do not infer it from the spooled script's directory or ambient activation.
 if [ "${1:-}" = "--siderius-checkout" ]; then
+    if [ "$#" -lt 2 ] || [ -z "${2:-}" ]; then
+        echo "[CRITICAL] --siderius-checkout requires a nonempty value" >&2
+        exit 2
+    fi
     PROJECT_DIR="${2:-}"
     shift 2
 elif [[ "${1:-}" == --siderius-checkout=* ]]; then
@@ -53,10 +56,9 @@ fi
 # --- Environment Setup ---
 cd "$PROJECT_DIR"
 
-if [ -f ".venv/bin/activate" ]; then
-    source .venv/bin/activate
-else
-    echo "[CRITICAL] Virtual environment not found in $PROJECT_DIR" >&2
+PYTHON_BIN="$PROJECT_DIR/.venv/bin/python"
+if [ ! -x "$PYTHON_BIN" ]; then
+    echo "[CRITICAL] exact checkout Python not found: $PYTHON_BIN" >&2
     exit 1
 fi
 export VIRTUAL_ENV="$PROJECT_DIR/.venv"
@@ -118,15 +120,18 @@ while [[ $# -gt 0 ]]; do
       break
       ;;
     --workspace)
+      if [ "$#" -lt 2 ] || [ -z "${2:-}" ]; then echo "[FAIL] --workspace requires a nonempty value" >&2; exit 2; fi
       WORKSPACE="$2"; FORWARD_ARGS+=("$1" "$2"); shift 2 ;;
     --siderius-checkout|--siderius-checkout=*)
       echo "[FAIL] duplicate --siderius-checkout binding" >&2
       exit 2
       ;;
     --iteration|--start_iteration)
+      if [ "$#" -lt 2 ] || [ -z "${2:-}" ]; then echo "[FAIL] $1 requires a nonempty value" >&2; exit 2; fi
       ITERATION="$2"; FORWARD_ARGS+=("$1" "$2"); shift 2 ;;
     --source_paths|--seed_paths)
       FORWARD_ARGS+=("$1"); shift
+      if [ "$#" -eq 0 ] || [[ "$1" == --* ]]; then echo "[FAIL] ${FORWARD_ARGS[${#FORWARD_ARGS[@]}-1]} requires at least one value" >&2; exit 2; fi
       while [[ $# -gt 0 && ! "$1" =~ ^-- ]]; do
         SOURCE_PATHS+=("$1")
         FORWARD_ARGS+=("$1")
@@ -220,7 +225,7 @@ if [ ! -f "$PROJECT_DIR/scripts/launch/_import_resolution_probe.py" ]; then
 fi
 cp "$PROJECT_DIR/scripts/launch/_import_resolution_probe.py" "$PROBE_TMP/probe.py"
 set +e
-(cd "$PROBE_TMP" && "$PROJECT_DIR/.venv/bin/python" probe.py "$PROJECT_DIR" --tree-only)
+(cd "$PROBE_TMP" && "$PYTHON_BIN" probe.py "$PROJECT_DIR" --tree-only)
 PROBE_RC=$?
 set -e
 if [ "$PROBE_RC" -ne 0 ]; then
@@ -230,7 +235,7 @@ fi
 
 # --- Execute the runner ---
 set +e
-"$PROJECT_DIR/.venv/bin/python" "$PROJECT_DIR/src/workflows/run_one_iteration.py" "${RUNNER_ARGS[@]}"
+"$PYTHON_BIN" "$PROJECT_DIR/src/workflows/run_one_iteration.py" "${RUNNER_ARGS[@]}"
 PY_EXIT_CODE=$?
 set -e
 

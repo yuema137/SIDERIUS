@@ -30,8 +30,8 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-PROBE = REPO_ROOT / "sdsc_submission_scripts" / "_import_resolution_probe.py"
-RUN_CHAIN = REPO_ROOT / "sdsc_submission_scripts" / "run_chain.sh"
+PROBE = REPO_ROOT / "scripts" / "launch" / "_import_resolution_probe.py"
+RUN_CHAIN = REPO_ROOT / "scripts" / "launch" / "run_chain.sh"
 
 
 def _make_fake_framework_tree(root: Path) -> Path:
@@ -144,7 +144,7 @@ def _run_guard(
             str(harness),
             str(guard),
             str(project_dir),
-            str(script_dir if script_dir is not None else REPO_ROOT / "sdsc_submission_scripts"),
+            str(script_dir if script_dir is not None else REPO_ROOT / "scripts" / "launch"),
             sys.executable,
             "",
         ],
@@ -218,7 +218,7 @@ def test_guard_refuses_when_the_pin_cannot_hold(tmp_path):
     resolution lands outside it. Fails by: exit == 0, or the refusal text
     missing."""
     empty = tmp_path / "frameworkless_checkout"
-    (empty / "sdsc_submission_scripts").mkdir(parents=True)
+    (empty / "scripts" / "launch").mkdir(parents=True)
     rc, out = _run_guard(tmp_path, empty)
     assert rc == 1, out
     assert "SOURCE-TREE AUTHORITY REFUSED" in out
@@ -273,7 +273,7 @@ def test_dry_run_still_refuses_foreign_resolution_the_hole_closure(tmp_path):
     DRY_RUN=1 — resolution lands outside it via the interpreter's own
     environment. Fails by: exit == 0 (the hole reopened)."""
     empty = tmp_path / "frameworkless_checkout"
-    (empty / "sdsc_submission_scripts").mkdir(parents=True)
+    (empty / "scripts" / "launch").mkdir(parents=True)
     rc, out = _run_guard(tmp_path, empty, dry_run=True)
     assert rc == 1, out
     assert "SOURCE-TREE AUTHORITY REFUSED" in out
