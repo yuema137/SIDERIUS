@@ -215,6 +215,7 @@ fi
 
 RUNNER_ARGS=("${FORWARD_ARGS[@]}")
 
+# --- Execute the runner ---
 # Validate source ownership on the compute node as well as the submission node.
 PROBE_TMP="$(mktemp -d)"
 cleanup_probe() { rm -rf "$PROBE_TMP"; }
@@ -233,7 +234,7 @@ if [ "$PROBE_RC" -ne 0 ]; then
     exit 1
 fi
 
-# --- Execute the runner ---
+# --- Runner execution after probe ---
 set +e
 "$PYTHON_BIN" "$PROJECT_DIR/src/workflows/run_one_iteration.py" "${RUNNER_ARGS[@]}"
 PY_EXIT_CODE=$?
