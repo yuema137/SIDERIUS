@@ -46,7 +46,7 @@ Two semantic rules, frozen by §V.4 and enforced here
    ``persisted_ranking``'s per-record partition. When no identity can be
    established this module **declines by name** — no best-so-far, no ranking,
    and a recorded refusal string — following the pattern of
-   ``scripts/inspect_run_state.py`` and the chain console summary (§V.14h).
+   ``scripts/launch/inspect_run_state.py`` and the chain console summary (§V.14h).
 
 What it reads — settled by source, not chosen here (§V.13c)
 ------------------------------------------------------------

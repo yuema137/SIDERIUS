@@ -11,7 +11,7 @@
 # Usage:
 #   sbatch --partition=gpu-shared --nodes=1 --ntasks=1 --gpus=1 --mem=24G \
 #          --time=04:00:00 --cpus-per-task=8 \
-#          sdsc_submission_scripts/submit_one_iteration.slurm \
+#          scripts/slurm/submit_one_iteration.slurm \
 #          --workspace /expanse/lustre/projects/ddp433/ym137/exploration_v1 \
 #          --iteration 3 \
 #          --source_paths /scratch/.../seed_punet.json /scratch/.../seed_wavenet.json \
@@ -48,11 +48,6 @@ if [ -z "$PROJECT_DIR" ] || [[ "$PROJECT_DIR" != /* ]] || [ ! -d "$PROJECT_DIR" 
     exit 1
 fi
 
-if [ ! -d "$PROJECT_DIR" ]; then
-    echo "[CRITICAL] Project directory $PROJECT_DIR not found!" >&2
-    exit 1
-fi
-
 # --- Environment Setup ---
 cd "$PROJECT_DIR"
 
@@ -62,6 +57,11 @@ if [ ! -x "$PYTHON_BIN" ]; then
     exit 1
 fi
 export VIRTUAL_ENV="$PROJECT_DIR/.venv"
+
+if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.prefix == sys.argv[1] else 1)' "$PROJECT_DIR/.venv"; then
+    echo "[CRITICAL] selected Python is not owned by $PROJECT_DIR/.venv" >&2
+    exit 1
+fi
 
 unset PYTHONPATH
 
