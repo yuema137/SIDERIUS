@@ -82,7 +82,7 @@ def _run_cli(monkeypatch, *argv: str) -> int:
     """Execute rebuild_per_file_best as a script (mirrors real CLI use);
     returns the exit code (0 = success). ``runpy`` propagates the
     script's ``SystemExit`` — catching it is expected."""
-    script = Path(__file__).resolve().parents[3] / "scripts" / "rebuild_per_file_best.py"
+    script = Path(__file__).resolve().parents[3] / "scripts" / "runtime" / "rebuild_per_file_best.py"
     monkeypatch.setattr(sys, "argv", [str(script), *argv])
     try:
         runpy.run_path(str(script), run_name="__main__")

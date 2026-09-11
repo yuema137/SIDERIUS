@@ -3563,7 +3563,7 @@ def main():
     # analytical bookkeeping, not decision state); on failure the
     # existing table is preserved by atomic replace and can always be
     # regenerated deterministically via
-    # ``scripts/rebuild_per_file_best.py`` from committed artifacts.
+    # ``scripts/runtime/rebuild_per_file_best.py`` from committed artifacts.
     # Only updates on completed manifests (A6).
     if manifest["status"] == "completed":
         try:
@@ -3576,7 +3576,7 @@ def main():
                 f"  [PER_FILE_BEST] WARN: incremental table write failed for "
                 f"workspace {args.workspace!r}: {type(e).__name__}: {e} — "
                 f"chain continues; regenerate via "
-                f"scripts/rebuild_per_file_best.py."
+                f"scripts/runtime/rebuild_per_file_best.py."
             )
 
     if manifest["status"] == "completed":
