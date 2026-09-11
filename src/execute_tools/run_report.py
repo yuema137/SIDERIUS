@@ -728,7 +728,7 @@ def load_run_output(path: Path) -> HyperparamTuningOutput:
     json.JSONDecodeError)`` — has an unreachable second branch: pydantic v2
     reports a JSON SYNTAX error as a ``ValidationError`` too, so the
     ``JSONDecodeError`` clause never fires and every truncated file is
-    reported as a schema violation. (``scripts/inspect_run_state.py``'s
+    reported as a schema violation. (``scripts/launch/inspect_run_state.py``'s
     ``_validate_run_output`` has that shape; OBSERVED, not this workstream's
     to change.) Splitting the steps keeps "this file is not JSON" and "this
     file is not a tuner output" as two different things an operator is told,

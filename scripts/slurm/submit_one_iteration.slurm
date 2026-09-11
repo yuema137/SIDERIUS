@@ -58,7 +58,7 @@ if [ ! -x "$PYTHON_BIN" ]; then
 fi
 export VIRTUAL_ENV="$PROJECT_DIR/.venv"
 
-if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.prefix == sys.argv[1] else 1)' "$PROJECT_DIR/.venv"; then
+if ! "$PYTHON_BIN" -c 'import sys; from pathlib import Path; raise SystemExit(0 if Path(sys.prefix).resolve() == Path(sys.argv[1]).resolve() else 1)' "$PROJECT_DIR/.venv"; then
     echo "[CRITICAL] selected Python is not owned by $PROJECT_DIR/.venv" >&2
     exit 1
 fi

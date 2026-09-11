@@ -10,7 +10,7 @@ from pathlib import Path
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from core.resume import restore_prior_state
-from scripts.inspect_run_state import compute_next_iter
+from scripts.launch.inspect_run_state import compute_next_iter
 
 
 def _commit_iter1(ws: Path) -> str:

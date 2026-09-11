@@ -609,7 +609,7 @@ def should_run_literature_review(
 
     For v1 this is just the resolved ``enabled`` flag (resolution priority
     CLI > YAML > default False — Design Decisions 1 + 2, 2026-06-11). The
-    runner ``sdsc_submission_scripts/run_one_iteration.py`` resolves the
+    runner ``src/workflows/run_one_iteration.py`` resolves the
     boolean from ``--ml_lit_review_enabled`` / ``--no-ml_lit_review_enabled``
     (BooleanOptionalAction) against the YAML's top-level ``enabled``,
     then passes the result into ``run_workflow(lit_review_enabled=...)``.

@@ -12,7 +12,7 @@ Each iteration:
   3. Writes a manifest.json summarizing the iteration's output for the next job
 
 Usage:
-    python sdsc_submission_scripts/run_one_iteration.py \\
+    python src/workflows/run_one_iteration.py \\
         --workspace /scratch/exploration_v1 \\
         --start_iteration 3 \\
         --source_paths /scratch/.../seed_punet.json /scratch/.../seed_wavenet.json \\
@@ -1884,7 +1884,7 @@ def build_parser() -> argparse.ArgumentParser:
         "subprocess groups. Tri-state (arXiv #261 / Q-07c-6): "
         "--runtime_watchdog forces on, --no-runtime_watchdog forces off, "
         "and when NEITHER is passed the device/execution-regime runtime "
-        "profile decides (configs/runtime_profiles.yaml + the measured "
+        "profile decides (configs/runtime/runtime_profiles.yaml + the measured "
         "overlay in $SIDERIUS_CALIBRATION_DIR). An uncalibrated pair "
         "resolves to the legacy default: off.",
     )
@@ -2265,7 +2265,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help=(
             "Declares that this launch was selected by the chain's auto-resume "
-            "(run_chain.sh forwards it only when scripts/inspect_run_state.py "
+            "(run_chain.sh forwards it only when scripts/launch/inspect_run_state.py "
             "computed the start iteration). #258 refinement: with this flag, an "
             "existing same-iteration manifest whose terminal status is 'failed' "
             "or 'no_records' is replaced through the EXPLICIT replacement path — "
@@ -2880,7 +2880,7 @@ def main():
             "device/execution regime — watchdog disabled; the outer time "
             "budgets are the runaway bound. Run qualification (write the "
             "measured overlay in $SIDERIUS_CALIBRATION_DIR), add a reviewed "
-            "row to configs/runtime_profiles.yaml, or pass explicit "
+            "row to configs/runtime/runtime_profiles.yaml, or pass explicit "
             "--runtime_watchdog flags to change this.",
             file=sys.stderr,
             flush=True,

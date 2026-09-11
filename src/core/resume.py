@@ -396,7 +396,7 @@ def _validate_run_output(
 ) -> HyperparamTuningOutput:
     """Validate the run_output JSON against ``HyperparamTuningOutput``.
 
-    Same predicate as ``scripts/inspect_run_state.py:91-104`` so the
+    Same predicate as ``scripts/launch/inspect_run_state.py:91-104`` so the
     inspector and the resume helper agree on what "committed" means.
     """
     if not os.path.isfile(output_path):
@@ -419,7 +419,7 @@ def _validate_run_output(
 
 # ---------------------------------------------------------------------------
 # V19 PR 1 — chain-incumbent reconstruction (design doc §3.3/§3.6).
-# Commit-time validity ONLY: the repo-current configs/health_checks.yaml is
+# Commit-time validity ONLY: the repo-current configs/health/health_checks.yaml is
 # NEVER consulted for decision state. Candidates whose commit-time validity
 # cannot be established are UNKNOWN and excluded.
 # ---------------------------------------------------------------------------
@@ -725,7 +725,7 @@ def classify_committed_record(
     gate verdicts interpreted against the workspace's materialized
     effective HealthGate policy (accepted only when its canonical body
     sha equals the iteration's stamped ``health_config_sha256``). The
-    repo-current shipped ``configs/health_checks.yaml`` is NEVER
+    repo-current shipped ``configs/health/health_checks.yaml`` is NEVER
     consulted — the same rule that makes incumbent reconstruction
     stable across repo-policy edits (design doc §3.3).
 

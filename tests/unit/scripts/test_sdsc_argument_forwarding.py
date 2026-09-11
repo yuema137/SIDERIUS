@@ -39,7 +39,10 @@ RUNNER = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
 
 #: Required by the wrapper's own validation; supplied so a test exercises
 #: the token under study rather than tripping over an unrelated check.
-BASE = ["--workspace", "/tmp/ws", "--iteration", "3", "--source_paths", "/tmp/seed.json"]
+BASE = [
+    "--workspace", "/tmp/ws", "--iteration", "3", "--source_paths", "/tmp/seed.json",
+    "--run_name", "r", "--task_composition", "/tmp/task.yaml", "--data_dir", "/tmp/data",
+]
 
 
 def _slice(text: str, start: str, end: str) -> str:
@@ -327,5 +330,5 @@ class TestLilabSdscParity:
         sdsc_argv = forward([*BASE, flag, value])
         assert flag in sdsc_argv
         assert sdsc_argv[sdsc_argv.index(flag) + 1] == value
-        sdsc = module.build_parser().parse_args([*required, flag, value])
+        sdsc = module.build_parser().parse_args(sdsc_argv)
         assert getattr(lilab, dest) == getattr(sdsc, dest)

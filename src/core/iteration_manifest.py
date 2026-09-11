@@ -32,7 +32,7 @@ silently regenerate integrity hashes. Concretely:
   ``previous_run_output_sha256`` under ``manifest_replacement``.
 * :func:`verify_iteration_manifest` is the verification predicate
   ``core/resume.py``, ``execute_tools/per_file_best.py`` and
-  ``scripts/inspect_run_state.py`` all call, so "trustworthy" has one
+  ``scripts/launch/inspect_run_state.py`` all call, so "trustworthy" has one
   definition and one message shape.
 
 What content hashing cannot do, stated plainly: a hand rewrite that
