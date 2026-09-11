@@ -46,7 +46,6 @@ from core.run_invariants import (
 )
 from core.runtime_control.gpu_accounting import device_identity_from_hardware
 from core.sandbox_executor import TidmadSandbox
-from execute_tools.trial_anchor_map import load_anchor_map
 from execute_tools.data_paths import active_physical_data_root
 from execute_tools.dataset_config import (
     resolve_dataset_profile,
@@ -75,6 +74,7 @@ from execute_tools.task_data_path import (
     require_bound_task_data_path,
     resolve_bound_task_data_path,
 )
+from execute_tools.trial_anchor_map import load_anchor_map
 from nodes.ml_hyperparameter_tune_agent.cli import (
     PARTIAL_CAMPAIGN_EXIT_CODE,
     build_agent_input,
