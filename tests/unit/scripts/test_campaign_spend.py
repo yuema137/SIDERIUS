@@ -19,7 +19,7 @@ import json
 
 import pytest
 
-from scripts.campaign_spend import (
+from scripts.runtime.campaign_spend import (
     DEFAULT_COST_PER_MTOK_USD,
     RunNameError,
     estimated_cost_usd,

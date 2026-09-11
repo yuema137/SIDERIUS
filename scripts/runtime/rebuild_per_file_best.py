@@ -11,10 +11,10 @@ Typical usages:
     # Regenerate the table in a chain workspace (after a WARN'd
     # incremental failure, or as first-time backfill on a legacy V17
     # workspace).
-    python scripts/rebuild_per_file_best.py --workspace /path/to/ws
+    python scripts/runtime/rebuild_per_file_best.py --workspace /path/to/ws
 
     # Compute + print the table (JSON on stdout) without touching disk.
-    python scripts/rebuild_per_file_best.py --workspace /path/to/ws \
+    python scripts/runtime/rebuild_per_file_best.py --workspace /path/to/ws \
         --print-only
 
 Exits non-zero on ``ReplayIntegrityError`` (a committed artifact's
