@@ -299,7 +299,7 @@ implementation form so its content joins the run identity.
 ## Step 10 — Launch
 
 ```bash
-bash sdsc_submission_scripts/run_chain.sh \
+bash scripts/launch/run_chain.sh \
     --mode lilab \
     --workspace /path/to/workspace \
     --run_name my_task_v1 \

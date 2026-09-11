@@ -1,9 +1,9 @@
 # Entrypoints and CLI
 
 **Audience**: operators and anyone trying to find the right command.
-**Authority**: `sdsc_submission_scripts/run_chain.sh`,
+**Authority**: `scripts/launch/run_chain.sh`,
 `sdsc_submission_scripts/_chain_common.sh`,
-`sdsc_submission_scripts/run_one_iteration.py`,
+`src/workflows/run_one_iteration.py`,
 `src/workflows/model_exploration.py`. Scientific comparison launchers live in
 the external task repository.
 
@@ -16,10 +16,10 @@ the flags that decide *what a run is*.
 
 | you want to | use |
 |---|---|
-| run the full multi-iteration agent loop | `sdsc_submission_scripts/run_chain.sh` |
+| run the full multi-iteration agent loop | `scripts/launch/run_chain.sh` |
 | launch a task-specific campaign | use the campaign entrypoint in the experiment repository; it delegates to this repository's `run_chain.sh` |
 | run one arm of a task-specific comparison | use that experiment repository's launcher with an explicit SIDERIUS checkout |
-| run exactly one iteration (or debug one) | `sdsc_submission_scripts/run_one_iteration.py` |
+| run exactly one iteration (or debug one) | `src/workflows/run_one_iteration.py` |
 | drive the workflow directly from Python | `src/workflows/model_exploration.py` |
 | compare a task model against baselines | use the task package's comparison entrypoint |
 | gate a campaign launch | use the campaign-owned preflight in the experiment repository |
@@ -91,7 +91,7 @@ generated modules, and task-owned extensions remain under the declared
 workspace.
 
 ```bash
-bash sdsc_submission_scripts/run_chain.sh \
+bash scripts/launch/run_chain.sh \
     --mode lilab \
     --workspace /path/to/workspace \
     --run_name my_run_v1 \

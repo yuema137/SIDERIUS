@@ -103,7 +103,7 @@ Three rules of thumb:
 Auto-resume is **on by default**. Re-running the same command against the same
 workspace:
 
-1. asks the inspector (`scripts/inspect_run_state.py --next-iter`) for the
+1. asks the inspector (`scripts/launch/inspect_run_state.py --next-iter`) for the
    first incomplete iteration, judged from each `iter_NNN/manifest.json`;
 2. restores plugin classes from `plugins/iter_001 … iter_{N-1}` and seeds the
    new iteration with the prior iterations' output records — you do not pass

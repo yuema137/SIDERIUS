@@ -67,7 +67,7 @@ exits zero. The former `env_validation/test_agent_env.py` path is retired.
 If you want to see exactly what a real chain would execute, without executing it:
 
 ```bash
-bash sdsc_submission_scripts/run_chain.sh \
+bash scripts/launch/run_chain.sh \
     --mode lilab \
     --workspace /path/to/your/workspace \
     --run_name first_run_v1 \
@@ -90,7 +90,7 @@ manifest and workspace; no framework checkout file needs to be edited.
 Start small — one iteration, one round, trial budget, a bounded scope:
 
 ```bash
-bash sdsc_submission_scripts/run_chain.sh \
+bash scripts/launch/run_chain.sh \
     --mode lilab \
     --workspace /path/to/your/workspace \
     --run_name first_run_v1 \

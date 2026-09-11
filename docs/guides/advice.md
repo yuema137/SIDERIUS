@@ -31,7 +31,7 @@ bytes; a supplied digest must match the observed digest.
 
 ## The key set is closed
 
-`sdsc_submission_scripts/run_one_iteration.py::load_advice_artifact` refuses
+`src/workflows/run_one_iteration.py::load_advice_artifact` refuses
 an advice artifact that could not inject anything (F-SCHED-5). The recognised
 top-level keys are exactly:
 
