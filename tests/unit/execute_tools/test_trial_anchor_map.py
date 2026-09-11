@@ -39,3 +39,10 @@ def test_missing_file_requires_caller_preparation(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="caller- or task-owned"):
         load_anchor_map(str(path))
+
+
+def test_tuner_public_alias_reaches_the_explicit_reader():
+    """The production tuner seam must be the reusable reader, not a bypass."""
+    import nodes.ml_hyperparameter_tune_agent as tuner
+
+    assert tuner.load_anchor_map is load_anchor_map
