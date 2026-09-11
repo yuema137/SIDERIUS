@@ -31,7 +31,7 @@ does*; the task owns *what is checked and how strictly*.
 
 ## Inputs
 
-Framework policy (`configs/health_checks.yaml` — policy ONLY) + a task health
+Framework policy (`configs/health/health_checks.yaml` — policy ONLY) + a task health
 config (TIDMAD's ships at `configs/task_health/tidmad.yaml`; an external task
 supplies its own anywhere on disk); run-level inputs that are deliberately
 CLI, not YAML (`--health_gate_enabled`, `--health_gate_files`); deliverable
@@ -104,7 +104,7 @@ Registries are process-global with run-scoped plugin loading.
 
 For a task: **nothing here** — your own health config + plugin files. For the
 framework: a new built-in check module (+ its bootstrap import, tests, and the
-health-core census), or policy in `configs/health_checks.yaml`.
+health-core census), or policy in `configs/health/health_checks.yaml`.
 
 ## Files normally NOT edited
 

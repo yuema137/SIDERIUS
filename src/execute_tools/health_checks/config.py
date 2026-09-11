@@ -165,7 +165,7 @@ class ActionConfig(BaseModel):
 
 
 class GateConfig(BaseModel):
-    """One HealthGate entry in ``configs/health_checks.yaml``.
+    """One HealthGate entry in ``configs/health/health_checks.yaml``.
 
     A gate fires at its configured ``after_round`` position, runs its
     ``checks`` in listed order (with per-gate ``short_circuit``), and
@@ -302,7 +302,7 @@ class PersistedHealthPluginIdentity(BaseModel):
 class HealthChecksConfig(BaseModel):
     """The rev-6 HealthGate YAML root.
 
-    Loaded from ``configs/health_checks.yaml`` by
+    Loaded from ``configs/health/health_checks.yaml`` by
     ``load_health_gates_config``. See
     ``docs/design/pluggable_health_checks.md`` §3.
     """
