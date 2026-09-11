@@ -37,8 +37,9 @@ private modules from outside it.
 
 Package-level helpers shared across nodes: `agent_data_stream.py`,
 `interpretation_helpers.py`, `proposal_helpers.py`, `scoring_reference.py`.
-The top-level `ml_hyperparameter_tune_agent.md` is a **legacy pointer** kept
-for old links; the real contract doc lives inside the node directory.
+The top-level [tuner page](ml_hyperparameter_tune_agent.md) is a **legacy
+pointer** kept for old links; the real contract doc lives inside the node
+directory, and the pointer links to the preserved historical body.
 
 ## Inputs
 

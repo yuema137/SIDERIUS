@@ -112,7 +112,7 @@ landed — read the status markers.
 | [`docs/testing/schema_tier_consolidation.md`](testing/schema_tier_consolidation.md) | evidence record for a schema-test consolidation |
 | [`tests/pseudo_data/README.md`](../tests/pseudo_data/README.md) | pseudo-mode fixtures for dual-mode tests |
 | [`dashboard/README.md`](../dashboard/README.md) | the result browser |
-| [`advice/README.md`](../advice/README.md) | human advice JSON schema and injection points |
+| [Human advice guide](guides/advice.md) | human advice JSON schema and injection points |
 | [`sdsc_submission_scripts/README.md`](../sdsc_submission_scripts/README.md) | chain launcher internals |
 | [`reports/`](../reports/) | frozen point-in-time run reports |
 

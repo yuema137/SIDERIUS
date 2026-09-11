@@ -1,17 +1,18 @@
-# `advice/` — caller-owned human advice
+# Human advice — format and caller ownership
 
-Only this README is tracked here. There are no shipped `single_agent/`,
-`workflow/` or `gate/` directories or advice JSON artifacts. Keep active advice
-in the task/experiment repository or an explicit workspace selected by its
-caller. Historical documents may cite retired advice paths; those citations
-do not make the files available or select them for a new run.
+SIDERIUS ships this format guide, not `single_agent/`, `workflow/` or `gate/`
+advice directories or advice JSON artifacts. Keep active advice in the
+task/experiment repository or an explicit workspace selected by its caller.
+Historical documents may cite retired advice paths; those citations do not make
+the files available or select them for a new run. The former guide location was
+`advice/README.md`; use this page instead.
 
 ## Chain entry and format
 
 Pass an explicit JSON path with `--human_advice_file` or `--advice` to the
 chain/iteration entrypoint. `--advice` takes precedence when both are supplied.
 The source authority is
-[`run_one_iteration.py::load_advice_artifact`](../sdsc_submission_scripts/run_one_iteration.py),
+[`run_one_iteration.py::load_advice_artifact`](../../sdsc_submission_scripts/run_one_iteration.py),
 with `render_advice_value` shared by validation and argument normalization.
 The five agent keys target interpretation, proposal, implementation, validation
 and tuning; `mindset` supplies the proposer's preamble.
@@ -67,14 +68,14 @@ bytes reached a prompt.
 
 ## Other callers and historical Gate advice
 
-Standalone node inputs follow their own [node contracts](../docs/agent-reference/README.md#nodes).
+Standalone node inputs follow their own [node contracts](../agent-reference/README.md#nodes).
 The external TIDMAD baseline tool now lives at
 `siderius-exp/tasks/tidmad/tools/run_comparison.py`; its separate advice reader
 requires a `tune` key. It is not the chain loader described here. See the
-[external-consumer map](../docs/repository-map.md#external-consumer-and-evidence)
+[external-consumer map](../repository-map.md#external-consumer-and-evidence)
 for the inspected repository and revision.
 
 Historical Gate advice is validation evidence, not a new scientific default.
 Its model/VRAM constraints belong to the specific approved Gate contract and
-[Gate standard](../docs/gates/gate_testing_standard.md), not to this format
-README. No new run or advice artifact is selected by this document.
+[Gate standard](../gates/gate_testing_standard.md), not to this format guide.
+No new run or advice artifact is selected by this document.

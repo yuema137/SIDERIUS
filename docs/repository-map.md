@@ -13,7 +13,7 @@ imports and CLI paths have not moved.
 | Declare a task | [Task composition reference](reference/task-composition.md), [define a task](guides/define-a-task.md) |
 | Start a chain | [run_chain.sh](../sdsc_submission_scripts/run_chain.sh); [entrypoint reference](reference/entrypoints.md) |
 | Inspect or resume a workspace | [inspect_run_state.py](../scripts/inspect_run_state.py); [workspace guide](guides/workspaces-and-resume.md) |
-| Supply human advice | [Advice format and ownership](../advice/README.md) |
+| Supply human advice | [Advice format and ownership](guides/advice.md) |
 | Extend a model or loss | [Model and plugin loaders](../ml_models/README.md) |
 | Develop the framework | [CLAUDE.md](../CLAUDE.md), then [agent reference](agent-reference/README.md) |
 
@@ -49,7 +49,7 @@ SIDERIUS (navigation, not physical directories)
 │   └── .github/
 └── Documentation and retained material
     ├── docs/
-    ├── advice/
+    │   └── guides/advice.md
     ├── reports/
     └── reference_data/
 ```
@@ -76,7 +76,7 @@ Counts refer to the audited base, before this documentation addition.
 | [`env_validation/`](../env_validation/) | 1 | Environment diagnostic that can call provider APIs; not an offline smoke |
 | [`.github/`](../.github/) | 1 | CI workflow |
 | [`docs/`](./) | 164 | User/agent documentation plus design history; freshness varies |
-| [`advice/`](../advice/) | 1 | Format README only; no tracked advice artifacts or subdirectories |
+| Former `advice/` root at the audited base | 1 | Its format README moved to [`docs/guides/advice.md`](guides/advice.md); no advice artifacts or subdirectories were shipped |
 | [`reports/`](../reports/) | 12 | Retained reports for named revisions; not new runtime storage |
 | [`reference_data/`](../reference_data/) | 1 | `segment_anchors.json`, still read by scientific compatibility code |
 
@@ -207,7 +207,7 @@ Recovered trajectories and plots must not be presented as complete provenance.
 | Default policy package resources | Existing [#424](https://github.com/Galileo-Sandbox/SIDERIUS/issues/424); exact-checkout entry checks do not qualify wheel-only execution |
 | Mixed scripts/configs | `scripts/inspect_run_state.py` is active; dated harnesses and review material require caller-by-caller audit, not directory-wide deletion |
 | `reports/` | Frozen named-run evidence, excluded from distributions and not read by framework execution |
-| `advice/` | Only the format README is tracked; active advice is caller-owned input |
+| Former `advice/` root | Retired; the [format guide](guides/advice.md) documents caller-owned input |
 | Old design records and dated CLAUDE status entries | Rationale and incident evidence; use [design index](design/README.md) for history and Git/source for capability |
 
 Source consolidation was not performed. Packaging discovers the existing
