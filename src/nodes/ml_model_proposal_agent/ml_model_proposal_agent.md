@@ -78,7 +78,7 @@
 ## CLI usage
 
 ```bash
-.venv/bin/python nodes/ml_model_proposal_agent/ml_model_proposal_agent.py \
+.venv/bin/python src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py \
     --workspace ./siderius_workspace \
     --run_name v1 \
     --task_composition configs/task_composition/quickstart.yaml \

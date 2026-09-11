@@ -139,7 +139,7 @@ path into the fail-safe one.
 ### Verify the installation
 
 ```bash
-./.venv/bin/python tools/claude_hooks/precompact_memory_guard.py --check
+./.venv/bin/python src/tools/claude_hooks/precompact_memory_guard.py --check
 ```
 
 Exit 0 with "complete and current" means the guard can see your handoff
@@ -152,7 +152,7 @@ and your repository. Exit 2 prints every condition that is failing.
 Do **not** edit the previous PR's handoff.
 
 ```bash
-./.venv/bin/python tools/claude_hooks/init_pr_handoff.py \
+./.venv/bin/python src/tools/claude_hooks/init_pr_handoff.py \
     --project "Widget refactor (PR 42)" \
     --design  docs/design/development/widget_refactor.md
 ```

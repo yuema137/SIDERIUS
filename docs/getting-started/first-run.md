@@ -123,7 +123,7 @@ health config, an invariants lock, and the generated model plugins. Browse
 results with the dashboard:
 
 ```bash
-python dashboard/main.py     # http://localhost:8000
+python src/dashboard/main.py     # http://localhost:8000
 ```
 
 ## Level 3 — real task packages

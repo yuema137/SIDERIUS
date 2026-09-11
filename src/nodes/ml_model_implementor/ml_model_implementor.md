@@ -57,7 +57,7 @@
 ## CLI usage
 
 ```bash
-.venv/bin/python nodes/ml_model_implementor/ml_model_implementor.py \
+.venv/bin/python src/nodes/ml_model_implementor/ml_model_implementor.py \
     --workspace ./siderius_workspace \
     --run_name v1 \
     --provider gemini \

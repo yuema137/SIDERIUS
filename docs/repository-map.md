@@ -1,10 +1,10 @@
 # Repository map
 
 Use this page to find an existing capability, its source owner and its entrypoint.
-Source inventory: infra `2091acdfcb24eb9c8d3953ee7ba1e3ba99926aa0`, inspected
-2026-09-10. The groups below are navigation categories. PR 03A later relocated
-the advice guide and opt-in provider diagnostic as recorded below; core package
-imports and the chain/iteration CLI paths have not moved.
+The current physical source layout places eight packages under `src/`, with
+unchanged Python import names. PR 03A relocated the advice guide and optional
+provider diagnostic; PR 03B relocates the packages and their resources. Chain
+and iteration CLI paths remain in `sdsc_submission_scripts/`.
 
 ## Start here
 
@@ -29,59 +29,37 @@ context; a CLI does not reconstruct missing workflow state automatically.
 ## Navigation tree and actual roots
 
 ```text
-SIDERIUS (navigation, not physical directories)
-├── Start and operate
-│   ├── examples/
-│   ├── configs/ + llm_configs/
-│   ├── sdsc_submission_scripts/
-│   └── dashboard/
-├── Agent capabilities and composition
-│   ├── nodes/
-│   ├── agent/
-│   └── workflows/
-├── Deterministic execution and extensions
-│   ├── core/
-│   ├── execute_tools/
-│   └── ml_models/
-├── Development and validation
-│   ├── tests/
-│   ├── tools/ + scripts/
-│   │   └── diagnostics/
-│   └── .github/
-└── Documentation and retained material
-    ├── docs/
-    │   └── guides/advice.md
-    ├── reports/
-    └── reference_data/
+SIDERIUS/
+├── src/
+│   ├── agent/ + nodes/ + workflows/
+│   ├── core/ + execute_tools/ + ml_models/
+│   └── dashboard/ + tools/
+├── examples/
+├── configs/ + llm_configs/
+├── sdsc_submission_scripts/
+├── tests/ + scripts/
+├── docs/ + reports/ + reference_data/
+└── .github/
 ```
 
-At the audited base, all 19 visible tracked directory roots plus `.github` were
-accounted for below. Counts in the table remain that dated inventory. After the
-two PR 03A relocations, the current tracked tree has 17 visible roots plus
-`.github`; `advice/` and `env_validation/` are the two retired roots.
+| Actual root | Responsibility and status |
+| --- | --- |
+| [src/](../src/README.md) | Eight installed framework packages; the source guide identifies each owner |
+| [examples/](../examples/) | Two synthetic specifications; no shipped real scientific task |
+| [configs/](../configs/) | Framework policy, runtime profiles and synthetic manifests; also dated review material |
+| [llm_configs/](../llm_configs/) | Provider/model routing, separate from scientific treatment |
+| [sdsc_submission_scripts/](../sdsc_submission_scripts/) | Existing chain/iteration launch, checkout environment binding and scheduler support |
+| [tests/](../tests/) | Unit, integration and helpers; presence does not establish CI execution |
+| [scripts/](../scripts/) | Active inspection/resume tools alongside dated diagnostic harnesses; [diagnostics](../scripts/diagnostics/README.md) remains opt-in |
+| [docs/](./) | User/agent documentation and design history; includes the [advice guide](guides/advice.md) |
+| [reports/](../reports/) | Retained reports for named revisions; not new runtime storage |
+| [reference_data/](../reference_data/) | `segment_anchors.json`, still read by scientific compatibility code |
+| [.github/](../.github/) | Automatic CI workflow |
 
-| Actual root | Tracked files | Responsibility and status |
-| --- | ---: | --- |
-| [`examples/`](../examples/) | 27 | Two synthetic specifications; no shipped real scientific task |
-| [`configs/`](../configs/) | 8 | Framework policy, runtime profiles, synthetic manifests; also dated review material |
-| [`llm_configs/`](../llm_configs/) | 4 | Provider/model routing, separate from scientific treatment |
-| [`sdsc_submission_scripts/`](../sdsc_submission_scripts/) | 9 | Chain/iteration launch, checkout environment binding and scheduler support |
-| [`dashboard/`](../src/dashboard) | 14 | Result browser; does not own execution |
-| [`nodes/`](../src/nodes) | 42 | Six public capabilities and private helpers |
-| [`agent/`](../src/agent) | 106 | One LLM gateway, schemas, protocols, prompts and atomic skills |
-| [`workflows/`](../src/workflows) | 9 | Deterministic traversal, task binding and carried state |
-| [`core/`](../src/core) | 78 | Process isolation, resources, identities, records and recovery |
-| [`execute_tools/`](../src/execute_tools) | 60 | Execution children and extension interfaces; retained scientific helpers remain mixed in |
-| [`ml_models/`](../src/ml_models) | 14 | Built-in architectures/configs and model/loss loaders |
-| [`tests/`](../tests/) | 999 | Unit, integration and helpers; presence does not establish CI execution |
-| [`tools/`](../src/tools) | 28 | CI selection/execution, reports and optional session tooling |
-| [`scripts/`](../scripts/) | 35 | Active inspection/resume tools alongside dated diagnostic harnesses |
-| Former `env_validation/` root at the audited base | 1 | Diagnostic moved to [`scripts/diagnostics/`](../scripts/diagnostics/README.md); old command retired, still opt-in and network-capable |
-| [`.github/`](../.github/) | 1 | CI workflow |
-| [`docs/`](./) | 164 | User/agent documentation plus design history; freshness varies |
-| Former `advice/` root at the audited base | 1 | Its format README moved to [`docs/guides/advice.md`](guides/advice.md); no advice artifacts or subdirectories were shipped |
-| [`reports/`](../reports/) | 12 | Retained reports for named revisions; not new runtime storage |
-| [`reference_data/`](../reference_data/) | 1 | `segment_anchors.json`, still read by scientific compatibility code |
+The initial audit at `2091acdf` counted 19 visible tracked roots. PR 03A retired
+`advice/` and `env_validation/`, leaving 17. PR 03B consolidates eight packages
+under `src/`, leaving 10 visible roots plus `.github`. Ignored files left in old
+locations are user state, not alternative source packages or cleanup targets.
 
 Root files such as [`pyproject.toml`](../pyproject.toml),
 [`uv.lock`](../uv.lock), [`Makefile`](../Makefile) and

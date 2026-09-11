@@ -4,7 +4,8 @@
 **Authority**: `sdsc_submission_scripts/run_chain.sh`,
 `sdsc_submission_scripts/_chain_common.sh`,
 `sdsc_submission_scripts/run_one_iteration.py`,
-`workflows/model_exploration.py`, `scripts/run_comparison.py`.
+`src/workflows/model_exploration.py`. Scientific comparison launchers live in
+the external task repository.
 
 For exhaustive flag lists, run each entrypoint with `--help`. This page covers
 the flags that decide *what a run is*.
@@ -19,7 +20,7 @@ the flags that decide *what a run is*.
 | launch a task-specific campaign | use the campaign entrypoint in the experiment repository; it delegates to this repository's `run_chain.sh` |
 | run one arm of a task-specific comparison | use that experiment repository's launcher with an explicit SIDERIUS checkout |
 | run exactly one iteration (or debug one) | `sdsc_submission_scripts/run_one_iteration.py` |
-| drive the workflow directly from Python | `workflows/model_exploration.py` |
+| drive the workflow directly from Python | `src/workflows/model_exploration.py` |
 | compare a task model against baselines | use the task package's comparison entrypoint |
 | gate a campaign launch | use the campaign-owned preflight in the experiment repository |
 
@@ -255,9 +256,9 @@ different one fails at startup.
 |---|:---:|
 | `run_chain.sh` | ✅ (forwards) |
 | `run_one_iteration.py` | ✅ |
-| `workflows/model_exploration.py` | ✅ |
-| `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` | ✅ (required) |
-| `scripts/run_comparison.py` | ❌ |
+| `src/workflows/model_exploration.py` | ✅ |
+| `src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` | ✅ (required) |
+| External task comparison launcher | Task-owned; inspect the selected exp revision |
 
 ---
 

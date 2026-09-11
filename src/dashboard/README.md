@@ -64,16 +64,16 @@ dashboard:
 
 ```bash
 # Standard start
-uv run python dashboard/main.py
+uv run python src/dashboard/main.py
 
 # Custom config file
-uv run python dashboard/main.py --config /path/to/config.yaml
+uv run python src/dashboard/main.py --config /path/to/config.yaml
 
 # Override host/port without editing the config
-uv run python dashboard/main.py --host 0.0.0.0 --port 9000
+uv run python src/dashboard/main.py --host 0.0.0.0 --port 9000
 
 # Development mode (auto-reload on code changes)
-uv run python dashboard/main.py --reload
+uv run python src/dashboard/main.py --reload
 ```
 
 **Or directly with uvicorn:**
@@ -86,7 +86,7 @@ uv run uvicorn dashboard.main:app --host 0.0.0.0 --port 8000
 
 ```bash
 screen -S siderius-dashboard
-uv run python dashboard/main.py
+uv run python src/dashboard/main.py
 # Ctrl+A D to detach
 ```
 

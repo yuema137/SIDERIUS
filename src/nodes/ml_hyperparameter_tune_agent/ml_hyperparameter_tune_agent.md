@@ -341,7 +341,7 @@ executes, without distorting what the planner is allowed to decide. See
 ## CLI usage
 
 ```bash
-.venv/bin/python nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py \
+.venv/bin/python src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py \
     --provider gemini \
     --model_id gemini-3.1-flash-lite-preview \
     --force_model wavenet \

@@ -203,7 +203,7 @@ not mistake either for an oversight:
 ## CLI usage
 
 ```bash
-.venv/bin/python nodes/result_interpretation_agent/result_interpretation_agent.py \
+.venv/bin/python src/nodes/result_interpretation_agent/result_interpretation_agent.py \
     --workspace ./siderius_workspace \
     --run_name v1 \
     --model_type punet \

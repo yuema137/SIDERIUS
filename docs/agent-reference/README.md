@@ -11,6 +11,9 @@ does not re-audit every linked mechanism document.
 
 ---
 
+Package-relative source citations in the mechanism guides map under `src/`.
+Python imports keep their existing names; see the [source guide](../../src/README.md).
+
 ## Rules of engagement
 
 1. **The source is the authority.** These documents are projections of it. Where

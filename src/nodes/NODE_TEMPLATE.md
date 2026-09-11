@@ -78,7 +78,7 @@ the workflow propagates from CLI flags, etc. -->
 ## CLI usage
 
 ```bash
-python nodes/<node_dir>/<node_module>.py \
+python src/nodes/<node_dir>/<node_module>.py \
     --<arg> <value> \
     --<arg> <value>
 ```

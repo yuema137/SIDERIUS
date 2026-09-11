@@ -54,7 +54,7 @@
 ## CLI usage
 
 ```bash
-.venv/bin/python nodes/ml_literature_review/ml_literature_review.py \
+.venv/bin/python src/nodes/ml_literature_review/ml_literature_review.py \
     --workspace ./siderius_workspace \
     --run_name v1 \
     --experiment-history ./siderius_workspace/interpretation_v1.json \

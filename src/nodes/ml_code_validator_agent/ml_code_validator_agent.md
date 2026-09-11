@@ -66,7 +66,7 @@
 ## CLI usage
 
 ```bash
-.venv/bin/python nodes/ml_code_validator_agent/ml_code_validator_agent.py \
+.venv/bin/python src/nodes/ml_code_validator_agent/ml_code_validator_agent.py \
     --model_type attn_unet \
     --model_file_path /home/yuema137/SIDERIUS/agent_generated/models/attn_unet.py \
     --test_file_path /home/yuema137/SIDERIUS/agent_generated/tests/test_attn_unet.py \

@@ -14,7 +14,7 @@ configuration reference: [`dashboard/README.md`](../../src/dashboard/README.md).
 
 ```bash
 cp dashboard_config.example.yaml dashboard_config.yaml   # once; then edit
-.venv/bin/python dashboard/main.py                       # http://localhost:8000
+.venv/bin/python src/dashboard/main.py                       # http://localhost:8000
 ```
 
 Set one key in `dashboard_config.yaml`:
