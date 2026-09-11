@@ -14,7 +14,7 @@
   - [`m9_multi_file_peek_execution_plan.md`](./m9_multi_file_peek_execution_plan.md)
   - [`paper_and_collapse_reference_baselines.md`](./paper_and_collapse_reference_baselines.md)
   - [`tidmad_collapse_advice_and_forensics.md`](./tidmad_collapse_advice_and_forensics.md)
-  - [experiment report](https://github.com/Galileo-Sandbox/siderius-exp/blob/e9e5063b/reports/health_metrics_scan.md)
+  - [experiment report: `reports/health_metrics_scan.md`](https://github.com/Galileo-Sandbox/siderius-exp/blob/e9e5063b/provenance/legacy_siderius/p0_03c1/reports/health_metrics_scan.md)
 
 ## 1. Purpose and final campaign decisions
 

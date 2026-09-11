@@ -114,7 +114,7 @@ landed — read the status markers.
 | [`dashboard/README.md`](../src/dashboard/README.md) | the result browser |
 | [Human advice guide](guides/advice.md) | human advice JSON schema and injection points |
 | [`sdsc_submission_scripts/README.md`](../sdsc_submission_scripts/README.md) | chain launcher internals |
-| [External reports/ history](https://github.com/Galileo-Sandbox/siderius-exp/tree/e9e5063b/reports) | frozen point-in-time run reports owned by the experiment repository |
+| [External reports/ history](https://github.com/Galileo-Sandbox/siderius-exp/tree/e9e5063b/provenance/legacy_siderius/p0_03c1/reports) | frozen point-in-time run reports owned by the experiment repository |
 
 Historical reports are owned by the experiment repository and are not a
 framework checkout surface. They are evidence for their named revisions, not
