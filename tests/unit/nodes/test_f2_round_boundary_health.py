@@ -101,6 +101,24 @@ def _route_conditions_guarding_the_gate_call(source: str) -> list[str]:
     return offenders
 
 
+def test_round_boundary_uses_relocated_production_policy_owner() -> None:
+    """The real execution call resolves the shipped policy through checkout."""
+    tree = ast.parse(EXECUTION_PY.read_text())
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "apply_round_health"
+    ]
+    assert calls
+    keyword = next(k for call in calls for k in call.keywords if k.arg == "production_config_path")
+    assert isinstance(keyword.value, ast.Call)
+    assert isinstance(keyword.value.func, ast.Name) and keyword.value.func.id == "checkout_path"
+    assert [elt.value for elt in keyword.value.args] == ["configs", "health", "health_checks.yaml"]
+    assert (EXECUTION_PY.parents[3] / "configs" / "health" / "health_checks.yaml").is_file()
+
+
 def _score_meta(gate_results: Any, resolved_action: Any):
     """Stand-in for the orchestrator's own projection, which has its own tests."""
     failed = [g for g in gate_results if not getattr(g, "passed", True)]
