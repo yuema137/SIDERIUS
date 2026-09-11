@@ -38,7 +38,7 @@ SIDERIUS/
 ├── configs/ + llm_configs/
 ├── sdsc_submission_scripts/
 ├── tests/ + scripts/
-├── docs/ + reports/
+├── docs/
 └── .github/
 ```
 
@@ -52,7 +52,6 @@ SIDERIUS/
 | [tests/](../tests/) | Unit, integration and helpers; presence does not establish CI execution |
 | [scripts/](../scripts/) | Active inspection/resume tools alongside dated diagnostic harnesses; [diagnostics](../scripts/diagnostics/README.md) remains opt-in |
 | [docs/](./) | User/agent documentation and design history; includes the [advice guide](guides/advice.md) |
-| [reports/](../reports/) | Retained reports for named revisions; not new runtime storage |
 | [.github/](../.github/) | Automatic CI workflow |
 
 The initial audit at `2091acdf` counted 19 visible tracked roots. PR 03A retired
@@ -186,7 +185,7 @@ Recovered trajectories and plots must not be presented as complete provenance.
 | Scientific scoring/Health compatibility | [`scoring_utils.py`](../src/execute_tools/scoring_utils.py) and [`Health evaluation`](../src/execute_tools/health_checks/evaluation.py) retain task-specific behavior; existing [#423](https://github.com/Galileo-Sandbox/SIDERIUS/issues/423) tracks the Health boundary |
 | Default policy package resources | Existing [#424](https://github.com/Galileo-Sandbox/SIDERIUS/issues/424); exact-checkout entry checks do not qualify wheel-only execution |
 | Mixed scripts/configs | `scripts/inspect_run_state.py` is active; dated harnesses and review material require caller-by-caller audit, not directory-wide deletion |
-| `reports/` | Frozen named-run evidence, excluded from distributions and not read by framework execution |
+| Historical reports | Preserved externally by the owning experiment repository; not an infra runtime root |
 | Former `advice/` root | Retired; the [format guide](guides/advice.md) documents caller-owned input |
 | Old design records and dated CLAUDE status entries | Rationale and incident evidence; use [design index](design/README.md) for history and Git/source for capability |
 

@@ -34,7 +34,6 @@ The durable operator surface:
 | `bg_gpu_sampler.sh` | background GPU utilisation sampler |
 | [`diagnostics/check_agent_environment.py`](diagnostics/README.md) | opt-in provider environment diagnostic; source-checkout-only and network-capable |
 
-Everything else — `fcnet_*`, `investigate_*`, `score_tidmad_official_*`,
 The dated study and calibration tooling formerly under
 `inspection_cost_study/` and `pr3_l2_calibration/`, along with retired
 diagnostic launch helpers, is no longer shipped in this checkout. Historical

@@ -188,7 +188,6 @@ SIDERIUS/
 ├── sdsc_submission_scripts/ # existing chain/iteration and scheduler entrypoints
 ├── tests/ + scripts/        # validation and checkout utilities
 ├── docs/                    # guides, references and design history
-├── reports/                  # retained historical evidence (not runtime input)
 └── .github/                 # automatic CI
 ```
 
