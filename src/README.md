@@ -42,7 +42,7 @@ No writable run state belongs under `src/` or `site-packages`.
 ## Current entrypoints and installation checks
 
 The chain and iteration scripts remain in `sdsc_submission_scripts/`. Routing
-remains in `llm_configs/`, and policy/manifests remain in `configs/`. Their later
+remains in `configs/llm/`, and policy/manifests remain in `configs/`. Their later
 relocation is separate work. Use the [entrypoint reference](../docs/reference/entrypoints.md).
 For package CLIs, `.venv/bin/python -m dashboard.main` retains the import name;
 direct source paths now start with `src/`.

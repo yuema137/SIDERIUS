@@ -94,7 +94,7 @@ detected at startup.
 
 ## Files normally edited
 
-`llm_configs/`-routed stages aside, the legitimate edits here are:
+`configs/llm/`-routed stages aside, the legitimate edits here are:
 Framework-policy changes as deliberate, reviewed framework PRs — never as a
 per-task step.
 
@@ -107,7 +107,7 @@ see [define a task](../docs/guides/define-a-task.md)).
 ## Minimal example
 
 ```bash
-bash sdsc_submission_scripts/run_chain.sh … \
+bash scripts/launch/run_chain.sh … \
     --task_composition configs/task_composition/quickstart.yaml --data_dir …
 ```
 

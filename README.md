@@ -115,7 +115,7 @@ bash sdsc_submission_scripts/run_chain.sh --mode lilab \
     --workspace /path/to/workspace --run_name first_run_v1 \
     --task_composition configs/task_composition/quickstart.yaml \
     --data_dir /path/to/workspace/quickstart_data \
-    --llm_config llm_configs/openai_tiered_pro.json \
+    --llm_config configs/llm/openai_tiered_pro.json \
     --num_iterations 1 --max_rounds 1 --dry-run
 ```
 
@@ -184,7 +184,7 @@ SIDERIUS/
 ├── src/                     # agent, nodes, workflows, core, execute_tools,
 │                            # ml_models, dashboard, tools
 ├── examples/                # synthetic executable specifications
-├── configs/ + llm_configs/   # existing policy, manifests and routing
+├── configs/                  # policy, manifests, runtime and LLM routing
 ├── sdsc_submission_scripts/ # existing chain/iteration and scheduler entrypoints
 ├── tests/ + scripts/        # validation and checkout utilities
 ├── docs/                    # guides, references and design history

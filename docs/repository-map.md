@@ -35,7 +35,7 @@ SIDERIUS/
 │   ├── core/ + execute_tools/ + ml_models/
 │   └── dashboard/ + tools/
 ├── examples/
-├── configs/ + llm_configs/
+├── configs/ (health/, llm/, runtime/, task_composition/)
 ├── sdsc_submission_scripts/
 ├── tests/ + scripts/
 ├── docs/
@@ -47,7 +47,7 @@ SIDERIUS/
 | [src/](../src/README.md) | Eight installed framework packages; the source guide identifies each owner |
 | [examples/](../examples/) | Two synthetic specifications; no shipped real scientific task |
 | [configs/](../configs/) | Framework policy, runtime profiles and synthetic manifests; also dated review material |
-| [llm_configs/](../llm_configs/) | Provider/model routing, separate from scientific treatment |
+| [configs/llm/](../configs/llm/) | Provider/model routing, separate from scientific treatment |
 | [sdsc_submission_scripts/](../sdsc_submission_scripts/) | Existing chain/iteration launch, checkout environment binding and scheduler support |
 | [tests/](../tests/) | Unit, integration and helpers; presence does not establish CI execution |
 | [scripts/](../scripts/) | Active inspection/resume tools alongside dated diagnostic harnesses; [diagnostics](../scripts/diagnostics/README.md) remains opt-in |

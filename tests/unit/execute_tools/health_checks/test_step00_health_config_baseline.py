@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-HEALTH_YAML = REPO_ROOT / "configs" / "health_checks.yaml"
+HEALTH_YAML = REPO_ROOT / "configs" / "health" / "health_checks.yaml"
 
 
 class TestHC1ShippedHealthConfig:
