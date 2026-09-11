@@ -18,10 +18,7 @@
 #          --max_rounds 20
 #
 # FIXED SBATCH HEADERS (Static cluster configuration)
-#SBATCH --account=ddp433
 #SBATCH --job-name="SIDERIUS_ITER"
-#SBATCH --output="/home/ym137/SIDERIUS/sdsc_submission_scripts/logs/iter_%j.out"
-#SBATCH --error="/home/ym137/SIDERIUS/sdsc_submission_scripts/logs/iter_%j.err"
 
 # NOTE: Resource parameters (nodes, ntasks, partition, gpus, mem, time, cpus-per-task)
 # must be provided via sbatch CLI to ensure full compliance with the bank_limit plugin.
@@ -31,7 +28,22 @@ set -e
 set -o pipefail
 
 # --- Project Paths & Validation ---
-PROJECT_DIR="/home/ym137/SIDERIUS"
+PROJECT_DIR=""
+CHECKOUT_BINDINGS=1
+
+# The submission node passes the exact checkout immediately after this script.
+# Do not infer it from the spooled script's directory or ambient activation.
+if [ "${1:-}" = "--siderius-checkout" ]; then
+    PROJECT_DIR="${2:-}"
+    shift 2
+elif [[ "${1:-}" == --siderius-checkout=* ]]; then
+    PROJECT_DIR="${1#*=}"
+    shift
+fi
+if [ -z "$PROJECT_DIR" ] || [[ "$PROJECT_DIR" != /* ]] || [ ! -d "$PROJECT_DIR" ]; then
+    echo "[CRITICAL] --siderius-checkout must be an absolute existing directory" >&2
+    exit 1
+fi
 
 if [ ! -d "$PROJECT_DIR" ]; then
     echo "[CRITICAL] Project directory $PROJECT_DIR not found!" >&2
@@ -39,10 +51,6 @@ if [ ! -d "$PROJECT_DIR" ]; then
 fi
 
 # --- Environment Setup ---
-if [ -f "$HOME/.bashrc" ]; then
-    source "$HOME/.bashrc"
-fi
-
 cd "$PROJECT_DIR"
 
 if [ -f ".venv/bin/activate" ]; then
@@ -51,8 +59,9 @@ else
     echo "[CRITICAL] Virtual environment not found in $PROJECT_DIR" >&2
     exit 1
 fi
+export VIRTUAL_ENV="$PROJECT_DIR/.venv"
 
-export PYTHONPATH="${PROJECT_DIR}:${PROJECT_DIR}/ml_models:${PROJECT_DIR}/execute_tools:${PYTHONPATH:-}"
+unset PYTHONPATH
 
 # Force Python stdout/stderr to be unbuffered so progress lines appear in the
 # slurm .out file in real time, instead of being block-buffered in memory and
@@ -110,9 +119,13 @@ while [[ $# -gt 0 ]]; do
       ;;
     --workspace)
       WORKSPACE="$2"; FORWARD_ARGS+=("$1" "$2"); shift 2 ;;
-    --iteration)
+    --siderius-checkout|--siderius-checkout=*)
+      echo "[FAIL] duplicate --siderius-checkout binding" >&2
+      exit 2
+      ;;
+    --iteration|--start_iteration)
       ITERATION="$2"; FORWARD_ARGS+=("$1" "$2"); shift 2 ;;
-    --source_paths)
+    --source_paths|--seed_paths)
       FORWARD_ARGS+=("$1"); shift
       while [[ $# -gt 0 && ! "$1" =~ ^-- ]]; do
         SOURCE_PATHS+=("$1")
@@ -197,9 +210,27 @@ fi
 
 RUNNER_ARGS=("${FORWARD_ARGS[@]}")
 
+# Validate source ownership on the compute node as well as the submission node.
+PROBE_TMP="$(mktemp -d)"
+cleanup_probe() { rm -rf "$PROBE_TMP"; }
+trap cleanup_probe EXIT
+if [ ! -f "$PROJECT_DIR/scripts/launch/_import_resolution_probe.py" ]; then
+    echo "[FAIL] source-authority probe missing in checkout" >&2
+    exit 1
+fi
+cp "$PROJECT_DIR/scripts/launch/_import_resolution_probe.py" "$PROBE_TMP/probe.py"
+set +e
+(cd "$PROBE_TMP" && "$PROJECT_DIR/.venv/bin/python" probe.py "$PROJECT_DIR" --tree-only)
+PROBE_RC=$?
+set -e
+if [ "$PROBE_RC" -ne 0 ]; then
+    echo "[FAIL] source-authority probe refused compute checkout (exit $PROBE_RC)" >&2
+    exit 1
+fi
+
 # --- Execute the runner ---
 set +e
-python sdsc_submission_scripts/run_one_iteration.py "${RUNNER_ARGS[@]}"
+"$PROJECT_DIR/.venv/bin/python" "$PROJECT_DIR/src/workflows/run_one_iteration.py" "${RUNNER_ARGS[@]}"
 PY_EXIT_CODE=$?
 set -e
 

@@ -114,7 +114,7 @@ from workflows.task_composition import (
     resolve_composed_measurement_capability,
 )
 
-SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SIDERIUS_ROOT = str(Path(__file__).resolve().parents[2])
 load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
 
 
