@@ -20,7 +20,7 @@ does*; the task owns *what is checked and how strictly*.
 |---|---|
 | `registry.py` | `register(check)` · `register_view_provider(provider)` — the **public** registration API for built-ins and external plugins alike · `get` / `all_registered` (+ provider counterparts). Duplicates raise |
 | `protocol.py` | `HealthCheckSkill` (Protocol): `name`, `declaration: CheckInputDeclaration`, and `run(ctx, config=None, *, view=None) -> HealthCheckResult`. A check that declares no view is invoked as `run(ctx, config)` |
-| `schemas.py` | the typed vocabulary: `CheckVerdict` (`passed` / `failed` / `inapplicable` / `error`) · `GateAction` (`continue` / `invalidate_round` / `skip_to_formal` / `skip_iter`) + severity · `HealthCheckContext` / `HealthCheckResult` / `GateResult` · `CheckInputDeclaration` · the `FACT_AXES` |
+| `schemas.py` | the typed vocabulary: `CheckVerdict` (`passed` / `failed` / `inapplicable` / `error`) · `GateAction` (`continue` / `invalidate_round`) + severity · `HealthCheckContext` / `HealthCheckResult` / `GateResult` · `CheckInputDeclaration` · the `FACT_AXES` |
 | `runner.py` | `evaluate_gate` (decides applicability **before** invoking a check) · `resolve_action` (max severity wins) |
 | `evaluation.py` | `evaluate_and_persist_health_gates` — the batched evaluate-and-persist adapter both Phase-1 baselines and tuner rounds use |
 | `config.py` | `load_health_gates_config` (returns the **composed** result) · `materialize_effective_config` → `{workspace}/health_checks_effective.yaml`, sha256-pinned by the invariants lock |

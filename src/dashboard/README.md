@@ -27,6 +27,9 @@ dashboard/
 └── static/              # Frontend (index.html, app.js, style.css)
 ```
 
+The `static/` directory is a resource-only browser leaf; its files are served
+by `main.py` and have no Python entrypoint of their own.
+
 ## Prerequisites
 
 Dependencies are declared in `pyproject.toml` (`fastapi`, `uvicorn[standard]`,

@@ -1,5 +1,14 @@
-# src/nodes/ml_code_validator_agent
+# ML code validator node
 
-Public entry `ml_code_validator_agent.py` and canonical `ml_code_validator_agent.md` define this node. Its Input/Output schemas live under `src/agent/schemas`; callers use the typed protocol adapters, while private helpers remain behind the node boundary. Focused coverage is under `tests/unit/nodes` and `tests/integration/nodes`.
+`MLCodeValidatorAgent` checks a generated plugin before tuning: deterministic
+load/config/description/test/forbidden-pattern checks, forward/backward probes,
+and an advisory LLM review. It does not generate, train, or judge scientific
+merit.
 
-See [the parent guide](../README.md) for child ownership and the focused validation route.
+- [Entry and CLI](ml_code_validator_agent.py) · [full guide](ml_code_validator_agent.md)
+- Input/output owners: [ValidatorInput/ValidatorOutput](../../agent/schemas/validator.py)
+- Incoming [ml_model_impl_to_ml_model_valid](../../agent/schemas/protocols/ml_model_impl_to_ml_model_valid.py); outgoing [ml_model_valid_to_ml_model_tune](../../agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py)
+- Focused real checks with controlled LLM seams: [tests/unit/agent/ml_code_validator_agent](../../../tests/unit/agent/ml_code_validator_agent/)
+
+Private probe/prompt helpers are not public API; use the typed schemas and
+protocols above.

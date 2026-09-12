@@ -50,9 +50,11 @@ reads it (CLAUDE.md binding rule).
 - **Prompt byte-surfaces are pinned.** The planner/reflector prompt bodies
   are guarded by exact renders in tests; a template edit is a semantic change
   with its own gate obligations, not a copyedit.
-- **Task science never lives in a template.** Templates render framework
-  structure; the science arrives as task-block *values* (absent ⇒ nothing
-  rendered). Census guards keep the framework templates task-free.
+- **Task declarations are caller-owned, not template-owned.** Templates render
+  framework structure; task-block *values* arrive from the composition caller
+  (absent ⇒ nothing rendered). A retained illustrative example in
+  `prompt_templates/literature_review/__init__.py` is neither a default nor
+  scientific authority. Census guards keep the framework templates task-free.
 
 ## Non-owned semantics
 

@@ -14,20 +14,14 @@ Four owners, three lifetimes.
 
 ### Task semantics — yours to write
 
-These describe your science. An external task supplies its own versions anywhere
-on disk; the in-repo TIDMAD copies are **reference packaging, not a framework
-dependency**.
+Task science is supplied through a composition manifest. The two in-repo
+manifests are synthetic examples; real task packages keep their declarations
+outside this repository.
 
 | file | declares |
 |---|---|
-| `configs/task_composition/<task>.yaml` | the manifest — see [task composition](task-composition.md) |
-| `configs/task_config.yaml` | `task_description` + `forward_contract` |
-| `configs/task_health/<task>.yaml` | health roster, **thresholds**, peek files, value scale, prose |
-| `configs/task_proposal/<task>.yaml` | task science rendered into proposer prompts |
-| `configs/task_implementor/<task>.yaml` | task science rendered into implementor prompts |
-| `configs/task_interpretation/<task>.yaml` | task science rendered into interpreter prompts |
-| a metric declaration JSON | metric id, direction, aggregation, scoreability |
-| a dataset profile JSON | partition count, anchors, peek set, opaque topology |
+| caller-owned task-composition manifest | manifest sections such as `task_config`, `task_health`, `metric`, `secondary_metrics`, `objective`, `model_plugins`, `loss_plugins`, and task-block declarations — see [task composition](task-composition.md) |
+| manifest-referenced task files | task config/model I/O, Health, metric, dataset profile, plugin and prompt-block declarations; paths resolve relative to the manifest |
 
 When a composed run omits a task-owned declaration, the corresponding binding
 is absent and the task composition loader refuses any operation that requires
@@ -82,8 +76,10 @@ generated per workspace, pinned      →  effective health config, invariants lo
 
 ## Two things that are *not* config
 
-- **Model and loss plugins** are found by environment variable
-  (`SIDERIUS_PLUGIN_DIRS`, `SIDERIUS_LOSS_DIRS`), not by any YAML file.
+- **Environment-only discovery** is used for legacy model/loss library paths
+  (`SIDERIUS_PLUGIN_DIRS`, `SIDERIUS_LOSS_DIRS`); composed manifests may instead
+  declare `model_plugins` and `loss_plugins` explicitly. These are distinct
+  routes, not a YAML fallback for task science.
 - **Data scope, budgets, round counts and gate enablement** are run-level CLI
   inputs, not configuration. `--health_gate_enabled` and `--health_gate_files` in
   particular are deliberately *not* YAML: they are per-run decisions that the
@@ -95,8 +91,9 @@ generated per workspace, pinned      →  effective health config, invariants lo
 
 The threshold lives in the roster entry's `parameters` in **your task's
 health config** — the file your manifest's `task_health:` section names,
-wherever it lives on disk. (The shipped TIDMAD reference is the in-repo
-example of the format.)
+wherever it lives on disk. The shipped synthetic manifests and their declaration
+files provide the in-repo examples: [`quickstart`](../../configs/task_composition/quickstart.yaml)
+and [`synthetic masked regression`](../../configs/task_composition/synthetic_masked_regression.yaml).
 
 > "I want a collapse to stop the round instead of just being recorded."
 
