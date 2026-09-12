@@ -135,8 +135,8 @@ Two properties follow, and both are pinned by tests:
   profile is resolved once per round rather than once per call site.
 
 `build_sample_set(profile=None)` still resolves ambiently, which is what
-callers without a run-bound profile (`scripts/run_comparison.py`, the
-proposer pre-flight) continue to do.
+callers without a run-bound profile (for example, an external experiment's
+legacy comparison tool or the proposer pre-flight) continue to do.
 
 #### Task-built scopes on the composed path (Step 12 / PR-12bc, CAP-SCOPE)
 
@@ -394,7 +394,7 @@ experiment repository. Result lands at `{workspace}/run_output_{run_name}.json`.
 | `--order_strategy_override` | `str` (`shuffle` \| `sequential`) | `None` | Force the training sample visitation order for every round, overriding any agent proposal. Omit = the agent decides, falling back to `shuffle`. |
 | `--file_order_override` | `str` (comma-separated) | `None` | File visitation **order** for `--order_strategy_override sequential`, e.g. `4,6,5,9,7,8`. Order is preserved as written; must be a full permutation of the resolved `DataScope`. Range syntax (`4-9`) is rejected — a range cannot express an order. Omit for ascending file index. |
 | `--progress_bar` | flag | `False` | Stream subprocess tqdm output. |
-| `--task_composition` | `str` (path, optional) | `None` | Path to a YAML task-composition manifest. When supplied, it binds this run's task data path, dataset profile, metric, declared secondaries, Health family and task context before any LLM call. A composed invocation also requires `--data_dir`; omission is refused. The manifest is composed once and shared with the run-scoped binding. |
+| `--task_composition` | `str` (path) | required | YAML task-composition manifest. It binds this run's task data path, dataset profile, metric, declared secondaries, Health family and task context before any LLM call; the manifest is composed once and shared with the run-scoped binding. `--data_dir` is also required. |
 
 ## Python API usage
 
