@@ -338,7 +338,7 @@ def _trim_negative_feedback(state: RestoredState) -> None:
 def _iter_run_name(iter_idx: int) -> str:
     """Chain-mode ``run_name`` convention.
 
- Mirrors ``src/workflows/run_one_iteration.py`` line 271
+    Mirrors ``src/workflows/run_one_iteration.py`` line 271
     (``run_name = f"iter_{args.iteration:03d}"``). Centralising the format
     string here means resume cannot drift from the writer.
     """
@@ -1449,7 +1449,8 @@ def restore_prior_state(
     Args:
         workspace: chain workspace root containing ``iter_NNN/`` and
             ``plugins/iter_NNN/`` subdirs. Same value as the ``--workspace``
-    flag on ``src/workflows/run_one_iteration.py`` and ``scripts/launch/run_chain.sh``.
+        flag on ``src/workflows/run_one_iteration.py`` and
+        ``scripts/launch/run_chain.sh``.
         current_iter: 1-based index of the iter this process is about to
             run. Iters ``[1, current_iter-1]`` are restored.
             ``current_iter == 1`` is a no-op that returns ``seed_paths``
