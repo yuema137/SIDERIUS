@@ -89,12 +89,12 @@ bash scripts/launch/run_chain.sh \
     --workspace /path/to/your/workspace \
     --run_name first_run_v1 \
     --task_composition /path/to/siderius-exp/tasks/example/compositions/workflow.yaml \
+    --llm_config /path/to/siderius-exp/configs/llm/example.json \
     --data_dir /path/to/task/data \
     --healthgate_mode blocking \
     --result_authority scientific \
     --num_iterations 1 \
     --max_rounds 1 \
-    --data_scope 0-9 \
     --trial_time_budget_minutes 20
 ```
 
@@ -103,10 +103,12 @@ Notes on the flags that are not obvious:
 - `--healthgate_mode` and `--result_authority` have **no defaults**. A formal
   launch without both exits `2`.
 - `--data_dir` is **required** for a composed run.
-- `--data_scope` bounds the work; under a partial scope, `--health_gate_files`
-  must be given and be in-scope.
-- Time budgets prevent a badly chosen data portion from producing a multi-hour
-  round.
+- `--llm_config` is caller-owned per-node routing; an external task should
+  provide its reviewed routing JSON explicitly.
+- A task may add a supported partial `--data_scope`; when it does, the
+  task-owned `--health_gate_files` must be present and in scope.
+- The trial budget bounds the training phase; setup, provider calls and
+  measurement can add wall time, so choose a workspace and timeout accordingly.
 
 Omitting `--task_composition` is refused. Every supported run declares its task explicitly.
 
@@ -117,7 +119,7 @@ health config, an invariants lock, and the generated model plugins. Browse
 results with the dashboard:
 
 ```bash
-python src/dashboard/main.py     # http://localhost:8000
+.venv/bin/python src/dashboard/main.py     # http://localhost:8000
 ```
 
 ## Level 3 — real task packages

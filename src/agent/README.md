@@ -54,7 +54,8 @@ reads it (CLAUDE.md binding rule).
   framework structure; task-block *values* arrive from the composition caller
   (absent ⇒ nothing rendered). A retained illustrative example in
   `prompt_templates/literature_review/__init__.py` is neither a default nor
-  scientific authority. Census guards keep the framework templates task-free.
+  scientific authority. Census guards cover the framework-owned template
+  surfaces; they do not turn retained illustrative text into task defaults.
 
 ## Non-owned semantics
 

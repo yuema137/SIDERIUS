@@ -41,8 +41,9 @@ No writable run state belongs under `src/` or `site-packages`.
 
 ## Current entrypoints and installation checks
 
-The chain and iteration scripts live in `scripts/launch/`; workflow code and
-its module entrypoint live in `src/workflows/`. Routing remains in `configs/llm/`,
+Chain scripts live in `scripts/launch/`; the one-iteration public entrypoint is
+`src/workflows/run_one_iteration.py`, with supporting workflow code alongside
+it in `src/workflows/`. Routing remains in `configs/llm/`,
 and policy/manifests remain in `configs/`. Use the
 [entrypoint reference](../docs/reference/entrypoints.md).
 For package CLIs, `.venv/bin/python -m dashboard.main` retains the import name;

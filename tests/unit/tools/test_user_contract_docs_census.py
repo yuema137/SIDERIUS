@@ -61,9 +61,12 @@ or deletion is loud.
 from __future__ import annotations
 
 import re
+import sys
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -78,6 +81,7 @@ DOC_TREES = (
 #: Every path here must exist — a rename must update this list consciously.
 REQUIRED_MEMBERS: tuple[str, ...] = (
     "README.md",
+    "tests/README.md",
     "examples/quickstart/README.md",
     "src/agent/schemas/README.md",
     "src/execute_tools/health_checks/README.md",
@@ -147,6 +151,36 @@ ALLOWLIST: tuple[tuple[str, str, str], ...] = (
         "pack's maintainers at the time, not an instruction to a reader "
         "using the framework.",
     ),
+    (
+        "docs/agent-reference/README.md",
+        "change tuner behaviour",
+        "A maintainer-facing decision table describing which source owner to edit; not a user command.",
+    ),
+    (
+        "docs/agent-reference/README.md",
+        "change what the interpreter reads",
+        "A maintainer-facing decision table describing source ownership; not a user command.",
+    ),
+    (
+        "docs/agent-reference/README.md",
+        "change what the proposer reads",
+        "A maintainer-facing decision table describing source ownership; not a user command.",
+    ),
+    (
+        "docs/agent-reference/README.md",
+        "add a node to the graph",
+        "A maintainer-facing decision table describing the node extension boundary; not a user command.",
+    ),
+    (
+        "tests/pseudo_data/README.md",
+        "A schema change is a two-file change.",
+        "Historical pseudo-data maintenance guidance for preserving fixture parity.",
+    ),
+    (
+        "tests/pseudo_data/README.md",
+        "`agent/schemas/hyperparam_tuning.py`, `agent/schemas/proposal.py`, `ml_models/models_format_sandbox.py`)",
+        "Historical pseudo-data maintenance guidance for preserving fixture parity.",
+    ),
 )
 
 
@@ -181,19 +215,14 @@ def census_files() -> list[str]:
             members.update(
                 p.relative_to(REPO_ROOT).as_posix() for p in (REPO_ROOT / tree).glob("*.md")
             )
-    # Every top-level module README, including every direct src package map
-    # (dynamic: an omitted new module README is swept in, not silently absent).
+    # Every tracked README is a maintained map (dynamic: an omitted nested map
+    # is swept in, not silently absent).
     if tracked is not None:
         for p in tracked:
-            parts = PurePosixPath(p).parts
-            if (len(parts) == 2 and parts[1] == "README.md") or (
-                len(parts) == 3 and parts[0] == "src" and parts[2] == "README.md"
-            ):
+            if p.endswith("/README.md"):
                 members.add(p)
     else:
-        for p in REPO_ROOT.glob("*/README.md"):
-            members.add(p.relative_to(REPO_ROOT).as_posix())
-        for p in (REPO_ROOT / "src").glob("*/README.md"):
+        for p in REPO_ROOT.rglob("README.md"):
             members.add(p.relative_to(REPO_ROOT).as_posix())
     return sorted(members)
 
@@ -296,6 +325,22 @@ def test_census_file_set_is_complete() -> None:
         "census no longer covers required user-facing docs (renamed or "
         f"deleted? update REQUIRED_MEMBERS deliberately): {missing}"
     )
+
+
+@pytest.mark.parametrize("relative", ["tests/unit/new_family/README.md", "src/new_package/deep/README.md"])
+def test_nested_counterexample_is_discovered_and_rejected(
+    tmp_path: Path, monkeypatch, relative: str
+) -> None:
+    nested = tmp_path / relative
+    nested.parent.mkdir(parents=True)
+    nested.write_text("Edit `nodes/example.py` in the checkout before running this test.\n")
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(module, "_tracked_files", lambda: frozenset({relative}))
+    discovered = census_files()
+    assert discovered == [relative]
+    findings = census(discovered)
+    assert findings and findings[0].source == relative
 
 
 def test_user_docs_never_instruct_in_tree_edits() -> None:

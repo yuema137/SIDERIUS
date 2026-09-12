@@ -18,10 +18,14 @@ def _required_assets() -> list[Path]:
     source = REPO / "src"
     groups = (
         [source / "agent/schemas/vocab_seed.json"],
-        list((source / "agent/prompt_templates").rglob("*.md")),
+        [
+            p
+            for p in (source / "agent/prompt_templates").rglob("*.md")
+            if p.name != "README.md"
+        ],
         list((source / "agent/skills").glob("*/skill_config.json")),
         list((source / "ml_models").glob("*/description.md")),
-        list((source / "nodes").rglob("*.md")),
+        [p for p in (source / "nodes").rglob("*.md") if p.name != "README.md"],
         [source / "dashboard/static" / name for name in ("index.html", "app.js", "style.css")],
         [source / "tools/ci/weights.json"],
         list((source / "tools/claude_hooks/templates").glob("*.md")),
