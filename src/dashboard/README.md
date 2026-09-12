@@ -33,7 +33,7 @@ Dependencies are declared in `pyproject.toml` (`fastapi`, `uvicorn[standard]`,
 `pyyaml`). Install with:
 
 ```bash
-uv sync
+uv sync --group dev --frozen
 ```
 
 ## Configuration
@@ -141,16 +141,16 @@ Consequences an operator will actually see:
 
 ```bash
 # Dashboard unit tests only
-uv run pytest tests/unit/dashboard/ -v
+.venv/bin/python -m pytest tests/unit/dashboard/ -v
 
 # Dashboard integration tests only (uses TestClient, no server needed)
-uv run pytest tests/integration/dashboard/ -v
+.venv/bin/python -m pytest tests/integration/dashboard/ -v
 
 # All dashboard tests
-uv run pytest tests/unit/dashboard/ tests/integration/dashboard/ -v
+.venv/bin/python -m pytest tests/unit/dashboard/ tests/integration/dashboard/ -v
 
 # Full test suite
-uv run pytest tests/unit/ tests/integration/dashboard/
+.venv/bin/python -m pytest tests/unit/ tests/integration/dashboard/
 ```
 
 ## Switching to PostgreSQL (future)

@@ -32,8 +32,8 @@ does*; the task owns *what is checked and how strictly*.
 ## Inputs
 
 Framework policy (`configs/health/health_checks.yaml` — policy ONLY) + a task health
-config (TIDMAD's ships at `configs/task_health/tidmad.yaml`; an external task
-supplies its own anywhere on disk); run-level inputs that are deliberately
+config supplied by the composition manifest (an external task supplies its own
+anywhere on disk); run-level inputs that are deliberately
 CLI, not YAML (`--health_gate_enabled`, `--health_gate_files`); deliverable
 peeks and views.
 

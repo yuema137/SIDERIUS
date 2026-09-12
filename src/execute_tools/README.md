@@ -18,11 +18,11 @@ The task-facing seams:
 | file | surface |
 |---|---|
 | `task_data_path.py` | `TaskDataPath` (Protocol, exactly four methods: `training_dataset` · `validation_dataset` · `write_deliverable` · `read_evaluation_payload`, plus `task_data_path_id`) · optional siblings `TaskScopeCapability`, `TaskTrialAnchoring` · `register_task_data_path` · `resolve_task_data_path` / `bind_task_data_path` / `active_task_data_path` · argv transport + identity verification |
-| `evaluation_metric.py` | `MetricSpec` (id **opaque**, `direction` explicit, `aggregation`, `scoreability`; frozen, `extra="forbid"`) · `EvaluationMetric` (ABC — `evaluate` runs the scoreability contract **before** any arithmetic) · `ScoreabilityContract` · `MetricResult` / `NotScoreableResult` / `NotScoreableError` · `bind_run_metric` / `resolve_run_metric` (+ secondaries) · shipped generic metric implementations · `TIDMAD_METRIC_ID` declared once here |
+| `evaluation_metric.py` | `MetricSpec` (id **opaque**, `direction` explicit, `aggregation`, `scoreability`; frozen, `extra="forbid"`) · `EvaluationMetric` (ABC — `evaluate` runs the scoreability contract **before** any arithmetic) · `ScoreabilityContract` · `MetricResult` / `NotScoreableResult` / `NotScoreableError` · `bind_run_metric` / `resolve_run_metric` (+ secondaries) · shipped generic metric implementations |
 | `metric_order.py` | `MetricOrder` — **the one authority interpreting metric direction** (`is_better`, `best`, `worst_sentinel`, `direction_words`, …) |
-| `dataset_config.py` | `DatasetProfile` (generic identity + opaque `topology` the framework never reads) · `DataScope` (`--data_scope "4-9"`) · `ChannelIdentity` / `ValueEncoding` · the TIDMAD constants |
+| `dataset_config.py` | `DatasetProfile` (generic identity + opaque `topology` the framework never reads) · `DataScope` (`--data_scope "4-9"`) · `ChannelIdentity` / `ValueEncoding` |
 | `deliverable_spec.py` | `DeliverableNaming` — **the sole owner of deliverable file naming** — and `DeliverableStorage`/`DeliverableSpec` |
-| `sample_set_builder.py` / `scoring_utils.py` | `build_sample_set` (constructive scope enforcement) · `validate_sample_set` (the boundary guarantee before all file I/O) · `score_vector` (pure 2-tuple scoring — frozen TIDMAD arithmetic) |
+| `sample_set_builder.py` / `scoring_utils.py` | `build_sample_set` (constructive scope enforcement) · `validate_sample_set` (the boundary guarantee before all file I/O) · `score_vector` (legacy compatibility helper; bound task metrics own current scoring semantics) |
 | `data_paths.py` | explicit physical data-root validation plus run-scoped bind/active/resolve transport |
 | `scope_artifact.py` | the hash-verified scope artifact ABI crossing the process boundary |
 | `task_registration_scope.py` | run-scoped registration visibility/rollback |
@@ -106,7 +106,7 @@ a new single-authority module, always with its census/guard.
 
 ## Files normally NOT edited
 
-`scoring_utils.score_vector` arithmetic (frozen task definition);
+`scoring_utils.score_vector` remains a legacy compatibility surface;
 `metric_order.py` (one authority); `deliverable_spec.py` naming ownership; the
 four `TaskDataPath` methods (frozen — extend via optional siblings).
 
