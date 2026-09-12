@@ -50,9 +50,12 @@ reads it (CLAUDE.md binding rule).
 - **Prompt byte-surfaces are pinned.** The planner/reflector prompt bodies
   are guarded by exact renders in tests; a template edit is a semantic change
   with its own gate obligations, not a copyedit.
-- **Task science never lives in a template.** Templates render framework
-  structure; the science arrives as task-block *values* (absent ⇒ nothing
-  rendered). Census guards keep the framework templates task-free.
+- **Task declarations are caller-owned, not template-owned.** Templates render
+  framework structure; task-block *values* arrive from the composition caller
+  (absent ⇒ nothing rendered). A retained illustrative example in
+  `prompt_templates/literature_review/__init__.py` is neither a default nor
+  scientific authority. Census guards cover the framework-owned template
+  surfaces; they do not turn retained illustrative text into task defaults.
 
 ## Non-owned semantics
 
@@ -115,5 +118,5 @@ text = bridge.generate_text(system_prompt="…", user_prompt="say ok")
 
 `tests/unit/agent/` (per-node prompt and schema suites, bridge behaviour,
 skills); prompt-surface pin tests under the node suites; dual-mode
-integration tests exercise the stub bridge by default
-(`docs/pseudo_test_infra.md`).
+integration tests exercise the stub bridge by default; see the
+[pseudo-full-loop testing guide](../../docs/architecture.md#pseudo-full-loop-tests).

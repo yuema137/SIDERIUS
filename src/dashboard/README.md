@@ -27,13 +27,16 @@ dashboard/
 └── static/              # Frontend (index.html, app.js, style.css)
 ```
 
+The `static/` directory is a resource-only browser leaf; its files are served
+by `main.py` and have no Python entrypoint of their own.
+
 ## Prerequisites
 
 Dependencies are declared in `pyproject.toml` (`fastapi`, `uvicorn[standard]`,
 `pyyaml`). Install with:
 
 ```bash
-uv sync
+uv sync --group dev --frozen
 ```
 
 ## Configuration
@@ -64,29 +67,29 @@ dashboard:
 
 ```bash
 # Standard start
-uv run python src/dashboard/main.py
+.venv/bin/python src/dashboard/main.py
 
 # Custom config file
-uv run python src/dashboard/main.py --config /path/to/config.yaml
+.venv/bin/python src/dashboard/main.py --config /path/to/config.yaml
 
 # Override host/port without editing the config
-uv run python src/dashboard/main.py --host 0.0.0.0 --port 9000
+.venv/bin/python src/dashboard/main.py --host 0.0.0.0 --port 9000
 
 # Development mode (auto-reload on code changes)
-uv run python src/dashboard/main.py --reload
+.venv/bin/python src/dashboard/main.py --reload
 ```
 
 **Or directly with uvicorn:**
 
 ```bash
-uv run uvicorn dashboard.main:app --host 0.0.0.0 --port 8000
+.venv/bin/python -m uvicorn dashboard.main:app --host 0.0.0.0 --port 8000
 ```
 
 **Run in a detached screen session (recommended for long experiments):**
 
 ```bash
 screen -S siderius-dashboard
-uv run python src/dashboard/main.py
+.venv/bin/python src/dashboard/main.py
 # Ctrl+A D to detach
 ```
 
@@ -141,16 +144,16 @@ Consequences an operator will actually see:
 
 ```bash
 # Dashboard unit tests only
-uv run pytest tests/unit/dashboard/ -v
+.venv/bin/python -m pytest tests/unit/dashboard/ -v
 
 # Dashboard integration tests only (uses TestClient, no server needed)
-uv run pytest tests/integration/dashboard/ -v
+.venv/bin/python -m pytest tests/integration/dashboard/ -v
 
 # All dashboard tests
-uv run pytest tests/unit/dashboard/ tests/integration/dashboard/ -v
+.venv/bin/python -m pytest tests/unit/dashboard/ tests/integration/dashboard/ -v
 
-# Full test suite
-uv run pytest tests/unit/ tests/integration/dashboard/
+# Affected dashboard route (the repository-wide suite is selected by CI)
+.venv/bin/python -m pytest tests/unit/dashboard/ tests/integration/dashboard/ -v
 ```
 
 ## Switching to PostgreSQL (future)

@@ -9,30 +9,24 @@ with a dataset, and not at all yet.
 
 ## Level 0 — no API key, no dataset, no GPU
 
-**The full unit suite is the zero-cost first contact.** It runs with *no API
-key at all* — every LLM is mocked, nothing touches the network, and CI runs
-the same suite (`-m "not real_run"`) with no secrets configured:
+**Focused checkout checks are the zero-cost first contact.** They run with *no
+API key at all* and verify source origin plus the shipped Quickstart manifest:
 
 ```bash
-.venv/bin/python -m pytest tests/unit/ -q
+.venv/bin/python -m pytest \
+  tests/unit/examples/test_quickstart_pack.py::test_composition_authority_resolves_from_this_checkout \
+  tests/unit/examples/test_quickstart_pack.py::test_shipped_manifest_composes_with_the_declared_values -q
 ```
 
-That claim is enforced, not aspirational: the handful of tests that *do* need
-real API keys or real data are marked `real_run` and are **skipped at
-collection** unless you explicitly pass a real-mode flag
-(`--real-api-call` / `--real-llm` / `--real-training`). A plain `pytest`
-invocation cannot spend money by accident.
+For broader deterministic validation, run the affected unit tests. Tests marked
+`real_run` require an explicit real-mode flag and are not part of this offline
+first contact.
 
-The integration suite runs the full node orchestration against **predefined**
-LLM and subprocess responses — the complete plan → train → score → reflect wiring
-in milliseconds, still no API key, no GPU:
-
-```bash
-.venv/bin/python -m pytest tests/integration/ -q
-```
-
-This is the fastest way to see the shape of the system. It is not a scientific
-run.
+The integration tree contains both pseudo and opt-in real tests; it is not a
+uniform millisecond, credential-free command. Read the
+[pseudo-full-loop and integration-tier guide](../architecture.md#pseudo-full-loop-tests)
+before selecting a bounded family test; do not assume the whole tree is a
+smoke test.
 
 ### When you do add a key
 
@@ -95,12 +89,12 @@ bash scripts/launch/run_chain.sh \
     --workspace /path/to/your/workspace \
     --run_name first_run_v1 \
     --task_composition /path/to/siderius-exp/tasks/example/compositions/workflow.yaml \
+    --llm_config /path/to/siderius-exp/configs/llm/example.json \
     --data_dir /path/to/task/data \
     --healthgate_mode blocking \
     --result_authority scientific \
     --num_iterations 1 \
     --max_rounds 1 \
-    --data_scope 0-9 \
     --trial_time_budget_minutes 20
 ```
 
@@ -109,10 +103,12 @@ Notes on the flags that are not obvious:
 - `--healthgate_mode` and `--result_authority` have **no defaults**. A formal
   launch without both exits `2`.
 - `--data_dir` is **required** for a composed run.
-- `--data_scope` bounds the work; under a partial scope, `--health_gate_files`
-  must be given and be in-scope.
-- Time budgets prevent a badly chosen data portion from producing a multi-hour
-  round.
+- `--llm_config` is caller-owned per-node routing; an external task should
+  provide its reviewed routing JSON explicitly.
+- A task may add a supported partial `--data_scope`; when it does, the
+  task-owned `--health_gate_files` must be present and in scope.
+- The trial budget bounds the training phase; setup, provider calls and
+  measurement can add wall time, so choose a workspace and timeout accordingly.
 
 Omitting `--task_composition` is refused. Every supported run declares its task explicitly.
 
@@ -123,7 +119,7 @@ health config, an invariants lock, and the generated model plugins. Browse
 results with the dashboard:
 
 ```bash
-python src/dashboard/main.py     # http://localhost:8000
+.venv/bin/python src/dashboard/main.py     # http://localhost:8000
 ```
 
 ## Level 3 — real task packages

@@ -45,8 +45,10 @@ a subdirectory of child-PR designs whose `§` ledgers record what actually lande
 | 12 | external extensibility graduation |
 | D14 | executable data path (three tasks, one execution architecture) |
 
-Steps 00–11 are complete and merged. Step 12 is in flight: its first two children
-have merged; the remaining two have not. See
+The following milestone statement is a historical snapshot from the design
+freeze, not a current implementation status: Steps 00–11 were recorded as
+complete and merged, while Step 12's first two children had merged and two
+remained open at that time. For current support, check Git and
 [supported tasks and current maturity](../concepts/supported-tasks.md) for what
 that means in practice, and verify any status claim against git rather than
 against a document's header.
@@ -72,7 +74,7 @@ campaigns are largely historical.
 | [`genericity_contract.md`](genericity_contract.md) | the genericity seams |
 | [`tidmad_coupling_ledger.md`](tidmad_coupling_ledger.md) | where TIDMAD assumptions lived |
 | [`pruning_test_rule.md`](pruning_test_rule.md) | the test-ownership rules |
-| [`framework_experiment_repository_separation.md`](framework_experiment_repository_separation.md) | active design and work ledger for separating generic framework infrastructure from real tasks and campaigns |
+| [`framework_experiment_repository_separation.md`](framework_experiment_repository_separation.md) | historical decisions/evidence and a local-only P0 ledger for separating generic framework infrastructure from caller-owned tasks and campaigns |
 
 ### Task-specific analysis
 
