@@ -79,8 +79,11 @@ bash scripts/launch/run_chain.sh \
 ```
 
 `--dry-run` prints the intended iteration command while preflight still runs.
-Removing it starts effectful work: configure credentials, review budgets, and
-follow [your first run](docs/getting-started/first-run.md). Auto-resume is the
+Removing it starts effectful work: prepare trusted external credentials in the
+same shell as the launch, review budgets, and follow [your first run](docs/getting-started/first-run.md).
+See the [per-launch credential procedure](docs/getting-started/installation.md#api-keys);
+do not assume an earlier shell or implicit `.env` loading carries into a new
+experiment. Auto-resume is the
 configurable default; use a new workspace for a new run identity. Provider
 diagnostics and the dashboard are optional and effectful; see the
 [diagnostic guide](scripts/diagnostics/README.md) and

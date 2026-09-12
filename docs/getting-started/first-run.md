@@ -33,9 +33,14 @@ smoke test.
 Real runs (Level 1 onward) need an LLM provider. Three are known to the
 bridge — **OpenAI** (`OPENAI_API_KEY`), **Gemini** (`GEMINI_API_KEY`) and
 **DeepSeek** (`DEEPSEEK_API_KEY`) — and any other OpenAI-compatible endpoint
-works by passing `base_url`/`api_key` explicitly. Keys go in a `.env` file at
-the repository root (see [installation](installation.md#api-keys)); the
-bridge loads it automatically.
+works by passing `base_url`/`api_key` explicitly. At every real launch, load a
+trusted machine-owned credential file outside the checkout (mode `600`) or use
+managed secret injection, then check the enabled provider variable names in
+the same shell/process that invokes the run. Do not commit, upload, log or
+shell-trace values; require no key for disabled providers. See the complete
+[per-launch credential procedure](installation.md#api-keys). Existing dotenv
+loading is compatibility behavior and must not be treated as implicit launch
+binding.
 
 What you will see when the key is wrong, so you recognise it:
 

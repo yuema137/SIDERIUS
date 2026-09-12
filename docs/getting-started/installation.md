@@ -81,18 +81,60 @@ Task-specific scoring references, including TIDMAD anchor maps, belong to the ex
 
 ## API keys
 
-Needed for real runs, not for the test suite — you can defer this until you
-launch [a real run](first-run.md). Keys live in a gitignored `.env` at the
-repository root; the LLM bridge loads it automatically:
+Real runs need credentials from the machine that launches that experiment.
+Keep them in a trusted, machine-owned file outside this checkout (permission
+`600`), or use your scheduler/secret manager to inject them into the launch
+process. Never commit, upload, log, or shell-trace credential values. A new
+shell does not inherit an earlier shell's setup: prepare and check credentials
+in the same shell that starts the run.
+
+The launch caller must require the variables for the providers enabled by its
+reviewed routing configuration. The bridge currently names `OPENAI_API_KEY`,
+`GEMINI_API_KEY`, and `DEEPSEEK_API_KEY`; do not require keys for disabled
+providers. Presence is only a local binding check—it does not prove validity,
+quota, or network reachability. For a trusted shell-compatible credentials
+file, this complete pattern checks names only and then invokes the real launch
+in the same shell (replace the required list and final command with the
+experiment's reviewed values):
 
 ```bash
-cat > .env << 'EOF'
-OPENAI_API_KEY=...
-GEMINI_API_KEY=...       # optional
-DEEPSEEK_API_KEY=...     # optional
-S2_API_KEY=...           # optional, literature review only
-EOF
+CREDENTIAL_FILE="/absolute/path/to/credential-file"
+if [[ ! -r "$CREDENTIAL_FILE" ]]; then
+  echo "credential file is missing or unreadable" >&2
+  exit 1
+fi
+set -a
+# The file must contain trusted shell-compatible variable assignments only.
+# shellcheck disable=SC1090
+source "$CREDENTIAL_FILE"
+set +a
+
+required_credentials=(OPENAI_API_KEY)  # add enabled providers only
+for name in "${required_credentials[@]}"; do
+  if [[ -z "${!name:-}" ]]; then
+    echo "missing or empty required credential: $name" >&2
+    exit 1
+  fi
+  if [[ "$(export -p)" != *"declare -x $name="* ]]; then
+    echo "required credential is not exported: $name" >&2
+    exit 1
+  fi
+done
+
+bash scripts/launch/run_chain.sh \
+  --mode lilab \
+  --workspace /path/to/run-workspace \
+  --run_name reviewed_run \
+  --task_composition /path/to/task/composition.yaml \
+  --data_dir /path/to/task/data
 ```
+
+Managed injection is equivalent when the secret manager exports the reviewed
+variables before this check and the launch command remains in this process.
+Do not rely on an implicit path search or on the bridge's existing dotenv
+compatibility loading; that behavior is retained for compatibility, not a
+reliable per-launch binding. Offline installation, focused tests, and
+`--dry-run` onboarding do not need an API key.
 
 ## Verify
 
