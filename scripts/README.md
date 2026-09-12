@@ -9,8 +9,8 @@ Template:
 
 ## Purpose
 
-Python/bash utilities that are *not* the chain. The maintained chain launchers
-live in [`launch/`](launch/), while Slurm entrypoints live in [`slurm/`](slurm/)
+Python/bash utilities, including the maintained chain launchers in
+[`launch/`](launch/) and Slurm entrypoints in [`slurm/`](slurm/)
 and durable runtime utilities in [`runtime/`](runtime/). This directory contains the
 small durable operator surface. Historical investigation and gate harnesses
 are maintained by their owning experiment repository, not shipped here.
@@ -32,6 +32,9 @@ The durable operator surface:
 | `runtime/campaign_admission.py` · `runtime/campaign_spend.py` · `runtime/replay.py` | resumable bookkeeping and runtime-control operations |
 | `diagnostics/bg_gpu_sampler.sh` | background GPU utilisation sampler |
 | [`diagnostics/check_agent_environment.py`](diagnostics/README.md) | opt-in provider environment diagnostic; source-checkout-only and network-capable |
+
+The chain entry is [`launch/run_chain.sh`](launch/run_chain.sh); Slurm submits
+through [`slurm/submit_one_iteration.slurm`](slurm/submit_one_iteration.slurm).
 
 The dated study and calibration tooling formerly under
 `inspection_cost_study/` and `pr3_l2_calibration/`, along with retired

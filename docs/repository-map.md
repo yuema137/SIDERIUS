@@ -188,9 +188,10 @@ Recovered trajectories and plots must not be presented as complete provenance.
 | Former `advice/` root | Retired; the [format guide](guides/advice.md) documents caller-owned input |
 | Old design records and dated CLAUDE status entries | Rationale and incident evidence; use [design index](design/README.md) for history and Git/source for capability |
 
-Source consolidation was not performed. Packaging discovers the existing
-top-level packages; child-script lookup and external imports depend on current
-paths. Any future physical move needs its own caller/path audit and validation.
+The source consolidation is complete: eight framework packages live under
+`src/`, while chain launchers and caller inputs remain at their actual root
+locations above. Packaging and child-script lookup use those current paths;
+any future physical move needs its own caller/path audit and validation.
 
 ## Minimal entry checks
 
