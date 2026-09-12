@@ -144,19 +144,13 @@ The eight installed packages remain importable as `agent`, `nodes`, `workflows`,
 
 ## Testing and contribution
 
-Run focused tests with this checkout's `.venv/bin/python -m pytest`. Test
-ownership and bounded Gate requirements are defined in [`CLAUDE.md`](CLAUDE.md)
-and the [Gate standard](docs/gates/gate_testing_standard.md). The local quality
-gate is:
-
-```bash
-make check
-```
-
-It runs Ruff, formatting, Pyright when available, and the unit tier. Formal PR
-CI selects affected deterministic tests and falls back conservatively when
-impact is unclear; it is the canonical full validation for the final PR head.
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for boundaries and limitations.
+Start with focused tests for the authority you changed, using this checkout's
+`.venv/bin/python -m pytest`. Test ownership and bounded Gate requirements are
+defined in [`CLAUDE.md`](CLAUDE.md) and the [Gate standard](docs/gates/gate_testing_standard.md).
+The optional `make check` contributor target runs the local lint, format, type,
+and unit checks; it is not a substitute for the affected-test selection and
+canonical exact-head PR CI described in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Do not treat a local full-suite run as the default first contact.
 
 ## Availability and license
 

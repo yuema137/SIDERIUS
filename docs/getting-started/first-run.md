@@ -9,30 +9,29 @@ with a dataset, and not at all yet.
 
 ## Level 0 — no API key, no dataset, no GPU
 
-**The full unit suite is the zero-cost first contact.** It runs with *no API
-key at all* — every LLM is mocked, nothing touches the network, and CI runs
-the same suite (`-m "not real_run"`) with no secrets configured:
+**Focused checkout checks are the zero-cost first contact.** They run with *no
+API key at all* and verify source origin plus the shipped Quickstart manifest:
 
 ```bash
-.venv/bin/python -m pytest tests/unit/ -q
+.venv/bin/python -m pytest \
+  tests/unit/examples/test_quickstart_pack.py::test_composition_authority_resolves_from_this_checkout \
+  tests/unit/examples/test_quickstart_pack.py::test_shipped_manifest_composes_with_the_declared_values -q
 ```
 
-That claim is enforced, not aspirational: the handful of tests that *do* need
-real API keys or real data are marked `real_run` and are **skipped at
-collection** unless you explicitly pass a real-mode flag
-(`--real-api-call` / `--real-llm` / `--real-training`). A plain `pytest`
-invocation cannot spend money by accident.
+For broader deterministic validation, run the affected unit tests. Tests marked
+`real_run` require an explicit real-mode flag and are not part of this offline
+first contact.
 
-The integration suite runs the full node orchestration against **predefined**
-LLM and subprocess responses — the complete plan → train → score → reflect wiring
-in milliseconds, still no API key, no GPU:
+The integration tree contains both pseudo and opt-in real tests; it is not a
+uniform millisecond, credential-free command. Use the markers and each test's
+instructions to choose a bounded pseudo subset:
 
 ```bash
-.venv/bin/python -m pytest tests/integration/ -q
+.venv/bin/python -m pytest -m 'not real_run' tests/integration/workflows -q
 ```
 
-This is the fastest way to see the shape of the system. It is not a scientific
-run.
+This exercises selected deterministic workflow wiring; it is not a scientific
+run or a substitute for the task package's real-data checks.
 
 ### When you do add a key
 

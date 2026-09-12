@@ -9,8 +9,8 @@
 - **Python 3.12+** (the repo pins `3.12`; the system `python3` on several lab
   machines is 3.8 and will fail)
 - **[uv](https://docs.astral.sh/uv/)** package manager
-- An **NVIDIA GPU with CUDA** — required for real training, not for the test
-  suite
+- An **NVIDIA GPU with CUDA** — required for the supported real scientific
+  training path, not for synthetic CPU examples or focused tests
 - At least one LLM API key — OpenAI, Gemini and/or DeepSeek — for **real
   runs only**: the full unit suite runs with no key at all
 - Optional: a Semantic Scholar key, only for the literature-review stage
@@ -45,9 +45,9 @@ you plan to run the contributor gate (`make check`, see
 [`CONTRIBUTING.md`](../../CONTRIBUTING.md)).
 
 Supported interpreter and accelerator, today: **Python 3.12** (the version CI
-installs) and **CUDA GPUs only** for real training. The broader accelerator
-matrix (CPU-only training, ROCm, MPS) is tracked in issue #291 — that issue,
-not this page, owns the deeper answer.
+installs) and **CUDA GPUs** for the supported real scientific training path.
+Synthetic examples and focused tests can run on CPU; broader real-training
+accelerator support is outside this guide.
 
 ### Installed packages and checkout resources
 
@@ -117,10 +117,6 @@ This is config-only — no code changes:
 The GPU is detected at runtime; verify that the chosen experiment budgets fit
 the new device rather than assuming a hardware move preserves its operating
 envelope. On a multi-GPU node, select one externally with `CUDA_VISIBLE_DEVICES`.
-
-Optionally, per-server scoring wall-time calibration lives in
-`core/server_configs/{hostname}.py`. An unknown host falls back to a default with
-a one-time warning, and only the time *forecast* is affected.
 
 ---
 

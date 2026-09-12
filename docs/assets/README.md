@@ -5,14 +5,16 @@ reused from SIDERIUS-Paper. Its provenance and conversion command are recorded
 in [`paper/README.md`](paper/README.md); the PDF is the byte-identical source
 and the PNG is a local faithful preview.
 
-Diagrams are hand-authored **SVG**, committed here and referenced from Markdown:
+The maintained diagrams are committed assets referenced from Markdown. Existing
+SVG figures remain in place; the Paper reference figure is an unchanged PDF
+with a generated PNG preview:
 
 ```markdown
 ![alt text](../assets/discovery-loop.svg)     <!-- from a page under docs/ -->
 ![alt text](docs/assets/discovery-loop.svg)   <!-- from README.md at the root -->
 ```
 
-## Why SVG and not Mermaid
+## Why the existing SVG figures are retained
 
 Mermaid renders as generic auto-laid-out boxes; it cannot express a deliberate
 composition — emphasis, grouping, a dashed "not yet real" panel, a takeaway line.
@@ -49,17 +51,8 @@ Palette: `#2980B9` blue · `#8E44AD` purple · `#F39C12` amber · `#16A085` teal
 
 ## Checking a change
 
-Render before committing — do not trust the markup by eye:
-
-```bash
-python3 -m venv /tmp/svgenv && /tmp/svgenv/bin/pip install cairosvg
-/tmp/svgenv/bin/python -c "import cairosvg; cairosvg.svg2png(
-    url='docs/assets/discovery-loop.svg', write_to='/tmp/out.png',
-    scale=1.4, background_color='white')"
-```
-
-`cairosvg` falls back to DejaVu Sans, which is **wider** than Helvetica — text
-that fits there will fit for a real viewer, so it is a safe worst case.
+For the Paper asset's exact conversion command, tool version, and hashes, see
+[`paper/README.md`](paper/README.md). Do not edit the source Paper checkout.
 
 ## Current figures
 
