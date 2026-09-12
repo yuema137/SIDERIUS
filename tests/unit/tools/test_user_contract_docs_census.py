@@ -61,10 +61,10 @@ or deletion is loud.
 from __future__ import annotations
 
 import re
-import sys
 import subprocess
+import sys
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import pytest
 
@@ -327,7 +327,9 @@ def test_census_file_set_is_complete() -> None:
     )
 
 
-@pytest.mark.parametrize("relative", ["tests/unit/new_family/README.md", "src/new_package/deep/README.md"])
+@pytest.mark.parametrize(
+    "relative", ["tests/unit/new_family/README.md", "src/new_package/deep/README.md"]
+)
 def test_nested_counterexample_is_discovered_and_rejected(
     tmp_path: Path, monkeypatch, relative: str
 ) -> None:
