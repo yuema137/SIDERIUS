@@ -64,6 +64,8 @@ def read_resources(workspace: Path) -> dict[str, str]:
     resources = {}
     for family, reader in (("proposal", proposal), ("literature_review", literature_review)):
         for path in (root / "agent/prompt_templates" / family).glob("*.md"):
+            if path.name == "README.md":
+                continue
             resources[path.relative_to(root).as_posix()] = reader.load_prompt(path.name)
     assert len(resources) == 12, "prompt templates missing from the installation"
     assert len(_load_vocab_seed()) == 21, "vocabulary seed missing or unreadable"
