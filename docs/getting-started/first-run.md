@@ -30,7 +30,8 @@ smoke test.
 
 ### When you do add a key
 
-Real runs (Level 1 onward) need an LLM provider. Three are known to the
+Real runs (Level 2 onward) need an LLM provider. Level 1 is the credential-free
+dry run. Three providers are known to the
 bridge — **OpenAI** (`OPENAI_API_KEY`), **Gemini** (`GEMINI_API_KEY`) and
 **DeepSeek** (`DEEPSEEK_API_KEY`) — and any other OpenAI-compatible endpoint
 works by passing `base_url`/`api_key` explicitly. At every real launch, load a

@@ -98,39 +98,50 @@ in the same shell (replace the required list and final command with the
 experiment's reviewed values):
 
 ```bash
-CREDENTIAL_FILE="/absolute/path/to/credential-file"
-if [[ ! -r "$CREDENTIAL_FILE" ]]; then
-  echo "credential file is missing or unreadable" >&2
-  exit 1
-fi
-set -a
-# The file must contain trusted shell-compatible variable assignments only.
-# shellcheck disable=SC1090
-source "$CREDENTIAL_FILE"
-set +a
-
-required_credentials=(OPENAI_API_KEY)  # add enabled providers only
-for name in "${required_credentials[@]}"; do
-  if [[ -z "${!name:-}" ]]; then
-    echo "missing or empty required credential: $name" >&2
+(
+  set +x
+  set -euo pipefail
+  CREDENTIAL_FILE="/absolute/path/to/credential-file"
+  if [[ ! -r "$CREDENTIAL_FILE" ]]; then
+    echo "credential file is missing or unreadable" >&2
     exit 1
   fi
-  if [[ "$(export -p)" != *"declare -x $name="* ]]; then
-    echo "required credential is not exported: $name" >&2
-    exit 1
-  fi
-done
+  set -a
+  # The file must contain trusted shell-compatible variable assignments only.
+  # shellcheck disable=SC1090
+  source "$CREDENTIAL_FILE"
+  set +a
 
-bash scripts/launch/run_chain.sh \
-  --mode lilab \
-  --workspace /path/to/run-workspace \
-  --run_name reviewed_run \
-  --task_composition /path/to/task/composition.yaml \
-  --data_dir /path/to/task/data
+  required_credentials=(OPENAI_API_KEY)  # match the selected routing
+  .venv/bin/python - "${required_credentials[@]}" <<'PY'
+import os
+import sys
+
+missing = [name for name in sys.argv[1:] if not os.environ.get(name, "").strip()]
+if missing:
+    print("missing or empty required credential(s): " + ", ".join(missing), file=sys.stderr)
+    raise SystemExit(1)
+PY
+
+  bash scripts/launch/run_chain.sh \
+    --mode lilab \
+    --workspace /path/to/run-workspace \
+    --run_name reviewed_run \
+    --task_composition /path/to/task/composition.yaml \
+    --data_dir /path/to/task/data \
+    --llm_config configs/llm/openai_tiered_pro.json \
+    --no-ml_lit_review_enabled \
+    --healthgate_mode blocking \
+    --result_authority diagnostic \
+    --num_iterations 1 \
+    --max_rounds 1
+)
 ```
 
 Managed injection is equivalent when the secret manager exports the reviewed
 variables before this check and the launch command remains in this process.
+Adapt `required_credentials` and the routing configuration when another
+provider or optional service is enabled; disabled providers remain omitted.
 Do not rely on an implicit path search or on the bridge's existing dotenv
 compatibility loading; that behavior is retained for compatibility, not a
 reliable per-launch binding. Offline installation, focused tests, and
