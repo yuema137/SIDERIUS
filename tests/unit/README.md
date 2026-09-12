@@ -17,5 +17,9 @@ Other maintained families: [dashboard](dashboard/README.md),
 [workflows](workflows/README.md). Agent subfamilies are indexed by the
 [agent map](agent/README.md).
 
+The [agent_generated](agent_generated/README.md) family is a historical
+registry/index-write regression suite owned by `core.capability_registry`,
+not a production package.
+
 `test_repo_hygiene.py` owns repository-level checks; a focused run is not a
 full-suite result.
