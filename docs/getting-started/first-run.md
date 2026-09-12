@@ -23,9 +23,10 @@ For broader deterministic validation, run the affected unit tests. Tests marked
 first contact.
 
 The integration tree contains both pseudo and opt-in real tests; it is not a
-uniform millisecond, credential-free command. Follow the relevant family guide
-under [`tests/integration/`](../../tests/integration/README.md) instead of
-assuming the whole tree is a smoke test.
+uniform millisecond, credential-free command. Read the
+[pseudo-full-loop and integration-tier guide](../architecture.md#pseudo-full-loop-tests)
+before selecting a bounded family test; do not assume the whole tree is a
+smoke test.
 
 ### When you do add a key
 
