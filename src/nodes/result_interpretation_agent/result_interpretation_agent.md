@@ -49,11 +49,10 @@ SCIENCE. `InterpretationInput.task_blocks` carries a frozen
 header, no bytes. A present-but-empty section is refused.
 
 The interpreter never discovers task files. The CALLER supplies the value:
-today `workflows/model_exploration.py` and this node's CLI `main()` resolve
-the caller's through the bounded adapter above; the composition root supplies
-the same typed value and an external
-task supplies its own value — or its own YAML at any path — with no SIDERIUS
-edit.
+the CLI `main()` calls `load_interpretation_task_blocks()` and, without a path,
+gets an empty value; the workflow reads `composition.interpretation_blocks`
+directly. An external task supplies its own typed value (or YAML at any path)
+with no SIDERIUS edit.
 
 TIDMAD's declaration deliberately carries NO `prediction_guidance`: nothing
 existed in the pre-09b prompts to migrate there, and inventing guidance

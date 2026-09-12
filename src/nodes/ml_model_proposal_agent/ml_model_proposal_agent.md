@@ -33,8 +33,8 @@
 | `target_files` | `list[int]` | No | `[]` | File indices to sample from. Required when `trial_strategy="target"`. |
 | `train_portion` | `float` | No | `0.1` | Per-epoch subsample fraction from the training scope. Forwarded to `evaluate_time_skill` so the proposer's wall-time estimate matches the tuner's. |
 | `sampling_seed` | `int \| None` | No | `None` | Seed for `build_sample_set()`. When `None` the proposer auto-generates one for its estimate; the tuner uses its own auto-generation policy. |
-| `trial_time_budget_minutes` | `float \| None` | No | `None` | Wall-time budget (minutes) against which `evaluate_time_skill` gates the baseline config when `is_trial=True`. `None` = trial gate disabled. |
-| `formal_time_budget_minutes` | `float \| None` | No | `None` | Wall-time budget (minutes) against which `evaluate_time_skill` gates the baseline config when `is_trial=False`. `None` = formal gate disabled. |
+| `trial_time_budget_minutes` | `float \| None` | No | `None` | Active trial budget supplied to the static `estimate_proposal_time` advisory; it never rejects or revises a proposal. |
+| `formal_time_budget_minutes` | `float \| None` | No | `None` | Active formal budget supplied to the static `estimate_proposal_time` advisory; it never rejects or revises a proposal. |
 | `vram_budget_gb` | `float \| None` | No | `None` | Active operator-defined VRAM ceiling (GB) for the upcoming tuning iteration. Workflow picks trial vs formal budget based on `is_trial`. |
 | `data_dir` | `str \| None` | No | `None` | Caller-selected physical data root forwarded to the workflow/runtime when supplied. The proposer preflight is a static estimate: it performs no HDF5/data access and does not switch to a synthetic fallback when this value is absent. |
 | `debug_dump_proposing_prompt_path` | `str \| None` | No | `None` | Debug instrumentation: when set, pipeline mode writes the rendered proposing-stage system prompt to this path before calling the LLM. Useful for offline prompt audits (Checkpoint P). |
