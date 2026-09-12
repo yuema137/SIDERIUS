@@ -35,8 +35,8 @@ PRODUCTION_PACKAGES = (
     "src/workflows",
     "src/ml_models",
     "src/dashboard",
+    "src/tools",
     "scripts",
-    "sdsc_submission_scripts",
 )
 FORBIDDEN_IMPORT_ROOTS = ("examples", "tools.example_packs")
 PARALLEL_COPY_KEYS = ("task_description", "forward_contract")
