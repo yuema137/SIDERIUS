@@ -88,6 +88,17 @@
   in the consumer repository. They call the same framework entrypoint without
   modifying this checkout.
 
+- **Credentials at every real launch**: Offline installation, tests and
+  `--dry-run` need no API key. Before each effectful experiment, use a trusted
+  machine-owned external credential file (mode `600`) or managed secret
+  injection, and perform the name-only presence check in the same shell/process
+  that launches the run. Require only keys for enabled providers; the current
+  bridge names `OPENAI_API_KEY`, `GEMINI_API_KEY` and `DEEPSEEK_API_KEY`.
+  Never commit, upload, log or shell-trace values. Follow the complete
+  [installation procedure](docs/getting-started/installation.md#api-keys).
+  Existing dotenv loading is compatibility behavior, not a per-launch
+  binding guarantee; no runtime helper or hook is implied.
+
 ## Repository and Environment Portability
 
 SIDERIUS is maintained as a large open-source codebase. All production
