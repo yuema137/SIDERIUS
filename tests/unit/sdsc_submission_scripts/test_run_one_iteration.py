@@ -1516,6 +1516,43 @@ class TestComputeExpectedInvariants:
         assert not os.path.exists(os.path.join(str(tmp_path), "health_checks_effective.yaml"))
 
 
+@pytest.mark.parametrize(
+    ("composition_value", "expected_message"),
+    (
+        ("", "required task composition was not resolved"),
+        ("missing.yaml", "could not resolve --task_composition"),
+    ),
+)
+def test_main_refuses_missing_composition_before_work(
+    tmp_path, monkeypatch, capsys, composition_value, expected_message
+):
+    """A required composition failure records a crashed manifest without work."""
+    workspace = tmp_path / "workspace"
+    argv = list(_BASE)
+    argv.extend(("--healthgate_mode", "blocking", "--result_authority", "diagnostic"))
+    argv[argv.index("WS")] = str(workspace)
+    argv[argv.index(str(_REPO_ROOT / "configs/task_composition/quickstart.yaml"))] = (
+        composition_value
+    )
+    monkeypatch.setattr(sys, "argv", ["run_one_iteration.py", *argv])
+
+    with (
+        patch.object(runner, "run_workflow") as run_workflow,
+        patch.object(runner, "resolve_composed_measurement_capability") as resolve_measurement,
+    ):
+        with pytest.raises(SystemExit) as exc:
+            runner.main()
+
+    assert exc.value.code == 1
+    output = capsys.readouterr()
+    assert expected_message in (output.out + output.err)
+    manifest = workspace / "iter_001" / "manifest.json"
+    assert manifest.is_file()
+    assert json.loads(manifest.read_text())["status"] == "failed"
+    run_workflow.assert_not_called()
+    resolve_measurement.assert_not_called()
+
+
 class TestDataScopeChainWiring:
     """DS6c wiring through main(): invariants computed before restore, the
     three params reach run_workflow, and a conflicting second invocation
