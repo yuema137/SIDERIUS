@@ -1,5 +1,10 @@
 # Figures
 
+The `paper/` subdirectory contains the unchanged reference-workflow asset
+reused from SIDERIUS-Paper. Its provenance and conversion command are recorded
+in [`paper/README.md`](paper/README.md); the PDF is the byte-identical source
+and the PNG is a local faithful preview.
+
 Diagrams are hand-authored **SVG**, committed here and referenced from Markdown:
 
 ```markdown
