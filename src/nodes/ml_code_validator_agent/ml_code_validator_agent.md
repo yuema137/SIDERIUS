@@ -4,7 +4,7 @@
 
 ## Position in the pipeline
 
-- **Node type**: **standalone-capable** — `nodes/ml_code_validator_agent/ml_code_validator_agent.py` exposes a CLI `main()` that takes every required artifact via explicit args (file paths + config + spec + description), builds a `ValidatorInput`, runs the 8-check pipeline, and writes `validation_{run_name}.json` to the workspace.
+- **CLI entry**: **present** — the module exposes `main()` and accepts explicit artifact paths. Presence does not supply richer workflow-only fields such as inherited components or task context; see the limitations below.
 - **Upstream**: `ml_model_implementor` (provides `model_type`, `model_file_path`, `test_file_path`, `description_file_path`, `config_fields`, `model_description`, `mathematical_definition` via the `ml_model_impl_to_ml_model_valid` protocol — plus `inherited_components` from the original proposal that get carried through).
 - **Downstream**: `ml_hyperparameter_tune_agent` — the workflow gates on `ValidatorOutput.passed`; only validated plugins reach the tuner. The validator's `expert_advice`, `spec_deviation_notes`, and `inheritance_deviation_notes` propagate forward as soft signals.
 - **Protocol (upstream)**: `ml_model_impl_to_ml_model_valid` — maps `ImplementorOutput.{model_type, model_file_path, test_file_path, description_file_path, config_fields, model_description, mathematical_definition, model_io_contract}` into this node's `ValidatorInput`. `model_io_contract` (Step 04a) is the normalized Step-03 Model-I/O declaration the candidate was generated against; it is mapped verbatim and never re-resolved here, so the validator probes against the same declaration the implementor used. `inherited_components` flows from the original `ProposalOutput` through the chain state.

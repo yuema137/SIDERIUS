@@ -4,7 +4,7 @@
 
 ## Position in the pipeline
 
-- **Node type**: **standalone-capable** — `main()` CLI added by issue #303, mirroring the sibling node CLIs. `experiment_history` is read from the upstream interpretation node's **persisted record on disk**: `{workspace}/interpretation_{run_name}.json` by naming convention (the same file the proposal agent's CLI reads), or an explicit `--experiment-history` path. The workflow path is unchanged (`InterpretationOutput` threaded in memory through `workflows/model_exploration.py`); programmatic Python-API use also works as before — the §10 diagnostic scripts and integration tests construct `LiteratureReviewInput` manually.
+- **CLI entry**: **present** — `main()` was added by issue #303. The current CLI still needs a caller-bound task configuration; it does not expose that binding flag, so issue #433 remains open. Typed Python and workflow routes can supply the required context. `experiment_history` is read from the upstream interpretation record on disk or an explicit path.
 - **Upstream**: `result_interpretation_agent` (provides `experiment_history: InterpretationOutput` — the current iteration's bottlenecks + key findings that ground every synthesized finding).
 - **Downstream**: `ml_model_proposal_agent` (consumes this node's four channels via the proposer's `agent_cards` / `expert_context` / `mindset` / `vocab_seed` inputs).
 - **Protocol**: `local_all_channels` in `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py` — maps `LiteratureReviewOutput.findings` / `new_vocab_candidates` / `agent_card` / `suggested_mindset` into the proposer's four kwargs. No `reference_library` channel — equations travel inline inside finding `content` (per the Commit 2d revision).

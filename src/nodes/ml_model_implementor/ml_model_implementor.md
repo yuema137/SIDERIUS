@@ -4,7 +4,7 @@
 
 ## Position in the pipeline
 
-- **Node type**: **standalone-capable** — `nodes/ml_model_implementor/ml_model_implementor.py` exposes a CLI `main()` that reads `proposal_{run_name}.json` from the workspace, builds an `ImplementorInput`, runs the agent, and writes the plugin + description + test files to `agent_generated/`.
+- **CLI entry**: **present** — `main()` reads a proposal record and accepts the minimal CLI field set. Richer task/model-I/O context is supplied by the typed workflow route; generated paths are caller/workspace-owned rather than a universal checkout destination.
 - **Upstream**: `ml_model_proposal_agent` (provides `model_name`, `output_type`, `model_description`, `mathematical_definition`, `baseline_config`, `custom_loss_spec` via `ml_model_propose_to_ml_model_impl.py::local_full_spec` in `agent/schemas/protocols/`).
 - **Downstream**: `ml_code_validator_agent` (consumes the three file paths + `model_description` + `mathematical_definition` for the eight-check validation pass via the `ml_model_impl_to_ml_model_valid` protocol).
 - **Protocol (upstream)**: `ml_model_propose_to_ml_model_impl.py::local_full_spec` — maps `ProposalOutput.{candidate_id, model_name, output_type, model_description, mathematical_definition, baseline_config, custom_loss_spec}` into this node's `ImplementorInput`. The `reference_code` for any `inherited_components` (ancestor model source the implementor can read) is NOT loaded by the protocol — the workflow attaches it after the protocol returns (`workflows/model_exploration.py:2696`).

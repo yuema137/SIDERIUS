@@ -67,7 +67,7 @@ _PROTOCOL_MODULE = re.compile(r"^ml_[a-z0-9_]+_to_ml_[a-z0-9_]+$")
 _TO_TOKEN = re.compile(
     r"(?<![A-Za-z0-9_/])((?:[a-z0-9_]+/)*[a-z][a-z0-9_]*_to_[a-z0-9_]+)(\.py)?(?:::([a-z_][a-z0-9_]*))?(?![A-Za-z0-9_])"
 )
-_NODE_TYPE = re.compile(r"\*\*Node type\*\*: \*\*(standalone-capable|workflow-only)\*\*")
+_CLI_ENTRY = re.compile(r"\*\*CLI entry\*\*: \*\*(present|absent)\*\*")
 _MAIN_GUARD = re.compile(r'^if __name__ == "__main__":', re.MULTILINE)
 _CLI_CELL = re.compile(r"`(src/nodes/[A-Za-z0-9_/]+\.py):(\d+)`")
 
@@ -190,18 +190,18 @@ def test_node_type_matches_the_presence_of_a_main_guard() -> None:
     problems: list[str] = []
     for rel in NODE_DOCS:
         doc = REPO_ROOT / rel
-        declared = _NODE_TYPE.findall(doc.read_text(encoding="utf-8"))
+        declared = _CLI_ENTRY.findall(doc.read_text(encoding="utf-8"))
         assert len(declared) == 1, (
             f"{rel}: expected exactly one **Node type** declaration, got {declared}"
         )
         module = doc.with_suffix(".py")
         has_main = bool(_MAIN_GUARD.search(module.read_text(encoding="utf-8")))
-        if declared[0] == "standalone-capable" and not has_main:
+        if declared[0] == "present" and not has_main:
             problems.append(
-                f"{rel}: says standalone-capable, but {module.name} has no __main__ guard"
+                f"{rel}: says CLI entry present, but {module.name} has no __main__ guard"
             )
-        if declared[0] == "workflow-only" and has_main:
-            problems.append(f"{rel}: says workflow-only, but {module.name} has a __main__ guard")
+        if declared[0] == "absent" and has_main:
+            problems.append(f"{rel}: says CLI entry absent, but {module.name} has a __main__ guard")
     assert not problems, "\n".join(problems)
 
 
@@ -215,7 +215,7 @@ def test_agent_reference_cli_column_points_at_def_main() -> None:
     cited = _CLI_CELL.findall(text)
     # Declared delta (#303/#305, landed 9f826731): the literature-review node
     # gained a CLI, so SIX nodes are standalone — the 5-count pin and the
-    # workflow-only marker moved WITH that landing.
+    # CLI-entry marker moved WITH that landing.
     assert len(cited) == 6, (
         f"expected six `file:line` CLI citations (all six nodes standalone, #303), got {cited}"
     )
@@ -226,10 +226,10 @@ def test_agent_reference_cli_column_points_at_def_main() -> None:
         if not actual.startswith("def main("):
             problems.append(f"{rel}:{line_no} is {actual!r}, not a `def main(` line")
     assert not problems, "\n".join(problems)
-    # #303 removed the one asterisk: NO node may be marked workflow-only in
+    # #303 removed the one asterisk: NO node may claim an absent CLI entry in
     # the CLI column any more — a reintroduced marker is the drift this pins.
     assert "ml_literature_review" in text
-    assert "workflow-only; no `main()`" not in text
+    assert "CLI entry: **absent**" not in text
 
 
 # ---------------------------------------------------------------------------

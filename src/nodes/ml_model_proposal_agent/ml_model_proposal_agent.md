@@ -4,7 +4,7 @@
 
 ## Position in the pipeline
 
-- **Node type**: **standalone-capable** — `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` exposes a CLI `main()` that reads `interpretation_{run_name}.json` from the workspace, projects it through `build_proposer_evidence` — the SAME authority the production protocol uses — builds a minimal `ProposalInput` (legacy-mode only — no `reasoning_pipeline`), runs the agent, and writes `proposal_{run_name}.json` back to the same workspace. For pipeline mode + external-agent contributions (`expert_context`, `agent_cards`, `mindset`), drive the node via `workflows/model_exploration.py`.
+- **CLI entry**: **present** — `main()` reads an interpretation record and builds a minimal legacy-mode `ProposalInput`. Its advisory estimates and prompt constraints do not create deterministic hardware locks; richer pipeline context is supplied by the workflow route.
 - **Upstream**: `result_interpretation_agent` (its `InterpretationOutput` is projected into the `interpretation_evidence` field by `build_proposer_evidence`). When external agents are active in the workflow, `ml_literature_review` also contributes via the proposer's `expert_context` / `agent_cards` / `mindset` / `vocab_seed` channels (mapped by `local_full_context`).
 - **Downstream**: two downstream consumers via separate protocols:
   - `ml_model_implementor` — consumes `model_name`, `output_type`, `model_description`, `mathematical_definition`, `baseline_config`, `custom_loss_spec` via `ml_model_propose_to_ml_model_impl.py::local_full_spec` (`agent/schemas/protocols/`).

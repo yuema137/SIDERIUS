@@ -125,7 +125,7 @@ not mistake either for an oversight:
 
 ## Position in the pipeline
 
-- **Node type**: **standalone-capable** — `nodes/result_interpretation_agent/result_interpretation_agent.py` exposes a CLI `main()` that reads a tuning agent's `run_output_{run_name}.json` from disk, builds the `InterpretationInput` itself, runs the two-phase pipeline, and writes `interpretation_{run_name}.json` back to the same workspace.
+- **CLI entry**: **present** — `main()` reads a tuning record from disk and constructs the input, while optional task guidance and run-scoped metric/evidence context remain caller-supplied; CLI presence is not a claim of complete workflow equivalence.
 - **Upstream**: `ml_hyperparameter_tune_agent` (provides `HyperparamTuningOutput` per model, converted by `tuning_output_to_model_run_summary` into the `ModelRunSummary` entries this node consumes).
 - **Downstream**: `ml_model_proposal_agent` (consumes `InterpretationOutput` via the `local_full_context` protocol; specific fields read: `key_findings`, `bottlenecks`, `take_home_message`, `runtime_vocab`, `model_descriptions`, plus per-model best/worst scores).
 - **Protocol**: `local_full_context` in `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` — maps `InterpretationOutput` (this node's output) plus the next-iter's chain state into the proposer's `ProposalInput`.
