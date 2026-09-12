@@ -100,8 +100,14 @@ operator surface.
 ## Minimal example
 
 ```bash
-.venv/bin/python scripts/launch/inspect_run_state.py --workspace /path/to/ws --next-iter
+.venv/bin/python scripts/launch/inspect_run_state.py --workspace /path/to/ws --layout chain --next-iter
 ```
+
+Chain callers must bind the generated-library environment to the same
+workspace (`SIDERIUS_CHAIN_WORKSPACE=/path/to/ws` and
+`SIDERIUS_GENERATED_LIBRARY_DIR=/path/to/ws/generated_library`); see the
+[generated-library transport](../src/ml_models/README.md) for the caller
+setup.
 
 ## Related tests
 
