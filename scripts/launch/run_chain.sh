@@ -33,8 +33,9 @@
 #
 # Required flags:
 #   --workspace DIR      chain workspace root
-#   --seed_paths P [P…]  one or more seed run_output JSONs
 #   --run_name NAME      chain-level run name (pins immutable run_id)
+#   --task_composition F task manifest (required)
+#   --data_dir DIR       physical task data root (required with composition)
 #
 # Frequently-used flags:
 #   --num_iterations N   number of iterations (default 2)
@@ -56,13 +57,15 @@
 #       --workspace /home/klz/Data/SIDEREIS_DATA/lilab_chain_v1 \
 #       --run_name lilab_v1 \
 #       --num_iterations 3 \
-#       --seed_paths /path/to/seed.json
+#       --task_composition /path/to/task/composition.yaml \
+#       --data_dir /path/to/task/data
 #
 #   bash scripts/launch/run_chain.sh --mode sdsc --dry-run \
 #       --workspace /expanse/.../exploration_v1 \
 #       --run_name expanse_v1 \
 #       --num_iterations 5 \
-#       --seed_paths /scratch/.../seed.json \
+#       --task_composition /path/to/task/composition.yaml \
+#       --data_dir /scratch/.../task-data \
 #       --partition gpu-shared --time 06:00:00
 #
 #   # A COMPOSED run — the task is bound once, at the launcher edge:
@@ -70,7 +73,8 @@
 #       --workspace /home/klz/Data/SIDEREIS_DATA/composed_tidmad_v1 \
 #       --run_name composed_tidmad_v1 \
 #       --num_iterations 2 \
-#       --task_composition configs/task_composition/tidmad.yaml
+#       --task_composition /path/to/task/composition.yaml \
+#       --data_dir /path/to/task/data
 #
 # History: introduced in Phase 6.8 Commit 13 to consolidate the legacy
 # run_iteration_chain.sh (SDSC) and run_iteration_chain_lilab.sh (lilab)

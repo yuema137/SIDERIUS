@@ -84,6 +84,9 @@ The CLI takes every required `ValidatorInput` field as an explicit argument — 
 
 **Limitations of standalone CLI use**:
 
+- The minimal CLI cannot carry `model_io_contract`; typed `ValidatorInput` and
+  the implementor→validator protocol do carry it when the workflow supplies it.
+
 - **No `inherited_components`** — the CLI has no flag to pass them, so check #9 (inheritance regex) is always skipped in standalone mode. The workflow path is the only way the inheritance check runs.
 - **No `expert_advice` / `human_advice`** — fresh review, no upstream guidance.
 

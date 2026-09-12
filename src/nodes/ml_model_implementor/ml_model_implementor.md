@@ -145,12 +145,12 @@ Explicit generated-code directories remain supported for orchestrators. The refe
 - **Self-correction repair loop.** On any validation failure, the implementor calls `bridge.generate(IMPLEMENTOR_REPAIR_PROMPT, ...)` with the previous code + the validation error message — up to `inp.max_retries` times (default 2). Total worst-case LLM calls per run: 1 reasoning + 1 commit + 2 repairs = 4.
 - **Common-mistake patching** (`_patch_common_mistakes`). Before validation, known LLM quirks get rewritten in-place: `self.embedding(input)` → `self.embedding(x)` (Python keyword collision), trailing `$` artefacts stripped, etc. This avoids burning a repair slot on cosmetic LLM errors.
 - **Plugin contract enforced by `PLUGIN_TEMPLATE`.** Every generated plugin defines exactly four module-level attributes — `PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`, `PLUGIN_OUTPUT_TYPE` — in that order. The plugin loader (`core/plugin_loader.py`) refuses to register a plugin missing any of these. The LLM never writes the contract; only the section bodies.
-- **Forward-pass shape contract follows the declared `output_type`** (V21 PR A). The input is always `[B, T] int`; the output depends on the contract the proposal committed to:
+- **Forward-pass shape contract follows the declared `output_type`** (V21 PR A). Input and output rank/dimensions come from the declared `ModelIOContract`; the output form depends on the contract the proposal committed to:
 
   | `ImplementorInput.output_type` | emitted `PLUGIN_OUTPUT_TYPE` | forward output |
   |---|---|---|
-  | `classifier` (default) | `"classifier"` | `[B, C, T]` float — per-timestep class logits, `C` from the task's declared cardinality (256 under TIDMAD) |
-  | `regressor` | `"regressor"` | `[B, T]` float — the denoised waveform |
+  | `classifier` (default) | `"classifier"` | Contract-derived float logits; class cardinality and axes come from the task's declared `ModelIOContract` |
+  | `regressor` | `"regressor"` | Contract-derived float prediction; axes and dimensions come from the task's declared `ModelIOContract` |
 
   The DECLARATION selects the form; the task's `ModelIOContract` supplies the facts inside it. A `classifier` declaration under a task that declares no class alphabet fails closed rather than guessing a cardinality.
 

@@ -309,6 +309,7 @@ bash scripts/launch/run_chain.sh \
     --run_name my_task_v1 \
     --task_composition /path/to/my_task/composition.yaml \
     --data_dir /path/to/data \
+    --llm_config configs/llm/openai_tiered_pro.json \
     --healthgate_mode blocking \
     --result_authority scientific \
     --num_iterations 2 \
