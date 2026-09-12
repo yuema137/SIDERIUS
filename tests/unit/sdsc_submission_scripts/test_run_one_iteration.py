@@ -634,7 +634,7 @@ class TestRestoreWiring:
                 }
             )
         )
-        health_path = "configs/health_checks_baseline_observe_mode.yaml"
+        health_path = "configs/health/health_checks_baseline_observe_mode.yaml"
 
         with patch.object(runner, "run_workflow") as mock_wf:
             mock_wf.return_value = [_StubResult("c8_test_arch_a")]
@@ -2076,7 +2076,8 @@ class TestFormalLaunchPolicyIsEnforcedAtTheChainBoundary:
         """
         common = (
             pathlib.Path(__file__).resolve().parents[3]
-            / "sdsc_submission_scripts"
+            / "scripts"
+            / "launch"
             / "_chain_common.sh"
         ).read_text(encoding="utf-8")
         assert "HEALTHGATE_MODE=blocking" in common

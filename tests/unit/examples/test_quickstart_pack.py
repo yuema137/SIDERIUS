@@ -706,11 +706,11 @@ def test_notebook_html_readme_and_command_stay_in_sync() -> None:
     readme = (PACK / "README.md").read_text(encoding="utf-8")
     notebook_text = (PACK / "quickstart.ipynb").read_text(encoding="utf-8")
     for token in (
-        "sdsc_submission_scripts/run_chain.sh",
+        "scripts/launch/run_chain.sh",
         "--mode lilab",
         "--task_composition configs/task_composition/quickstart.yaml",
         "--data_dir",
-        "--llm_config llm_configs/openai_tiered_pro.json",
+        "--llm_config configs/llm/openai_tiered_pro.json",
         "--healthgate_mode blocking",
         "--result_authority diagnostic",
         "--num_iterations 1",
@@ -718,5 +718,5 @@ def test_notebook_html_readme_and_command_stay_in_sync() -> None:
     ):
         assert token in readme, f"README launch command lost {token!r}"
         assert token in notebook_text, f"notebook launch cell lost {token!r}"
-    command = re.search(r"```bash\n[^`]*bash sdsc_submission_scripts/run_chain\.sh[^`]+```", readme)
+    command = re.search(r"```bash\n[^`]*bash scripts/launch/run_chain\.sh[^`]+```", readme)
     assert command, "README carries no bash launch command block"

@@ -99,7 +99,7 @@ authority, so a fresh run cannot repeat that loss mismatch. Start with
 ```bash
 WS="${SIDERIUS_QUICKSTART_WORKSPACE:-$HOME/siderius_quickstart_workspace}"
 
-bash sdsc_submission_scripts/run_chain.sh \
+bash scripts/launch/run_chain.sh \
     --mode lilab \
     --workspace "$WS/chain" \
     --run_name quickstart_v1 \
@@ -109,7 +109,7 @@ bash sdsc_submission_scripts/run_chain.sh \
     --data_dir "$WS/data" \
     --healthgate_mode blocking \
     --result_authority diagnostic \
-    --llm_config llm_configs/openai_tiered_pro.json
+    --llm_config configs/llm/openai_tiered_pro.json
 ```
 
 Notes pinned to source: a composed run **requires** `--data_dir`

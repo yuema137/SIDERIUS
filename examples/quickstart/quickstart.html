@@ -388,7 +388,7 @@ semantic fingerprint: 1330d3991a98c48b …
 cd &quot;$(git rev-parse --show-toplevel)&quot;
 WS=&quot;${SIDERIUS_QUICKSTART_WORKSPACE:-$HOME/siderius_quickstart_workspace}&quot;
 
-bash sdsc_submission_scripts/run_chain.sh \
+bash scripts/launch/run_chain.sh \
     --mode lilab \
     --workspace &quot;$WS/chain&quot; \
     --run_name quickstart_v1 \
@@ -398,7 +398,7 @@ bash sdsc_submission_scripts/run_chain.sh \
     --data_dir &quot;$WS/data&quot; \
     --healthgate_mode blocking \
     --result_authority diagnostic \
-    --llm_config llm_configs/openai_tiered_pro.json
+    --llm_config configs/llm/openai_tiered_pro.json
 </pre>
 <pre class="out">Start: workspace does not exist yet — fresh chain at 1
 ############################################################

@@ -237,7 +237,8 @@ class TestTheLauncherCallSite:
 
         source = (
             pathlib.Path(__file__).resolve().parents[4]
-            / "sdsc_submission_scripts"
+            / "src"
+            / "workflows"
             / "run_one_iteration.py"
         ).read_text(encoding="utf-8")
         # Step 09.5a C3: transit configuration is bound inside the
