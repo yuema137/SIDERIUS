@@ -86,7 +86,8 @@ Two prose fields, both required:
 
 - **`task_description`** — the scientific problem, as you would explain it to a
   new collaborator;
-- **`forward_contract`** — the exact tensor contract, e.g.
+- **`forward_contract`** — a typed `ForwardContract` declaration containing the
+  exact tensor contract, e.g.
   `[B, 3, 144, 144] float32 in [0,1] → [B, 37] logits`.
 
 These reach every LLM prompt. Be precise about the forward contract in
@@ -167,9 +168,9 @@ turned into a budget or selection signal at all.
 Start from the generic checks: `sample_dispersion_floor` for continuous outputs,
 `categorical_distinct_symbols` and `categorical_dominant_fraction` for
 classification. Set thresholds you can defend, and choose a **disposition** for
-each — `blocking` or `observational`.
+each — `blocking` or `recording`.
 
-Advice worth taking: start almost everything `observational`, run once, look at
+Advice worth taking: start almost everything `recording`, run once, look at
 what the checks actually report on your data, and only then promote the ones that
 catch real collapse to `blocking`. A blocking threshold guessed in advance
 usually blocks the wrong thing.
