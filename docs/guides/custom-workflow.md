@@ -28,6 +28,7 @@ storage = StorageConfig(
 )
 proposal = ProposalOutput(
     model_name="demo_model",
+    output_type="regressor",
     model_description="A small model for the declared task.",
     mathematical_definition="Input projection followed by a linear prediction head.",
     motivation="Tests the typed handoff.",
@@ -57,10 +58,9 @@ model_io = ModelIOContract(
 )
 implementor = local_full_spec(proposal, storage).model_copy(update={
     "task_description": "The caller's declared supervised task.",
+    "plugin_dir": str(workspace / "generated" / "models"),
     "forward_contract": ForwardContract(
-        input_shape="[B, T] float32",
         input_description="caller-declared features",
-        output_shape="[B, 1] float32",
         output_description="caller-declared prediction",
         model_io=model_io,
     ),
@@ -71,7 +71,12 @@ implementor = local_full_spec(proposal, storage).model_copy(update={
 implementor = ImplementorInput.model_validate(implementor.model_dump())
 assert isinstance(implementor, ImplementorInput)
 assert implementor.storage == storage
+assert implementor.model_name == proposal.model_name
+assert implementor.output_type == "regressor"
+assert implementor.baseline_config == proposal.baseline_config
+assert implementor.plugin_dir.startswith(str(workspace))
 assert implementor.task_description.startswith("The caller")
+assert implementor.forward_contract.input_shape == "[B, T] float32"
 assert implementor.forward_contract.output_shape == "[B, 1] float32"
 assert implementor.forward_contract.model_io == model_io
 assert implementor.implementor_blocks is not None

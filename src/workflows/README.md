@@ -28,8 +28,8 @@ into here one iteration at a time.
 
 ## Inputs
 
-`workspace` + `run_name`; a `WorkflowLaunchConfig`; optionally a composition
-manifest path (with a **mandatory** `--data_dir` when composed); LLM routing
+`workspace` + `run_name`; a `WorkflowLaunchConfig`; a required composition
+manifest (with a **mandatory** `--data_dir`); LLM routing
 JSON; a `RestoredState` when resuming; pseudo-mode factories for $0 smokes.
 
 ## Outputs
@@ -44,10 +44,10 @@ invariants lock and effective health config (written via `core` /
 
 - **The fixed iteration path** and its retry loop (proposal attempts, tuner
   invocation, record persistence).
-- **Manifest resolution**: ten sections, five required
-  (`_REQUIRED_KEYS`); an unknown key is *refused, not ignored*; `file:` plugin
-  refs resolve against the manifest's own directory and their content sha
-  joins the semantic fingerprint.
+- **Manifest resolution**: the typed composition schema owns section names and
+  requiredness; an unknown key is *refused, not ignored*; `file:` plugin refs
+  resolve against the manifest's own directory and their content sha joins the
+  semantic fingerprint.
 - **Run-scoped binding**: a composed run binds data path, profile, metric,
   secondaries, deliverable naming, task config for the whole run; an
   explicitly composed run **never falls back to TIDMAD**.
@@ -77,7 +77,7 @@ invariants lock and effective health config (written via `core` /
 ## State and filesystem effects
 
 Creates `run_dir = {workspace}/{run_name}` and the per-iteration tree; snapshots
-`configs/task_config.yaml` into the run dir (only if absent); writes the
+the resolved task declaration/effective configuration into the run dir (only if absent); writes the
 workflow summary; calls `ensure_run_invariants` (chain-level lock). Sets
 `SIDERIUS_CHAIN_WORKSPACE`; mirrors validated plugins into workspace dirs. The
 generated library is caller/workspace-owned and must be explicitly bound by
@@ -109,13 +109,13 @@ weakening a refusal into a fallback is the defect class the guards exist for.
 ## Minimal example
 
 ```bash
-# The module CLI is an effectful workflow entry and requires a source run,
-# model directory and data root. For a credential-free view of the complete
-# chain, use the maintained launcher dry-run in the root README.
+# The module CLI is an effectful workflow entry: all of these required inputs
+# are supplied explicitly. For a credential-free view of the complete chain,
+# use the maintained launcher dry-run in the root README.
 .venv/bin/python src/workflows/model_exploration.py \
     --task_composition configs/task_composition/quickstart.yaml \
     --data_dir /tmp/quickstart-data --workspace /tmp/ws --run_name demo_v1 \
-    --source_run_name seed --max_iterations 1
+    --models punet --source_run_name seed --max_iterations 1
 ```
 
 For real runs use the chain launcher

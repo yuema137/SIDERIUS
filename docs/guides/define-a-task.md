@@ -181,7 +181,9 @@ it in your health config's `plugins:` — it registers itself through the public
 registration API, and it can live entirely outside the repository.
 
 Declare `task_health: {none: true}` if you genuinely have no health family.
-**Do not omit the section** — omission means TIDMAD's family.
+**Declare the section explicitly**: use `task_health: {none: true}` for a task
+with no Health family; omitting the required declaration is refused rather than
+selecting a scientific default.
 
 A Health view provider should decode the current artifact through
 `ctx.load_evaluation_payload()`. That callback reuses your
