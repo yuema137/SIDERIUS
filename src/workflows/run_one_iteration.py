@@ -3322,6 +3322,11 @@ def main():
         # ADMITTED on the strength of another task's dataset where it is
         # present, which is every campaign host.
         #
+        # This call retains the pre-existing runtime contract: the composed
+        # capability resolver dereferences its required composition, while
+        # the surrounding activation path handles the legacy no-composition
+        # case unchanged. The cast supplies that boundary fact to Pyright
+        # without adding a fallback or changing runtime control flow.
         measurement_capability = resolve_composed_measurement_capability(
             cast(RunTaskComposition, run_composition), dataset_root=args.data_dir
         )
