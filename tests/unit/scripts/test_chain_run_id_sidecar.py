@@ -1,5 +1,5 @@
 """Unit tests for ``_resolve_chain_run_id`` in
-``sdsc_submission_scripts/run_one_iteration.py``.
+``src/workflows/run_one_iteration.py``.
 
 The chain runner invokes one fresh subprocess per iteration; without a
 sidecar, every iter would generate its own run_id (different pid +
@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 import re
 
-from sdsc_submission_scripts.run_one_iteration import _resolve_chain_run_id
+from workflows.run_one_iteration import _resolve_chain_run_id
 
 _ID_SHAPE = re.compile(r"^[A-Za-z0-9_]+-\d{8}T\d{6}-\d+$")
 

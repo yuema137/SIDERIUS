@@ -12,7 +12,7 @@ Each iteration:
   3. Writes a manifest.json summarizing the iteration's output for the next job
 
 Usage:
-    python sdsc_submission_scripts/run_one_iteration.py \\
+    python src/workflows/run_one_iteration.py \\
         --workspace /scratch/exploration_v1 \\
         --start_iteration 3 \\
         --source_paths /scratch/.../seed_punet.json /scratch/.../seed_wavenet.json \\
@@ -78,6 +78,7 @@ from core.iteration_manifest import (
     manifest_path,
     publish_iteration_manifest,
 )
+from core.layout import checkout_root
 from core.record_role import formal_evidence_of
 from core.resume import ResumeError, restore_prior_state
 from core.run_invariants import (
@@ -109,13 +110,18 @@ from workflows.model_exploration import (
 )
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import (
+    RunTaskComposition,
     bind_run_task_composition,
     compose_run_task_bindings,
     resolve_composed_measurement_capability,
 )
 
-SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
+_CHECKOUT_ROOT = checkout_root()
+SIDERIUS_ROOT = (
+    str(_CHECKOUT_ROOT) if _CHECKOUT_ROOT is not None else str(Path(__file__).resolve().parents[2])
+)
+if _CHECKOUT_ROOT is not None:
+    load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
 
 
 def _positive_int(s: str) -> int:
@@ -1881,7 +1887,7 @@ def build_parser() -> argparse.ArgumentParser:
         "subprocess groups. Tri-state (arXiv #261 / Q-07c-6): "
         "--runtime_watchdog forces on, --no-runtime_watchdog forces off, "
         "and when NEITHER is passed the device/execution-regime runtime "
-        "profile decides (configs/runtime_profiles.yaml + the measured "
+        "profile decides (configs/runtime/runtime_profiles.yaml + the measured "
         "overlay in $SIDERIUS_CALIBRATION_DIR). An uncalibrated pair "
         "resolves to the legacy default: off.",
     )
@@ -2262,7 +2268,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help=(
             "Declares that this launch was selected by the chain's auto-resume "
-            "(run_chain.sh forwards it only when scripts/inspect_run_state.py "
+            "(run_chain.sh forwards it only when scripts/launch/inspect_run_state.py "
             "computed the start iteration). #258 refinement: with this flag, an "
             "existing same-iteration manifest whose terminal status is 'failed' "
             "or 'no_records' is replaced through the EXPLICIT replacement path — "
@@ -2468,7 +2474,7 @@ def resolve_watchdog_policy(args: argparse.Namespace) -> ResolvedWatchdogSetting
 def compute_expected_invariants(
     args: argparse.Namespace,
     *,
-    run_composition: object | None = None,
+    run_composition: RunTaskComposition | None = None,
     launch_identity: LaunchIdentity | None = None,
 ) -> RunInvariants:
     """DS6c — compute this run's invariants via the ONE shared path.
@@ -2877,7 +2883,7 @@ def main():
             "device/execution regime — watchdog disabled; the outer time "
             "budgets are the runaway bound. Run qualification (write the "
             "measured overlay in $SIDERIUS_CALIBRATION_DIR), add a reviewed "
-            "row to configs/runtime_profiles.yaml, or pass explicit "
+            "row to configs/runtime/runtime_profiles.yaml, or pass explicit "
             "--runtime_watchdog flags to change this.",
             file=sys.stderr,
             flush=True,
@@ -3168,6 +3174,8 @@ def main():
         if preflight_composition_error is not None:
             raise preflight_composition_error
         run_composition = preflight_composition
+        if run_composition is None:
+            raise ValueError("required task composition was not resolved")
     except Exception as e:
         print(f"FAIL: could not resolve --task_composition {args.task_composition!r}: {e}")
         write_manifest(
@@ -3560,7 +3568,7 @@ def main():
     # analytical bookkeeping, not decision state); on failure the
     # existing table is preserved by atomic replace and can always be
     # regenerated deterministically via
-    # ``scripts/rebuild_per_file_best.py`` from committed artifacts.
+    # ``scripts/runtime/rebuild_per_file_best.py`` from committed artifacts.
     # Only updates on completed manifests (A6).
     if manifest["status"] == "completed":
         try:
@@ -3573,7 +3581,7 @@ def main():
                 f"  [PER_FILE_BEST] WARN: incremental table write failed for "
                 f"workspace {args.workspace!r}: {type(e).__name__}: {e} — "
                 f"chain continues; regenerate via "
-                f"scripts/rebuild_per_file_best.py."
+                f"scripts/runtime/rebuild_per_file_best.py."
             )
 
     if manifest["status"] == "completed":

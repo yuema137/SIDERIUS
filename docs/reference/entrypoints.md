@@ -1,9 +1,9 @@
 # Entrypoints and CLI
 
 **Audience**: operators and anyone trying to find the right command.
-**Authority**: `sdsc_submission_scripts/run_chain.sh`,
-`sdsc_submission_scripts/_chain_common.sh`,
-`sdsc_submission_scripts/run_one_iteration.py`,
+**Authority**: `scripts/launch/run_chain.sh`,
+`scripts/launch/_chain_common.sh`,
+`src/workflows/run_one_iteration.py`,
 `src/workflows/model_exploration.py`. Scientific comparison launchers live in
 the external task repository.
 
@@ -16,16 +16,16 @@ the flags that decide *what a run is*.
 
 | you want to | use |
 |---|---|
-| run the full multi-iteration agent loop | `sdsc_submission_scripts/run_chain.sh` |
+| run the full multi-iteration agent loop | `scripts/launch/run_chain.sh` |
 | launch a task-specific campaign | use the campaign entrypoint in the experiment repository; it delegates to this repository's `run_chain.sh` |
 | run one arm of a task-specific comparison | use that experiment repository's launcher with an explicit SIDERIUS checkout |
-| run exactly one iteration (or debug one) | `sdsc_submission_scripts/run_one_iteration.py` |
+| run exactly one iteration (or debug one) | `src/workflows/run_one_iteration.py` |
 | drive the workflow directly from Python | `src/workflows/model_exploration.py` |
 | compare a task model against baselines | use the task package's comparison entrypoint |
 | gate a campaign launch | use the campaign-owned preflight in the experiment repository |
 
-> Note the directory: the chain launchers live in `sdsc_submission_scripts/`,
-> **not** in `scripts/`. Several older documents said otherwise.
+> Maintained shell launchers live in `scripts/launch/`, the Slurm wrapper in
+> `scripts/slurm/`, and the Python iteration owner in `src/workflows/`.
 
 ## Archived X9 preflight reference
 
@@ -37,7 +37,7 @@ context only; none of the named campaign paths is a SIDERIUS entrypoint.
 
 One gate, rows `R1`…`R9`, each printing `PASS` / `FAIL` / `SKIP` / `INFO`
 with its evidence; any `FAIL` exits non-zero. Full row descriptions live in
-the script's own `--help` and in `sdsc_submission_scripts/README.md`. Two
+the script's own `--help` and in the archived experiment documentation. Two
 things about its output are worth knowing before you read a report.
 
 **R7 states which layers it actually compared.** The arm-symmetry row
@@ -91,7 +91,7 @@ generated modules, and task-owned extensions remain under the declared
 workspace.
 
 ```bash
-bash sdsc_submission_scripts/run_chain.sh \
+bash scripts/launch/run_chain.sh \
     --mode lilab \
     --workspace /path/to/workspace \
     --run_name my_run_v1 \
@@ -197,10 +197,7 @@ Other flags that define a run:
 One launcher, two arms, one argument changed:
 
 ```bash
-bash sdsc_submission_scripts/launch_prior_baseline_experiment.sh \
-    --arm with-prior-art|without-prior-art \
-    --workspace DIR [--run_name NAME] [--mode lilab|sdsc] \
-    [--dry-run] [--h100] [passthrough run_chain.sh flags...]
+Use the external experiment repository's documented `launch_prior_baseline_experiment.sh` entrypoint for this historical comparison.
 ```
 
 | arm | explicit child argv |

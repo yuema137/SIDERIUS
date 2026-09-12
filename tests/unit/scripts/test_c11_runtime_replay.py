@@ -15,22 +15,22 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from scripts.runtime_replay.executable_replay import (
+from tools.runtime_replay.executable_replay import (
     eligible_candidates,
     plan_executable_replay,
     run_executable_replay,
 )
-from scripts.runtime_replay.legacy_migration import (
+from tools.runtime_replay.legacy_migration import (
     discover_legacy_tables,
     legacy_entries_as_priors,
     migrate_legacy_table,
 )
-from scripts.runtime_replay.metadata_replay import (
+from tools.runtime_replay.metadata_replay import (
     SnapshotNotFound,
     run_metadata_replay,
     verify_snapshot_integrity,
 )
-from scripts.runtime_replay.schemas import (
+from tools.runtime_replay.schemas import (
     MeasuredRuntime,
     ReplayCandidate,
     ReplayReport,
@@ -314,7 +314,7 @@ class TestLegacyMigration:
 
 class TestCliSurface:
     def test_the_three_subcommands_exist(self):
-        from scripts.runtime_replay.__main__ import build_parser
+        from tools.runtime_replay.__main__ import build_parser
 
         parser = build_parser()
         for argv in (
@@ -325,7 +325,7 @@ class TestCliSurface:
             assert parser.parse_args(argv)
 
     def test_executable_defaults_to_planning_not_running(self):
-        from scripts.runtime_replay.__main__ import build_parser
+        from tools.runtime_replay.__main__ import build_parser
 
         args = build_parser().parse_args(["executable", "--snapshot", "/x"])
         assert args.run is False

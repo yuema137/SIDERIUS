@@ -109,7 +109,7 @@ class TestFX3PresetResolution:
         resolver = repo / "src/agent" / "schemas" / "model_io_resolution.py"
         offenders: list[str] = []
         sources = [*repo.glob("*.py")]
-        for root in ("src", "scripts", "sdsc_submission_scripts"):
+        for root in ("src", "scripts"):
             files = list((repo / root).rglob("*.py"))
             assert files, f"empty production scan: {root}"
             sources.extend(files)

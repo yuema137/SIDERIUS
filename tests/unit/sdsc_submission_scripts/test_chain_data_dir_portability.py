@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_RUN_CHAIN = _REPO_ROOT / "sdsc_submission_scripts" / "run_chain.sh"
+_RUN_CHAIN = _REPO_ROOT / "scripts" / "launch" / "run_chain.sh"
 
 _OLD_HARDCODED_PATH = "/home/klz/Data/TIDMAD"
 

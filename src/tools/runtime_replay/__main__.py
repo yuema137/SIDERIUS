@@ -1,14 +1,14 @@
 """Replay CLI (C11).
 
     # what the stopped run believed — reads only, no GPU, no LLM
-    .venv/bin/python -m scripts.runtime_replay metadata \
+    .venv/bin/python -m tools.runtime_replay metadata \
         --snapshot /home/klz/Data/SIDEREIS_DATA/v19/forensics
 
     # what an executable replay WOULD probe (no device touched)
-    .venv/bin/python -m scripts.runtime_replay executable --snapshot ... --plan
+    .venv/bin/python -m tools.runtime_replay executable --snapshot ... --plan
 
     # register the legacy k-table by content hash (never imports it)
-    .venv/bin/python -m scripts.runtime_replay legacy --dry-run
+    .venv/bin/python -m tools.runtime_replay legacy --dry-run
 
 Executable replay with `--run` touches the GPU and is operator-gated.
 """
@@ -17,24 +17,18 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import sys
 from pathlib import Path
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
-
-from scripts.runtime_replay.executable_replay import (  # noqa: E402
+from tools.runtime_replay.executable_replay import (
     plan_executable_replay,
     production_probe,
     run_executable_replay,
 )
-from scripts.runtime_replay.legacy_migration import (  # noqa: E402
+from tools.runtime_replay.legacy_migration import (
     discover_legacy_tables,
     migrate_legacy_table,
 )
-from scripts.runtime_replay.metadata_replay import run_metadata_replay  # noqa: E402
+from tools.runtime_replay.metadata_replay import run_metadata_replay
 
 
 def build_parser() -> argparse.ArgumentParser:

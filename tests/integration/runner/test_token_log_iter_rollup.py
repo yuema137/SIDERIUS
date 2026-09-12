@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from sdsc_submission_scripts.run_one_iteration import _emit_token_iter_rollup
+from workflows.run_one_iteration import _emit_token_iter_rollup
 
 # ---------------------------------------------------------------------------
 # 1. Per-iter rollup emission

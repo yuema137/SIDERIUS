@@ -35,8 +35,8 @@ from unittest.mock import patch
 import pytest
 
 from agent.schemas.health_feedback import TrialValidityFeedback
-from sdsc_submission_scripts import run_one_iteration as runner
 from tests.helpers.launcher_bindings import effective_workflow_kwargs
+from workflows import run_one_iteration as runner
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _QUICKSTART_ARGS = [
@@ -634,7 +634,7 @@ class TestRestoreWiring:
                 }
             )
         )
-        health_path = "configs/health_checks_baseline_observe_mode.yaml"
+        health_path = "configs/health/health_checks_baseline_observe_mode.yaml"
 
         with patch.object(runner, "run_workflow") as mock_wf:
             mock_wf.return_value = [_StubResult("c8_test_arch_a")]
@@ -1516,6 +1516,43 @@ class TestComputeExpectedInvariants:
         assert not os.path.exists(os.path.join(str(tmp_path), "health_checks_effective.yaml"))
 
 
+@pytest.mark.parametrize(
+    ("composition_value", "expected_message"),
+    (
+        ("", "required task composition was not resolved"),
+        ("missing.yaml", "could not resolve --task_composition"),
+    ),
+)
+def test_main_refuses_missing_composition_before_work(
+    tmp_path, monkeypatch, capsys, composition_value, expected_message
+):
+    """A required composition failure records a crashed manifest without work."""
+    workspace = tmp_path / "workspace"
+    argv = list(_BASE)
+    argv.extend(("--healthgate_mode", "blocking", "--result_authority", "diagnostic"))
+    argv[argv.index("WS")] = str(workspace)
+    argv[argv.index(str(_REPO_ROOT / "configs/task_composition/quickstart.yaml"))] = (
+        composition_value
+    )
+    monkeypatch.setattr(sys, "argv", ["run_one_iteration.py", *argv])
+
+    with (
+        patch.object(runner, "run_workflow") as run_workflow,
+        patch.object(runner, "resolve_composed_measurement_capability") as resolve_measurement,
+    ):
+        with pytest.raises(SystemExit) as exc:
+            runner.main()
+
+    assert exc.value.code == 1
+    output = capsys.readouterr()
+    assert expected_message in (output.out + output.err)
+    manifest = workspace / "iter_001" / "manifest.json"
+    assert manifest.is_file()
+    assert json.loads(manifest.read_text())["status"] == "failed"
+    run_workflow.assert_not_called()
+    resolve_measurement.assert_not_called()
+
+
 class TestDataScopeChainWiring:
     """DS6c wiring through main(): invariants computed before restore, the
     three params reach run_workflow, and a conflicting second invocation
@@ -1979,7 +2016,7 @@ class TestFormalLaunchPolicyIsEnforcedAtTheChainBoundary:
         """Invoke the real `main()` and return its exit code."""
         import sys as _sys
 
-        from sdsc_submission_scripts import run_one_iteration as runner
+        from workflows import run_one_iteration as runner
 
         argv = [*argv, *_QUICKSTART_ARGS]
         argv = ["run_one_iteration.py", *argv]
@@ -2075,9 +2112,7 @@ class TestFormalLaunchPolicyIsEnforcedAtTheChainBoundary:
         MUTATION TARGET: dropping either line from the argv assembly.
         """
         common = (
-            pathlib.Path(__file__).resolve().parents[3]
-            / "sdsc_submission_scripts"
-            / "_chain_common.sh"
+            pathlib.Path(__file__).resolve().parents[3] / "scripts" / "launch" / "_chain_common.sh"
         ).read_text(encoding="utf-8")
         assert "HEALTHGATE_MODE=blocking" in common
         assert "RESULT_AUTHORITY=scientific" in common

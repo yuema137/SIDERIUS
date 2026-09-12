@@ -168,7 +168,7 @@ class TestRunBindingsProductionAdoption:
         """
         sites = []
         sources = [*REPO_ROOT.glob("*.py")]
-        for root in ("src", "scripts", "sdsc_submission_scripts"):
+        for root in ("src", "scripts"):
             files = list((REPO_ROOT / root).rglob("*.py"))
             assert files, f"empty production scan: {root}"
             sources.extend(files)

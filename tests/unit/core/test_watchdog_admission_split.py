@@ -254,7 +254,7 @@ class TestCompatibilityAndWiring:
     def test_shell_passthrough_exact(self):
         """--runtime_watchdog_safety_factor 3.5 reaches APP_ARGS verbatim;
         omitting it emits NO such flag (V18 command parity)."""
-        lib = REPO_ROOT / "sdsc_submission_scripts" / "_chain_common.sh"
+        lib = REPO_ROOT / "scripts" / "launch" / "_chain_common.sh"
         script = f"""
 source '{lib}'
 parse_chain_args --workspace /tmp/w --run_name t --mode lilab \
@@ -306,7 +306,7 @@ def _run_workflow_call_kwargs() -> set[str]:
     # flattens both levels so this parity guard keeps testing the binding.
     from tests.helpers.launcher_bindings import workflow_call_bindings
 
-    source_path = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
+    source_path = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
     flattened = set(workflow_call_bindings(source_path))
     tree = ast.parse(source_path.read_text())
     kwargs: set[str] = set(flattened)

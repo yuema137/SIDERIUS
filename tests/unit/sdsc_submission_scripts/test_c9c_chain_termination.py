@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 def _load_runner():
     """Load run_one_iteration.py from THIS checkout (portability rule)."""
-    path = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
+    path = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
     spec = importlib.util.spec_from_file_location("_c9c_runner", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -128,7 +128,7 @@ class TestHaltMarker:
     def test_the_consecutive_failure_brake_is_a_different_reason(self):
         """The two producers of the sentinel must stay distinguishable, so
         an infrastructure abort is never read as a fail-round streak."""
-        source = (REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py").read_text(
+        source = (REPO_ROOT / "src" / "workflows" / "run_one_iteration.py").read_text(
             encoding="utf-8"
         )
         assert '"reason": "consecutive_failure_brake"' in source
@@ -141,7 +141,7 @@ class TestExitContract:
     operator keeps the diagnostics."""
 
     def test_the_abort_branch_exits_three_after_writing_the_manifest(self):
-        source = (REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py").read_text(
+        source = (REPO_ROOT / "src" / "workflows" / "run_one_iteration.py").read_text(
             encoding="utf-8"
         )
         manifest_at = source.index("    manifest = write_manifest(")
@@ -154,7 +154,7 @@ class TestExitContract:
     def test_gate_exhaustion_still_exits_zero(self):
         """no_records means "no candidate passed", not "infrastructure is
         broken" — that chain continues, and must keep doing so."""
-        source = (REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py").read_text(
+        source = (REPO_ROOT / "src" / "workflows" / "run_one_iteration.py").read_text(
             encoding="utf-8"
         )
         block = source[source.index('if manifest["status"] == "no_records":') :]

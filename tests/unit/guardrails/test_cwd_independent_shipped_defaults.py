@@ -9,7 +9,7 @@ from execute_tools.health_checks.config import _DEFAULT_CONFIG_PATH, load_health
 
 
 def test_framework_health_policy_is_anchored_to_this_checkout(tmp_path, monkeypatch) -> None:
-    expected = Path(__file__).resolve().parents[3] / "configs" / "health_checks.yaml"
+    expected = Path(__file__).resolve().parents[3] / "configs" / "health" / "health_checks.yaml"
     monkeypatch.chdir(tmp_path)
     assert Path(_DEFAULT_CONFIG_PATH) == expected
     assert load_health_gates_config().health_gates == []

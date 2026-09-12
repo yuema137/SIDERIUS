@@ -213,5 +213,5 @@ class TestTheDefaultTargetIsThisCheckout:
         Fails if ``DEFAULT_TARGET`` stops being derived from ``__file__``.
         """
         assert DEFAULT_TARGET.is_file()
-        assert DEFAULT_TARGET == REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
+        assert DEFAULT_TARGET == REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
         assert (REPO_ROOT / "tests" / "helpers" / "step12_pr12e_gate_iteration.py").is_file()

@@ -23,7 +23,7 @@ campaign is selected implicitly.
 Resolve the exact command without creating a workspace:
 
 ```bash
-bash sdsc_submission_scripts/run_chain.sh \
+bash scripts/launch/run_chain.sh \
   --mode lilab \
   --workspace /tmp/siderius_run \
   --run_name qualification_v1 \
@@ -43,7 +43,7 @@ document or launch wrapper is not evidence of an effective value.
 Use a new workspace for a new scientific lineage:
 
 ```bash
-bash sdsc_submission_scripts/run_chain.sh \
+bash scripts/launch/run_chain.sh \
   --mode lilab \
   --workspace /absolute/path/to/new_workspace \
   --run_name qualification_v1 \
@@ -62,7 +62,7 @@ archive old state explicitly before using the path for a new lineage.
 Use `--auto_resume` only when continuing the same comparable run:
 
 ```bash
-bash sdsc_submission_scripts/run_chain.sh \
+bash scripts/launch/run_chain.sh \
   --mode lilab \
   --workspace /absolute/path/to/existing_workspace \
   --run_name qualification_v1 \

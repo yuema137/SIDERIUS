@@ -213,7 +213,7 @@ class TestParameterOwnershipCensus:
 #: MEASURED at the design anchor. Every one must migrate atomically in C3.
 EXPECTED_PRODUCTION_CALLERS = frozenset(
     {
-        "sdsc_submission_scripts/run_one_iteration.py",
+        "src/workflows/run_one_iteration.py",
         "src/workflows/model_exploration.py",
     }
 )
@@ -225,7 +225,7 @@ _PRODUCTION_DIRS = (
     "src/workflows",
     "scripts",
     "src/execute_tools",
-    "sdsc_submission_scripts",
+    "scripts/launch",
     "src/tools",
     "src/dashboard",
     "src/ml_models",

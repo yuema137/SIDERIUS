@@ -307,10 +307,10 @@ def test_one_resolution_authority_for_runtime_profiles():
     for discoverability). Fails by: naming the new file."""
     allowed = {
         Path("src/core/runtime_control/watchdog_profile.py"),
-        Path("sdsc_submission_scripts/run_one_iteration.py"),
+        Path("src/workflows/run_one_iteration.py"),
     }
     mentions: set[Path] = set()
-    for root in (*_PRODUCTION_ROOTS, "sdsc_submission_scripts"):
+    for root in (*_PRODUCTION_ROOTS, "src/workflows"):
         for path in sorted((REPO_ROOT / root).rglob("*.py")):
             if "runtime_profiles" in path.read_text(encoding="utf-8"):
                 mentions.add(path.relative_to(REPO_ROOT))

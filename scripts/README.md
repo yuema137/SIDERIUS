@@ -9,9 +9,9 @@ Template:
 
 ## Purpose
 
-Python/bash utilities that are *not* the chain. **The chain launchers live in
-[`sdsc_submission_scripts/`](../sdsc_submission_scripts/README.md), not
-here** — several older documents said otherwise. This directory contains the
+Python/bash utilities that are *not* the chain. The maintained chain launchers
+live in [`launch/`](launch/), while Slurm entrypoints live in [`slurm/`](slurm/)
+and durable runtime utilities in [`runtime/`](runtime/). This directory contains the
 small durable operator surface. Historical investigation and gate harnesses
 are maintained by their owning experiment repository, not shipped here.
 
@@ -26,11 +26,11 @@ The durable operator surface:
 
 | script | role |
 |---|---|
-| `inspect_run_state.py` | the auto-resume inspector — `--next-iter` reports the first incomplete iteration from each `iter_NNN/manifest.json`; one of the three callers of the shared manifest-verification predicate |
-| `rebuild_per_file_best.py` | rebuild the per-partition best-of table from records |
-| `validate_path_component.py` | path-component hygiene used by launchers |
-| `campaign_admission.py` · `campaign_spend.py` · `runtime_campaign.py` · `runtime_replay/` | resumable-campaign bookkeeping and runtime-control operations |
-| `bg_gpu_sampler.sh` | background GPU utilisation sampler |
+| `launch/inspect_run_state.py` | auto-resume inspector |
+| `runtime/rebuild_per_file_best.py` | rebuild the per-partition best-of table from records |
+| `launch/validate_path_component.py` | path-component hygiene used by launchers |
+| `runtime/campaign_admission.py` · `runtime/campaign_spend.py` · `runtime/replay.py` | resumable bookkeeping and runtime-control operations |
+| `diagnostics/bg_gpu_sampler.sh` | background GPU utilisation sampler |
 | [`diagnostics/check_agent_environment.py`](diagnostics/README.md) | opt-in provider environment diagnostic; source-checkout-only and network-capable |
 
 The dated study and calibration tooling formerly under
@@ -59,7 +59,7 @@ files are evidence only.
 ## Non-owned semantics
 
 - Launching the real multi-iteration chain →
-  [`sdsc_submission_scripts/`](../sdsc_submission_scripts/README.md).
+  [`launch/`](launch/README.md).
 - The workflow itself → [`workflows/`](../src/workflows/README.md).
 - Record/manifest integrity rules → `core/record_log.py` /
   `core/iteration_manifest.py`
@@ -97,7 +97,7 @@ operator surface.
 ## Minimal example
 
 ```bash
-.venv/bin/python scripts/inspect_run_state.py --workspace /path/to/ws --next-iter
+.venv/bin/python scripts/launch/inspect_run_state.py --workspace /path/to/ws --next-iter
 ```
 
 ## Related tests

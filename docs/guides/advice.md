@@ -12,7 +12,7 @@ the files available or select them for a new run. The former guide location was
 Pass an explicit JSON path with `--human_advice_file` or `--advice` to the
 chain/iteration entrypoint. `--advice` takes precedence when both are supplied.
 The source authority is
-[`run_one_iteration.py::load_advice_artifact`](../../sdsc_submission_scripts/run_one_iteration.py),
+[`run_one_iteration.py::load_advice_artifact`](../../src/workflows/run_one_iteration.py),
 with `render_advice_value` shared by validation and argument normalization.
 The five agent keys target interpretation, proposal, implementation, validation
 and tuning; `mindset` supplies the proposer's preamble.
@@ -31,7 +31,7 @@ bytes; a supplied digest must match the observed digest.
 
 ## The key set is closed
 
-`sdsc_submission_scripts/run_one_iteration.py::load_advice_artifact` refuses
+`src/workflows/run_one_iteration.py::load_advice_artifact` refuses
 an advice artifact that could not inject anything (F-SCHED-5). The recognised
 top-level keys are exactly:
 

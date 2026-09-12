@@ -55,10 +55,10 @@ from agent.schemas.validator import ValidatorOutput
 from core.resume import restore_prior_state
 from core.scientific_authority import ScientificAuthority
 from execute_tools.metric_order import MetricOrder
-from sdsc_submission_scripts.run_one_iteration import write_manifest
 from tests.helpers.metric_fixtures import shipped_spec
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.run_one_iteration import write_manifest
 
 # ---------------------------------------------------------------------------
 # Fixture helpers — mocked node outputs + a chain-runner-shaped disk seed

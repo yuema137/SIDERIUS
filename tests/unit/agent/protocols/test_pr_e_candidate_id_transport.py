@@ -455,7 +455,7 @@ class TestFixedPlanSeam:
         return str(path)
 
     def test_a_plan_carrying_candidate_id_refuses_the_launch(self, tmp_path):
-        from sdsc_submission_scripts.run_one_iteration import (
+        from workflows.run_one_iteration import (
             load_validation_fixed_candidate_plan,
         )
 
@@ -464,7 +464,7 @@ class TestFixedPlanSeam:
             load_validation_fixed_candidate_plan(path)
 
     def test_a_clean_plan_loads_with_no_identity(self, tmp_path):
-        from sdsc_submission_scripts.run_one_iteration import (
+        from workflows.run_one_iteration import (
             load_validation_fixed_candidate_plan,
         )
 

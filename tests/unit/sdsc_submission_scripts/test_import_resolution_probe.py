@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-PROBE = REPO_ROOT / "sdsc_submission_scripts" / "_import_resolution_probe.py"
+PROBE = REPO_ROOT / "scripts" / "launch" / "_import_resolution_probe.py"
 
 
 def _run(tmp_path: Path, intended: Path, pin: Path | None) -> subprocess.CompletedProcess:

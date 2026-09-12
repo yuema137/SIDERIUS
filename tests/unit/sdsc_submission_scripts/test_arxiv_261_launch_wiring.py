@@ -29,7 +29,7 @@ from agent.skills.evaluate_time_skill.calibration import gpu_slug
 from core.runtime_control.watchdog_profile import ResolvedWatchdogSettings
 
 _REPO = Path(__file__).resolve().parents[3]
-_ROI = _REPO / "sdsc_submission_scripts" / "run_one_iteration.py"
+_ROI = _REPO / "src" / "workflows" / "run_one_iteration.py"
 
 _spec = importlib.util.spec_from_file_location("run_one_iteration_for_261_test", _ROI)
 roi = importlib.util.module_from_spec(_spec)

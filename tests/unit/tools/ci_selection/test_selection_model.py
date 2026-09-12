@@ -108,7 +108,7 @@ class TestTheModelIsFailClosed:
         for diff in (
             ["src/execute_tools/probe_batch.py"],
             ["src/ml_models/loss_models_sandbox.py"],
-            ["sdsc_submission_scripts/run_chain.sh"],
+            ["scripts/launch/run_chain.sh"],
             ["docs/gates/gate_testing_standard.md"],
         ):
             result = select(diff)
@@ -211,6 +211,13 @@ def test_every_unit_test_module_is_reachable() -> None:
         "selective run would never choose them. Add them to ALWAYS_ON if they "
         "scan the tree, or declare what they read:\n  " + "\n  ".join(unreachable)
     )
+
+
+def test_slurm_change_selects_forwarding_and_entry_contracts() -> None:
+    result = select(["scripts/slurm/submit_one_iteration.slurm"])
+    assert not result.full_suite
+    assert "tests/unit/scripts/test_submit_one_iteration_entry.py" in result.modules
+    assert "tests/unit/scripts/test_sdsc_argument_forwarding.py" in result.modules
 
 
 class TestAffectedCallerCoverage:

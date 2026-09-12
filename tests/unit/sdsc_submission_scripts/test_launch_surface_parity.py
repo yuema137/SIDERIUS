@@ -35,8 +35,8 @@ import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CHAIN_LIB = REPO_ROOT / "sdsc_submission_scripts" / "_chain_common.sh"
-RUN_ONE_ITERATION = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
+CHAIN_LIB = REPO_ROOT / "scripts" / "launch" / "_chain_common.sh"
+RUN_ONE_ITERATION = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
 WORKFLOW = REPO_ROOT / "src/workflows" / "model_exploration.py"
 PROTOCOL_DIR = REPO_ROOT / "src/agent" / "schemas" / "protocols"
 

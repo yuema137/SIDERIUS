@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SAMPLER = REPO_ROOT / "scripts" / "bg_gpu_sampler.sh"
+SAMPLER = REPO_ROOT / "scripts" / "diagnostics" / "bg_gpu_sampler.sh"
 
 
 def _drive(outdir: Path, calls: str) -> dict[str, str]:

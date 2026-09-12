@@ -110,7 +110,7 @@ def prepare_inputs(checkout: Path, workspace: Path) -> Path:
         workspace / "losses/installed/masked_mse_loss.py"
     )
     manifest.write_text(yaml.safe_dump(config))
-    shutil.copyfile(checkout / "configs/health_checks.yaml", inputs / "health_policy.yaml")
+    shutil.copyfile(checkout / "configs/health/health_checks.yaml", inputs / "health_policy.yaml")
     return manifest
 
 

@@ -13,8 +13,8 @@ from __future__ import annotations
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RUN_CHAIN = REPO_ROOT / "sdsc_submission_scripts" / "run_chain.sh"
-RUN_ONE = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
+RUN_CHAIN = REPO_ROOT / "scripts" / "launch" / "run_chain.sh"
+RUN_ONE = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
 
 
 def test_chain_exports_no_bytecode_policy_before_every_python_call(tmp_path: Path) -> None:

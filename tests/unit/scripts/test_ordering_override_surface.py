@@ -23,12 +23,12 @@ REPO = Path(__file__).resolve().parents[3]
 LOCK_SITES = [
     REPO / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
     REPO / "src/workflows/model_exploration.py",
-    REPO / "sdsc_submission_scripts/run_one_iteration.py",
+    REPO / "src/workflows/run_one_iteration.py",
 ]
 
 ORDER_PARSING_SITES = [
     REPO / "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
-    REPO / "sdsc_submission_scripts/run_one_iteration.py",
+    REPO / "src/workflows/run_one_iteration.py",
 ]
 
 

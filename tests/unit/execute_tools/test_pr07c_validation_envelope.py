@@ -334,7 +334,7 @@ class TestTheOperatorSurface:
         from pathlib import Path
 
         source = (
-            Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_one_iteration.py"
+            Path(__file__).resolve().parents[3] / "src" / "workflows" / "run_one_iteration.py"
         ).read_text(encoding="utf-8")
         tree = ast.parse(source)
         flags = [
@@ -360,7 +360,7 @@ class TestTheOperatorSurface:
         from pathlib import Path
 
         shell = (
-            Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "_chain_common.sh"
+            Path(__file__).resolve().parents[3] / "scripts" / "launch" / "_chain_common.sh"
         ).read_text(encoding="utf-8")
         assert "--validation_max_samples)" in shell
         assert 'APP_ARGS+=(--validation_max_samples "$VALIDATION_MAX_SAMPLES")' in shell

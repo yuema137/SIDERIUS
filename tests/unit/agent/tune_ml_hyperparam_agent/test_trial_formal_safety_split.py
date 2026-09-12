@@ -25,7 +25,7 @@ from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from core.runtime_control.session import RuntimeControlPolicy
 from core.sandbox_executor import _watchdog_deadline_provider
 from nodes.ml_hyperparameter_tune_agent import _build_runtime_policy
-from sdsc_submission_scripts.run_one_iteration import build_parser
+from workflows.run_one_iteration import build_parser
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 QUICKSTART_MANIFEST = REPO_ROOT / "configs/task_composition/quickstart.yaml"

@@ -102,8 +102,8 @@ PRODUCTION_DIRS = (
     "src/execute_tools",
     "src/ml_models",
     "src/nodes",
+    "src/tools",
     "scripts",
-    "sdsc_submission_scripts",
     "src/workflows",
 )
 

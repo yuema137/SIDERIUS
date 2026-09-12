@@ -222,11 +222,9 @@ class TestTheLaunchSplitIsUnchangedAndCorrectlyJustified:
         """Naming a mechanism is worth nothing if THAT one is also absent —
         which is the whole lesson of this finding.
         """
-        chain = (REPO_ROOT / "sdsc_submission_scripts" / "run_chain.sh").read_text(encoding="utf-8")
+        chain = (REPO_ROOT / "scripts" / "launch" / "run_chain.sh").read_text(encoding="utf-8")
         assert '(cd "$PROJECT_DIR" && "${cmd[@]}")' in chain
-        common = (REPO_ROOT / "sdsc_submission_scripts" / "_chain_common.sh").read_text(
-            encoding="utf-8"
-        )
+        common = (REPO_ROOT / "scripts" / "launch" / "_chain_common.sh").read_text(encoding="utf-8")
         assert "install_chain_stop_traps()" in common
         assert "trap '_chain_note_signal SIGINT'  INT" in common
 

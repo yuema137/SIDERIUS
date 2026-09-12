@@ -1939,7 +1939,7 @@ class TestOrchestrationParamForwarding:
         assert "health_checks_config" in sig.parameters
 
     def test_health_checks_config_reaches_tuner(self, workflow_env, tmp_path):
-        path = "configs/health_checks_baseline_observe_mode.yaml"
+        path = "configs/health/health_checks_baseline_observe_mode.yaml"
         tune_input = _tune_input_from_workflow(
             workflow_env,
             tmp_path,

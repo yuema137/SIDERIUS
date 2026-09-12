@@ -659,7 +659,7 @@ class TestPersistenceIsJsonSafe:
     def test_the_manifest_carries_the_source_beside_the_reference(self, tmp_path):
         """Reachability for the OTHER artifact: `write_manifest` must copy
         the source across, not just the reference and thresholds."""
-        from sdsc_submission_scripts.run_one_iteration import write_manifest
+        from workflows.run_one_iteration import write_manifest
 
         class _Output:
             model_type = "punet"

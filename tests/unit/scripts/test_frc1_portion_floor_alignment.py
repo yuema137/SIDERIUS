@@ -46,7 +46,7 @@ from pydantic import ValidationError
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RUNNER = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
+RUNNER = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
 
 #: The canonical executable floor, hand-written. Every assertion below compares
 #: a real boundary against THIS, never one boundary against another — so two

@@ -1,4 +1,4 @@
-"""Unit tests for ``scripts/inspect_run_state.py``.
+"""Unit tests for ``scripts/launch/inspect_run_state.py``.
 
 Covers the chain-layout walk introduced in Phase 6.8 Task 2 Commit 12,
 the ``--next-iter`` machine-readable output used by ``run_chain.sh
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import inspect_run_state as ins
+from scripts.launch import inspect_run_state as ins
 
 # ---------------------------------------------------------------------------
 # Fixture builders

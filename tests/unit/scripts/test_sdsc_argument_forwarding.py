@@ -32,14 +32,27 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SDSC = REPO_ROOT / "sdsc_submission_scripts"
-SLURM = SDSC / "submit_one_iteration.slurm"
+SDSC = REPO_ROOT / "scripts" / "launch"
+SLURM = REPO_ROOT / "scripts" / "slurm" / "submit_one_iteration.slurm"
 CHAIN_COMMON = SDSC / "_chain_common.sh"
-RUNNER = SDSC / "run_one_iteration.py"
+RUNNER = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
 
 #: Required by the wrapper's own validation; supplied so a test exercises
 #: the token under study rather than tripping over an unrelated check.
-BASE = ["--workspace", "/tmp/ws", "--iteration", "3", "--source_paths", "/tmp/seed.json"]
+BASE = [
+    "--workspace",
+    "/tmp/ws",
+    "--iteration",
+    "3",
+    "--source_paths",
+    "/tmp/seed.json",
+    "--run_name",
+    "r",
+    "--task_composition",
+    "/tmp/task.yaml",
+    "--data_dir",
+    "/tmp/data",
+]
 
 
 def _slice(text: str, start: str, end: str) -> str:
@@ -57,6 +70,7 @@ def forward(argv: list[str]) -> list[str]:
     build = _slice(src, "# --- Fill in defaults", "# --- Execute the runner ---")
     script = (
         "set -u\n"
+        "PROJECT_DIR=/tmp\nPYTHON_BIN=/bin/true\n"
         'WORKSPACE=""\nITERATION=""\nSOURCE_PATHS=()\n'
         "MAX_ROUNDS=20\nMAX_PROPOSAL_ATTEMPTS=3\nLLM_MODEL=default-model\n"
         "TRIAL_PORTION=0.1\nTRAIN_PORTION=0.1\nEVAL_PORTION=0.1\n"
@@ -326,5 +340,5 @@ class TestLilabSdscParity:
         sdsc_argv = forward([*BASE, flag, value])
         assert flag in sdsc_argv
         assert sdsc_argv[sdsc_argv.index(flag) + 1] == value
-        sdsc = module.build_parser().parse_args([*required, flag, value])
+        sdsc = module.build_parser().parse_args(sdsc_argv)
         assert getattr(lilab, dest) == getattr(sdsc, dest)

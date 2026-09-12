@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Admit a campaign to its home directory, or refuse.
 
-    python scripts/campaign_admission.py --campaign-id <id> \
+    python scripts/runtime/campaign_admission.py --campaign-id <id> \
         --ws-root <path> --campaign-home <path> \
         --runner <filename> --runner-pid <pid> \
         [--wave-state <path> --legacy-wave-state <path>]

@@ -8,7 +8,7 @@ summary of the best HealthGate-valid and best raw scores achieved.
 One single computation — :func:`build_table` — is shared by both the
 incremental writer (called from ``run_one_iteration.py`` after each
 completed manifest commit) and the standalone
-``scripts/rebuild_per_file_best.py`` CLI, so their outputs cannot
+``scripts/runtime/rebuild_per_file_best.py`` CLI, so their outputs cannot
 drift. See design doc §3.7 (contract) and §3.7.3 (file plan).
 """
 
@@ -316,7 +316,7 @@ def _assemble(sources: list[_SourceIter]) -> dict[str, Any]:
     # its provenance readable — but it carries no rows and says why.
     scanned_sources = sources if row_order is not None else []
     if row_order is None and sources:
-        # STDERR, not stdout. `scripts/rebuild_per_file_best.py --print-only`
+        # STDERR, not stdout. `scripts/runtime/rebuild_per_file_best.py --print-only`
         # writes this table's canonical JSON to stdout and its contract is
         # byte-exact (`test_cli_print_only_writes_canonical_json_to_stdout`
         # compares stdout to `canonical_bytes` directly), so a diagnostic line

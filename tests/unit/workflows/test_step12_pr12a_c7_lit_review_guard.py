@@ -113,9 +113,7 @@ class TestDisabledLiteratureReviewIsUnaffected:
         assert WorkflowLaunchConfig().lit_review_enabled is False
 
     def test_the_chain_defaults_OFF_without_a_config(self):
-        chain = (REPO_ROOT / "sdsc_submission_scripts" / "_chain_common.sh").read_text(
-            encoding="utf-8"
-        )
+        chain = (REPO_ROOT / "scripts" / "launch" / "_chain_common.sh").read_text(encoding="utf-8")
         assert "ML_LIT_REVIEW_ENABLED=0" in chain
         assert WorkflowLaunchConfig().lit_review_config_path is None
 

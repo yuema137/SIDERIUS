@@ -20,9 +20,9 @@ from core.runtime_control.probe import (
     RealizedModelProperties,
     run_bounded_probe,
 )
-from scripts.runtime_replay.executable_replay import run_executable_replay
-from scripts.runtime_replay.metadata_replay import run_metadata_replay
-from scripts.runtime_replay.schemas import MeasuredRuntime
+from tools.runtime_replay.executable_replay import run_executable_replay
+from tools.runtime_replay.metadata_replay import run_metadata_replay
+from tools.runtime_replay.schemas import MeasuredRuntime
 
 IDLE = ContentionSnapshot(
     telemetry_available=True, foreign_compute_processes=0, gpu_utilization_pct=1.0

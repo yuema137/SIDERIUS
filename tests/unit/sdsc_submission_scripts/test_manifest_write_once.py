@@ -21,9 +21,9 @@ from core.iteration_manifest import (
     ManifestReplacementRequest,
     verify_iteration_manifest,
 )
-from sdsc_submission_scripts import run_one_iteration as runner
+from workflows import run_one_iteration as runner
 
-LAUNCHER = Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_one_iteration.py"
+LAUNCHER = Path(__file__).resolve().parents[3] / "src" / "workflows" / "run_one_iteration.py"
 
 
 class _Result:

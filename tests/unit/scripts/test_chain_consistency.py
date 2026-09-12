@@ -1,7 +1,7 @@
 """Shell ↔ Python CLI contract tests (Phase 6.8 Commit 11 §3.8, post-4.3.4).
 
-Validates that ``sdsc_submission_scripts/run_one_iteration.py`` (the chain
-runner) and ``sdsc_submission_scripts/_chain_common.sh`` (the shell entry)
+Validates that ``src/workflows/run_one_iteration.py`` (the chain
+runner) and ``scripts/launch/_chain_common.sh`` (the shell entry)
 agree on the §3.2 flag set: every contract flag has matching name,
 default, and type/shape across both layers. Additionally,
 ``run_chain.sh --dry-run`` is exercised end-to-end as a side-effect-free
@@ -21,7 +21,7 @@ from pathlib import Path as _Path
 
 import pytest
 
-from sdsc_submission_scripts.run_one_iteration import (
+from workflows.run_one_iteration import (
     build_parser as _roi_build_parser,
 )
 
@@ -61,7 +61,7 @@ def _get_roi_flags():
 class TestShellDefaults:
     """Verify _chain_common.sh variable defaults match the chain runner."""
 
-    SHELL_PATH = "sdsc_submission_scripts/_chain_common.sh"
+    SHELL_PATH = "scripts/launch/_chain_common.sh"
 
     def _read_shell(self):
         with open(self.SHELL_PATH) as f:
@@ -224,7 +224,7 @@ def _shell_var_name(flag: str) -> str:
 
 
 def _read_shell() -> str:
-    with open("sdsc_submission_scripts/_chain_common.sh") as f:
+    with open("scripts/launch/_chain_common.sh") as f:
         return f.read()
 
 
@@ -441,7 +441,7 @@ class TestShellPythonConsistency:
 #   - workspace dir stays untouched (does not exist after dry-run)
 
 
-_RUN_CHAIN_SH = _Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_chain.sh"
+_RUN_CHAIN_SH = _Path(__file__).resolve().parents[3] / "scripts" / "launch" / "run_chain.sh"
 
 
 def _run_dry(
@@ -522,7 +522,7 @@ class TestDryRunSmoke:
         )
 
     def test_health_checks_config_is_rendered_verbatim(self, workspace, seed_path):
-        config_path = "configs/health_checks_baseline_observe_mode.yaml"
+        config_path = "configs/health/health_checks_baseline_observe_mode.yaml"
         rc, stdout, stderr = _run_dry(
             "lilab",
             workspace,

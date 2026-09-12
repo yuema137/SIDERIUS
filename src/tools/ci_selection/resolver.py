@@ -60,7 +60,6 @@ REPO_PACKAGES = frozenset(
         "ml_models",
         "workflows",
         "scripts",
-        "sdsc_submission_scripts",
         "dashboard",
         "tools",
         "examples",

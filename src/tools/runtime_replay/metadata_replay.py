@@ -23,7 +23,7 @@ import json
 import re
 from pathlib import Path
 
-from scripts.runtime_replay.schemas import ReplayCandidate, ReplayReport
+from tools.runtime_replay.schemas import ReplayCandidate, ReplayReport
 
 #: e.g. "   Pre-flight rejected (factor=84.64x); requesting revision 2/3."
 _REJECTION = re.compile(r"Pre-flight rejected \(factor=([0-9.]+)x\)")

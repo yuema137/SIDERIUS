@@ -19,8 +19,8 @@ from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
 from core.runtime_control.session import RuntimeControlPolicy
 from nodes.ml_hyperparameter_tune_agent import _build_runtime_policy
-from sdsc_submission_scripts.run_one_iteration import build_parser
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.run_one_iteration import build_parser
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIELD = "runtime_verification_max_wall_seconds"
@@ -62,7 +62,7 @@ def test_override_crosses_the_typed_launch_boundaries() -> None:
     assert FIELD in HyperparamTuningInput.model_fields
 
     launcher_value = _call_keyword_value(
-        REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py",
+        REPO_ROOT / "src" / "workflows" / "run_one_iteration.py",
         "WorkflowLaunchConfig",
         FIELD,
     )

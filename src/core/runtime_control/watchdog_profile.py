@@ -9,7 +9,7 @@ and applies what it returns.
 Two layers, reusing the repository's existing by-device machinery rather
 than inventing a second system:
 
-1. **Shipped defaults** — ``configs/runtime_profiles.yaml``: the committed,
+1. **Shipped defaults** — ``configs/runtime/runtime_profiles.yaml``: the committed,
    reviewed profiles (today: the RTX 5090 single-chain posture, calibrated
    on the lilab RTX 5090 across the V19/V20 campaigns). Declarative data,
    like the task-health configs.
@@ -75,7 +75,7 @@ from core.layout import checkout_path
 
 #: The committed defaults. Relative to the repository root (derived from this
 #: file's location — never the caller's cwd).
-SHIPPED_PROFILES_PATH = checkout_path("configs", "runtime_profiles.yaml")
+SHIPPED_PROFILES_PATH = checkout_path("configs", "runtime", "runtime_profiles.yaml")
 
 ExecutionRegime = Literal["single", "dual_coresident", "four_way_coresident"]
 

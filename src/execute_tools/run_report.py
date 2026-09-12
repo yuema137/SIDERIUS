@@ -46,7 +46,7 @@ Two semantic rules, frozen by §V.4 and enforced here
    ``persisted_ranking``'s per-record partition. When no identity can be
    established this module **declines by name** — no best-so-far, no ranking,
    and a recorded refusal string — following the pattern of
-   ``scripts/inspect_run_state.py`` and the chain console summary (§V.14h).
+   ``scripts/launch/inspect_run_state.py`` and the chain console summary (§V.14h).
 
 What it reads — settled by source, not chosen here (§V.13c)
 ------------------------------------------------------------
@@ -728,7 +728,7 @@ def load_run_output(path: Path) -> HyperparamTuningOutput:
     json.JSONDecodeError)`` — has an unreachable second branch: pydantic v2
     reports a JSON SYNTAX error as a ``ValidationError`` too, so the
     ``JSONDecodeError`` clause never fires and every truncated file is
-    reported as a schema violation. (``scripts/inspect_run_state.py``'s
+    reported as a schema violation. (``scripts/launch/inspect_run_state.py``'s
     ``_validate_run_output`` has that shape; OBSERVED, not this workstream's
     to change.) Splitting the steps keeps "this file is not JSON" and "this
     file is not a tuner output" as two different things an operator is told,

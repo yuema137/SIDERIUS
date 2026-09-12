@@ -1047,17 +1047,18 @@ class TestTheFileSetCannotBeBlind:
 
     def test_it_covers_the_non_python_suffixes_that_actually_exist(self):
         """F-12e-UX-8 was a census over ``*.py`` while the defect lived in
-        ``app.js``. Quantified here rather than asserted: a ``*.py`` census
-        sees 3 of the 16 files in ``sdsc_submission_scripts``."""
+        ``app.js``. The maintained launch and Slurm roots are explicit census
+        inputs, alongside the other production roots."""
         walked = production_files(REPO_ROOT)
         suffixes = {p.suffix for p in walked}
         for suffix in (".py", ".sh", ".slurm", ".js", ".md"):
             assert suffix in suffixes, f"no {suffix} file reached the census"
-        sdsc = [p for p in walked if p.parts[-2:][0] or True]
-        sdsc = [p for p in walked if "sdsc_submission_scripts" in p.parts]
-        assert len([p for p in sdsc if p.suffix == ".py"]) < len(sdsc) / 2, (
-            "a *.py-only census would see under half of sdsc_submission_scripts"
-        )
+        launch = [
+            p for p in walked if "scripts" in p.parts and p.parent.name in {"launch", "slurm"}
+        ]
+        assert launch
+        assert any(p.name == "run_chain.sh" for p in launch)
+        assert any(p.name == "submit_one_iteration.slurm" for p in launch)
 
     def test_derived_bytecode_is_excluded_but_nothing_else_is(self):
         """``__pycache__`` is the ONE exclusion, and it is excluded because it

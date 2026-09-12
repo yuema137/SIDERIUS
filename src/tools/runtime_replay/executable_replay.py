@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from scripts.runtime_replay.schemas import (
+from tools.runtime_replay.schemas import (
     MeasuredRuntime,
     ReplayCandidate,
     ReplayReport,

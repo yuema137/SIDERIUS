@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 _REPO = Path(__file__).resolve().parents[3]
-_ROI = _REPO / "sdsc_submission_scripts" / "run_one_iteration.py"
-_CHAIN_COMMON = _REPO / "sdsc_submission_scripts" / "_chain_common.sh"
+_ROI = _REPO / "src" / "workflows" / "run_one_iteration.py"
+_CHAIN_COMMON = _REPO / "scripts" / "launch" / "_chain_common.sh"
 
 _BASE_ARGV = [
     "--workspace",

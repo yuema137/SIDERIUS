@@ -12,7 +12,7 @@ to discriminate architectures.
 Until Phase 1.5 the runner accepted any ``float``, so a sub-0.01 value
 spent tokens on Interpretation before crashing inside the Proposer's
 Pydantic validator. The ``_portion_floor`` validator in
-``sdsc_submission_scripts/run_one_iteration.py`` fails fast at argparse
+``src/workflows/run_one_iteration.py`` fails fast at argparse
 time — see Phase 1.5 §1.5 of
 ``docs/audit_and_optimize_token_usage_and_growth.md``.
 
@@ -27,10 +27,10 @@ import argparse
 
 import pytest
 
-from sdsc_submission_scripts.run_one_iteration import (
+from workflows.run_one_iteration import (
     _portion_floor as roi_floor,
 )
-from sdsc_submission_scripts.run_one_iteration import (
+from workflows.run_one_iteration import (
     build_parser,
 )
 

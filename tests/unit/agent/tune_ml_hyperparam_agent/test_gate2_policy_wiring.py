@@ -27,7 +27,7 @@ import pytest
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from core.runtime_control.session import RuntimeControlPolicy
 from nodes.ml_hyperparameter_tune_agent import _build_runtime_policy
-from sdsc_submission_scripts.run_one_iteration import build_parser
+from workflows.run_one_iteration import build_parser
 
 # Preserve the historical numeric fixture with today's explicit task and
 # admission-source declarations; this is not a scientific campaign launcher.

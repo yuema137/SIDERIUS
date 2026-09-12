@@ -155,7 +155,7 @@ class TestCliParsing:
 
         spec = importlib.util.spec_from_file_location(
             "run_one_iteration_under_test",
-            REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py",
+            REPO_ROOT / "src" / "workflows" / "run_one_iteration.py",
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)

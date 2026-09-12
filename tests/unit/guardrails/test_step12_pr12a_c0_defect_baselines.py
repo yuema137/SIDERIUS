@@ -207,7 +207,7 @@ STRUCTURAL_BASELINE: dict[str, tuple[int, int, int, int]] = {
         474,
         6,
     ),
-    "sdsc_submission_scripts/run_one_iteration.py::compute_expected_invariants": (6, 3, 64, 2),
+    "src/workflows/run_one_iteration.py::compute_expected_invariants": (6, 3, 64, 2),
     "src/core/resume.py::restore_prior_state": (100, 47, 383, 4),
     "src/core/run_invariants.py::build_run_invariants": (8, 3, 103, 13),
     "src/core/run_invariants.py::validate_stamped_invariants": (25, 14, 101, 4),

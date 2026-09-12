@@ -39,8 +39,8 @@ absolute or relative; a relative one resolves against the repo root too.
 
 | file | declares | when a run gets it |
 |---|---|---|
-| `configs/health_checks.yaml` | what a health failure **does**: gate role, cadence, short-circuit, `on_pass`/`on_fail` | the default |
-| `configs/health_checks_baseline_observe_mode.yaml` | the same, with blocking failures downgraded to observation | `--healthgate_mode observe_only` — a diagnostic campaign |
+| `configs/health/health_checks.yaml` | what a health failure **does**: gate role, cadence, short-circuit, `on_pass`/`on_fail` | the default |
+| `configs/health/health_checks_baseline_observe_mode.yaml` | the same, with blocking failures downgraded to observation | `--healthgate_mode observe_only` — a diagnostic campaign |
 
 A run that needs different consequences selects its own policy file with
 `--health_checks_config /path/to/policy.yaml`; the shipped pair is the
@@ -55,7 +55,7 @@ framework cannot hold contradictory opinions about what a failure means.
 | file | declares | tracked? |
 |---|---|---|
 | caller-owned `--ml_lit_review_config` | literature-review budget, root papers, rubric | external task or experiment |
-| `llm_configs/*.json` | per-stage LLM provider routing | yes |
+| `configs/llm/*.json` | per-stage LLM provider routing | yes |
 | caller-owned advice files | human advice injected into the loop | external experiment |
 | `--data_dir` / `--workspace` | explicit input-data / run-output roots | machine-local directories outside the checkout |
 | `dashboard_config.yaml` | dashboard data root | **gitignored** — copy from `.example` |

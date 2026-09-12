@@ -85,9 +85,9 @@ set -o pipefail
 export PYTHONDONTWRITEBYTECODE=1
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-RUNNER="${SCRIPT_DIR}/run_one_iteration.py"
-SLURM_SCRIPT="${SCRIPT_DIR}/submit_one_iteration.slurm"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+RUNNER="${PROJECT_DIR}/src/workflows/run_one_iteration.py"
+SLURM_SCRIPT="${PROJECT_DIR}/scripts/slurm/submit_one_iteration.slurm"
 
 source "${SCRIPT_DIR}/_chain_common.sh"
 
@@ -209,6 +209,9 @@ submit_iteration_lilab() {
 
 submit_iteration_sdsc() {
     local iter=$1
+    if [ "$DRY_RUN" -eq 0 ]; then
+        mkdir -p "$WORKSPACE/logs"
+    fi
     local sbatch_args=(
         --partition="$PARTITION"
         --nodes=1
@@ -217,6 +220,8 @@ submit_iteration_sdsc() {
         --mem="$MEM"
         --time="$TIME"
         --cpus-per-task="$CPUS"
+        --output="$WORKSPACE/logs/iter_%j.out"
+        --error="$WORKSPACE/logs/iter_%j.err"
     )
     if [ -n "$PREV_JOB_ID" ]; then
         # afterany (not afterok): the OOM-tolerant tuner can finish a
@@ -225,7 +230,7 @@ submit_iteration_sdsc() {
         # under afterok.
         sbatch_args+=( --dependency="afterany:${PREV_JOB_ID}" )
     fi
-    local cmd=( sbatch "${sbatch_args[@]}" "$SLURM_SCRIPT" "${APP_ARGS[@]}" )
+    local cmd=( sbatch "${sbatch_args[@]}" "$SLURM_SCRIPT" --siderius-checkout "$PROJECT_DIR" "${APP_ARGS[@]}" )
     if [ "$DRY_RUN" -eq 1 ]; then
         echo "  [DRY-RUN] would submit:"
         printf '    '
@@ -241,7 +246,7 @@ submit_iteration_sdsc() {
         return 0
     fi
     local OUTPUT JOB_ID
-    OUTPUT=$(sbatch "${sbatch_args[@]}" "$SLURM_SCRIPT" "${APP_ARGS[@]}")
+    OUTPUT=$(sbatch "${sbatch_args[@]}" "$SLURM_SCRIPT" --siderius-checkout "$PROJECT_DIR" "${APP_ARGS[@]}")
     JOB_ID=$(echo "$OUTPUT" | grep -oP '\d+$')
     if [ -z "$JOB_ID" ]; then
         echo "[FAIL] could not parse job ID from sbatch output:" >&2
@@ -336,7 +341,7 @@ resolve_start_iter() {
     # non-contiguous gap, ...). We let stderr flow through naturally and
     # halt with a wrapper-level message so operators see both signals.
     local _raw_next_iter
-    if ! _raw_next_iter=$("${PY_CMD[@]}" "${PROJECT_DIR}/scripts/inspect_run_state.py" \
+    if ! _raw_next_iter=$("${PY_CMD[@]}" "${PROJECT_DIR}/scripts/launch/inspect_run_state.py" \
             --layout chain --workspace "$WORKSPACE" --next-iter); then
         echo "ERROR: inspector refused to compute --next-iter for workspace $WORKSPACE (see error above)" >&2
         exit 1

@@ -282,7 +282,7 @@ class TestAComposedRunMustDeclareItsRoot:
 
         repo = pathlib.Path(__file__).resolve().parents[3]
         for rel in (
-            "sdsc_submission_scripts/run_one_iteration.py",
+            "src/workflows/run_one_iteration.py",
             "src/workflows/model_exploration.py",
         ):
             src = (repo / rel).read_text(encoding="utf-8")

@@ -235,7 +235,7 @@ class TestTheWorkflowIsSuppliedACapability:
         this assertion used to pin.
         """
         launcher = (
-            Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_one_iteration.py"
+            Path(__file__).resolve().parents[3] / "src" / "workflows" / "run_one_iteration.py"
         ).read_text()
         assert "measurement_capability=measurement_capability," in launcher, (
             "the launcher no longer threads a capability into run_workflow"

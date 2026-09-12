@@ -263,7 +263,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--health_checks_config",
         type=str,
         default=None,
-        help="Optional HealthGate YAML override; omitted uses configs/health_checks.yaml.",
+        help="Optional HealthGate YAML override; omitted uses configs/health/health_checks.yaml.",
     )
     # --- DataScope + HealthGate subsystem (DS5c) ---
     parser.add_argument(

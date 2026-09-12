@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Sum a campaign's token spend from the per-chain ledgers.
 
-    python scripts/campaign_spend.py --root <WS_ROOT> \
+    python scripts/runtime/campaign_spend.py --root <WS_ROOT> \
         --run-name <exact> [--run-name <exact> ...]
     -> "<total_tokens> <estimated_usd>"
 

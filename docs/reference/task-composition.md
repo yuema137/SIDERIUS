@@ -285,7 +285,7 @@ import-time data directory exactly as before.
 
 | thing | how it is supplied instead |
 |---|---|
-| framework health policy | `configs/health_checks.yaml` (owned by the framework, never the task) |
+| framework health policy | `configs/health/health_checks.yaml` (owned by the framework, never the task) |
 | data scope, budgets, rounds | CLI flags — see [entrypoints](entrypoints.md) |
 | the physical data root | `--data_dir` (below) |
 

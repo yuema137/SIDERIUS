@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from sdsc_submission_scripts.run_one_iteration import build_parser
+from workflows.run_one_iteration import build_parser
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STANDARD = REPO_ROOT / "docs" / "gates" / "gate_testing_standard.md"

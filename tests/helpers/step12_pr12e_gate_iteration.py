@@ -46,7 +46,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 #: The production per-iteration runner. Derived from this file's location so
 #: the wrapper always drives the checkout it lives in (CLAUDE.md portability
 #: rule) — never a differently-rooted clone that happens to be on the path.
-DEFAULT_TARGET = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
+DEFAULT_TARGET = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
 
 _USAGE = (
     "usage: step12_pr12e_gate_iteration.py --provenance-workspace WS "

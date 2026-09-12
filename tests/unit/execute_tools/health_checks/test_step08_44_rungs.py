@@ -277,7 +277,7 @@ class TestTheAxisCutsBothWays:
         from execute_tools.health_checks.registry import get
 
         assert get(check_name) is not None
-        for config_path in (None, "configs/health_checks_baseline_observe_mode.yaml"):
+        for config_path in (None, "configs/health/health_checks_baseline_observe_mode.yaml"):
             config = load_health_gates_config(config_path)
             configured = {ref.name for gate in config.health_gates for ref in gate.checks}
             assert check_name not in configured, config_path

@@ -45,7 +45,7 @@ from execute_tools.health_checks.schemas import GateAction
 # what gets WRITTEN into a persisted artifact goes through `_record_path`,
 # which renders an in-repo config repo-relative so the artifact does not carry
 # the path of whichever checkout produced it.
-_DEFAULT_CONFIG_PATH = checkout_path("configs", "health_checks.yaml")
+_DEFAULT_CONFIG_PATH = checkout_path("configs", "health", "health_checks.yaml")
 
 # Basename of the per-workspace materialized effective config — the single
 # path every downstream loader reads once the run-level monitored-file
@@ -165,7 +165,7 @@ class ActionConfig(BaseModel):
 
 
 class GateConfig(BaseModel):
-    """One HealthGate entry in ``configs/health_checks.yaml``.
+    """One HealthGate entry in ``configs/health/health_checks.yaml``.
 
     A gate fires at its configured ``after_round`` position, runs its
     ``checks`` in listed order (with per-gate ``short_circuit``), and
@@ -302,7 +302,7 @@ class PersistedHealthPluginIdentity(BaseModel):
 class HealthChecksConfig(BaseModel):
     """The rev-6 HealthGate YAML root.
 
-    Loaded from ``configs/health_checks.yaml`` by
+    Loaded from ``configs/health/health_checks.yaml`` by
     ``load_health_gates_config``. See
     ``docs/design/pluggable_health_checks.md`` §3.
     """
@@ -466,7 +466,7 @@ def _resolve_config_path(path: str | None) -> str:
     """Resolve an explicit policy or the same-checkout default, never CWD."""
     if path or _DEFAULT_CONFIG_PATH:
         return path or str(_DEFAULT_CONFIG_PATH)
-    return str(require_checkout(SIDERIUS_ROOT) / "configs" / "health_checks.yaml")
+    return str(require_checkout(SIDERIUS_ROOT) / "configs" / "health" / "health_checks.yaml")
 
 
 def _load_raw_health_config(path: str | None = None) -> HealthChecksConfig:
