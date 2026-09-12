@@ -9,7 +9,7 @@ every caller composition or pictured research capability is available here.
 | [`fig_loop.pdf`](fig_loop.pdf) | Byte-copied unchanged from `SIDERIUS-Paper/shared/figures/fig_loop.pdf` |
 | [`fig_loop.png`](fig_loop.png) | Faithful PNG rendering of the copied PDF for Markdown display |
 
-Source repository: `Galileo-Sandbox/SIDERIUS-Paper`, revision and source path
+Source repository: `git@github.com:yuema137/SIDERIUS-Paper.git`, revision and source path
 above (the local checkout used for this copy was read-only during this PR).
 
 - Paper revision: `884058d852983925b8604f78d46b4d1a8a0b806c`

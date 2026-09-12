@@ -97,12 +97,23 @@ EOF
 ## Verify
 
 ```bash
-.venv/bin/python scripts/diagnostics/check_agent_environment.py  # opt-in; calls provider APIs
-.venv/bin/python -m pytest tests/unit/ -q    # no GPU, no API calls, mocked LLM
+.venv/bin/python -m pytest \
+  tests/unit/examples/test_quickstart_pack.py::test_composition_authority_resolves_from_this_checkout \
+  tests/unit/examples/test_quickstart_pack.py::test_shipped_manifest_composes_with_the_declared_values -q
 ```
 
-The unit suite is the CI gate: mocked LLM, no GPU, no network. If it passes, your
-checkout is sound.
+These bounded checks verify checkout origin and the shipped synthetic manifest
+without a provider, network, GPU, or training. For broader validation, run the
+affected tests described in `CLAUDE.md` and `CONTRIBUTING.md`; formal PR CI is
+the canonical final-head check. The provider diagnostic below is optional and
+effectful, not part of offline installation verification.
+
+If you choose to inspect configured providers, run the diagnostic explicitly;
+it calls provider APIs and is not an installation or checkout test:
+
+```bash
+.venv/bin/python scripts/diagnostics/check_agent_environment.py
+```
 
 ## Moving to a different machine or GPU
 

@@ -23,15 +23,9 @@ For broader deterministic validation, run the affected unit tests. Tests marked
 first contact.
 
 The integration tree contains both pseudo and opt-in real tests; it is not a
-uniform millisecond, credential-free command. Use the markers and each test's
-instructions to choose a bounded pseudo subset:
-
-```bash
-.venv/bin/python -m pytest -m 'not real_run' tests/integration/workflows -q
-```
-
-This exercises selected deterministic workflow wiring; it is not a scientific
-run or a substitute for the task package's real-data checks.
+uniform millisecond, credential-free command. Follow the relevant family guide
+under [`tests/integration/`](../../tests/integration/README.md) instead of
+assuming the whole tree is a smoke test.
 
 ### When you do add a key
 
