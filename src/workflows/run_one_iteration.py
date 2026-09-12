@@ -53,7 +53,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import get_args
+from typing import cast, get_args
 
 # A direct one-iteration launch does not pass through run_chain.sh.  Establish
 # the same read-only-checkout policy before importing any SIDERIUS module, and
@@ -110,6 +110,7 @@ from workflows.model_exploration import (
 )
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import (
+    RunTaskComposition,
     bind_run_task_composition,
     compose_run_task_bindings,
     resolve_composed_measurement_capability,
@@ -2473,7 +2474,7 @@ def resolve_watchdog_policy(args: argparse.Namespace) -> ResolvedWatchdogSetting
 def compute_expected_invariants(
     args: argparse.Namespace,
     *,
-    run_composition: object | None = None,
+    run_composition: RunTaskComposition | None = None,
     launch_identity: LaunchIdentity | None = None,
 ) -> RunInvariants:
     """DS6c — compute this run's invariants via the ONE shared path.
@@ -3322,7 +3323,7 @@ def main():
         # present, which is every campaign host.
         #
         measurement_capability = resolve_composed_measurement_capability(
-            run_composition, dataset_root=args.data_dir
+            cast(RunTaskComposition, run_composition), dataset_root=args.data_dir
         )
         # Step 11 C4 — the run's resolved physical data root travels with
         # the composition binding. `args.data_dir` was already put through
