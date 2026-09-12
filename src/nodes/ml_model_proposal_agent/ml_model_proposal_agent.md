@@ -27,12 +27,12 @@
 | `agent_cards` | `list[AgentCard]` | No | `[]` | Self-descriptions of all external agents contributing context this round. Rendered as a "Contributors" section above the Expert Context block. Carries `trust_level` (`hard_limit` / `strong_prior` / `soft_prior`) for synthesis-rule routing. |
 | `mindset` | `str \| None` | No | `None` | Mindset block injected at `{# EXPLORATION_MODE_BLOCK #}` in the causal-reasoning stage prompt. Overrides the default `_explore.md` / `_exploit.md` fallback. |
 | `vocab_seed` | `list[VocabEntry]` | No | `[]` | The runtime vocabulary available to the reasoning pipeline (canonical seed + promoted candidates + active candidates). Populated by the upstream interpretation node via the protocol. |
-| `is_trial` | `bool` | No | `False` | Whether the run uses trial (sparse) sampling. Forwarded to `build_sample_set` inside the proposer's `evaluate_time_skill` pre-flight gate so the wall-time estimate matches what the tuner will see. |
+| `is_trial` | `bool` | No | `False` | Whether the run uses trial (sparse) sampling; this selects inputs to the static `estimate_proposal_time` advisory. |
 | `trial_strategy` | `Literal["snapshot", "anchors", "target"]` | No | `"snapshot"` | Sampling strategy for the training scope: `snapshot` (all 20 files), `anchors` (files 0/10/19), `target` (caller-specified files). Mirrors `HyperparamTuningInput.trial_strategy`. |
 | `trial_portion` | `float` | No | `0.1` | Fraction of segments per file for the training scope. Mirrors `HyperparamTuningInput.trial_portion`. |
 | `target_files` | `list[int]` | No | `[]` | File indices to sample from. Required when `trial_strategy="target"`. |
-| `train_portion` | `float` | No | `0.1` | Per-epoch subsample fraction from the training scope. Forwarded to `evaluate_time_skill` so the proposer's wall-time estimate matches the tuner's. |
-| `sampling_seed` | `int \| None` | No | `None` | Seed for `build_sample_set()`. When `None` the proposer auto-generates one for its estimate; the tuner uses its own auto-generation policy. |
+| `train_portion` | `float` | No | `0.1` | Per-epoch fraction supplied to the static proposal-time estimate; it does not trigger data sampling in the proposer. |
+| `sampling_seed` | `int \| None` | No | `None` | Optional seed recorded as proposal context; the static estimate performs no `build_sample_set()` data access. |
 | `trial_time_budget_minutes` | `float \| None` | No | `None` | Active trial budget supplied to the static `estimate_proposal_time` advisory; it never rejects or revises a proposal. |
 | `formal_time_budget_minutes` | `float \| None` | No | `None` | Active formal budget supplied to the static `estimate_proposal_time` advisory; it never rejects or revises a proposal. |
 | `vram_budget_gb` | `float \| None` | No | `None` | Active operator-defined VRAM ceiling (GB) for the upcoming tuning iteration. Workflow picks trial vs formal budget based on `is_trial`. |
@@ -45,7 +45,7 @@
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `storage` | `StorageConfig` | Yes | — | Where the node reads its inputs and writes `proposal_{run_name}.json`. In standalone CLI use, constructed by `main()` from `--workspace` + `--run_name`; in workflow use, populated by `workflows/model_exploration.py`. |
-| `hardware_context` | `HardwareContext \| None` | No | `None` | Live hardware manifest from `core.hardware_context.get_or_create()`. Populated by the workflow on GPU-enabled hosts; `None` for CPU-only / test stubs and falls back to deterministic priors in `evaluate_time_skill`. |
+| `hardware_context` | `HardwareContext \| None` | No | `None` | Live hardware manifest from `core.hardware_context.get_or_create()`. Populated by the workflow on GPU-enabled hosts; `None` for CPU-only / test stubs and uses deterministic priors in the static proposal-time estimate. |
 | `task_description` | `str` | No | `""` | Plain-English task description, authored in `configs/task_config.yaml`. Populated by the workflow via `get_task_description(load_task_config())` and by the standalone CLI in `main()`. Rendered into the `{TASK_BACKGROUND}` block of the legacy reasoning prompt AND — since PR 01b — into the `{task_background_block}` placeholder of all three pipeline stage system prompts. The `""` default is for test fixtures only; empty or whitespace-only collapses the block. |
 | `forward_contract` | `ForwardContract` | No | `ForwardContract()` | Typed forward-pass contract from the same YAML. Rendered into the legacy `{TASK_BACKGROUND}` block and into `proposing_stage.md`'s `{forward_contract}` placeholder. Deliberately NOT expanded into the comparison or causal stages. All-empty default is for test fixtures only. |
 | `previous_failures` | `list[str]` | No | `[]` | Validation error messages from previous failed attempts in this iteration. The workflow populates this when retrying after a downstream validation failure, so the proposer can self-correct. |
