@@ -82,16 +82,18 @@ process boundary.
 
 ## Step 3 — Write the task config
 
-Two prose fields, both required:
+Two typed task-context fields, both required in a production composition:
 
 - **`task_description`** — the scientific problem, as you would explain it to a
   new collaborator;
-- **`forward_contract`** — the exact tensor contract, e.g.
+- **`forward_contract`** — a typed `ForwardContract` declaration containing the
+  exact tensor contract, e.g.
   `[B, 3, 144, 144] float32 in [0,1] → [B, 37] logits`.
 
-These reach every LLM prompt. Be precise about the forward contract in
-particular: it is what stops the implementor writing a model with the wrong
-output rank.
+The caller routes these fields to the node prompts that consume them; they are
+not copied into every prompt indiscriminately. Be precise about the typed
+forward contract in particular: it is what stops the implementor writing a
+model with the wrong declared I/O.
 
 ## Step 4 — Declare the primary metric
 
@@ -167,9 +169,9 @@ turned into a budget or selection signal at all.
 Start from the generic checks: `sample_dispersion_floor` for continuous outputs,
 `categorical_distinct_symbols` and `categorical_dominant_fraction` for
 classification. Set thresholds you can defend, and choose a **disposition** for
-each — `blocking` or `observational`.
+each — `blocking` or `recording`.
 
-Advice worth taking: start almost everything `observational`, run once, look at
+Advice worth taking: start almost everything `recording`, run once, look at
 what the checks actually report on your data, and only then promote the ones that
 catch real collapse to `blocking`. A blocking threshold guessed in advance
 usually blocks the wrong thing.
@@ -179,7 +181,9 @@ it in your health config's `plugins:` — it registers itself through the public
 registration API, and it can live entirely outside the repository.
 
 Declare `task_health: {none: true}` if you genuinely have no health family.
-**Do not omit the section** — omission means TIDMAD's family.
+**Declare the section explicitly**: use `task_health: {none: true}` for a task
+with no Health family; omitting the required declaration is refused rather than
+selecting a scientific default.
 
 A Health view provider should decode the current artifact through
 `ctx.load_evaluation_payload()`. That callback reuses your
@@ -305,6 +309,7 @@ bash scripts/launch/run_chain.sh \
     --run_name my_task_v1 \
     --task_composition /path/to/my_task/composition.yaml \
     --data_dir /path/to/data \
+    --llm_config configs/llm/openai_tiered_pro.json \
     --healthgate_mode blocking \
     --result_authority scientific \
     --num_iterations 2 \

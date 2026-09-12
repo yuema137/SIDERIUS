@@ -5,7 +5,7 @@
 # Role : library, mode-agnostic. Holds everything that is identical between
 #        any execution backend (lilab subprocess, SDSC slurm, future ones).
 # Entry: run_chain.sh sources this file and adds the mode-aware pieces.
-# Files: see sdsc_submission_scripts/README.md for the folder map.
+# Files: see scripts/launch/README.md for the folder map.
 # Doc  : docs/running_chain_test.md is the operator runbook.
 # ---------------------------------------------------------------------------
 # What lives here:
@@ -226,7 +226,7 @@ MODE=""
 # touching the workspace or submitting any jobs. Side-effect-free.
 DRY_RUN=0
 # Auto-resume control (Phase 6.8 Commit 13.B). AUTO_RESUME=1 means the
-# orchestrator queries scripts/inspect_run_state.py --next-iter to pick up
+# orchestrator queries scripts/launch/inspect_run_state.py --next-iter to pick up
 # where a partially-run chain left off. --no_auto_resume forces 1.
 # --start_iter N overrides everything (manual pin). --force_fresh bypasses
 # the stale-fresh safety guard that otherwise refuses to clobber a
@@ -1105,7 +1105,7 @@ report_chain_outcome() {
 # ---------------------------------------------------------------------------
 # F-SCANB-4 — auto-resume inspector capture validation
 # ---------------------------------------------------------------------------
-# `scripts/inspect_run_state.py --layout chain --next-iter` prints ONLY the
+# `scripts/launch/inspect_run_state.py --layout chain --next-iter` prints ONLY the
 # integer index as its FINAL stdout write on the success path (every
 # diagnostic goes to stderr; see its `print(compute_next_iter(...))` /
 # `return 0`). The shell capture, however, can ALSO carry import-time

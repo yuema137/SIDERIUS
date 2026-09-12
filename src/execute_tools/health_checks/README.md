@@ -77,13 +77,10 @@ the extension path** (censused). Prefer the shipped generic checks first:
 `sample_dispersion_floor` (continuous), `categorical_distinct_symbols` /
 `categorical_dominant_fraction` (classification).
 
-🟡 Health families on the **composed chain path** are still not demonstrated —
-this is now *landed, declared debt*, not an unmerged-work gap: PR-12d (landed
-`84d74280`) records finding **A1** — HealthGate evaluation lives only inside
-the legacy `ANCHOR_NORMALIZED` branch, so a composed run fires **zero** gates,
-and the `G-12d` PASS lists deliberately did not require them. The 08c evidence
-ran through the D14 direct-execution runners and stands unchanged. Do not
-claim composed-path enforcement beyond what a real run has shown.
+Health evaluation is reached at the tuner round boundary after scoring, on the
+current composed and compatibility routes. This source-level reachability does
+not by itself qualify a scientific task run; task-specific evidence remains
+external and must be reported separately.
 
 ## State and filesystem effects
 

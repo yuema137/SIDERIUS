@@ -18,7 +18,7 @@ The task-facing seams:
 | file | surface |
 |---|---|
 | `task_data_path.py` | `TaskDataPath` (Protocol, exactly four methods: `training_dataset` · `validation_dataset` · `write_deliverable` · `read_evaluation_payload`, plus `task_data_path_id`) · optional siblings `TaskScopeCapability`, `TaskTrialAnchoring` · `register_task_data_path` · `resolve_task_data_path` / `bind_task_data_path` / `active_task_data_path` · argv transport + identity verification |
-| `evaluation_metric.py` | `MetricSpec` (id **opaque**, `direction` explicit, `aggregation`, `scoreability`; frozen, `extra="forbid"`) · `EvaluationMetric` (ABC — `evaluate` runs the scoreability contract **before** any arithmetic) · `ScoreabilityContract` · `MetricResult` / `NotScoreableResult` / `NotScoreableError` · `bind_run_metric` / `resolve_bound_run_metric` (+ secondaries) · shipped instances `TidmadDenoisingMetric`, `AccuracyMetric`, `GlobalMseMetric` · `TIDMAD_METRIC_ID` declared once here |
+| `evaluation_metric.py` | `MetricSpec` (id **opaque**, `direction` explicit, `aggregation`, `scoreability`; frozen, `extra="forbid"`) · `EvaluationMetric` (ABC — `evaluate` runs the scoreability contract **before** any arithmetic) · `ScoreabilityContract` · `MetricResult` / `NotScoreableResult` / `NotScoreableError` · `bind_run_metric` / `resolve_run_metric` (+ secondaries) · shipped generic metric implementations · `TIDMAD_METRIC_ID` declared once here |
 | `metric_order.py` | `MetricOrder` — **the one authority interpreting metric direction** (`is_better`, `best`, `worst_sentinel`, `direction_words`, …) |
 | `dataset_config.py` | `DatasetProfile` (generic identity + opaque `topology` the framework never reads) · `DataScope` (`--data_scope "4-9"`) · `ChannelIdentity` / `ValueEncoding` · the TIDMAD constants |
 | `deliverable_spec.py` | `DeliverableNaming` — **the sole owner of deliverable file naming** — and `DeliverableStorage`/`DeliverableSpec` |
@@ -29,8 +29,8 @@ The task-facing seams:
 
 The engines (subprocess entrypoints, launched only by `core/sandbox_executor`):
 `train_engine_sandbox.py` · `inference_single.py` · `denoising_score_single.py`.
-Task implementations shipped in-tree: `tidmad_data_path.py`, `pets_data_path.py`,
-`davis_data_path.py`. Plus focused single-authority modules
+Task implementations are supplied by caller-owned plugins; this checkout ships
+only the generic protocols and engines. Plus focused single-authority modules
 (`persisted_ranking.py`, `per_file_best.py`, `workload_resolvers.py`,
 `probe_batch.py`, `scientific_aggregation.py`, …) — read their docstrings.
 
@@ -86,8 +86,8 @@ records (`metric_result` / `metric_refusal`), typed training results.
 
 Engines read the data root and write deliverables/records under the sandbox
 directories; `validate_sample_set` guards every file touch. Process-global
-state: the data-path registry (run-scoped rollback via
-`task_registration_scope`) and the ⚠ import-time TIDMAD data-config read.
+state is limited to the data-path registry (run-scoped rollback via
+`task_registration_scope`); task data configuration is caller-bound.
 
 ## Failure modes
 
@@ -112,12 +112,9 @@ four `TaskDataPath` methods (frozen — extend via optional siblings).
 
 ## Current maturity
 
-✅ Task-owned scopes reach **all three** children (training, inference,
-scoring), and both contrast packs (Pets, DAVIS) are at **L4** — the composed
-production loop has executed them end to end (Step 12 / PR-12d, landed
-`84d74280`, on `G-12d` evidence; each pack's `STATUS.md` mirrors the roadmap).
-One declared residual: composed-path **HealthGate enforcement** is recorded
-debt (PR-12d ledger, finding A1) — see
+✅ Task-owned scopes reach **all three** children (training, inference, scoring).
+The current tuner reaches inference, scoring and Health through the generic
+round boundary; task qualification evidence remains external. See
 [`health_checks/README.md`](health_checks/README.md). See
 [supported tasks](../../docs/concepts/supported-tasks.md) for the authoritative
 current-vs-target table.

@@ -24,14 +24,10 @@ Rules for filling in this template per-node:
   - Workflow-populated input fields that a standalone caller would never
     set may move into the "Workflow-populated fields" subsection at the
     end of the Input section, to keep the primary table readable.
-  - **Node type** values:
-      * `standalone-capable` — the node can be invoked directly via its
-        CLI `main()`, reading inputs from disk and writing outputs to
-        disk, without the full chain workflow.
-      * `workflow-only` — the node is only meaningfully invoked from
-        within `workflows/model_exploration.py` (or a sibling workflow)
-        because it depends on state the workflow assembles (e.g. live
-        protocol-passed inputs, per-iteration in-memory handoffs).
+  - The **CLI entry** marker is `present` or `absent` and records only whether
+    the module has an argparse `main()` guard. Presence does not certify that
+    an unbound standalone invocation is supported; document required caller
+    context and limitations separately.
 -->
 
 # <NodeClassName>
@@ -40,7 +36,7 @@ Rules for filling in this template per-node:
 
 ## Position in the pipeline
 
-- **Node type**: <workflow-only / standalone-capable> — <one-line justification: what makes it CLI-runnable, or what workflow state it depends on>
+- **CLI entry**: <present / absent> — <one-line description of the parser, or why the node depends on workflow state>
 - **Upstream**: <which node(s) feed into this one, or "none" if it is the entry point>
 - **Downstream**: <which node(s) consume this node's output>
 - **Protocol**: <which protocol function connects this node to the next, e.g. `local_full_context` in `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py`>

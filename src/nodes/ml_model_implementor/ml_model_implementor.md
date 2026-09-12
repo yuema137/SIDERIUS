@@ -4,7 +4,7 @@
 
 ## Position in the pipeline
 
-- **Node type**: **standalone-capable** — `nodes/ml_model_implementor/ml_model_implementor.py` exposes a CLI `main()` that reads `proposal_{run_name}.json` from the workspace, builds an `ImplementorInput`, runs the agent, and writes the plugin + description + test files to `agent_generated/`.
+- **CLI entry**: **present** — `main()` reads a proposal record and accepts the minimal CLI field set. Richer task/model-I/O context is supplied by the typed workflow route; generated paths are caller/workspace-owned rather than a universal checkout destination.
 - **Upstream**: `ml_model_proposal_agent` (provides `model_name`, `output_type`, `model_description`, `mathematical_definition`, `baseline_config`, `custom_loss_spec` via `ml_model_propose_to_ml_model_impl.py::local_full_spec` in `agent/schemas/protocols/`).
 - **Downstream**: `ml_code_validator_agent` (consumes the three file paths + `model_description` + `mathematical_definition` for the eight-check validation pass via the `ml_model_impl_to_ml_model_valid` protocol).
 - **Protocol (upstream)**: `ml_model_propose_to_ml_model_impl.py::local_full_spec` — maps `ProposalOutput.{candidate_id, model_name, output_type, model_description, mathematical_definition, baseline_config, custom_loss_spec}` into this node's `ImplementorInput`. The `reference_code` for any `inherited_components` (ancestor model source the implementor can read) is NOT loaded by the protocol — the workflow attaches it after the protocol returns (`workflows/model_exploration.py:2696`).
@@ -32,7 +32,7 @@
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `storage` | `StorageConfig` | Yes | — | Where this node reads its inputs and writes its own output record (e.g. `implementor_output_{run_name}.json`). Note that `plugin_dir` and `test_dir` above are independent of this — the plugin and test files go to `agent_generated/` regardless. |
+| `storage` | `StorageConfig` | No | `StorageConfig()` | Where this node reads its inputs and writes its own output record (e.g. `implementor_output_{run_name}.json`). The schema supplies a default factory; callers should provide an explicit workspace for real runs. Generated plugin/test paths are separate typed fields and are resolved from the caller-owned workspace when omitted. |
 | `task_description` | `str` | No | `""` | Plain-English task description from `configs/task_config.yaml`, injected into the reasoning prompt's `{TASK_BACKGROUND}` block. |
 | `forward_contract` | `ForwardContract` | No | `ForwardContract()` | The typed forward-pass contract from `configs/task_config.yaml`. Its `model_io` field carries the normalized Step-03 `ModelIOContract`, which since Step 04a is the authority for every contract-owned fact the implementor derives: the self-check probe, the generated plugin's contract comments, the generated test's class count, and the custom-loss probe pair. `None` = the legacy prose-only path, which reproduces the shipped behaviour exactly. |
 | `hardware_context` | `HardwareContext \| None` | No | `None` | Live hardware manifest (Step 04a / OD-S4-1). Combined with `vram_budget_gb` through `HardwareContext.effective_cap_gb` to render the reasoning prompt's GPU-budget bullet. `None` (CPU-only host, test fixture, standalone invocation) renders a defined magnitude-free form — never a stale literal. |
@@ -45,9 +45,9 @@
 | Field | Type | Description |
 |---|---|---|
 | `model_type` | `str` | The `PLUGIN_MODEL_TYPE` key written into the plugin file. Same as the input `model_name`. |
-| `model_file_path` | `str` | Absolute path to the written plugin file (e.g. `.../agent_generated/models/attn_unet.py`). |
-| `description_file_path` | `str` | Absolute path to the written `description.md` (e.g. `.../agent_generated/models/attn_unet/description.md`). Used by `result_interpretation_agent` to load architecture knowledge for the next iteration. |
-| `test_file_path` | `str` | Absolute path to the written test file (e.g. `.../agent_generated/tests/test_attn_unet.py`). |
+| `model_file_path` | `str` | Absolute path to the written plugin file under the caller/workflow-selected generated model directory. |
+| `description_file_path` | `str` | Absolute path to the written description file under the caller/workflow-selected generated model directory. Used by `result_interpretation_agent` when available. |
+| `test_file_path` | `str` | Absolute path to the written test file under the caller/workflow-selected generated test directory. |
 | `model_io_contract` | `ModelIOContract \| None` | The normalized declaration this candidate was generated against, echoed from `forward_contract.model_io` (Step 04a). Mapped verbatim to `ValidatorInput` by the impl→valid protocol, so the validator probes against the declaration the implementor actually used rather than a second read of the task config. `None` on the legacy prose-only path. |
 | `config_fields` | `dict[str, Any]` | Summary of the Pydantic config fields generated by the LLM. Keys are field names, values are their default values. Read by the downstream validator + the tuner. |
 | `model_description` | `str` | Plain-English description of the architecture, passed through from `ImplementorInput`. Carried forward so the downstream validator can provide it to its LLM-review step. |
@@ -79,7 +79,7 @@ The CLI reads `{workspace}/proposal_{run_name}.json` (the upstream proposal agen
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `--workspace` | `str` | `./siderius_workspace` | Root directory for reading `proposal_{run_name}.json`. The plugin/test files always land under `agent_generated/`, NOT here. |
+| `--workspace` | `str` | `./siderius_workspace` | Root directory for reading the proposal and writing the output record. Richer workflow fields (task description, `ForwardContract.model_io`, and `implementor_blocks`) are not represented by this minimal CLI. |
 | `--run_name` | `str` | `v1` | Filename suffix shared across the chain (proposal, implementor). |
 | `--provider` | `str` (`gemini` \| `openai`) | `gemini` | LLM provider for both the reasoning and code calls. |
 | `--model_id` | `str` | `gemini-3.1-pro-preview` | Specific model id. Note the default is `gemini-3.1-pro-preview` (not `flash-lite`) — code generation benefits from the stronger model. |
@@ -145,12 +145,12 @@ Explicit generated-code directories remain supported for orchestrators. The refe
 - **Self-correction repair loop.** On any validation failure, the implementor calls `bridge.generate(IMPLEMENTOR_REPAIR_PROMPT, ...)` with the previous code + the validation error message — up to `inp.max_retries` times (default 2). Total worst-case LLM calls per run: 1 reasoning + 1 commit + 2 repairs = 4.
 - **Common-mistake patching** (`_patch_common_mistakes`). Before validation, known LLM quirks get rewritten in-place: `self.embedding(input)` → `self.embedding(x)` (Python keyword collision), trailing `$` artefacts stripped, etc. This avoids burning a repair slot on cosmetic LLM errors.
 - **Plugin contract enforced by `PLUGIN_TEMPLATE`.** Every generated plugin defines exactly four module-level attributes — `PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`, `PLUGIN_OUTPUT_TYPE` — in that order. The plugin loader (`core/plugin_loader.py`) refuses to register a plugin missing any of these. The LLM never writes the contract; only the section bodies.
-- **Forward-pass shape contract follows the declared `output_type`** (V21 PR A). The input is always `[B, T] int`; the output depends on the contract the proposal committed to:
+- **Forward-pass shape contract follows the declared `output_type`** (V21 PR A). Input and output rank/dimensions come from the declared `ModelIOContract`; the output form depends on the contract the proposal committed to:
 
   | `ImplementorInput.output_type` | emitted `PLUGIN_OUTPUT_TYPE` | forward output |
   |---|---|---|
-  | `classifier` (default) | `"classifier"` | `[B, C, T]` float — per-timestep class logits, `C` from the task's declared cardinality (256 under TIDMAD) |
-  | `regressor` | `"regressor"` | `[B, T]` float — the denoised waveform |
+  | `classifier` (default) | `"classifier"` | Contract-derived float logits; class cardinality and axes come from the task's declared `ModelIOContract` |
+  | `regressor` | `"regressor"` | Contract-derived float prediction; axes and dimensions come from the task's declared `ModelIOContract` |
 
   The DECLARATION selects the form; the task's `ModelIOContract` supplies the facts inside it. A `classifier` declaration under a task that declares no class alphabet fails closed rather than guessing a cardinality.
 

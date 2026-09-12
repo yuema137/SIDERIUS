@@ -40,9 +40,9 @@ surfacing recent papers as soft priors.
 
 ![What you declare versus what SIDERIUS provides](docs/assets/ownership-split.svg)
 
-A **task package** declares your task through
-one YAML manifest — thirteen possible sections, five required — plus whatever small
-amount of Python the framework cannot supply generically for your data. A package
+A **task package** declares your task through one YAML manifest whose exact typed
+sections and requiredness are defined in the composition reference, plus whatever
+small amount of Python the framework cannot supply generically for your data. A package
 can live entirely outside this repository. Remaining scientific compatibility
 helpers are listed in the [repository map](docs/repository-map.md#retained-and-mixed-material).
 
@@ -158,6 +158,9 @@ joins the run's identity, so an edited plugin is detected rather than silently
 used.
 
 → [Define your own task](docs/guides/define-a-task.md)
+
+For callers assembling a small typed handoff around an existing node, see the
+[custom workflow boundary](docs/guides/custom-workflow.md).
 
 ## Documentation
 

@@ -18,8 +18,9 @@ a *plausible* score. A research loop that reads that score as evidence will
 happily propose a variation on a broken architecture and burn another few GPU-hours
 finding out.
 
-Health gates catch that class of failure at round boundaries — before the compute
-is spent, and without polluting the scoring pipeline with validity logic.
+Health gates catch that class of failure at round boundaries — after scoring has
+produced its evidence and before the round record is finalized, without mixing
+validity logic into metric arithmetic.
 
 > **A health gate PASS is not a scientific success.** It means "nothing detectably
 > invalid". A model can pass every gate and be scientifically useless. The gates
@@ -30,7 +31,7 @@ is spent, and without polluting the scoring pipeline with validity logic.
 Checks look at the model's actual behaviour on a small peeked sample — the spread
 of its outputs, whether it emits more than one distinct symbol, whether one class
 dominates, whether the spectrum has collapsed. They are cheap by design; they run
-at round boundaries, not inside scoring.
+at round boundaries, after scoring, not inside scoring.
 
 Nine checks ship with the framework. Some are inherently generic and reusable by
 any task of the right shape:
@@ -64,13 +65,13 @@ as a pass**.
 `error` on a blocking check **fails closed**. A check that cannot run is not
 treated as a check that succeeded.
 
-## Blocking versus observational
+## Blocking versus recording
 
 When you declare a check, you choose exactly one thing about it: its
 **disposition**.
 
 - **blocking** — a failure changes what the run does
-- **observational** — a failure is recorded as evidence and changes nothing
+- **recording** — a failure is recorded as evidence and changes nothing
 
 That is the whole of your policy choice. When the gate runs, whether it
 short-circuits, what action a failure produces, and how severity resolves between
@@ -106,7 +107,7 @@ Two documents, two owners, and the split is the point:
   your file, anywhere on disk, named by your manifest's `task_health:` section.
 - **What a failure does** lives in framework policy — role, cadence,
   short-circuit, actions. The framework ships its policy (with an
-  observational variant a run selects via `--healthgate_mode observe_only`),
+  recording variant a run selects via `--healthgate_mode observe_only`),
   and a run can substitute its own policy file with `--health_checks_config`.
 
 Strictness is a decision you write in your own task config; consequences are

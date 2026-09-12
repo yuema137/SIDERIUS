@@ -30,7 +30,7 @@ executes training, inference or scoring.
 
 API keys from the environment (`OPENAI_API_KEY` / `GEMINI_API_KEY` /
 `DEEPSEEK_API_KEY`; `LLMBridge` calls `load_dotenv()`, so a repo-root `.env`
-works); per-stage routing from `llm_configs/*.json`
+works); per-stage routing from `configs/llm/*.json`
 (`workflows/llm_config.py` loads them); task-block YAML paths supplied by the
 caller, never discovered.
 
@@ -61,13 +61,13 @@ reads it (CLAUDE.md binding rule).
 - What flows between nodes → [`schemas/`](schemas/README.md) protocols.
 - Deterministic execution (training/inference/scoring) →
   [`execute_tools/`](../execute_tools/README.md) via `core/sandbox_executor`.
-- Which provider serves which stage in a real run → `llm_configs/*.json`
+- Which provider serves which stage in a real run → `configs/llm/*.json`
   routing, an operator artifact.
 
 ## Extension points
 
 - **A new LLM endpoint needs no code** when it is OpenAI-compatible: pass
-  `base_url` and `api_key` explicitly (or route via `llm_configs/*.json`).
+  `base_url` and `api_key` explicitly (or route via `configs/llm/*.json`).
   The `_KNOWN_PROVIDERS` table is convenience defaults, not a gate.
 - **New task science** for the proposer/implementor/interpreter is a
   task-owned blocks YAML named by the composition manifest — no template
@@ -95,7 +95,7 @@ checkout.
 
 Task-block adapter *loaders* only alongside their design docs; `skills/`
 packages under their own contracts. Routing changes belong in
-`llm_configs/*.json`, not in `llm_bridge.py`.
+`configs/llm/*.json`, not in `llm_bridge.py`.
 
 ## Files normally NOT edited
 

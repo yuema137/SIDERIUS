@@ -6,15 +6,15 @@
 #          mode-aware pieces (python resolution, auto-resume, slurm vs
 #          subprocess submission) and delegates the loop body to the
 #          shared library.
-# Library: sources sdsc_submission_scripts/_chain_common.sh, which owns
+# Library: sources scripts/launch/_chain_common.sh, which owns
 #          the mode-agnostic defaults / arg parser / iter loop body.
-# Folder : see sdsc_submission_scripts/README.md for the full file map.
-# Doc    : docs/running_chain_test.md is the operator runbook.
+# Folder : see scripts/launch/README.md for the full file map.
+# Doc    : docs/reference/entrypoints.md is the operator runbook.
 # ---------------------------------------------------------------------------
 # What lives here (and not in _chain_common.sh):
 #   * exact-checkout virtualenv resolution + version guard (>= 3.10) +
 #     env passthrough for child processes
-#   * --auto_resume — query scripts/inspect_run_state.py for --next-iter
+#   * --auto_resume — query scripts/launch/inspect_run_state.py for --next-iter
 #   * --force_fresh / stale-fresh safety guard
 #   * --start_iter manual pin + idempotency check
 #   * Mode-specific submit_iteration implementations:
@@ -33,8 +33,9 @@
 #
 # Required flags:
 #   --workspace DIR      chain workspace root
-#   --seed_paths P [P…]  one or more seed run_output JSONs
 #   --run_name NAME      chain-level run name (pins immutable run_id)
+#   --task_composition F task manifest (required)
+#   --data_dir DIR       physical task data root (required with composition)
 #
 # Frequently-used flags:
 #   --num_iterations N   number of iterations (default 2)
@@ -52,25 +53,28 @@
 #
 # Usage examples:
 #
-#   bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+#   bash scripts/launch/run_chain.sh --mode lilab \
 #       --workspace /home/klz/Data/SIDEREIS_DATA/lilab_chain_v1 \
 #       --run_name lilab_v1 \
 #       --num_iterations 3 \
-#       --seed_paths /path/to/seed.json
+#       --task_composition /path/to/task/composition.yaml \
+#       --data_dir /path/to/task/data
 #
-#   bash sdsc_submission_scripts/run_chain.sh --mode sdsc --dry-run \
+#   bash scripts/launch/run_chain.sh --mode sdsc --dry-run \
 #       --workspace /expanse/.../exploration_v1 \
 #       --run_name expanse_v1 \
 #       --num_iterations 5 \
-#       --seed_paths /scratch/.../seed.json \
+#       --task_composition /path/to/task/composition.yaml \
+#       --data_dir /scratch/.../task-data \
 #       --partition gpu-shared --time 06:00:00
 #
 #   # A COMPOSED run — the task is bound once, at the launcher edge:
-#   bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+#   bash scripts/launch/run_chain.sh --mode lilab \
 #       --workspace /home/klz/Data/SIDEREIS_DATA/composed_tidmad_v1 \
 #       --run_name composed_tidmad_v1 \
 #       --num_iterations 2 \
-#       --task_composition configs/task_composition/tidmad.yaml
+#       --task_composition /path/to/task/composition.yaml \
+#       --data_dir /path/to/task/data
 #
 # History: introduced in Phase 6.8 Commit 13 to consolidate the legacy
 # run_iteration_chain.sh (SDSC) and run_iteration_chain_lilab.sh (lilab)
@@ -305,7 +309,7 @@ fi
 
 # Resolve the Python interpreter for both modes. Lilab uses it to run
 # run_one_iteration.py directly; SDSC only uses it on the submission node
-# to run scripts/inspect_run_state.py for auto-resume. The SDSC iteration
+# to run scripts/launch/inspect_run_state.py for auto-resume. The Slurm iteration
 # jobs themselves use whatever python is configured inside submit_one_iteration.slurm.
 resolve_py_cmd
 # 13.D — version + env-passthrough guards. Both run unconditionally so
@@ -357,7 +361,7 @@ resolve_start_iter() {
         echo "  The captured stdout does not end in a bare non-negative integer." >&2
         echo "  Captured output (last 400 bytes):" >&2
         printf '%s\n' "$_raw_next_iter" | tail -c 400 | sed 's/^/    | /' >&2
-        echo "  Workaround: pass --start_iter N explicitly (scripts/inspect_run_state.py" >&2
+        echo "  Workaround: pass --start_iter N explicitly (scripts/launch/inspect_run_state.py" >&2
         echo "  --layout chain --workspace \"$WORKSPACE\" shows the per-iteration state)." >&2
         exit 1
     fi

@@ -14,7 +14,7 @@ only inspects non-underscore modules), not public-API status.
 | `result_interpretation_agent.py` | **PUBLIC** | `ResultInterpretationAgent`, the `run()` lifecycle, the CLI `main()`, `_dedup_promoted`, evolution-log I/O, output assembly and persistence. Since Step 09b C1 it owns NO prompt byte: the prompt constants and builders live in `agent/prompt_templates/interpretation/rendering.py` (a byte-exact move), and this module imports exactly the builders its lifecycle calls |
 | `result_interpretation_agent.md` | **PUBLIC** | this contract |
 | `agent/prompt_templates/interpretation/rendering.py` | framework (outside the node) | the interpreter's ENTIRE prompt surface: the two system-prompt TEMPLATES (task-free since 09b C2 — they carry a `{TASK_GUIDANCE_SECTIONS}` slot, not task science), `DEDUP_SYSTEM_PROMPT`, `HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS`, the user-prompt builders, the system-prompt assemblers, `_render_health_summary_section`, `_flatten_entry_for_prompt`, and the explicit evidence renderers (`render_metric_identity`, `render_interpretation_diagnosis_lines`, `render_secondary_metrics`, `render_failure_counts`, `render_prediction_track_record`). Layering rule: it imports schemas/framework authorities only and must never import the node package |
-| `agent/prompt_templates/interpretation/task_blocks.py` | framework (outside the node) | the BOUNDED Regime-A adapter: `load_interpretation_task_blocks(path=None)` + the ONE self-labelled default-path constant `LEGACY_DEFAULT_TASK_INTERPRETATION_CONFIG` (`configs/task_interpretation/tidmad.yaml`, anchored to THIS checkout via `_task_blocks_loader.SIDERIUS_ROOT` — it was cwd-relative until the N-1 release remediation, so a zero-arg load from any other working directory raised `FileNotFoundError`). Fail-closed on a missing / non-mapping / unknown-key / empty-section declaration. It is compatibility PACKAGING, never a registry or loader ecosystem: the constant feeds no branch, and Step 12's composition root replaces the CALL SITE, not the contract |
+| `agent/prompt_templates/interpretation/task_blocks.py` | framework (outside the node) | bounded task-block adapter: `load_interpretation_task_blocks(path=None)` returns an empty value when no task guidance is declared and refuses malformed/unknown/empty sections. The caller supplies the task value; no implicit scientific guidance is selected. |
 | `evidence.py` | private | persisted evidence → typed projections: `tuning_output_to_model_run_summary`, `_round_ordering`, `_round_health`, `_collect_health_evidence`, `_required_denoising_score`, `reconcile_metric_spec`, `project_failure_counts`, `InterpretationContractError` |
 | `ordering.py` | private | the run-scoped deterministic boundary: `bind_run_order` → the ONE `MetricOrder`; `precompute_evidence` → `PrecomputedEvidence` (per-model/overall best, valid, worst, formal, configs, `total_experiments`, the summary index and the scientific-aggregation scope) and `collect_enriched_fields` → `EnrichedFields` (score tables, parameter counts, training volumes) |
 | `prediction.py` | private | prediction grammar and semantics: `evaluate_prediction`, `_compute_metric`, the FROZEN legacy alias table, and the versioned accumulators `accumulate_prediction_outcomes` / `accumulate_information_gain` / `prediction_pool_sizes`. It IMPLEMENTS the v2 rule but does not own its NAME: the semantics ids and the outcome vocabulary are declared once in `agent/schemas/interpretation.py` (the schema owning the fields they key) and re-exported here under the same names, so the schema, the helpers and `core/resume.py` all read one authority |
@@ -49,11 +49,10 @@ SCIENCE. `InterpretationInput.task_blocks` carries a frozen
 header, no bytes. A present-but-empty section is refused.
 
 The interpreter never discovers task files. The CALLER supplies the value:
-today `workflows/model_exploration.py` and this node's CLI `main()` resolve
-TIDMAD's through the bounded adapter above; at Step 12 the composition root
-supplies the same typed value and the adapter call disappears. An external
-task supplies its own value — or its own YAML at any path — with no SIDERIUS
-edit.
+the CLI `main()` calls `load_interpretation_task_blocks()` and, without a path,
+gets an empty value; the workflow reads `composition.interpretation_blocks`
+directly. An external task supplies its own typed value (or YAML at any path)
+with no SIDERIUS edit.
 
 TIDMAD's declaration deliberately carries NO `prediction_guidance`: nothing
 existed in the pre-09b prompts to migrate there, and inventing guidance
@@ -125,7 +124,7 @@ not mistake either for an oversight:
 
 ## Position in the pipeline
 
-- **Node type**: **standalone-capable** — `nodes/result_interpretation_agent/result_interpretation_agent.py` exposes a CLI `main()` that reads a tuning agent's `run_output_{run_name}.json` from disk, builds the `InterpretationInput` itself, runs the two-phase pipeline, and writes `interpretation_{run_name}.json` back to the same workspace.
+- **CLI entry**: **present** — `main()` reads a tuning record from disk and constructs the input, while optional task guidance and run-scoped metric/evidence context remain caller-supplied; CLI presence is not a claim of complete workflow equivalence.
 - **Upstream**: `ml_hyperparameter_tune_agent` (provides `HyperparamTuningOutput` per model, converted by `tuning_output_to_model_run_summary` into the `ModelRunSummary` entries this node consumes).
 - **Downstream**: `ml_model_proposal_agent` (consumes `InterpretationOutput` via the `local_full_context` protocol; specific fields read: `key_findings`, `bottlenecks`, `take_home_message`, `runtime_vocab`, `model_descriptions`, plus per-model best/worst scores).
 - **Protocol**: `local_full_context` in `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` — maps `InterpretationOutput` (this node's output) plus the next-iter's chain state into the proposer's `ProposalInput`.

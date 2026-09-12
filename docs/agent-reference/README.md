@@ -76,13 +76,12 @@ Each node owns one stage. Its `.md` is the contract.
 | [`ml_code_validator_agent`](../../src/nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ | `src/nodes/ml_code_validator_agent/ml_code_validator_agent.py:896` |
 | [`ml_hyperparameter_tune_agent`](../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1742` (parser and input builder in `cli.py`) |
 
-All six nodes are standalone-capable — each exposes an `argparse` `main()`
+All six nodes currently have a CLI entry: each exposes an `argparse` `main()`
 behind `if __name__ == "__main__":` at the line cited
-(`ml_literature_review`'s CLI landed with #303/#305). The CLI column is
-verified by `tests/unit/docs/test_node_docs_contract.py`: exactly six
-`file:line` citations, each pointing at a `def main` line, and every node
-doc's declared type must match its module's `__main__` reality. Invocation
-details live in each node's own `.md`.
+(`ml_literature_review`'s CLI landed with #303/#305). The marker and source
+citations are structural facts only; they do not certify that an invocation
+has all task context needed for a successful run. Invocation boundaries and
+limitations live in each node's own `.md`.
 
 Adding a node: [`nodes/NODE_TEMPLATE.md`](../../src/nodes/NODE_TEMPLATE.md) — all
 eight steps, including the connection audit.
