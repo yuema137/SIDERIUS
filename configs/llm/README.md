@@ -1,5 +1,9 @@
 # configs/llm
 
-Explicit configuration inputs: per-stage routing JSON files. Loaders and section contracts are linked from `docs/reference/task-composition.md`; task data and credentials stay external.
+Per-stage routing inputs are [`certify_minimal.json`](certify_minimal.json),
+[`deepseek_tiered_pro.json`](deepseek_tiered_pro.json),
+[`openai_tiered_pro.json`](openai_tiered_pro.json), and
+[`openai_tiered_v1.json`](openai_tiered_v1.json). The launcher passes the
+selected file to `agent.llm_bridge`; credentials remain external.
 
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+See [the parent guide](../README.md) for child ownership and the focused validation route.

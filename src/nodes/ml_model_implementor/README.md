@@ -1,5 +1,6 @@
 # src/nodes/ml_model_implementor
 
-Public node entry `<node>.py` and canonical `<node>.md` contract live here. The corresponding Input/Output schemas and protocol adapter own handoffs; private helpers remain behind this boundary.
-
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+Public entry `ml_model_implementor.py` and canonical `ml_model_implementor.md`
+define the node. `ImplementorInput`/`ImplementorOutput` live in
+`src/agent/schemas/implementor.py`; the outgoing adapter is
+`ml_model_impl_to_ml_model_valid.py`. Focused tests: `tests/unit/agent/ml_model_implementor/`.

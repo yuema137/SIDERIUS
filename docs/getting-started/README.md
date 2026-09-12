@@ -1,5 +1,9 @@
 # docs/getting-started
 
-Documentation index for docs/getting-started. The Markdown pages in this directory are the named authority for their subject; source modules own behavior and this README routes maintainers without duplicating contracts.
+Start with [`installation.md`](installation.md) for the frozen environment and
+then [`first-run.md`](first-run.md) for offline checks, dry-run, and explicit
+task/data/workspace inputs. The [Quickstart pack](../../examples/quickstart/README.md)
+provides the synthetic CPU walkthrough; these pages do not qualify scientific
+hardware or model performance.
 
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+See [the parent guide](../README.md) for child ownership and the focused validation route.

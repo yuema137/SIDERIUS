@@ -1,5 +1,7 @@
 # src/nodes/ml_literature_review
 
-Public node entry `<node>.py` and canonical `<node>.md` contract live here. The corresponding Input/Output schemas and protocol adapter own handoffs; private helpers remain behind this boundary.
-
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+Public entry `ml_literature_review.py` and canonical `ml_literature_review.md`
+define the node. `LiteratureReviewInput`/`LiteratureReviewOutput` live in
+`src/agent/schemas/literature_review.py`; the fan-in protocol is
+`src/agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`.
+Focused tests: `tests/unit/agent/ml_literature_review/`.

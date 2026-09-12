@@ -1,5 +1,8 @@
 # configs/health
 
-Explicit configuration inputs: health_checks.yaml policy files. Loaders and section contracts are linked from `docs/reference/task-composition.md`; task data and credentials stay external.
+Framework Health consequence policy lives in [`health_checks.yaml`](health_checks.yaml)
+and [`health_checks_baseline_observe_mode.yaml`](health_checks_baseline_observe_mode.yaml).
+The loader is `execute_tools.health_checks.config`; task rosters and thresholds
+come from the task manifest. See [`Health gates`](../../docs/concepts/health-gates.md).
 
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+See [the parent guide](../README.md) for child ownership and the focused validation route.

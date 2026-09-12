@@ -1,5 +1,10 @@
 # docs/guides
 
-Documentation index for docs/guides. The Markdown pages in this directory are the named authority for their subject; source modules own behavior and this README routes maintainers without duplicating contracts.
+Start with [`operating-a-run.md`](operating-a-run.md), then use
+[`define-a-task.md`](define-a-task.md), [`custom-workflow.md`](custom-workflow.md),
+[`bring-your-own-metric.md`](bring-your-own-metric.md), and
+[`bring-your-own-health-checks.md`](bring-your-own-health-checks.md). Advice,
+dashboard, troubleshooting, and workspace recovery guides are linked from the
+same directory.
 
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+See [the parent guide](../README.md) for child ownership and the focused validation route.

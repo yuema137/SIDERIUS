@@ -1,5 +1,8 @@
 # docs/agent-reference/mechanisms
 
-Documentation index for docs/agent-reference/mechanisms. The Markdown pages in this directory are the named authority for their subject; source modules own behavior and this README routes maintainers without duplicating contracts.
+Use [`composition.md`](composition.md), [`data-path-and-scope.md`](data-path-and-scope.md),
+[`execution.md`](execution.md), [`health-gates.md`](health-gates.md), and the neighboring
+mechanism pages for cross-cutting contracts. Source modules remain behavioral
+authority.
 
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+See [the parent guide](../README.md) for child ownership and the focused validation route.

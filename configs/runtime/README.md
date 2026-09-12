@@ -1,5 +1,8 @@
 # configs/runtime
 
-Explicit configuration inputs: runtime_profiles.yaml. Loaders and section contracts are linked from `docs/reference/task-composition.md`; task data and credentials stay external.
+[`runtime_profiles.yaml`](runtime_profiles.yaml) supplies runtime-control
+profile inputs. The loader and admission callers under
+[`src/core/runtime_control`](../../src/core/runtime_control/README.md) own
+behavior; this file does not qualify hardware.
 
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+See [the parent guide](../README.md) for child ownership and the focused validation route.

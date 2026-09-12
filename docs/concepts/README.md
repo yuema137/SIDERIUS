@@ -1,5 +1,9 @@
 # docs/concepts
 
-Documentation index for docs/concepts. The Markdown pages in this directory are the named authority for their subject; source modules own behavior and this README routes maintainers without duplicating contracts.
+Read [`overview.md`](overview.md), then [`execution-model.md`](execution-model.md)
+and [`data-paths.md`](data-paths.md). Task declarations are in
+[`task-package.md`](task-package.md); ordering and validity are in
+[`objectives-and-metrics.md`](objectives-and-metrics.md) and
+[`health-gates.md`](health-gates.md). The [`glossary.md`](glossary.md) defines terms.
 
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+See [the parent guide](../README.md) for child ownership and the focused validation route.

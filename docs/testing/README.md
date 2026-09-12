@@ -1,5 +1,8 @@
 # docs/testing
 
-Documentation index for docs/testing. The Markdown pages in this directory are the named authority for their subject; source modules own behavior and this README routes maintainers without duplicating contracts.
+Read [`ci_parity.md`](ci_parity.md) for automatic CI/selector ownership and
+[`schema_tier_consolidation.md`](schema_tier_consolidation.md) for schema-test
+organization. These references distinguish selected deterministic tests from
+real integration and GPU qualification.
 
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+See [the parent guide](../README.md) for child ownership and the focused validation route.

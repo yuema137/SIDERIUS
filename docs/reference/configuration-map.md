@@ -29,11 +29,11 @@ dependency**.
 | a metric declaration JSON | metric id, direction, aggregation, scoreability |
 | a dataset profile JSON | partition count, anchors, peek set, opaque topology |
 
-When a run declares none of the four `configs/task_*/…` files, each falls back
-to the shipped TIDMAD copy — resolved from **this checkout**, never from the
-directory you launched from. So a chain started from anywhere (a Slurm submit
-dir, `sdsc_submission_scripts/`, `$HOME`) finds them. Your own paths may be
-absolute or relative; a relative one resolves against the repo root too.
+When a composed run omits a task-owned declaration, the corresponding binding
+is absent and the task composition loader refuses any operation that requires
+it; the framework does not silently select another task's science. Paths named
+inside a composition manifest resolve relative to that manifest. Caller-owned
+paths may also be absolute when the contract permits them.
 
 ### Framework policy — the framework's, selectable per run
 

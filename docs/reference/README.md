@@ -1,5 +1,7 @@
 # docs/reference
 
-Documentation index for docs/reference. The Markdown pages in this directory are the named authority for their subject; source modules own behavior and this README routes maintainers without duplicating contracts.
+Read [`task-composition.md`](task-composition.md) for manifest sections,
+[`entrypoints.md`](entrypoints.md) for CLI ownership, and
+[`configuration-map.md`](configuration-map.md) for config lifetimes and owners.
 
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+See [the parent guide](../README.md) for child ownership and the focused validation route.

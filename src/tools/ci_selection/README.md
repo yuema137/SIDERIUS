@@ -1,5 +1,8 @@
 # src/tools/ci_selection
 
-Named tool entrypoints and focused helpers live here. Follow each module CLI and tests; explicit inputs/outputs and possible side effects are part of its contract.
+The selection CLI is `python -m tools.ci_selection`; `manifest.py` declares
+ownership/dependency mappings and `resolver.py` derives affected tests from the
+changed paths. Unknown impact fails closed to broader validation. Focused tests
+are in `tests/unit/tools/ci_selection/test_selection_model.py`.
 
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+See [the parent guide](../README.md) for child ownership and the focused validation route.

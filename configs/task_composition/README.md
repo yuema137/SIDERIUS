@@ -1,5 +1,8 @@
 # configs/task_composition
 
-Explicit configuration inputs: the two synthetic task-composition manifests. Loaders and section contracts are linked from `docs/reference/task-composition.md`; task data and credentials stay external.
+The shipped manifests are [`quickstart.yaml`](quickstart.yaml) and
+[`synthetic_masked_regression.yaml`](synthetic_masked_regression.yaml). Their
+sections are defined by the [composition reference](../../docs/reference/task-composition.md)
+and bind the corresponding [example packages](../../examples/README.md).
 
-Validation/use route: follow the linked parent/module documentation and the focused tests for this directory; this guide is navigation, not a second API contract.
+See [the parent guide](../README.md) for child ownership and the focused validation route.
