@@ -372,7 +372,7 @@ def spawn_worker(
             stderr=subprocess.STDOUT,
             start_new_session=True,
             # Step 11 C1 (F-11-2, same omission). This spawner is reachable
-            # only from `scripts/runtime_campaign.py`, so it is NOT the
+            # only from the retired historical campaign driver, so it is NOT the
             # production defect — it is included so the transport census
             # can be a UNIVERSAL rule instead of carrying a by-name
             # exemption, which is the F-11-8 / F-P2b-4 shape.

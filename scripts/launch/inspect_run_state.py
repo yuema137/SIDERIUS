@@ -35,18 +35,18 @@ removed artifact hash, or a changed artifact. It is never advanced past —
 fail at ``restore_prior_state`` anyway, after the job was queued.
 
 Usage (legacy run layout):
-    .venv/bin/python scripts/inspect_run_state.py \\
+    .venv/bin/python scripts/launch/inspect_run_state.py \\
         --layout run \\
         --run_dir /home/klz/Data/SIDEREIS_DATA \\
         --run_name exploit_cnn_v4_0425
 
 Usage (chain layout, human view):
-    .venv/bin/python scripts/inspect_run_state.py \\
+    .venv/bin/python scripts/launch/inspect_run_state.py \\
         --layout chain \\
         --workspace /home/klz/Data/SIDEREIS_DATA/exploration_<name>
 
 Usage (chain layout, machine view for shell capture):
-    NEXT=$(.venv/bin/python scripts/inspect_run_state.py \\
+    NEXT=$(.venv/bin/python scripts/launch/inspect_run_state.py \\
         --layout chain --workspace "$WORKSPACE" --next-iter)
 
 This is a read-only foundation tool. It does not modify any files.

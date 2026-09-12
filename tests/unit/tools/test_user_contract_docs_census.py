@@ -88,6 +88,7 @@ REQUIRED_MEMBERS: tuple[str, ...] = (
     "examples/README.md",
     "src/agent/README.md",
     "src/nodes/README.md",
+    "src/tools/README.md",
     "docs/getting-started/first-run.md",
     "docs/guides/define-a-task.md",
     "docs/concepts/health-gates.md",
@@ -180,15 +181,19 @@ def census_files() -> list[str]:
             members.update(
                 p.relative_to(REPO_ROOT).as_posix() for p in (REPO_ROOT / tree).glob("*.md")
             )
-    # Every top-level module README (dynamic: an omitted new module README
-    # is swept in, not silently absent).
+    # Every top-level module README, including every direct src package map
+    # (dynamic: an omitted new module README is swept in, not silently absent).
     if tracked is not None:
         for p in tracked:
             parts = PurePosixPath(p).parts
-            if len(parts) == 2 and parts[1] == "README.md":
+            if (len(parts) == 2 and parts[1] == "README.md") or (
+                len(parts) == 3 and parts[0] == "src" and parts[2] == "README.md"
+            ):
                 members.add(p)
     else:
         for p in REPO_ROOT.glob("*/README.md"):
+            members.add(p.relative_to(REPO_ROOT).as_posix())
+        for p in (REPO_ROOT / "src").glob("*/README.md"):
             members.add(p.relative_to(REPO_ROOT).as_posix())
     return sorted(members)
 

@@ -111,7 +111,9 @@ weakening a refusal into a fallback is the defect class the guards exist for.
 ## Minimal example
 
 ```bash
-# one composed dry iteration, directly through the module CLI
+# The module CLI is an effectful workflow entry and requires a source run,
+# model directory and data root. For a credential-free view of the complete
+# chain, use the maintained launcher dry-run in the root README.
 .venv/bin/python src/workflows/model_exploration.py \
     --task_composition configs/task_composition/quickstart.yaml \
     --data_dir /tmp/quickstart-data --workspace /tmp/ws --run_name demo_v1 \
