@@ -82,7 +82,7 @@ process boundary.
 
 ## Step 3 — Write the task config
 
-Two prose fields, both required:
+Two typed task-context fields, both required in a production composition:
 
 - **`task_description`** — the scientific problem, as you would explain it to a
   new collaborator;
@@ -90,9 +90,10 @@ Two prose fields, both required:
   exact tensor contract, e.g.
   `[B, 3, 144, 144] float32 in [0,1] → [B, 37] logits`.
 
-These reach every LLM prompt. Be precise about the forward contract in
-particular: it is what stops the implementor writing a model with the wrong
-output rank.
+The caller routes these fields to the node prompts that consume them; they are
+not copied into every prompt indiscriminately. Be precise about the typed
+forward contract in particular: it is what stops the implementor writing a
+model with the wrong declared I/O.
 
 ## Step 4 — Declare the primary metric
 

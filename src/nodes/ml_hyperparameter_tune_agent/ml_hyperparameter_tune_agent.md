@@ -362,7 +362,11 @@ executes, without distorting what the planner is allowed to decide. See
     --file_index 6
 ```
 
-The CLI is the historical TIDMAD-style invocation and is what `scripts/run_comparison.py` calls. It supports the full range of input fields via flags (the schema's 38 fields map to ~30 CLI args). Result lands at `{workspace}/run_output_{run_name}.json`.
+The CLI is a standalone invocation surface with a broad flag set; it does not
+replace the composed chain. When `--task_composition` is supplied, `--data_dir`
+is required and the task's metric/data/Health bindings are resolved before any
+LLM call. The former scientific comparison caller belongs to the external
+experiment repository. Result lands at `{workspace}/run_output_{run_name}.json`.
 
 **Limitations of standalone CLI use** (vs workflow-driven):
 
@@ -390,7 +394,7 @@ The CLI is the historical TIDMAD-style invocation and is what `scripts/run_compa
 | `--order_strategy_override` | `str` (`shuffle` \| `sequential`) | `None` | Force the training sample visitation order for every round, overriding any agent proposal. Omit = the agent decides, falling back to `shuffle`. |
 | `--file_order_override` | `str` (comma-separated) | `None` | File visitation **order** for `--order_strategy_override sequential`, e.g. `4,6,5,9,7,8`. Order is preserved as written; must be a full permutation of the resolved `DataScope`. Range syntax (`4-9`) is rejected — a range cannot express an order. Omit for ascending file index. |
 | `--progress_bar` | flag | `False` | Stream subprocess tqdm output. |
-| `--task_composition` | `str` (path, optional) | `None` | **Step 12 / PR-12d D8a.** Path to a YAML task-composition manifest. Omitted = the legacy un-composed run, byte-identical to pre-Step-10 behaviour. Supplied, it binds this run's task data path, dataset profile, metric, declared secondaries, Health family and task description/forward contract explicitly, and every unresolvable reference fails closed before any LLM call. Composed exactly ONCE in `main()` — the same composed object threads into both `build_agent_input` (as `task_composition_ref`) and the `bind_run_task_composition` context around `.run()`, because composing twice would be a second resolution the registry-identity rules (Step 12 / PR-12bc CASE A) treat as a fresh instance. Same manifest shape and composition authority the chain launcher's own `--task_composition` already uses (`sdsc_submission_scripts/run_chain.sh`) — added here so a single model can be run composed and `--force_model`-locked in one launch, without the multi-agent chain's proposer choosing the architecture. |
+| `--task_composition` | `str` (path, optional) | `None` | Path to a YAML task-composition manifest. When supplied, it binds this run's task data path, dataset profile, metric, declared secondaries, Health family and task context before any LLM call. A composed invocation also requires `--data_dir`; omission is refused. The manifest is composed once and shared with the run-scoped binding. |
 
 ## Python API usage
 

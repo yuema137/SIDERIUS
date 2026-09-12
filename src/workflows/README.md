@@ -51,9 +51,9 @@ invariants lock and effective health config (written via `core` /
 - **Run-scoped binding**: a composed run binds data path, profile, metric,
   secondaries, deliverable naming, task config for the whole run; an
   explicitly composed run **never falls back to TIDMAD**.
-- Plugin registration into the workspace (`plugins/{run_name}/`) and — ⚠ a
-  known checkout-mutation, see below — promotion into the repo-level
-  `agent_generated/` library.
+- Plugin registration and generated sources are rooted in the caller-owned
+  workspace (`plugins/{run_name}/` and its generated-library paths); the
+  workflow does not make the checkout a hidden task workspace.
 
 ## Non-owned semantics
 
@@ -79,11 +79,9 @@ invariants lock and effective health config (written via `core` /
 Creates `run_dir = {workspace}/{run_name}` and the per-iteration tree; snapshots
 `configs/task_config.yaml` into the run dir (only if absent); writes the
 workflow summary; calls `ensure_run_invariants` (chain-level lock). Sets
-`SIDERIUS_CHAIN_WORKSPACE`; mirrors validated plugins into workspace dirs and
-**promotes them into the checkout-level `agent_generated/` library, which every
-later run on the same checkout preloads** — workspace state is isolated, that
-library is not (recorded product gap; see
-[workspaces and resume](../../docs/guides/workspaces-and-resume.md)).
+`SIDERIUS_CHAIN_WORKSPACE`; mirrors validated plugins into workspace dirs. The
+generated library is caller/workspace-owned and must be explicitly bound by
+low-level consumers; it is not an implicit inter-run checkout channel.
 
 ## Failure modes
 

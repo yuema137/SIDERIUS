@@ -9,15 +9,19 @@ specification into `ImplementorInput`, and leaves the caller in control of the
 workspace and task context. It does not invoke an LLM or execute a node.
 
 ```python
+import tempfile
 from pathlib import Path
 
 from agent.schemas.implementor import ImplementorInput
 from agent.schemas.proposal import ExpertAdvice, FalsifiablePrediction, ProposalOutput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
+from agent.schemas.implementor import ImplementorTaskBlocks
+from agent.schemas.model_io_contract import Dimension, ModelIOContract, TensorAxis, TensorContract
+from ml_models.models_format_sandbox import DtypeAdmissibility
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
 
-workspace = Path("/tmp/my-task-workspace")
+workspace = Path(tempfile.mkdtemp(prefix="siderius-custom-workflow-"))
 storage = StorageConfig(
     backend="local",
     local=LocalStorageConfig(workspace=str(workspace), run_name="demo"),
@@ -37,7 +41,20 @@ proposal = ProposalOutput(
 )
 
 # The adapter carries proposal fields and caller-owned storage. It does not
-# transport task context: attach the resolved run declaration at this boundary.
+# transport task context: attach the resolved run declaration at this boundary,
+# then revalidate the complete typed object.
+model_io = ModelIOContract(
+    input=TensorContract(
+        axes=(TensorAxis(dimension=Dimension(symbolic="B")),
+              TensorAxis(dimension=Dimension(symbolic="T"))),
+        dtype=DtypeAdmissibility(admissible=("float32",)),
+    ),
+    output=TensorContract(
+        axes=(TensorAxis(dimension=Dimension(symbolic="B")),
+              TensorAxis(dimension=Dimension(fixed=1))),
+        dtype=DtypeAdmissibility(admissible=("float32",)),
+    ),
+)
 implementor = local_full_spec(proposal, storage).model_copy(update={
     "task_description": "The caller's declared supervised task.",
     "forward_contract": ForwardContract(
@@ -45,12 +62,19 @@ implementor = local_full_spec(proposal, storage).model_copy(update={
         input_description="caller-declared features",
         output_shape="[B, 1] float32",
         output_description="caller-declared prediction",
+        model_io=model_io,
+    ),
+    "implementor_blocks": ImplementorTaskBlocks(
+        science_domain="demo prediction", continuous_output_phrase="demo value"
     ),
 })
+implementor = ImplementorInput.model_validate(implementor.model_dump())
 assert isinstance(implementor, ImplementorInput)
 assert implementor.storage == storage
 assert implementor.task_description.startswith("The caller")
 assert implementor.forward_contract.output_shape == "[B, 1] float32"
+assert implementor.forward_contract.model_io == model_io
+assert implementor.implementor_blocks is not None
 ```
 
 In a real composed run, `task_description`, `forward_contract` and optional
@@ -63,7 +87,8 @@ outside this deterministic example.
 `StorageConfig` describes where the node records its own inputs and outputs; it
 is not an inter-node message channel. Typed protocol adapters carry values in
 memory. If a workflow needs persistence, it must use the declared storage and
-then validate records at the next boundary.
+then validate records at the next boundary. The temporary workspace above is
+created by the caller and can be removed after the demonstration.
 
 See the [task declaration guide](define-a-task.md), the
 [composition reference](../reference/task-composition.md), and the
