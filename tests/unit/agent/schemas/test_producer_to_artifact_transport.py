@@ -34,8 +34,8 @@ from typing import ClassVar
 import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
-from workflows.run_one_iteration import write_manifest
 from tests.helpers.tuner_source import tuner_lifecycle_source
+from workflows.run_one_iteration import write_manifest
 
 # (field, where it lives, the value the producer writes)
 OUTPUT_LEVEL = [

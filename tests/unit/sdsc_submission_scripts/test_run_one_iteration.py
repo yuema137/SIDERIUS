@@ -35,8 +35,8 @@ from unittest.mock import patch
 import pytest
 
 from agent.schemas.health_feedback import TrialValidityFeedback
-from workflows import run_one_iteration as runner
 from tests.helpers.launcher_bindings import effective_workflow_kwargs
+from workflows import run_one_iteration as runner
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _QUICKSTART_ARGS = [
@@ -2075,10 +2075,7 @@ class TestFormalLaunchPolicyIsEnforcedAtTheChainBoundary:
         MUTATION TARGET: dropping either line from the argv assembly.
         """
         common = (
-            pathlib.Path(__file__).resolve().parents[3]
-            / "scripts"
-            / "launch"
-            / "_chain_common.sh"
+            pathlib.Path(__file__).resolve().parents[3] / "scripts" / "launch" / "_chain_common.sh"
         ).read_text(encoding="utf-8")
         assert "HEALTHGATE_MODE=blocking" in common
         assert "RESULT_AUTHORITY=scientific" in common

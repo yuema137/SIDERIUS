@@ -40,8 +40,18 @@ RUNNER = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
 #: Required by the wrapper's own validation; supplied so a test exercises
 #: the token under study rather than tripping over an unrelated check.
 BASE = [
-    "--workspace", "/tmp/ws", "--iteration", "3", "--source_paths", "/tmp/seed.json",
-    "--run_name", "r", "--task_composition", "/tmp/task.yaml", "--data_dir", "/tmp/data",
+    "--workspace",
+    "/tmp/ws",
+    "--iteration",
+    "3",
+    "--source_paths",
+    "/tmp/seed.json",
+    "--run_name",
+    "r",
+    "--task_composition",
+    "/tmp/task.yaml",
+    "--data_dir",
+    "/tmp/data",
 ]
 
 

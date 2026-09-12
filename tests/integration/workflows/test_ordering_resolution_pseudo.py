@@ -48,10 +48,10 @@ from agent.schemas.proposal import ExpertAdvice, ProposalOutput
 from agent.schemas.validator import ValidatorOutput
 from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
-from workflows.run_one_iteration import write_manifest
 from tests.helpers.metric_fixtures import shipped_spec
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.run_one_iteration import write_manifest
 
 #: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
 #: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in

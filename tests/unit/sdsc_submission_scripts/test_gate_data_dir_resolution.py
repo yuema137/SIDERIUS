@@ -98,7 +98,7 @@ def test_no_machine_specific_dataset_path_is_tracked():
     repo = Path(__file__).resolve().parents[3]
     code_surfaces = [
         repo / "src/execute_tools/data_paths.py",
-            repo / "src/workflows/run_one_iteration.py",
+        repo / "src/workflows/run_one_iteration.py",
         repo / "scripts/launch/_chain_common.sh",
         repo / "scripts/launch/run_chain.sh",
     ]

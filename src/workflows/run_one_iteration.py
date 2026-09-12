@@ -116,7 +116,9 @@ from workflows.task_composition import (
 )
 
 _CHECKOUT_ROOT = checkout_root()
-SIDERIUS_ROOT = str(_CHECKOUT_ROOT) if _CHECKOUT_ROOT is not None else str(Path(__file__).resolve().parents[2])
+SIDERIUS_ROOT = (
+    str(_CHECKOUT_ROOT) if _CHECKOUT_ROOT is not None else str(Path(__file__).resolve().parents[2])
+)
 if _CHECKOUT_ROOT is not None:
     load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
 

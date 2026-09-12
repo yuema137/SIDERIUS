@@ -138,7 +138,7 @@ class TestEndToEndPlumbing:
         from pathlib import Path
 
         launcher = (
-        Path(__file__).resolve().parents[4] / "src" / "workflows" / "run_one_iteration.py"
+            Path(__file__).resolve().parents[4] / "src" / "workflows" / "run_one_iteration.py"
         )
         # Step 09.5a C3: the launcher binds transit configuration inside the
         # WorkflowLaunchConfig it constructs, one level below the run_workflow

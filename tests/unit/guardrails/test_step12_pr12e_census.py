@@ -1053,7 +1053,9 @@ class TestTheFileSetCannotBeBlind:
         suffixes = {p.suffix for p in walked}
         for suffix in (".py", ".sh", ".slurm", ".js", ".md"):
             assert suffix in suffixes, f"no {suffix} file reached the census"
-        launch = [p for p in walked if "scripts" in p.parts and p.parent.name in {"launch", "slurm"}]
+        launch = [
+            p for p in walked if "scripts" in p.parts and p.parent.name in {"launch", "slurm"}
+        ]
         assert launch
         assert any(p.name == "run_chain.sh" for p in launch)
         assert any(p.name == "submit_one_iteration.slurm" for p in launch)

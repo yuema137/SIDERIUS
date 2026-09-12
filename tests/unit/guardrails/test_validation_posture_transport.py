@@ -36,8 +36,8 @@ import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
-from workflows.run_one_iteration import build_parser, main
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.run_one_iteration import build_parser, main
 
 #: Every hop between the CLI and the tuner input that declares its parameters
 #: EXPLICITLY, so an unknown keyword is a TypeError at launch. Both entries
