@@ -1449,8 +1449,8 @@ def restore_prior_state(
     Args:
         workspace: chain workspace root containing ``iter_NNN/`` and
             ``plugins/iter_NNN/`` subdirs. Same value as the ``--workspace``
-        flag on ``src/workflows/run_one_iteration.py`` and
-        ``scripts/launch/run_chain.sh``.
+            flag on ``src/workflows/run_one_iteration.py`` and
+            ``scripts/launch/run_chain.sh``.
         current_iter: 1-based index of the iter this process is about to
             run. Iters ``[1, current_iter-1]`` are restored.
             ``current_iter == 1`` is a no-op that returns ``seed_paths``
