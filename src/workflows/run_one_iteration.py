@@ -53,7 +53,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast, get_args
+from typing import get_args
 
 # A direct one-iteration launch does not pass through run_chain.sh.  Establish
 # the same read-only-checkout policy before importing any SIDERIUS module, and
@@ -3174,6 +3174,8 @@ def main():
         if preflight_composition_error is not None:
             raise preflight_composition_error
         run_composition = preflight_composition
+        if run_composition is None:
+            raise ValueError("required task composition was not resolved")
     except Exception as e:
         print(f"FAIL: could not resolve --task_composition {args.task_composition!r}: {e}")
         write_manifest(
@@ -3322,13 +3324,8 @@ def main():
         # ADMITTED on the strength of another task's dataset where it is
         # present, which is every campaign host.
         #
-        # This call retains the pre-existing runtime contract: the composed
-        # capability resolver dereferences its required composition, while
-        # the surrounding activation path handles the legacy no-composition
-        # case unchanged. The cast supplies that boundary fact to Pyright
-        # without adding a fallback or changing runtime control flow.
         measurement_capability = resolve_composed_measurement_capability(
-            cast(RunTaskComposition, run_composition), dataset_root=args.data_dir
+            run_composition, dataset_root=args.data_dir
         )
         # Step 11 C4 — the run's resolved physical data root travels with
         # the composition binding. `args.data_dir` was already put through
