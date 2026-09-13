@@ -3251,22 +3251,28 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
         )
         sys.exit(1)
 
+    from ml_models.plugin_binding import bind_run_model_plugins
+
     try:
-        state = restore_prior_state(
-            workspace=args.workspace,
-            current_iter=args.start_iteration,
-            seed_paths=resolved_seeds,
-            expected_invariants=expected_invariants,
-            dataset_partition_count=(
-                run_composition.dataset_profile.partition_count
-                if run_composition is not None
-                else resolve_dataset_profile().partition_count
+        with (
+            bind_code_package(
+                run_composition.code_package if run_composition is not None else None
             ),
-            model_plugin_binding=(
+            bind_run_model_plugins(
                 run_composition.model_plugins if run_composition is not None else None
             ),
-            code_package=(run_composition.code_package if run_composition is not None else None),
-        )
+        ):
+            state = restore_prior_state(
+                workspace=args.workspace,
+                current_iter=args.start_iteration,
+                seed_paths=resolved_seeds,
+                expected_invariants=expected_invariants,
+                dataset_partition_count=(
+                    run_composition.dataset_profile.partition_count
+                    if run_composition is not None
+                    else resolve_dataset_profile().partition_count
+                ),
+            )
     except (ResumeError, RunInvariantsViolation) as e:
         print(f"FAIL: restore_prior_state refused to chain: {e}")
         write_manifest(

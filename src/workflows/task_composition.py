@@ -585,23 +585,9 @@ def _load_symbol(
         raise TaskCompositionError(f"{where} requires a non-empty string 'file'; got {file_ref!r}.")
     logical = _normalized_ref(file_ref)
     target = _resolve_path(file_ref, manifest_dir)
-    # Keep the family's required-symbol checks and registration rollback inside
-    # acquisition: a cached helper is not successful resolution by itself.
-    from execute_tools.task_registration_scope import registration_rollback
-
-    with registration_rollback(), acquire_module(target) as captured_module:
-        if captured_module is not None:
-            _require_companion_symbols(captured_module, also_require, where, logical)
-            value = _getattr_or_fail(captured_module, symbol, where, logical)
-            member = selected_member(target)
-            assert member is not None
-            return value, ResolvedPluginRef(
-                configured_ref=logical,
-                symbol=symbol,
-                content_sha256=member.pin.content_sha256,
-                absolute_path=target,
-                local_code=selected_identity(target),
-            )
+    captured = _load_captured_symbol(target, logical, symbol, where, also_require)
+    if captured is not None:
+        return captured
     if not os.path.isfile(target):
         raise TaskCompositionError(
             f"{where} names plugin file {logical!r}, which does not exist at "
@@ -660,6 +646,28 @@ def _load_symbol(
         absolute_path=target,
     )
     return _getattr_or_fail(module, symbol, where, logical), resolved
+
+
+def _load_captured_symbol(
+    target: str, logical: str, symbol: str, where: str, also_require: tuple[str, ...]
+) -> tuple[Any, ResolvedPluginRef] | None:
+    """Resolve a captured entry and its companions within one family transaction."""
+    from execute_tools.task_registration_scope import registration_rollback
+
+    with registration_rollback(), acquire_module(target) as module:
+        if module is None:
+            return None
+        _require_companion_symbols(module, also_require, where, logical)
+        value = _getattr_or_fail(module, symbol, where, logical)
+        member = selected_member(target)
+        assert member is not None
+        return value, ResolvedPluginRef(
+            configured_ref=logical,
+            symbol=symbol,
+            content_sha256=member.pin.content_sha256,
+            absolute_path=target,
+            local_code=selected_identity(target),
+        )
 
 
 def _require_companion_symbols(

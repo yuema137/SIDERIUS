@@ -97,23 +97,17 @@ class _InvalidPackageModel(ValueError):
     """Unwind new modules when the family's ordinary metadata check rejects."""
 
 
-def _load_plugin(path: str) -> dict | None:
-    """Load a single plugin file. Returns attribute dict or None if invalid.
-
-    The module is registered in ``sys.modules`` under a stable, filename-
-    derived name so that downstream callers of ``inspect.getsource(cls)``
-    (Phase D.1 — planner-prompt excerpt) can resolve the source file.
-    Without this, classes defined in the plugin appear as built-ins.
-    """
+def _load_captured_plugin(path: str) -> dict | None:
+    """Validate a selected package model, rolling back rejected acquisitions."""
     from core.local_code import LocalCodeError, acquire_module
 
     try:
         with acquire_module(path) as captured:
-            if captured is not None:
-                attributes = _plugin_attributes(captured, path)
-                if attributes is None:
-                    raise _InvalidPackageModel
-                return attributes
+            assert captured is not None
+            attributes = _plugin_attributes(captured, path)
+            if attributes is None:
+                raise _InvalidPackageModel
+            return attributes
     except LocalCodeError:
         raise
     except _InvalidPackageModel:
@@ -125,6 +119,18 @@ def _load_plugin(path: str) -> dict | None:
         print(f"[PluginLoader] Failed to load {path}: {exc}")
         return None
 
+
+def _load_plugin(path: str) -> dict | None:
+    """Load a single plugin file. Returns attribute dict or None if invalid.
+
+    Legacy modules retain their filename-derived ``sys.modules`` name for
+    downstream source inspection; declared members use their captured package.
+    """
+    from core.local_code import selected_member
+
+    if selected_member(path) is not None:
+        # Invalid selected metadata is an ordinary refusal, never legacy fallback.
+        return _load_captured_plugin(path)
     module_name = _MODULE_NAME_PREFIX + os.path.splitext(os.path.basename(path))[0]
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:

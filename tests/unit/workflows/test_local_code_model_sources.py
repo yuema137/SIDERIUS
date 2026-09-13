@@ -159,3 +159,23 @@ def test_model_acquisition_does_not_erase_explicitly_wrapped_package_refusal(tmp
         pytest.raises(LocalCodeError, match="undeclared relative import"),
     ):
         register_model_in_memory(str(source))
+
+
+def test_invalid_captured_model_rolls_back_without_legacy_retry(tmp_path):
+    import sys
+
+    from ml_models.plugin_loader import _load_plugin
+
+    source = tmp_path / "invalid.py"
+    marker = tmp_path / "executed"
+    source.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('captured')\n")
+    package = capture_package(CodePackageDeclaration(root=".", files=(source.name,)), tmp_path)
+    source.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('legacy')\n"
+        "raise AssertionError('invalid capture must not retry legacy disk')\n"
+    )
+    before = set(sys.modules)
+    with bind_code_package(package):
+        assert _load_plugin(str(source)) is None
+    assert marker.read_text() == "captured"
+    assert not {name for name in set(sys.modules) - before if name.startswith("_siderius_task_")}

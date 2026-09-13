@@ -12,6 +12,7 @@ import yaml
 from core.local_code import CodePackageDeclaration, bind_code_package, capture_package
 from execute_tools.task_data_path import content_identity, registered_task_data_path_ids
 from execute_tools.task_registration_scope import run_registration_scope
+from tests.unit.core.test_resume import isolated_registries
 from workflows.task_composition import (
     TaskCompositionError,
     _load_symbol,
@@ -67,7 +68,10 @@ def test_composition_registration_identity_includes_helper_and_excludes_host(tmp
         assert content_identity(changed.task_data_path) != values[0][1]
 
 
-def test_missing_symbol_rolls_back_import_registration_and_captured_entry_hash(tmp_path):
+@pytest.mark.parametrize("missing_companion", [False, True])
+def test_missing_symbol_rolls_back_import_registration_and_captured_entry_hash(
+    tmp_path, missing_companion
+):
     """Family symbol checks are inside acquisition; later hashes never reread disk."""
     manifest = modular_fixture(tmp_path / "task")
     helper = manifest.parent / "plugins/helper.py"
@@ -85,7 +89,15 @@ def test_missing_symbol_rolls_back_import_registration_and_captured_entry_hash(t
     before = registered_task_data_path_ids()
     with run_registration_scope(), bind_code_package(captured):
         with pytest.raises(TaskCompositionError, match="Missing"):
-            _load_symbol({"file": str(entry), "symbol": "Missing"}, str(manifest.parent), "fixture")
+            _load_symbol(
+                {
+                    "file": str(entry),
+                    "symbol": "SpectroTaskDataPath" if missing_companion else "Missing",
+                },
+                str(manifest.parent),
+                "fixture",
+                also_require=("Missing",) if missing_companion else (),
+            )
         assert registered_task_data_path_ids() == before
         _, ref = _load_symbol(
             {"file": str(entry), "symbol": "SpectroTaskDataPath"}, str(manifest.parent), "fixture"
@@ -218,3 +230,57 @@ def test_iteration_policy_preflight_has_capture_before_run_activation(tmp_path, 
     with run_registration_scope(), pytest.raises(Observed):
         runner.main()
     assert active_package() is None
+
+
+@pytest.mark.usefixtures("isolated_registries")
+def test_iteration_restore_sees_existing_package_and_model_scopes(tmp_path, monkeypatch):
+    """Actual runner reaches restore before full composition activation, then unwinds."""
+    from core import resume
+    from core.local_code import active_package
+    from ml_models.plugin_binding import active_run_model_plugins
+    from tests.unit.ml_models.test_step12_pr12d_dp_plugin_binding import write_plugin
+    from tests.unit.sdsc_submission_scripts.test_run_one_iteration import _run_main
+    from workflows import run_one_iteration as runner
+
+    manifest = modular_fixture(tmp_path / "task")
+    write_plugin(manifest.parent / "models", "resume_scope_net")
+    raw = yaml.safe_load(manifest.read_text())
+    raw["code_package"]["files"].append("models/resume_scope_net.py")
+    raw["model_plugins"] = {"dir": "models", "require": ["resume_scope_net"]}
+    manifest.write_text(yaml.safe_dump(raw))
+    previous_package, previous_models = active_package(), active_run_model_plugins()
+
+    class Observed(BaseException):
+        pass
+
+    def observe_restore(
+        workspace, current_iter, seed_paths, expected_invariants=None, dataset_partition_count=None
+    ):
+        package, models = active_package(), active_run_model_plugins()
+        assert package is not None and package.root == manifest.parent
+        assert models is not None and models.required_model_types == ("resume_scope_net",)
+        assert models.plugins[0].local_code.package == package.identity
+        assert dataset_partition_count == 5
+        raise Observed
+
+    monkeypatch.setattr(resume, "restore_prior_state", observe_restore)
+    # This witness owns the binding edge, not Health preflight/materialization.
+    monkeypatch.setattr(runner, "validate_formal_launch", lambda **kwargs: None)
+    monkeypatch.setattr(runner, "compute_expected_invariants", lambda *args, **kwargs: None)
+    for key in ("SIDERIUS_GENERATED_LIBRARY_DIR", "SIDERIUS_CHAIN_WORKSPACE"):
+        monkeypatch.delenv(key, raising=False)
+    with run_registration_scope(), pytest.raises(Observed):
+        _run_main(
+            [
+                "--workspace",
+                str(tmp_path / "workspace"),
+                "--start_iteration",
+                "1",
+                "--task_composition",
+                str(manifest),
+                "--data_dir",
+                str(tmp_path),
+            ]
+        )
+    assert active_package() is previous_package
+    assert active_run_model_plugins() is previous_models

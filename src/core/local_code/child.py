@@ -36,9 +36,9 @@ def prepare_child(argv: Sequence[str], environ: Mapping[str, str]) -> ChildInvoc
     from core.local_code.binding import active_package
     from core.local_code.transport import DIGEST_ENV, MANIFEST_ENV
 
+    if MANIFEST_ENV not in environ and DIGEST_ENV not in environ:
+        return ChildInvocation(list(argv), environ if isinstance(environ, dict) else dict(environ))
     env = dict(environ)
-    if MANIFEST_ENV not in env and DIGEST_ENV not in env:
-        return ChildInvocation(list(argv), env)
     package = active_package()
     if package is None:
         raise LocalCodeError("code_package child requires its captured parent binding")

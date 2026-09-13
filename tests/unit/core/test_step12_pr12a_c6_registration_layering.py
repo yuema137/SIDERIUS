@@ -212,14 +212,33 @@ class TestResumeKeepsWarnAndContinue:
     memory_history.
     """
 
-    def test_the_failure_branch_still_warns_rather_than_raising(self):
+    def test_the_failure_branch_still_warns_rather_than_raising(self, tmp_path):
+        from core.resume_plugins import restore_model_plugin
+        from ml_models.plugin_loader import register_model_in_memory
+
         source = (CORE / "resume.py").read_text(encoding="utf-8")
-        marker = "registered = register_model_in_memory(plugin_file)"
-        assert marker in source
-        after = source[source.index(marker) : source.index(marker) + 900]
-        assert "if registered is None:" in after
-        assert "warnings.warn(" in after
-        assert "raise" not in after.split("warnings.warn(")[0]
+        calls = [
+            n
+            for n in ast.walk(ast.parse(source))
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "restore_model_plugin"
+        ]
+        assert len(calls) == 1
+        registration = next(kw.value for kw in calls[0].keywords if kw.arg == "register")
+        assert isinstance(registration, ast.Name) and registration.id == "register_model_in_memory"
+        broken = tmp_path / "broken.py"
+        broken.write_text("# missing ordinary model metadata\n")
+        with pytest.warns(UserWarning, match="Continuing with JSON-only history"):
+            assert (
+                restore_model_plugin(
+                    model_type="ordinary_broken",
+                    generated_path=str(broken),
+                    iteration=1,
+                    register=register_model_in_memory,
+                )
+                is None
+            )
 
     def test_the_public_authority_returns_None_rather_than_raising(self, tmp_path):
         """The behavioural half: warn-and-continue is only preserved if the

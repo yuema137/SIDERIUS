@@ -6,9 +6,9 @@ import os
 import warnings
 from collections.abc import Callable
 
-from core.local_code import CapturedCodePackage, LocalCodeError, bind_code_package
+from core.local_code import LocalCodeError, active_package, bind_code_package
 from ml_models.plugin_binding import (
-    RunModelPluginBinding,
+    active_run_model_plugins,
     bind_run_model_plugins,
     declared_package_model,
     require_declared_model_source,
@@ -36,13 +36,13 @@ def restore_model_plugin(
     model_type: str,
     generated_path: str,
     iteration: int,
-    binding: RunModelPluginBinding | None,
-    package: CapturedCodePackage | None,
     register: Callable[[str], str | None],
 ) -> str | None:
     """The caller must finish all existing invariant checks before this mutation."""
+    binding = active_run_model_plugins()
     declared = declared_package_model(model_type, binding)
     if declared is not None:
+        package = active_package()
         if package is None:
             raise LocalCodeError(
                 f"declared package model {model_type!r} requires its current capture"

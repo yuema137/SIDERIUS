@@ -100,6 +100,7 @@ def test_no_package_invocation_and_explicit_absence_keep_old_contract(tmp_path, 
     env = {"A": "one"}
     invocation = prepare_child(command, env)
     assert invocation.argv == command and invocation.env == env
+    assert invocation.env is env
     assert invocation.channel is None
     monkeypatch.setenv(FAILURE_ENV, "stale invalid descriptor")
     with root_code_scope():

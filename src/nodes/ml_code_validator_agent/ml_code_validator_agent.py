@@ -77,6 +77,13 @@ from nodes.ml_code_validator_agent.source import (
     read_source,
 )
 
+__all__ = [
+    "MLCodeValidatorAgent",
+    "main",
+]
+# Acquisition helpers are new private implementation details, not moved APIs.
+_COMPATIBILITY_REEXPORTS: tuple[str, ...] = ()
+
 # ---------------------------------------------------------------------------
 # LLM prompts
 # ---------------------------------------------------------------------------

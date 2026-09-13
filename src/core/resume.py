@@ -51,7 +51,6 @@ from core.iteration_manifest import (
     ManifestVerdict,
     verify_iteration_manifest,
 )
-from core.local_code import CapturedCodePackage
 from core.resume_plugins import restore_model_plugin
 from core.run_invariants import (
     RunInvariants,
@@ -78,7 +77,6 @@ from execute_tools.health_checks.config import (
     read_effective_config_body_sha,
 )
 from execute_tools.metric_order import MetricOrder
-from ml_models.plugin_binding import RunModelPluginBinding
 
 # Step 12 / PR-12a C6 (09.5 Q2 = B) — the PUBLIC registration authority.
 # `core` used to import a PRIVATE symbol from `workflows`, which is the wrong
@@ -1454,8 +1452,6 @@ def restore_prior_state(
     seed_paths: Sequence[str],
     expected_invariants: RunInvariants | None = None,
     dataset_partition_count: int | None = None,
-    model_plugin_binding: RunModelPluginBinding | None = None,
-    code_package: CapturedCodePackage | None = None,
 ) -> RestoredState:
     """Restore every prior iter's plugin classes and assemble the
     source-paths list for ``run_workflow``.
@@ -1485,9 +1481,6 @@ def restore_prior_state(
             resolved dataset profile. The chain runner supplies this value
             explicitly because resume occurs before task-composition
             activation. ``None`` preserves the legacy bound-profile lookup.
-        model_plugin_binding: Explicit current model declaration, resolved before
-            activation; only package members override historical generated paths.
-        code_package: That declaration's captured bytes for package acquisition.
 
     Returns:
         :class:`RestoredState` with ``resolved_source_paths``,
@@ -1640,8 +1633,6 @@ def restore_prior_state(
             model_type=parsed.model_type,
             generated_path=plugin_file,
             iteration=iter_idx,
-            binding=model_plugin_binding,
-            package=code_package,
             register=register_model_in_memory,
         )
         if registered is not None:
