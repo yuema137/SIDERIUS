@@ -119,3 +119,20 @@ opaque scope. Children run as installed modules from an unrelated temporary
 working directory with no `PYTHONPATH` overlay. The cohort uses tiny synthetic
 HDF5 files on CPU; it performs no provider call, GPU work or scientific-task
 execution.
+
+## Three-iteration scoring-error continuity (manual, offline)
+
+Run the V8 workflow witness from the checkout's frozen environment:
+
+```bash
+env -u PYTHONPATH -u VIRTUAL_ENV CUDA_VISIBLE_DEVICES= \
+  OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2 \
+  timeout 180 .venv/bin/python -m pytest \
+  tests/integration/workflows/test_v8_certification_smoke.py -q
+```
+
+Its one case must pass without skips. It runs three pseudo workflow iterations
+under the shipped Quickstart composition and proves that iteration 2's named
+scoring-crash evidence reaches iteration 3 while all three evolution-log rows
+persist below pytest's temporary workspace. Agent boundaries are mocked; there
+is no provider, GPU, external dataset, training, inference or scoring arithmetic.
