@@ -1,0 +1,62 @@
+# Same synthetic data/arithmetic as the single-file example; explicit local
+# package imports add shared Python class identity and optional diagnostics.
+code_package:
+  root: ..
+  files:
+    - plugins/_masked_task.py
+    - plugins/_masked_metrics.py
+    - plugins/_masked_health_views.py
+    - plugins/masked_reference_mlp.py
+    - plugins/masked_mse_loss.py
+    - modular/_shared.py
+    - modular/_metrics.py
+    - modular/_health.py
+    - modular/_observables.py
+
+task_data_path:
+  file: ../plugins/_masked_task.py
+  symbol: SyntheticMaskedTaskDataPath
+  id: synthetic_masked_regression
+  config:
+    train_shards: [0, 1]
+    eval_shard: 2
+dataset_profile:
+  config: ../declared/dataset_profile.json
+metric:
+  declaration: ../declared/metric_masked_mse.json
+  implementation:
+    file: _metrics.py
+    symbol: SharedScopeMaskedMse
+  scoreability_contracts:
+    deliverable_presence:
+      file: _metrics.py
+      symbol: ModularPresence
+secondary_metrics:
+  - declaration: ../declared/metric_masked_mae.json
+    implementation:
+      file: ../plugins/_masked_metrics.py
+      symbol: MaskedMaeMetric
+static_observables:
+  - name: trainable_parameters
+    implementation:
+      file: _observables.py
+      symbol: TrainableParameters
+task_health:
+  config: task_health.yaml
+interpretation_blocks:
+  none: true
+deliverable:
+  prefix: synthetic_masked_predictions
+  extension: .json
+  index_width: 4
+task_config:
+  config: ../declared/task_config.yaml
+model_plugins:
+  dir: ../plugins
+  require: [masked_reference_mlp]
+loss_plugins:
+  dir: ../plugins
+objective:
+  implementation:
+    file: ../plugins/masked_mse_loss.py
+    symbol: PLUGIN_LOSS_TYPE
