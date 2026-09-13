@@ -4,7 +4,7 @@
 
 ## Position in the pipeline
 
-- **CLI entry**: **present** — `main()` was added by issue #303. The current CLI still needs a caller-bound task configuration; it does not expose that binding flag, so issue #433 remains open. Typed Python and workflow routes can supply the required context. `experiment_history` is read from the upstream interpretation record on disk or an explicit path.
+- **CLI entry**: **present** — `main()` requires explicit `--task_composition` and `--data_dir`, binds the workspace and full task contract, then calls the same typed `run()` as the workflow. `experiment_history` is read from the upstream interpretation record on disk or an explicit path.
 - **Upstream**: `result_interpretation_agent` (provides `experiment_history: InterpretationOutput` — the current iteration's bottlenecks + key findings that ground every synthesized finding).
 - **Downstream**: `ml_model_proposal_agent` (consumes this node's four channels via the proposer's `agent_cards` / `expert_context` / `mindset` / `vocab_seed` inputs).
 - **Protocol**: `local_all_channels` in `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py` — maps `LiteratureReviewOutput.findings` / `new_vocab_candidates` / `agent_card` / `suggested_mindset` into the proposer's four kwargs. No `reference_library` channel — equations travel inline inside finding `content` (per the Commit 2d revision).
@@ -25,7 +25,7 @@
 | `llm_model_id` | `str` | Yes | — | LLMBridge model id for the compression + synthesis steps (e.g. `"deepseek-v4-pro"`). |
 | `search_llm_provider` | `str \| None` | No | `None` | Optional separate provider for the cheap, templated search-decision step. Falls back to `llm_provider`. Lets the search loop run on a cheaper model while compression + synthesis stay on the main one. |
 | `search_llm_model_id` | `str \| None` | No | `None` | Optional separate model id for the search-decision step. Falls back to `llm_model_id`. |
-| `task_description` | `str` | No | `""` | Plain-English framing of the research task the lit-review run is supporting. Injected into all three lit-review prompts (paper-extract, search-decision, synthesis) via the `{TASK_DESCRIPTION}` placeholder. Sourced from `configs/task_config.yaml` by the workflow (Commit T3+T4 — the T-series de-hardcoding, `docs/design/enable_global_task_config.md`); empty string when unset means the prompt section is bare (no task-domain anchor). Since Step 04b this is the SINGLE source: `_build_lit_review_input` resolves it via `get_task_description(load_task_config())` and no longer reads a `task_description` key from `configs/lit_review_config.yaml`, which no longer declares one. The task-config loader rejects a missing or empty description, so the production path cannot produce an empty value — there is no fallback constant and no load-time warning. |
+| `task_description` | `str` | No | `""` | Plain-English task framing injected into all three literature prompts via `{TASK_DESCRIPTION}`. The workflow and CLI use `get_task_description(load_task_config())` under the supplied task composition; the task-owned `task_config.config` declaration is the sole source, not the literature-knob YAML. The loader rejects a missing or empty description. A hand-built typed input may still omit it; there is no fallback task. |
 
 ### Workflow-populated fields
 
@@ -56,21 +56,36 @@
 ```bash
 .venv/bin/python src/nodes/ml_literature_review/ml_literature_review.py \
     --workspace ./siderius_workspace \
+    --task_composition /path/to/task/composition.yaml \
+    --data_dir /path/to/task/data \
     --run_name v1 \
     --experiment-history ./siderius_workspace/interpretation_v1.json \
-    --lit_review_config ./task/literature.yaml \
+    --lit_review_config /path/to/task/literature.yaml \
     --provider gemini \
     --model_id gemini-3.1-flash-lite-preview
 ```
 
-The CLI has an entry, but it does not expose the task-composition binding that
-production task context requires; issue #433 tracks that unbound invocation gap.
-Use the typed Python API or workflow route for a task-bound run. The module
+`--task_composition` supplies the full validated task declaration, including its
+dataset profile, normalized model-I/O contract, task description and metric.
+`--data_dir` must name an existing directory because the shared full-composition
+binder requires an explicit physical data root; literature review does not train
+or score those data. The workspace is selected before importing composition/plugin
+dependencies, and the task binding stays active through input validation and
+`run()`, then unwinds even if the run raises. The module
 form `python -m nodes.ml_literature_review.ml_literature_review ...` is
 equivalent; the short package form does not work because the package rebind
 has no `__path__` for a `__main__` lookup.
 
 The CLI reads the upstream `InterpretationOutput` (`--experiment-history`, defaulting to `{workspace}/interpretation_{run_name}.json` — the same persisted record the proposal agent's CLI reads), loads the node knobs from the required `--lit_review_config` file with the same key mapping the workflow uses (`_build_lit_review_input`), resolves `task_description` from the active task declaration, builds a validated `LiteratureReviewInput`, runs the agent (the same `run()` the workflow calls), and writes `{workspace}/ml_literature_review_{run_name}.json`.
+
+If the history carries `metric_identity`, its `metric_id` and `direction` must
+match the supplied task's metric. A conflict names both history and manifest and
+refuses before agent/provider construction. An absent stamp remains accepted for
+existing scoreless histories; a matching metric pair does **not** establish full
+task compatibility. Missing/invalid manifests, referenced task configuration, data
+roots and invalid node knobs also refuse before the agent runs. Composition can
+import task plugins; this is not a guarantee that arbitrary plugin imports have
+no side effects.
 
 **Ingestion refusals are loud and distinct** (`load_experiment_history`): a missing file raises `FileNotFoundError` naming the path and the upstream node to run; unparseable JSON raises `ValueError` ("not valid JSON") chaining the `JSONDecodeError`; valid JSON that is not a valid `InterpretationOutput` raises `ValueError` naming the schema, chaining the pydantic `ValidationError`. The CLI never silently degrades to an empty history.
 
@@ -79,6 +94,8 @@ The CLI reads the upstream `InterpretationOutput` (`--experiment-history`, defau
 | Flag | Default | Description |
 |---|---|---|
 | `--workspace` | `./siderius_workspace` | Root directory for reading the upstream interpretation output and writing this node's output JSON. |
+| `--task_composition` | required | Task-composition manifest supplying the scientific contract and metric. Relative manifest references resolve against the manifest directory. |
+| `--data_dir` | required | Existing physical data directory required by the shared full-task binder; no training or scoring is performed. |
 | `--run_name` | `v1` | Run identifier — reads `interpretation_{run_name}.json` (unless `--experiment-history` overrides), writes `ml_literature_review_{run_name}.json`. |
 | `--experiment-history` | `{workspace}/interpretation_{run_name}.json` | Explicit path to the upstream `InterpretationOutput` JSON. `--experiment_history` is accepted as an alias (repo flag style); the dashed form is the issue-#303 acceptance spelling. |
 | `--lit_review_config` | required | Node-knob YAML (`root_papers` / `dynamic_search` / `synthesis` / `confidence_rubric` / `findings_verbosity`) — same file and key mapping as the workflow. A relative path resolves against the repo root. The YAML's top-level `enabled:` key gates the **workflow** stage only and is ignored by the CLI — invoking the CLI is the enablement. |
@@ -205,7 +222,7 @@ The synthesis prompt requires every finding's **Implication** to ground in one o
 | `experiment_history.key_findings` | `agent/schemas/interpretation.py` | `list[str]` | — | Findings carried from prior iterations. Provided to the synthesis LLM as PRIMARY input alongside bottlenecks. | finding quality (relevance) |
 | `experiment_history.take_home_message` | `agent/schemas/interpretation.py` | `str` | — | One-line summary of current state. Surfaced near the top of the synthesis prompt. | finding quality (framing) |
 | `root_papers` (count) | `agent/schemas/literature_review.py:400` length | `list[PaperSource]` length | `[]` | Locked starting set of papers. More roots = more candidate citations, more equations in scope. | finding count, finding quality |
-| `task_description` | `agent/schemas/literature_review.py:494` | `str` | `""` (unreachable from the production path — the task-config loader fails closed on an empty description) | Task-domain anchor injected into `{TASK_DESCRIPTION}` in all three lit-review prompts (paper-extract, search-decision, synthesis). Sourced from `configs/task_config.yaml` by the workflow — the single declaration since Step 04b. Empty → the LLM has no task-domain anchor for `relevance_to_task`, search queries, or synthesis grounding. | finding quality (relevance grounding), search behavior, extraction quality (`relevance_to_task` field) |
+| `task_description` | `agent/schemas/literature_review.py:494` | `str` | `""` (unreachable from the production path — the task-config loader fails closed on an empty description) | Task-domain anchor injected into `{TASK_DESCRIPTION}` in all three literature prompts. The workflow and standalone CLI resolve it from the composed task-owned `task_config.config` declaration through the same loader. Empty → a hand-built input has no task-domain anchor. | finding quality (relevance grounding), search behavior, extraction quality (`relevance_to_task` field) |
 
 ### LLM routing
 

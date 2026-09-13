@@ -15,8 +15,11 @@ touched (node public-boundary rule).
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -200,11 +203,14 @@ class TestArgParser:
 # ---------------------------------------------------------------------------
 
 _TEST_CONFIG_YAML = """\
+enabled: false
 root_papers: []
 dynamic_search:
   enabled: false
 synthesis:
   transfer_tolerance: strict
+confidence_rubric:
+  omit_below: 0.55
 findings_verbosity: 0
 """
 
@@ -276,6 +282,7 @@ class TestMainEndToEnd:
         assert inp.root_papers == []
         assert inp.dynamic_search.enabled is False
         assert inp.synthesis_config.transfer_tolerance == "strict"
+        assert inp.confidence_rubric.omit_below == 0.55
         assert inp.findings_verbosity == 0
 
     def test_main_explicit_experiment_history_wins(self, monkeypatch, tmp_path):
@@ -472,6 +479,107 @@ class TestTaskBindingRefusals:
                 active_task_data_path(),
             ) == before
         assert seen == ["first task", "second task", "third task"]
+
+
+@pytest.mark.parametrize("omit_task", [False, True])
+def test_cold_script_transports_task_to_real_synthesis_and_storage(tmp_path, omit_task):
+    """No parent binding/import can rescue script startup. A dropped task hop
+    loses the distinctive synthesis prompt; a swallowed bridge exception cannot
+    pass because the child asserts the exact call, then the parent reads output."""
+    argv, workspace, _ = _cli_case(tmp_path, description="Cold CLI selected synthetic task")
+    if omit_task:
+        index = argv.index("--task_composition")
+        del argv[index : index + 2]
+    script_path = _REPO_ROOT / "src/nodes/ml_literature_review/ml_literature_review.py"
+    neutral = tmp_path / "neutral"
+    neutral.mkdir()
+    script = textwrap.dedent("""\
+        import builtins
+        import os
+        from pathlib import Path
+        import runpy
+        import socket
+        import sys
+        import agent.llm_bridge as bridge_module
+
+        assert "workflows.task_composition" not in sys.modules
+        assert "SIDERIUS_GENERATED_LIBRARY_DIR" not in os.environ
+        observed = []
+        original_import = builtins.__import__
+        def observe_import(name, *args, **kwargs):
+            if name == "workflows.task_composition":
+                workspace = Path(sys.argv[sys.argv.index("--workspace") + 1])
+                assert os.environ["SIDERIUS_GENERATED_LIBRARY_DIR"] == str(workspace / "generated_library")
+                observed.append("composition_after_workspace")
+            return original_import(name, *args, **kwargs)
+        builtins.__import__ = observe_import
+
+        def forbidden_network(*args, **kwargs):
+            raise AssertionError("cold CLI witness forbids network")
+        socket.create_connection = forbidden_network
+        socket.socket.connect = forbidden_network
+
+        calls = []
+        class Bridge:
+            def __init__(self, **kwargs):
+                pass
+            def generate(self, system, user, *, label, **kwargs):
+                calls.append((label, system, user))
+                return {"findings": []}
+        bridge_module.LLMBridge = Bridge
+        sys.argv = sys.argv[1:]
+        namespace = runpy.run_path(sys.argv[0], run_name="__main__")
+        assert Path(namespace["__file__"]).resolve() == Path(sys.argv[0]).resolve()
+        assert observed == ["composition_after_workspace"]
+        assert len(calls) == 1, calls
+        assert calls[0][0] == "lit_review.synthesis"
+        assert "Cold CLI selected synthetic task" in calls[0][1]
+        print("COLD_CLI_TASK_TRANSPORT_PASS")
+    """)
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"PYTHONPATH", "SIDERIUS_GENERATED_LIBRARY_DIR", "SIDERIUS_CHAIN_WORKSPACE"}
+        and not key.endswith("_API_KEY")
+    }
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script, str(script_path), *argv[1:]],
+        cwd=neutral,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    output_path = workspace / "ml_literature_review_v1.json"
+    if omit_task:
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "--task_composition" in result.stderr
+        assert not output_path.exists()
+        assert not (workspace / "cache").exists()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "COLD_CLI_TASK_TRANSPORT_PASS" in result.stdout
+        output = LiteratureReviewOutput.model_validate_json(output_path.read_text())
+        assert output.run_name == "v1"
+        assert output.agent_card.agent_name == "ml_literature_review"
+        assert output.search_rounds_used == 0
+
+
+def test_relative_knob_path_stays_checkout_anchored(monkeypatch, tmp_path):
+    """A CWD-based resolution would consume the decoy YAML instead of the
+    existing checkout-relative knob path; absolute external YAML is covered above."""
+    argv, _, _ = _cli_case(tmp_path)
+    neutral = tmp_path / "neutral"
+    neutral.mkdir()
+    (neutral / "literature.yaml").write_text("findings_verbosity: 1\n")
+    argv[argv.index("--lit_review_config") + 1] = "literature.yaml"
+    monkeypatch.chdir(neutral)
+    monkeypatch.setattr(node_mod, "_SIDERIUS_ROOT", tmp_path)
+    captured = []
+    _install_stubs(monkeypatch, captured)
+    monkeypatch.setattr(sys, "argv", argv)
+    node_mod.main()
+    assert captured[0].findings_verbosity == 0
 
 
 # ---------------------------------------------------------------------------
