@@ -58,6 +58,7 @@ from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import LLMCodeReview, ValidatorInput, ValidatorOutput
 from agent.skills.forbidden_pattern_skill import check_file as _check_forbidden_patterns
+from agent.skills.forbidden_pattern_skill import check_source as _check_forbidden_source
 from agent.skills.model_io_probe_skill import (
     ProbeConstructionError,
     build_model_input,
@@ -65,7 +66,16 @@ from agent.skills.model_io_probe_skill import (
     expected_output_shape,
     probe_config_kwargs,
 )
+from core.local_code.child import prepare_child
+from core.local_code.failure import raise_if_code_package_failure
+from core.subprocess_env import subprocess_env
 from ml_models.plugin_loader import PLUGIN_LEGAL_OUTPUT_TYPES
+from nodes.ml_code_validator_agent.source import (
+    REQUIRED_PLUGIN_ATTRIBUTES,
+    captured_plugin,
+    captured_source,
+    read_source,
+)
 
 # ---------------------------------------------------------------------------
 # LLM prompts
@@ -284,16 +294,23 @@ def _check_plugin(model_file_path: str) -> tuple[bool, str | None]:
     Load the plugin file and verify the three required module-level attributes.
     Returns (success, error_message_or_None).
     """
-    spec = importlib.util.spec_from_file_location("_validator_plugin_load", model_file_path)
-    if spec is None or spec.loader is None:
-        return False, f"Could not create module spec/loader for {model_file_path}"
-    module = importlib.util.module_from_spec(spec)
     try:
-        spec.loader.exec_module(module)
+        module = captured_plugin(model_file_path)
     except Exception as e:
+        raise_if_code_package_failure(e)
         return False, f"Import error: {e}"
+    if module is None:
+        spec = importlib.util.spec_from_file_location("_validator_plugin_load", model_file_path)
+        if spec is None or spec.loader is None:
+            return False, f"Could not create module spec/loader for {model_file_path}"
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except Exception as e:
+            raise_if_code_package_failure(e)
+            return False, f"Import error: {e}"
 
-    for attr in ("PLUGIN_MODEL_TYPE", "PLUGIN_CONFIG_CLASS", "PLUGIN_MODEL_CLASS"):
+    for attr in REQUIRED_PLUGIN_ATTRIBUTES:
         if not hasattr(module, attr):
             return False, f"Plugin is missing required attribute '{attr}'"
 
@@ -325,11 +342,16 @@ def _run_tests(test_file_path: str) -> tuple[bool, str]:
             "Skipped: no test file provided (Branch B model reuse — "
             "plugin already validated at registration time)."
         )
-    result = subprocess.run(
+    invocation = prepare_child(
         [sys.executable, "-m", "pytest", test_file_path, "-v", "--tb=short"],
-        capture_output=True,
-        text=True,
+        subprocess_env(),
     )
+    try:
+        result = subprocess.run(invocation.argv, capture_output=True, text=True, env=invocation.env)
+    except Exception as exc:
+        invocation.check(getattr(exc, "returncode", None))
+        raise
+    invocation.check(result.returncode)
     output = result.stdout + result.stderr
     return result.returncode == 0, output
 
@@ -449,21 +471,28 @@ def _check_instantiation_and_gradient(
             was generated against, mapped in by the impl->valid protocol, or
             ``None`` on the legacy path.
     """
-    spec = importlib.util.spec_from_file_location("_validator_plugin_inst", model_file_path)
-    if spec is None or spec.loader is None:
-        return (
-            False,
-            False,
-            False,
-            f"Could not create module spec/loader for {model_file_path}",
-            None,
-            None,
-        )
-    module = importlib.util.module_from_spec(spec)
     try:
-        spec.loader.exec_module(module)
+        module = captured_plugin(model_file_path)
     except Exception as e:
+        raise_if_code_package_failure(e)
         return False, False, False, f"Import error: {e}", None, None
+    if module is None:
+        spec = importlib.util.spec_from_file_location("_validator_plugin_inst", model_file_path)
+        if spec is None or spec.loader is None:
+            return (
+                False,
+                False,
+                False,
+                f"Could not create module spec/loader for {model_file_path}",
+                None,
+                None,
+            )
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except Exception as e:
+            raise_if_code_package_failure(e)
+            return False, False, False, f"Import error: {e}", None, None
 
     # Instantiate config and model.
     #
@@ -487,6 +516,7 @@ def _check_instantiation_and_gradient(
         model = module.PLUGIN_MODEL_CLASS(config)
         model.train()
     except Exception as e:
+        raise_if_code_package_failure(e)
         return False, False, False, f"Model instantiation failed: {e}", None, None
 
     # V21 PR E (O-E-6 FINAL): both parameter-count views of the instantiated
@@ -559,6 +589,7 @@ def _check_instantiation_and_gradient(
     try:
         out = model(probe_input)
     except Exception as e:
+        raise_if_code_package_failure(e)
         return False, False, False, f"Forward pass failed: {e}", realized_total, realized_trainable
 
     if not isinstance(out, torch.Tensor):
@@ -588,6 +619,7 @@ def _check_instantiation_and_gradient(
         loss = out.sum()
         loss.backward()
     except Exception as e:
+        raise_if_code_package_failure(e)
         return (
             True,
             False,
@@ -652,7 +684,10 @@ class MLCodeValidatorAgent:
         # 5. Forbidden patterns: AST scan rejects Python loops over the time
         #    dim in `forward(...)`. Cheap, deterministic, runs even if the
         #    plugin failed to import.
-        if os.path.isfile(inp.model_file_path):
+        captured_entry = captured_source(inp.model_file_path)
+        if captured_entry is not None:
+            forbid_ok, forbid_err = _check_forbidden_source(captured_entry)
+        elif os.path.isfile(inp.model_file_path):
             forbid_ok, forbid_err = _check_forbidden_patterns(inp.model_file_path)
         else:
             forbid_ok, forbid_err = False, "Skipped — plugin file not found"
@@ -686,9 +721,8 @@ class MLCodeValidatorAgent:
             realized_trainable_parameter_count = None
 
         # 7. LLM code review (only if plugin file is readable)
-        if os.path.isfile(inp.model_file_path):
-            with open(inp.model_file_path) as f:
-                plugin_src = f.read()
+        if captured_entry is not None or os.path.isfile(inp.model_file_path):
+            plugin_src = read_source(inp.model_file_path, captured_entry)
             review = self._llm_review(
                 inp,
                 plugin_src,
@@ -715,12 +749,13 @@ class MLCodeValidatorAgent:
         # 8. Inheritance check (only if plugin source is readable and claims exist)
         inherit_ok = True
         inherit_notes = None
-        if inp.inherited_components and os.path.isfile(inp.model_file_path):
+        if inp.inherited_components and (
+            captured_entry is not None or os.path.isfile(inp.model_file_path)
+        ):
             if "plugin_src" in dir():
                 inherit_src = plugin_src
             else:
-                with open(inp.model_file_path) as f:
-                    inherit_src = f.read()
+                inherit_src = read_source(inp.model_file_path, captured_entry)
             # Load vocab seed for pattern lookup
             vocab_for_check = None
             try:
