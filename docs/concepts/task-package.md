@@ -47,12 +47,20 @@ and an opaque `topology` payload that is *yours* — the framework carries it an
 never looks inside.
 
 A task may optionally add a **`TaskScopeCapability`** — the ability to build and
-serialise its own training and evaluation scopes. This is how a task that isn't
-shaped like "N files of M segments" describes what a run should cover.
+serialise its own training and evaluation scopes. The base data path consumes
+already-supplied scopes; the composed workflow needs this sibling to construct
+them, regardless of data geometry, and refuses missing methods with
+`TaskScopeCapabilityError`. There is no automatic default split for an
+implementation without the capability.
 
 > The four `TaskDataPath` methods are a frozen interface. Capabilities beyond them
 > are declared as *optional siblings* on the same object, so the base contract
 > never grows to accommodate one task.
+
+The package also owns the
+[required task-owned split evidence](../guides/define-a-task.md#required-task-owned-split-evidence).
+Follow that canonical checklist before claiming scientific evaluation: scope
+hashes authenticate transport, but do not prove training/evaluation independence.
 
 ## 2. What a model reads and produces
 

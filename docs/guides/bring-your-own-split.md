@@ -31,6 +31,12 @@ The quickstart pack is the worked example: its
 `declared/dataset_profile.json` declares the four-partition geometry the
 scope capability serves.
 
+Your package must also supply the
+[required task-owned split evidence](define-a-task.md#required-task-owned-split-evidence).
+That is the canonical onboarding obligation; the identity mechanisms below
+preserve transport integrity and comparability, not scientific disjointness.
+Two correctly hashed scopes can still contain the same held-out identity.
+
 ## What enters run identity — the comparability consequences
 
 The papers' comparability rule (S13/S14) is enforced by two identity layers.
@@ -78,9 +84,10 @@ plugins/_your_task.py             # TaskDataPath + (optionally) TaskScopeCapabil
 composition.yaml                  # dataset_profile: {config: declared/dataset_profile.json}
 ```
 
-If you implement no `TaskScopeCapability`, the framework's default scope
-handling applies to your declared partitions; implement the capability when
-your split logic is genuinely task-owned (windowed forecasting, grouped
-holdouts, per-clip isolation — the coverage-zoo packages in
-`reports/coverage_zoo_onboarding.md` show four measured instances, including
-a forecasting split with corpus-derived truth).
+The four-method `TaskDataPath` can consume already-supplied scopes without
+`TaskScopeCapability`. The composed workflow's scope-construction path requires
+the sibling's four methods, regardless of whether your data is uniform,
+windowed or grouped. Missing methods cause `TaskScopeCapabilityError` before
+child processes launch; the framework does not invent a default split from
+your declared partitions. Implementing the capability does not itself prove
+that the scopes are scientifically independent.
