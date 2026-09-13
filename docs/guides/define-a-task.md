@@ -69,16 +69,88 @@ If your task has no defensible interpretation for a requested fraction, refuse
 it explicitly. Never let the framework infer scientific grouping from tensor
 shape or file order.
 
-If your data is not shaped like "N partitions of M uniform units", add the
-optional `TaskScopeCapability` sibling — `build_training_scope`,
-`build_eval_scope`, `serialize_scope`, `deserialize_scope`. Your serialisation
-must be **canonical**: the framework hashes it to verify the scope across the
-process boundary.
+The base interface consumes scopes supplied by its caller. For the composed
+workflow to **construct** training and evaluation scopes, also implement the
+`TaskScopeCapability` sibling — `build_training_scope`, `build_eval_scope`,
+`serialize_scope`, `deserialize_scope` — regardless of your data's geometry.
+It is optional to the four-method base contract, not a default split service:
+composed scope construction refuses missing methods with
+`TaskScopeCapabilityError` before launching child processes. Your serialisation
+must be **canonical**: the framework hashes it to verify scope transport.
 
 > ✅ Scopes built this way reach **all three** child processes — training,
 > inference and scoring — as a hash-verified artifact; each child recomputes the
 > digest before deserializing. See
 > [supported tasks](../concepts/supported-tasks.md).
+
+## Required task-owned split evidence
+
+Before using a new task package for scientific evaluation, supply and retain a
+reproducible, task-owned split check. Scope payloads are opaque to SIDERIUS:
+different filenames or hashes, successful execution and a passing Health check
+do **not** prove that training and evaluation are independent. For example,
+training IDs `{a, b}` and evaluation IDs `{b, c}` can have different hashes while
+sharing `b`. This is an onboarding proof obligation, not a new framework check
+that automatically rejects every scientifically leaky task.
+
+Evaluation used to select models or tune hyperparameters is **selection
+validation**, not an untouched final test. If your task separately declares a
+held-out final evaluation, document its isolation from training and selection.
+SIDERIUS does not require every task to invent a third split.
+
+Keep the following evidence with your task package or its referenced records:
+
+1. **Define independence and the identity key.** State which overlap the claim
+   forbids: samples/events, objects/patients/groups, or sequence/time context.
+   Compare identities at that level, not merely distinct row or crop names.
+   For forecasting, include prohibited history/target-window overlap. Shared
+   context is not automatically leakage: a graph task may share adjacency while
+   keeping supervised node masks disjoint, if it states and justifies that
+   protocol. The task owns this scientific choice.
+2. **Identify the inputs actually checked.** Record the dataset/source revision,
+   split declaration, task code revision and effective configuration, including
+   role overrides. Name training, selection-validation and any separately
+   declared final-evaluation populations. A proof for shipped defaults does not
+   certify another configuration or another dataset.
+3. **Check real membership and materialization.** Use the task's scope builders
+   and data-materialization rules to establish the relevant identities. Assert
+   independently expected, nonempty population sizes before disjointness; an
+   empty set passes an intersection check vacuously. Cover supported selection,
+   sampling, window and augmentation rules that could change membership or
+   identity. A constructive proof that every permitted selection stays inside
+   certified disjoint base populations is sufficient; one random subset or seed
+   that happens not to overlap is not.
+4. **Show a failing leakage counterexample.** Deliberately admit a held-out
+   identity, prohibited group or forbidden temporal context to training and
+   show that the same check fails. Distinct augmented row IDs must not conceal
+   a shared underlying unit when the declared protocol forbids it.
+5. **Make the evidence reproducible and bounded in claim.** Retain the exact
+   command, required external inputs, revisions/configuration, observed counts,
+   result and limitations. Missing data, skipped checks and unavailable evidence
+   mean **unverified**, not passed. Synthetic fixtures or test doubles do not
+   certify official scientific data.
+
+The shipped
+[masked-regression split test](../../tests/unit/examples/test_synthetic_masked_regression_pack.py)
+(`test_training_and_evaluation_scopes_are_disjoint`) is a small worked witness:
+it calls the task's default full-snapshot builders, expects 48 training and 24
+evaluation sample IDs, and checks disjointness. The
+[Quickstart scope test](../../tests/unit/examples/test_quickstart_pack.py)
+(`test_scope_construction_and_canonical_codec`) additionally exercises default
+snapshot, anchor and target selection, including refusal of evaluation shard 2
+as a training target. From the SIDERIUS checkout, reproduce just these witnesses:
+
+```bash
+uv sync --group dev --frozen
+.venv/bin/python -m pytest -q \
+  tests/unit/examples/test_synthetic_masked_regression_pack.py::test_training_and_evaluation_scopes_are_disjoint \
+  tests/unit/examples/test_quickstart_pack.py::test_scope_construction_and_canonical_codec
+```
+
+These tests need no external dataset and prove only the synthetic default
+configurations and cases they exercise. They do not verify arbitrary role
+overrides, all materialization variants or your external task's split. Supply
+your own evidence for the actual declarations and scientific claim above.
 
 ## Step 3 — Write the task config
 
