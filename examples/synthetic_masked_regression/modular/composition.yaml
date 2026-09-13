@@ -8,10 +8,10 @@ code_package:
     - plugins/_masked_health_views.py
     - plugins/masked_reference_mlp.py
     - plugins/masked_mse_loss.py
-    - modular/_shared.py
-    - modular/_metrics.py
-    - modular/_health.py
-    - modular/_observables.py
+    - plugins/_modular_shared.py
+    - plugins/_modular_metrics.py
+    - plugins/_modular_health.py
+    - plugins/_modular_observables.py
 
 task_data_path:
   file: ../plugins/_masked_task.py
@@ -25,11 +25,11 @@ dataset_profile:
 metric:
   declaration: ../declared/metric_masked_mse.json
   implementation:
-    file: _metrics.py
+    file: ../plugins/_modular_metrics.py
     symbol: SharedScopeMaskedMse
   scoreability_contracts:
     deliverable_presence:
-      file: _metrics.py
+      file: ../plugins/_modular_metrics.py
       symbol: ModularPresence
 secondary_metrics:
   - declaration: ../declared/metric_masked_mae.json
@@ -39,7 +39,7 @@ secondary_metrics:
 static_observables:
   - name: trainable_parameters
     implementation:
-      file: _observables.py
+      file: ../plugins/_modular_observables.py
       symbol: TrainableParameters
 task_health:
   config: task_health.yaml

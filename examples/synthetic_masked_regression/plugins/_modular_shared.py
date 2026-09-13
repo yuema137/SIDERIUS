@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from torch import nn
 
-from ..plugins._masked_task import MaskedScope
+from ._masked_task import MaskedScope
 
 
 def require_scope(scope: object) -> MaskedScope:

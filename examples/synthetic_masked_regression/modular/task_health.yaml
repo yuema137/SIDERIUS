@@ -2,7 +2,7 @@ facts:
   encoding_family: continuous_float
 plugins:
   - kind: file
-    ref: _health.py
+    ref: ../plugins/_modular_health.py
 providers:
   - provider_id: synthetic_masked_regression.valid_predictions
 roster:

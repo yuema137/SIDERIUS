@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -19,6 +21,7 @@ from core.run_invariants import (
     validate_run_invariants,
 )
 from core.subprocess_env import subprocess_env
+from execute_tools import task_data_path
 from execute_tools.health_checks import runner
 from execute_tools.health_checks.config import materialize_effective_config
 from execute_tools.health_checks.schemas import HealthCheckContext
@@ -31,12 +34,38 @@ from tests.unit.core.test_step11_c8_invariants_resume import _invariants
 from tests.unit.examples.test_synthetic_masked_regression_pack import _restore_health_plugin_globals
 from tests.unit.ml_models.test_loss_functions import _l6c_clear_loss_registry
 from tests.unit.ml_models.test_step12_pr12d_dp_plugin_binding import _clean_registries
-from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+from workflows.task_composition import (
+    TaskCompositionError,
+    bind_run_task_composition,
+    compose_run_task_bindings,
+)
 
 PACK = Path(__file__).resolve().parents[3] / "examples/synthetic_masked_regression"
 pytestmark = pytest.mark.usefixtures(
     "_restore_health_plugin_globals", "_clean_registries", "_l6c_clear_loss_registry"
 )
+
+
+@contextmanager
+def _isolated_task_registrations() -> Iterator[None]:
+    """Give this variant a fresh registry, then restore the caller's exact pair."""
+    registry = dict(task_data_path._REGISTRY)
+    content = dict(task_data_path._CONTENT)
+    task_data_path._REGISTRY.clear()
+    task_data_path._CONTENT.clear()
+    try:
+        yield
+    finally:
+        task_data_path._REGISTRY.clear()
+        task_data_path._REGISTRY.update(registry)
+        task_data_path._CONTENT.clear()
+        task_data_path._CONTENT.update(content)
+
+
+@pytest.fixture(autouse=True)
+def isolated_task_registrations() -> Iterator[None]:
+    with _isolated_task_registrations():
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +76,37 @@ def restore_loss_reductions():
     yield
     LOSS_REDUCTION_REGISTRY.clear()
     LOSS_REDUCTION_REGISTRY.update(saved)
+
+
+def test_variant_isolation_restores_plain_registration_without_weakening_conflict_refusal():
+    """CI2: inherited plain content must not poison this module or be overwritten.
+
+    Clearing only the instance map breaks modular composition; failing to restore
+    either map changes the snapshots or makes the final active collision succeed.
+    """
+    plain_manifest = PACK.parents[1] / "configs/task_composition/synthetic_masked_regression.yaml"
+    plain = compose_run_task_bindings(str(plain_manifest))
+    registry = dict(task_data_path._REGISTRY)
+    content = dict(task_data_path._CONTENT)
+    assert registry["synthetic_masked_regression"] is plain.task_data_path
+
+    with _isolated_task_registrations():
+        with run_registration_scope():
+            modular = compose_run_task_bindings(str(PACK / "modular/composition.yaml"))
+            assert modular.task_data_path.task_data_path_id == "synthetic_masked_regression"
+            assert (
+                task_data_path._CONTENT["synthetic_masked_regression"]
+                != content["synthetic_masked_regression"]
+            )
+    assert task_data_path._REGISTRY == registry
+    assert task_data_path._REGISTRY["synthetic_masked_regression"] is plain.task_data_path
+    assert task_data_path._CONTENT == content
+
+    with pytest.raises(TaskCompositionError, match="registered with different content"):
+        with run_registration_scope():
+            compose_run_task_bindings(str(PACK / "modular/composition.yaml"))
+    assert task_data_path._REGISTRY == registry
+    assert task_data_path._CONTENT == content
 
 
 def test_public_modular_manifest_runs_metric_health_and_independent_model_loss_acquisition(
@@ -82,7 +142,7 @@ def test_public_modular_manifest_runs_metric_health_and_independent_model_loss_a
                 {0: str(tmp_path / "absent")}
             ).scoreable
             assert type(composition.metric.spec.scoreability).__module__.endswith(
-                ".modular._metrics"
+                ".plugins._modular_metrics"
             )
 
             from ml_models.loss_models_sandbox import LOSS_REGISTRY
@@ -173,12 +233,12 @@ def test_public_package_relocation_preserves_identity_and_helper_edit_refuses_re
     validate_run_invariants(
         workspace, _invariants(task_composition_fingerprint=second.semantic_fingerprint)
     )
-    helper = tmp_path / "unrelated/second/modular/_shared.py"
+    helper = tmp_path / "unrelated/second/plugins/_modular_shared.py"
     original = helper.read_bytes()
     try:
         helper.write_bytes(original + b"\n# intentional helper edit\n")
         with run_registration_scope():
-            changed = compose_run_task_bindings(str(helper.parent / "composition.yaml"))
+            changed = compose_run_task_bindings(str(helper.parents[1] / "modular/composition.yaml"))
         assert changed.semantic_fingerprint != first.semantic_fingerprint
         with pytest.raises(RunInvariantsViolation, match="task_composition_fingerprint"):
             validate_run_invariants(
@@ -221,7 +281,7 @@ def test_public_composition_reaches_cold_family_loaders_and_refuses_helper_tampe
     script = tmp_path / "child.py"
     script.write_text(_CHILD)
     marker = tmp_path / "target-entered"
-    helper = pack / "modular/_shared.py"
+    helper = pack / "plugins/_modular_shared.py"
     original = helper.read_bytes()
     with run_registration_scope():
         composition = compose_run_task_bindings(str(manifest))

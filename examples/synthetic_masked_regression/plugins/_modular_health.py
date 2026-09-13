@@ -5,7 +5,7 @@ from typing import ClassVar
 from execute_tools.health_checks import register
 from execute_tools.health_checks.sample_dispersion_floor import SampleDispersionFloorCheck
 
-from ..plugins._masked_health_views import (
+from ._masked_health_views import (
     MaskedRegressionHealthViews as MaskedRegressionHealthViews,
 )
 

@@ -7,8 +7,8 @@ from typing import Any
 
 from execute_tools.evaluation_metric import PresenceScoreabilityContract
 
-from ..plugins._masked_metrics import MaskedMseMetric
-from ._shared import require_scope
+from ._masked_metrics import MaskedMseMetric
+from ._modular_shared import require_scope
 
 
 class SharedScopeMaskedMse(MaskedMseMetric):

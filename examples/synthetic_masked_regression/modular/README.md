@@ -5,6 +5,11 @@ not another scientific task or benchmark. [composition.yaml](composition.yaml)
 reuses the original implementation files unchanged and declares every Python
 member it imports. The original single-file manifest remains supported.
 
+The four modular helpers live beside the original plugins as
+`../plugins/_modular_*.py`. Their leading underscores keep them out of ordinary
+model/loss directory scans; the modular manifest selects them explicitly.
+This directory contains only the variant's manifests and documentation.
+
 The data path creates `MaskedScope` objects. The metric imports that same class
 through a relative helper and checks its identity before calling the unchanged
 masked-MSE arithmetic. A per-entry module namespace would break this check.

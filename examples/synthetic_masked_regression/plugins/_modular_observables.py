@@ -4,7 +4,7 @@ from torch import nn
 
 from execute_tools.observables import StaticObservable
 
-from ._shared import trainable_parameters
+from ._modular_shared import trainable_parameters
 
 
 class TrainableParameters(StaticObservable):
