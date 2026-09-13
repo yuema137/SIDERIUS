@@ -352,6 +352,7 @@ def prepare_attempt(
     checklist = build_exploration_checklist(
         config_schema=config_schema,
         memory_history=memory_history,
+        loss_context=run_task_render.loss_context,
     )
     # Phase D.1 — surface the raw config class source (validator
     # bodies included) so the planner sees cross-field invariants

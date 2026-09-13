@@ -89,7 +89,8 @@ class TestRenderedAuthorities:
         bridge.plan(**{**planner_kwargs(), "task_render": _task_render()})
         _method, _label, system, _user = bridge.captures[0]
         assert "trains on 150 segments" in system
-        assert "alpha=0.5" in system
+        assert "Compatible builtin loss types: **smooth_l1**" in system
+        assert "alpha=0.5" not in system
 
     def test_a_missing_model_io_contract_stays_absent(self):
         assert render_output_contract_shape(None) is None
@@ -113,8 +114,8 @@ class TestRenderedAuthorities:
     def test_templates_keep_authority_owned_values_as_tokens(self):
         for token in (
             "{FULL_SCOPE_SEGMENTS}",
-            "{FOCAL_ALPHA_DEFAULT}",
-            "{FOCAL_GAMMA_DEFAULT}",
+            "{LOSS_COLLAPSE}",
+            "{LOSS_RESET}",
         ):
             assert token in PLANNER_PROMPT
 

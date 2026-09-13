@@ -891,6 +891,11 @@ class HyperparamTuningAgent:
             # LLM-facing task science. `False` for every un-composed run,
             # which renders the legacy bytes.
             composed=agent_input.task_composition_ref is not None,
+            objective=(
+                agent_input.task_composition_ref.objective
+                if agent_input.task_composition_ref is not None
+                else None
+            ),
         )
 
         # Run-invariants lock (DS6b): an existing lock is validated NOW so a

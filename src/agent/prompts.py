@@ -11,6 +11,11 @@ from agent.prompt_templates.timing_attribution import (
     is_coherent_split,
     render_planner_train_term,
 )
+from agent.prompt_templates.tuner.loss_context import PlannerLossContext
+from agent.prompt_templates.tuner.loss_rendering import (
+    render_loss_example,
+    render_loss_model_constraint,
+)
 from agent.prompt_templates.tuner.rendering import (
     EFFICIENCY_BAND_PCT,
     render_builtin_model_roster,
@@ -74,19 +79,18 @@ Your goal is to {METRIC_VERB} the `denoising_score` {SCORE_FIELD_NOUN} ({METRIC_
 {AVAILABLE_MODELS_BLOCK}
 ### BASELINE REFERENCE RULE:
 In Round 1, you **must** use the Baseline Configuration found in the initial Research Memory
-(the record with "baseline" in its exp_id). Use the same model_config, train_config, and
-loss_config as the baseline, but at your chosen trial_portion. This establishes a "Sparse
+(the record with "baseline" in its exp_id). {LOSS_BASELINE} This establishes a "Sparse
 Baseline" — a reference point that shows how the baseline config performs on sparse data.
 Do not change hyperparameters until this reference is set.
 
 ### PROGRESSIVE RESEARCH STRATEGY:
 Plan your experiments across rounds, not just one at a time:
 - **Phase 1: Screening** (first 25% of rounds): Broad exploration with low trial_portion
-  (0.02-0.05) and low epochs (1-3). Test different loss types and learning rates quickly.
+  (0.02-0.05) and low epochs (1-3). {LOSS_SCREENING}
   Discard configs that fail to converge. Goal: find 2-3 promising directions.
 - **Phase 2: Refinement** (middle 50% of rounds): Pick the top performing configs from
   Phase 1. Increase trial_portion to 0.1-0.3 and epochs to 5-10. Fine-tune lr,
-  loss_type, and regularization. Goal: {METRIC_VERB} the score with sufficient data.
+  {LOSS_REFINEMENT} Goal: {METRIC_VERB} the score with sufficient data.
 - **Phase 3: Solidification** (last 25% of rounds): Select the best candidate. Increase
   trial_portion to 0.5+ or switch to formal mode for definitive validation.
   The final round may be configured to require formal mode — see the
@@ -97,7 +101,7 @@ Plan your experiments across rounds, not just one at a time:
 - **Cross-Exploration Rule**: To avoid local minima, you must explore broadly:
     - **Architecture** (when free to choose): do not stay on one model for more than 2 consecutive runs if improvement is < 5%. Switch to a different architecture.
     - **Model config** (always applies): explore ALL tunable fields in model_config. Read the MODEL DESCRIPTION and CONFIG MANUAL carefully — every field listed there is a tuning lever. Model-specific parameters (e.g. gate vectors, layer counts, channel widths) are equally important as loss and learning rate.
-    - **Loss config** (always applies): do not repeat the same `loss_type` for more than 2 consecutive runs without improvement. Cycle through the valid loss types for this model.
+{LOSS_EXPLORATION}
     - **Train config** (always applies): do not repeat the same `lr` and `batch_size` region for more than 2 consecutive runs. Try different learning rates (e.g. 1e-3, 3e-4, 1e-4) and batch sizes.
     - **EXCEPTION — Data Volume Override**: The Cross-Exploration Rule is **suspended** if
       `trial_portion` < 0.1 and the model shows signs of underfitting (high training loss,
@@ -121,18 +125,13 @@ Plan your experiments across rounds, not just one at a time:
   `failure_reason` means HealthGate detected model collapse or invalid output.
 - `gate_action="continue"` with a non-None `failure_reason` means the gate
   detected a problem but allowed later rounds to run; it is NOT a healthy round.
-{GATE_OUTPUT_DIVERSITY_ADVICE}{GATE_AMPLITUDE_COLLAPSE_ADVICE}- If `loss_type="ce"`, switch immediately to focal loss with `alpha={FOCAL_ALPHA_DEFAULT}`
-  and `gamma={FOCAL_GAMMA_DEFAULT}`; CE is unstable on class-imbalanced data.
-- If focal loss still collapses, reduce `lr` by 2-5×, for example
-  `1e-3 → 5e-4 → 1e-4`.
-- If `lr` is already low and collapse persists, switch from Adam to AdamW
+{GATE_OUTPUT_DIVERSITY_ADVICE}{GATE_AMPLITUDE_COLLAPSE_ADVICE}{LOSS_COLLAPSE}- If `lr` is already low and collapse persists, switch from Adam to AdamW
   with `weight_decay=1e-4`.
 - Do NOT increase model capacity or change architecture during collapse
   recovery. Stabilize training first and change one major factor at a time.
 - Three or more consecutive records with non-None `failure_reason` indicate
   a fundamental configuration problem, not random variance.
-- After persistent collapse, reset to the known-working baseline:
-  focal loss (`alpha={FOCAL_ALPHA_DEFAULT}`, `gamma={FOCAL_GAMMA_DEFAULT}`), `lr=5e-4`, and Adam.
+{LOSS_RESET}
 - Do not continue exploring a loss/optimizer/learning-rate region that has
   collapsed repeatedly.
 - A finite score such as `-3.14` is NOT collapse. It is valid,
@@ -222,13 +221,7 @@ When reviewing past experiments in Research Memory:
 
 {available_losses_block}
 
-When the registry above lists one or more custom losses, you may set
-`loss_config.loss_type = "custom"` AND `loss_config.loss_name = <name from
-the table>` to train under that loss. The plugin is already generated and
-dummy-tensor-validated; selecting it does NOT cost an extra implementor
-call. When the block above says "No custom losses registered yet", the only
-legal `loss_type` values are the four built-ins (`focal`, `focal_cw`, `ce`,
-`smooth_l1`) — see the COMPATIBILITY section in the user message below.
+{LOSS_INVENTORY_RULE}
 
 {PER_FILE_TABLE_PROTOCOL}{SCORE_COMPARISON_TABLE}
 
@@ -361,6 +354,7 @@ def _canonical_config_value(value: Any) -> Any:
 def build_exploration_checklist(
     config_schema: dict,
     memory_history: list,
+    loss_context: PlannerLossContext | None = None,
 ) -> str:
     """
     Build a parameter exploration checklist from the config schema and past records.
@@ -498,6 +492,9 @@ def build_exploration_checklist(
 
     # Loss config
     lines.append("\n**loss_config:**")
+    if loss_context is not None and loss_context.objective is not None:
+        lines.append("Task objective is locked; loss fields are not exploration levers.")
+        loss_cfg_tried = {}
     for key, tried in loss_cfg_tried.items():
         tried_str = ", ".join(sorted(tried.values()))
         marker = "[x]" if len(tried) >= 2 else "[ ]"
@@ -770,6 +767,7 @@ def _format_fixed_params_block(
     *,
     trial_max_epochs=None,
     formal_max_epochs=None,
+    loss_context: PlannerLossContext | None = None,
 ):
     """
     Render a SYSTEM-FIXED PARAMETERS block for the planner prompt when the
@@ -863,6 +861,11 @@ def _format_fixed_params_block(
         if has_partial_scope
         else "  - trial_strategy + target_files; eval_strategy; train_validation_align"
     )
+    loss_control = "  - loss_config (loss_type)"
+    focus = "architecture, lr, and loss_type"
+    if loss_context is not None and loss_context.objective is not None:
+        loss_control = "  - loss_config is task-locked (not a control surface)"
+        focus = "architecture and lr, retaining the task-locked objective"
     return f"""
 ### SYSTEM-FIXED PARAMETERS (operator-set; do NOT vary):
 The operator has frozen these plan fields. Any other value you pick will be silently
@@ -873,13 +876,13 @@ on them.
 
 Your control surface this run:
   - model_type + model_config (architecture, segmentation_size, channel widths, …)
-  - loss_config (loss_type)
+{loss_control}
   - train_config (lr, batch_size; epochs is capped)
 {strategy_surface}
 
 NOTE: Standard guidance below mentions varying trial_portion/epochs (phase-progression,
 "increase trial_portion if scores are poor"). Those instructions do not apply this run
-since those knobs are frozen — focus your reasoning on architecture, lr, and loss_type.
+since those knobs are frozen — focus your reasoning on {focus}.
 """
 
 
@@ -1146,7 +1149,10 @@ def get_planner_user_prompt(
 
     # Handle the model constraint message + output type / valid losses
     model_constraint = ""
-    if force_model != "auto":
+    loss_context = task_render.loss_context if task_render is not None else None
+    if loss_context is not None:
+        model_constraint = render_loss_model_constraint(loss_context, force_model)
+    elif force_model != "auto":
         from ml_models.plugin_loader import (
             UnknownOutputContractError,
             get_output_type,
@@ -1386,6 +1392,7 @@ def get_planner_user_prompt(
         resolved_data_scope,
         trial_max_epochs=trial_max_epochs,
         formal_max_epochs=formal_max_epochs,
+        loss_context=loss_context,
     )
 
     # Phase K (K.6) — per-round numeric resource block + static guidance.
@@ -1440,7 +1447,7 @@ def get_planner_user_prompt(
     "train_validation_align": "true | false",
     "model_config": {{ ... }},
     "train_config": {{ "lr": ..., "epochs": ..., "batch_size": ..., "device": "cuda" }},
-    "loss_config": {{ "loss_type": "ce/focal/smooth_l1", ... }}
+    "loss_config": {render_loss_example(loss_context)}
 }}
 """
 
