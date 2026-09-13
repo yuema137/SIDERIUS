@@ -23,9 +23,16 @@ the flags that decide *what a run is*.
 | drive the workflow directly from Python | `src/workflows/model_exploration.py` |
 | compare a task model against baselines | use the task package's comparison entrypoint |
 | gate a campaign launch | use the campaign-owned preflight in the experiment repository |
+| run standalone literature review for an explicit task | `src/nodes/ml_literature_review/ml_literature_review.py` with `--task_composition`, `--data_dir`, and `--lit_review_config`; see the [node guide](../../src/nodes/ml_literature_review/ml_literature_review.md#cli-usage) |
 
 > Maintained shell launchers live in `scripts/launch/`, the Slurm wrapper in
 > `scripts/slurm/`, and the Python iteration owner in `src/workflows/`.
+
+The literature CLI binds the full task contract before constructing the agent.
+Its data directory must exist even though this node does not train or score.
+An absolute external literature YAML is supported; relative `--lit_review_config`
+paths remain checkout-root-relative. A contradictory history metric id/direction
+refuses; absent or matching stamps are not proof of whole-task compatibility.
 
 ## Archived X9 preflight reference
 
@@ -255,6 +262,7 @@ different one fails at startup.
 | `run_one_iteration.py` | ✅ |
 | `src/workflows/model_exploration.py` | ✅ |
 | `src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` | ✅ (required) |
+| `src/nodes/ml_literature_review/ml_literature_review.py` | ✅ (required, with `--data_dir`) |
 | External task comparison launcher | Task-owned; inspect the selected exp revision |
 
 ---
