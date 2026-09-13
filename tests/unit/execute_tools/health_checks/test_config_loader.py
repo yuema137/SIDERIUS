@@ -455,6 +455,7 @@ class TestAMaterializedConfigDoesNotRecordWhichCheckoutProducedIt:
 def test_explicit_invalid_policy_never_reads_default(tmp_path, monkeypatch, content):
     """A fallback would hide an explicit missing/malformed/invalid operator input."""
     import yaml
+
     from execute_tools.health_checks import _composition
 
     def forbidden():

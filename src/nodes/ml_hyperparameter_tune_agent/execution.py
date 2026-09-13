@@ -39,7 +39,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
-from core.layout import checkout_path, checkout_root
+from core.layout import checkout_root
 from execute_tools.dataset_config import (
     ScopeViolationError,
 )
@@ -48,6 +48,7 @@ from execute_tools.evaluation_metric import (
     MetricResult,
     NotScoreableResult,
 )
+from execute_tools.health_checks.config import default_health_policy_path
 from execute_tools.health_checks.schemas import (
     PerSampleEvidence,
 )
@@ -1408,7 +1409,7 @@ def run_inference_scoring_health(
             enabled=agent_input.health_gate_enabled,
             round_index=round_index,
             config_path=agent_input.health_checks_config,
-            production_config_path=checkout_path("configs", "health", "health_checks.yaml"),
+            production_config_path=default_health_policy_path(),
             task_health_binding=(
                 agent_input.task_composition_ref.task_health_binding
                 if agent_input.task_composition_ref is not None
