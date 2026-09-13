@@ -21,7 +21,7 @@ provenance names exactly what produced it.
 | **TaskScopeCapability** | `Protocol`, 4 methods | *not a section* — an optional sibling on the same object | duck-typed callability | ✅ rides the data path |
 | **TaskTrialAnchoring** | `Protocol`, 1 method | same object | `declares_trial_anchoring` TypeGuard | ✅ |
 | **EvaluationMetric** | ABC | manifest `metric` / `secondary_metrics[i]` | `_load_symbol`, instantiated with the declared spec, type-checked | ✅ via `file:` |
-| **ScoreabilityContract** | `BaseModel, ABC` | inside the metric declaration JSON, by `contract_id` | rebuilt from a **closed** declaration lookup (`_SCOREABILITY_CONTRACT_TYPES`, `execute_tools/evaluation_metric.py:687`) | ❌ closed vocabulary, not a plugin surface — a new contract class is a framework contribution; an unknown id is refused by name |
+| **ScoreabilityContract** | `BaseModel, ABC` | metric declaration JSON `contract_id` plus optional manifest `scoreability_contracts` mapping | rebuilt from the task-declared implementation mapping or supported framework contracts | ✅ via `file:`; an unknown undeclared id refuses |
 | **HealthCheckSkill** | `Protocol` | task health YAML `roster[].check` + `plugins:` | file/dir executed; plugin calls public `register()` | ✅ |
 | **HealthViewProvider** | `Protocol` | task health YAML `providers:` | resolved against what plugins registered | ✅ |
 | **Model plugin** | attribute contract | manifest `model_plugins` (`dir` + `require`) *or* env var | directory scan over the declared/injected roots | ✅ |
@@ -41,9 +41,10 @@ SIDERIUS_PLUGIN_DIRS   os.pathsep-separated   → PLUGIN_MODEL_TYPE / PLUGIN_CON
 SIDERIUS_LOSS_DIRS     deliberately separate  → PLUGIN_LOSS_TYPE / PLUGIN_LOSS_CONFIG_CLASS / PLUGIN_LOSS_CLASS (+ PLUGIN_LOSS_TARGET_DTYPE)
 ```
 
-They extend `MODEL_REGISTRY` / `LOSS_REGISTRY` at runtime through
-`CapabilityRegistry`, and each run stages its plugins into
-`{workspace}/plugins/{run_name}/`.
+They extend `MODEL_REGISTRY` / `LOSS_REGISTRY` through their family loaders.
+Generated model source is staged into `{workspace}/plugins/{run_name}/`;
+current declared package members retain their original captured source path.
+The capability index records available capabilities; it is not code identity.
 
 ### The generated-capability library (arXiv P1)
 
@@ -91,8 +92,8 @@ Exactly one, never both, never neither.
 
 ## Module namespace isolation
 
-Three distinct `sys.modules` prefixes prevent stem collisions between unrelated
-plugin files that happen to share a filename:
+Without `code_package`, these existing `sys.modules` prefixes prevent stem
+collisions between unrelated plugin files:
 
 | prefix | family |
 |---|---|
@@ -100,12 +101,23 @@ plugin files that happen to share a filename:
 | `siderius_plugin_` | model plugins |
 | `siderius_health_plugin_` | health plugins |
 
+With the optional [package declaration](../../reference/task-composition.md),
+selected file consumers share a finite namespace across families. Relative
+imports execute only declared captured members, so helper-defined classes have
+one identity within a package. Directory-roster rules remain unchanged; this
+does not add recursive model/loss discovery. See the
+[loading/transport owner](../../../src/core/local_code/README.md).
+
 ## Identity and provenance
 
 The rules that make provenance trustworthy:
 
 - **A file-declared plugin's content sha256 joins the run's semantic
   fingerprint.** Editing it between a run and its resume is detected.
+- **A selected package member additionally pins the whole declared set.**
+  Editing a helper changes every selected member's package identity, even if
+  the entry file is unchanged. Parent execution and validator entry review use
+  captured bytes; child startup verifies all original member pins.
 - **Absolute paths are never hashed.** The same package at two locations has one
   identity — which is what makes an out-of-tree package relocatable.
 - **Health plugin digests join `health_config_sha256`**, so an edited health

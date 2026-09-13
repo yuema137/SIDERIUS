@@ -161,6 +161,7 @@ Interpret terminal evidence by responsibility:
 | Outcome | Meaning |
 |---|---|
 | composition or argument refusal | required task or execution input is absent, invalid, or inconsistent |
+| `code_package_integrity` | declared package/member/dependency pins cannot be trusted; the workflow halts the chain, not an ordinary candidate retry |
 | admission refusal | measured evidence exceeds a declared execution ceiling |
 | inconclusive preflight | the bounded measurement did not finish; it proves neither fit nor overflow |
 | execution failure | training, inference, scoring, or persistence did not complete |
@@ -170,6 +171,17 @@ Interpret terminal evidence by responsibility:
 
 Do not report a Health-invalid candidate as an infrastructure failure, and do
 not promote its scalar into a best-score trajectory.
+
+A named task-code refusal writes `.chain_halted` with reason
+`code_package_integrity` and exits 3. Guarded child diagnostics, when available,
+live under `task_code/failures/`; queued iterations also respect the halt marker.
+Read that diagnosis and restore the declared original files, or start a new
+workspace for an intentional code change. Do not edit pins or clear a marker to
+hide an unresolved failure. An early composition refusal may precede an iteration
+manifest. Ordinary candidate errors, provider retries, Health invalidation and
+resource-budget decisions retain their existing handling. See
+[workspaces and resume](workspaces-and-resume.md) for source/pin ownership and
+[package limits](../../src/core/local_code/README.md#refusal-and-limits).
 
 ## Campaign ownership
 

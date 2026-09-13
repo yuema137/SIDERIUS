@@ -7,6 +7,9 @@ SIDERIUS ships two lightweight synthetic examples:
 - [`synthetic_masked_regression/`](synthetic_masked_regression/README.md)
   demonstrates masked continuous supervision, a lower-is-better primary metric,
   an observational secondary metric and task-owned Health.
+  Its [modular variant](synthetic_masked_regression/modular/README.md) demonstrates
+  explicit local-package members and shared helper-class identity while reusing
+  the same synthetic implementation files.
 
 These packages are executable framework specifications. Their offline checks
 are small, CPU-friendly and credential-free, and make no scientific-performance

@@ -128,6 +128,14 @@ until its plugin loads. **Phase B** (binding) then resolves every name; a
 check or provider that never appeared fails the startup closed. A
 configuration error is never downgraded to a health verdict.
 
+With a declared [`code_package`](../reference/task-composition.md), checks and
+view providers may import listed helpers relatively. A named package integrity
+or refused-dependency error, including one raised during a later callback, stops
+the workflow as `code_package_integrity`; it is not converted into scientific
+Health evidence. Ordinary check/provider exceptions retain existing Health ERROR
+handling. Package loading does not add a global registry reset or permit
+concurrent task rosters in one process.
+
 Three generic, task-reusable checks ship with the framework:
 `sample_dispersion_floor` (continuous outputs), and
 `categorical_distinct_symbols` + `categorical_dominant_fraction`

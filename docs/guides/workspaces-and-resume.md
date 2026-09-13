@@ -36,6 +36,10 @@ the workspace looks like this:
 {workspace}/                            # --workspace
 ├── run_invariants_lock.json            # the comparability identity — never edit
 ├── health_checks_effective.yaml        # composed health policy, sha256-pinned — never edit
+├── task_code/                          # optional declared-code pins, not a source overlay
+│   ├── <digest>.json                   # immutable child transport
+│   └── failures/<launch_id>.json        # only when a child reports a named refusal
+├── .chain_halted                       # terminal diagnosis, when a chain halt occurs
 ├── iter_001_hardware.json              # {run_name}_hardware.json — the GPU as the run saw it
 ├── plugins/
 │   └── iter_001/{model_type}/          # the generated model code that actually ran
@@ -83,6 +87,12 @@ Three rules of thumb:
 - **`plugins/` is the actual science.** It contains the model code the agents
   wrote and ran. On resume, plugin classes from earlier iterations are
   restored from here automatically.
+
+Composition-declared package models are different: they remain read-only source
+inputs at their current declared location. After invariant checks, resume uses
+that current binding instead of a missing or stale one-file workspace copy.
+Conflicting generated source under a declared model name refuses before registry
+replacement; there is no historical source guessing or metadata migration.
 
 > ℹ **The cross-run library is per-user, not per-checkout.** Every run also
 > *promotes* its generated models and losses (plus the capability index)
@@ -150,6 +160,16 @@ for the exact semantics.
 Editing a **file-declared plugin** or the task health config between runs also
 moves the pinned digest, so the workspace refuses to continue under silently
 changed science. Same rule: new semantics, new workspace.
+
+For [`code_package`](../reference/task-composition.md), the pin covers every
+listed Python member, including helpers. Identical files moved together to a
+different root retain semantic identity; a helper edit does not. The parent
+uses captured bytes, and a child verifies original hashes against its visible
+files. `task_code/*.json` is transport metadata, not authority to recapture edited
+source. Restore accidental source damage before deciding how to recover a halted
+run; an intentional new code identity needs a fresh workspace. Inspect
+`.chain_halted` and any matching child failure report before restarting; ordinary
+auto-resume does not bypass a terminal chain halt.
 
 The advice pin follows the same rule and adds two cases worth stating, because
 advice is optional where the fields above are not:

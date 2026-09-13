@@ -135,7 +135,8 @@ Registries are process-global with run-scoped plugin loading.
 |---|---|
 | `HealthCompositionError` | hand-authored injected key, or both framework and task declared a roster |
 | `HealthPluginError` / `HealthPluginRunScopeError` | plugin file missing/raising, registration collision, or a different plugin set already loaded this process |
-| view materialization error | `CheckVerdict.ERROR` — never converted to `inapplicable` or a pass |
+| ordinary view materialization error | `CheckVerdict.ERROR` — never converted to `inapplicable` or a pass |
+| named `LocalCodeError` during loading/view/check callback | preserved terminal package-integrity refusal, not a Health verdict; see [package boundary](../../core/local_code/README.md) |
 | effective-config sha mismatch on resume | the workspace refuses silently-changed health semantics |
 
 ## Files normally edited
