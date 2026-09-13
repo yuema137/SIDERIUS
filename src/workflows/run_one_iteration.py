@@ -3262,6 +3262,10 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
                 if run_composition is not None
                 else resolve_dataset_profile().partition_count
             ),
+            model_plugin_binding=(
+                run_composition.model_plugins if run_composition is not None else None
+            ),
+            code_package=(run_composition.code_package if run_composition is not None else None),
         )
     except (ResumeError, RunInvariantsViolation) as e:
         print(f"FAIL: restore_prior_state refused to chain: {e}")

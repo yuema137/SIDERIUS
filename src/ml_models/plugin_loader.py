@@ -119,6 +119,9 @@ def _load_plugin(path: str) -> dict | None:
     except _InvalidPackageModel:
         return None
     except Exception as exc:
+        from core.local_code.failure import raise_if_code_package_failure
+
+        raise_if_code_package_failure(exc)
         print(f"[PluginLoader] Failed to load {path}: {exc}")
         return None
 
@@ -137,6 +140,9 @@ def _load_plugin(path: str) -> dict | None:
         # Roll back the sys.modules entry on load failure so a broken plugin
         # can be fixed and retried in the same process.
         sys.modules.pop(module_name, None)
+        from core.local_code.failure import raise_if_code_package_failure
+
+        raise_if_code_package_failure(e)
         print(f"[PluginLoader] Failed to load {path}: {e}")
         return None
 
@@ -426,6 +432,15 @@ def register_model_in_memory(plugin_path: str) -> str | None:
         return None
     model_type = plugin["model_type"]
     new_cls = plugin["model_class"]
+    from ml_models.plugin_binding import (
+        active_run_model_plugins,
+        declared_package_model,
+        require_declared_model_source,
+    )
+
+    declared = declared_package_model(model_type, active_run_model_plugins())
+    if declared is not None:
+        require_declared_model_source(declared, plugin_path)
     existing_cls = MODEL_REGISTRY.get(model_type)
     if existing_cls is not None and getattr(existing_cls, "__qualname__", None) != getattr(
         new_cls, "__qualname__", None

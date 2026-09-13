@@ -2141,7 +2141,12 @@ class MLModelImplementor:
                 None,
             )
             assert existing_meta is not None  # narrowed by membership check above
-            existing_path = existing_meta.file_path
+            from ml_models.plugin_binding import active_run_model_plugins, declared_package_model
+
+            declared = declared_package_model(branch_b_model_name, active_run_model_plugins())
+            existing_path = (
+                declared.absolute_path if declared is not None else existing_meta.file_path
+            )
             print(
                 f"♻️  Branch B model reuse: '{branch_b_model_name}' "
                 f"(source={existing_meta.source_iteration}, "

@@ -1280,57 +1280,17 @@ def _register_plugin(
     if isinstance(dest_plugin_dirs, str):
         dest_plugin_dirs = [dest_plugin_dirs]
 
-    if not os.path.isfile(impl_output.model_file_path):
-        print(
-            f"    Warning: plugin file not found at "
-            f"{impl_output.model_file_path}, skipping registration"
-        )
+    from workflows.plugin_staging import stage_model_source
+
+    source_available, primary_plugin = stage_model_source(
+        impl_output.model_file_path,
+        impl_output.description_file_path,
+        model_name,
+        dest_plugin_dirs,
+        model_type=getattr(impl_output, "model_type", model_name),
+    )
+    if not source_available:
         return
-
-    # Forensic copy — preserve the generated plugin source under a
-    # workspace-relative sentinel directory BEFORE any registration / build
-    # step that could OOM-kill the orchestrator and leave us with no record
-    # of the offending code. Anchored under the SIDERIUS_CHAIN_WORKSPACE env
-    # var so the sentinel lives at the workspace root (not the per-iter
-    # attempt tree), surviving the per-iter cleanup that `--cleanup_denoised`
-    # and similar flags perform. Added after the 2026-06-24 v15 arch OOM
-    # where the generated plugin source was lost when we cleaned the
-    # workspace post-mortem. Best-effort: failures here never block plugin
-    # registration; the sentinel is a debug aid, not a load-bearing step.
-    try:
-        _sentinel_root = os.environ.get(
-            "SIDERIUS_CHAIN_WORKSPACE",
-            os.path.dirname(os.path.dirname(impl_output.model_file_path)),
-        )
-        _sentinel_dir = os.path.join(_sentinel_root, "plugin_source_sentinel")
-        os.makedirs(_sentinel_dir, exist_ok=True)
-        _sentinel_path = os.path.join(_sentinel_dir, f"{model_name}.py")
-        shutil.copy2(impl_output.model_file_path, _sentinel_path)
-        print(f"    [DEBUG] Plugin source saved to sentinel: {_sentinel_path}", flush=True)
-    except Exception as _e:
-        print(f"    [DEBUG] Plugin source sentinel write skipped ({type(_e).__name__}: {_e})")
-
-    primary_plugin: str | None = None
-    for d in dest_plugin_dirs:
-        os.makedirs(d, exist_ok=True)
-        dest_plugin = os.path.join(d, f"{model_name}.py")
-        shutil.copy2(impl_output.model_file_path, dest_plugin)
-        if primary_plugin is None:
-            primary_plugin = dest_plugin
-        print(f"    Plugin registered → {dest_plugin}")
-
-    if os.path.isfile(impl_output.description_file_path):
-        for d in dest_plugin_dirs:
-            desc_dest_dir = os.path.join(d, model_name)
-            os.makedirs(desc_dest_dir, exist_ok=True)
-            dest_desc = os.path.join(desc_dest_dir, "description.md")
-            shutil.copy2(impl_output.description_file_path, dest_desc)
-            print(f"    Description registered → {dest_desc}")
-    else:
-        print(
-            f"    Warning: description not found at "
-            f"{impl_output.description_file_path}, skipping registration"
-        )
 
     # L6a — loss plugin propagation. Only mirror on "generated" so reused
     # losses (Branch B) don't double-copy onto themselves on every iter.
@@ -1640,6 +1600,18 @@ def _promote_model_to_global(impl_output) -> None:
     path that never wrote a generated plugin — nothing to promote).
     """
     model_file_path = getattr(impl_output, "model_file_path", "") or ""
+    from ml_models.plugin_binding import (
+        active_run_model_plugins,
+        declared_package_model,
+        require_declared_model_source,
+    )
+
+    declared = declared_package_model(
+        getattr(impl_output, "model_type", ""), active_run_model_plugins()
+    )
+    if declared is not None:
+        require_declared_model_source(declared, model_file_path)
+        return
     if not model_file_path or not os.path.isfile(model_file_path):
         return  # Built-in / Branch B with no fresh codegen / defensive guard.
 
@@ -1794,9 +1766,17 @@ def _cleanup_stale_registry_entries(registry) -> tuple[int, list[str]]:
         ``(n_removed, names)`` where ``names`` are the entries that were
         pruned. ``(0, [])`` on a clean index.
     """
+    from ml_models.plugin_binding import active_run_model_plugins, declared_package_model
+
+    binding = active_run_model_plugins()
     stale: list[tuple[str, str, str]] = []  # (name, capability_type, file_path)
     for meta in registry.list():
         fp = getattr(meta, "file_path", "") or ""
+        declared = (
+            declared_package_model(meta.name, binding) if meta.capability_type == "model" else None
+        )
+        if declared is not None:
+            fp = declared.absolute_path
         if fp and not os.path.isfile(fp):
             stale.append((meta.name, meta.capability_type, fp))
 

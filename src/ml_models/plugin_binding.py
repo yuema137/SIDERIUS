@@ -62,6 +62,7 @@ from contextvars import ContextVar
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.local_code import (
+    LocalCodeError,
     MemberIdentity,
     scan_candidate_allowed,
     selected_identity,
@@ -206,6 +207,27 @@ def active_run_model_plugins() -> RunModelPluginBinding | None:
     behaviour — the exact defect R-11-13 recorded one subsystem over.
     """
     return _ACTIVE_RUN_MODEL_PLUGINS.get()
+
+
+def declared_package_model(
+    model_type: str, binding: RunModelPluginBinding | None
+) -> ResolvedModelPlugin | None:
+    """Select this current declaration only; never infer rows from history/files."""
+    if binding is None:
+        return None
+    return next(
+        (p for p in binding.plugins if p.model_type == model_type and p.local_code is not None),
+        None,
+    )
+
+
+def require_declared_model_source(plugin: ResolvedModelPlugin, path: str) -> None:
+    """Reject replacement of a current declared package member before mutation."""
+    if plugin.local_code is None or selected_identity(path) != plugin.local_code:
+        raise LocalCodeError(
+            f"declared package model {plugin.model_type!r} requires {plugin.absolute_path!r}; "
+            f"source {path!r} does not match its captured member identity"
+        )
 
 
 def active_run_model_plugin_roots() -> tuple[str, ...]:

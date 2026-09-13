@@ -51,6 +51,8 @@ from core.iteration_manifest import (
     ManifestVerdict,
     verify_iteration_manifest,
 )
+from core.local_code import CapturedCodePackage
+from core.resume_plugins import restore_model_plugin
 from core.run_invariants import (
     RunInvariants,
     load_run_invariants,
@@ -76,6 +78,7 @@ from execute_tools.health_checks.config import (
     read_effective_config_body_sha,
 )
 from execute_tools.metric_order import MetricOrder
+from ml_models.plugin_binding import RunModelPluginBinding
 
 # Step 12 / PR-12a C6 (09.5 Q2 = B) — the PUBLIC registration authority.
 # `core` used to import a PRIVATE symbol from `workflows`, which is the wrong
@@ -1451,6 +1454,8 @@ def restore_prior_state(
     seed_paths: Sequence[str],
     expected_invariants: RunInvariants | None = None,
     dataset_partition_count: int | None = None,
+    model_plugin_binding: RunModelPluginBinding | None = None,
+    code_package: CapturedCodePackage | None = None,
 ) -> RestoredState:
     """Restore every prior iter's plugin classes and assemble the
     source-paths list for ``run_workflow``.
@@ -1480,6 +1485,9 @@ def restore_prior_state(
             resolved dataset profile. The chain runner supplies this value
             explicitly because resume occurs before task-composition
             activation. ``None`` preserves the legacy bound-profile lookup.
+        model_plugin_binding: Explicit current model declaration, resolved before
+            activation; only package members override historical generated paths.
+        code_package: That declaration's captured bytes for package acquisition.
 
     Returns:
         :class:`RestoredState` with ``resolved_source_paths``,
@@ -1628,37 +1636,16 @@ def restore_prior_state(
         plugin_dir = get_plugin_dir(abs_workspace, run_name)
         plugin_file = os.path.join(plugin_dir, f"{parsed.model_type}.py")
 
-        if os.path.isfile(plugin_file):
-            registered = register_model_in_memory(plugin_file)
-            if registered is None:
-                # The .py is on disk but failed _load_plugin validation —
-                # broken plugin contract (missing PLUGIN_MODEL_TYPE etc).
-                # Higher tier of corruption than a missing file: warn and
-                # continue, so the run can still produce memory_history but
-                # the operator is alerted.
-                warnings.warn(
-                    f"[resume] iter {iter_idx:03d}: plugin file at "
-                    f"{plugin_file} failed _load_plugin validation. "
-                    f"Continuing with JSON-only history; model class is "
-                    f"unavailable for any retraining.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-            else:
-                state.restored_plugins.append(registered)
-                print(
-                    f"[resume] iter {iter_idx:03d}: restored plugin "
-                    f"'{registered}' from {plugin_file}"
-                )
-        else:
-            warnings.warn(
-                f"[resume] iter {iter_idx:03d}: plugin file not found at "
-                f"{plugin_file}. JSON record is kept (memory_history is "
-                f"still reconstructible); model class is unavailable for "
-                f"any retraining.",
-                UserWarning,
-                stacklevel=2,
-            )
+        registered = restore_model_plugin(
+            model_type=parsed.model_type,
+            generated_path=plugin_file,
+            iteration=iter_idx,
+            binding=model_plugin_binding,
+            package=code_package,
+            register=register_model_in_memory,
+        )
+        if registered is not None:
+            state.restored_plugins.append(registered)
 
         state.resolved_source_paths.append(output_path)
         state.committed_iters.append(iter_idx)
