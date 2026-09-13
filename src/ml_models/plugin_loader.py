@@ -20,7 +20,9 @@ Plugin interface — each plugin file must define:
 import importlib.util
 import os
 import sys
+from typing import get_args
 
+from agent.schemas.output_types import OutputTypeName
 from core.layout import checkout_path
 
 # LEGACY CHECKOUT model-plugin directory: the repository's
@@ -62,6 +64,15 @@ PLUGIN_OUTPUT_TYPE_REGISTRY: dict[str, str] = {}
 # survived for so long: a plugin legal at LOAD time was refused at VALIDATION
 # time, and an unrecognised value was silently rewritten to "classifier".
 
+#: What a PLUGIN may declare. Evidence-derived, not asserted: across the 109
+#: generated plugins on record the distribution is 106 ``classifier`` +
+#: 3 ``regressor`` and **zero** ``hybrid``; the implementor template emits one
+#: of the two; and the validator has independently enforced exactly this pair
+#: (``_LEGAL_OUTPUT_TYPES``) since V21 PR A. ``hybrid`` reaches the registry
+#: through the builtin table, never through a plugin file.
+#: Derive from the lightweight schema owner shared with proposal/config/CLI.
+PLUGIN_LEGAL_OUTPUT_TYPES: tuple[str, ...] = get_args(OutputTypeName)
+
 #: Every output contract the framework can INTERPRET, including the legacy
 #: builtin adapter value. ``"hybrid"`` is not a tensor semantic — it means "the
 #: shape is classifier-shaped but every loss is legal" and is carried by
@@ -69,15 +80,7 @@ PLUGIN_OUTPUT_TYPE_REGISTRY: dict[str, str] = {}
 #: vocabulary because real consumers branch on it — ``inference_single``
 #: routes regression on ``output_type == "hybrid" and target_dtype ==
 #: torch.float32`` — so deleting it would change execution, not just wording.
-OUTPUT_TYPE_VOCABULARY: tuple[str, ...] = ("classifier", "regressor", "hybrid")
-
-#: What a PLUGIN may declare. Evidence-derived, not asserted: across the 109
-#: generated plugins on record the distribution is 106 ``classifier`` +
-#: 3 ``regressor`` and **zero** ``hybrid``; the implementor template emits one
-#: of the two; and the validator has independently enforced exactly this pair
-#: (``_LEGAL_OUTPUT_TYPES``) since V21 PR A. ``hybrid`` reaches the registry
-#: through the builtin table, never through a plugin file.
-PLUGIN_LEGAL_OUTPUT_TYPES: tuple[str, ...] = ("classifier", "regressor")
+OUTPUT_TYPE_VOCABULARY: tuple[str, ...] = (*PLUGIN_LEGAL_OUTPUT_TYPES, "hybrid")
 
 #: Read for a plugin that predates the declaration (V21 PR A). Kept — and
 #: deliberately NOT folded into the refusal below — because the validator's

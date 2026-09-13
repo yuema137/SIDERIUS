@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
 from agent.schemas.model_io_contract import ModelIOContract
+from agent.schemas.output_types import OutputTypeName
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
@@ -238,7 +239,7 @@ class ImplementorInput(BaseModel):
     model_name: str = Field(
         description="snake_case model type key. Used as the filename and PLUGIN_MODEL_TYPE constant.",
     )
-    output_type: Literal["classifier", "regressor"] = Field(
+    output_type: OutputTypeName = Field(
         default="classifier",
         description="Output representation the proposal committed to, carried "
         "verbatim from ``ProposalOutput.output_type``. Decides the emitted "

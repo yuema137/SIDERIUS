@@ -37,6 +37,9 @@ about a declaration that is PRESENT and unrecognised; that is what fails closed.
 
 from __future__ import annotations
 
+import ast
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -79,6 +82,24 @@ def _write_plugin(directory: Path, declared: str | None, model_type: str) -> str
     return str(path)
 
 
+def _assert_loader_derivation(source: str) -> None:
+    """Reject same-value tuple copies, which runtime equality cannot distinguish."""
+    bindings = [
+        (target.id, ast.dump(node.value))
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.AnnAssign | ast.Assign) and node.value is not None
+        for target in ([node.target] if isinstance(node, ast.AnnAssign) else node.targets)
+        if isinstance(target, ast.Name)
+    ]
+    for name, expression in {
+        "PLUGIN_LEGAL_OUTPUT_TYPES": "get_args(OutputTypeName)",
+        "OUTPUT_TYPE_VOCABULARY": '(*PLUGIN_LEGAL_OUTPUT_TYPES, "hybrid")',
+    }.items():
+        assert [value for target, value in bindings if target == name] == [
+            ast.dump(ast.parse(expression, mode="eval").body)
+        ], name
+
+
 class TestTheVocabularyIsOneAuthority:
     def test_the_validator_reads_the_SAME_object(self):
         """Not "the same value" — the same object. A second literal that
@@ -100,8 +121,6 @@ class TestTheVocabularyIsOneAuthority:
         to those two template names, not to this vocabulary, and binding it to
         the set would create a silent mismatch the day the set grew.
         """
-        import ast
-
         validator = ast.parse(
             (
                 REPO_ROOT / "src/nodes" / "ml_code_validator_agent" / "ml_code_validator_agent.py"
@@ -121,10 +140,66 @@ class TestTheVocabularyIsOneAuthority:
         )
         assert bindings[0].id == "PLUGIN_LEGAL_OUTPUT_TYPES"
 
-    def test_the_loader_declares_each_set_exactly_once(self):
+    def test_the_loader_derives_both_sets_from_the_schema(self):
         loader = (REPO_ROOT / "src/ml_models" / "plugin_loader.py").read_text(encoding="utf-8")
-        assert loader.count('("classifier", "regressor")') == 1
-        assert loader.count('("classifier", "regressor", "hybrid")') == 1
+        _assert_loader_derivation(loader)
+
+    @pytest.mark.parametrize("module", ["proposal", "implementor"])
+    def test_schema_consumers_import_instead_of_copying_the_literal(self, module):
+        """Restoring either old Literal fails even if typing interns the alias.
+
+        An imported but unused owner cannot hide a second alphabet declaration.
+        """
+        tree = ast.parse(
+            (REPO_ROOT / "src/agent/schemas" / f"{module}.py").read_text(encoding="utf-8")
+        )
+        assert any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "agent.schemas.output_types"
+            and any(alias.name == "OutputTypeName" for alias in node.names)
+            for node in tree.body
+        )
+        copied_literal = ast.dump(ast.parse('Literal["classifier", "regressor"]', mode="eval").body)
+        assert all(ast.dump(node) != copied_literal for node in ast.walk(tree))
+
+    @pytest.mark.parametrize("first", ["ml_models.plugin_loader", "agent.schemas.proposal"])
+    def test_cold_imports_keep_the_loader_independent_of_proposal(self, first, tmp_path):
+        """A loader->proposal dependency can cycle through model registration.
+
+        A fresh interpreter catches imports hidden by this suite's warm modules;
+        loader-first additionally refuses eager proposal/model initialization.
+        """
+        script = """
+import importlib
+import sys
+from pathlib import Path
+
+importlib.import_module(sys.argv[1])
+if sys.argv[1] == "ml_models.plugin_loader":
+    assert "agent.schemas.proposal" not in sys.modules
+    assert "ml_models.models_sandbox" not in sys.modules
+    assert "torch" not in sys.modules
+from agent.schemas.output_types import OutputTypeName
+from agent.schemas.proposal import OutputTypeName as ProposalOutputTypeName
+from ml_models import plugin_loader
+assert ProposalOutputTypeName is OutputTypeName
+assert plugin_loader.PLUGIN_LEGAL_OUTPUT_TYPES == ("classifier", "regressor")
+assert Path(plugin_loader.__file__).resolve() == Path(sys.argv[2]).resolve()
+"""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                script,
+                first,
+                str(REPO_ROOT / "src/ml_models/plugin_loader.py"),
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
 
     def test_the_plugin_legal_set_is_a_strict_subset_of_the_vocabulary(self):
         assert set(PLUGIN_LEGAL_OUTPUT_TYPES) < set(OUTPUT_TYPE_VOCABULARY)

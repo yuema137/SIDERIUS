@@ -24,6 +24,12 @@ Per-node contracts (one module each): `interpretation.py`, `proposal.py` (+
 namespace every node writes under), `ordering.py`, `vocab.py`,
 `health_feedback.py`, `run_metadata.py`, `telemetry/`.
 
+`output_types.py` owns the lightweight `OutputTypeName` vocabulary used by
+proposal/implementor schemas, launch config, CLI and plugin loading.
+`proposal.OutputTypeName` remains an explicit public re-export. The loader
+derives its legal plugin tuple from this alias and adds builtin-only `hybrid`
+only to its broader execution vocabulary; plugins cannot declare `hybrid`.
+
 `protocols/` — one module per directed edge, named
 `{source_code}_to_{target_code}.py` (e.g.
 `ml_model_valid_to_ml_model_tune.py`). Functions inside are named
