@@ -72,7 +72,8 @@ def _scenario(args, baseline):
     effective, sha = materialize_effective_config(
         source, None, str(root / "effective"), task_health_binding=binding
     )
-    content = Path(effective).read_text()
+    original_bytes = Path(effective).read_bytes()
+    content = original_bytes.decode("utf-8")
     body = "".join(line for line in content.splitlines(keepends=True) if not line.startswith("#"))
     assert body == expected["body"] and sha == expected["sha256"], name
     if not source:
@@ -80,7 +81,7 @@ def _scenario(args, baseline):
     assert materialize_effective_config(
         source, None, str(root / "effective"), task_health_binding=binding
     ) == (effective, sha)
-    assert Path(effective).read_text() == content
+    assert Path(effective).read_bytes() == original_bytes
 
     _, persisted, action = evaluate_and_persist_health_gates(
         HealthCheckContext(model_name="witness", run_name="baseline", round_index=1),
@@ -161,7 +162,7 @@ def _scenario(args, baseline):
                 "changed_body_resume",
             )
         )
-        assert Path(effective).read_text() == content
+        assert Path(effective).read_bytes() == original_bytes
         passing, _ = materialize_effective_config(
             None, None, str(root / "passing"), task_health_binding=binding
         )
