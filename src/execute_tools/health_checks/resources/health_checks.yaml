@@ -1,4 +1,4 @@
-# configs/health_checks.yaml
+# Packaged generic Health default policy.
 #
 # FRAMEWORK HealthGate policy. Step 08b C5 slimmed this file to policy only.
 #

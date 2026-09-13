@@ -23,7 +23,7 @@ does*; the task owns *what is checked and how strictly*.
 | `schemas.py` | the typed vocabulary: `CheckVerdict` (`passed` / `failed` / `inapplicable` / `error`) · `GateAction` (`continue` / `invalidate_round`) + severity · `HealthCheckContext` / `HealthCheckResult` / `GateResult` · `CheckInputDeclaration` · the `FACT_AXES` |
 | `runner.py` | `evaluate_gate` (decides applicability **before** invoking a check) · `resolve_action` (max severity wins) |
 | `evaluation.py` | `evaluate_and_persist_health_gates` — the batched evaluate-and-persist adapter both Phase-1 baselines and tuner rounds use |
-| `config.py` | `load_health_gates_config` (returns the **composed** result) · `materialize_effective_config` → `{workspace}/health_checks_effective.yaml`, sha256-pinned by the invariants lock |
+| `config.py` | `default_health_policy_path()` (inert installed resource location) · `load_health_gates_config` (returns the **composed** result) · `materialize_effective_config` → `{workspace}/health_checks_effective.yaml`, sha256-pinned by the invariants lock |
 | `_task_health_config.py` | `TaskHealthConfig` — the task-owned document: facts, value scale, peek files, roster (`gate_id`, `check`, **`disposition`** — the task's only policy choice — `parameters`, `reason`), `plugins:` |
 | `_plugin_binding.py` | `load_task_health_plugins` — run-scoped loading of external plugin files |
 | `standard_views.py` | the framework-standard view capabilities `categorical_predictions` / `continuous_samples`: 1-D typed, read-only, no-copy, engine-opaque |
@@ -31,17 +31,32 @@ does*; the task owns *what is checked and how strictly*.
 
 ## Inputs
 
-Framework policy (`configs/health/health_checks.yaml` — policy ONLY) + a task health
+Packaged framework policy (`resources/health_checks.yaml` — policy ONLY) + a task health
 config supplied by the composition manifest (an external task supplies its own
 anywhere on disk); run-level inputs that are deliberately
 CLI, not YAML (`--health_gate_enabled`, `--health_gate_files`); deliverable
 peeks and views.
+
+Omit the policy override to use the same default in source/editable and wheel
+installations. A nonempty explicit missing or invalid override refuses without
+fallback. Empty-string paths still select the default; blank/empty explicit
+YAML retains its existing empty-root semantics. Complete explicit policy is
+independent of the packaged default. For different consequences supply an
+external file and leave installed package files unchanged. The old checkout path
+`configs/health/health_checks.yaml` was removed, not aliased. Optional observe
+policy must be selected explicitly; `--healthgate_mode` only declares/checks
+the posture, never chooses the file.
 
 ## Outputs
 
 `GateResult`s with per-check verdicts; a resolved `GateAction`; persisted
 `PersistedHealthGateResult`s on the experiment record; the pinned
 `health_checks_effective.yaml`.
+
+Default provenance uses the stable header label
+`execute_tools/health_checks/resources/health_checks.yaml`. That human header
+is excluded from the effective body SHA; policy/body identity and reuse rules
+are unchanged. Existing effective files are not rewritten to update a header.
 
 ## Owned semantics
 
@@ -101,7 +116,7 @@ Registries are process-global with run-scoped plugin loading.
 
 For a task: **nothing here** — your own health config + plugin files. For the
 framework: a new built-in check module (+ its bootstrap import, tests, and the
-health-core census), or policy in `configs/health/health_checks.yaml`.
+health-core census), or the packaged generic policy in `resources/health_checks.yaml`.
 
 ## Files normally NOT edited
 

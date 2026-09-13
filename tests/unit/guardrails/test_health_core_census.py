@@ -79,7 +79,7 @@ TASK_TOKENS = ("tidmad", "pets", "davis", "oxford", "acme")
 SCIENCE_LITERALS = ("int8", "channel0001", "channel0002", "mV")
 
 FRAMEWORK_POLICY_YAMLS = (
-    REPO_ROOT / "configs" / "health" / "health_checks.yaml",
+    REPO_ROOT / "src/execute_tools/health_checks/resources/health_checks.yaml",
     REPO_ROOT / "configs" / "health" / "health_checks_baseline_observe_mode.yaml",
 )
 

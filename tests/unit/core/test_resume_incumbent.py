@@ -401,7 +401,8 @@ def test_repo_policy_never_consulted(tmp_path, monkeypatch):
     """
     real = resume.resolve_scientific_gate_ids
     repo_config = str(
-        pathlib.Path(__file__).resolve().parents[3] / "configs" / "health" / "health_checks.yaml"
+        pathlib.Path(__file__).resolve().parents[3]
+        / "src/execute_tools/health_checks/resources/health_checks.yaml"
     )
     calls: list[str] = []
 

@@ -8,8 +8,11 @@ from agent.prompt_templates.proposal.task_blocks import load_proposal_task_block
 from execute_tools.health_checks.config import _DEFAULT_CONFIG_PATH, load_health_gates_config
 
 
-def test_framework_health_policy_is_anchored_to_this_checkout(tmp_path, monkeypatch) -> None:
-    expected = Path(__file__).resolve().parents[3] / "configs" / "health" / "health_checks.yaml"
+def test_framework_health_policy_is_anchored_to_its_package(tmp_path, monkeypatch) -> None:
+    expected = (
+        Path(__file__).resolve().parents[3]
+        / "src/execute_tools/health_checks/resources/health_checks.yaml"
+    )
     monkeypatch.chdir(tmp_path)
     assert Path(_DEFAULT_CONFIG_PATH) == expected
     assert load_health_gates_config().health_gates == []

@@ -57,7 +57,14 @@ Import names are unchanged (`core`, `agent`, `nodes`, `workflows`,
 inject source paths through `PYTHONPATH`.
 
 A wheel contains these packages and their adjacent runtime resources. It does
-not contain root launch scripts, examples, policy YAML or machine configuration.
+not contain root launch scripts, examples, optional policy variants or machine
+configuration. The required generic Health default is packaged: omit
+`--health_checks_config`, or use
+`execute_tools.health_checks.config.default_health_policy_path()` when a
+library call needs its location. The old checkout path
+`configs/health/health_checks.yaml` was removed. Nonempty missing/invalid explicit
+overrides refuse without fallback; supply an external policy to customize
+consequences, never edit site-packages. Task Health science remains external.
 Library consumers supply explicit external task/config/data/workspace inputs;
 the checkout remains necessary for the documented chain launcher. Installed
 synthetic CPU execution is qualified separately from real scientific tasks or

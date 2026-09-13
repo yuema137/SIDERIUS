@@ -5,14 +5,19 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
+import yaml
+
 from execute_tools.health_checks import _plugin_binding
-from execute_tools.health_checks.config import materialize_effective_config
+from execute_tools.health_checks.config import (
+    default_health_policy_path,
+    materialize_effective_config,
+)
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.registry import _PROVIDER_REGISTRY, _REGISTRY
 from execute_tools.health_checks.schemas import HealthCheckContext
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PRODUCTION_POLICY = REPO_ROOT / "configs" / "health" / "health_checks.yaml"
+PRODUCTION_POLICY = Path(default_health_policy_path())
 
 
 def _external_health_binding(root: Path) -> str:
@@ -38,7 +43,7 @@ def _external_health_binding(root: Path) -> str:
                 def run(self, ctx, config=None):
                     return HealthCheckResult(
                         check_name=self.name,
-                        passed=True,
+                        passed=False,
                         reason="synthetic round-boundary fixture",
                     )
 
@@ -82,20 +87,28 @@ def test_production_policy_comparison_preserves_the_composed_task_binding(tmp_pa
     _plugin_binding.reset_run_scope()
     try:
         task_health_binding = _external_health_binding(tmp_path)
+        policy = yaml.safe_load(PRODUCTION_POLICY.read_text())
+        policy["health_policy"]["blocking"]["on_fail"] = "continue"
+        observe = tmp_path / "observe.yaml"
+        observe.write_text(yaml.safe_dump(policy))
         effective_path, _ = materialize_effective_config(
-            None,
+            str(observe),
             None,
             str(tmp_path),
             task_health_binding=task_health_binding,
         )
 
-        evaluate_and_persist_health_gates(
+        _, persisted, action = evaluate_and_persist_health_gates(
             HealthCheckContext(model_name="candidate", run_name="run", round_index=1),
             config_path=effective_path,
             production_config_path=str(PRODUCTION_POLICY),
             task_health_binding=task_health_binding,
-            gate_ids=[],
         )
+
+        assert action.value == "continue"
+        assert len(persisted) == 1
+        assert persisted[0].check_passed is False
+        assert persisted[0].would_invalidate_under_production_policy is True
 
         assert [plugin.configured_ref for plugin in _plugin_binding.loaded_plugin_set()] == [
             "health_plugin.py"

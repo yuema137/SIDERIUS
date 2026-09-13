@@ -295,8 +295,11 @@ class TestNoInfrastructureEditWasRequired:
         assert self._git_grep(identifier) == []
 
     def test_the_shipped_configs_carry_no_task_identity(self):
-        for name in ("health_checks.yaml", "health_checks_baseline_observe_mode.yaml"):
-            body = yaml.safe_load((REPO_ROOT / "configs" / "health" / name).read_text())
+        for name in (
+            "src/execute_tools/health_checks/resources/health_checks.yaml",
+            "configs/health/health_checks_baseline_observe_mode.yaml",
+        ):
+            body = yaml.safe_load((REPO_ROOT / name).read_text())
             assert set(body) == {"health_policy"}, name
 
     def test_the_central_import_list_registers_only_built_ins(self):

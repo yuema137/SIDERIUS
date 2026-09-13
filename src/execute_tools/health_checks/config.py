@@ -23,29 +23,34 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from core.layout import checkout_path, require_checkout
 from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks._composition import (
-    DEFAULT_DISPOSITION_POLICY,
     SIDERIUS_ROOT,
     DispositionPolicy,
     HealthBindingState,
     TaskHealthBinding,
     body_markers,
+    default_disposition_policy,
     resolve_composed_gates,
 )
 from execute_tools.health_checks._plugin_binding import ResolvedHealthPlugin
+from execute_tools.health_checks._policy_resources import DEFAULT_POLICY_LABEL, default_policy_path
 from execute_tools.health_checks._task_health_config import TaskHealthConfig
 from execute_tools.health_checks.schemas import GateAction
 
-# F-7: anchored to THIS checkout, not to the caller's working directory. See
-# `_composition.SIDERIUS_ROOT` for why (a campaign launched from outside the
-# repo root refused every band scan). This value is for RESOLUTION only —
-# what gets WRITTEN into a persisted artifact goes through `_record_path`,
-# which renders an in-repo config repo-relative so the artifact does not carry
-# the path of whichever checkout produced it.
-_DEFAULT_CONFIG_PATH = checkout_path("configs", "health", "health_checks.yaml")
+
+def default_health_policy_path() -> str:
+    """Locate the packaged generic policy without opening it.
+
+    Use this accessor for explicit production-policy comparisons. Omitted
+    loader overrides use the same resource; scientific Health remains external.
+    """
+    return default_policy_path()
+
+
+# Private compatibility name; values and location have no checkout authority.
+_DEFAULT_CONFIG_PATH = default_health_policy_path()
 
 # Basename of the per-workspace materialized effective config — the single
 # path every downstream loader reads once the run-level monitored-file
@@ -165,7 +170,7 @@ class ActionConfig(BaseModel):
 
 
 class GateConfig(BaseModel):
-    """One HealthGate entry in ``configs/health/health_checks.yaml``.
+    """One HealthGate entry in an effective or explicit Health configuration.
 
     A gate fires at its configured ``after_round`` position, runs its
     ``checks`` in listed order (with per-gate ``short_circuit``), and
@@ -302,7 +307,7 @@ class PersistedHealthPluginIdentity(BaseModel):
 class HealthChecksConfig(BaseModel):
     """The rev-6 HealthGate YAML root.
 
-    Loaded from ``configs/health/health_checks.yaml`` by
+    Loaded from packaged defaults or explicit files by
     ``load_health_gates_config``. See
     ``docs/design/pluggable_health_checks.md`` §3.
     """
@@ -333,12 +338,10 @@ class HealthChecksConfig(BaseModel):
             "disposition (Step 08b §3.7). The operator policy surface: "
             "gate role, cadence, short-circuit, actions, severity and "
             "per-check policy keys such as ``aggregation``.\n\n"
-            "Empty means the built-in default table, which reproduces the "
-            "six shipped gates exactly — so a pre-08b custom YAML keeps "
-            "working without acquiring a block it never had. The shipped "
-            "observe-mode config exists precisely because this is data: it "
-            "differs from the production config ONLY in ``on_fail`` for "
-            "blocking gates."
+            "Empty selects the packaged default table when composition needs "
+            "policy; an explicit complete table is independent of that resource. "
+            "The optional observe-mode file differs from the production default "
+            "only in blocking ``on_fail`` and must be selected explicitly."
         ),
     )
 
@@ -374,8 +377,8 @@ class HealthChecksConfig(BaseModel):
     )
 
     def resolved_policy(self) -> dict[str, DispositionPolicy]:
-        """The policy table in effect — declared, or the built-in default."""
-        return self.health_policy or DEFAULT_DISPOSITION_POLICY
+        """Declared policy, or a lazy validated read of the packaged default."""
+        return self.health_policy or default_disposition_policy()
 
     @model_validator(mode="after")
     def _validate_unique_ids(self) -> HealthChecksConfig:
@@ -463,10 +466,8 @@ def _resolved_binding_identity(path: str | None) -> tuple[Any, ...]:
 
 
 def _resolve_config_path(path: str | None) -> str:
-    """Resolve an explicit policy or the same-checkout default, never CWD."""
-    if path or _DEFAULT_CONFIG_PATH:
-        return path or str(_DEFAULT_CONFIG_PATH)
-    return str(require_checkout(SIDERIUS_ROOT) / "configs" / "health" / "health_checks.yaml")
+    """Preserve explicit paths and falsey-path compatibility for the default."""
+    return path or default_health_policy_path()
 
 
 def _load_raw_health_config(path: str | None = None) -> HealthChecksConfig:
@@ -476,6 +477,8 @@ def _load_raw_health_config(path: str | None = None) -> HealthChecksConfig:
     without recursing through the public loader.
     """
     resolved = _resolve_config_path(path)
+    if resolved == default_health_policy_path():
+        return HealthChecksConfig(health_policy=default_disposition_policy())
     with open(resolved) as f:
         raw = yaml.safe_load(f) or {}
     return HealthChecksConfig.model_validate(raw)
@@ -800,6 +803,8 @@ def _record_path(path: str) -> str:
         absolute path.
     """
     absolute = Path(path).resolve()
+    if absolute == Path(default_health_policy_path()):
+        return DEFAULT_POLICY_LABEL
     if SIDERIUS_ROOT is None:
         return str(absolute)
     root = Path(SIDERIUS_ROOT).resolve()

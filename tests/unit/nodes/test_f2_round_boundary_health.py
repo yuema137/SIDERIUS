@@ -102,7 +102,7 @@ def _route_conditions_guarding_the_gate_call(source: str) -> list[str]:
 
 
 def test_round_boundary_uses_relocated_production_policy_owner() -> None:
-    """The real execution call resolves the shipped policy through checkout."""
+    """A checkout-only/None argument silently drops installed observe evidence."""
     tree = ast.parse(EXECUTION_PY.read_text())
     calls = [
         node
@@ -114,9 +114,9 @@ def test_round_boundary_uses_relocated_production_policy_owner() -> None:
     assert calls
     keyword = next(k for call in calls for k in call.keywords if k.arg == "production_config_path")
     assert isinstance(keyword.value, ast.Call)
-    assert isinstance(keyword.value.func, ast.Name) and keyword.value.func.id == "checkout_path"
-    assert [elt.value for elt in keyword.value.args] == ["configs", "health", "health_checks.yaml"]
-    assert (EXECUTION_PY.parents[3] / "configs" / "health" / "health_checks.yaml").is_file()
+    assert isinstance(keyword.value.func, ast.Name)
+    assert keyword.value.func.id == "default_health_policy_path"
+    assert keyword.value.args == []
 
 
 def _score_meta(gate_results: Any, resolved_action: Any):

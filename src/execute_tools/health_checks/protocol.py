@@ -69,8 +69,8 @@ class HealthCheckSkill(Protocol):
 
         Args:
             ctx: Shared context — the skill reads only the fields it needs.
-            config: Per-gate threshold overrides from
-                ``configs/health/health_checks.yaml``. ``None`` (default) means
+            config: Per-gate thresholds from the task-owned effective
+                Health configuration. ``None`` (default) means
                 the skill uses its own defaults. Partial config overlays:
                 skills merge provided keys over their instance defaults,
                 so YAML can override just one threshold and leave the

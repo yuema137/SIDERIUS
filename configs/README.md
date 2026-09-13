@@ -20,8 +20,8 @@ semantics and experiment treatment belong to caller-owned packages.
 |---|---|---|
 | `task_composition/{quickstart,synthetic_masked_regression}.yaml` | pointers to the two lightweight framework examples | `workflows/task_composition.py` |
 | `task_config.example.yaml` | copyable shape example; never a runtime default | task-config documentation |
-| `health/health_checks.yaml` | **framework policy only**: per-disposition gate role, cadence, short-circuit, `on_pass`/`on_fail`, and the default `aggregation` | `execute_tools/health_checks/config.py` |
-| `health/health_checks_baseline_observe_mode.yaml` | same policy with blocking failures downgraded to observation (differs only in `blocking.on_fail`) | selected via `--healthgate_mode observe_only` |
+| packaged `execute_tools/health_checks/resources/health_checks.yaml` (outside this directory) | **framework policy only**: per-disposition role, cadence, short-circuit, actions and default aggregation | omitted `--health_checks_config`; public `default_health_policy_path()` accessor |
+| `health/health_checks_baseline_observe_mode.yaml` | optional policy with blocking failures downgraded to observation | explicit `--health_checks_config` plus declared `--healthgate_mode observe_only` |
 
 ## Inputs
 
@@ -69,9 +69,11 @@ pair.
 - **A new task is a new manifest anywhere on disk**, passed via
   `--task_composition` — not a file added here. The shipped manifests are
   worked examples.
-- **A different framework policy** is a run input: `--healthgate_mode
-  observe_only` for the shipped observe-mode variant, or
-  `--health_checks_config /path/to/policy.yaml` for a custom policy file.
+- **A different framework policy** is a run input:
+  `--health_checks_config /path/to/policy.yaml`. For observe-only consequences,
+  select the optional observe file (or an external equivalent) and declare
+  `--healthgate_mode observe_only --result_authority diagnostic`; mode alone
+  does not select a policy. Installed users never need to edit site-packages.
 - Run-level decisions (`health_gate_enabled`, `health_gate_files`, data
   scope, budgets) are deliberately **CLI inputs, not YAML**.
 

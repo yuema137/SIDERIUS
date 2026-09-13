@@ -18,8 +18,8 @@ import yaml
 
 from execute_tools.health_checks._composition import HealthBindingState, TaskHealthBinding
 from execute_tools.health_checks.config import (
-    _DEFAULT_CONFIG_PATH,
     EFFECTIVE_CONFIG_BASENAME,
+    default_health_policy_path,
     load_composed_health_config,
     load_health_gates_config,
 )
@@ -194,9 +194,11 @@ def required_blocking_gate_ids(production_config_path: str | None = None) -> fro
     function collapses UNKNOWN to the empty set and so cannot distinguish
     "no blocking gates" from "roles could not be established".
     """
-    # `_DEFAULT_CONFIG_PATH` rather than a second `__file__` walk to the same
-    # file: two anchors to one path is how one of them drifts (F-7).
-    path = production_config_path if production_config_path is not None else _DEFAULT_CONFIG_PATH
+    path = (
+        production_config_path
+        if production_config_path is not None
+        else default_health_policy_path()
+    )
     return resolve_scientific_gate_ids(path) or frozenset()
 
 

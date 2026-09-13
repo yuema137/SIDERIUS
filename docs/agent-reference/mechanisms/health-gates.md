@@ -76,7 +76,7 @@ Severity: `skip_iter > skip_to_formal > invalidate_round > continue`.
 
 | owner | file | declares |
 |---|---|---|
-| framework | `configs/health/health_checks.yaml` | `health_policy.{blocking,recording}`: gate role, cadence, short-circuit, `on_pass`/`on_fail`, `aggregation` |
+| framework | packaged default via `execute_tools.health_checks.config.default_health_policy_path()` | `health_policy.{blocking,recording}`: gate role, cadence, short-circuit, `on_pass`/`on_fail`, default `aggregation` |
 | task | e.g. `configs/task_health/tidmad.yaml` | `facts`, `value_scale`, `health_peek_files`, `roster[]` with **thresholds** in `parameters`, and `reason` prose |
 
 The task's **only** policy choice is `disposition` ∈ {`BLOCKING`,
