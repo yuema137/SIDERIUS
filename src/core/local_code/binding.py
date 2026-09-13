@@ -83,14 +83,24 @@ def root_code_scope() -> Iterator[None]:
 
 
 def package_subprocess_env(environ: MutableMapping[str, str]) -> None:
+    from core.local_code.failure import FAILURE_ENV, read_failure_channel
     from core.local_code.transport import DIGEST_ENV, MANIFEST_ENV, write_transport
 
     package = active_package()
     if package is not None:
         write_transport(package, environ)
+        if isinstance(_ACTIVE.get(), _Inherited):
+            channel = read_failure_channel(environ)
+            if channel is not None and channel.package_digest != package.identity.digest:
+                raise LocalCodeError("code_package inherited failure channel differs from package")
+        else:
+            environ.pop(FAILURE_ENV, None)  # A new root cannot reuse ambient launch state.
     elif _ACTIVE.get() is None:
         environ.pop(MANIFEST_ENV, None)
         environ.pop(DIGEST_ENV, None)
+        environ.pop(FAILURE_ENV, None)
+    elif FAILURE_ENV in environ:
+        raise LocalCodeError("code_package failure channel is present without package transport")
 
 
 def bootstrap_code_package(manifest_path: str | None = None, digest: str | None = None) -> None:
@@ -99,6 +109,40 @@ def bootstrap_code_package(manifest_path: str | None = None, digest: str | None 
     Pool owners pass the same shared-env carrier as serializable initargs;
     this does not mutate os.environ, start workers, or execute plugin source.
     """
+    try:
+        _bootstrap_code_package(manifest_path, digest)
+    except LocalCodeError as exc:
+        _report_bootstrap_refusal(exc)
+        raise
+
+
+def _report_bootstrap_refusal(exc: LocalCodeError) -> None:
+    """Pool initializer errors otherwise become an untyped BrokenProcessPool."""
+    from core.local_code.failure import publish_failure, read_failure_channel
+
+    if _ACTIVE.get() is None or isinstance(_ACTIVE.get(), CapturedCodePackage):
+        return
+    try:
+        channel = read_failure_channel(os.environ)
+        if channel is not None:
+            publish_failure(channel, exc)
+    except (OSError, LocalCodeError):
+        # Retain the original refusal. Broken report storage cannot guarantee
+        # nested-pool diagnosis; never relabel every BrokenProcessPool instead.
+        pass
+
+
+def _bootstrap_code_package(manifest_path: str | None, digest: str | None) -> None:
+    from core.local_code.failure import read_failure_channel
+
+    inherited_decision = _ACTIVE.get() is UNBOUND or isinstance(_ACTIVE.get(), _Inherited)
+    channel = read_failure_channel(os.environ) if inherited_decision else None
+    if (
+        channel is not None
+        and (manifest_path is not None or digest is not None)
+        and digest != channel.transport_digest
+    ):
+        raise LocalCodeError("code_package initializer transport differs from inherited channel")
     if manifest_path is None and digest is None:
         package = active_package()
     else:
@@ -116,6 +160,8 @@ def bootstrap_code_package(manifest_path: str | None = None, digest: str | None 
         if package is not None:
             _ACTIVE.set(_Inherited(package))
     if package is not None:
+        if channel is not None and channel.package_digest != package.identity.digest:
+            raise LocalCodeError("code_package initializer channel differs from parent pin")
         install_package_finder(package)
 
 

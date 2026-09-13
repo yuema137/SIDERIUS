@@ -7,13 +7,20 @@ import json
 import keyword
 import os
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+if TYPE_CHECKING:
+    from core.local_code.failure import CodeFailure
 
 
 class LocalCodeError(ValueError):
     """A declared package cannot be used; never downgrade to a scan warning."""
+
+    def __init__(self, message: str, *, report: CodeFailure | None = None):
+        super().__init__(message)
+        self.report = report
 
 
 def sha256(data: bytes) -> str:
