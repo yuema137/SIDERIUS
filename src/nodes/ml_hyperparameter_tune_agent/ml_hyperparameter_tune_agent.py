@@ -1608,6 +1608,9 @@ class HyperparamTuningAgent:
                     break
 
                 except Exception as e:
+                    from core.local_code.failure import raise_if_code_package_failure
+
+                    raise_if_code_package_failure(e)
                     if isinstance(e, RuntimeEvidenceChannelError):
                         # C9c: infrastructure class — the machinery that
                         # produces runtime evidence is broken, so no further

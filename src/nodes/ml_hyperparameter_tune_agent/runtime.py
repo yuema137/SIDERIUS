@@ -937,6 +937,9 @@ def _run_skill(skill_folder: str, sandbox: TidmadSandbox, **params) -> dict:
         skill_module = importlib.import_module(module_path)
         return skill_module.run_skill(sandbox, **params)
     except Exception as e:
+        from core.local_code.failure import raise_if_code_package_failure
+
+        raise_if_code_package_failure(e)
         print(f"Skill Error [{skill_folder}]: {e!s}")
         return {"status": "error", "message": str(e)}
 
@@ -1054,6 +1057,9 @@ def _resolve_task_scope_guardrail_steps(
             max_samples=max_samples,
         ).unit_count
     except Exception as exc:
+        from core.local_code.failure import raise_if_code_package_failure
+
+        raise_if_code_package_failure(exc)
         print(f"[guardrails] task-owned step resolution failed (non-fatal): {exc}")
         return None
 

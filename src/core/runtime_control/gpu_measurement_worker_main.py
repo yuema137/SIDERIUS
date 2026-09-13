@@ -49,6 +49,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from core.local_code.failure import raise_if_code_package_failure
 from core.runtime_control.gpu_measurement_identity import build_realized_identity
 from core.runtime_control.gpu_measurement_phases import (
     CandidateComponents,
@@ -445,6 +446,7 @@ def validate_candidate_configs(spec: GpuMeasurementSpec) -> str | None:
         TrainConfig(**spec.train_config)
         LossConfig(**spec.loss_config)
     except Exception as exc:
+        raise_if_code_package_failure(exc)
         return f"{type(exc).__name__}: {exc}"
     return None
 
@@ -617,6 +619,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = measure(spec, trace)
     except BaseException as exc:
+        raise_if_code_package_failure(exc)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
         # The measurement system itself broke. That is not a property of

@@ -59,6 +59,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.execution_calibration import MalformedCeilingOverride
+from core.local_code.child import ChildInvocation, prepare_child
+from core.local_code.failure import raise_if_code_package_failure
 from core.runtime_control.probe import descendant_pids
 from core.subprocess_env import subprocess_env
 
@@ -333,10 +335,10 @@ def _read_phase(progress_path: Path) -> WorkerPhase | None:
 
 def spawn_worker(
     spec: ProbeWorkerSpec, *, command: list[str] | None = None
-) -> tuple[subprocess.Popen, Any, Path]:
+) -> tuple[subprocess.Popen, Any, Path, ChildInvocation]:
     """Launch one worker in its OWN process group and return immediately.
 
-    Returns ``(process, log_handle, log_path)``. The caller owns the
+    Returns ``(process, log_handle, log_path, invocation)``. The caller owns the
     deadline, the log handle and the eventual termination — see
     `run_worker` for the blocking, deadline-enforcing use, and the C12-C
     pairwise driver for the concurrent one.
@@ -366,8 +368,9 @@ def spawn_worker(
     try:
         # start_new_session -> the child leads its own process group, so a
         # kill reaches every dataloader worker it spawned, not just itself.
+        invocation = prepare_child(argv, subprocess_env())
         process = subprocess.Popen(
-            argv,
+            invocation.argv,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             start_new_session=True,
@@ -382,12 +385,13 @@ def spawn_worker(
             # the worker still falls back to the legacy global dir exactly
             # as before. What it gains is the PYTHONPATH extension every
             # other SIDERIUS worker already receives.
-            env=subprocess_env(),
+            env=invocation.env,
         )
     except Exception as exc:
         log_handle.close()
+        raise_if_code_package_failure(exc)
         raise ProbeInfrastructureFailure(f"could not launch the probe worker: {exc!r}") from exc
-    return process, log_handle, log_path
+    return process, log_handle, log_path, invocation
 
 
 def stop_worker(process: subprocess.Popen, *, grace_seconds: float = DEFAULT_GRACE_SECONDS) -> None:
@@ -424,7 +428,7 @@ def run_worker(
     """
     result_path = Path(spec.result_path)
     progress_path = result_path.with_suffix(".phase")
-    process, log_handle, log_path = spawn_worker(spec, command=command)
+    process, log_handle, log_path, invocation = spawn_worker(spec, command=command)
 
     pgid = process.pid  # session leader: pgid == pid
     started = clock()
@@ -466,6 +470,7 @@ def run_worker(
     worker_log_tail = _log_tail(log_path)
     phase_at_exit = _read_phase(progress_path)
     returncode = process.returncode
+    invocation.check(returncode)
     exit_signal = -returncode if returncode is not None and returncode < 0 else None
     result_present = result_path.is_file()
     vram_threshold = vram_attribution_threshold_gb(spec.device_vram_gb)

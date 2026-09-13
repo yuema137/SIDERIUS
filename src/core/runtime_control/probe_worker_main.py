@@ -23,6 +23,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from core.local_code.failure import raise_if_code_package_failure
+
 
 def _run_sustained_load(spec, executors, paths) -> int:
     """Train continuously until the deadline, then report (C12-C).
@@ -138,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     except Exception as exc:  # the worker still reports, then exits
+        raise_if_code_package_failure(exc)
         from core.runtime_control.probe import is_out_of_memory
 
         dump_result(

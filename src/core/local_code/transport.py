@@ -117,8 +117,6 @@ def write_transport(package: CapturedCodePackage, environ: MutableMapping[str, s
     except OSError as exc:
         raise LocalCodeError(f"code_package cannot materialize captured transport: {exc}") from exc
     except ValueError as exc:
-        if isinstance(exc, LocalCodeError):
-            raise
         raise LocalCodeError(f"code_package transport refused: {exc}") from exc
     environ[MANIFEST_ENV] = str(path)
     environ[DIGEST_ENV] = digest

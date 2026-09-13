@@ -1387,6 +1387,9 @@ def _register_plugin(
         if registered:
             print(f"    Model '{model_name}' added to registries (model_type='{registered}')")
     except Exception as e:
+        from core.local_code.failure import raise_if_code_package_failure
+
+        raise_if_code_package_failure(e)
         print(f"    Warning: could not extend registries: {e}")
 
     # Construction-time RSS validator — catches faulty SSM/attention plugins
@@ -3088,6 +3091,9 @@ def run_workflow(
                     print("    Retrying with a new proposal...\n")
 
             except Exception as e:
+                from core.local_code.failure import raise_if_code_package_failure
+
+                raise_if_code_package_failure(e)
                 error_msg = f"Node error: {type(e).__name__}: {e}"
                 print(f"    ERROR: {error_msg}")
                 previous_failures.append(error_msg)

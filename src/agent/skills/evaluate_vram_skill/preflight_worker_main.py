@@ -31,6 +31,8 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+from core.local_code.failure import raise_if_code_package_failure
+
 #: Combined ceiling for the three rich diagnostic fields (PR A, D-A2).
 #: They exist so an agent can act on a rejection; they must never become a
 #: channel for tensors, state dicts or whole tracebacks.
@@ -259,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
             probe_budgets=ProbeBudgets.model_validate(spec.get("probe_budgets") or {}),
         )
     except BaseException as exc:
+        raise_if_code_package_failure(exc)
         from agent.skills.evaluate_vram_skill.probe_budgets import (
             classify_host_memory_exception,
         )

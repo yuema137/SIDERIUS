@@ -310,8 +310,7 @@ def _write_halt_marker(workspace: str, payload: dict) -> str:
 
 
 def _check_halt_marker(workspace: str) -> bool:
-    """Return True iff the consecutive-failure brake has already fired
-    in this workspace (Stage 4 / Commit 4.6).
+    """Return True iff a chain halt marker exists in this workspace.
 
     Cheap fail-fast for SDSC ``afterany`` chains: Slurm queues the next
     iter regardless of the previous's exit code, so we need an on-disk
@@ -2824,7 +2823,18 @@ def main():
 
     with ExitStack() as package_scope:
         package_scope.enter_context(root_code_scope())
-        return _run_bound_iteration(args, package_scope)
+        try:
+            return _run_bound_iteration(args, package_scope)
+        except Exception as exc:
+            from workflows.package_failure import halt_on_package_failure
+
+            halt_on_package_failure(
+                exc,
+                workspace=args.workspace,
+                iteration=args.start_iteration,
+                write_marker=_write_halt_marker,
+            )
+            raise
 
 
 def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
@@ -2847,6 +2857,9 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
         try:
             preflight_composition = compose_run_task_bindings(args.task_composition)
         except Exception as exc:
+            from core.local_code.failure import raise_if_code_package_failure
+
+            raise_if_code_package_failure(exc)
             preflight_composition_error = exc
 
     # Launch policy and invariants materialize Health before run activation.
@@ -2937,7 +2950,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
     #     both break the streak.
     if _check_halt_marker(args.workspace):
         print(
-            f"[HALT] consecutive-failure brake already fired in this "
+            f"[HALT] chain halt marker present in this "
             f"workspace — see {os.path.join(args.workspace, '.chain_halted')}",
             file=sys.stderr,
         )
@@ -3505,17 +3518,22 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
     except Exception as e:
         print(f"FAIL: Workflow raised exception: {type(e).__name__}: {e}")
         traceback.print_exc()
-        write_manifest(
-            iter_dir,
-            run_name,
-            results=[],
-            crashed=True,
-            healthgate_mode=args.healthgate_mode,
-            result_authority=args.result_authority,
-            fixed_candidate_provenance=fixed_candidate_provenance,
-            launch_identity=launch_identity,
-            replacement=manifest_replacement,
-        )
+        try:
+            write_manifest(
+                iter_dir,
+                run_name,
+                results=[],
+                crashed=True,
+                healthgate_mode=args.healthgate_mode,
+                result_authority=args.result_authority,
+                fixed_candidate_provenance=fixed_candidate_provenance,
+                launch_identity=launch_identity,
+                replacement=manifest_replacement,
+            )
+        finally:
+            from core.local_code.failure import raise_if_code_package_failure
+
+            raise_if_code_package_failure(e)
         sys.exit(1)
 
     manifest = write_manifest(

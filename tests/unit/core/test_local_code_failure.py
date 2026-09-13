@@ -131,3 +131,27 @@ def test_explicit_initializer_cannot_replace_inherited_locator_transport(tmp_pat
         assert binding._ACTIVE.get() is binding.UNBOUND
     finally:
         binding._ACTIVE.reset(token)
+
+
+def test_lazy_package_import_inside_pydantic_validator_is_not_candidate_validation(tmp_path):
+    from pydantic import ValidationError
+
+    from core.local_code import acquire_module
+
+    entry = tmp_path / "config.py"
+    entry.write_text(
+        "from pydantic import BaseModel, field_validator\n"
+        "class Config(BaseModel):\n"
+        " value: int\n"
+        " @field_validator('value')\n"
+        " @classmethod\n"
+        " def require_helper(cls, value):\n"
+        "  from .undeclared import validate\n"
+        "  return validate(value)\n"
+    )
+    package = capture_package(CodePackageDeclaration(root=".", files=("config.py",)), tmp_path)
+    with bind_code_package(package), acquire_module(entry) as module:
+        with pytest.raises(LocalCodeError, match="undeclared relative import"):
+            module.Config(value=3)
+        with pytest.raises(ValidationError):
+            module.Config(value="not an integer")

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from core.local_code.failure import CodeFailure
 
 
-class LocalCodeError(ValueError):
+class LocalCodeError(RuntimeError):
     """A declared package cannot be used; never downgrade to a scan warning."""
 
     def __init__(self, message: str, *, report: CodeFailure | None = None):
