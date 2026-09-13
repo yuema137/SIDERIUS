@@ -15,6 +15,7 @@ import os
 import pathlib
 
 import pytest
+import yaml
 
 import core.resume as resume
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
@@ -381,6 +382,25 @@ def test_unestablishable_commit_time_excluded(tmp_path):
     )
     state = _restore(ws, 2)
     assert state.chain_best_valid_formal_score is None
+
+
+def test_matching_artifact_with_missing_roles_cannot_promote_on_resume(tmp_path):
+    """A verified body hash proves artifact identity, never undeclared roles."""
+    body = yaml.safe_load(_HEALTH_CONFIG.read_text())
+    for gate in body["health_gates"]:
+        gate.pop("gate_role")
+    source = tmp_path / "roleless.yaml"
+    source.write_text(yaml.safe_dump(body))
+    model_dir = tmp_path / "iter_001" / "iteration_001" / "punet"
+    model_dir.mkdir(parents=True)
+    _, sha = materialize_effective_config(str(source), None, str(model_dir))
+    _write_iter(
+        str(tmp_path),
+        1,
+        [_record("f1", 0.9, waiver=None, verdicts=_passing_verdicts())],
+        health_config_sha256=sha,
+    )
+    assert _restore(str(tmp_path), 2).chain_best_valid_formal_score is None
 
 
 def test_repo_policy_never_consulted(tmp_path, monkeypatch):

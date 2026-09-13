@@ -8,18 +8,14 @@ invalid for promotion.
 
 from __future__ import annotations
 
-import hashlib
 import math
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
-
 from execute_tools.health_checks._composition import HealthBindingState, TaskHealthBinding
 from execute_tools.health_checks.config import (
     EFFECTIVE_CONFIG_BASENAME,
-    default_health_policy_path,
     load_composed_health_config,
     load_health_gates_config,
 )
@@ -44,76 +40,15 @@ def _as_mapping(value: Any) -> dict[str, Any]:
     return {}
 
 
-#: Gate roles as they stood in the shipped configs BEFORE `gate_role`
-#: existed, keyed by the exact body sha256 those configs had at that time.
-#:
-#: This is an audited historical declaration, not a heuristic. It is keyed
-#: on the sha so it can only ever answer for a config whose bytes are known;
-#: a role-less config that is not in this map is UNKNOWN, never guessed.
-#:
-#: The two entries are `configs/health_checks.yaml` and
-#: `configs/health_checks_baseline_observe_mode.yaml` at master 334d388d,
-#: measured immediately before the roles were added.
-_LEGACY_ROLES_BY_CONFIG_SHA: dict[str, dict[str, str]] = {
-    # configs/health_checks.yaml — blocking enforcement
-    "3b5521180f5460a4a7aa67ad0ff67701633d75ed8fdcac4277c222b713655b74": {
-        "output_diversity_blocking": "blocking",
-        "output_std_blocking": "blocking",
-        "amplitude_collapse_blocking": "blocking",
-        "pearson_dispersion_recording": "observational",
-        "spectral_peak_ratio_recording": "observational",
-        "per_file_output_std_recording": "observational",
-    },
-    # configs/health_checks_baseline_observe_mode.yaml — observe-only
-    # enforcement, IDENTICAL science. That the two maps are equal is the
-    # whole point: the role is a property of the check, not of the action.
-    "d133a12d3133fb20d632383aa010b1a861fe0fdb6fb6436874b2142d6b5ef58d": {
-        "output_diversity_blocking": "blocking",
-        "output_std_blocking": "blocking",
-        "amplitude_collapse_blocking": "blocking",
-        "pearson_dispersion_recording": "observational",
-        "spectral_peak_ratio_recording": "observational",
-        "per_file_output_std_recording": "observational",
-    },
-}
-
-
-def legacy_config_body_sha(config_path: str | None = None) -> str | None:
-    """The body sha this config WOULD have had before ``gate_role`` existed.
-
-    ``health_config_sha256`` stamps recorded before this hotfix were computed
-    over a model dump with no ``gate_role`` key, so the current dump cannot
-    match them. Removing the key reproduces the historical body exactly,
-    which is what lets the compatibility map be keyed on a real recorded
-    value rather than on a filename.
-
-    Returns ``None`` when the file is missing or unparseable — absence of a
-    sha is not evidence of anything, and the caller must treat it as UNKNOWN.
-    """
-    try:
-        config = load_health_gates_config(config_path)
-        body = config.model_dump(mode="json")
-    except Exception:
-        return None
-    for gate in body.get("health_gates", []):
-        if isinstance(gate, dict):
-            gate.pop("gate_role", None)
-    return hashlib.sha256(yaml.safe_dump(body, sort_keys=True).encode()).hexdigest()
-
-
 def resolve_run_scientific_gate_ids(
     task_health_binding: TaskHealthBinding = HealthBindingState.LEGACY_OMITTED,
 ) -> frozenset[str] | None:
     """The scientific gate set for a RUN, resolved from its own Health declaration.
 
-    Step 10 / P5+P6 **W6**. The zero-argument
-    :func:`resolve_scientific_gate_ids` resolves through
-    ``load_health_gates_config(None)``, which composes with
-    ``LEGACY_OMITTED`` — the LEGACY TIDMAD task-health config. That default is
-    correct for an un-composed run and WRONG for a composed one: it makes a
-    composed contrast run bind TIDMAD's Health family process-globally, and the
-    Step-08b run-scope guard then (correctly) refuses the run's own family.
-    Finding F-P56-2.
+    Step 10 / P5+P6 **W6**, finding F-P56-2: composition must supply its own
+    binding rather than acquire another task's policy through a default.
+    The current omitted binding is neutral; no historical scientific roster
+    is recovered.
 
     This is the composition-aware resolver. It exists so the run's Health
     declaration is resolved **ONCE, at the composition edge**, and consumed
@@ -126,9 +61,9 @@ def resolve_run_scientific_gate_ids(
     whichever its composition declared.
 
     Args:
-        task_health_binding: the run's declared Health binding. The default
-            reproduces the pre-W6 behaviour exactly, so every un-composed
-            caller is unaffected.
+        task_health_binding: the run's declared Health binding. Omission uses
+            the existing neutral run-level default; EXPLICIT_NONE names an
+            intentionally absent Health family.
 
     Returns:
         The blocking-role gate ids, or ``None`` when the roles cannot be
@@ -167,9 +102,10 @@ def resolve_scientific_gate_ids(config_path: str | None = None) -> frozenset[str
 
     Returns:
         The blocking-role gate ids, or ``None`` when the roles cannot be
-        established: a role-less config whose sha is not in the audited
-        compatibility map. ``None`` means UNKNOWN and the caller must exclude
-        the record, never fall back to a guess.
+        established because any gate lacks a role. Historical body hashes,
+        gate names and actions never supply missing roles. ``None`` means
+        UNKNOWN, not the explicitly empty roster. Missing or malformed explicit
+        files retain the loader's exceptions; no default is substituted.
     """
     # `None` means the shipped default config — the same convention
     # `load_health_gates_config` uses, rather than a second spelling of it.
@@ -178,28 +114,7 @@ def resolve_scientific_gate_ids(config_path: str | None = None) -> frozenset[str
     if all(role is not None for role in declared.values()):
         return frozenset(gid for gid, role in declared.items() if role == "blocking")
 
-    # Role-less: a config written before this field existed. Recover only
-    # through the audited map, keyed on the body it actually had.
-    legacy = _LEGACY_ROLES_BY_CONFIG_SHA.get(legacy_config_body_sha(config_path) or "")
-    if legacy is None:
-        return None
-    return frozenset(gid for gid, role in legacy.items() if role == "blocking")
-
-
-def required_blocking_gate_ids(production_config_path: str | None = None) -> frozenset[str]:
-    """Deprecated shim: the scientific gate set for one config.
-
-    Retained so existing call sites keep working. New code should call
-    :func:`resolve_scientific_gate_ids`, which can express UNKNOWN; this
-    function collapses UNKNOWN to the empty set and so cannot distinguish
-    "no blocking gates" from "roles could not be established".
-    """
-    path = (
-        production_config_path
-        if production_config_path is not None
-        else default_health_policy_path()
-    )
-    return resolve_scientific_gate_ids(path) or frozenset()
+    return None
 
 
 def _all_checks_inapplicable(result: dict[str, Any]) -> bool:
@@ -225,7 +140,9 @@ def classify_candidate_health(
 ) -> CandidateHealthValidity:
     """Classify one record for valid-candidate eligibility.
 
-    Missing or non-executed required HealthGates are ``unknown``.  An actual
+    A missing roster (``None``, including omission) is ``unknown`` and performs
+    no config I/O; an explicitly empty iterable declares no required gates.
+    Missing or non-executed required HealthGates are ``unknown``. An actual
     failed blocking check, a collapse status, or a non-finite score is
     ``invalid``. Recording-only checks are ignored.
     """
@@ -247,9 +164,9 @@ def classify_candidate_health(
     if data.get("health_gate_enabled") is False:
         return CandidateHealthValidity.VALID
 
-    required = frozenset(
-        required_blocking_gate_ids() if required_gate_ids is None else required_gate_ids
-    )
+    if required_gate_ids is None:
+        return CandidateHealthValidity.UNKNOWN
+    required = frozenset(required_gate_ids)
     results = {
         item.get("gate_name"): item
         for raw in data.get("health_gate_results") or []
@@ -327,7 +244,7 @@ def is_valid_candidate(
 def pinned_workspace_gate_ids(workspace: str | Path) -> frozenset[str] | None:
     """The scientific gate set a WORKSPACE PINNED, or ``None`` for UNKNOWN.
 
-    The counterpart of :func:`required_blocking_gate_ids` for a consumer that
+    The workspace adapter of :func:`resolve_scientific_gate_ids` for a consumer that
     is judging ONE RUN'S persisted records. It resolves the run's own
     materialized ``health_checks_effective.yaml``; the repo-current shipped
     config is deliberately never consulted, because that is a DIFFERENT run's
@@ -360,7 +277,7 @@ def classify_under_pinned_policy(
 ) -> CandidateHealthValidity:
     """Validity of one persisted record under the RUN'S OWN resolved gate set.
 
-    **The one place the UNKNOWN rule is written.** ``gate_ids is None`` means
+    Delegates to the one classifier owning UNKNOWN. ``gate_ids is None`` means
     the run's policy could not be established, and the answer is UNKNOWN —
     never a silent fall-back to the repo-current shipped config, and never the
     empty set, which reads as "no gate is required" and would classify every
@@ -381,11 +298,4 @@ def classify_under_pinned_policy(
         gate_ids: the run's own scientific gate set, or ``None`` for UNKNOWN —
             typically from :func:`pinned_workspace_gate_ids`.
     """
-    if _as_mapping(record).get("health_gate_enabled") is False:
-        return classify_candidate_health(record, required_gate_ids=frozenset())
-    if gate_ids is None:
-        base = classify_candidate_health(record, required_gate_ids=frozenset())
-        if base is CandidateHealthValidity.INVALID:
-            return CandidateHealthValidity.INVALID
-        return CandidateHealthValidity.UNKNOWN
     return classify_candidate_health(record, required_gate_ids=gate_ids)

@@ -492,7 +492,7 @@ def _load_trial_anchor_map(*, composed: bool, data_root: str) -> dict | None:
     return load_anchor_map(anchor_map_path)
 
 
-def _resolve_run_gate_ids(agent_input: Any) -> Any:
+def _resolve_run_gate_ids(agent_input: Any) -> frozenset[str] | None:
     """The RUN's own scientific gate set — F-12d-30.
 
     Resolved ONCE, here, so ``records.py`` can read it off ``RunBindings``
@@ -501,26 +501,27 @@ def _resolve_run_gate_ids(agent_input: Any) -> Any:
     projection instead is what made a composed chain refuse its own output
     (F-11-C10-a).
 
-    The zero-argument default inside ``is_valid_candidate`` composes with
-    ``LEGACY_OMITTED`` — TIDMAD's set. Correct for an un-composed run, and
-    wrong for a composed one, where it binds TIDMAD's Health family into a
-    process that has already bound the run's own and the Step-08b run-scope
-    guard then refuses an otherwise-complete run at finalize.
+    Composed runs resolve their declared binding. Uncomposed runs resolve
+    their actual effective ``health_checks_config`` (already swapped in before
+    RunBindings construction). A missing path uses the run-level loader's
+    neutral default; classifiers never load a default themselves.
 
     Extracted rather than inlined at the construction site: ``run()`` sits on
     a PR-12a C0 structural LOC budget and §E.2 requires new behaviour to
     arrive by EXTRACTION rather than by spending the allowance. Inlining these
     eleven lines put it 88 over an 80-line budget and the guard caught it.
 
-    ``None`` for an un-composed run, which resolves the legacy default exactly
-    as before.
+    ``None`` means roles could not be established, not an empty roster.
     """
     from execute_tools.health_checks.candidate_eligibility import (
         resolve_run_scientific_gate_ids,
+        resolve_scientific_gate_ids,
     )
 
     ref = getattr(agent_input, "task_composition_ref", None)
-    return resolve_run_scientific_gate_ids(ref.task_health_binding) if ref is not None else None
+    if ref is not None:
+        return resolve_run_scientific_gate_ids(ref.task_health_binding)
+    return resolve_scientific_gate_ids(getattr(agent_input, "health_checks_config", None))
 
 
 def _resolve_run_health_config(agent_input: Any) -> HealthChecksConfig:

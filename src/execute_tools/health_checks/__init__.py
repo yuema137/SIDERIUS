@@ -56,7 +56,6 @@ from execute_tools.health_checks.candidate_eligibility import (
     CandidateHealthValidity,
     classify_candidate_health,
     is_valid_candidate,
-    required_blocking_gate_ids,
 )
 from execute_tools.health_checks.categorical_distinct_symbols import (
     CategoricalDistinctSymbolsCheck,
@@ -175,7 +174,6 @@ __all__ = [
     "loaded_plugin_set",
     "register",
     "register_view_provider",
-    "required_blocking_gate_ids",
     "resolve_action",
     "resolve_task_health_bindings",
     "severity_of",

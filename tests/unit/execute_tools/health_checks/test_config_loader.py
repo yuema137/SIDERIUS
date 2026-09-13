@@ -338,12 +338,12 @@ class TestTheShippedDefaultsDoNotDependOnTheWorkingDirectory:
         resolve an absolute framework path and then compose the TASK default,
         which is a second constant.
         """
-        from execute_tools.health_checks.candidate_eligibility import required_blocking_gate_ids
+        from execute_tools.health_checks.candidate_eligibility import resolve_scientific_gate_ids
 
         monkeypatch.chdir(tmp_path)
 
         assert load_health_gates_config(None).health_gates == []
-        assert required_blocking_gate_ids() == frozenset()
+        assert resolve_scientific_gate_ids() == frozenset()
         assert load_health_gates_config(_DEFAULT_CONFIG_PATH).health_gates == []
 
     def test_framework_default_points_into_this_package(self):
