@@ -558,7 +558,7 @@ class LockView(BaseModel):
     created_at: str | None
     runtime_estimator_identity: str | None
     runtime_policy_identity: str | None
-    model_plugin_identities: list[dict[str, str]] | None
+    model_plugin_identities: list[dict[str, object]] | None
 
 
 class TrajectoryPoint(BaseModel):
