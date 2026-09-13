@@ -586,7 +586,7 @@ class TestRestoreWiring:
             )
         )
 
-        with patch.object(runner, "run_workflow") as mock_wf:
+        with patch("workflows.model_exploration.run_workflow") as mock_wf:
             mock_wf.return_value = [_StubResult("c8_test_arch_a")]
             with patch.object(
                 runner,
@@ -636,7 +636,7 @@ class TestRestoreWiring:
         )
         health_path = "configs/health/health_checks_baseline_observe_mode.yaml"
 
-        with patch.object(runner, "run_workflow") as mock_wf:
+        with patch("workflows.model_exploration.run_workflow") as mock_wf:
             mock_wf.return_value = [_StubResult("c8_test_arch_a")]
             with patch.object(
                 runner,
@@ -704,7 +704,7 @@ class TestRestoreWiring:
         assert "c8_test_arch_a" not in MODEL_REGISTRY
 
         with (
-            patch.object(runner, "run_workflow") as mock_wf,
+            patch("workflows.model_exploration.run_workflow") as mock_wf,
             patch.object(
                 runner,
                 "write_manifest",
@@ -748,7 +748,10 @@ class TestRestoreWiring:
         # only treats @manifest: prefixes specially.
 
         with (
-            patch.object(runner, "run_workflow", return_value=[_StubResult("c8_test_arch_b")]),
+            patch(
+                "workflows.model_exploration.run_workflow",
+                return_value=[_StubResult("c8_test_arch_b")],
+            ),
             patch.object(
                 runner,
                 "write_manifest",
@@ -785,7 +788,10 @@ class TestRestoreWiring:
         seed.write_text("{}")
 
         with (
-            patch.object(runner, "run_workflow", return_value=[_StubResult("c8_test_arch_a")]),
+            patch(
+                "workflows.model_exploration.run_workflow",
+                return_value=[_StubResult("c8_test_arch_a")],
+            ),
             patch.object(
                 runner,
                 "write_manifest",
@@ -825,7 +831,7 @@ class TestRestoreWiring:
         seed.write_text("{}")
 
         with (
-            patch.object(runner, "run_workflow") as mock_wf,
+            patch("workflows.model_exploration.run_workflow") as mock_wf,
             patch.object(
                 runner,
                 "write_manifest",
@@ -876,7 +882,7 @@ class TestRestoreWiring:
         seed.write_text("{}")
 
         with (
-            patch.object(runner, "run_workflow") as mock_wf,
+            patch("workflows.model_exploration.run_workflow") as mock_wf,
             patch.object(
                 runner,
                 "write_manifest",
@@ -924,7 +930,7 @@ class TestRestoreWiring:
         seed = tmp_path / "seed.json"
         seed.write_text("{}")
 
-        with patch.object(runner, "run_workflow") as mock_wf:
+        with patch("workflows.model_exploration.run_workflow") as mock_wf:
             code = _run_main(
                 [
                     "--workspace",
@@ -957,7 +963,7 @@ class TestRestoreWiring:
         seed.write_text("{}")
 
         with (
-            patch.object(runner, "run_workflow") as mock_wf,
+            patch("workflows.model_exploration.run_workflow") as mock_wf,
             patch.object(
                 runner,
                 "write_manifest",
@@ -1162,7 +1168,7 @@ class TestNoRecordsExit:
         capsys,
     ):
         seed = self._seed_file(tmp_path)
-        with patch.object(runner, "run_workflow", return_value=[]):
+        with patch("workflows.model_exploration.run_workflow", return_value=[]):
             code = _run_main(
                 [
                     "--workspace",
@@ -1191,9 +1197,8 @@ class TestNoRecordsExit:
         capsys,
     ):
         seed = self._seed_file(tmp_path)
-        with patch.object(
-            runner,
-            "run_workflow",
+        with patch(
+            "workflows.model_exploration.run_workflow",
             side_effect=RuntimeError("simulated workflow crash"),
         ):
             code = _run_main(
@@ -1237,7 +1242,7 @@ class TestNoRecordsExit:
         )
 
         seed = self._seed_file(tmp_path)
-        with patch.object(runner, "run_workflow") as mock_wf:
+        with patch("workflows.model_exploration.run_workflow") as mock_wf:
             mock_wf.return_value = [_StubResult("c8_test_arch_b", score=0.78)]
             code = _run_main(
                 [
@@ -1298,7 +1303,7 @@ class TestPseudoModeFactoryWiring:
     def _invoke(self, tmp_path, *extra_flags):
         seed = self._seed(tmp_path)
         with (
-            patch.object(runner, "run_workflow") as mock_wf,
+            patch("workflows.model_exploration.run_workflow") as mock_wf,
             patch.object(
                 runner,
                 "write_manifest",
@@ -1537,7 +1542,7 @@ def test_main_refuses_missing_composition_before_work(
     monkeypatch.setattr(sys, "argv", ["run_one_iteration.py", *argv])
 
     with (
-        patch.object(runner, "run_workflow") as run_workflow,
+        patch("workflows.model_exploration.run_workflow") as run_workflow,
         patch.object(runner, "resolve_composed_measurement_capability") as resolve_measurement,
     ):
         with pytest.raises(SystemExit) as exc:
@@ -1569,7 +1574,7 @@ class TestDataScopeChainWiring:
             "iter_001",
             *extra,
         ]
-        with patch.object(runner, "run_workflow") as mock_wf:
+        with patch("workflows.model_exploration.run_workflow") as mock_wf:
             mock_wf.return_value = [_StubResult("c8_test_arch_a")]
             code = _run_main(argv)
         return code, mock_wf
@@ -1659,7 +1664,7 @@ class TestAutoResumeRecovery:
             "iter_001",
             *extra,
         ]
-        with patch.object(runner, "run_workflow") as mock_wf:
+        with patch("workflows.model_exploration.run_workflow") as mock_wf:
             mock_wf.return_value = [_StubResult("c8_test_arch_a")]
             code = _run_main(argv)
         return code, mock_wf
@@ -1810,7 +1815,7 @@ class TestDeprecatedStrategyFlags:
             "--trial_strategy",
             "anchors",
         ]
-        with patch.object(runner, "run_workflow") as mock_wf:
+        with patch("workflows.model_exploration.run_workflow") as mock_wf:
             mock_wf.return_value = [_StubResult("c8_test_arch_a")]
             with pytest.warns(DeprecationWarning):
                 code = _run_main(argv)

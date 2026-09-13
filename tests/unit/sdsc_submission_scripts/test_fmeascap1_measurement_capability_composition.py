@@ -145,7 +145,7 @@ def _capability_reaching_the_workflow(argv: list[str]) -> object:
         "scientific",
         *argv,
     ]
-    with patch.object(runner, "run_workflow") as mock_wf:
+    with patch("workflows.model_exploration.run_workflow") as mock_wf:
         mock_wf.return_value = [_StubResult("fmeascap1_arch")]
         with patch.object(
             runner,
