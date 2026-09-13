@@ -82,6 +82,7 @@ from nodes.ml_hyperparameter_tune_agent.cli import (
 )
 from nodes.ml_hyperparameter_tune_agent.contracts import (
     AttemptIdentity,
+    AttemptOrdering,
     AttemptSignal,
     AttemptStage,
     RunBindings,
@@ -1408,6 +1409,7 @@ class HyperparamTuningAgent:
                 total_attempts += 1
                 iteration = round_index  # legacy alias for prints + brain.plan(current_round=...)
                 stage = AttemptStage("planning")
+                attempt_ordering = AttemptOrdering()
                 exp_id = f"{model_type_setting}_{run_name}_{total_attempts:03d}"
                 model_type = model_type_setting
                 record_params: dict[str, Any] = {}
@@ -1415,6 +1417,7 @@ class HyperparamTuningAgent:
                 try:
                     prepared = prepare_attempt(
                         run_bindings,
+                        attempt_ordering=attempt_ordering,
                         iteration=iteration,
                         attempt_in_round=attempt_in_round,
                         total_attempts=total_attempts,
@@ -1668,7 +1671,9 @@ class HyperparamTuningAgent:
                         # The RAW dict is saved (validation is the gate, not
                         # the serializer): model_dump() drops extra keys, which
                         # would silently lose the §4 watchdog provenance.
-                        _emit_attempt_record(sandbox, failure_record, agent_input)
+                        _emit_attempt_record(
+                            sandbox, failure_record, agent_input, ordering=attempt_ordering.selected
+                        )
                         print(f"  Saved structured attempt failure: {exp_id}")
                     except Exception as persist_error:
                         print(f"  [ERROR] Could not persist attempt failure: {persist_error}")

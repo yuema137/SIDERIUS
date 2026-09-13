@@ -36,6 +36,7 @@ from pydantic import ValidationError
 from agent.schemas.hyperparam_tuning import (
     PhysicalRejection,
 )
+from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
@@ -129,7 +130,14 @@ _records = _import_module("nodes.ml_hyperparameter_tune_agent.records")
 _runtime = _import_module("nodes.ml_hyperparameter_tune_agent.runtime")
 
 
-def _emit_attempt_record(sandbox, record: dict, agent_input, *, status: dict | None = None) -> None:
+def _emit_attempt_record(
+    sandbox,
+    record: dict,
+    agent_input,
+    *,
+    status: dict | None = None,
+    ordering: ResolvedOrdering | None = None,
+) -> None:
     """Emit one attempt record with the run's identity kwargs attached.
 
     Integration extraction (S1 x landed PR-12d, the SE.2 idiom): threading
@@ -151,6 +159,7 @@ def _emit_attempt_record(sandbox, record: dict, agent_input, *, status: dict | N
             record,
             candidate_id=agent_input.candidate_id,
             experiment_arm=agent_input.experiment_arm,
+            ordering=ordering,
         )
     else:
         _records._emit_record(
@@ -159,6 +168,7 @@ def _emit_attempt_record(sandbox, record: dict, agent_input, *, status: dict | N
             status=status,
             candidate_id=agent_input.candidate_id,
             experiment_arm=agent_input.experiment_arm,
+            ordering=ordering,
         )
 
 
@@ -931,7 +941,9 @@ def run_training(
             round_index=round_index,
             attempt_in_round=attempt_in_round,
         )
-        _emit_attempt_record(sandbox, error_record, agent_input, status=train_status)
+        _emit_attempt_record(
+            sandbox, error_record, agent_input, status=train_status, ordering=prepared.ordering
+        )
         print(f"  Saved error record: {error_record['status']}")
         return TrainingOutcome.next_attempt()
 
@@ -1160,7 +1172,9 @@ def run_inference_scoring_health(
                 round_index=round_index,
                 attempt_in_round=attempt_in_round,
             )
-            _emit_attempt_record(sandbox, error_record, agent_input, status=inf_status)
+            _emit_attempt_record(
+                sandbox, error_record, agent_input, status=inf_status, ordering=prepared.ordering
+            )
             print(f"  Saved error record: {error_record['status']}")
             return AttemptExecution.next_attempt()
 
@@ -1380,7 +1394,7 @@ def run_inference_scoring_health(
                 round_index=round_index,
                 attempt_in_round=attempt_in_round,
             )
-            _emit_attempt_record(sandbox, error_record, agent_input)
+            _emit_attempt_record(sandbox, error_record, agent_input, ordering=prepared.ordering)
             print(f"  Saved error record: {error_record['status']}")
             return AttemptExecution.next_attempt()
         scoring_time = round(time.time() - t0, 1)

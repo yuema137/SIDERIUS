@@ -34,7 +34,11 @@ from execute_tools.health_checks.candidate_eligibility import (
     is_valid_candidate,
 )
 from execute_tools.sample_set_builder import build_sample_set
-from nodes.ml_hyperparameter_tune_agent.contracts import PreparedAttempt, RunBindings
+from nodes.ml_hyperparameter_tune_agent.contracts import (
+    AttemptOrdering,
+    PreparedAttempt,
+    RunBindings,
+)
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _apply_mode_override_chain,
     _apply_plan_overrides,
@@ -293,6 +297,7 @@ def _no_sample_set_notice(mode: str, file_index: int | None) -> str:
 def prepare_attempt(
     bindings: RunBindings,
     *,
+    attempt_ordering: AttemptOrdering,
     iteration: int,
     attempt_in_round: int,
     total_attempts: int,
@@ -631,6 +636,7 @@ def prepare_attempt(
         override_file_order=agent_input.file_order_override,
         rejected_proposal=rejected_ordering,
     )
+    attempt_ordering.selected = ordering
     print(f"[data_order] {ordering.describes_execution()}")
 
     trial_config = TrialConfig(
