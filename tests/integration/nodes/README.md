@@ -1,13 +1,21 @@
 # tests/integration/nodes
 
-Node integration covers mock-LLM cache accumulation plus isolated node wiring.
-Most modules are `real_run` and skipped unless credentials/options are supplied;
-those paths may call providers, Semantic Scholar/arXiv, or CUDA. Synthetic
-mock-chain tests remain local and deterministic.
+Node integration covers deterministic cache accumulation and isolated node
+wiring. Provider construction belongs to the single LLM gateway and live task
+workflows belong to external consumers; this directory is not a hidden
+provider/GPU qualification suite.
 
 ## Source and route
 
 `.venv/bin/python -m pytest tests/integration/nodes/test_interpretation_cache_accumulator.py -q`
 
-Owner: `src/nodes/` and `src/agent/llm_bridge.py`; use `-m real_run` only for
-the explicitly documented live routes. See the [integration map](../README.md).
+The composed tuner boundary is exercised by:
+
+```bash
+.venv/bin/python -m pytest \
+  tests/integration/workflows/test_data_scope_tuner_pseudo.py \
+  tests/integration/workflows/test_healthgate_ten_collapse_continuation.py -q
+```
+
+Owner: `src/nodes/` and `src/agent/llm_bridge.py`. See the
+[integration map](../README.md).
