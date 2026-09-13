@@ -61,6 +61,14 @@ from contextvars import ContextVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.local_code import (
+    LocalCodeError,
+    MemberIdentity,
+    scan_candidate_allowed,
+    selected_identity,
+    selected_member,
+)
+
 
 class ModelPluginResolutionError(RuntimeError):
     """A composed run's declared model plugins could not be resolved.
@@ -83,6 +91,7 @@ class ResolvedModelPlugin(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+    local_code: MemberIdentity | None = None
 
     configured_ref: str = Field(
         description="The declared root as authored, path-normalized. Never host-anchored.",
@@ -110,14 +119,17 @@ class ResolvedModelPlugin(BaseModel):
         ),
     )
 
-    def canonical_identity(self) -> dict[str, str]:
+    def canonical_identity(self) -> dict[str, object]:
         """The host-independent identity the composition fingerprint hashes."""
-        return {
+        identity: dict[str, object] = {
             "configured_ref": self.configured_ref,
             "member": self.member,
             "model_type": self.model_type,
             "content_sha256": self.content_sha256,
         }
+        if self.local_code is not None:
+            identity["local_code"] = self.local_code.model_dump(mode="json")
+        return identity
 
 
 class RunModelPluginBinding(BaseModel):
@@ -150,12 +162,14 @@ class RunModelPluginBinding(BaseModel):
         description="Every plugin the declared roots produced, in scan order.",
     )
 
-    def canonical_identities(self) -> list[dict[str, str]]:
+    def canonical_identities(self) -> list[dict[str, object]]:
         """Provenance, ordered deterministically for persistence."""
-        return sorted(
-            (plugin.canonical_identity() for plugin in self.plugins),
-            key=lambda identity: (identity["configured_ref"], identity["member"]),
-        )
+        return [
+            plugin.canonical_identity()
+            for plugin in sorted(
+                self.plugins, key=lambda plugin: (plugin.configured_ref, plugin.member)
+            )
+        ]
 
 
 _ACTIVE_RUN_MODEL_PLUGINS: ContextVar[RunModelPluginBinding | None] = ContextVar(
@@ -193,6 +207,27 @@ def active_run_model_plugins() -> RunModelPluginBinding | None:
     behaviour — the exact defect R-11-13 recorded one subsystem over.
     """
     return _ACTIVE_RUN_MODEL_PLUGINS.get()
+
+
+def declared_package_model(
+    model_type: str, binding: RunModelPluginBinding | None
+) -> ResolvedModelPlugin | None:
+    """Select this current declaration only; never infer rows from history/files."""
+    if binding is None:
+        return None
+    return next(
+        (p for p in binding.plugins if p.model_type == model_type and p.local_code is not None),
+        None,
+    )
+
+
+def require_declared_model_source(plugin: ResolvedModelPlugin, path: str) -> None:
+    """Reject replacement of a current declared package member before mutation."""
+    if plugin.local_code is None or selected_identity(path) != plugin.local_code:
+        raise LocalCodeError(
+            f"declared package model {plugin.model_type!r} requires {plugin.absolute_path!r}; "
+            f"source {path!r} does not match its captured member identity"
+        )
 
 
 def active_run_model_plugin_roots() -> tuple[str, ...]:
@@ -316,7 +351,10 @@ def resolve_declared_model_plugins(
         if not member.endswith(".py") or member.startswith("_"):
             continue
         path = os.path.join(root, member)
-        digest = _digest(path)
+        if not scan_candidate_allowed(path):
+            continue
+        captured = selected_member(path)
+        digest = captured.pin.content_sha256 if captured is not None else _digest(path)
         model_type = register_model_in_memory(path)
         if model_type is None:
             # The loader already printed the named reason. A scanned member
@@ -330,6 +368,7 @@ def resolve_declared_model_plugins(
                 model_type=model_type,
                 content_sha256=digest,
                 absolute_path=path,
+                local_code=selected_identity(path),
             )
         )
         produced_by.setdefault(model_type, []).append(member)

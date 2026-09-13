@@ -12,6 +12,11 @@ checkpoint and writes denoised outputs. The wrapper does not validate configs
 or score results; it preserves the run-bound sample scope. A stub sandbox can
 exercise the same call boundary but is not scientific evidence.
 
+Optional [task-code transport](../../../core/local_code/README.md) verifies
+declared package pins before child execution. Named integrity refusals escape
+ordinary error/retry conversion and halt the workflow; normal inference failures
+keep their existing handling.
+
 Estimator and batch semantics are covered by [tests/unit/agent/inference_skill](../../../../tests/unit/agent/inference_skill/);
 runtime checkpoint/inference coverage is under
 [tests/unit/execute_tools](../../../../tests/unit/execute_tools/).

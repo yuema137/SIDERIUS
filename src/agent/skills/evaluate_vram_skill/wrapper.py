@@ -78,6 +78,7 @@ from agent.skills.model_io_probe_skill import (
 )
 from agent.skills.training_skill.estimator import resolve_model_field
 from core.hardware_context import HardwareContext, discover
+from core.local_code.failure import raise_if_code_package_failure
 from execute_tools.model_input_dtype import TRAINING_SITE_DTYPE, resolve_input_dtype
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import (
@@ -939,6 +940,7 @@ def run_skill(sandbox, **kwargs):
             inference_peak, inference_breakdown = _compose_inference_peak(inference_probe)
             inference_breakdown["inference_batch"] = inference_batch
         except ValueError as e:
+            raise_if_code_package_failure(e)
             inference_err = str(e)
 
         inference_ok = inference_batch is not None
@@ -1101,6 +1103,7 @@ def run_skill(sandbox, **kwargs):
             "timeout_record": record.model_dump(mode="json"),
         }
     except Exception as e:
+        raise_if_code_package_failure(e)
         import traceback
 
         msg = f"VRAMEval runtime error: {e}\n{traceback.format_exc()}"

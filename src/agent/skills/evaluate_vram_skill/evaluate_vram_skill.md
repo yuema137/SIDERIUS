@@ -150,6 +150,14 @@ GPU.
 
 ## What it must never do
 
+Declared task-code integrity is not resource evidence. A named `LocalCodeError`
+from package verification or a refused declared dependency propagates through
+the worker and parent boundaries to the workflow's `code_package_integrity`
+chain halt. It must not become measured overflow, inconclusive capacity, an
+ordinary candidate rejection or a suggestion to shrink the model. Ordinary
+probe failures and existing CPU/GPU applicability remain unchanged. See
+[task-code transport](../../../core/local_code/README.md).
+
 - Assume GPU 0, or any device index, rather than a resolved UUID.
 - Reuse a figure measured on a different GPU UUID.
 - Present `estimated_gb` as a driver-visible requirement.

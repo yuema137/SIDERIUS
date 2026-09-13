@@ -788,6 +788,12 @@ def content_identity(impl: object) -> str:
     cls = type(impl)
     qualname = f"{cls.__module__}.{cls.__qualname__}"
     module = sys.modules.get(cls.__module__)
+    if module is not None:
+        from core.local_code import module_identity
+
+        identity = module_identity(module)
+        if identity is not None:
+            return f"{identity.member}:{cls.__qualname__}@{identity.package.digest}"
     source = getattr(module, "__file__", None) if module is not None else None
     if source:
         try:

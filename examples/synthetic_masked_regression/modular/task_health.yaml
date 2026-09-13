@@ -1,0 +1,16 @@
+facts:
+  encoding_family: continuous_float
+plugins:
+  - kind: file
+    ref: ../plugins/_modular_health.py
+providers:
+  - provider_id: synthetic_masked_regression.valid_predictions
+roster:
+  - gate_id: synthetic_masked_prediction_dispersion
+    check: modular_prediction_dispersion
+    disposition: blocking
+    parameters:
+      min_dispersion: 0.1
+    reason: >-
+      This modular variant uses the same synthetic dispersion boundary as
+      the single-file example, with task-local check registration.

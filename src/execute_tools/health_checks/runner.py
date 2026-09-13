@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from core.local_code.failure import raise_if_code_package_failure
 from execute_tools.health_checks._plugin_binding import materialize_view
 from execute_tools.health_checks._view_provider import HealthViewMaterializationError
 from execute_tools.health_checks.config import load_health_gates_config
@@ -197,6 +198,7 @@ def evaluate_gate(
                 else skill.run(ctx, config=cfg_override)
             )
         except Exception as exc:
+            raise_if_code_package_failure(exc)
             import traceback
 
             _err_name = type(exc).__name__

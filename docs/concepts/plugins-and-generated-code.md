@@ -25,8 +25,8 @@ how a task lives outside the SIDERIUS tree: its content sha256 joins the
 run's semantic fingerprint, so editing the plugin between a run and its
 resume is detected. `module:` references carry no digest.
 
-**Directory-scanned** (found by scanning directories, never named in the
-manifest): **model plugins** and **loss plugins** — the two families the
+**Directory-scanned** (found under manifest-declared or explicitly supplied
+directories): **model plugins** and **loss plugins** — the two families the
 agents themselves generate.
 
 ```
@@ -34,7 +34,7 @@ SIDERIUS_PLUGIN_DIRS   →  model plugins:  PLUGIN_MODEL_TYPE / PLUGIN_CONFIG_CL
 SIDERIUS_LOSS_DIRS     →  loss plugins:   PLUGIN_LOSS_TYPE / PLUGIN_LOSS_CONFIG_CLASS / PLUGIN_LOSS_CLASS
 ```
 
-A model plugin is a single Python file declaring those three attributes (its
+A generated model plugin is a single Python file declaring those three attributes (its
 config class, its `nn.Module`), satisfying the task's declared forward
 contract — for TIDMAD, `[B, T] int → [B, 256, T] float`. Directory scanners
 skip `_`-prefixed files, which is how example packs ship manifest-referenced
@@ -42,6 +42,11 @@ plugins next to a scanned directory without them being picked up implicitly.
 A composed run's manifest can also name pack plugin directories
 (`model_plugins:` / `loss_plugins:`), which are unioned into every child
 process's scan path.
+
+A user-authored model can instead be an entry in a finite
+[`code_package`](../reference/task-composition.md). Its classes and helpers may
+use relative imports across listed members. This adds no multi-file generated
+model producer and no recursive directory discovery.
 
 ### What a model plugin's config must declare
 
@@ -103,10 +108,19 @@ one identity, which is what makes an out-of-tree package relocatable.
 
 Two different lifetimes, two different places:
 
-**Per run** — every run stages the plugin code that actually executed into
+**Per run, generated code** — runs stage generated model code into
 `{workspace}/plugins/{run_name}/`. That directory *is* the science of the
 run: the model code the agents wrote, exactly as it ran, restored
 automatically on resume.
+
+**Current declared package models** retain their captured external member path;
+reuse does not make an orphan one-file or forensic copy, or promote it as fresh
+generated code. Generated losses still propagate and construction checks still
+run. Resume selects the explicitly current declared source after invariant
+checks; a conflicting generated file cannot overwrite that declared model.
+Existing capability rows may use a relocated current source without rewriting
+historical metadata or creating new reuse offers. Optional workspace `task_code`
+artifacts carry pins and diagnostics, not a copied source tree.
 
 **Across iterations in one workspace** — promoted model/loss plugins and the capability index
 (`_capability_index.json`) live in the **generated-capability library**,
@@ -145,6 +159,7 @@ capabilities for resume and reuse.
 | declared an `id:` that differs from the implementation's own | refused: the implementation is the authority on its own id |
 | registered a second implementation under an id with different content | refused (the two-phase rule) |
 | edited a `file:`-declared plugin between run and resume | resume fails at startup — the pinned digest moved |
+| changed or removed a declared package helper after capture | child startup refuses with named package integrity; the workflow halts rather than retrying the candidate |
 | set `SIDERIUS_GENERATED_LIBRARY_DIR` to a relative path | `MalformedGeneratedLibraryOverride`, with the reason and the fix in the message |
 
 ## Where to go next

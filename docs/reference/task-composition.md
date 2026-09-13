@@ -2,8 +2,9 @@
 
 **Audience**: anyone authoring or debugging a composition manifest.
 **Authority**: `workflows/task_composition.py` — `_MANIFEST_KEYS` /
-`_REQUIRED_KEYS` (`:96-121`), resolvers (`:706-1643`),
-`compose_run_task_bindings` (`:1867`), `bind_run_task_composition` (`:2092`).
+`_REQUIRED_KEYS`, resolvers, `compose_run_task_bindings` and
+`bind_run_task_composition`. The optional Python package's capture, import and
+transport mechanics live in [`core/local_code`](../../src/core/local_code/README.md).
 
 If this page and that module disagree, the module is right. It is the single
 authority; this page is a human-readable projection of it.
@@ -25,7 +26,7 @@ Two properties worth knowing before you start:
 There is **no `version` field**. (Recorded as a known gap — see
 [DOC-F3](../audit/documentation_gap_audit.md#12-findings-recorded-deliberately-not-fixed-here).)
 
-## The fifteen sections
+## Manifest sections
 
 | section | required | what it declares | absence means |
 |---|:---:|---|---|
@@ -44,6 +45,8 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `deliverable` | — | an indexed deliverable filename template | see below — a task that names its own artifacts is **refused** an indexed template, never handed TIDMAD's |
 | `dynamic_observables` | — | quantities observed DURING training, once per epoch | the run observes none: `training_history.observations` stays `{}` |
 | `static_observables` | — | quantities read off the TRAINED model after training | the run observes none: no record key, no rendered bytes |
+| `parameter_rules` | — | deterministic constraints on configured parameter leaves | no task-declared parameter constraints |
+| `code_package` | — | one finite, content-pinned set of task-local Python files | existing independent file loading and identities, without task-relative helper imports |
 
 ### Why `task_health` is required but may say "none"
 
@@ -107,8 +110,96 @@ is hashed and that hash joins the run's semantic fingerprint, so editing the
 plugin between a run and its resume is detected rather than silently accepted.
 `module:` references carry no digest.
 
+For a `file:` plugin that needs sibling helpers, use the optional
+[`code_package` declaration](#shared-task-local-python-code). It adds the
+declared helper set to code identity; it does not make `module:` dependencies
+content-pinned or turn the consumer repository into an installed package.
+
 The `id:` on `task_data_path` is optional and is only a cross-check: if given, it
 must equal the implementation's own declared id, and a mismatch is refused.
+
+## Shared task-local Python code
+
+Use this only when your file plugins share Python modules. Keep the simpler
+single-file form when they do not. There is one optional package per composition:
+
+```yaml
+code_package:
+  root: .                         # relative to this manifest
+  files:                          # paths relative to root; explicit, no globs
+    - runtime/scope.py
+    - runtime/data_path.py
+    - plugins/metric.py
+
+task_data_path:
+  file: runtime/data_path.py       # existing file references remain manifest-relative
+  symbol: MyTaskDataPath
+metric:
+  declaration: declared/metric.json
+  implementation:
+    file: plugins/metric.py
+    symbol: MyMetric
+# Other required task sections are unchanged.
+```
+
+`data_path.py` can use `from .scope import MyScope`; `metric.py` can use
+`from ..runtime.scope import MyScope`. Both receive the same class object
+within that captured package, rather than two independently loaded copies.
+The [modular synthetic example](../../examples/synthetic_masked_regression/modular/README.md)
+demonstrates this through actual data/metric, model/loss, Health, observable and
+scoreability interfaces.
+
+- List every selected Python entry and helper inside the package root. Members
+  must be normalized relative `.py` paths with Python-identifier components.
+  Duplicate names, traversal, module/package collisions, missing files and
+  symlinks escaping the root are refused. Directory scans exclude unlisted
+  members; explicitly requesting one refuses instead of falling back.
+- Nested and parent-relative imports are supported within that finite set.
+  `__init__.py` executes only if explicitly listed; implicit namespace parents
+  do not search the filesystem for extra code. Installed framework and
+  third-party dependencies still use the checkout's frozen environment.
+- Existing `file:`, model/loss directory and Health references keep their own
+  resolution rules. The package does not change their path bases. Files outside
+  the declared root retain their existing loading rules; they are not
+  automatically added to the package.
+- Every declared member contributes its name and captured SHA-256 to package
+  identity, even if not imported yet. Editing a helper changes the composition
+  fingerprint. Relocating unchanged files and relative declarations does not.
+  Data, configuration files and outputs are not Python members; their existing
+  task/configuration contracts remain separate.
+
+The parent executes captured source bytes. Before a new framework child loads
+selected code, it checks **all** members against the parent's captured hashes;
+it must not silently capture a new revision. Transport contains paths and hashes,
+not copied source or datasets, in the configured workspace's `task_code/`
+directory. Normal launchers establish that workspace; a programmatic caller
+must bind an explicit workspace before creating subprocess transport. In-memory
+composition alone does not create that transport file. Do not add the consumer
+checkout to `PYTHONPATH` or modify SIDERIUS to make imports succeed.
+
+A declared modular model reused by the workflow retains its original selected
+source rather than becoming an orphan one-file copy in the generated library.
+Validator execution and its entry-source checks use the captured entry; the LLM
+review does **not** recursively review every helper. Generated models remain the
+existing single-file producer path, not a new modular code-generation feature.
+
+### Missing or changed package code
+
+`LocalCodeError` identifies a declaration, member or pin refusal. The supported
+workflow/chain treats it as `code_package_integrity`, halts with exit code 3 and
+preserves available diagnostics; it is not a bad candidate to retry, a measured
+resource failure or a scientific Health rejection. Ordinary candidate errors
+retain their existing handling.
+
+Restore the exact declared files to continue the same captured run. For an
+intentional code change, compose it again and start a fresh workspace with the
+new identity. Do not edit persisted hashes or re-stamp old results to conceal
+the change. See [workspaces and resume](../guides/workspaces-and-resume.md).
+
+This is reproducible code selection, **not a Python security sandbox**. It does
+not prevent arbitrary file access or recover exceptions suppressed by task or
+third-party code. A killed process or unavailable diagnostic storage can also
+limit the recorded explanation; missing evidence is not a scientific result.
 
 ## Section shapes
 
@@ -243,10 +334,12 @@ Notes:
   already transports (`--task_manifest`); the child composes them through this
   same authority. Nothing new crosses the process boundary — an observable is
   a live object with per-epoch state, which no argv could carry.
-- A declared observable that raises or returns a non-finite value is an
+- A declared observable with an ordinary error or non-finite value is an
   **absence**, never a sentinel: its value is dropped and the training attempt
   succeeds. A dynamic series that is shorter than the epoch axis (an observable
   that failed in some epochs only) is dropped whole rather than padded.
+  Named code-package integrity refusals are different: they propagate and halt
+  the workflow rather than being hidden as an absent observation.
 - A metric implementation must be an `EvaluationMetric` and may not rewrite the
   `id` declared in its declaration file.
 - `deliverable` is `extra="forbid"`: a misspelled key is refused rather than
@@ -321,8 +414,9 @@ and rerun; no automatic old-result migration is provided. Tasks with no custom
 scoreability mapping retain their previous fingerprint through this correction.
 
 1. The manifest is read; unknown keys refuse; required keys are checked.
-2. Each section resolves — files loaded, symbols imported or executed by path,
-   types checked.
+2. If declared, the finite Python package is captured before plugin execution.
+   Each section then resolves — files loaded, symbols imported or executed by
+   path, types checked. Selected members share the captured package loader.
 3. A semantic fingerprint is computed over the declared content (never absolute
    paths).
 4. `bind_run_task_composition` activates every binding on one exit stack, so any

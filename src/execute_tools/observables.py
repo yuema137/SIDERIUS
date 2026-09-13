@@ -55,6 +55,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
+from core.local_code.failure import raise_if_code_package_failure
+
 #: The two acquisition labels. DERIVED from an implementation's type by
 #: :func:`acquisition_of` — never declared by a task, never parsed from a
 #: name, and never stored as the thing that decides behaviour.
@@ -260,6 +262,7 @@ class DynamicObservableEpoch:
             try:
                 declared.implementation.reset()
             except Exception as exc:  # diagnostic, never fatal
+                raise_if_code_package_failure(exc)
                 self._failed[declared.name] = f"reset raised {type(exc).__name__}: {exc}"
 
     def observe(self, output: Any, target: Any) -> None:
@@ -283,6 +286,7 @@ class DynamicObservableEpoch:
             try:
                 declared.implementation.update(output, target)
             except Exception as exc:  # diagnostic, never fatal
+                raise_if_code_package_failure(exc)
                 self._failed[declared.name] = f"update raised {type(exc).__name__}: {exc}"
 
     def finish_epoch(self) -> dict[str, float]:
@@ -300,6 +304,7 @@ class DynamicObservableEpoch:
             try:
                 raw = declared.implementation.value()
             except Exception as exc:  # diagnostic, never fatal
+                raise_if_code_package_failure(exc)
                 self._failed[declared.name] = f"value raised {type(exc).__name__}: {exc}"
                 continue
             try:
@@ -333,6 +338,7 @@ def compute_static_observations(
         try:
             raw = entry.implementation.compute(model)
         except Exception as exc:  # diagnostic, never fatal
+            raise_if_code_package_failure(exc)
             failures[entry.name] = f"compute raised {type(exc).__name__}: {exc}"
             continue
         try:

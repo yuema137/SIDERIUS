@@ -50,6 +50,7 @@ import os
 import sys
 import traceback
 import warnings
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -309,8 +310,7 @@ def _write_halt_marker(workspace: str, payload: dict) -> str:
 
 
 def _check_halt_marker(workspace: str) -> bool:
-    """Return True iff the consecutive-failure brake has already fired
-    in this workspace (Stage 4 / Commit 4.6).
+    """Return True iff a chain halt marker exists in this workspace.
 
     Cheap fail-fast for SDSC ``afterany`` chains: Slurm queues the next
     iter regardless of the previous's exit code, so we need an on-disk
@@ -2819,6 +2819,26 @@ def main():
     from core.generated_library import bind_generated_library_to_workspace
 
     bind_generated_library_to_workspace(args.workspace)
+    from core.local_code import root_code_scope
+
+    with ExitStack() as package_scope:
+        package_scope.enter_context(root_code_scope())
+        try:
+            return _run_bound_iteration(args, package_scope)
+        except Exception as exc:
+            from workflows.package_failure import halt_on_package_failure
+
+            halt_on_package_failure(
+                exc,
+                workspace=args.workspace,
+                iteration=args.start_iteration,
+                write_marker=_write_halt_marker,
+            )
+            raise
+
+
+def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
+    """Run the existing lifecycle after root workspace/package decisions."""
 
     # Both owners transitively load model registries. A cold launch must bind
     # its workspace first so discovery cannot import legacy checkout plugins.
@@ -2837,7 +2857,20 @@ def main():
         try:
             preflight_composition = compose_run_task_bindings(args.task_composition)
         except Exception as exc:
+            from core.local_code.failure import raise_if_code_package_failure
+
+            raise_if_code_package_failure(exc)
             preflight_composition_error = exc
+
+    # Launch policy and invariants materialize Health before run activation.
+    # They must see the same capture, without creating a transport sidecar.
+    from core.local_code import bind_code_package
+
+    package_scope.enter_context(
+        bind_code_package(
+            preflight_composition.code_package if preflight_composition is not None else None
+        )
+    )
 
     # --- V20 PR D (D-C1b): formal-launch policy refusal ----------------
     # THE FIRST thing done with the parsed arguments, and deliberately
@@ -2917,7 +2950,7 @@ def main():
     #     both break the streak.
     if _check_halt_marker(args.workspace):
         print(
-            f"[HALT] consecutive-failure brake already fired in this "
+            f"[HALT] chain halt marker present in this "
             f"workspace — see {os.path.join(args.workspace, '.chain_halted')}",
             file=sys.stderr,
         )
@@ -3218,18 +3251,28 @@ def main():
         )
         sys.exit(1)
 
+    from ml_models.plugin_binding import bind_run_model_plugins
+
     try:
-        state = restore_prior_state(
-            workspace=args.workspace,
-            current_iter=args.start_iteration,
-            seed_paths=resolved_seeds,
-            expected_invariants=expected_invariants,
-            dataset_partition_count=(
-                run_composition.dataset_profile.partition_count
-                if run_composition is not None
-                else resolve_dataset_profile().partition_count
+        with (
+            bind_code_package(
+                run_composition.code_package if run_composition is not None else None
             ),
-        )
+            bind_run_model_plugins(
+                run_composition.model_plugins if run_composition is not None else None
+            ),
+        ):
+            state = restore_prior_state(
+                workspace=args.workspace,
+                current_iter=args.start_iteration,
+                seed_paths=resolved_seeds,
+                expected_invariants=expected_invariants,
+                dataset_partition_count=(
+                    run_composition.dataset_profile.partition_count
+                    if run_composition is not None
+                    else resolve_dataset_profile().partition_count
+                ),
+            )
     except (ResumeError, RunInvariantsViolation) as e:
         print(f"FAIL: restore_prior_state refused to chain: {e}")
         write_manifest(
@@ -3485,17 +3528,22 @@ def main():
     except Exception as e:
         print(f"FAIL: Workflow raised exception: {type(e).__name__}: {e}")
         traceback.print_exc()
-        write_manifest(
-            iter_dir,
-            run_name,
-            results=[],
-            crashed=True,
-            healthgate_mode=args.healthgate_mode,
-            result_authority=args.result_authority,
-            fixed_candidate_provenance=fixed_candidate_provenance,
-            launch_identity=launch_identity,
-            replacement=manifest_replacement,
-        )
+        try:
+            write_manifest(
+                iter_dir,
+                run_name,
+                results=[],
+                crashed=True,
+                healthgate_mode=args.healthgate_mode,
+                result_authority=args.result_authority,
+                fixed_candidate_provenance=fixed_candidate_provenance,
+                launch_identity=launch_identity,
+                replacement=manifest_replacement,
+            )
+        finally:
+            from core.local_code.failure import raise_if_code_package_failure
+
+            raise_if_code_package_failure(e)
         sys.exit(1)
 
     manifest = write_manifest(

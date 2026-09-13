@@ -24,8 +24,8 @@ their own artifact path.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `model_type` | `str` | Yes | — | Architecture to tune. One of the registered model keys (`punet`, `wavenet`, `fcnet`, `transformer`, `rnn`), or `"auto"` to let the planner pick. Plugin types (from `ml_model_implementor`) require `seed_plugin_path`. |
-| `seed_plugin_path` | `str \| None` | No | `None` | Optional path to a plugin `.py` file used as the seed model. Required when `model_type` is a plugin (not built-in). The tuner copies the file into `{workspace}/plugins/{run_name}/` at run start so the training subprocess sees it via `SIDERIUS_PLUGIN_DIRS`. The file's `PLUGIN_MODEL_TYPE` must equal `model_type`. |
+| `model_type` | `str` | Yes | — | Architecture to tune. One of the registered model keys (`punet`, `wavenet`, `fcnet`, `transformer`, `rnn`), or `"auto"` to let the planner pick. Composition-declared models use their current binding; an explicit single-file seed can be supplied through `seed_plugin_path`. |
+| `seed_plugin_path` | `str \| None` | No | `None` | Optional single-file seed path. When supplied, the tuner copies it into `{workspace}/plugins/{run_name}/`; its top-level `PLUGIN_MODEL_TYPE` must equal `model_type`. A composition-declared package model uses its current binding and does not need this copy. Explicit seed staging remains a single-file operation, not package staging. |
 | `expert_advice` | `str \| ExpertAdvice` | No | `""` | Structured guidance from upstream agents (typically `ml_model_proposal_agent.expert_advice`). Accepts a plain string or a structured `ExpertAdvice` object. Injected into the planner prompt. |
 | `human_advice` | `str \| None` | No | `None` | Optional human-provided guidance. Injected into the planner prompt alongside `expert_advice` under a `[Human Guidance (high priority)]` header. |
 | `seed_records` | `list[dict[str, Any]]` | No | `[]` | Pre-existing experiment records injected into the agent's memory before round 1. Typically contains the baseline result so the planner has prior history to reason from. |
@@ -497,6 +497,15 @@ they change what its subprocesses read and what its records carry.
   `next_attempt()`. **Planner-facing prompt bytes are unchanged**: the record
   carries no `_oom` suffix, so the "OUT-OF-MEMORY NOT ATTRIBUTED" note does
   not render for it.
+
+* **Declared task-code integrity is terminal, not an attempt outcome.** A named
+  `LocalCodeError` (also through an explicit exception cause) propagates through
+  framework-owned skill/attempt catches. The root workflow writes
+  `.chain_halted` with reason `code_package_integrity` and exits 3 before retry,
+  next iteration or scoring promotion. It does not invent a tuner status or
+  reuse the evidence-channel-specific `infrastructure_abort` category. Ordinary
+  candidate errors, provider retries, Health policy and budgets are unchanged.
+  See [package transport and limits](../../core/local_code/README.md).
 
 * **Every record carries `task_composition_fingerprint`** (C8). Stamped at
   `_emit_record`, the single validate-and-persist seam. `None` for an

@@ -1137,6 +1137,14 @@ def main() -> None:
 
     # Composition imports can load plugins: workspace selection must precede them.
     bind_generated_library_to_workspace(args.workspace)
+    from core.local_code import root_code_scope
+
+    with root_code_scope():
+        _run_bound_cli(args)
+
+
+def _run_bound_cli(args: argparse.Namespace) -> None:
+    """Resolve and activate the task after suppressing stale root transport."""
     from workflows.task_composition import (
         bind_run_task_composition,
         compose_run_task_bindings,

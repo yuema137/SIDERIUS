@@ -812,6 +812,41 @@ def _run_observed_subprocess(
     label: str = "",
     observer: Any = None,
 ) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
+    """Retain package refusals around the existing observed process owner."""
+    from core.local_code.child import prepare_child
+
+    invocation = prepare_child(cmd, env)
+    try:
+        result, kill_info = _run_observed_process(
+            invocation.argv,
+            env=invocation.env,
+            preexec_fn=preexec_fn,
+            capture_stdout=capture_stdout,
+            deadline_provider=deadline_provider,
+            grace_seconds=grace_seconds,
+            poll_seconds=poll_seconds,
+            label=label,
+            observer=observer,
+        )
+    except Exception as exc:
+        invocation.check(exc.returncode if isinstance(exc, subprocess.CalledProcessError) else None)
+        raise
+    invocation.check(result.returncode if result is not None else None)
+    return result, kill_info
+
+
+def _run_observed_process(
+    cmd: list[str],
+    *,
+    env: dict,
+    preexec_fn: Callable[[], None] | None,
+    capture_stdout: bool,
+    deadline_provider: Callable[[], tuple[float | None, str]] | None = None,
+    grace_seconds: float = 0.0,
+    poll_seconds: float = 0.0,
+    label: str = "",
+    observer: Any = None,
+) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
     """The single seam every GPU child is launched through (V20 B-C2a1).
 
     **Routing only.** This commit changes *where* the four GPU launches
@@ -1683,6 +1718,9 @@ class TidmadSandbox:
                 _observer,
             )
         except Exception as e:
+            from core.local_code.failure import raise_if_code_package_failure
+
+            raise_if_code_package_failure(e)
             print(f"!!! [Executor Internal Error] !!!: {e!s}")
             return {"status": "error", "message": str(e)}
 
@@ -2117,13 +2155,16 @@ class TidmadSandbox:
             os.path.join(result_dir, f"score_results_{model_type}_{exp_id}.json")
         )
 
+        from core.local_code.child import prepare_child
+
+        invocation = None
         try:
             # Pre-create the scoring JSON so the script can write to it
             with open(score_json_path, "w") as f:
                 json.dump({}, f)
 
             print(f">>> [Executor] Running scoring for {exp_id}...")
-            subprocess.run(
+            invocation = prepare_child(
                 [
                     sys.executable,
                     child_script_path("execute_tools/denoising_score_single.py"),
@@ -2154,14 +2195,19 @@ class TidmadSandbox:
                     # scopes, same emitter, same emitted-only-when-bound rule.
                     *task_scope_argv(self.dirs["configs"], exp_id, task_scopes),
                 ],
+                _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir),
+            )
+            result = subprocess.run(
+                invocation.argv,
                 check=True,
                 stdout=None if self.progress_bar else subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=os.getcwd(),
-                env=_subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir),
+                env=invocation.env,
                 preexec_fn=_limited_preexec(_subprocess_rss_gb("scoring")),
             )
+            invocation.check(result.returncode)
 
             # Merge training results (loss history) with scoring results
             results = {}
@@ -2178,11 +2224,18 @@ class TidmadSandbox:
             # We return results to ml_hyperparameter_tune_agent.py, which adds LLM memory and then saves.
             return {"status": "success", "results": results}
         except subprocess.CalledProcessError as e:
+            if invocation is not None:
+                invocation.check(e.returncode)
             error_msg = _format_subprocess_error(e, "Scoring")
             print(f"--- Scoring Script Error ---\n{error_msg}")
             status = "oom_host_ram" if _is_oom_failure(e) else "error"
             return {"status": status, "message": error_msg}
         except Exception as e:
+            from core.local_code.failure import raise_if_code_package_failure
+
+            if invocation is not None:
+                invocation.check()
+            raise_if_code_package_failure(e)
             print(f"--- Scoring Internal Error ---\n{e!s}")
             return {"status": "error", "message": str(e)}
 

@@ -64,6 +64,7 @@ from pydantic import (
     model_validator,
 )
 
+from core.local_code.failure import raise_if_code_package_failure
 from execute_tools.dataset_config import ScopeViolationError
 
 MetricDirection = Literal["higher", "lower"]
@@ -782,6 +783,7 @@ def evaluate_declared_secondaries(
         except ScopeViolationError:
             raise
         except Exception as exc:
+            raise_if_code_package_failure(exc)
             errors[metric_id] = f"{type(exc).__name__}: {exc}"
             # The diagnostic surface, never a machine-readable stdout
             # contract and never a planner/reflector payload: a secondary

@@ -156,9 +156,10 @@ Three things worth knowing before you write one:
   arithmetic runs, and the class is what actually decides.
 - **`update` must not mutate anything.** It runs inside the transactional
   validation pass, which certifies that training state is left exactly as found.
-- **Failure is an absence.** An observable that raises or returns a non-finite
-  value is dropped and the training attempt still succeeds. Declaring one is
-  never riskier than not declaring one.
+- **Ordinary failure is an absence.** An observable's ordinary exception or
+  non-finite value is dropped and the training attempt still succeeds. A named
+  code-package integrity refusal instead halts the workflow: changed or missing
+  declared code must not be hidden as a missing observation.
 
 Observables are shown in the run report and are hidden from the agents. Like
 secondaries, they influence nothing — and unlike a secondary, they may not be
@@ -255,6 +256,30 @@ Use `file:` references for your plugins if the package lives outside the SIDERIU
 tree. Paths resolve against the manifest's own directory, so the package is
 relocatable.
 
+### When your plugins share helpers
+
+Keep the task in your consumer repository, not in the SIDERIUS checkout. If the
+data path and metric need the same scope class, put that class in one helper and
+declare a finite `code_package` in the manifest. Then use ordinary relative
+imports, such as `from .scope import MyScope` from the data module and
+`from ..runtime.scope import MyScope` from a metric in a sibling directory.
+Do not copy the helper into both files or add the consumer checkout to
+`PYTHONPATH`.
+
+The [composition reference](../reference/task-composition.md#shared-task-local-python-code)
+owns the exact declaration and path rules. Start with the
+[modular masked-regression example](../../examples/synthetic_masked_regression/modular/README.md)
+for a working tree: it shares a scope type across data and metric entries and
+also shows model/loss, Health, observable and scoreability loading. The original
+single-file example remains the simpler option when no shared helpers are needed.
+
+List all Python members deliberately; do not include raw data, output files or
+credentials. Keep those at explicit external paths. Every listed helper enters
+the code identity, and a fresh child checks its bytes against the parent's pin
+before loading it. If you deliberately edit one, use a fresh run/workspace;
+do not continue old evidence by rewriting a stored hash. This package feature
+does not add multi-file model generation or recursive helper review by the LLM.
+
 ## Step 9 — Declare your model and loss plugins
 
 Declare them in the manifest:
@@ -330,8 +355,9 @@ Composition failures are deliberate and specific. Common ones:
 | health config refused | you declared both `none: true` and `config:` |
 | exit code 2 | missing `--healthgate_mode` or `--result_authority` on a formal launch |
 | a resume fails at startup | scope, gate enablement or effective-config hash differs from the workspace's invariants lock |
+| `LocalCodeError` / `code_package_integrity` | a declared Python member, dependency or captured pin is invalid; restore the exact source, or use a fresh composition/workspace for intentional edits |
 
-The last one is the system working. Aggregate scores are only comparable within
+These identity refusals are the system working. Aggregate scores are only comparable within
 one scope and one health configuration; a workspace that silently accepted a
 changed one would produce numbers that cannot be compared to its own history.
 

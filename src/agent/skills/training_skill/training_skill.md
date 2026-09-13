@@ -52,6 +52,11 @@ validation site; this skill still validates nothing.
 
 ## Key behavioral notes
 
+Declared task-code integrity refusals propagate to the workflow's named chain
+halt, rather than becoming ordinary retryable training errors. This does not
+change candidate/provider failures, resource budgets or training semantics;
+see [package transport and limits](../../../core/local_code/README.md).
+
 ### Ordering values here are already RESOLVED (V19 PR 2)
 
 `order_strategy` / `file_order` carry the values the tuner's resolver

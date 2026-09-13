@@ -1371,6 +1371,9 @@ def run_inference_scoring_health(
             _scope_violation_reason = f"error_scope_violation: {e}"
             return AttemptExecution.end_round(scope_violation_reason=_scope_violation_reason)
         except Exception as e:
+            from core.local_code.failure import raise_if_code_package_failure
+
+            raise_if_code_package_failure(e)
             scoring_time = round(time.time() - t0, 1)
             probe_memory(
                 iter_idx=round_index,

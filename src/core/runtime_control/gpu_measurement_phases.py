@@ -43,6 +43,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.local_code.failure import raise_if_code_package_failure
 from core.runtime_control.gpu_measurement_spec import (
     PhaseCompletion,
     PhaseExecutionReport,
@@ -339,6 +340,7 @@ def run_measured_phases(
     try:
         components = build_components()
     except BaseException as exc:  # classified below, never swallowed
+        raise_if_code_package_failure(exc)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
         allocated, reserved = _read_peaks(device)
@@ -556,6 +558,7 @@ def _run_training(
             counters["optimizer_steps"] += 1
             executed += 1
     except BaseException as exc:  # classified below, never swallowed
+        raise_if_code_package_failure(exc)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
         kind = _classify_exception(exc)
@@ -668,6 +671,7 @@ def _run_inference(
                 del output
                 counters["outputs_released"] += 1
     except BaseException as exc:  # classified below, never swallowed
+        raise_if_code_package_failure(exc)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
         kind = _classify_exception(exc)

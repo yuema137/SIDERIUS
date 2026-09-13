@@ -7,6 +7,11 @@ planning estimators used by the pre-flight gates.
 
 ## Files
 
+Declared task-code integrity refusals propagate to the workflow's named chain
+halt, rather than becoming ordinary retryable inference errors. Other failures
+and batch/runtime policies are unchanged; see
+[package transport and limits](../../../core/local_code/README.md).
+
 | File | Role |
 |---|---|
 | `wrapper.py` | `run_skill(sandbox, **kwargs)` — forwards `model_type`, configs, sample sets and `inference_batch` to `sandbox.execute_inference`. |

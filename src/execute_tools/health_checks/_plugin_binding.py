@@ -69,6 +69,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.local_code import (
+    MemberIdentity,
+    scan_candidate_allowed,
+    selected_identity,
+    selected_member,
+)
 from execute_tools.health_checks._task_health_config import TaskHealthConfig
 from execute_tools.health_checks._view_provider import HealthView, HealthViewMaterializationError
 from execute_tools.health_checks.registry import (  # the plugin calls register() itself
@@ -124,6 +130,7 @@ class ResolvedHealthPlugin(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+    local_code: MemberIdentity | None = None
 
     configured_ref: str = Field(
         description="The ref as authored, path-normalized. Never host-anchored.",
@@ -149,13 +156,16 @@ class ResolvedHealthPlugin(BaseModel):
         ),
     )
 
-    def canonical_identity(self) -> dict[str, str]:
+    def canonical_identity(self) -> dict[str, object]:
         """The host-independent identity C4 hashes into the run's pin."""
-        return {
+        identity: dict[str, object] = {
             "configured_ref": self.configured_ref,
             "member": self.member,
             "content_sha256": self.content_sha256,
         }
+        if self.local_code is not None:
+            identity["local_code"] = self.local_code.model_dump(mode="json")
+        return identity
 
 
 class _RunScope(BaseModel):
@@ -229,7 +239,8 @@ def _resolve(config: TaskHealthConfig, config_dir: str) -> tuple[ResolvedHealthP
         target = os.path.normpath(os.path.join(config_dir, ref.ref))
 
         if ref.kind == "file":
-            if not os.path.isfile(target):
+            captured = selected_member(target)
+            if captured is None and not os.path.isfile(target):
                 raise HealthPluginError(
                     f"Health plugin file {logical!r} declared by the task health "
                     f"config does not exist at {target!r}. An explicitly named "
@@ -238,14 +249,17 @@ def _resolve(config: TaskHealthConfig, config_dir: str) -> tuple[ResolvedHealthP
                     f"gates than the config describes."
                 )
             try:
-                digest = _digest(target)
+                digest = captured.pin.content_sha256 if captured is not None else _digest(target)
             except OSError as exc:
                 raise HealthPluginError(
                     f"Health plugin file {logical!r} at {target!r} is unreadable: {exc}"
                 ) from exc
             resolved.append(
                 ResolvedHealthPlugin(
-                    configured_ref=logical, content_sha256=digest, absolute_path=target
+                    configured_ref=logical,
+                    content_sha256=digest,
+                    absolute_path=target,
+                    local_code=selected_identity(target),
                 )
             )
             continue
@@ -261,10 +275,15 @@ def _resolve(config: TaskHealthConfig, config_dir: str) -> tuple[ResolvedHealthP
             if not name.endswith(".py") or name.startswith("_"):
                 continue
             member_path = os.path.join(target, name)
+            if not scan_candidate_allowed(member_path):
+                continue
             if not os.path.isfile(member_path):
                 continue
             try:
-                digest = _digest(member_path)
+                captured = selected_member(member_path)
+                digest = (
+                    captured.pin.content_sha256 if captured is not None else _digest(member_path)
+                )
             except OSError as exc:
                 # Scan tolerance: an unreadable member of a directory is not
                 # something the task asked for by name. Any binding that then
@@ -282,6 +301,7 @@ def _resolve(config: TaskHealthConfig, config_dir: str) -> tuple[ResolvedHealthP
                     member=name,
                     content_sha256=digest,
                     absolute_path=member_path,
+                    local_code=selected_identity(member_path),
                 )
             )
     return tuple(resolved)
@@ -316,21 +336,27 @@ def _import_and_register(plugin: ResolvedHealthPlugin) -> tuple[tuple[str, ...],
             where a check name silently means something other than what the
             registry says it means.
     """
-    module_name = _module_name(plugin)
-    spec = importlib.util.spec_from_file_location(module_name, plugin.absolute_path)
-    if spec is None or spec.loader is None:
-        raise HealthPluginError(
-            f"Cannot resolve a module spec for Health plugin "
-            f"{plugin.configured_ref!r} at {plugin.absolute_path!r}."
-        )
-    module = importlib.util.module_from_spec(spec)
+    from core.local_code import LocalCodeError, acquire_module
+
+    module_name: str | None = None
     before = set(_REGISTRY)
     before_providers = set(_PROVIDER_REGISTRY)
-    sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
+        with acquire_module(plugin.absolute_path) as captured:
+            if captured is None:
+                module_name = _module_name(plugin)
+                spec = importlib.util.spec_from_file_location(module_name, plugin.absolute_path)
+                if spec is None or spec.loader is None:
+                    raise HealthPluginError(
+                        f"Cannot resolve a module spec for Health plugin "
+                        f"{plugin.configured_ref!r} at {plugin.absolute_path!r}."
+                    )
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
     except Exception as exc:
-        sys.modules.pop(module_name, None)
+        if module_name is not None:
+            sys.modules.pop(module_name, None)
         # Roll back partial registrations. A module that registered check A
         # and then raised must contribute NOTHING, or A would sit in the
         # registry able to satisfy a binding while the plugin that defines
@@ -339,6 +365,8 @@ def _import_and_register(plugin: ResolvedHealthPlugin) -> tuple[tuple[str, ...],
             del _REGISTRY[name]
         for provider_id in set(_PROVIDER_REGISTRY) - before_providers:
             del _PROVIDER_REGISTRY[provider_id]
+        if isinstance(exc, LocalCodeError):
+            raise
         raise HealthPluginError(
             f"Health plugin {plugin.configured_ref!r}"
             f"{'/' + plugin.member if plugin.member else ''} at "
@@ -379,6 +407,9 @@ def load_task_health_plugins(
             in this process.
     """
     global _RUN_SCOPE
+    from core.local_code import bootstrap_code_package
+
+    bootstrap_code_package()
     resolved = _resolve(config, config_dir)
 
     if _RUN_SCOPE is not None:

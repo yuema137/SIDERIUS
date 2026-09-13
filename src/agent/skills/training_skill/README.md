@@ -13,5 +13,10 @@ nothing and makes no ordering decision; the tuner and executor own those rules.
 StubSandbox mirrors the boundary for pseudo-mode tests but performs no training
 and is not scientific evidence.
 
+Optional [task-code transport](../../../core/local_code/README.md) verifies
+declared package pins before child execution. Named integrity refusals escape
+ordinary error/retry conversion and halt the workflow; normal training failures
+keep their existing handling.
+
 Estimator tests are [tests/unit/agent/training_skill/test_estimator.py](../../../../tests/unit/agent/training_skill/test_estimator.py);
 real training-loop coverage is [tests/integration/execute_tools/test_training_loop.py](../../../../tests/integration/execute_tools/test_training_loop.py).

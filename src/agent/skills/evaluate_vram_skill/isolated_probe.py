@@ -503,8 +503,13 @@ def run_isolated_preflight(
     started = time.monotonic()
     log_handle = log_path.open("w", encoding="utf-8")
     try:
+        from core.local_code.child import prepare_child
+
+        invocation = prepare_child(
+            argv, subprocess_env(plugin_dir=spec.plugin_dir, loss_dir=spec.loss_dir)
+        )
         process = subprocess.Popen(
-            argv,
+            invocation.argv,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             start_new_session=True,  # own process group: a kill reaches descendants
@@ -514,10 +519,13 @@ def run_isolated_preflight(
             # same omission. `subprocess_env` never mutates `os.environ`,
             # and it also supplies the PYTHONPATH extension the child was
             # losing regardless of whether the plugin dirs are known.
-            env=subprocess_env(plugin_dir=spec.plugin_dir, loss_dir=spec.loss_dir),
+            env=invocation.env,
         )
     except Exception as exc:
         log_handle.close()
+        from core.local_code.failure import raise_if_code_package_failure
+
+        raise_if_code_package_failure(exc)
         return IsolatedProbeResult(
             label=spec.label,
             outcome="PROBE_INFRASTRUCTURE_FAILURE",
@@ -555,6 +563,7 @@ def run_isolated_preflight(
     elapsed = round(time.monotonic() - started, 3)
     log_handle.close()
     returncode = process.returncode
+    invocation.check(returncode)
     exit_signal = -returncode if returncode is not None and returncode < 0 else None
     orphans = _process_group_alive(pgid)
 

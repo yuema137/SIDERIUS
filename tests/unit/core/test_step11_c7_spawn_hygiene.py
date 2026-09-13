@@ -183,10 +183,21 @@ class TestTheLaunchSplitIsUnchangedAndCorrectlyJustified:
         """
         src = SANDBOX.read_text(encoding="utf-8")
         tree = ast.parse(src)
-        fn = next(
+        wrapper = next(
             n
             for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef) and n.name == "_run_observed_subprocess"
+        )
+        assert any(
+            isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "_run_observed_process"
+            for n in ast.walk(wrapper)
+        ), "the package wrapper must still call the process-supervision owner"
+        fn = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_observed_process"
         )
         sessions = [
             kw.value.value

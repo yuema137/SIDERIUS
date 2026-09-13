@@ -629,6 +629,7 @@ class TestPluginProvenance:
     def test_an_unbound_run_writes_no_key(self, tmp_path):
         """A legacy lock stays byte-identical rather than gaining a null."""
         from core.run_invariants import RunInvariants, write_run_invariants
+        from execute_tools.run_report import load_lock
 
         invariants = RunInvariants(
             resolved_data_scope=[0],
@@ -639,9 +640,13 @@ class TestPluginProvenance:
         )
         path = write_run_invariants(str(tmp_path), invariants)
         assert "model_plugin_identities" not in json.loads(pathlib.Path(path).read_text())
+        report = load_lock(tmp_path)
+        assert report is not None
+        assert report.model_plugin_identities is None
 
     def test_a_bound_run_records_the_identities_it_resolved(self, tmp_path):
         from core.run_invariants import RunInvariants, write_run_invariants
+        from execute_tools.run_report import load_lock
 
         binding = RunModelPluginBinding(
             roots=("/pack/plugins",),
@@ -675,6 +680,67 @@ class TestPluginProvenance:
                 "content_sha256": "a" * 64,
             }
         ]
+        report = load_lock(tmp_path)
+        assert report is not None
+        assert report.model_plugin_identities == payload["model_plugin_identities"]
+
+    def test_captured_package_identity_survives_lock_and_report(self, tmp_path):
+        from core.local_code import CodePackageDeclaration, bind_code_package, capture_package
+        from core.run_invariants import RunInvariants, build_run_invariants, write_run_invariants
+        from execute_tools.run_report import load_lock
+
+        plugin = write_plugin(tmp_path / "plugins", "dp_packaged_net")
+        helper = tmp_path / "plugins" / "_helper.py"
+        helper.write_text("CONSTANT = 7\n")
+        package = capture_package(
+            CodePackageDeclaration(root="plugins", files=(plugin.name, helper.name)), tmp_path
+        )
+        expected = [
+            {
+                "configured_ref": "plugins",
+                "member": plugin.name,
+                "model_type": "dp_packaged_net",
+                "content_sha256": hashlib.sha256(plugin.read_bytes()).hexdigest(),
+                "local_code": {
+                    "member": plugin.name,
+                    "package": {
+                        "version": "task-local-code-v1",
+                        "members": [
+                            {
+                                "member": path.name,
+                                "content_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                            }
+                            for path in (helper, plugin)
+                        ],
+                    },
+                },
+            }
+        ]
+        with bind_code_package(package):
+            binding = resolve_declared_model_plugins(
+                configured_ref="plugins",
+                root=str(plugin.parent),
+                required_model_types=("dp_packaged_net",),
+            )
+            with bind_run_model_plugins(binding):
+                invariants, _ = build_run_invariants(
+                    resolved_data_scope=[0],
+                    health_gate_enabled=False,
+                    health_gate_files=None,
+                    health_checks_config=None,
+                    workspace=str(tmp_path),
+                    task_composition_fingerprint="fixture-composition",
+                )
+        path = pathlib.Path(write_run_invariants(str(tmp_path), invariants))
+        original_bytes = path.read_bytes()
+        assert json.loads(original_bytes)["model_plugin_identities"] == expected
+        assert str(tmp_path) not in json.dumps(expected)
+        loaded = RunInvariants.model_validate_json(original_bytes)
+        assert loaded.model_plugin_identities == expected
+        report = load_lock(tmp_path)
+        assert report is not None
+        assert report.model_dump(mode="json")["model_plugin_identities"] == expected
+        assert path.read_bytes() == original_bytes
 
     def test_the_recorded_digest_is_the_one_CAPTURED_at_resolution(self, tmp_path):
         """F-12bc-7, applied here rather than inherited as a slogan.

@@ -18,8 +18,8 @@ Two properties, each with the defect only it catches:
 
 from __future__ import annotations
 
+import ast
 import importlib
-import re
 from pathlib import Path
 
 import pytest
@@ -145,19 +145,33 @@ def test_the_helper_is_what_the_live_except_path_calls():
     the helper and no longer inlines the record (a re-inlined dict would
     silently drop the not-scoreable description)."""
     source = tuner_node_source()
-    # Indentation-insensitive: the scoring `except` kept its body but changed
-    # indent level when the attempt loop was decomposed into phase functions
-    # (Step 07 PR 07b, C7d). The anchor is the handler and the statement that
-    # opens it, not the column they happen to sit at.
-    m = re.search(r"except Exception as e:\n\s*scoring_time", source)
-    assert m, "the scoring except path is no longer recognisable"
-    start = m.start()
-    # Both emission spellings: the direct call, or the identity-threading
-    # helper the structural-budget closure introduced (one emission idiom).
-    emit = re.search(r"_emit(?:_attempt)?_record\(", source[start:])
-    assert emit, "no emission call after the scoring except path"
-    block = source[start : start + emit.start()]
-    assert "_build_scoring_failure_record(" in block
+    handlers = [
+        n
+        for n in ast.walk(ast.parse(source))
+        if isinstance(n, ast.ExceptHandler)
+        and isinstance(n.type, ast.Name)
+        and n.type.id == "Exception"
+        and any(
+            isinstance(c, ast.Call)
+            and isinstance(c.func, ast.Name)
+            and c.func.id == "_build_scoring_failure_record"
+            for c in ast.walk(n)
+        )
+    ]
+    assert len(handlers) == 1
+    handler = handlers[0]
+    calls = {
+        n.func.id: n.lineno
+        for n in ast.walk(handler)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    # Named integrity refusal exits first; ordinary errors still use and emit
+    # the shared scoring record rather than an inline lossy replacement.
+    assert calls["raise_if_code_package_failure"] < calls["_build_scoring_failure_record"]
+    emit = calls.get("_emit_record", calls.get("_emit_attempt_record"))
+    assert emit is not None and calls["_build_scoring_failure_record"] < emit
+    block = ast.get_source_segment(source, handler)
+    assert block is not None
     assert '"status": "error_scoring"' not in block
 
 

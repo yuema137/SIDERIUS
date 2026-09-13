@@ -274,17 +274,24 @@ def run_prephase_measurement(
         # agent-generated candidate CONFIG_REJECTED in V20 attempt 2 —
         # the parent's own environment carries no SIDERIUS_PLUGIN_DIRS,
         # because that variable is built per-sandbox for its children.
+        from core.local_code.child import prepare_child
         from core.subprocess_env import subprocess_env
 
+        invocation = prepare_child(
+            argv, subprocess_env(plugin_dir=spec.plugin_dir, loss_dir=spec.loss_dir)
+        )
         process = subprocess.Popen(
-            argv,
+            invocation.argv,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             start_new_session=True,  # own group: a kill reaches descendants
-            env=subprocess_env(plugin_dir=spec.plugin_dir, loss_dir=spec.loss_dir),
+            env=invocation.env,
         )
     except Exception as exc:
         log_handle.close()
+        from core.local_code.failure import raise_if_code_package_failure
+
+        raise_if_code_package_failure(exc)
         return _launch_failure(spec, deadline_seconds, exc)
 
     pgid = process.pid  # session leader, so pgid == pid
@@ -360,6 +367,7 @@ def run_prephase_measurement(
     log_handle.close()
 
     returncode = process.returncode
+    invocation.check(returncode)
     report = _load_report(result_path)
     journal = _load_journal(Path(spec.journal_path))
 

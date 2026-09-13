@@ -22,7 +22,8 @@ what a task means — task semantics live in
 | `sandbox_executor.py` | `TidmadSandbox` / `StubSandbox` — the GPU child launch surface: `execute_training`, `execute_inference`, `evaluate_metric`, `execute_scoring`; every child goes through one observed-subprocess seam |
 | `execution_calibration.py` | `ROLE_CEILINGS` (training 40 · inference 60 · scoring 24 GiB, with derivation provenance) · `resolve_role_ceiling_gb(role)` (two layers: `SIDERIUS_SUBPROCESS_RSS_GB` caller override, else the declared default; the override is either one global integer or one complete role mapping; `0` disables the selected role; malformed **refuses**) · `calibration_provenance()` |
 | `hardware_context.py` | `get_or_create(workspace, run_name)` — discovery + the per-run `{run_name}_hardware.json` manifest; the only `torch.cuda.get_device_properties` call site |
-| `subprocess_env.py` | the one environment a child needs to see generated plugins (`SIDERIUS_PLUGIN_DIRS` / `SIDERIUS_LOSS_DIRS` transport) |
+| `subprocess_env.py` | the one environment a child needs for generated plugin roots and optional captured task-code transport |
+| [`local_code/`](local_code/README.md) | finite captured package imports, whole-set identity, verified child transport and named integrity refusal |
 | `runtime_control/` | measurement, admission, watchdog, calibration registry, `launch_guard.run_launch_self_test`, estimator/policy identity |
 | `server_configs/` | per-server calibration registry (`_base.py` schema; one module per host) |
 | `campaign_identity.py` | validates campaign ids, binds campaign state to its identity stamp, and admits campaign homes |
@@ -92,6 +93,7 @@ children. `StubSandbox` is the pseudo-training stub — no GPU, canned results.
 | a pre-runtime-identity lock | rejected, not defaulted — that workspace cannot be resumed by this build |
 | `MalformedCeilingOverride` | a bad `SIDERIUS_SUBPROCESS_RSS_GB` refuses loudly instead of silently falling back |
 | `ResumeError` / `ReplayIntegrityError` | workspace state unreadable / tampered — fails closed |
+| `LocalCodeError` | declared task-code integrity/dependency refusal; the workflow halts the chain with its own diagnosis, not a scientific failure |
 | `MemoryError` in a child | the role ceiling working: structured `oom_host_ram`, not a dead host |
 
 ## Files normally edited

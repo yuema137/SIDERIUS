@@ -339,7 +339,7 @@ class RunInvariants(BaseModel):
     #
     # Omitted from the serialized lock when None, like the two fields above,
     # so every pre-seam-P lock file stays byte-identical.
-    model_plugin_identities: list[dict[str, str]] | None = None
+    model_plugin_identities: list[dict[str, object]] | None = None
     # arXiv P1 — WHERE this run's generated-capability library resolved
     # ({"root": ..., "source": "env"|"default"},
     # ``core.generated_library.generated_library_provenance``). RECORDED,
@@ -1025,7 +1025,7 @@ def build_run_invariants(
     )
 
 
-def _model_plugin_identities() -> list[dict[str, str]] | None:
+def _model_plugin_identities() -> list[dict[str, object]] | None:
     """The run's declared model-plugin identities, or ``None`` when unbound.
 
     ``None`` — not ``[]`` — is what an un-composed run, and a composed run
