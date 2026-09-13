@@ -58,7 +58,7 @@ def _require_real_data_dir(flag: str) -> str:
     """The configured external data directory, or an informative skip/failure.
 
     Only ever called from behind ``--real-data`` / ``--real-training``; the
-    default run never dereferences ``REAL_DATA_DIR`` at all.
+    default run never resolves ``SIDERIUS_TEST_DATA_DIR`` at all.
     """
     return str(require_configured_directory(REAL_DATA_ENV_VAR, requested_by=flag))
 

@@ -16,8 +16,8 @@ full-suite, live-provider, GPU, or scientific-result claim.
 
 ## Optional external resources
 
-Tests that opt into the shared `--real-data` or `--real-training` lane read
-their resource root only from the absolute path in `SIDERIUS_TEST_DATA_DIR`.
+The shared fixtures behind `--real-data` and `--real-training` read their
+resource root only from the absolute path in `SIDERIUS_TEST_DATA_DIR`.
 Leaving the variable unset visibly skips that optional lane. Setting it to a
 blank, missing, non-directory, or incomplete resource is a qualification
 failure; it never falls back to a developer path or becomes a green skip.
@@ -29,6 +29,7 @@ SIDERIUS_TEST_DATA_DIR=/absolute/path/to/test-data \
   .venv/bin/python -m pytest <selected-test> --real-data -q
 ```
 
-The shared historical real-data fixture still expects its named external file;
-that workload's task ownership is being resolved separately. This resource
-contract does not make a real scientific task a framework default.
+The shared historical real-data fixture still expects its named external file.
+Direct historical workload owners have not yet been routed through this seam;
+their migration or retirement is the next bounded portability slice. This
+resource contract does not make a real scientific task a framework default.
