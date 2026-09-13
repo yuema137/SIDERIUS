@@ -98,6 +98,27 @@ When several gates fire in one round, severity resolves
 > semantics; a config declaring either now refuses at validation instead
 > of silently claiming loop control the runtime does not implement.
 
+## Unknown is not an empty policy
+
+The effective config declares each gate's scientific role. Names and execution
+actions cannot supply that role: an observe-only `continue` action does not turn
+a failed blocking check into a valid candidate.
+
+A declared empty roster means no Health checks are required. A missing role or
+unavailable policy means the required checks cannot be established; that is
+UNKNOWN, not a pass. Historical configuration hashes no longer recover missing
+roles. Explicitly disabling Health still permits finite successful records, but
+does not make failed or nonfinite results valid.
+
+New declarations must specify roles through task disposition or an explicit
+effective config. Peek sets must be concrete lists; the historical
+`task_health_peek` string is no longer expanded. Historical records remain
+readable as evidence and are not rewritten to invent missing declarations.
+
+On resume, a stored “valid” verdict cannot replace the matching effective policy
+and required results. Missing or mismatched evidence excludes the scientific
+incumbent; it does not erase the raw history.
+
 ## Where the settings live
 
 Two documents, two owners, and the split is the point:

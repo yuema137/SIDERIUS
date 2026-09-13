@@ -24,6 +24,7 @@ does*; the task owns *what is checked and how strictly*.
 | `runner.py` | `evaluate_gate` (decides applicability **before** invoking a check) · `resolve_action` (max severity wins) |
 | `evaluation.py` | `evaluate_and_persist_health_gates` — the batched evaluate-and-persist adapter both Phase-1 baselines and tuner rounds use |
 | `config.py` | `default_health_policy_path()` (inert installed resource location) · `load_health_gates_config` (returns the **composed** result) · `materialize_effective_config` → `{workspace}/health_checks_effective.yaml`, sha256-pinned by the invariants lock |
+| `candidate_eligibility.py` | `resolve_scientific_gate_ids` / `resolve_run_scientific_gate_ids` resolve declared roles; `classify_candidate_health` consumes the resolved roster without config I/O; `classify_under_pinned_policy` delegates to that classifier |
 | `_task_health_config.py` | `TaskHealthConfig` — the task-owned document: facts, value scale, peek files, roster (`gate_id`, `check`, **`disposition`** — the task's only policy choice — `parameters`, `reason`), `plugins:` |
 | `_plugin_binding.py` | `load_task_health_plugins` — run-scoped loading of external plugin files |
 | `standard_views.py` | the framework-standard view capabilities `categorical_predictions` / `continuous_samples`: 1-D typed, read-only, no-copy, engine-opaque |
@@ -74,6 +75,31 @@ are unchanged. Existing effective files are not rewritten to update a header.
 - Roster **declaration order is semantic**, and the composed effective config
   is content-addressed (plugin digests included) — editing any of it forks
   the workspace identity.
+
+## Explicit roles and unknown evidence
+
+Every effective gate must declare `gate_role: blocking` or `observational`.
+Task rosters obtain these roles from their declared disposition during composition.
+An observational gate never decides eligibility, regardless of its name. A failed
+blocking-role check is not a valid candidate even if enforcement says `continue`.
+
+`resolve_scientific_gate_ids(path)` returns `None` when any role is missing;
+an empty roster returns `frozenset()`. These are different facts. Passing `None`
+(or omitting the argument) to `classify_candidate_health` means UNKNOWN, never
+"load defaults". Resolve the run's actual policy once and pass its value. Explicit
+empty rosters and explicit `health_gate_enabled=False` support finite successes;
+failed status and nonfinite scores remain INVALID before that waiver.
+
+Historical SHA-to-role inference, `legacy_config_body_sha`, and the lossy
+`required_blocking_gate_ids` API/export are removed. Use the supported resolver
+and preserve its nullable result. The `task_health_peek` string marker is also
+unsupported: declare task-owned `health_peek_files: [2, 7]`, or concrete
+`peek_file_indices: [2, 7]` in an effective config. No string triggers profile
+lookup. Existing historical results are not migrated or rewritten.
+
+Resume requires independent VALID evidence before trusting stored formal
+authority, even when committed-best fields are present. A missing or mismatched
+policy artifact is no longer an admission exception; raw records remain readable.
 
 ## Non-owned semantics
 
