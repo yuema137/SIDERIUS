@@ -1046,24 +1046,49 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai"])
     parser.add_argument("--model_id", type=str, default="gemini-3.1-flash-lite-preview")
+    parser.add_argument(
+        "--task_composition",
+        required=True,
+        help="Task-composition manifest supplying the scientific contract and metric",
+    )
+    parser.add_argument(
+        "--data_dir",
+        required=True,
+        help="Existing physical data root required by the full task-composition binding; "
+        "literature review does not train or score the data",
+    )
     return parser
 
 
-def main() -> None:
-    """Standalone CLI entry point (issue #303).
-
-    Mirrors the sibling node CLIs (``ml_model_proposal_agent`` /
-    ``result_interpretation_agent``): parse flags -> load the upstream
-    persisted record -> ``model_validate`` the node input -> ``run()`` ->
-    print a summary. ``run()`` itself is unchanged — the CLI is additive.
-    """
-    args = _build_arg_parser().parse_args()
+def _build_cli_input(args: argparse.Namespace) -> LiteratureReviewInput:
+    """Load standalone inputs under the caller's active task composition."""
+    from execute_tools.evaluation_metric import (
+        MetricIdentityKey,
+        StampedMetricSpec,
+        reconcile_metric_identity,
+        resolve_bound_run_metric,
+    )
 
     if args.experiment_history is not None:
         history_path = Path(args.experiment_history)
     else:
         history_path = Path(args.workspace) / f"interpretation_{args.run_name}.json"
     experiment_history = load_experiment_history(history_path)
+    bound_metric = resolve_bound_run_metric()
+    assert bound_metric is not None  # main() owns the full composition lifetime.
+    stamp = experiment_history.metric_identity
+    reconcile_metric_identity(
+        [
+            StampedMetricSpec(
+                label=str(history_path),
+                spec=MetricIdentityKey(id=stamp.metric_id, direction=stamp.direction)
+                if stamp is not None
+                else None,
+            )
+        ],
+        bound=bound_metric.spec,
+        bound_label=f"task composition {args.task_composition}",
+    )
 
     # Node knobs: the SAME YAML + key mapping the workflow uses
     # (workflows/model_exploration.py::_build_lit_review_input), with a
@@ -1085,7 +1110,7 @@ def main() -> None:
 
     task_description = get_task_description(load_task_config())
 
-    agent_input = LiteratureReviewInput.model_validate(
+    return LiteratureReviewInput.model_validate(
         {
             "experiment_history": experiment_history,
             "root_papers": lit_review_config.get("root_papers", []),
@@ -1103,6 +1128,31 @@ def main() -> None:
             "llm_model_id": args.model_id,
         }
     )
+
+
+def main() -> None:
+    """Bind the explicit task, validate standalone inputs, then run the node."""
+    args = _build_arg_parser().parse_args()
+    from core.generated_library import bind_generated_library_to_workspace
+
+    # Composition imports can load plugins: workspace selection must precede them.
+    bind_generated_library_to_workspace(args.workspace)
+    from workflows.task_composition import (
+        bind_run_task_composition,
+        compose_run_task_bindings,
+    )
+
+    composition = compose_run_task_bindings(args.task_composition)
+    with bind_run_task_composition(composition, physical_data_root=args.data_dir):
+        agent_input = _build_cli_input(args)
+        _run_cli_review(agent_input)
+
+
+def _run_cli_review(agent_input: LiteratureReviewInput) -> None:
+    """Execute a validated CLI input and print the existing operator summary."""
+    experiment_history = agent_input.experiment_history
+    assert agent_input.storage.local is not None
+    workspace = Path(agent_input.storage.local.workspace)
     print(
         f"Input validated: bottlenecks={len(experiment_history.bottlenecks)} | "
         f"key_findings={len(experiment_history.key_findings)} | "
@@ -1115,7 +1165,7 @@ def main() -> None:
         )
 
     agent = MLLiteratureReviewAgent(
-        root_cache_dir=str(Path(args.workspace) / "cache" / "literature" / "root_papers")
+        root_cache_dir=str(workspace / "cache" / "literature" / "root_papers")
     )
     output = agent.run(agent_input)
 
@@ -1127,7 +1177,7 @@ def main() -> None:
     print(f"  Findings         : {len(output.findings)}")
     for item in output.findings:
         print(f"    - [{item.source_ref}] confidence={item.confidence}")
-    out_path = Path(args.workspace) / f"ml_literature_review_{args.run_name}.json"
+    out_path = workspace / f"ml_literature_review_{agent_input.run_name}.json"
     print(f"\n  Output: {out_path}")
     print(f"{'=' * 60}\n")
 
