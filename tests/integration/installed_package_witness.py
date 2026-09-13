@@ -112,7 +112,6 @@ def prepare_inputs(checkout: Path, workspace: Path) -> Path:
         workspace / "losses/installed/masked_mse_loss.py"
     )
     manifest.write_text(yaml.safe_dump(config))
-    shutil.copyfile(checkout / "configs/health/health_checks.yaml", inputs / "health_policy.yaml")
     return manifest
 
 
@@ -196,7 +195,7 @@ def execute_lifecycle(manifest: Path, workspace: Path) -> dict:
         assert math.isclose(results["metric_result"]["scalar"], expected, rel_tol=1e-6)
         (checkpoint,) = Path(sandbox.dirs["models"]).glob("*.pth")
         effective, health_hash = materialize_effective_config(
-            str(workspace / "inputs/health_policy.yaml"),
+            None,
             None,
             str(workspace),
             task_health_binding=str(
