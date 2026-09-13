@@ -43,6 +43,7 @@
         "focal_gamma_default",
         "full_scope_segments",
         "gate_check_names",
+        "loss_context",
         "output_contract_shape",
         "per_file_comparison_block",
         "per_file_table_protocol",

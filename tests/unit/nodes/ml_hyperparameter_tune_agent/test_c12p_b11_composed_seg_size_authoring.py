@@ -187,6 +187,7 @@ class _Sandbox:
 def _bindings(agent_input, configs_dir) -> RunBindings:
     from execute_tools.metric_order import MetricOrder
     from tests.helpers.metric_fixtures import direction_only_metric
+    from tests.helpers.tuner_prompt_fixtures import TASK_RENDER
 
     metric = direction_only_metric()
     return RunBindings(
@@ -200,7 +201,9 @@ def _bindings(agent_input, configs_dir) -> RunBindings:
         run_metric=metric,
         run_secondary_metrics=(),
         run_order=MetricOrder(metric.spec),
-        run_task_render=None,
+        # Scope-only fixture: provide the typed carrier production constructs;
+        # the recording brain never renders or calls an LLM.
+        run_task_render=TASK_RENDER,
         run_name="c12p_b11",
         workspace=str(configs_dir),
         file_index=0,
