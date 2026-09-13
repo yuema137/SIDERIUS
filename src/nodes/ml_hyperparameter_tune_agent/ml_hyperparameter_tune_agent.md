@@ -870,31 +870,35 @@ Four-part contract:
    operator override — not the resolved value — is pinned in the
    run-invariants lock.
 
-5. **Five provenance states**, recorded in
-   `ordering_resolution_source`. Three mean an ordering actually ran;
-   two mean none did, and they are deliberately distinct because they
-   mean different things:
+5. **Five provenance states**, exposed by the ordering reader. The first
+   three identify selected effective configuration, not proof that any or all
+   samples were visited. `ordering_resolution_source` retains the selection
+   on success, mode collapse, and training/inference/scoring errors, including
+   CUDA/host OOM and malformed training results. Outer attempt errors retain it
+   once resolution has happened, even when later preparation raises before
+   training. Each attempt starts with no captured ordering.
 
    | Source | Meaning | `resolved_order_strategy` |
    |---|---|---|
-   | `operator_override` | training ran the operator-forced ordering | the forced value |
-   | `agent_proposal` | training ran the validated agent proposal | the proposed value |
-   | `default` | training ran the default, no usable proposal or override | `shuffle` |
-   | `legacy_default` | a **pre-PR2 artifact** has no ordering fields because it predates the feature; the reader reconstructs the historical default | `shuffle` (reconstructed) |
-   | `not_executed` | a **current-code attempt** was rejected before training and never applied an ordering — at pre-flight (`skipped_oom_risk` / `skipped_time_risk` / `skipped_schema_violation`) or, since V20 PR B, at GPU admission (`skipped_resource_admission`) | `None` |
+   | `operator_override` | operator-forced ordering selected | the forced value |
+   | `agent_proposal` | validated agent proposal selected | the proposed value |
+   | `default` | default selected, no usable proposal or override | `shuffle` |
+   | `legacy_default` | unstamped non-preflight record; compatibility fallback, not observed traversal | `shuffle` (reconstructed) |
+   | `not_executed` | named preflight skip: `skipped_oom_risk`, `skipped_time_risk`, or `skipped_schema_violation` | `None` |
 
    `not_executed` never fabricates a `shuffle` value: inventing one for
-   an attempt that visited no data would misreport the run. Proposal and
-   override context is still preserved on such an attempt — what the
-   agent *did* is independent of whether the attempt was admitted — but
-   the source describes what **executed**, never what would have been
-   selected had it passed admission.
+   an attempt that visited no data would misreport the run. The three named
+   preflight producers remain unstamped; the reader preserves any proposal or
+   override context already present without inventing it. Post-resolution error
+   records preserve rejected proposals and operator overrides as distinct facts.
 
-   Known residual: current-run ERROR records (`error_training`,
-   `error_inference`, `error_scoring`, …) fail before the stamping site
-   and so still read as `legacy_default`. Tracked in issue #139; the
-   preferred fix is to stamp resolved ordering immediately after
-   resolution and before training dispatch.
+   Known limitation ([#447](https://github.com/Galileo-Sandbox/SIDERIUS/issues/447)):
+   pre-resolution failures and resource/infrastructure admission skips remain
+   unstamped and can still read as `legacy_default`, as can historical errors.
+   Resource admission can refuse before training or before inference after
+   training, so its status alone cannot establish `not_executed`. No historical
+   record is rewritten, no ordering is guessed from params, and no new record
+   is created for terminal paths that did not previously emit one.
 
 Design: `docs/design/v19_priorities/pr2_data_ordering.md` §3.6–§3.9.
 

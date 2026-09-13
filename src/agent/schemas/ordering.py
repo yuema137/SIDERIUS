@@ -4,7 +4,8 @@ Ordering is the first option to adopt the project-wide configuration
 principle (``docs/design/genericity_contract.md`` Seam 2):
 
     Agents propose configuration. The execution system resolves
-    configuration. Only resolved values describe what actually ran.
+    configuration. Only resolved values describe selected execution settings;
+    provenance does not prove that training visited any or all selected samples.
 
 Precedence is fixed and implemented HERE, exactly once::
 
@@ -51,21 +52,20 @@ OrderingResolutionSource = Literal[
     "legacy_default",
     "not_executed",
 ]
-"""Which level supplied the ordering that RAN — or why none did.
+"""Which level supplied selected ordering, or how an unstamped record is read.
 
-The first three describe an ordering that actually executed:
+The first three describe selected configuration, including on attempt errors:
 
-``operator_override``  training ran the operator-forced ordering.
-``agent_proposal``     training ran the validated agent proposal.
-``default``            training ran the current default, because there was
+``operator_override``  the operator-forced ordering was selected.
+``agent_proposal``     the validated agent proposal was selected.
+``default``            the current default was selected, because there was
                        no usable proposal and no override.
 
-The last two describe the absence of an executed ordering, and are
-deliberately distinct because they mean different things:
+The last two are reader states, not evidence of selected configuration:
 
-``legacy_default``     a PRE-PR2 artifact has no ordering fields because it
-                       predates the feature; the reader reconstructs the
-                       historical default for compatibility.
+``legacy_default``     an unstamped record uses the historical fallback.
+                       This includes old errors and pre-resolution failures;
+                       it does not establish what actually executed.
 ``not_executed``       a CURRENT-code attempt never reached training (it was
                        rejected at pre-flight), so no ordering was applied.
                        ``resolved_strategy`` / ``resolved_file_order`` are
@@ -233,10 +233,10 @@ class RejectedOrderingProposal(BaseModel):
 
 
 class ResolvedOrdering(BaseModel):
-    """The full ordering provenance for one round: intent, control, and fact.
+    """The full ordering provenance for one attempt: intent, control, selection.
 
-    Only ``resolved_strategy`` / ``resolved_file_order`` describe what
-    executed. The proposed and override values are context: they explain WHY
+    Only ``resolved_strategy`` / ``resolved_file_order`` describe selected
+    execution settings, not completed traversal. The other values explain WHY
     the resolved value is what it is, and they must never be reported as what
     ran (``docs/design/v19_priorities/pr2_data_ordering.md`` §3.7).
 
@@ -285,16 +285,16 @@ class ResolvedOrdering(BaseModel):
     resolved_strategy: OrderStrategy | None = Field(
         default=None,
         description=(
-            "The strategy that actually executed. None ONLY when nothing "
-            "executed — i.e. resolution_source is 'not_executed'. A live "
+            "The selected strategy, not proof of completed traversal. None "
+            "when resolution_source is 'not_executed'. A live "
             "resolution always produces a strategy."
         ),
     )
     resolved_file_order: list[int] | None = Field(
         default=None,
         description=(
-            "The file visitation order that actually executed. None exactly "
-            "when resolved_strategy is 'shuffle'; otherwise a full permutation "
+            "The selected file visitation order. None for 'shuffle' or "
+            "'not_executed'; otherwise a full permutation "
             "of the resolved DataScope."
         ),
     )
@@ -303,7 +303,7 @@ class ResolvedOrdering(BaseModel):
     )
 
     def executed_strategy(self) -> OrderStrategy:
-        """The strategy that executed, narrowed to non-null.
+        """The selected execution strategy, narrowed to non-null.
 
         ``resolved_strategy`` is optional because the read-path
         constructors describe attempts where nothing ran
@@ -330,23 +330,23 @@ class ResolvedOrdering(BaseModel):
 
     @classmethod
     def from_record(cls, record: Any) -> ResolvedOrdering:
-        """Read the ordering a persisted record says it ran.
+        """Read selected configuration, preserving legacy and preflight semantics.
 
         The single place the legacy rule lives, so the interpreter and the
         iteration manifest cannot drift apart on it: a record with no
-        ``resolved_order_strategy`` predates the ordering option entirely and
-        is read as the global shuffle with source ``legacy_default`` — read
-        explicitly, never guessed, and never written back.
+        ``resolved_order_strategy`` outside the named preflight skips is read
+        as global shuffle with source ``legacy_default``. Such absence includes
+        historical errors and current pre-resolution failures; the fallback is
+        not proof of traversal and is never written back.
 
         Takes any object exposing the record's ordering attributes (duck
         typed, so this module stays free of a schema import cycle).
         """
         resolved = getattr(record, "resolved_order_strategy", None)
         if resolved is None:
-            # No executed-ordering stamp. Two very different reasons, and
-            # conflating them misreports the run: a CURRENT attempt rejected
-            # at pre-flight never ran an ordering, whereas a PRE-PR2 artifact
-            # has no ordering fields because the feature did not exist yet.
+            # Only these named preflight skips establish not_executed.
+            # Other unstamped inputs retain the compatibility fallback,
+            # including pre-resolution and admission failures (issue #447).
             if getattr(record, "status", None) in NOT_EXECUTED_STATUSES:
                 return cls.not_executed(record)
             return cls.legacy_default()
@@ -392,13 +392,11 @@ class ResolvedOrdering(BaseModel):
 
     @classmethod
     def legacy_default(cls) -> ResolvedOrdering:
-        """The reading of a pre-PR2 artifact that carries no ordering fields.
+        """The compatibility reading of an unstamped non-preflight record.
 
-        Such runs predate the ordering option entirely, so they ran the
-        global shuffle. Recorded with a distinct source so a reader can tell
-        "no ordering fields existed yet" from "this run chose the default" —
-        legacy artifacts are interpreted explicitly, never guessed at and
-        never rewritten.
+        Retains the historical shuffle fallback, without claiming an unstamped
+        error actually ran it. Distinct from a selected ``default``; historical
+        artifacts and current pre-resolution failures are never rewritten.
         """
         return cls(resolved_strategy=DEFAULT_ORDER_STRATEGY, resolution_source="legacy_default")
 

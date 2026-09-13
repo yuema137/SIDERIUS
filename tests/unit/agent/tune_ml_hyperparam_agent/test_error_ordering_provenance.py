@@ -22,8 +22,11 @@ from execute_tools.evaluation_metric import (
     ScoreabilityFailure,
     ScoreabilityVerdict,
 )
+from execute_tools.metric_order import MetricOrder
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
 from tests.helpers.scoring_stubs import stub_scoring
+from workflows.run_one_iteration import write_manifest
 from workflows.task_composition import (
     bind_run_task_composition,
     build_task_composition_ref,
@@ -246,3 +249,41 @@ def test_outer_error_capture_is_attempt_local(run_failure, phase):
     else:
         assert "denoising_score_skill" in dispatched
         assert saved[0]["failure_reason"] == "after execution"
+
+
+def test_saved_failures_reach_both_real_ordering_readers(run_failure, tmp_path):
+    """Saved errors must not become historical shuffle in either live reader."""
+    saved, _, _, output = run_failure(phase="preparation", attempts=2)
+    assert output.metric_spec is not None
+    assert [record.exp_id for record in output.all_records] == [r["exp_id"] for r in saved]
+    summary = tuning_output_to_model_run_summary(output, order=MetricOrder(output.metric_spec))
+    selected, absent = summary.round_ordering
+    assert selected.resolved_order_strategy == "sequential"
+    assert selected.resolved_file_order == [3, 1, 0, 2]
+    assert selected.resolution_source == "operator_override"
+    assert selected.proposal_rejected is True
+    assert absent.resolution_source == "legacy_default"
+    manifest = write_manifest(str(tmp_path), "error_ordering", [output])
+    selected_manifest, absent_manifest = manifest["ordering_by_experiment"]
+    assert selected_manifest["resolved_order_strategy"] == "sequential"
+    assert selected_manifest["resolved_file_order"] == [3, 1, 0, 2]
+    assert selected_manifest["ordering_resolution_source"] == "operator_override"
+    assert {key: selected_manifest[key] for key in _FIELDS} == {
+        key: saved[0][key] for key in _FIELDS
+    }
+    assert absent_manifest["ordering_resolution_source"] == "legacy_default"
+
+
+def test_mode_collapse_keeps_completed_record_ordering(run_failure):
+    """Moving the mapping must not drop ordering on the other completed status."""
+    saved, _, _, _ = run_failure(
+        phase="denoising_score_skill",
+        payload={
+            "status": "success",
+            "results": {
+                "denoising_score": float("nan"),
+            },
+        },
+    )
+    assert saved[0]["status"] == "failed_mode_collapse"
+    assert_selected(saved[0])

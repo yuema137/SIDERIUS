@@ -666,11 +666,10 @@ class ExperimentRecord(BaseModel):
     )
     # --- Data-ordering provenance (V19 PR 2) ---
     # The three levels kept distinct, so a reader can reconstruct "the agent
-    # proposed X, the operator overrode with Y, Z actually ran, because S"
-    # from this record alone. ONLY the resolved_* fields describe execution:
-    # an overridden proposal must never be reported as what ran. All default
-    # to None so pre-PR2 records stay readable — a record with no ordering
-    # fields is interpreted via ResolvedOrdering.legacy_default().
+    # proposed X, the operator overrode with Y, Z was selected, because S".
+    # Only resolved_* describes selected settings, never completed traversal.
+    # Unstamped inputs stay readable through ResolvedOrdering.from_record;
+    # absence does not establish what actually ran.
     proposed_order_strategy: str | None = Field(
         default=None,
         description=(
@@ -709,16 +708,16 @@ class ExperimentRecord(BaseModel):
     resolved_order_strategy: OrderStrategy | None = Field(
         default=None,
         description=(
-            "The ordering that ACTUALLY EXECUTED for this round — the only "
-            "ordering field that describes execution. None on legacy records "
-            "(read as 'shuffle', source 'legacy_default')."
+            "Selected effective ordering for this attempt, including errors "
+            "after resolution; not proof of completed traversal. None on "
+            "unstamped records and named preflight skips."
         ),
     )
     resolved_file_order: list[int] | None = Field(
         default=None,
         description=(
-            "The file visitation order that ACTUALLY EXECUTED. None when the "
-            "resolved strategy was 'shuffle', or on legacy records."
+            "Selected file visitation order. None for 'shuffle', unstamped "
+            "records, or named preflight skips; not a list of files visited."
         ),
     )
     ordering_resolution_source: (
@@ -726,8 +725,8 @@ class ExperimentRecord(BaseModel):
     ) = Field(
         default=None,
         description=(
-            "Which level supplied the executed ordering. None on records "
-            "written before this field existed."
+            "Which level supplied selected ordering. None when unstamped, "
+            "including pre-resolution failures and named preflight skips."
         ),
     )
     file_vector: list[float | None] | None = Field(

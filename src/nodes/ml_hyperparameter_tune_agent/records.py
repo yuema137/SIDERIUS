@@ -643,6 +643,9 @@ def _emit_record(
     later admission refusal has exactly one place to attach its own.
     Passing `None` — the default, and what every non-executor path does
     today — stamps nothing, which is what those paths do now.
+
+    `ordering` is explicitly supplied for scoped post-resolution errors.
+    Skips omit it; this seam neither resolves nor guesses selected settings.
     """
     if status is not None:
         _attach_runtime_evidence(record, status)
@@ -1576,7 +1579,7 @@ def build_attempt_record(
     # V19 PR 2 — data-ordering provenance. Stamped for EVERY
     # round (trial and formal alike), unlike the trial-only
     # block below: ordering applies to all training. Only the
-    # resolved_* pair describes execution; proposed/override
+    # resolved_* pair describes selected settings; proposed/override
     # explain why, and a rejected proposal is recorded AS
     # rejected so it is never read as agent silence.
     _attach_ordering(final_record, ordering)

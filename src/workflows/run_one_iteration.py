@@ -482,7 +482,8 @@ def _ordering_by_experiment(tune_output) -> list[dict]:
     Collapsing them into one iteration-level value would silently misreport
     every round but one (§3.7 granularity rule).
 
-    Only ``resolved_*`` describes execution; ``proposed_*`` and
+    Only ``resolved_*`` describes selected execution settings, not completed
+    traversal; ``proposed_*`` and
     ``override_*`` explain why, and a rejected proposal is carried AS
     rejected so it is never read as agent silence.
 
