@@ -6,9 +6,10 @@ calibration registry (hash-verified), the observation builder, and the
 production launch guard. Faked: the executors (no torch), the telemetry
 sampler (no nvidia-smi) and the hardware collectors (no CUDA).
 
-This is the closest thing to a real bootstrap that can run in CI, and it
-is what makes the operator-gated GPU run a matter of swapping the device
-seams rather than exercising untested wiring.
+This is deterministic subsystem-composition evidence, not GPU timing or
+measurement-validity qualification. The pseudo hardware has no device UUID,
+so occupancy and measurement validity remain absent. See the integration
+README for the exact offline command; ordinary unit CI excludes this module.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from core.runtime_control.bootstrap import BootstrapDependencies, run_bootstrap
 from core.runtime_control.calibration_policy import sample_contention_window
 from core.runtime_control.calibration_registry import CalibrationRegistry
 from core.runtime_control.launch_guard import run_launch_self_test
+from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from core.runtime_control.probe import (
     ContentionSnapshot,
     ProbeCaps,
@@ -120,7 +122,17 @@ def _deps(tmp_path, *, snapshot=IDLE) -> BootstrapDependencies:
         ),
         collect_environment=lambda **kw: ExecutionEnvironmentProfile(**kw),
         build_registry=lambda: CalibrationRegistry(tmp_path / "runtime_calibration"),
-        dataset_check=lambda: (True, str(tmp_path)),
+        # Supply the task-owned verdict directly: the real resolver would
+        # make this fixture depend on the host's CUDA and dataset availability.
+        measurement_capability=lambda: ResolvedMeasurementCapability(
+            task_identity="pseudo_bootstrap_task",
+            dataset_adapter="pseudo_bootstrap_adapter",
+            data_shape_class="pseudo_bootstrap_shape",
+            probe_available=True,
+            target_device="pseudo-gpu",
+            dataset_root=str(tmp_path),
+            supported_phases=("training", "inference"),
+        ),
         sample_contention=_sample,
         build_executors=lambda **kw: _executors(),
         run_probe=_run_probe,
@@ -179,8 +191,11 @@ class TestBootstrapPseudo:
         assert estimate.provenance == "historical_observation_prior"
 
     def test_repeated_bootstraps_accumulate_toward_calibration(self, tmp_path):
-        """Three consistent bootstraps promote the buckets — the honest
-        path from "measured once" to "calibrated"."""
+        """Three distinct training observations promote their bucket.
+
+        Inference timing is identical, so its single content-addressed
+        observation remains an unvalidated prior.
+        """
         from core.runtime_control.calibration_policy import evaluate_promotions
 
         for train_ms in (17.6, 17.9, 18.1):
@@ -208,6 +223,11 @@ class TestBootstrapPseudo:
         promotions = evaluate_promotions(registry.iter_observations(), generation=0)
         levels = {p.level for p in promotions}
         assert levels == {"validated"}
+        assert {
+            registry.load_observation(observation_id).operation
+            for promotion in promotions
+            for observation_id in promotion.source_observation_ids
+        } == {"training"}
 
     def test_a_busy_gpu_is_recorded_and_still_measured(self, tmp_path):
         """RE-GROUNDED 2026-08-06 (operator).
@@ -230,6 +250,12 @@ class TestBootstrapPseudo:
         assert step.data["decides_readiness"] is False
         # The run proceeded past the window into real measurement.
         assert len(report.steps) > 5
+        steps = {s.name: s for s in report.steps}
+        # A failed executor build also produces six steps; require the real
+        # probe and observation path, not merely that step-count threshold.
+        assert steps["bounded training probe"].ok
+        assert steps["bounded inference probe"].ok
+        assert len(report.observation_ids) == 2
 
     @pytest.mark.parametrize("run_twice", [True])
     def test_bootstrapping_twice_is_safe(self, tmp_path, run_twice):
