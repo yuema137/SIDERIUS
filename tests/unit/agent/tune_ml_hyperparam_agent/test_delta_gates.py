@@ -71,6 +71,8 @@ _BLOCKING_IDS = (
     "output_std_blocking",
     "amplitude_collapse_blocking",
 )
+# These fixtures model this nonempty roster; selection receives the same policy
+# as the supplied verdicts instead of asking for an implicit default.
 
 
 def _valid_trial(score: float) -> dict:
@@ -126,7 +128,7 @@ def _skip(records, *, threshold, gates_enabled=True, order=HIGHER_ORDER) -> bool
     can never open a gate" a live assertion here instead of an assumption.
     """
     return _should_skip_formal(
-        _best_trial_winner(records, order=order),
+        _best_trial_winner(records, order=order, required_gate_ids=frozenset(_BLOCKING_IDS)),
         threshold=threshold,
         gates_enabled=gates_enabled,
         order=order,
@@ -136,7 +138,9 @@ def _skip(records, *, threshold, gates_enabled=True, order=HIGHER_ORDER) -> bool
 def _bypass(records, *, threshold, order=HIGHER_ORDER) -> bool:
     """Records → winner → gate. See :func:`_skip`."""
     return _should_bypass_formal_time_budget(
-        _best_trial_winner(records, order=order), threshold=threshold, order=order
+        _best_trial_winner(records, order=order, required_gate_ids=frozenset(_BLOCKING_IDS)),
+        threshold=threshold,
+        order=order,
     )
 
 

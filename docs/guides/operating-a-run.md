@@ -76,6 +76,14 @@ The comparability lock refuses changes to identity-bearing configuration. Do
 not bypass that refusal by rewriting manifests or copying an incumbent into a
 fresh lineage.
 
+Resumed scientific incumbents require independently valid Health evidence, not
+just stored `scientific_authority` or `best_valid_formal_*` claims. Missing roles,
+a missing or hash-mismatched effective policy, or missing required gate results
+leave validity UNKNOWN and exclude the candidate with a named diagnostic. Raw
+history remains readable; do not rewrite old records to manufacture evidence.
+Explicit empty policies and explicitly disabled Health still permit finite
+successful records. Failed or nonfinite records remain excluded.
+
 ## Resource qualification
 
 Resource budgets are ceilings, not utilization targets. Static estimates may

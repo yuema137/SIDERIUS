@@ -69,18 +69,19 @@ Classification lives once, in `classify_verdict`.
 
 ## Gate actions
 
-`continue` | `skip_iter` | `skip_to_formal` | `invalidate_round`.
-Severity: `skip_iter > skip_to_formal > invalidate_round > continue`.
+`continue` | `invalidate_round`.
+Severity: `invalidate_round > continue`. The retired `skip_iter` and
+`skip_to_formal` actions are rejected; gates do not control the iteration loop.
 
 ## Policy composition — two owners
 
 | owner | file | declares |
 |---|---|---|
 | framework | packaged default via `execute_tools.health_checks.config.default_health_policy_path()` | `health_policy.{blocking,recording}`: gate role, cadence, short-circuit, `on_pass`/`on_fail`, default `aggregation` |
-| task | e.g. `configs/task_health/tidmad.yaml` | `facts`, `value_scale`, `health_peek_files`, `roster[]` with **thresholds** in `parameters`, and `reason` prose |
+| task | external task's declared Health YAML | `facts`, `value_scale`, `health_peek_files`, `roster[]` with **thresholds** in `parameters`, and `reason` prose |
 
-The task's **only** policy choice is `disposition` ∈ {`BLOCKING`,
-`OBSERVATIONAL`}; the framework derives role, cadence, short-circuit, actions and
+The task's **only** policy choice is YAML `disposition: blocking` or `recording`;
+the framework derives role, cadence, short-circuit, actions and
 severity from it, so the two cannot disagree. Framework-policy keys appearing in a
 roster entry's `parameters` are rejected.
 
@@ -95,9 +96,34 @@ override the config in memory.
 
 | state | meaning |
 |---|---|
-| `LEGACY_OMITTED` | no statement — resolves TIDMAD's family. The ⚠ bounded legacy path; **a composition may not express it** |
+| `LEGACY_OMITTED` | omitted uncomposed binding; current neutral default, not a scientific task family; **a composition may not express it** |
 | `EXPLICIT_NONE` | `none: true` — a named absence that must never fall back to another task's family |
 | a path | the declared task health config |
+
+## Candidate eligibility
+
+`candidate_eligibility.py` owns the scientific classifier. Role resolution uses
+every gate's declared `gate_role`, never historical hashes, IDs or actions. Any
+missing role yields `None` (UNKNOWN); an explicit empty roster yields an empty
+set. The classifier consumes this value without config I/O: omitted or explicit
+`None` remains UNKNOWN. Status failure/nonfinite score takes precedence, followed
+by the explicit record-level `health_gate_enabled=False` waiver.
+
+The uncomposed tuner resolves its effective policy before building RunBindings;
+composed runs resolve their own task binding. Pinned readers use the workspace
+policy, with resume additionally verifying the output's body-hash stamp. Neither
+reader substitutes a current default for a missing/mismatched artifact.
+Resume additionally requires independent VALID classification before consulting
+stored authority, including its committed-best shortcut. Unknown evidence cannot
+be repaired by a stored valid verdict. Summary-only scientific aggregation still
+checks stored consistency without that artifact context; independent aggregation
+evidence is tracked separately in [#445](https://github.com/Galileo-Sandbox/SIDERIUS/issues/445).
+
+Removed compatibility APIs: `legacy_config_body_sha`, `required_blocking_gate_ids`
+and its package export. Use `resolve_scientific_gate_ids` and retain UNKNOWN.
+Removed marker: `task_health_peek`; use task-owned `health_peek_files` or a concrete
+effective `peek_file_indices` list. String refusal precedes profile access.
+Historical artifacts are not rewritten or migrated.
 
 ## Run-level inputs, not YAML
 

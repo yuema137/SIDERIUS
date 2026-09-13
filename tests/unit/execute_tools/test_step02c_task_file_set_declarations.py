@@ -71,7 +71,7 @@ class TestExplicitPeekLists:
         assert again.config["peek_file_indices"] == [4, 7, 9]
 
     def test_unrecognized_marker_is_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="not a recognized marker"):
+        with pytest.raises(ValidationError, match="must be an explicit list"):
             CheckRef(
                 name="output_diversity",
                 config={"peek_file_indices": "task_helth_peek"},

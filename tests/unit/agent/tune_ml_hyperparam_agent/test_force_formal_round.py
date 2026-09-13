@@ -36,6 +36,15 @@ from tests.helpers.metric_fixtures import shipped_spec
 #: order authority. The SHIPPED higher-is-better order keeps every assertion
 #: below stating exactly the property it stated before 07b.
 HIGHER_ORDER = MetricOrder(shipped_spec())
+# This module supplies passed verdicts for this concrete, nonempty policy.
+# Carry it to selection so inheritance tests do not depend on default rescue.
+_REQUIRED_GATES = frozenset(
+    {
+        "output_diversity_blocking",
+        "output_std_blocking",
+        "amplitude_collapse_blocking",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -58,7 +67,9 @@ def _override(plan, *, memory_history=None, **kwargs):
     return _apply_mode_override_chain(
         plan,
         memory_history=memory_history,
-        trial_winner=_best_trial_winner(memory_history or [], order=HIGHER_ORDER),
+        trial_winner=_best_trial_winner(
+            memory_history or [], order=HIGHER_ORDER, required_gate_ids=_REQUIRED_GATES
+        ),
         **kwargs,
     )
 
@@ -122,11 +133,7 @@ def _make_trial_record(
                 "would_invalidate_under_production_policy": False,
                 "resolved_action": "continue",
             }
-            for gate_name in (
-                "output_diversity_blocking",
-                "output_std_blocking",
-                "amplitude_collapse_blocking",
-            )
+            for gate_name in sorted(_REQUIRED_GATES)
         ],
         "params": {
             "model_config": dict(model_config),
@@ -457,7 +464,7 @@ def test_best_trial_winner_picks_max_score():
         _make_trial_record("r2", score=5.45),  # winner
         _make_trial_record("r3", score=4.90),
     ]
-    winner = _best_trial_winner(history, order=HIGHER_ORDER)
+    winner = _best_trial_winner(history, order=HIGHER_ORDER, required_gate_ids=_REQUIRED_GATES)
     assert winner is not None
     assert winner["exp_id"] == "r2"
 
@@ -471,7 +478,7 @@ def test_best_trial_winner_excludes_formal_mode():
         _make_trial_record("formal_high", score=99.0, time_mode="formal"),
         _make_trial_record("trial_low", score=5.45, time_mode="trial"),
     ]
-    winner = _best_trial_winner(history, order=HIGHER_ORDER)
+    winner = _best_trial_winner(history, order=HIGHER_ORDER, required_gate_ids=_REQUIRED_GATES)
     assert winner is not None
     assert winner["exp_id"] == "trial_low"
 
@@ -484,7 +491,7 @@ def test_best_trial_winner_excludes_non_success():
         _make_trial_record("skipped", score=None, status="skipped_time_risk"),
         _make_trial_record("good", score=5.45),
     ]
-    winner = _best_trial_winner(history, order=HIGHER_ORDER)
+    winner = _best_trial_winner(history, order=HIGHER_ORDER, required_gate_ids=_REQUIRED_GATES)
     assert winner is not None
     assert winner["exp_id"] == "good"
 
@@ -502,7 +509,7 @@ def test_best_trial_winner_admits_a_trial_without_time_mode():
     """
     rec = _make_trial_record("no_mode", score=5.45)
     rec["memory"].pop("time_mode")
-    winner = _best_trial_winner([rec], order=HIGHER_ORDER)
+    winner = _best_trial_winner([rec], order=HIGHER_ORDER, required_gate_ids=_REQUIRED_GATES)
     assert winner is not None
     assert winner["exp_id"] == "no_mode"
 

@@ -1602,8 +1602,13 @@ carries it on `RunBindings.run_scientific_gate_ids`.
 `records.py::finalize_run_output` reads it off the BINDING, never off
 `task_composition_ref` — the F-11-C10-a lesson, where a stamp reading the
 input projection instead of the run's own authority made a composed chain
-refuse its own output. `None` for an un-composed run resolves the legacy
-default exactly as before, so TIDMAD's `best_*` selection is unaffected.
+refuse its own output. Uncomposed runs resolve their actual effective
+`health_checks_config` through `resolve_scientific_gate_ids`, including an
+explicit empty roster. A missing path uses the current neutral run-level
+default. `None` returned by the resolver means unknown roles; classifiers never
+reload defaults or infer roles from historical hashes. Unknown candidates are
+excluded from valid-best and trial winners, and reported as unknown in feedback.
+Explicit `health_gate_enabled=False` waives Health only for finite successes.
 The forced-Formal boundary uses the same value when `_best_trial_winner`
 classifies Trial records; otherwise a valid task-owned Trial can be followed
 by an accidental attempt to bind the legacy/default Health family before

@@ -57,24 +57,6 @@ _DEFAULT_CONFIG_PATH = default_health_policy_path()
 # override is applied. See docs/design/enable_partial_file_list.md (DS4).
 EFFECTIVE_CONFIG_BASENAME: str = "health_checks_effective.yaml"
 
-# LEGACY COMPATIBILITY ADAPTER since Step 08b C5. This marker is written into a check's
-# ``peek_file_indices`` and resolved, at config validation, into
-# ``DatasetProfile.health_peek_files`` — the one route by which task-owned
-# data reached the framework config. The task now states its peek set
-# directly in its own health config, so the sentinel has no remaining job
-# and no production YAML uses it (census at C5: zero, and no Python consumer
-# outside this module).
-#
-# It still RESOLVES, and the C5 audit is why: a pre-08b config is re-read to
-# reproduce its recorded ``health_config_sha256`` (see
-# ``candidate_eligibility._LEGACY_ROLES_BY_CONFIG_SHA``), the sha is computed
-# over the RESOLVED document, and those configs carry this marker — so
-# refusing it would make a historical artifact unreadable and turn every
-# affected candidate UNKNOWN. Bounded legacy adapter, never the extension
-# mechanism and never generic task-package vocabulary.
-TASK_HEALTH_PEEK: str = "task_health_peek"
-
-
 # ---------------------------------------------------------------------------
 # rev-6 HealthGate config classes
 # ---------------------------------------------------------------------------
@@ -101,57 +83,25 @@ class CheckRef(BaseModel):
         description=(
             "Per-gate config override passed to the check's ``run()`` method. "
             "Empty dict (default) means the check uses its own defaults.\n\n"
-            "``peek_file_indices`` must be an explicit list. Step 08b C5 "
-            f"retired the ``{TASK_HEALTH_PEEK}`` marker: the task states its "
+            "``peek_file_indices`` must be an explicit list, never a string "
+            "marker: the task states its "
             "peek set in its own health config and composition injects it."
         ),
     )
 
     @field_validator("config")
     @classmethod
-    def _resolve_legacy_peek_marker(cls, value: dict[str, Any]) -> dict[str, Any]:
-        """Resolve the LEGACY marker into the task's file set. Legacy adapter only.
-
-        Which files a task's blocking checks watch is a property of the TASK.
-        Until Step 08b C5 this marker was the one route by which that fact
-        reached the framework config; a task now declares its peek set in its
-        own health config and composition injects the resolved list, so **no
-        shipped config uses this any more**.
-
-        **It resolves rather than raises, and the reason is concrete.** A
-        pre-08b config is re-read to reproduce its recorded
-        ``health_config_sha256`` — that is how
-        ``candidate_eligibility._LEGACY_ROLES_BY_CONFIG_SHA`` recovers the
-        gate roles of a workspace written before ``gate_role`` existed. Those
-        configs carry the marker, and the sha is computed over the RESOLVED
-        document, so refusing to resolve it would make a historical artifact
-        unreadable and turn every such candidate UNKNOWN.
-
-        Strictly a bounded legacy compatibility adapter (child design §3.8):
-        **not** the extension mechanism, **not** required by any future task,
-        and **not** task-package vocabulary. A new task declares
-        ``health_peek_files`` in its own config instead.
-
-        Any OTHER string is rejected. Left alone, a typo'd marker is truthy,
-        and ``_resolve_indices`` would iterate it CHARACTER by character and
-        peek file indices like ``'t'`` — a silent wrong answer rather than an
-        error.
-        """
+    def _refuse_peek_strings(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """Refuse strings before any profile access; keep plugin values opaque."""
         peek = value.get("peek_file_indices")
         if not isinstance(peek, str):
             return value
-        if peek != TASK_HEALTH_PEEK:
-            raise ValueError(
-                f"peek_file_indices={peek!r} is not a recognized marker. Use "
-                f"an explicit list of file indices. (The legacy "
-                f"{TASK_HEALTH_PEEK!r} marker is retained only so pre-08b "
-                f"configs stay readable; a task declares health_peek_files in "
-                f"its own health config.)"
-            )
-        return {
-            **value,
-            "peek_file_indices": list(resolve_dataset_profile().health_peek_files),
-        }
+        raise ValueError(
+            f"peek_file_indices={peek!r} must be an explicit list of file indices, "
+            "not a string marker. Declare health_peek_files in the task's Health "
+            "config for composition, or supply the concrete peek_file_indices list "
+            "in an effective config. Historical marker expansion is unsupported."
+        )
 
 
 class ActionConfig(BaseModel):
@@ -200,10 +150,9 @@ class GateConfig(BaseModel):
             "action-derived scientific set is EMPTY and every record classifies "
             "valid. That was a live defect (see "
             "``resolve_scientific_gate_ids``).\n\n"
-            "``None`` only for a historical config written before this field "
-            "existed. Such a config is resolved through the audited "
-            "compatibility map, or treated as UNKNOWN — never guessed from the "
-            "gate id, the filename or the action."
+            "A missing role (``None``) makes the roster UNKNOWN. Every gate "
+            "must declare its role; historical hashes, gate ids, filenames "
+            "and actions never supply a missing declaration."
         ),
     )
     after_round: int | Literal["every"] | list[int] = Field(

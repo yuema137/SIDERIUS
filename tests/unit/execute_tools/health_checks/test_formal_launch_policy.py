@@ -208,7 +208,7 @@ class TestTheDeclarationMustMatchTheConfig:
         _check()
 
     def test_a_role_less_config_cannot_be_declared_blocking(self, tmp_path):
-        """A new launch must declare every role. An unaudited role-less
+        """A new launch must declare every role. Any role-less
         config is UNKNOWN, and UNKNOWN is not a licence to assume."""
         import yaml
 
@@ -219,14 +219,15 @@ class TestTheDeclarationMustMatchTheConfig:
         body = load_health_gates_config(BLOCKING).model_dump(mode="json")
         for gate in body["health_gates"]:
             gate.pop("gate_role", None)
-        body["health_gates"][0]["checks"][0]["config"]["fixture_marker"] = 0.123456
-        path = tmp_path / "unaudited.yaml"
+        body["health_gates"][0]["checks"][0]["config"]["peek_file_indices"] = [2, 7]
+        path = tmp_path / "roleless.yaml"
         with open(path, "w", encoding="utf-8") as handle:
             yaml.safe_dump(body, handle, sort_keys=False)
 
         with pytest.raises(FormalLaunchPolicyError) as exc:
             _check(health_checks_config=str(path))
         assert "cannot be established" in str(exc.value)
+        assert "missing gate_role" in str(exc.value)
 
 
 class TestTheDeltaOrderingInvariant:

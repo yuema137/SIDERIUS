@@ -107,7 +107,7 @@ class TestWhenItFires:
 
         monkeypatch.setattr(
             candidate_eligibility,
-            "required_blocking_gate_ids",
+            "load_health_gates_config",
             lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("default reloaded")),
         )
         record = {
