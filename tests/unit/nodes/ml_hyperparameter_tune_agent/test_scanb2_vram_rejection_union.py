@@ -140,7 +140,11 @@ def _drive_admission(monkeypatch, payload: dict):
     """
     emitted: list[dict] = []
 
-    def _spy(sandbox, record, *, status=None, candidate_id=None, experiment_arm=None):
+    def _spy(
+        sandbox, record, *, status=None, candidate_id=None, experiment_arm=None, ordering=None
+    ):
+        # #139 adds explicit ordering transport for errors, not preflight skips.
+        assert ordering is None, "preflight rejection must remain unstamped"
         emitted.append(record)
 
     monkeypatch.setattr(execution._records, "_emit_record", _spy)

@@ -25,6 +25,7 @@ from agent.schemas.hyperparam_tuning import (
     ExperimentRecord,
     HyperparamTuningOutput,
 )
+from agent.schemas.ordering import ResolvedOrdering
 from agent.skills.evaluate_time_skill.wrapper import _aggregate_inference_file_timings
 from core.durable_io import publish_json_atomically
 from core.run_invariants import (
@@ -607,6 +608,19 @@ def _build_resource_admission_record(
     return record
 
 
+def _attach_ordering(record: dict, ordering: ResolvedOrdering) -> None:
+    """Map selected attempt configuration to its nine existing record fields."""
+    record["proposed_order_strategy"] = ordering.proposed_strategy
+    record["proposed_file_order"] = ordering.proposed_file_order
+    record["ordering_proposal_rejected"] = ordering.proposal_rejected
+    record["ordering_proposal_rejection_reason"] = ordering.proposal_rejection_reason
+    record["override_order_strategy"] = ordering.override_strategy
+    record["override_file_order"] = ordering.override_file_order
+    record["resolved_order_strategy"] = ordering.resolved_strategy
+    record["resolved_file_order"] = ordering.resolved_file_order
+    record["ordering_resolution_source"] = ordering.resolution_source
+
+
 def _emit_record(
     sandbox,
     record: dict,
@@ -614,6 +628,7 @@ def _emit_record(
     status: dict | None = None,
     candidate_id: str | None = None,
     experiment_arm: str | None = None,
+    ordering: ResolvedOrdering | None = None,
 ) -> None:
     """Stamp evidence, validate, persist — in that order (B-C4a0 E3/E4).
 
@@ -628,9 +643,14 @@ def _emit_record(
     later admission refusal has exactly one place to attach its own.
     Passing `None` — the default, and what every non-executor path does
     today — stamps nothing, which is what those paths do now.
+
+    `ordering` is explicitly supplied for scoped post-resolution errors.
+    Skips omit it; this seam neither resolves nor guesses selected settings.
     """
     if status is not None:
         _attach_runtime_evidence(record, status)
+    if ordering is not None:
+        _attach_ordering(record, ordering)
     # V21 PR E: the candidate's observational identity is stamped at this
     # single validate-and-persist seam so no record-construction site can
     # forget it. None stays None — never synthesised (O-E-4/O-E-5).
@@ -1559,18 +1579,10 @@ def build_attempt_record(
     # V19 PR 2 — data-ordering provenance. Stamped for EVERY
     # round (trial and formal alike), unlike the trial-only
     # block below: ordering applies to all training. Only the
-    # resolved_* pair describes execution; proposed/override
+    # resolved_* pair describes selected settings; proposed/override
     # explain why, and a rejected proposal is recorded AS
     # rejected so it is never read as agent silence.
-    final_record["proposed_order_strategy"] = ordering.proposed_strategy
-    final_record["proposed_file_order"] = ordering.proposed_file_order
-    final_record["ordering_proposal_rejected"] = ordering.proposal_rejected
-    final_record["ordering_proposal_rejection_reason"] = ordering.proposal_rejection_reason
-    final_record["override_order_strategy"] = ordering.override_strategy
-    final_record["override_file_order"] = ordering.override_file_order
-    final_record["resolved_order_strategy"] = ordering.resolved_strategy
-    final_record["resolved_file_order"] = ordering.resolved_file_order
-    final_record["ordering_resolution_source"] = ordering.resolution_source
+    _attach_ordering(final_record, ordering)
     # --- V20 PR D (D-C2b): formal authority verdict -----
     # Attached to EVERY formal record — valid, invalid,
     # diagnostic and validity-unknown alike — because the

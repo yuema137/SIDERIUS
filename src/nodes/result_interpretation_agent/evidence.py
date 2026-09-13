@@ -257,10 +257,10 @@ def _required_denoising_score(record: ExperimentRecord) -> float:
 def _round_ordering(record) -> RoundOrdering:
     """Read one record's ordering provenance for the interpreter.
 
-    A record written before the ordering option existed carries no ordering
-    fields at all. That is read explicitly as the global shuffle with source
-    ``legacy_default`` — never guessed at, and never confused with a run that
-    actively chose the default.
+    Selected settings do not prove completed traversal. Unstamped records
+    outside named preflight skips retain the ``legacy_default`` shuffle
+    fallback, including historical errors and current pre-resolution failures.
+    That fallback is distinct from a run actively selecting the default.
     """
     ordering = ResolvedOrdering.from_record(record)
     return RoundOrdering(

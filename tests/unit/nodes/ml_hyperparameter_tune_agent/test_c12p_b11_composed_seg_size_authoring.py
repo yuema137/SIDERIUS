@@ -64,7 +64,7 @@ import pytest
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, TaskCompositionRef
 from execute_tools.dataset_config import TIDMAD_PROFILE
 from execute_tools.task_data_path import bind_task_data_path
-from nodes.ml_hyperparameter_tune_agent.contracts import RunBindings
+from nodes.ml_hyperparameter_tune_agent.contracts import AttemptOrdering, RunBindings
 from nodes.ml_hyperparameter_tune_agent.planning import prepare_attempt
 
 #: What ``WaveNetConfig`` DECLARES (`ml_models/models_format_sandbox.py:25`).
@@ -254,6 +254,7 @@ def _prepare(impl, configs_dir):
     with bind_task_data_path(impl):
         return prepare_attempt(
             _bindings(agent_input, configs_dir),
+            attempt_ordering=AttemptOrdering(),
             iteration=1,
             attempt_in_round=1,
             total_attempts=1,
@@ -321,6 +322,7 @@ def test_planner_history_uses_the_run_scientific_gate_set(tmp_path, monkeypatch)
     with bind_task_data_path(_ScopeRecorder()):
         prepare_attempt(
             bindings,
+            attempt_ordering=AttemptOrdering(),
             iteration=1,
             attempt_in_round=1,
             total_attempts=1,
@@ -388,6 +390,7 @@ class TestTheFrameworkNeverAuthorsTaskVocabulary:
         with bind_task_data_path(impl):
             prepare_attempt(
                 bindings,
+                attempt_ordering=AttemptOrdering(),
                 iteration=1,
                 attempt_in_round=1,
                 total_attempts=1,
@@ -460,6 +463,7 @@ class TestTheTaskRefusalIsReachable:
         with pytest.raises(ValueError, match="seg_size"), bind_task_data_path(impl):
             prepare_attempt(
                 bindings,
+                attempt_ordering=AttemptOrdering(),
                 iteration=1,
                 attempt_in_round=1,
                 total_attempts=1,
@@ -540,6 +544,7 @@ class TestOnlyTheStatedSizeIsValidated:
         with bind_task_data_path(impl):
             prepare_attempt(
                 bindings,
+                attempt_ordering=AttemptOrdering(),
                 iteration=1,
                 attempt_in_round=1,
                 total_attempts=1,

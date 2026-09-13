@@ -33,6 +33,8 @@ from dataclasses import dataclass, field, fields
 from enum import Enum
 from typing import Any
 
+from agent.schemas.ordering import ResolvedOrdering
+
 #: Names that must NEVER become ``RunBindings`` fields. Each is rebound or
 #: mutated inside the round/attempt loops, so storing it on a "stable bindings"
 #: object would make that object a mutable state bag — and would silently
@@ -267,7 +269,7 @@ class PreparedAttempt:
     task_scopes: Any
     train_psd_segments: Any
     eval_psd_segments: Any
-    ordering: Any
+    ordering: ResolvedOrdering
     planned_trial_strategy: Any
     planned_eval_strategy: Any
     strategy_normalization_reason: Any
@@ -335,7 +337,7 @@ class AttemptSignal(Enum):
 
 @dataclass
 class AttemptStage:
-    """How far the current attempt got — the ONE deliberately mutable carrier.
+    """How far the current attempt got — one deliberately mutable stage name.
 
     ``run()``'s exception handler records ``failure_stage`` on the failure
     record and classifies the exception by it. That value is written by the
@@ -348,6 +350,17 @@ class AttemptStage:
     """
 
     name: str
+
+
+@dataclass
+class AttemptOrdering:
+    """Selected configuration retained when preparation raises instead of returning.
+
+    Allocate before each attempt; planning writes immediately after resolution.
+    This is provenance only, not evidence that training visited any samples.
+    """
+
+    selected: ResolvedOrdering | None = None
 
 
 @dataclass(frozen=True)
