@@ -2744,8 +2744,9 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
 
 def print_resolved_launch_config(args: argparse.Namespace) -> int:
     """arXiv U3 (#259) — print the resolved launch configuration as ONE JSON
-    object and return the process exit status. Pure: it resolves exactly
-    what :func:`main` would resolve and touches nothing on disk.
+    object and return the process exit status, without iteration execution or
+    run-artifact writes. Resolving the existing workflow owners can import
+    plugins with their own import-time effects and stdout.
 
     Returns ``0`` after printing; ``1`` (with the reason on stderr) when the
     identity cannot be resolved — an enabled lit-review whose config cannot
@@ -2897,8 +2898,9 @@ def main():
 
     # arXiv U3 (#259) — the resolved-configuration view. Placed AFTER the
     # policy refusal (a config that could not launch is not "resolved") and
-    # BEFORE every side effect below: no halt marker, no workspace or iter
-    # directory, no run-id sidecar, no env var, no lock, no LLM.
+    # BEFORE iteration-side effects below: no halt marker, iteration directory,
+    # run-id sidecar, lock, or LLM. Workspace env binding and plugin imports
+    # have already occurred; plugin effects/stdout are not suppressed.
     if args.print_resolved_launch_config:
         sys.exit(print_resolved_launch_config(args))
 
