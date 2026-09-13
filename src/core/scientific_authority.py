@@ -221,8 +221,10 @@ class RecordAuthority(BaseModel):
 
     The distinction from :class:`ScientificAuthority` is the input. That one
     takes three trusted facts. This one takes an artifact that a later
-    writer could have edited, and is therefore **fail-closed**: anything it
-    cannot independently justify is excluded.
+    writer could have edited, and checks stored consistency. It does not
+    establish whether the independent policy artifact is available: resume
+    separately requires VALID commit-time evidence before consulting this
+    boundary; summary-only aggregation has no such artifact context.
 
     **The stored conclusions are never believed.** ``verdict`` is always a
     fresh derivation. D-C2b made the persisted block *tamper-evident* by
@@ -329,8 +331,9 @@ def resolve_record_authority(
     # the iteration independently recorded. Deliberately narrow: only a
     # WEAKENING contradiction counts (stored says its gates passed, the
     # commit-time evidence says they failed). A commit-time ``unknown`` is
-    # an evidence gap, not a contradiction, and must not retroactively
-    # condemn a record whose effective-policy artifact is simply missing.
+    # an evidence gap, not a contradiction. Summary-only aggregation supplies
+    # it deliberately. Resume separately refuses UNKNOWN before this call;
+    # this consistency checker is not evidence of policy-artifact availability.
     if commit_time_validity == "invalid" and validity == "valid":
         return RecordAuthority(verdict=None, basis="stored_validity_contradicts_commit_time")
 

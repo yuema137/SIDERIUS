@@ -887,7 +887,10 @@ def _formal_candidate_is_authoritative(
     Fail-closed. The persisted verdict is a plain dict that any later
     writer could edit, so :func:`resolve_record_authority` re-derives the
     conclusions from the record's own facts and refuses anything that
-    disagrees with itself. Excluded candidates are announced with a
+    disagrees with itself. Before that check, the record must independently
+    classify VALID under this iteration's pinned policy (or explicit disabled
+    waiver). A coherent stored verdict cannot replace missing evidence.
+    Excluded candidates are announced with a
     structured reason rather than dropped silently — an operator watching
     an incumbent stop advancing needs to know which record was refused and
     why.
@@ -903,11 +906,21 @@ def _formal_candidate_is_authoritative(
         ``True`` only for an authoritative record.
     """
     record = candidate["record"]
+    commit_time_validity = _classify_commit_time(record, gate_ids)
+    if commit_time_validity is not CandidateHealthValidity.VALID:
+        print(
+            f"[resume] iter {iter_idx:03d}: formal candidate "
+            f"{record.get('exp_id')!r} is NOT scientifically authoritative — "
+            f"reason=commit_time_validity_{commit_time_validity.value}. "
+            "The record is kept; stored authority and committed-best fields "
+            "cannot replace independently valid Health evidence."
+        )
+        return False
     resolution = resolve_record_authority(
         record,
         declared_healthgate_mode=getattr(parsed, "healthgate_mode", None),
         declared_result_authority=getattr(parsed, "result_authority", None),
-        commit_time_validity=_classify_commit_time(record, gate_ids).value,
+        commit_time_validity=commit_time_validity.value,
     )
     if resolution.authoritative:
         candidate["authority_basis"] = resolution.basis

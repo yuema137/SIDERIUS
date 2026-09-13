@@ -681,10 +681,9 @@ class TestScientificAuthorityAdmission:
         summary — which makes "edit the summary to promote an invalid
         record" the realistic attack, and this the layer that catches it.
 
-        The materialized effective policy is required: without it the
-        commit-time answer is UNKNOWN rather than INVALID, and an evidence
-        gap is deliberately NOT treated as a contradiction (see
-        `test_a_missing_policy_artifact_is_a_gap_not_a_contradiction`).
+        The materialized effective policy distinguishes INVALID from UNKNOWN.
+        Since the 2026-09-13 operator ruling both refuse resume authority,
+        before stored-verdict consistency validation.
         """
         ws = str(tmp_path)
         model_dir = os.path.join(ws, "iter_001", "iteration_001", "punet")
@@ -720,19 +719,14 @@ class TestScientificAuthorityAdmission:
         state = _restore(ws, 2)
 
         assert state.chain_best_valid_formal_score is None
-        assert "stored_validity_contradicts_commit_time" in capsys.readouterr().out
+        assert "commit_time_validity_invalid" in capsys.readouterr().out
 
-    def test_a_missing_policy_artifact_is_a_gap_not_a_contradiction(self, tmp_path):
-        """THE SCOPING RULE for the cross-check above.
+    def test_missing_policy_cannot_be_replaced_by_stored_authority(self, tmp_path, capsys):
+        """2026-09-13 operator ruling supersedes the old missing-artifact waiver.
 
-        With no sha-matching effective-policy artifact the commit-time
-        answer is UNKNOWN. That is an evidence gap, and it must not
-        retroactively condemn a record whose own verdict is coherent — a
-        widened cross-check would empty the incumbent for every workspace
-        whose policy artifact was merely lost.
-
-        Admission still requires the verdict itself to be authoritative,
-        which is what the rest of this class covers.
+        The historical test admitted a coherent stored verdict with no matching
+        policy. Evidence-required resume now retains its record but refuses its
+        incumbent claim. This is intentional retirement, not lost coverage.
         """
         state = self._one(
             tmp_path,
@@ -747,7 +741,79 @@ class TestScientificAuthorityAdmission:
             best_valid_formal_score=1.4,
             best_valid_formal_exp_id="gap",
         )
-        assert state.chain_best_valid_formal_score == 1.4
+        assert state.chain_best_valid_formal_score is None
+        assert "commit_time_validity_unknown" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            "declared",
+            "roleless",
+            "missing_policy",
+            "wrong_hash",
+            "missing_evidence",
+            "empty",
+            "disabled",
+            "failed_disabled",
+            "nonfinite_disabled",
+        ],
+    )
+    def test_committed_authority_requires_independent_policy_evidence(self, tmp_path, capsys, case):
+        """Committed-best + coherent stored-valid claims cannot launder UNKNOWN.
+
+        Real materialization/hash resolution and restore own this branch test;
+        the source output must stay byte-identical and readable on every refusal.
+        """
+        body = yaml.safe_load(_HEALTH_CONFIG.read_text())
+        if case == "roleless":
+            for gate in body["health_gates"]:
+                gate.pop("gate_role")
+        elif case == "empty":
+            body["health_gates"] = []
+        source = tmp_path / "policy.yaml"
+        source.write_text(yaml.safe_dump(body))
+        model_dir = tmp_path / "iter_001" / "iteration_001" / "punet"
+        model_dir.mkdir(parents=True)
+        effective_path, sha = materialize_effective_config(str(source), None, str(model_dir))
+        if case == "missing_policy":
+            pathlib.Path(effective_path).unlink()  # This test's temporary artifact only.
+        disabled = case in {"disabled", "failed_disabled", "nonfinite_disabled"}
+        record = _formal(
+            "claimed",
+            float("inf") if case == "nonfinite_disabled" else 1.4,
+            _verdict("blocking", "scientific", "valid"),
+            status="error_training" if case == "failed_disabled" else "success",
+            waiver=False if disabled else None,
+            verdicts=[]
+            if case in {"missing_evidence", "empty", "disabled"}
+            else _passing_verdicts(),
+        )
+        path = pathlib.Path(
+            _write_iter(
+                str(tmp_path),
+                1,
+                [record],
+                health_config_sha256="deadbeef" * 8 if case in {"wrong_hash", "disabled"} else sha,
+                best_valid_formal_score=1.4,
+                best_valid_formal_exp_id="claimed",
+            )
+        )
+        before = path.read_bytes()
+        state = _restore(str(tmp_path), 2)
+        assert path.read_bytes() == before
+        assert str(path) in state.resolved_source_paths  # Raw history remains available.
+        if case in {"declared", "empty", "disabled"}:
+            assert state.chain_best_valid_formal_score == 1.4
+            assert state.chain_best_valid_formal_provenance["authority_basis"] == "stored_verdict"
+        else:
+            assert state.chain_best_valid_formal_score is None
+            assert state.chain_best_valid_formal_provenance is None
+            output = capsys.readouterr().out
+            if case == "nonfinite_disabled":
+                assert "SUMMARY-MISMATCH" in output
+            else:
+                expected = "invalid" if case == "failed_disabled" else "unknown"
+                assert f"commit_time_validity_{expected}" in output
 
     def test_a_trial_record_is_never_a_formal_incumbent(self, tmp_path):
         """Pre-existing separation, re-asserted because D-C4 is the
