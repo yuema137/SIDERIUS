@@ -318,8 +318,12 @@ class TestTrainConfigCompatibilityLrDefault:
         schema default above are pinned to the same hardcoded value,
         so whichever surface moves first fails one of these two tests
         rather than silently disagreeing with the other. Fails when: the
-        prompt literal is edited or removed.
+        rendered legacy prompt literal is edited, removed, or no longer wired.
         """
-        from agent.prompts import PLANNER_PROMPT
+        from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
+        from tests.helpers.tuner_prompt_fixtures import planner_kwargs
 
-        assert "`lr=5e-4`" in PLANNER_PROMPT
+        bridge = BoundaryRecorderBridge()
+        bridge.plan(**planner_kwargs())
+        assert len(bridge.captures) == 1
+        assert "`lr=5e-4`" in bridge.captures[0][2]

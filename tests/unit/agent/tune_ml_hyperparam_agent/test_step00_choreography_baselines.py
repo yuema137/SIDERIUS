@@ -20,6 +20,12 @@ so the exclusions cannot hide drift.
 DECLARED GOLDEN DELTAS (never a re-baseline to make a test green)
 ----------------------------------------------------------------
 
+* **PR01A2 builtin loss offers (2026-09-12)** — one textual field-name
+  insertion: ``kwargs.task_render.fields`` gains ``loss_context``. This is
+  the approved additive typed carrier, not a plan() keyword or a change to
+  the legacy prompt bytes (eight actual bridge pairs remain byte-identical).
+  CI's captured diff contained exactly that one insertion; no regeneration.
+
 * **Step 12 / PR-12a C7-2** — the composed-prompt gating (D-12a-5). Two
   deltas, measured BEFORE either golden was touched and applied by textual
   insertion (**9 insertions, 0 deletions** across both files; nothing else

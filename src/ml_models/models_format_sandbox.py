@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -720,6 +720,34 @@ def validate_output_loss_compatibility(
 # ==========================================
 # Loss Configs
 # ==========================================
+
+
+def eligible_builtin_loss_types(
+    semantic: OutputSemantic | None,
+    *,
+    output_has_temporal_axis: bool | None,
+) -> tuple[str, ...]:
+    """Project the execution authority onto the schema's builtin vocabulary.
+
+    This is an offer query, not another compatibility matrix. ``custom`` is
+    a router to independently supplied code and is not certified by this query.
+    Schema declaration order is retained; unknown geometry is not ``False``.
+    """
+    eligible: list[str] = []
+    for loss_type in get_args(LossConfig.model_fields["loss_type"].annotation):
+        if loss_type == "custom":
+            continue
+        try:
+            validate_semantic_loss_compatibility(
+                semantic,
+                loss_type,
+                model_type="declared task output",
+                output_has_temporal_axis=output_has_temporal_axis,
+            )
+        except ValueError:
+            continue
+        eligible.append(loss_type)
+    return tuple(eligible)
 
 
 class LossConfig(BaseModel):

@@ -1493,11 +1493,35 @@ winning trial's `loss_config` wholesale, so an objective applied earlier
 would be silently overwritten by whatever the trial happened to run. Last
 writer on the plan wins, and the declared objective is the last writer.
 
-**Silent no-op for every run that exists today**: `composition_ref` is
+**No-op when no objective is declared**: `composition_ref` is
 `None` for an un-composed run, and `objective` is `None` for a composed task
 that declares none — in both cases the plan is returned unchanged. A
 substitution that does happen is announced with a `[objective]` print line
 naming the planner's choice and the value that replaced it.
+
+### Planner builtin loss offers
+
+For composed runs, the planner's system instructions, user constraint and JSON
+example derive builtin offers from the same semantic/temporal compatibility
+authority used by execution. A categorical output without a temporal axis offers
+`ce`; a categorical temporal output offers `focal`, `focal_cw`, `ce`; a continuous
+output offers `smooth_l1`. These are the existing framework checks, not proof of
+arbitrary target-layout compatibility or scientific suitability.
+
+A composed run must declare normalized ModelIO facts. Missing facts, no eligible
+builtin (unless an explicit custom objective supplies the independent route), an
+incompatible builtin objective, or a concrete fixed-model output declaration
+contradicting the task output refuses before the planner call. Reconcile the task
+and model declarations rather than relying on an inferred default. Legacy
+uncomposed prompt bytes remain unchanged.
+
+An explicit task objective is displayed as the exact `LossConfig`; baseline,
+exploration and collapse guidance do not tell the planner to replace it. The
+last-writer enforcement described above is unchanged. Custom losses remain
+selectable through their existing route, but registration and earlier dummy tests
+do **not** certify prediction/target compatibility for this task. Custom loss
+declarations and generation need a separate compatibility contract; this change
+does not establish their mathematics, stability or quality.
 
 ## Task-composed parameter rules
 

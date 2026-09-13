@@ -1113,6 +1113,14 @@ class LLMBridge:
                 "run_metric.spec."
             )
         _direction = render_metric_direction_words(metric_spec)
+        from agent.prompt_templates.tuner.loss_rendering import render_loss_sections
+
+        loss_context = task_render.loss_context
+        if loss_context is not None:
+            loss_context.validate_fixed_model(force_model)
+        planner_template = PLANNER_PROMPT
+        for token, section in render_loss_sections(loss_context).items():
+            planner_template = planner_template.replace("{" + token + "}", section)
         # L6b — render the AVAILABLE CUSTOM LOSSES block. Imported lazily to
         # avoid pulling the proposal-module helper into the bridge's import
         # chain when registry is None (the back-compat path).
@@ -1122,13 +1130,17 @@ class LLMBridge:
             available_losses_block = render_available_losses(registry)
         else:
             available_losses_block = "No custom losses registered yet.\n"
+        if loss_context is not None and loss_context.objective is not None:
+            available_losses_block = (
+                "Task objective is locked; registry entries are not alternative objectives.\n"
+            )
         # Step 07 PR 07b (P2) — the authority-rendered task tokens travel the
         # SAME `str.replace` seam the task description and the score table
         # already use. Under TIDMAD every one of them renders the exact bytes
         # the template used to carry as a literal, which is why PB-1/PB-2 must
         # pass UNCHANGED after this commit.
         system_prompt = (
-            PLANNER_PROMPT.replace(
+            planner_template.replace(
                 "{SCORE_COMPARISON_TABLE}",
                 score_table_md or _PLANNER_SCORE_TABLE_FALLBACK,
             )

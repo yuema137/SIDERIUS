@@ -252,6 +252,14 @@ Notes:
 - `deliverable` is `extra="forbid"`: a misspelled key is refused rather than
   falling back to a template.
 - An empty `task_description` is refused.
+- **Planner builtin offers follow declared ModelIO compatibility.** Composed runs
+  require normalized output semantic/temporal facts. The planner filters builtins
+  through execution's existing compatibility rule and refuses contradictory
+  concrete fixed-model declarations. A declared objective is displayed exactly
+  and remains deterministically authoritative, not a loss-exploration lever.
+  Custom-loss registration and earlier dummy tests are not task-specific
+  prediction/target compatibility certification; their existing routing is
+  unchanged, and fuller custom compatibility declarations remain pending.
 - **An `objective.implementation` file must export all three loss-plugin symbols** —
   `PLUGIN_LOSS_TYPE`, `PLUGIN_LOSS_CONFIG_CLASS` and `PLUGIN_LOSS_CLASS` — even
   though the manifest names only the first. The section is checked against the
