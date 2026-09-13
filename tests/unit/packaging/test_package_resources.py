@@ -24,6 +24,7 @@ def _required_assets() -> list[Path]:
         [p for p in (source / "nodes").rglob("*.md") if p.name != "README.md"],
         [source / "dashboard/static" / name for name in ("index.html", "app.js", "style.css")],
         [source / "tools/ci/weights.json"],
+        [source / "execute_tools/health_checks/resources/health_checks.yaml"],
         list((source / "tools/claude_hooks/templates").glob("*.md")),
     )
     assert all(groups), "a runtime resource family disappeared before packaging"
@@ -50,4 +51,15 @@ def test_removed_prompt_declaration_is_detected():
     data = config["tool"]["setuptools"]["package-data"]
     data["agent"] = [p for p in data["agent"] if "prompt_templates" not in p]
     with pytest.raises(AssertionError, match="omitted from package-data: agent/prompt_templates"):
+        _assert_declared(data)
+
+
+def test_removed_health_policy_declaration_is_detected():
+    """Editable Health reads cannot detect a wheel missing its only default."""
+    config = tomllib.loads((REPO / "pyproject.toml").read_text())
+    data = config["tool"]["setuptools"]["package-data"]
+    data.pop("execute_tools")
+    with pytest.raises(
+        AssertionError, match="omitted from package-data: execute_tools/health_checks"
+    ):
         _assert_declared(data)

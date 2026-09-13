@@ -62,9 +62,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.layout import checkout_root
 from execute_tools.health_checks._plugin_binding import ResolvedHealthPlugin
+from execute_tools.health_checks._policy_resources import read_default_policy
 from execute_tools.health_checks._task_health_config import (
     TASK_DECLARABLE_POLICY_KEYS,
-    HealthDisposition,
     HealthRosterEntry,
     TaskHealthConfig,
 )
@@ -164,32 +164,19 @@ class DispositionPolicy(BaseModel):
     )
 
 
-DEFAULT_DISPOSITION_POLICY: dict[str, DispositionPolicy] = {
-    HealthDisposition.BLOCKING.value: DispositionPolicy(
-        gate_role="blocking",
-        after_round="every",
-        short_circuit=True,
-        on_pass=GateAction.CONTINUE,
-        on_fail=GateAction.INVALIDATE_ROUND,
-        check_config={"aggregation": "all_pass"},
-    ),
-    HealthDisposition.RECORDING.value: DispositionPolicy(
-        gate_role="observational",
-        after_round="every",
-        short_circuit=False,
-        on_pass=GateAction.CONTINUE,
-        on_fail=GateAction.CONTINUE,
-        check_config={},
-    ),
-}
-"""The policy a framework config that declares none falls back to.
+class _DefaultPolicyDocument(BaseModel):
+    """The required packaged default, not the permissive external root schema."""
 
-Reproduces the six shipped gates exactly, so a pre-08b custom YAML — of which
-there are several under `tests/` and in operator workspaces — keeps working
-without acquiring a `health_policy` block it never had. Adding a disposition
-is a framework decision requiring a task that forces one; adding a TASK
-requires nothing here, which is what keeps this from being a per-task
-registry."""
+    health_policy: dict[str, DispositionPolicy] = Field(min_length=1)
+
+
+def default_disposition_policy() -> dict[str, DispositionPolicy]:
+    """Lazily validate the single default authority when it is needed.
+
+    No module-import I/O or mutable shared table: complete explicit policies
+    remain independent of the packaged default, including a damaged install.
+    """
+    return _DefaultPolicyDocument.model_validate(read_default_policy()).health_policy
 
 
 class HealthCompositionError(RuntimeError):
@@ -281,7 +268,7 @@ def compose_gate(
             order below silently overwrote the authored value, and a silent
             winner in either direction is a hazard, not a resolution.
     """
-    table = policy_table if policy_table is not None else DEFAULT_DISPOSITION_POLICY
+    table = policy_table if policy_table is not None else default_disposition_policy()
     policy = table.get(entry.disposition.value)
     if policy is None:
         raise HealthCompositionError(

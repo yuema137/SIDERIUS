@@ -346,10 +346,13 @@ class TestTheShippedDefaultsDoNotDependOnTheWorkingDirectory:
         assert required_blocking_gate_ids() == frozenset()
         assert load_health_gates_config(_DEFAULT_CONFIG_PATH).health_gates == []
 
-    def test_framework_default_points_into_this_checkout(self):
+    def test_framework_default_points_into_this_package(self):
         repo_root = Path(__file__).resolve().parents[4]
 
-        assert Path(_DEFAULT_CONFIG_PATH) == repo_root / "configs" / "health" / "health_checks.yaml"
+        assert (
+            Path(_DEFAULT_CONFIG_PATH)
+            == repo_root / "src/execute_tools/health_checks/resources/health_checks.yaml"
+        )
 
 
 class TestAMaterializedConfigDoesNotRecordWhichCheckoutProducedIt:
@@ -379,10 +382,8 @@ class TestAMaterializedConfigDoesNotRecordWhichCheckoutProducedIt:
     def _second_checkout(tmp_path: Path) -> Path:
         """A second checkout of the same framework config, at another path."""
         root = tmp_path / "another" / "checkout" / "at" / "a" / "much" / "longer" / "path"
-        (root / "configs" / "health").mkdir(parents=True)
-        shutil.copyfile(
-            Path(_DEFAULT_CONFIG_PATH), root / "configs" / "health" / "health_checks.yaml"
-        )
+        (root / "resources").mkdir(parents=True)
+        shutil.copyfile(Path(_DEFAULT_CONFIG_PATH), root / "resources/health_checks.yaml")
         return root
 
     def test_the_artifact_is_byte_identical_across_two_checkout_roots(self, tmp_path, monkeypatch):
@@ -396,11 +397,13 @@ class TestAMaterializedConfigDoesNotRecordWhichCheckoutProducedIt:
         ).read_bytes()
 
         root_b = self._second_checkout(tmp_path)
-        monkeypatch.setattr(config_module, "SIDERIUS_ROOT", str(root_b))
+        from execute_tools.health_checks import _policy_resources
+
+        monkeypatch.setattr(config_module, "SIDERIUS_ROOT", None)
         monkeypatch.setattr(
-            config_module,
-            "_DEFAULT_CONFIG_PATH",
-            str(root_b / "configs" / "health" / "health_checks.yaml"),
+            _policy_resources,
+            "__file__",
+            str(root_b / "_policy_resources.py"),
         )
         clear_health_gates_config_cache()
         from_other = Path(
@@ -411,7 +414,7 @@ class TestAMaterializedConfigDoesNotRecordWhichCheckoutProducedIt:
             "the materialized effective config differs between two checkouts of "
             "the same framework config — it is recording which machine produced it"
         )
-        assert b"# source: configs/health/health_checks.yaml\n" in from_real
+        assert b"# source: execute_tools/health_checks/resources/health_checks.yaml\n" in from_real
 
     def test_an_external_config_keeps_its_absolute_path(self, tmp_path):
         """The deliberate exception, pinned so it reads as a decision.
@@ -436,10 +439,92 @@ class TestAMaterializedConfigDoesNotRecordWhichCheckoutProducedIt:
         A census rather than one example: an in-repo config must never render
         absolutely, whichever one a run names.
         """
-        for shipped in sorted((Path(_DEFAULT_CONFIG_PATH).parent).glob("health_checks*.yaml")):
+        root = Path(__file__).resolve().parents[4]
+        for shipped in (
+            Path(_DEFAULT_CONFIG_PATH),
+            root / "configs/health/health_checks_baseline_observe_mode.yaml",
+        ):
             rendered = config_module._record_path(str(shipped))
             assert not os.path.isabs(rendered), f"{shipped.name} rendered absolutely: {rendered}"
-            assert rendered.startswith("configs/"), rendered
+            assert rendered.startswith(("configs/", "execute_tools/")), rendered
+
+
+@pytest.mark.parametrize(
+    "content", [None, "health_policy: [", "health_policy: {blocking: {on_fail: wrong}}"]
+)
+def test_explicit_invalid_policy_never_reads_default(tmp_path, monkeypatch, content):
+    """A fallback would hide an explicit missing/malformed/invalid operator input."""
+    import yaml
+    from execute_tools.health_checks import _composition
+
+    def forbidden():
+        pytest.fail("explicit policy failure attempted default rescue")
+
+    monkeypatch.setattr(_composition, "read_default_policy", forbidden)
+    path = tmp_path / "explicit.yaml"
+    if content is not None:
+        path.write_text(content)
+    with pytest.raises((FileNotFoundError, yaml.YAMLError, ValidationError)):
+        load_composed_health_config(str(path))
+
+
+@pytest.mark.parametrize("selection", ["omitted", "empty_path", "blank", "empty"])
+def test_empty_inputs_keep_the_same_resolved_default(tmp_path, selection):
+    """Path omission and accepted empty documents converge only when policy is needed."""
+    source = None
+    if selection == "empty_path":
+        source = ""
+    elif selection in {"blank", "empty"}:
+        path = tmp_path / "explicit.yaml"
+        path.write_text("" if selection == "blank" else "{}\n")
+        source = str(path)
+    config, _, _ = load_composed_health_config(source)
+    policy = config.resolved_policy()
+    assert policy["blocking"].on_fail is GateAction.INVALIDATE_ROUND
+    assert policy["blocking"].check_config == {"aggregation": "all_pass"}
+    assert policy["recording"].on_fail is GateAction.CONTINUE
+
+
+@pytest.mark.parametrize("damage", [None, "", "{}", "health_policy: {}", "health_policy: []"])
+def test_damaged_default_refuses_but_complete_explicit_policy_is_independent(
+    tmp_path, monkeypatch, damage
+):
+    """Default validation is lazy and required; an explicit policy never needs that asset."""
+    from execute_tools.health_checks import _policy_resources
+
+    explicit = tmp_path / "explicit.yaml"
+    explicit.write_bytes(Path(_DEFAULT_CONFIG_PATH).read_bytes())
+    package = tmp_path / "installed_health"
+    resource = package / "resources/health_checks.yaml"
+    resource.parent.mkdir(parents=True)
+    if damage is not None:
+        resource.write_text(damage)
+    monkeypatch.setattr(_policy_resources, "__file__", str(package / "_policy_resources.py"))
+    # Location is inert even if the default cannot be read.
+    assert config_module.default_health_policy_path() == str(resource)
+    with pytest.raises((FileNotFoundError, ValidationError)):
+        load_health_gates_config()
+    assert (
+        load_health_gates_config(str(explicit)).resolved_policy()["blocking"].on_fail
+        is GateAction.INVALIDATE_ROUND
+    )
+
+
+def test_no_python_default_policy_values_compete_with_the_resource():
+    """Restoring an authored DispositionPolicy table creates a second default authority."""
+    import ast
+
+    package = Path(config_module.__file__).parent
+    constructors = []
+    for source in package.glob("*.py"):
+        for node in ast.walk(ast.parse(source.read_text())):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "DispositionPolicy"
+            ):
+                constructors.append(f"{source.name}:{node.lineno}")
+    assert constructors == [], f"authored policy values outside the resource: {constructors}"
 
 
 # Note (commit-6): TestLegacyClasses + TestLegacyLoader used to live here

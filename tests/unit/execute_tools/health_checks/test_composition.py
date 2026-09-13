@@ -134,10 +134,13 @@ class TestUndeclaredTaskHealthIsEmpty:
         `configs/health_checks.yaml` must never become
         `tidmad: … / pets: … / <user task>: …` (parent §6a.4).
         """
-        for name in ("health_checks.yaml", "health_checks_baseline_observe_mode.yaml"):
-            body = yaml.safe_load((REPO_ROOT / "configs" / "health" / name).read_text())
+        for name in (
+            "src/execute_tools/health_checks/resources/health_checks.yaml",
+            "configs/health/health_checks_baseline_observe_mode.yaml",
+        ):
+            body = yaml.safe_load((REPO_ROOT / name).read_text())
             assert set(body) == {"health_policy"}, name
-            text = (REPO_ROOT / "configs" / "health" / name).read_text().lower()
+            text = (REPO_ROOT / name).read_text().lower()
             for threshold in ("min_unique_int8_values", "min_std_mv", "collapse_threshold"):
                 assert threshold not in text, f"{name} still carries {threshold}"
 
