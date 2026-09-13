@@ -301,7 +301,18 @@ class TestMainWiring:
         the identity would leave a labelled iteration unattributable exactly
         when it failed."""
         tree = ast.parse(LOCK_SITES["chain"].read_text(encoding="utf-8"))
-        main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+        entry = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+        assert any(
+            isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "_run_bound_iteration"
+            for n in ast.walk(entry)
+        ), "main must reach the package-bound lifecycle"
+        main = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_bound_iteration"
+        )
         calls = [
             n
             for n in ast.walk(main)

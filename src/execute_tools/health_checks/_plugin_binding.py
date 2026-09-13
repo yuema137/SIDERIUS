@@ -69,6 +69,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.local_code import (
+    MemberIdentity,
+    scan_candidate_allowed,
+    selected_identity,
+    selected_member,
+)
 from execute_tools.health_checks._task_health_config import TaskHealthConfig
 from execute_tools.health_checks._view_provider import HealthView, HealthViewMaterializationError
 from execute_tools.health_checks.registry import (  # the plugin calls register() itself
@@ -124,6 +130,7 @@ class ResolvedHealthPlugin(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+    local_code: MemberIdentity | None = None
 
     configured_ref: str = Field(
         description="The ref as authored, path-normalized. Never host-anchored.",
@@ -149,13 +156,16 @@ class ResolvedHealthPlugin(BaseModel):
         ),
     )
 
-    def canonical_identity(self) -> dict[str, str]:
+    def canonical_identity(self) -> dict[str, object]:
         """The host-independent identity C4 hashes into the run's pin."""
-        return {
+        identity: dict[str, object] = {
             "configured_ref": self.configured_ref,
             "member": self.member,
             "content_sha256": self.content_sha256,
         }
+        if self.local_code is not None:
+            identity["local_code"] = self.local_code.model_dump(mode="json")
+        return identity
 
 
 class _RunScope(BaseModel):
@@ -229,7 +239,8 @@ def _resolve(config: TaskHealthConfig, config_dir: str) -> tuple[ResolvedHealthP
         target = os.path.normpath(os.path.join(config_dir, ref.ref))
 
         if ref.kind == "file":
-            if not os.path.isfile(target):
+            captured = selected_member(target)
+            if captured is None and not os.path.isfile(target):
                 raise HealthPluginError(
                     f"Health plugin file {logical!r} declared by the task health "
                     f"config does not exist at {target!r}. An explicitly named "
@@ -238,14 +249,17 @@ def _resolve(config: TaskHealthConfig, config_dir: str) -> tuple[ResolvedHealthP
                     f"gates than the config describes."
                 )
             try:
-                digest = _digest(target)
+                digest = captured.pin.content_sha256 if captured is not None else _digest(target)
             except OSError as exc:
                 raise HealthPluginError(
                     f"Health plugin file {logical!r} at {target!r} is unreadable: {exc}"
                 ) from exc
             resolved.append(
                 ResolvedHealthPlugin(
-                    configured_ref=logical, content_sha256=digest, absolute_path=target
+                    configured_ref=logical,
+                    content_sha256=digest,
+                    absolute_path=target,
+                    local_code=selected_identity(target),
                 )
             )
             continue
@@ -261,10 +275,15 @@ def _resolve(config: TaskHealthConfig, config_dir: str) -> tuple[ResolvedHealthP
             if not name.endswith(".py") or name.startswith("_"):
                 continue
             member_path = os.path.join(target, name)
+            if not scan_candidate_allowed(member_path):
+                continue
             if not os.path.isfile(member_path):
                 continue
             try:
-                digest = _digest(member_path)
+                captured = selected_member(member_path)
+                digest = (
+                    captured.pin.content_sha256 if captured is not None else _digest(member_path)
+                )
             except OSError as exc:
                 # Scan tolerance: an unreadable member of a directory is not
                 # something the task asked for by name. Any binding that then
@@ -282,6 +301,7 @@ def _resolve(config: TaskHealthConfig, config_dir: str) -> tuple[ResolvedHealthP
                     member=name,
                     content_sha256=digest,
                     absolute_path=member_path,
+                    local_code=selected_identity(member_path),
                 )
             )
     return tuple(resolved)

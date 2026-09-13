@@ -50,6 +50,7 @@ import os
 import sys
 import traceback
 import warnings
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -2819,6 +2820,15 @@ def main():
     from core.generated_library import bind_generated_library_to_workspace
 
     bind_generated_library_to_workspace(args.workspace)
+    from core.local_code import bind_code_package
+
+    with ExitStack() as package_scope:
+        package_scope.enter_context(bind_code_package(None))
+        return _run_bound_iteration(args, package_scope)
+
+
+def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
+    """Run the existing lifecycle after root workspace/package decisions."""
 
     # Both owners transitively load model registries. A cold launch must bind
     # its workspace first so discovery cannot import legacy checkout plugins.
@@ -2838,6 +2848,16 @@ def main():
             preflight_composition = compose_run_task_bindings(args.task_composition)
         except Exception as exc:
             preflight_composition_error = exc
+
+    # Launch policy and invariants materialize Health before run activation.
+    # They must see the same capture, without creating a transport sidecar.
+    from core.local_code import bind_code_package
+
+    package_scope.enter_context(
+        bind_code_package(
+            preflight_composition.code_package if preflight_composition is not None else None
+        )
+    )
 
     # --- V20 PR D (D-C1b): formal-launch policy refusal ----------------
     # THE FIRST thing done with the parsed arguments, and deliberately

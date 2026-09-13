@@ -1508,7 +1508,8 @@ class TestComputeExpectedInvariants:
 
     def test_resume_receives_the_resolved_task_partition_count(self):
         """The iteration runner must not make resume rediscover task state."""
-        source = inspect.getsource(runner.main)
+        assert "_run_bound_iteration(args, package_scope)" in inspect.getsource(runner.main)
+        source = inspect.getsource(runner._run_bound_iteration)
         assert "dataset_partition_count=(" in source
         assert "run_composition.dataset_profile.partition_count" in source
 

@@ -74,6 +74,16 @@ import yaml
 
 from agent.schemas.hyperparam_tuning import TaskCompositionRef
 from agent.schemas.parameter_rules import ParameterRules
+from core.local_code import (
+    CapturedCodePackage,
+    MemberIdentity,
+    PackageIdentity,
+    acquire_module,
+    bind_code_package,
+    composition_package,
+    selected_identity,
+    selected_member,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.interpretation import InterpretationTaskBlocks
@@ -113,6 +123,7 @@ _MANIFEST_KEYS = frozenset(
         "parameter_rules",
         "dynamic_observables",
         "static_observables",
+        "code_package",
     }
 )
 
@@ -160,14 +171,18 @@ class ResolvedPluginRef:
     symbol: str
     content_sha256: str
     absolute_path: str
+    local_code: MemberIdentity | None = None
 
-    def canonical_identity(self) -> dict[str, str]:
+    def canonical_identity(self) -> dict[str, Any]:
         """The host-independent identity the semantic fingerprint hashes."""
-        return {
+        identity: dict[str, Any] = {
             "configured_ref": self.configured_ref,
             "symbol": self.symbol,
             "content_sha256": self.content_sha256,
         }
+        if self.local_code is not None:
+            identity["local_code"] = self.local_code.model_dump(mode="json")
+        return identity
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +224,7 @@ class RunTaskComposition:
     forward_contract: ForwardContract
     semantic_fingerprint: str
     provenance: CompositionProvenance
+    code_package: CapturedCodePackage | None = None
     deliverable_naming: Any = None
     """The run's DECLARED deliverable naming, or ``None`` for the shipped one.
 
@@ -569,6 +585,23 @@ def _load_symbol(
         raise TaskCompositionError(f"{where} requires a non-empty string 'file'; got {file_ref!r}.")
     logical = _normalized_ref(file_ref)
     target = _resolve_path(file_ref, manifest_dir)
+    # Keep the family's required-symbol checks and registration rollback inside
+    # acquisition: a cached helper is not successful resolution by itself.
+    from execute_tools.task_registration_scope import registration_rollback
+
+    with registration_rollback(), acquire_module(target) as captured_module:
+        if captured_module is not None:
+            _require_companion_symbols(captured_module, also_require, where, logical)
+            value = _getattr_or_fail(captured_module, symbol, where, logical)
+            member = selected_member(target)
+            assert member is not None
+            return value, ResolvedPluginRef(
+                configured_ref=logical,
+                symbol=symbol,
+                content_sha256=member.pin.content_sha256,
+                absolute_path=target,
+                local_code=selected_identity(target),
+            )
     if not os.path.isfile(target):
         raise TaskCompositionError(
             f"{where} names plugin file {logical!r}, which does not exist at "
@@ -1908,6 +1941,7 @@ def compute_semantic_fingerprint(
     builtin_objective_declaration: dict[str, Any] | None = None,
     parameter_rules: ParameterRules | None = None,
     scoreability_bindings: dict[str, Any] | None = None,
+    code_package: PackageIdentity | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -1949,6 +1983,8 @@ def compute_semantic_fingerprint(
             key=lambda identity: (identity["configured_ref"], identity["symbol"]),
         ),
     }
+    if code_package is not None:
+        payload["code_package"] = code_package.model_dump(mode="json")
     # Step 10 / P2b (delta D3) — ADDITIVE WHEN NON-EMPTY, never always-present.
     # An unconditional key would move the fingerprint of EVERY composed run
     # that exists today and fail their resumes for a reason with no scientific
@@ -2074,7 +2110,9 @@ def compose_deliverable_naming_from_manifest(manifest_path: str):
     and the shipped TIDMAD naming applies, byte-identically.
     """
     resolved_manifest = os.path.abspath(manifest_path)
-    return _compose_deliverable_naming(_read_manifest(resolved_manifest), resolved_manifest)
+    raw = _read_manifest(resolved_manifest)
+    with composition_package(raw.get("code_package"), os.path.dirname(resolved_manifest)):
+        return _compose_deliverable_naming(raw, resolved_manifest)
 
 
 def compose_observables_from_manifest(manifest_path: str):
@@ -2098,9 +2136,9 @@ def compose_observables_from_manifest(manifest_path: str):
     """
     resolved_manifest = os.path.abspath(manifest_path)
     manifest_dir = os.path.dirname(resolved_manifest)
-    observables, _declarations, _plugins, _names = _compose_observables(
-        _read_manifest(resolved_manifest), manifest_dir
-    )
+    raw = _read_manifest(resolved_manifest)
+    with composition_package(raw.get("code_package"), manifest_dir):
+        observables, _declarations, _plugins, _names = _compose_observables(raw, manifest_dir)
     return observables
 
 
@@ -2136,9 +2174,10 @@ def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
     """
     resolved_manifest = os.path.abspath(manifest_path)
     raw = _read_manifest(resolved_manifest)
-    metric, _declaration, _plugin = _compose_metric(
-        _section(raw, "metric", resolved_manifest), os.path.dirname(resolved_manifest)
-    )
+    with composition_package(raw.get("code_package"), os.path.dirname(resolved_manifest)):
+        metric, _declaration, _plugin = _compose_metric(
+            _section(raw, "metric", resolved_manifest), os.path.dirname(resolved_manifest)
+        )
     return metric
 
 
@@ -2158,10 +2197,11 @@ def compose_task_data_path_from_manifest(manifest_path: str) -> TaskDataPath:
     """
     resolved_manifest = os.path.abspath(manifest_path)
     raw = _read_manifest(resolved_manifest)
-    impl, _plugin, _config = _compose_task_data_path(
-        _section(raw, "task_data_path", resolved_manifest),
-        os.path.dirname(resolved_manifest),
-    )
+    with composition_package(raw.get("code_package"), os.path.dirname(resolved_manifest)):
+        impl, _plugin, _config = _compose_task_data_path(
+            _section(raw, "task_data_path", resolved_manifest),
+            os.path.dirname(resolved_manifest),
+        )
     return impl
 
 
@@ -2339,6 +2379,15 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
     manifest_dir = os.path.dirname(resolved_manifest)
     raw = _read_manifest(resolved_manifest)
 
+    with composition_package(raw.get("code_package"), manifest_dir) as package:
+        return _compose_resolved_task_bindings(raw, resolved_manifest, package)
+
+
+def _compose_resolved_task_bindings(
+    raw: dict[str, Any], resolved_manifest: str, package: CapturedCodePackage | None
+) -> RunTaskComposition:
+    """Sequence existing family authorities inside the finite source binding."""
+    manifest_dir = os.path.dirname(resolved_manifest)
     try:
         parameter_rules = ParameterRules.model_validate(raw.get("parameter_rules", {}))
     except Exception as exc:
@@ -2420,6 +2469,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
                 symbol=plugin.model_type,
                 content_sha256=plugin.content_sha256,
                 absolute_path=plugin.absolute_path,
+                local_code=plugin.local_code,
             )
             for plugin in model_plugin_binding.plugins
         )
@@ -2551,6 +2601,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         ),
         parameter_rules=parameter_rules,
         scoreability_bindings=_scoreability_binding_identity(raw),
+        code_package=package.identity if package is not None else None,
     )
 
     return RunTaskComposition(
@@ -2564,6 +2615,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         task_description=description,
         forward_contract=contract,
         semantic_fingerprint=fingerprint,
+        code_package=package,
         provenance=CompositionProvenance(
             manifest_path=resolved_manifest,
             source_paths=source_paths,
@@ -2764,6 +2816,7 @@ def bind_run_task_composition(
         )
 
     with ExitStack() as stack:
+        stack.enter_context(bind_code_package(composition.code_package))
         # Step 11 C4 — FIRST on the stack, so it is bound before any other
         # authority and unwinds last. `bind_physical_data_root` validates
         # fail-closed through `resolve_dataset_dir`, the ONE such rule, so a

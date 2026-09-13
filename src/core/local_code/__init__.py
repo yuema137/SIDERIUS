@@ -4,7 +4,9 @@ from core.local_code.binding import (
     acquire_module,
     active_package,
     bind_code_package,
+    composition_package,
     scan_candidate_allowed,
+    selected_identity,
     selected_member,
 )
 from core.local_code.capture import (
@@ -27,7 +29,9 @@ __all__ = [
     "active_package",
     "bind_code_package",
     "capture_package",
+    "composition_package",
     "module_identity",
     "scan_candidate_allowed",
+    "selected_identity",
     "selected_member",
 ]

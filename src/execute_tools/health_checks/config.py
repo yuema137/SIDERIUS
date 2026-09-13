@@ -23,6 +23,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from core.local_code import MemberIdentity
 from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks._composition import (
@@ -251,6 +252,7 @@ class PersistedHealthPluginIdentity(BaseModel):
     configured_ref: str
     member: str = ""
     content_sha256: str
+    local_code: MemberIdentity | None = None
 
 
 class HealthChecksConfig(BaseModel):
@@ -816,7 +818,7 @@ def materialize_effective_config(
         and cfg.resolved_plugins
     ):
         markers["resolved_plugins"] = [
-            identity.model_dump(mode="json") for identity in cfg.resolved_plugins
+            identity.model_dump(mode="json", exclude_none=True) for identity in cfg.resolved_plugins
         ]
     document = {**cfg.model_dump(mode="json"), **markers}
     body = yaml.safe_dump(document, sort_keys=True)

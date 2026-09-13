@@ -9,7 +9,14 @@ from enum import Enum
 from pathlib import Path
 from types import ModuleType
 
-from core.local_code.capture import CapturedCodePackage, CapturedMember, LocalCodeError
+from core.local_code.capture import (
+    CapturedCodePackage,
+    CapturedMember,
+    CodePackageDeclaration,
+    LocalCodeError,
+    MemberIdentity,
+    capture_package,
+)
 from core.local_code.importing import import_member
 
 
@@ -41,6 +48,32 @@ def bind_code_package(package: CapturedCodePackage | None) -> Iterator[None]:
 def selected_member(path: str | Path) -> CapturedMember | None:
     package = active_package()
     return package.member(path) if package is not None else None
+
+
+def selected_identity(path: str | Path) -> MemberIdentity | None:
+    package = active_package()
+    member = package.member(path) if package is not None else None
+    return (
+        MemberIdentity(package=package.identity, member=member.pin.member)
+        if package is not None and member is not None
+        else None
+    )
+
+
+@contextmanager
+def composition_package(
+    raw: object, manifest_dir: str | Path
+) -> Iterator[CapturedCodePackage | None]:
+    """Validate the optional declaration before any composition plugin effects."""
+    package = None
+    if raw is not None:
+        try:
+            declaration = CodePackageDeclaration.model_validate(raw)
+            package = capture_package(declaration, manifest_dir)
+        except ValueError as exc:
+            raise LocalCodeError(f"code_package: {exc}") from exc
+    with bind_code_package(package):
+        yield package
 
 
 def scan_candidate_allowed(path: str | Path) -> bool:
