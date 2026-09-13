@@ -207,6 +207,20 @@ def generated_models_dir(*, environ: Mapping[str, str] | None = None) -> str:
     return os.path.join(generated_library_root(environ=environ), "models")
 
 
+def verified_chain_workspace(*, environ: Mapping[str, str] | None = None) -> str:
+    """Expose the workspace only when its existing generated-library binding agrees."""
+    env = os.environ if environ is None else environ
+    if not generated_library_is_workspace_bound(environ=env):
+        raise MalformedGeneratedLibraryOverride(
+            "task code transport requires an explicit bound workspace; call "
+            "bind_generated_library_to_workspace before spawning"
+        )
+    workspace = env[_CHAIN_WORKSPACE_ENV_VAR].strip()
+    if not os.path.isabs(workspace):
+        raise MalformedGeneratedLibraryOverride("bound chain workspace must be absolute")
+    return workspace
+
+
 def generated_losses_dir(*, environ: Mapping[str, str] | None = None) -> str:
     """``{root}/losses`` — promoted loss plugins."""
     return os.path.join(generated_library_root(environ=environ), "losses")

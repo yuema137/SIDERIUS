@@ -20,6 +20,7 @@ Plugin interface — each plugin file must define:
 import importlib.util
 import os
 import sys
+from types import ModuleType
 from typing import get_args
 
 from agent.schemas.output_types import OutputTypeName
@@ -92,6 +93,10 @@ OUTPUT_TYPE_VOCABULARY: tuple[str, ...] = (*PLUGIN_LEGAL_OUTPUT_TYPES, "hybrid")
 _LEGACY_OMITTED_OUTPUT_TYPE = "classifier"
 
 
+class _InvalidPackageModel(ValueError):
+    """Unwind new modules when the family's ordinary metadata check rejects."""
+
+
 def _load_plugin(path: str) -> dict | None:
     """Load a single plugin file. Returns attribute dict or None if invalid.
 
@@ -100,6 +105,23 @@ def _load_plugin(path: str) -> dict | None:
     (Phase D.1 — planner-prompt excerpt) can resolve the source file.
     Without this, classes defined in the plugin appear as built-ins.
     """
+    from core.local_code import LocalCodeError, acquire_module
+
+    try:
+        with acquire_module(path) as captured:
+            if captured is not None:
+                attributes = _plugin_attributes(captured, path)
+                if attributes is None:
+                    raise _InvalidPackageModel
+                return attributes
+    except LocalCodeError:
+        raise
+    except _InvalidPackageModel:
+        return None
+    except Exception as exc:
+        print(f"[PluginLoader] Failed to load {path}: {exc}")
+        return None
+
     module_name = _MODULE_NAME_PREFIX + os.path.splitext(os.path.basename(path))[0]
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
@@ -118,6 +140,11 @@ def _load_plugin(path: str) -> dict | None:
         print(f"[PluginLoader] Failed to load {path}: {e}")
         return None
 
+    return _plugin_attributes(module, path)
+
+
+def _plugin_attributes(module: ModuleType, path: str) -> dict | None:
+    """The existing model metadata contract, independent of source acquisition."""
     for attr in ("PLUGIN_MODEL_TYPE", "PLUGIN_CONFIG_CLASS", "PLUGIN_MODEL_CLASS"):
         if not hasattr(module, attr):
             print(f"[PluginLoader] Skipping {os.path.basename(path)}: missing '{attr}'")
@@ -255,6 +282,9 @@ def extend_registries(model_registry: dict, config_registry: dict) -> list:
     see :func:`_refuse_ambiguous_origins`.
     """
     loaded = []
+    from core.local_code import bootstrap_code_package, scan_candidate_allowed
+
+    bootstrap_code_package()
     scanned = _resolve_plugin_dirs()
     origins: dict[str, list[str]] = {}
     for plugin_dir in scanned:
@@ -265,7 +295,10 @@ def extend_registries(model_registry: dict, config_registry: dict) -> list:
             if not fname.endswith(".py") or fname.startswith("_"):
                 continue
 
-            plugin = _load_plugin(os.path.join(plugin_dir, fname))
+            path = os.path.join(plugin_dir, fname)
+            if not scan_candidate_allowed(path):
+                continue
+            plugin = _load_plugin(path)
             if plugin is None:
                 continue
 
@@ -443,7 +476,9 @@ def preload_global_models() -> list[str]:
         neither directory exists or both are empty (first-run / fresh host).
     """
     from core.generated_library import generated_library_is_workspace_bound, generated_models_dir
+    from core.local_code import bootstrap_code_package, scan_candidate_allowed
 
+    bootstrap_code_package()
     loaded: list[str] = []
     seen_basenames: set[str] = set()
     model_dirs = [generated_models_dir()]
@@ -457,8 +492,10 @@ def preload_global_models() -> list[str]:
                 continue
             if fname in seen_basenames:
                 continue  # resolved-library copy shadows the legacy one
-            seen_basenames.add(fname)
             plugin_path = os.path.join(models_dir, fname)
+            if not scan_candidate_allowed(plugin_path):
+                continue
+            seen_basenames.add(fname)
             model_type = register_model_in_memory(plugin_path)
             if model_type is not None:
                 loaded.append(model_type)

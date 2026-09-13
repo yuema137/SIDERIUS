@@ -144,8 +144,10 @@ def preload_global_losses() -> list[str]:
         neither directory exists or both are empty (first-run / fresh host).
     """
     from core.generated_library import generated_library_is_workspace_bound, generated_losses_dir
+    from core.local_code import bootstrap_code_package, scan_candidate_allowed
     from ml_models.loss_plugin_loader import LOSSES_DIR
 
+    bootstrap_code_package()
     loaded: list[str] = []
     seen_basenames: set[str] = set()
     loss_dirs = [generated_losses_dir()]
@@ -159,8 +161,10 @@ def preload_global_losses() -> list[str]:
                 continue
             if fname in seen_basenames:
                 continue  # resolved-library copy shadows the legacy one
-            seen_basenames.add(fname)
             plugin_path = os.path.join(losses_dir, fname)
+            if not scan_candidate_allowed(plugin_path):
+                continue
+            seen_basenames.add(fname)
             loss_type = register_loss_in_memory(plugin_path)
             if loss_type is not None:
                 loaded.append(loss_type)

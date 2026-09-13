@@ -2820,10 +2820,10 @@ def main():
     from core.generated_library import bind_generated_library_to_workspace
 
     bind_generated_library_to_workspace(args.workspace)
-    from core.local_code import bind_code_package
+    from core.local_code import root_code_scope
 
     with ExitStack() as package_scope:
-        package_scope.enter_context(bind_code_package(None))
+        package_scope.enter_context(root_code_scope())
         return _run_bound_iteration(args, package_scope)
 
 

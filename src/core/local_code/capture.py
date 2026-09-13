@@ -71,7 +71,7 @@ class CodePackageDeclaration(BaseModel):
 class MemberPin(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     member: str
-    content_sha256: str
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class PackageIdentity(BaseModel):
@@ -79,7 +79,7 @@ class PackageIdentity(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     version: Literal["task-local-code-v1"] = "task-local-code-v1"
-    members: tuple[MemberPin, ...]
+    members: tuple[MemberPin, ...] = Field(min_length=1)
 
     @property
     def digest(self) -> str:

@@ -336,21 +336,27 @@ def _import_and_register(plugin: ResolvedHealthPlugin) -> tuple[tuple[str, ...],
             where a check name silently means something other than what the
             registry says it means.
     """
-    module_name = _module_name(plugin)
-    spec = importlib.util.spec_from_file_location(module_name, plugin.absolute_path)
-    if spec is None or spec.loader is None:
-        raise HealthPluginError(
-            f"Cannot resolve a module spec for Health plugin "
-            f"{plugin.configured_ref!r} at {plugin.absolute_path!r}."
-        )
-    module = importlib.util.module_from_spec(spec)
+    from core.local_code import LocalCodeError, acquire_module
+
+    module_name: str | None = None
     before = set(_REGISTRY)
     before_providers = set(_PROVIDER_REGISTRY)
-    sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
+        with acquire_module(plugin.absolute_path) as captured:
+            if captured is None:
+                module_name = _module_name(plugin)
+                spec = importlib.util.spec_from_file_location(module_name, plugin.absolute_path)
+                if spec is None or spec.loader is None:
+                    raise HealthPluginError(
+                        f"Cannot resolve a module spec for Health plugin "
+                        f"{plugin.configured_ref!r} at {plugin.absolute_path!r}."
+                    )
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
     except Exception as exc:
-        sys.modules.pop(module_name, None)
+        if module_name is not None:
+            sys.modules.pop(module_name, None)
         # Roll back partial registrations. A module that registered check A
         # and then raised must contribute NOTHING, or A would sit in the
         # registry able to satisfy a binding while the plugin that defines
@@ -359,6 +365,8 @@ def _import_and_register(plugin: ResolvedHealthPlugin) -> tuple[tuple[str, ...],
             del _REGISTRY[name]
         for provider_id in set(_PROVIDER_REGISTRY) - before_providers:
             del _PROVIDER_REGISTRY[provider_id]
+        if isinstance(exc, LocalCodeError):
+            raise
         raise HealthPluginError(
             f"Health plugin {plugin.configured_ref!r}"
             f"{'/' + plugin.member if plugin.member else ''} at "
@@ -399,6 +407,9 @@ def load_task_health_plugins(
             in this process.
     """
     global _RUN_SCOPE
+    from core.local_code import bootstrap_code_package
+
+    bootstrap_code_package()
     resolved = _resolve(config, config_dir)
 
     if _RUN_SCOPE is not None:

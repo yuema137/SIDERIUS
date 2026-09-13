@@ -1513,8 +1513,12 @@ def _objective_name_declared_by(path: str) -> str | None:
     of a safety check.
     """
     try:
-        with open(path, encoding="utf-8", errors="ignore") as handle:
-            text = handle.read()
+        captured = selected_member(path)
+        if captured is not None:
+            text = captured.source.decode("utf-8", errors="ignore")
+        else:
+            with open(path, encoding="utf-8", errors="ignore") as handle:
+                text = handle.read()
     except OSError:
         return None
     match = re.search(r"^PLUGIN_LOSS_TYPE\s*[:=][^=]*?['\"]([^'\"]+)['\"]", text, re.MULTILINE)
@@ -1561,16 +1565,21 @@ def _refuse_ambiguous_objective(
     search_roots.append(os.path.dirname(declared_path))
 
     shadows: list[str] = []
+    from core.local_code import scan_candidate_allowed
+
     for root in search_roots:
         if not os.path.isdir(root):
             continue
         for entry in sorted(os.listdir(root)):
             if not entry.endswith(".py"):
                 continue
-            candidate = os.path.realpath(os.path.join(root, entry))
+            selected_path = os.path.join(root, entry)
+            if not scan_candidate_allowed(selected_path):
+                continue
+            candidate = os.path.realpath(selected_path)
             if candidate == declared_path or candidate in shadows:
                 continue
-            if _objective_name_declared_by(candidate) == declared_name:
+            if _objective_name_declared_by(selected_path) == declared_name:
                 shadows.append(candidate)
     if shadows:
         raise TaskCompositionError(

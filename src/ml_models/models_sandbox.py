@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from core.local_code import LocalCodeError
 from ml_models.models_format_sandbox import (
     AEConfig,
     DtypeAdmissibility,
@@ -834,5 +835,7 @@ try:
     from ml_models.plugin_loader import extend_registries as _extend_registries
 
     _extend_registries(MODEL_REGISTRY, _plugin_cfg_reg)
+except LocalCodeError:
+    raise
 except Exception as _e:
     print(f"[PluginLoader] Warning: could not load plugins: {_e}")

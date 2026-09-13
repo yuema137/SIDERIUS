@@ -113,11 +113,18 @@ def import_member(package: CapturedCodePackage, member: CapturedMember) -> Itera
     """Keep acquisition AND caller's family checks inside one module transaction."""
     namespace = _namespace(package)
     with _LOCK:
+        install_package_finder(package)
+        with _transaction(namespace):
+            key = module_key(member.pin.member)
+            yield importlib.import_module(namespace + ("." + key if key else ""))
+
+
+def install_package_finder(package: CapturedCodePackage) -> None:
+    """Make captured names importable (including unpickling), executing no source."""
+    namespace = _namespace(package)
+    with _LOCK:
         if not any(
             isinstance(finder, _FiniteImporter) and finder.namespace == namespace
             for finder in sys.meta_path
         ):
             sys.meta_path.insert(0, _FiniteImporter(package, namespace))
-        with _transaction(namespace):
-            key = module_key(member.pin.member)
-            yield importlib.import_module(namespace + ("." + key if key else ""))

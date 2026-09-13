@@ -44,6 +44,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+from types import ModuleType
 from typing import Any
 
 from core.layout import checkout_path
@@ -86,6 +87,10 @@ REQUIRED_LOSS_PLUGIN_SYMBOLS: tuple[str, ...] = (
 )
 
 
+class _InvalidPackageLoss(ValueError):
+    """Unwind new modules when required loss metadata is absent."""
+
+
 def _load_loss_plugin(path: str) -> dict[str, Any] | None:
     """Load a single loss-plugin file. Returns attribute dict or None if invalid.
 
@@ -103,6 +108,23 @@ def _load_loss_plugin(path: str) -> dict[str, Any] | None:
         the required-attribute check — the loader logs a single line per
         rejection and continues scanning.
     """
+    from core.local_code import LocalCodeError, acquire_module
+
+    try:
+        with acquire_module(path) as captured:
+            if captured is not None:
+                attributes = _loss_attributes(captured, path)
+                if attributes is None:
+                    raise _InvalidPackageLoss
+                return attributes
+    except LocalCodeError:
+        raise
+    except _InvalidPackageLoss:
+        return None
+    except Exception as exc:
+        print(f"[LossLoader] Failed to load {path}: {exc}")
+        return None
+
     module_name = _MODULE_NAME_PREFIX + os.path.splitext(os.path.basename(path))[0]
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
@@ -121,6 +143,11 @@ def _load_loss_plugin(path: str) -> dict[str, Any] | None:
         print(f"[LossLoader] Failed to load {path}: {e}")
         return None
 
+    return _loss_attributes(module, path)
+
+
+def _loss_attributes(module: ModuleType, path: str) -> dict[str, Any] | None:
+    """Preserve loss-specific metadata interpretation for either acquisition path."""
     for attr in REQUIRED_LOSS_PLUGIN_SYMBOLS:
         if not hasattr(module, attr):
             print(f"[LossLoader] Skipping {os.path.basename(path)}: missing '{attr}'")
@@ -247,13 +274,19 @@ def load_loss_plugin(loss_name: str) -> dict[str, Any] | None:
         The plugin attribute dict (same shape as ``_load_loss_plugin``) on hit.
         ``None`` when no matching plugin is found in any resolved directory.
     """
+    from core.local_code import bootstrap_code_package, scan_candidate_allowed
+
+    bootstrap_code_package()
     for loss_dir in _resolve_loss_dirs():
         if not os.path.isdir(loss_dir):
             continue
         for fname in sorted(os.listdir(loss_dir)):
             if not fname.endswith(".py") or fname.startswith("_"):
                 continue
-            plugin = _load_loss_plugin(os.path.join(loss_dir, fname))
+            path = os.path.join(loss_dir, fname)
+            if not scan_candidate_allowed(path):
+                continue
+            plugin = _load_loss_plugin(path)
             if plugin is None:
                 continue
             if plugin["loss_type"] == loss_name:

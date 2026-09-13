@@ -1137,9 +1137,9 @@ def main() -> None:
 
     # Composition imports can load plugins: workspace selection must precede them.
     bind_generated_library_to_workspace(args.workspace)
-    from core.local_code import bind_code_package
+    from core.local_code import root_code_scope
 
-    with bind_code_package(None):
+    with root_code_scope():
         _run_bound_cli(args)
 
 

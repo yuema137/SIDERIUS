@@ -105,6 +105,9 @@ def subprocess_env(
 
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
+    from core.local_code import package_subprocess_env
+
+    package_subprocess_env(env)
     plugin_roots = union_plugin_roots(
         [plugin_dir] if plugin_dir else (),
         active_run_model_plugin_roots(),
