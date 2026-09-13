@@ -34,6 +34,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -42,6 +43,7 @@ from agent.schemas.implementor import ImplementorInput, ImplementorOutput
 from agent.schemas.proposal import ExpertAdvice, ProposalInput, ProposalOutput
 from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.task_config import ForwardContract
 from agent.schemas.validator import ValidatorOutput
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
@@ -64,8 +66,23 @@ from tests.unit.agent.ml_model_proposal_agent.test_proposal_agent import (
     FAKE_REASONING,
 )
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 pytestmark = pytest.mark.dual_mode
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _persistence_contract() -> ForwardContract:
+    """A complete, test-owned contract for the real proposer prompt path."""
+    return ForwardContract(
+        input_shape="[B, 4] float32",
+        input_description="four synthetic floating-point features",
+        output_shape="[B, 2] float32",
+        output_description="two class logits",
+        num_classes=2,
+        task_type="classification",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +100,7 @@ class TestNodePersistence:
             out = agent.run(
                 ProposalInput(
                     interpretation_evidence=build_proposer_evidence(FAKE_INTERPRETATION),
+                    forward_contract=_persistence_contract(),
                     existing_model_types=[],
                     constraints=[],
                     storage={
@@ -281,6 +299,11 @@ class TestAttemptDirectoryLayout:
         )
 
         workspace = str(tmp_path)
+        composition = compose_run_task_bindings(
+            str(REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml")
+        )
+        tune_out.metric_spec = composition.metric.spec
+        tune_out.task_composition_fingerprint = composition.semantic_fingerprint
         # Step 0 of run_workflow loads the source model's prior tuning output
         # from {data_dir}/{model}/{source}/agent/run_output_{source}_agent.json
         # (model_exploration.py:283-300) BEFORE any agent is invoked, mocked
@@ -296,6 +319,8 @@ class TestAttemptDirectoryLayout:
                 completed_rounds=0,
                 total_attempts=0,
                 all_records=[],
+                metric_spec=composition.metric.spec,
+                task_composition_fingerprint=composition.semantic_fingerprint,
                 started_at="2026-08-08 00:00:00",
                 finished_at="2026-08-08 00:00:01",
             ).model_dump_json()
@@ -329,18 +354,20 @@ class TestAttemptDirectoryLayout:
             MockValid.return_value.run.side_effect = verdicts
             MockTune.return_value.run.return_value = tune_out
 
-            run_workflow(
-                launch=WorkflowLaunchConfig(
-                    data_dir=str(tmp_path / "data"),
-                    model_types=["punet"],
-                    source_run_name="v0",
-                    max_iterations=1,
-                    max_proposal_attempts=2,
-                    max_impl_attempts=1,
-                ),
-                workspace=workspace,
-                run_name="e1_layout",
-            )
+            with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
+                run_workflow(
+                    launch=WorkflowLaunchConfig(
+                        data_dir=str(tmp_path / "data"),
+                        model_types=["punet"],
+                        source_run_name="v0",
+                        max_iterations=1,
+                        max_proposal_attempts=2,
+                        max_impl_attempts=1,
+                    ),
+                    workspace=workspace,
+                    run_name="e1_layout",
+                    task_composition=composition,
+                )
 
         iter_dir = os.path.join(workspace, "e1_layout", "iteration_001")
         assert os.path.isdir(iter_dir)

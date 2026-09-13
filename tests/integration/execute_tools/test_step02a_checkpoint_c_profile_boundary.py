@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +39,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
+
+from execute_tools.scope_artifact import write_scope_artifact
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PYTHON = sys.executable
@@ -60,17 +63,21 @@ PROFILE = {
         "segments_per_file": N_PSD,
         "num_files": 2,
         "sampling_frequency": 1000.0,
-        "training_file_pattern": "cpc_train_{file_index:03d}.h5",
-        "validation_file_pattern": "cpc_valid_{file_index:03d}.h5",
+        "training_file_pattern": "training_{file_index:04d}.h5",
+        "validation_file_pattern": "validation_{file_index:04d}.h5",
     },
-    "channels": {"input_channel": "cpc_in", "target_channel": "cpc_truth"},
+    "channels": {"input_channel": "input", "target_channel": "target"},
     "encoding": {
         "storage_dtype": "int8",
         "compute_dtype": "int16",
         "value_offset": 128,
         "num_classes": 256,
     },
+    "anchor_selection_files": [FILE_INDEX],
+    "health_peek_files": [FILE_INDEX],
 }
+
+FIXTURE_PACKAGE = REPO_ROOT / "tests" / "fixtures" / "step10_p1" / "fourth_task"
 
 
 def _write_h5(path: Path, n: int) -> None:
@@ -95,6 +102,31 @@ def boundary_workspace(tmp_path):
 
     profile_path = cfg_dir / "dataset_profile_cpc.json"
     profile_path.write_text(json.dumps(PROFILE))
+
+    task_package = tmp_path / "checkpoint_c_task"
+    shutil.copytree(FIXTURE_PACKAGE, task_package)
+    (task_package / "declared" / "dataset_profile.json").write_text(json.dumps(PROFILE))
+    manifest = (task_package / "composition.yaml").read_text()
+    manifest = manifest.replace(
+        "file: plugins/spectro_data_path.py",
+        f"file: {REPO_ROOT / 'tests' / 'helpers' / 'synthetic_training_data_path.py'}",
+    )
+    manifest = manifest.replace("symbol: SpectroTaskDataPath", "symbol: TwoFamilyDataPath")
+    manifest = manifest.replace("id: spectro_segmentation_v0", "id: synthetic_two_family_training")
+    (task_package / "composition.yaml").write_text(manifest)
+
+    scope_payload = json.dumps(
+        {
+            "family": "training",
+            "selection": {str(FILE_INDEX): list(range(N_PSD))},
+            "segment_length": PSD_LEN,
+            "row_length": SEG_SIZE,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    scope_path = cfg_dir / "task_scope_cpc.json"
+    scope_digest = write_scope_artifact(str(scope_path), scope_payload)
 
     dataset = PROFILE["dataset"]
     n_samples = PSD_LEN * N_PSD
@@ -131,35 +163,23 @@ def boundary_workspace(tmp_path):
         "cfg_dir": cfg_dir,
         "sandbox": sandbox,
         "profile": profile_path,
+        "task_manifest": task_package / "composition.yaml",
+        "task_scope": scope_path,
+        "task_scope_digest": scope_digest,
     }
 
 
 def _child_env() -> dict[str, str]:
-    """Force the child onto THIS checkout.
-
-    Found the hard way: a plain ``python execute_tools/foo.py`` puts the
-    SCRIPT's directory on ``sys.path[0]``, not the repo root, so
-    ``import execute_tools.dataset_config`` falls through to the venv's
-    editable-install finder — which hardcodes absolute paths into the main
-    checkout. Launched from a linked worktree, the child therefore imported
-    a DIFFERENT clone.
-
-    It failed loudly here only because the other clone lacks this PR's
-    changes. Had the change already been there, this test would have passed
-    while exercising the wrong tree — the exact failure CLAUDE.md's
-    portability rule exists to prevent. ``PYTHONPATH`` pins the checkout
-    under test, and ``test_the_child_imports_this_checkout`` proves it.
-    """
+    """Use the selected checkout interpreter without a source overlay."""
     env = dict(os.environ)
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{REPO_ROOT}{os.pathsep}{existing}" if existing else str(REPO_ROOT)
+    env.pop("PYTHONPATH", None)
     return env
 
 
-def _run(argv: list[str]) -> subprocess.CompletedProcess:
+def _run(argv: list[str], *, cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv,
-        cwd=REPO_ROOT,
+        cwd=cwd,
         env=_child_env(),
         capture_output=True,
         text=True,
@@ -168,17 +188,19 @@ def _run(argv: list[str]) -> subprocess.CompletedProcess:
     )
 
 
-def test_the_child_imports_this_checkout():
+def test_the_child_imports_this_checkout(tmp_path):
     """Guard the guard: if the subprocess ever resolves the package to
     another clone again, every Checkpoint-C assertion below becomes
     meaningless, and it would do so SILENTLY once both clones carry the
     change."""
+    assert "PYTHONPATH" not in _child_env()
     probe = _run(
         [
             PYTHON,
             "-c",
             "import execute_tools.dataset_config as dc; print(dc.__file__)",
-        ]
+        ],
+        cwd=tmp_path,
     )
     assert probe.returncode == 0, probe.stderr
     resolved = probe.stdout.strip()
@@ -190,7 +212,8 @@ def test_the_child_imports_this_checkout():
 def _training_argv(ws, profile_path: str | None) -> list[str]:
     argv = [
         PYTHON,
-        "src/execute_tools/train_engine_sandbox.py",
+        "-m",
+        "execute_tools.train_engine_sandbox",
         "--model_cfg",
         str(ws["cfg_dir"] / "model.json"),
         "--train_cfg",
@@ -209,6 +232,14 @@ def _training_argv(ws, profile_path: str | None) -> list[str]:
         str(FILE_INDEX),
         "--sample_set_json",
         str(ws["cfg_dir"] / "sample_set.json"),
+        "--task_manifest",
+        str(ws["task_manifest"]),
+        "--task_data_path_id",
+        "synthetic_two_family_training",
+        "--task_scope_ref",
+        str(ws["task_scope"]),
+        "--task_scope_digest",
+        ws["task_scope_digest"],
     ]
     if profile_path is not None:
         argv += ["--dataset_profile_json", profile_path]
@@ -221,15 +252,14 @@ class TestTrainingSubprocessConsumesTheProfile:
     def test_the_child_trains_on_data_only_the_declaration_can_find(self, boundary_workspace):
         """Load-bearing.
 
-        The files on disk are named ``cpc_train_000.h5`` and their channels
-        are ``cpc_in``/``cpc_truth``. NOTHING about that is discoverable from
-        the TIDMAD singleton. If the transport were deleted, the flag
-        ignored, or the loader still addressing ``channel0001``, the child
-        could not read a single sample — so a green run here is positive
-        evidence that the declaration crossed the boundary and was used.
+        The files and rows are owned by the explicit synthetic task scope;
+        their 256-class cardinality is owned by this profile. Neither is
+        discoverable from a framework scientific default. If the task or
+        profile transport is deleted, the child cannot construct and train
+        the declared model — so a green run is positive boundary evidence.
         """
         ws = boundary_workspace
-        result = _run(_training_argv(ws, str(ws["profile"])))
+        result = _run(_training_argv(ws, str(ws["profile"])), cwd=ws["tmp"])
 
         assert result.returncode == 0, (
             f"training subprocess failed\nSTDOUT:\n{result.stdout[-3000:]}\n"
@@ -254,7 +284,7 @@ class TestTrainingSubprocessConsumesTheProfile:
         broken = ws["cfg_dir"] / "broken_profile.json"
         broken.write_text("{ not json at all")
 
-        result = _run(_training_argv(ws, str(broken)))
+        result = _run(_training_argv(ws, str(broken)), cwd=ws["tmp"])
 
         assert result.returncode != 0, "a broken profile must not train"
         combined = result.stdout + result.stderr
@@ -263,28 +293,23 @@ class TestTrainingSubprocessConsumesTheProfile:
 
     def test_a_missing_profile_path_fails_closed(self, boundary_workspace):
         ws = boundary_workspace
-        result = _run(_training_argv(ws, str(ws["cfg_dir"] / "absent.json")))
+        result = _run(_training_argv(ws, str(ws["cfg_dir"] / "absent.json")), cwd=ws["tmp"])
 
         assert result.returncode != 0
         combined = result.stdout + result.stderr
         assert "absent.json" in combined
         assert "fails closed" in combined
 
-    def test_an_omitted_flag_keeps_regime_a(self, boundary_workspace):
-        """The other half of §5c. With no flag the child resolves the shipped
-        TIDMAD profile, so it looks for ``abra_training_0000.h5``, does not
-        find it in this workspace, and warns-and-skips — today's behaviour,
-        unchanged. It must NOT fail closed: that would break every legacy
-        caller.
-        """
+    def test_an_omitted_profile_without_a_task_binding_fails_closed(self, boundary_workspace):
+        """No explicit profile and no composed task means no scientific authority."""
         ws = boundary_workspace
-        result = _run(_training_argv(ws, None))
+        result = _run(_training_argv(ws, None), cwd=ws["tmp"])
 
         combined = result.stdout + result.stderr
-        assert "abra_training_0000.h5" in combined, (
-            "an omitted flag must resolve the shipped TIDMAD profile (Regime-A)"
-        )
-        assert "fails closed" not in combined
+        assert result.returncode != 0
+        assert "DatasetProfileBindingError" in combined
+        assert "no dataset profile is bound" in combined
+        assert "abra_training_0000.h5" not in combined
 
 
 class TestAllThreeEntriesLoadTheSameProfileFile:
@@ -299,9 +324,9 @@ class TestAllThreeEntriesLoadTheSameProfileFile:
     """
 
     ENTRIES = (
-        "src/execute_tools/train_engine_sandbox.py",
-        "src/execute_tools/inference_single.py",
-        "src/execute_tools/denoising_score_single.py",
+        "execute_tools.train_engine_sandbox",
+        "execute_tools.inference_single",
+        "execute_tools.denoising_score_single",
     )
 
     @pytest.mark.parametrize("entry", ENTRIES)
@@ -310,13 +335,13 @@ class TestAllThreeEntriesLoadTheSameProfileFile:
     ):
         ws = boundary_workspace
         missing = str(ws["cfg_dir"] / "nope.json")
-        argv = [PYTHON, entry, "--dataset_profile_json", missing]
+        argv = [PYTHON, "-m", entry, "--dataset_profile_json", missing]
 
         # Minimal required args per entry so argparse itself does not exit
         # before the profile is resolved.
-        if entry.endswith("train_engine_sandbox.py"):
+        if entry.endswith("train_engine_sandbox"):
             argv = _training_argv(ws, missing)
-        elif entry.endswith("inference_single.py"):
+        elif entry.endswith("inference_single"):
             argv += [
                 "--mode",
                 "agent",
@@ -349,11 +374,21 @@ class TestAllThreeEntriesLoadTheSameProfileFile:
                 "checkpoint_c",
                 "--data_dir",
                 str(ws["data_dir"]),
+                "--raw_data_dir",
+                str(ws["data_dir"]),
                 "--file_index",
                 str(FILE_INDEX),
+                "--task_manifest",
+                str(ws["cfg_dir"] / "unused_manifest.yaml"),
+                "--task_data_path_id",
+                "missing-profile-precedes-composition",
+                "--task_eval_scope_ref",
+                str(ws["cfg_dir"] / "unused_scope.json"),
+                "--task_eval_scope_digest",
+                "0" * 64,
             ]
 
-        result = _run(argv)
+        result = _run(argv, cwd=ws["tmp"])
         combined = result.stdout + result.stderr
         assert result.returncode != 0, f"{entry} accepted a missing profile"
         assert "nope.json" in combined, (
