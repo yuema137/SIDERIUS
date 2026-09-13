@@ -22,6 +22,33 @@ real provider or training paths require `--real-llm`/`--real-training` (the
 deprecated `--real-api-call` enables both). Collection alone is not a live-run
 claim. See the [tests map](../README.md).
 
+## Bootstrap composition (manual, offline)
+
+From the checkout being tested, synchronize its own frozen environment, then
+run exactly this five-case cohort (no real-mode flags):
+
+```bash
+env -u PYTHONPATH -u VIRTUAL_ENV uv sync --group dev --frozen
+env -u PYTHONPATH -u VIRTUAL_ENV CUDA_VISIBLE_DEVICES= \
+  OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2 \
+  timeout 180 .venv/bin/python -m pytest \
+  tests/integration/workflows/test_bootstrap_pseudo.py -q
+```
+
+This explicit qualification command owns the bootstrap pseudo-integration
+witness; ordinary unit CI does not select it. All five cases must pass without
+skips. They exercise the real bounded-probe engine, contention classifier,
+observation builder, hash-checked temporary registry and launch guard, using
+synthetic task capability, hardware, telemetry and executor timings. No provider,
+GPU, dataset, real training or inference is used by this cohort. Environment
+installation may need network access; the tests themselves are offline.
+
+Coverage: readiness, subsequent-run priors, promotion of the training bucket
+after three distinct consistent observations, busy-context measurement and
+idempotent registry writes. Identical inference observations deduplicate rather
+than promote. The unnamed pseudo device supplies no occupancy/measurement-validity
+evidence. This is not full integration coverage, real GPU qualification or a Gate.
+
 ## Installed Health policy (manual, offline)
 
 `installed_health_policy_witness.py` owns wheel-resource/filesystem acceptance,
