@@ -521,13 +521,9 @@ def _commit_time_gate_ids(
     )
     for path in candidates:
         if os.path.isfile(path) and _effective_config_body_sha(path) == stamped:
-            # `resolve_scientific_gate_ids`, not `required_blocking_gate_ids`:
-            # the shared resolver reads the DECLARED `gate_role` and can
-            # return None for a role-less config whose sha is not in the
-            # audited compatibility map. The deprecated shim collapses that
-            # None to an empty set, which reads as "no gate is required" —
-            # i.e. everything valid — and is how a record rejected in-run
-            # could become the incumbent on resume.
+            # Identity verification does not supply scientific roles. The
+            # shared resolver returns None if any gate lacks its declaration;
+            # that remains UNKNOWN rather than an empty, valid-by-default set.
             return resolve_scientific_gate_ids(path)
     return None
 

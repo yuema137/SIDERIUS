@@ -670,17 +670,9 @@ def _select_best_records(
         all_records: every record the invocation produced.
         order: the run's ONE order authority.
         required_gate_ids: the RUN's own scientific gate set — F-12d-30.
-            Omitted (``None``) means "resolve the default", which
-            ``is_valid_candidate`` does by calling
-            :func:`required_blocking_gate_ids`; that composes with
-            ``LEGACY_OMITTED`` and is therefore **TIDMAD's** set. Correct for
-            an un-composed run and wrong for a composed one, where it makes
-            the process bind TIDMAD's Health family after the run has already
-            bound its own — which the Step-08b run-scope guard then refuses,
-            killing an otherwise-complete run at finalize. The caller resolves
-            this through :func:`resolve_run_scientific_gate_ids`, the
-            authority Step 10 / P5+P6 W6 built for exactly this
-            (finding F-P56-2); this call site was simply never migrated to it.
+            Omitted (``None``) means UNKNOWN, never default resolution.
+            The caller resolves the actual policy once and passes its value;
+            an explicitly empty set declares no blocking requirements.
 
     Returns:
         A :class:`BestTracks` whose fields are the winning records (or

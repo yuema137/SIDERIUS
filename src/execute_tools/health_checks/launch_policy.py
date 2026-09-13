@@ -167,8 +167,7 @@ def validate_formal_launch(
             raise FormalLaunchPolicyError(
                 f"healthgate_mode=blocking, but the roles in "
                 f"{health_checks_config!r} cannot be established — it "
-                f"declares no gate_role and its sha is not in the audited "
-                f"compatibility map. A new formal launch must declare every "
+                f"has a missing gate_role. A new formal launch must declare every "
                 f"gate's role; roles are never guessed from ids or actions."
             )
         unenforced = sorted(scientific - enforcing)

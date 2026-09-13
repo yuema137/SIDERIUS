@@ -49,6 +49,23 @@ def _clear_caches():
 
 
 class TestCheckRef:
+    @pytest.mark.parametrize("peek", ["task_health_peek", "arbitrary_typo", ""])
+    def test_all_strings_refuse_before_profile_access(self, monkeypatch, peek):
+        """Retired marker cannot be rescued by a profile, even when unavailable."""
+
+        def no_profile():
+            raise AssertionError("profile accessed before string refusal")
+
+        monkeypatch.setattr(config_module, "resolve_dataset_profile", no_profile)
+        with pytest.raises(ValidationError, match="explicit list of file indices"):
+            CheckRef(name="synthetic", config={"peek_file_indices": peek})
+
+    @pytest.mark.parametrize("peek", [[2, 7], None, 2, (2, 7)])
+    def test_non_string_plugin_values_are_not_reinterpreted(self, peek):
+        """Marker retirement must not introduce a new plugin-config schema."""
+        result = CheckRef(name="synthetic", config={"peek_file_indices": peek})
+        assert result.config["peek_file_indices"] == peek
+
     def test_defaults(self):
         r = CheckRef(name="output_diversity")
         assert r.config == {}
@@ -60,6 +77,23 @@ class TestCheckRef:
         )
         assert r.config["min_unique_int8_values"] == 5
         assert r.config["peek_samples"] == 100_000
+
+    def test_task_owned_peek_list_survives_composition_and_materialization(self, tmp_path):
+        """The supported replacement is an actual task declaration, not a marker."""
+        task = tmp_path / "task_health.yaml"
+        task.write_text(
+            "health_peek_files: [2, 7]\n"
+            "roster:\n"
+            "  - gate_id: synthetic_guard\n"
+            "    check: output_diversity\n"
+            "    disposition: blocking\n"
+            "    uses_health_peek_files: true\n"
+        )
+        path, _ = materialize_effective_config(
+            None, None, str(tmp_path / "workspace"), task_health_binding=str(task)
+        )
+        config = load_health_gates_config(path)
+        assert config.health_gates[0].checks[0].config["peek_file_indices"] == [2, 7]
 
 
 # ---------------------------------------------------------------------------

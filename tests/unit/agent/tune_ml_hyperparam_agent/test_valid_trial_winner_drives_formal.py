@@ -80,9 +80,8 @@ def _valid_trial_record(exp_id: str, score: float, *, batch_size: int, lr: float
     Satisfies every condition `classify_candidate_health` checks: success
     status, a finite numeric score, and every **required blocking gate**
     present, executed, passed, and not production-invalidating. The gate
-    list is read from `required_blocking_gate_ids()` rather than hardcoded,
-    so adding a blocking gate to the shipped policy makes this fixture
-    follow rather than silently stop being valid.
+    list is this module's explicit synthetic roster, passed to selection
+    alongside the record. It does not depend on a shipped scientific default.
     """
     return {
         "exp_id": exp_id,

@@ -354,8 +354,8 @@ def tuning_output_to_model_run_summary(
     # a classifier that re-loaded the config would have to know which task it
     # is looking at, and — before W6 — resolved the LEGACY TIDMAD default,
     # binding that family process-globally for every composed run (F-P56-2).
-    # ``None`` keeps the pre-W6 behaviour exactly, which is what every
-    # un-composed caller gets.
+    # ``None`` means the roster is unknown: preserve raw scores/evidence but
+    # do not invent valid-best eligibility. Classifiers perform no config I/O.
     """
     Convert a HyperparamTuningOutput to a condensed ModelRunSummary.
 
