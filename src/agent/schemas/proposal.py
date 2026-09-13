@@ -20,6 +20,7 @@ from agent.schemas.hyperparam_tuning import (
     ExpertAdviceInput,
     GateExhaustionInfo,
 )
+from agent.schemas.output_types import OutputTypeName as OutputTypeName
 from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
@@ -31,11 +32,6 @@ from execute_tools.dataset_config import (
     resolve_dataset_profile,
     tidmad_topology,
 )
-
-#: arXiv #259 — the output-type vocabulary, declared ONCE. The schema fields,
-#: the launch config and the CLI parser all read this alias; adding a type
-#: means changing exactly this line (and the science that admits it).
-OutputTypeName = Literal["classifier", "regressor"]
 
 # ---------------------------------------------------------------------------
 # Phase B schemas — three-stage reasoning pipeline
