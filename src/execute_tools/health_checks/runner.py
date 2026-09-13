@@ -102,7 +102,7 @@ def get_gates_for_position(round_index: int, config_path: str | None = None) -> 
 def evaluate_gate(
     gate_id: str, ctx: HealthCheckContext, config_path: str | None = None
 ) -> GateResult:
-    """Evaluate a named gate from ``configs/health/health_checks.yaml``.
+    """Evaluate a named gate from the selected effective Health configuration.
 
     Runs the gate's checks in config-listed order. When the gate's
     ``short_circuit`` (default True per commit-2 D4) is set, stops at the

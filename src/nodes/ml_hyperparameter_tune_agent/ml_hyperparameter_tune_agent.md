@@ -1137,6 +1137,16 @@ contract have exactly one source for the whole run.
 
 ### HealthGates fire at the ROUND boundary, on every scoring route (F2)
 
+`--health_checks_config` defaults to `None`, selecting the packaged generic
+policy; a nonempty explicit override is loaded directly and invalid/missing
+input refuses. The comparison argument at the existing round-boundary call
+uses `execute_tools.health_checks.config.default_health_policy_path()` even
+without a checkout, carrying the same external task Health binding. Thus an
+observe policy may continue while persisting production would-invalidate
+evidence. The accessor performs no I/O, so disabled Health remains inert.
+`--healthgate_mode observe_only` is a posture declaration, not file selection;
+select an observe policy explicitly with `--health_checks_config`.
+
 `docs/design/pluggable_health_checks.md` §8 and `CLAUDE.md` both specify that
 gates fire at tuner round boundaries. Until this repair the code did not: the
 tuner's only production gate call sat INSIDE the `ANCHOR_NORMALIZED` scoring

@@ -106,9 +106,11 @@ Two documents, two owners, and the split is the point:
   the peek set, the prose explaining what a failure means scientifically. It is
   your file, anywhere on disk, named by your manifest's `task_health:` section.
 - **What a failure does** lives in framework policy — role, cadence,
-  short-circuit, actions. The framework ships its policy (with an
-  recording variant a run selects via `--healthgate_mode observe_only`),
-  and a run can substitute its own policy file with `--health_checks_config`.
+  short-circuit, actions. The installed package supplies the generic default;
+  omit `--health_checks_config` to use it. Select a different external policy
+  with `--health_checks_config /path/to/policy.yaml`. An observe policy also
+  requires `--healthgate_mode observe_only --result_authority diagnostic`;
+  mode alone does not select the optional checkout observe file.
 
 Strictness is a decision you write in your own task config; consequences are
 a run-level policy selection. Neither document can express the other's

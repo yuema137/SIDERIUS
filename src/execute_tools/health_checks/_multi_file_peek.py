@@ -236,7 +236,7 @@ def peek_and_aggregate(
             f"{sorted(VALID_AGGREGATION_MODES)}. Aggregation comes either "
             f"from the task roster entry's parameters or, when the entry "
             f"declares none, from health_policy.<disposition>.check_config "
-            f"in configs/health/health_checks.yaml — failing closed rather than "
+            f"in the selected framework policy — failing closed rather than "
             f"peeking under a rule the runtime does not implement."
         )
     if channel is None:

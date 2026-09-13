@@ -33,12 +33,15 @@ paths may also be absolute when the contract permits them.
 
 | file | declares | when a run gets it |
 |---|---|---|
-| `configs/health/health_checks.yaml` | what a health failure **does**: gate role, cadence, short-circuit, `on_pass`/`on_fail` | the default |
-| `configs/health/health_checks_baseline_observe_mode.yaml` | the same, with blocking failures downgraded to observation | `--healthgate_mode observe_only` — a diagnostic campaign |
+| packaged `execute_tools/health_checks/resources/health_checks.yaml` | what a health failure **does**: gate role, cadence, short-circuit, `on_pass`/`on_fail` | omitted `--health_checks_config` |
+| `configs/health/health_checks_baseline_observe_mode.yaml` | optional policy with blocking failures downgraded to observation | explicit `--health_checks_config` plus `--healthgate_mode observe_only` |
 
 A run that needs different consequences selects its own policy file with
-`--health_checks_config /path/to/policy.yaml`; the shipped pair is the
-framework's, not a per-task customization surface.
+`--health_checks_config /path/to/policy.yaml`. Missing or invalid nonempty
+explicit paths refuse without falling back. The old checkout default path
+`configs/health/health_checks.yaml` is removed; use omission or the public
+`execute_tools.health_checks.config.default_health_policy_path()` accessor.
+Users select external policy; framework developers maintain the packaged YAML.
 
 The split is the point. **Thresholds are task policy; consequences are framework
 policy.** Neither file can express the other's concern, so a task and the
@@ -102,7 +105,9 @@ What *blocking* then does is framework policy and you do not write it.
 
 > "I want blocking failures to stop blocking, temporarily."
 
-Launch with `--healthgate_mode observe_only`.
+Select an explicit observe policy with `--health_checks_config /path/to/policy.yaml`
+and declare `--healthgate_mode observe_only --result_authority diagnostic`.
+The mode declaration checks consistency; it does not choose a policy file.
 
 ---
 

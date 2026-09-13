@@ -170,7 +170,7 @@ class ActionConfig(BaseModel):
 
 
 class GateConfig(BaseModel):
-    """One HealthGate entry in ``configs/health/health_checks.yaml``.
+    """One HealthGate entry in an effective or explicit Health configuration.
 
     A gate fires at its configured ``after_round`` position, runs its
     ``checks`` in listed order (with per-gate ``short_circuit``), and
@@ -307,7 +307,7 @@ class PersistedHealthPluginIdentity(BaseModel):
 class HealthChecksConfig(BaseModel):
     """The rev-6 HealthGate YAML root.
 
-    Loaded from ``configs/health/health_checks.yaml`` by
+    Loaded from packaged defaults or explicit files by
     ``load_health_gates_config``. See
     ``docs/design/pluggable_health_checks.md`` §3.
     """
@@ -338,12 +338,10 @@ class HealthChecksConfig(BaseModel):
             "disposition (Step 08b §3.7). The operator policy surface: "
             "gate role, cadence, short-circuit, actions, severity and "
             "per-check policy keys such as ``aggregation``.\n\n"
-            "Empty means the built-in default table, which reproduces the "
-            "six shipped gates exactly — so a pre-08b custom YAML keeps "
-            "working without acquiring a block it never had. The shipped "
-            "observe-mode config exists precisely because this is data: it "
-            "differs from the production config ONLY in ``on_fail`` for "
-            "blocking gates."
+            "Empty selects the packaged default table when composition needs "
+            "policy; an explicit complete table is independent of that resource. "
+            "The optional observe-mode file differs from the production default "
+            "only in blocking ``on_fail`` and must be selected explicitly."
         ),
     )
 
@@ -379,7 +377,7 @@ class HealthChecksConfig(BaseModel):
     )
 
     def resolved_policy(self) -> dict[str, DispositionPolicy]:
-        """The policy table in effect — declared, or the built-in default."""
+        """Declared policy, or a lazy validated read of the packaged default."""
         return self.health_policy or default_disposition_policy()
 
     @model_validator(mode="after")

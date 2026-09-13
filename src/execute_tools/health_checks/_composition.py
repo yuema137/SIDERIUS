@@ -133,13 +133,10 @@ class DispositionPolicy(BaseModel):
     Every field here is one a task may not state (§3.7), which is what makes
     the ownership split structural rather than conventional.
 
-    This lives in the framework YAML rather than in code because the two
-    shipped configs genuinely differ in it: `health_checks.yaml` and
-    `health_checks_baseline_observe_mode.yaml` carry the identical six gates
-    and differ ONLY in `on_fail` for blocking gates. Observe mode is a policy
-    choice about what a failure DOES — exactly the thing the framework owns —
-    so hard-coding the table would have made the observe-mode config
-    inexpressible.
+    Values live in the packaged default or an explicitly selected policy
+    YAML, not a second Python table. The optional observe-only policy differs
+    from the default only in blocking ``on_fail``. The gate roster remains
+    task-owned; selecting a different consequence policy never selects a task.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

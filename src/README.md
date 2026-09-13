@@ -44,7 +44,9 @@ No writable run state belongs under `src/` or `site-packages`.
 Chain scripts live in `scripts/launch/`; the one-iteration public entrypoint is
 `src/workflows/run_one_iteration.py`, with supporting workflow code alongside
 it in `src/workflows/`. Routing remains in `configs/llm/`,
-and policy/manifests remain in `configs/`. Use the
+and optional policy variants/manifests remain in `configs/`. The required
+generic Health default lives beside its installed reader under
+`execute_tools/health_checks/resources/`; source and wheels share that authority. Use the
 [entrypoint reference](../docs/reference/entrypoints.md).
 For package CLIs, `.venv/bin/python -m dashboard.main` retains the import name;
 direct source paths now start with `src/`.
