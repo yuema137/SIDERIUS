@@ -1,11 +1,9 @@
 # tests/integration/scoring
 
-Legacy scoring parity compares the retained scoring route with its historical
-reference on synthetic inputs. It catches arithmetic/order drift; no provider,
-GPU, or external dataset is required.
+This namespace is reserved for task-generic scoring integrations. It currently
+contains no standalone test module; scoring mechanisms are exercised beside
+their workflow or metric-contract owners.
 
-## Source and route
-
-`.venv/bin/python -m pytest tests/integration/scoring/test_legacy_parity.py -q`
-
-Owner: `src/execute_tools` scoring/metric modules. See the [integration map](../README.md).
+Real-task numeric rulers and historical scientific parity belong to the
+consumer task package, not to framework integration tests. See the
+[integration map](../README.md).

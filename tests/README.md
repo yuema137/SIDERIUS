@@ -1,7 +1,7 @@
 # tests
 
 This tree records framework evidence: deterministic unit contracts, opt-in
-integration seams, shared fixtures/helpers, and manual hardware probes. The
+integration seams, shared fixtures/helpers, and bounded manual diagnostics. The
 [unit map](unit/README.md) is the normal source-change starting point; use the
 [integration map](integration/README.md) for cross-process or provider seams.
 
@@ -29,7 +29,6 @@ SIDERIUS_TEST_DATA_DIR=/absolute/path/to/test-data \
   .venv/bin/python -m pytest <selected-test> --real-data -q
 ```
 
-The shared historical real-data fixture still expects its named external file.
-Direct historical workload owners have not yet been routed through this seam;
-their migration or retirement is the next bounded portability slice. This
-resource contract does not make a real scientific task a framework default.
+The remaining shared real-mode options and their callers require a separate
+ownership census before removal or replacement. This resource contract does
+not make a real scientific task a framework default.

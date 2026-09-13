@@ -1,10 +1,8 @@
 # tests/manual
 
-`probe_ssm_vram.py` and `probe_warmup_pipe.py` are operator CUDA diagnostics,
-not automated tests or a training approval.
+This namespace is reserved for bounded, task-generic operator diagnostics that
+cannot be expressed as automated tests. It currently contains no manual probe.
 
-## Invocation
-
-These are manual hardware probes, not pytest modules; do not invoke them as a
-routine documentation check.
-See the [tests index](../README.md).
+Real-task warmup and generated-model replay procedures belong to the external
+experiment repository and its machine-owned workspaces. See the
+[tests index](../README.md).

@@ -9,8 +9,8 @@ scoring, skill, and workflow seams; inspect markers before opting into effects.
 - [execute_tools](execute_tools/README.md), [nodes](nodes/README.md), and
   [protocols](protocols/README.md) — typed cross-boundary seams.
 - [prompt_templates](prompt_templates/README.md), [runner](runner/README.md),
-  and [scoring](scoring/README.md) — rendering, launch bookkeeping, and
-  historical scoring compatibility.
+  and [scoring](scoring/README.md) — rendering, launch bookkeeping, and the
+  reserved task-generic scoring integration namespace.
 - [skills](skills/README.md) and [workflows](workflows/README.md) — effectful
   or pseudo campaign paths; inspect their markers before running.
 - `agent/` and `health_checks/` contain only `__init__.py` placeholders today;
