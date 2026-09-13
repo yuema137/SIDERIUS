@@ -62,18 +62,16 @@ What this test does NOT cover (and why)
 
 Workspace
 ---------
-Per the §5.2 plan and the user's directive, this test writes to
-``/home/yuema137/SIDERIUS_DATA/v8_preflight_test/v8_smoke/`` so the
-smoke artifacts (records, evolution_log) can be inspected afterwards.
-The directory is wiped at the start of each run.
+The test uses pytest's per-test temporary directory. This keeps its destructive
+setup and generated evidence isolated from retained runs and makes the test
+portable across checkouts and machines.
 """
 
 from __future__ import annotations
 
 import json
-import os
-import shutil
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -101,13 +99,14 @@ from workflows.llm_config import (
 )
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-V8_SMOKE_ROOT = "/home/yuema137/SIDERIUS_DATA/v8_preflight_test"
 RUN_NAME = "v8_smoke"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _error_scoring_record_dict(exp_id: str, model_type: str, file_index: int) -> dict:
@@ -227,7 +226,7 @@ def _make_interpretation_output_for_iter(iter_n: int) -> InterpretationOutput:
 # ---------------------------------------------------------------------------
 
 
-def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
+def test_iter003_inherits_iter002_scoring_crash_evidence(tmp_path):
     """Smoke test §5.2 — full V8 certification.
 
     Three iterations drive ``run_workflow``. Iter 002's tuner output
@@ -236,32 +235,34 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
     record verbatim, and that the C3 evolution_log captured one line
     per iteration."""
     # --- Workspace ---
-    chain_root = os.path.join(V8_SMOKE_ROOT, RUN_NAME)
-    if os.path.exists(chain_root):
-        shutil.rmtree(chain_root)
-    os.makedirs(chain_root, exist_ok=True)
-
-    # Tell the C3 evolution_log writer where the chain root is. In real
-    # chain mode this env var is set by run_chain.sh; in monolithic
-    # run_workflow we set it ourselves so all three iters' lines land
-    # in one tail-able file.
-    monkeypatch.setenv("SIDERIUS_CHAIN_WORKSPACE", chain_root)
+    workspace_root = tmp_path / "v8_preflight_test"
+    chain_root = workspace_root / RUN_NAME
+    workflow_workspace = chain_root / "workflow_output"
+    chain_root.mkdir(parents=True)
 
     # Seed tuning data so the workflow can bootstrap iteration 1 from disk.
-    workspace_root = os.path.join(V8_SMOKE_ROOT)
-    data_dir = os.path.join(workspace_root, RUN_NAME, "_seed_data")
-    os.makedirs(data_dir, exist_ok=True)
     # _write_tuning_output expects a Path-like with /data/ subdir convention.
-    from pathlib import Path
-
-    seed_root = Path(workspace_root) / RUN_NAME / "_seed"
+    seed_root = workspace_root / RUN_NAME / "_seed"
     seed_root.mkdir(parents=True, exist_ok=True)
-    _write_tuning_output(seed_root, "punet", run="v1", score=1.5)
+    composition = compose_run_task_bindings(
+        str(REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml")
+    )
+    _write_tuning_output(
+        seed_root,
+        "punet",
+        run="v1",
+        score=1.5,
+        fingerprint=composition.semantic_fingerprint,
+        metric_spec=composition.metric.spec,
+    )
 
     # --- Tuner outputs ---
     iter1_tune = _make_tuning_output(model_type="punet_v1", score=1.6)
     iter2_tune = _make_iter002_tune_output(model_type="m_iter2")
     iter3_tune = _make_tuning_output(model_type="m_iter3", score=1.7)
+    for tune_output in (iter1_tune, iter2_tune, iter3_tune):
+        tune_output.metric_spec = composition.metric.spec
+        tune_output.task_composition_fingerprint = composition.semantic_fingerprint
 
     # --- Spy on tuner inputs (for sanity, not the primary assertion) ---
     captured_tune_inputs: list = []
@@ -293,12 +294,12 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
             promoted_this_iter=0,
             is_degraded=False,  # neither Fix 2a nor 2b fired in this scenario
         )
-        # _resolve_evolution_log_root reads SIDERIUS_CHAIN_WORKSPACE
-        # which we set above; pass the agent's own workspace as the
-        # fallback so the helper picks up the env var.
+        # The workflow binds SIDERIUS_CHAIN_WORKSPACE to its configured
+        # workspace before the first node runs. Resolve through that same
+        # public binding rather than pre-seeding an obsolete test override.
         from nodes.result_interpretation_agent import _resolve_evolution_log_root
 
-        log_root = _resolve_evolution_log_root(getattr(inp, "agent_workspace", chain_root))
+        log_root = _resolve_evolution_log_root(getattr(inp, "agent_workspace", workflow_workspace))
         _append_evolution_log(
             log_root,
             {
@@ -346,17 +347,22 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
             ),
         )
 
-        run_workflow(
-            launch=WorkflowLaunchConfig(
-                data_dir=str(seed_root / "data"),
-                model_types=["punet"],
-                source_run_name="v1",
-                max_iterations=3,
-            ),
-            workspace=str(Path(workspace_root) / RUN_NAME / "workflow_output"),
-            run_name=RUN_NAME,
-            llm_config=llm_config,
-        )
+        with bind_run_task_composition(
+            composition,
+            physical_data_root=str(seed_root / "data"),
+        ):
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=str(seed_root / "data"),
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    max_iterations=3,
+                ),
+                workspace=str(workflow_workspace),
+                run_name=RUN_NAME,
+                llm_config=llm_config,
+                task_composition=composition,
+            )
 
     # ============================================================
     # Assertions
@@ -423,12 +429,12 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
     assert rehydrated.status == "error_scoring"
 
     # --- (b) evolution_log.jsonl exists with one line per iter ---
-    log_path = os.path.join(chain_root, "evolution_log.jsonl")
-    assert os.path.exists(log_path), (
+    log_path = workflow_workspace / "evolution_log.jsonl"
+    assert log_path.is_file(), (
         f"V8 CERTIFICATION FAILED — evolution_log.jsonl missing at "
         f"{log_path}. The C3 writer is not wired into the workflow."
     )
-    lines = [json.loads(line) for line in open(log_path, encoding="utf-8") if line.strip()]
+    lines = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line]
     assert len(lines) == 3, (
         f"Expected 3 evolution_log lines (one per iter); got {len(lines)}.\nLines: {lines}"
     )
