@@ -13,3 +13,22 @@ Each family map identifies the production owner, the defect its tests catch,
 and a focused command. Integration defaults are synthetic or recording; real
 LLM/training paths require explicit markers/options. No map implies a
 full-suite, live-provider, GPU, or scientific-result claim.
+
+## Optional external resources
+
+Tests that opt into the shared `--real-data` or `--real-training` lane read
+their resource root only from the absolute path in `SIDERIUS_TEST_DATA_DIR`.
+Leaving the variable unset visibly skips that optional lane. Setting it to a
+blank, missing, non-directory, or incomplete resource is a qualification
+failure; it never falls back to a developer path or becomes a green skip.
+
+For example:
+
+```bash
+SIDERIUS_TEST_DATA_DIR=/absolute/path/to/test-data \
+  .venv/bin/python -m pytest <selected-test> --real-data -q
+```
+
+The shared historical real-data fixture still expects its named external file;
+that workload's task ownership is being resolved separately. This resource
+contract does not make a real scientific task a framework default.

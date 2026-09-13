@@ -5,11 +5,9 @@ Data modes
 ----------
 By default all training tests use a tiny synthetic HDF5 file with random
 noise (fast, no real data required). Pass --real-data to switch to the
-actual TIDMAD file, ``abra_training_0000.h5``, resolved from the
-``tidmad_data_dir`` configured in ``tidmad_data_config.yaml`` (the tracked
-template is ``tidmad_data_config.example.yaml``, which also lists the
-reference values for the known deployments). Absent or unconfigured, the
-real-data tests skip with the path they looked for:
+explicitly configured ``SIDERIUS_TEST_DATA_DIR`` resource. When the variable
+is absent the optional lane skips visibly. When it is set but invalid, the
+qualification fails before execution rather than silently turning green:
 
     uv run pytest tests/integration/execute_tools/test_training_loop.py --real-data
 
@@ -42,28 +40,27 @@ from execute_tools.dataset_config import (
     tidmad_topology,
 )
 from execute_tools.evaluation_metric import bind_run_metric
+from tests.helpers.configured_resource import (
+    require_configured_directory,
+    require_resource_file,
+)
 from tests.helpers.metric_fixtures import accuracy_like_metric
 from tests.helpers.two_family_profile import make_two_family_profile
 from workflows.task_config import bind_task_config, load_task_config
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-REAL_DATA_DIR: str | None = os.environ.get("SIDERIUS_TEST_DATA_DIR")
+REAL_DATA_ENV_VAR = "SIDERIUS_TEST_DATA_DIR"
 REAL_DATA_FILE = "abra_training_0000.h5"
 
 
 def _require_real_data_dir(flag: str) -> str:
-    """The configured raw-TIDMAD directory, or an informative skip.
+    """The configured external data directory, or an informative skip/failure.
 
     Only ever called from behind ``--real-data`` / ``--real-training``; the
     default run never dereferences ``REAL_DATA_DIR`` at all.
     """
-    if REAL_DATA_DIR is None:
-        pytest.skip(
-            f"{flag} requires an explicit SIDERIUS_TEST_DATA_DIR. "
-            "Framework tests do not select a scientific dataset by default."
-        )
-    return REAL_DATA_DIR
+    return str(require_configured_directory(REAL_DATA_ENV_VAR, requested_by=flag))
 
 
 # Number of consecutive samples forming one group in TIDMADDataset.
@@ -358,13 +355,12 @@ def h5_source(request, synthetic_h5):
       - Real (--real-data):  ignores seg_size and points to the actual TIDMAD file
 
     Tests using this fixture are automatically marked "real_data" when
-    --real-data is active, and skipped if the file is missing.
+    --real-data is active. An unconfigured optional resource skips; an
+    explicitly configured missing directory or file fails.
     """
     if request.config.getoption("--real-data"):
         data_dir = _require_real_data_dir("--real-data")
-        real_path = os.path.join(data_dir, REAL_DATA_FILE)
-        if not os.path.exists(real_path):
-            pytest.skip(f"Real data not found at {real_path}")
+        require_resource_file(Path(data_dir), REAL_DATA_FILE, requested_by="--real-data")
         request.node.add_marker(pytest.mark.real_data)
 
         def _real(seg_size: int):
@@ -435,8 +431,8 @@ def make_sandbox_factory(request, model_type: str, base_dir: str, run_name: str)
     """Return a sandbox factory for the given model.
 
     Pseudo by default; pass ``--real-training`` (or the deprecated
-    ``--real-api-call``) for real subprocess execution. Skips the test if
-    the flag is set but TIDMAD data is absent.
+    ``--real-api-call``) for real subprocess execution. An unconfigured
+    optional resource skips; an explicitly configured invalid resource fails.
 
     Args:
         request:    pytest ``request`` fixture (for option access).
@@ -452,9 +448,7 @@ def make_sandbox_factory(request, model_type: str, base_dir: str, run_name: str)
     """
     if _is_real_training(request):
         data_dir = _require_real_data_dir("--real-training")
-        real_path = os.path.join(data_dir, REAL_DATA_FILE)
-        if not os.path.exists(real_path):
-            pytest.skip(f"--real-training requires TIDMAD data at {real_path}")
+        require_resource_file(Path(data_dir), REAL_DATA_FILE, requested_by="--real-training")
         from core.sandbox_executor import TidmadSandbox
 
         return TidmadSandbox
