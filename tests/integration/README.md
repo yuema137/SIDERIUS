@@ -98,3 +98,24 @@ inputs, body-immutable resume and cold damaged-default independence. Damaged
 resource probes alter only the disposable installation and restore its bytes.
 No network/provider/GPU/training calls. The broader `installed_package_witness.py`
 now also uses the packaged default, but its CPU lifecycle is a separate claim.
+
+## Explicit task-boundary persistence and profile transport (manual, offline)
+
+From the checkout being tested, use its frozen environment and run the two
+remaining cross-boundary owners together:
+
+```bash
+env -u PYTHONPATH -u VIRTUAL_ENV CUDA_VISIBLE_DEVICES= \
+  OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2 \
+  timeout 180 .venv/bin/python -m pytest \
+  tests/integration/workflows/test_pr_e_persistence_layout_pseudo.py \
+  tests/integration/execute_tools/test_step02a_checkpoint_c_profile_boundary.py -q
+```
+
+All fourteen cases must execute without skips. They prove node/workflow
+persistence under the shipped Quickstart composition and real subprocess
+transport of a test-owned DatasetProfile, task-data-path implementation and
+opaque scope. Children run as installed modules from an unrelated temporary
+working directory with no `PYTHONPATH` overlay. The cohort uses tiny synthetic
+HDF5 files on CPU; it performs no provider call, GPU work or scientific-task
+execution.
