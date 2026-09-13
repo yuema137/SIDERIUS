@@ -47,7 +47,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.prompt_templates.tuner.loss_context import PlannerLossContext
 from agent.schemas.execution_provenance import AUTHORITY_DESCRIPTIONS
+from ml_models.models_format_sandbox import LossConfig
 
 #: The efficiency-equivalence band, as a fraction of a run's observed score
 #: range. FRAMEWORK policy with a metric-independent definition (design §3.3
@@ -357,6 +359,8 @@ class TunerTaskRender(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    loss_context: PlannerLossContext | None = None
+
     builtin_model_roster: str = Field(
         description="The built-in architectures, pipe-joined, in registry order."
     )
@@ -446,6 +450,7 @@ def build_tuner_task_render(
     efficiency_band_fraction: float,
     registry: dict[str, Any] | None = None,
     composed: bool = False,
+    objective: LossConfig | None = None,
 ) -> TunerTaskRender:
     """Assemble the run's :class:`TunerTaskRender` from its landed authorities.
 
@@ -453,8 +458,20 @@ def build_tuner_task_render(
     already bound for another reason; nothing is loaded or derived here that
     the run did not already establish.
     """
+    loss_context = None
+    if composed:
+        if model_io_contract is None:
+            raise ValueError(
+                "Composed planner requires declared ModelIO output facts for loss offers"
+            )
+        loss_context = PlannerLossContext(
+            output_semantic=model_io_contract.output_semantic,
+            output_has_temporal_axis=model_io_contract.output_has_temporal_axis,
+            objective=objective,
+        )
     alpha, gamma = render_focal_defaults()
     return TunerTaskRender(
+        loss_context=loss_context,
         builtin_model_roster=render_builtin_model_roster(registry),
         full_scope_segments=render_full_scope_segments(dataset),
         output_contract_shape=render_output_contract_shape(model_io_contract),

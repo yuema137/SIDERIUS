@@ -42,9 +42,15 @@ class TestComposedRenderAuthority:
         assert render_per_file_table_protocol(composed=True) == ""
 
     def test_complete_render_contains_replacements_without_task_science(self):
+        from agent.schemas.model_io_contract import ModelIOContract
+
+        tensor = {
+            "axes": [{"dimension": {"symbolic": "B"}, "role": "batch"}],
+            "dtype": {"admissible": ["float32"]},
+        }
         render = build_tuner_task_render(
             dataset=type("DatasetFacts", (), {"num_files": 4, "segments_per_file": 8})(),
-            model_io_contract=None,
+            model_io_contract=ModelIOContract.model_validate({"input": tensor, "output": tensor}),
             health_config=type("HealthFacts", (), {"health_gates": []})(),
             efficiency_band_fraction=0.05,
             composed=True,
