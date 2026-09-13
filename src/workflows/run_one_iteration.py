@@ -80,7 +80,6 @@ from core.iteration_manifest import (
 )
 from core.layout import checkout_root
 from core.record_role import formal_evidence_of
-from core.resume import ResumeError, restore_prior_state
 from core.run_invariants import (
     LockLaunchIdentity,
     RunHealthMaterialization,
@@ -103,11 +102,6 @@ from execute_tools.health_checks.launch_policy import (
     validate_formal_launch,
 )
 from workflows.llm_config import WorkflowLLMConfig
-from workflows.model_exploration import (
-    lit_review_config_sha256,
-    resolve_lit_review_config_path,
-    run_workflow,
-)
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import (
     RunTaskComposition,
@@ -2306,6 +2300,8 @@ def resolve_lit_review_enabled(cli_flag: bool | None, config_path: str | None) -
         return cli_flag
     if config_path is None:
         return False
+    from workflows.model_exploration import resolve_lit_review_config_path
+
     yaml_path = resolve_lit_review_config_path(config_path)
     try:
         with open(yaml_path, encoding="utf-8") as f:
@@ -2324,6 +2320,8 @@ def resolve_launch_identity(args: argparse.Namespace) -> LaunchIdentity:
             the declared advice artifact cannot be certified
             (:class:`AdviceArtifactError`).
     """
+    from workflows.model_exploration import lit_review_config_sha256
+
     enabled = resolve_lit_review_enabled(args.ml_lit_review_enabled, args.ml_lit_review_config)
     # The advice pin comes from the SAME single read the advice CONTENT does
     # (`resolve_advice_artifact` is the one authority and caches on `args`),
@@ -2746,13 +2744,16 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
 
 def print_resolved_launch_config(args: argparse.Namespace) -> int:
     """arXiv U3 (#259) — print the resolved launch configuration as ONE JSON
-    object and return the process exit status. Pure: it resolves exactly
-    what :func:`main` would resolve and touches nothing on disk.
+    object and return the process exit status, without iteration execution or
+    run-artifact writes. Resolving the existing workflow owners can import
+    plugins with their own import-time effects and stdout.
 
     Returns ``0`` after printing; ``1`` (with the reason on stderr) when the
     identity cannot be resolved — an enabled lit-review whose config cannot
     be read has no resolved configuration to print.
     """
+    from workflows.model_exploration import resolve_lit_review_config_path
+
     try:
         identity = resolve_launch_identity(args)
     except ValueError as exc:
@@ -2818,6 +2819,11 @@ def main():
     from core.generated_library import bind_generated_library_to_workspace
 
     bind_generated_library_to_workspace(args.workspace)
+
+    # Both owners transitively load model registries. A cold launch must bind
+    # its workspace first so discovery cannot import legacy checkout plugins.
+    from core.resume import ResumeError, restore_prior_state
+    from workflows.model_exploration import run_workflow
 
     # Resolve a valid composition before launch-policy validation so the
     # policy reads this run's task-owned Health declaration rather than
@@ -2892,8 +2898,9 @@ def main():
 
     # arXiv U3 (#259) — the resolved-configuration view. Placed AFTER the
     # policy refusal (a config that could not launch is not "resolved") and
-    # BEFORE every side effect below: no halt marker, no workspace or iter
-    # directory, no run-id sidecar, no env var, no lock, no LLM.
+    # BEFORE iteration-side effects below: no halt marker, iteration directory,
+    # run-id sidecar, lock, or LLM. Workspace env binding and plugin imports
+    # have already occurred; plugin effects/stdout are not suppressed.
     if args.print_resolved_launch_config:
         sys.exit(print_resolved_launch_config(args))
 

@@ -83,6 +83,16 @@ workflow summary; calls `ensure_run_invariants` (chain-level lock). Sets
 generated library is caller/workspace-owned and must be explicitly bound by
 low-level consumers; it is not an implicit inter-run checkout channel.
 
+The direct `run_one_iteration.py` entry (script or module CLI) binds its parsed
+workspace before importing the registry-bearing resume/workflow owners in a
+fresh process. That excludes implicit legacy checkout model discovery while
+preserving selected-workspace plugins and explicit plugin-directory overrides.
+Help and missing required arguments return before those imports. Direct
+low-level calls and registries already imported in the same process are outside
+this startup guarantee. Even configuration inspection can import plugins and
+emit their stdout; it is not a sandbox. See the
+[one-iteration entry contract](../../docs/reference/entrypoints.md#run_one_iterationpy--one-iteration).
+
 ## Failure modes
 
 | refusal | meaning |

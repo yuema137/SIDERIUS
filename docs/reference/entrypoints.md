@@ -165,6 +165,20 @@ Direct invocation establishes the same no-bytecode policy before importing
 framework modules and passes it to child processes. This keeps the framework
 checkout read-only without changing workspace artifact ownership.
 
+In a fresh Python process, both the script and
+`python -m workflows.run_one_iteration` parse and normalize arguments, then bind
+`--workspace` to `{workspace}/generated_library` before importing the resume and
+workflow owners that load model registries. A stale ambient generated-library
+root is replaced by that workspace binding. Implicit legacy checkout model
+discovery is excluded; plugins in the selected workspace still load. `--help`
+and missing required arguments exit before those registry-bearing imports.
+
+This is an entry-ordering guarantee, not arbitrary Python isolation: explicit
+`SIDERIUS_PLUGIN_DIRS` overrides remain supported, already-imported registries
+are not reset, and unbound low-level helper calls retain legacy discovery.
+The configuration-printing path also imports selected workspace plugins; their
+import-time effects and stdout are not suppressed.
+
 Two flags have **no defaults and are required for a formal launch** — the run
 exits `2` without them:
 
@@ -197,7 +211,7 @@ Other flags that define a run:
 | `--advice` / `--human_advice_file` | `None`. Path to the JSON advice artifact (`--advice` wins when both are given). Recognised top-level keys are exactly `interpret`, `propose`, `implement`, `validate`, `tune`, `mindset`, each a string or a list of lines. The key set is CLOSED: an unrecognised key, a key present but resolving to nothing, a non-text value, or a file with no recognised key at all REFUSES the launch by name (F-SCHED-5) — the digest is pinned as the run's treatment identity whether or not the content ever reaches a prompt, so an artifact that cannot inject must never get that far. Sparse advice stays legal; prefix a key with `_` to declare it deliberately inert. See the [human advice guide](../guides/advice.md) |
 | `--advice_sha256` | `None` (undeclared). The launcher's OBSERVED sha256 of the advice artifact's bytes, forwarded as a DECLARATION. The run certifies it against its own single read and then discards it: the lock always pins the digest THIS process observed, never an echo of the declared value. A mismatch REFUSES the launch — which is how an edit to the artifact between two band launches of one campaign is caught, since the bands run in SEPARATE workspaces that no per-workspace lock can ever compare. Undeclared is legal (the observed digest is still pinned) and emits no token, so a non-campaign chain's child argv is unchanged |
 | `--baseline_isolation` | off. Excludes the bundled baselines from the LLM-facing surface: bundled descriptions refused, prompt examples neutralised, built-in proposals refused by name (arXiv U3). Pinned in the lock |
-| `--print_resolved_launch_config` | off. Print the resolved launch configuration (arm, lit-review topology + config sha256, isolation, composition, workspace, advice file + resolved advice path + OBSERVED advice sha256, declared posture) as ONE JSON object and exit 0 with no side effects. Includes `required_runtime_profile_path` / `required_runtime_profile` / `required_runtime_profile_sha256` — recorded as `null` when undeclared, so "no profile was pinned" is an observable fact rather than an absent key |
+| `--print_resolved_launch_config` | off. Print the resolved launch configuration (arm, lit-review topology + config sha256, isolation, composition, workspace, advice file + resolved advice path + OBSERVED advice sha256, declared posture) as ONE JSON object and exit 0 before iteration execution or run-artifact writes. Startup still binds the workspace and imports plugins; plugin stdout can precede the JSON. Includes `required_runtime_profile_path` / `required_runtime_profile` / `required_runtime_profile_sha256` — recorded as `null` when undeclared, so "no profile was pinned" is an observable fact rather than an absent key |
 
 ### `launch_prior_baseline_experiment.sh` — the two-arm experiment
 
