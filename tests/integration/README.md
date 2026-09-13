@@ -49,6 +49,35 @@ idempotent registry writes. Identical inference observations deduplicate rather
 than promote. The unnamed pseudo device supplies no occupancy/measurement-validity
 evidence. This is not full integration coverage, real GPU qualification or a Gate.
 
+## Declared-composition tuner (manual, offline)
+
+After the same checkout-owned frozen sync above, run these six existing cases:
+
+```bash
+env -u PYTHONPATH -u VIRTUAL_ENV CUDA_VISIBLE_DEVICES= \
+  OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2 \
+  timeout 180 .venv/bin/python -m pytest \
+  tests/integration/workflows/test_data_scope_tuner_pseudo.py \
+  tests/integration/workflows/test_healthgate_ten_collapse_continuation.py -q
+```
+
+All six must pass without skips. A temporary declared task supplies fixed-shape
+classification, separate train/eval identities and a blocking Health roster.
+Real composition, scope projection, round/admission orchestration and
+`LocalRecorder` persistence run with finite recording-provider/executor outcomes.
+The effect fixture refuses actual provider constructors, workers and process
+spawns; no model training, inference, scoring arithmetic or GPU probe executes.
+Parent-process RSS instrumentation and temporary record/config writes do occur.
+
+Coverage: four completed collapsed rounds beyond the execution-failure brake;
+partial-scope normalization and executor transport; unchanged snapshot/full
+scope; explicitly absent and disabled Health with a valid finite candidate;
+terminal scope refusal without a later phase or retry. Observe-only actions
+never convert a scientifically blocking failed check into a valid candidate.
+Ordinary unit CI does not select this manual integration cohort. These supplied
+outcomes are not real-LLM, real-Health-arithmetic or physical-workflow evidence;
+external-task qualification remains a separate requirement.
+
 ## Installed Health policy (manual, offline)
 
 `installed_health_policy_witness.py` owns wheel-resource/filesystem acceptance,

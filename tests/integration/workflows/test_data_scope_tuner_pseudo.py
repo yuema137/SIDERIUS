@@ -24,6 +24,7 @@ import copy
 import importlib
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -31,38 +32,73 @@ from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.dataset_config import DataScope
 from execute_tools.health_checks.config import EFFECTIVE_CONFIG_BASENAME
-from execute_tools.health_checks.schemas import GateAction
+from execute_tools.health_checks.schemas import (
+    GateAction,
+    GateResult,
+    HealthCheckResult,
+    PersistedHealthGateResult,
+)
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from tests.helpers.recording_llm_bridge import RecordingLLMBridge
 from tests.helpers.recording_sandbox import RecordingSandbox
+from tests.helpers.tuner_composed_effects import composed_tuner_effects
+from tests.helpers.tuner_composed_fixture import composed_run
 
 TUNER_MODULE = "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
 PSEUDO = "tests/pseudo_data"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _load_json(path):
-    with open(path) as handle:
+    with open(REPO_ROOT / path) as handle:
         return json.load(handle)
 
 
 def _canned(n: int, score=None):
     training = _load_json(f"{PSEUDO}/train_outputs/punet/execute_training.json")
     inference = _load_json(f"{PSEUDO}/train_outputs/punet/execute_inference.json")
-    score = score or {"file_vector": [None] * 20, "scalar": 2.5}
+    from execute_tools.training_history import objective_config_fingerprint
+    from ml_models.loss_models_sandbox import LossConfig
+
+    training["results"].update(final_loss=0.5, loss_history=[0.5], model_params=30)
+    training["results"]["training_history"].update(
+        objective_kind="ce",
+        objective_config_fingerprint=objective_config_fingerprint(LossConfig(loss_type="ce")),
+        epochs_planned=1,
+        epochs_completed=1,
+        train_objective=[0.5],
+        validation_objective=[0.6],
+        validation_seconds=[0.01],
+    )
+    score = {"file_vector": None, "denoising_score": 0.75} if score is None else score
     return {
         "execute_training": [copy.deepcopy(training) for _ in range(n)],
         "execute_inference": [copy.deepcopy(inference) for _ in range(n)],
-        "score_vector": [copy.deepcopy(score) for _ in range(n)],
+        "execute_scoring": [
+            {"status": "success", "results": copy.deepcopy(score)} for _ in range(n)
+        ],
     }
 
 
 def _bridge(n: int, plan_overlay: dict | None = None) -> RecordingLLMBridge:
     plan = _load_json(f"{PSEUDO}/api_call_outputs/ml_hyperparameter_tune_agent/generate.json")
     plan.update({"is_trial": True, "train_portion": 0.1})
+    plan["model_type"] = "quickstart_reference_mlp"
+    plan["model_config"] = {
+        "model_type": "quickstart_reference_mlp",
+        "segmentation_size": 4,
+        "batch_size": 1,
+        "hidden_dim": 4,
+    }
+    plan["loss_config"] = {"loss_type": "ce", "reduction": "mean"}
     plan["train_config"].update({"epochs": 1, "device": "cpu"})
+    plan.update(
+        hypothesis="Exercise declared scope transport", reasoning="Synthetic classification fixture"
+    )
     if plan_overlay:
         plan.update(plan_overlay)
     reflection = _load_json(f"{PSEUDO}/api_call_outputs/ml_hyperparameter_tune_agent/reflect.json")
+    reflection = {key: "Supplied fixture feedback; no scientific inference." for key in reflection}
     return RecordingLLMBridge(
         responses={
             "generate": [copy.deepcopy(plan) for _ in range(n)],
@@ -80,7 +116,7 @@ def _agent(bridge, sandbox) -> HyperparamTuningAgent:
 
 def _input(tmp_path, run_name: str, rounds: int, **overrides) -> HyperparamTuningInput:
     base = dict(
-        model_type="punet",
+        model_type="quickstart_reference_mlp",
         max_rounds=rounds,
         attempts_per_round=1,
         attempts_per_formal_round=1,
@@ -92,7 +128,7 @@ def _input(tmp_path, run_name: str, rounds: int, **overrides) -> HyperparamTunin
         train_portion=0.1,
         eval_portion=0.05,
         trial_time_budget_minutes=None,
-        trial_vram_budget_gb=1000.0,
+        trial_vram_budget_gb=None,
         storage=StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=str(tmp_path), run_name=run_name),
@@ -117,15 +153,41 @@ def _gates_pass(monkeypatch, _fast):
     calls = {"n": 0}
 
     def _adapter(ctx, **_kwargs):
+        assert _kwargs["gate_ids"] == ["collapse"]
         calls["n"] += 1
-        return [], [], GateAction.CONTINUE
+        check = HealthCheckResult(
+            check_name="categorical_dominant_fraction", passed=True, reason="fixture passed"
+        )
+        result = GateResult(
+            gate_id="collapse",
+            round_index=ctx.round_index,
+            passed=True,
+            action=GateAction.CONTINUE,
+            check_results=[check],
+        )
+        persisted = PersistedHealthGateResult(
+            gate_name=result.gate_id,
+            execution_status="passed",
+            check_passed=True,
+            would_invalidate_under_production_policy=False,
+            resolved_action=GateAction.CONTINUE,
+            gate_role="blocking",
+            configured_action=GateAction.INVALIDATE_ROUND,
+            healthgate_mode="blocking",
+            check_verdicts={"categorical_dominant_fraction": "passed"},
+        )
+        return [result], [persisted], GateAction.CONTINUE
 
-    monkeypatch.setattr(_fast, "evaluate_and_persist_health_gates", _adapter)
+    monkeypatch.setattr(
+        importlib.import_module("nodes.ml_hyperparameter_tune_agent.round_health"),
+        "evaluate_and_persist_health_gates",
+        _adapter,
+    )
     return calls
 
 
 class TestPartialScopeNormalizationAndStamps:
-    def test_llm_target_plan_normalized_with_provenance(self, tmp_path, _gates_pass):
+    def test_llm_target_plan_normalized_with_provenance(self, tmp_path, monkeypatch, _gates_pass):
         bridge = _bridge(
             2,
             plan_overlay={
@@ -142,7 +204,11 @@ class TestPartialScopeNormalizationAndStamps:
             data_scope=DataScope(file_indices=[4, 5, 6, 7, 8, 9]),
             health_gate_files=[4, 7, 9],
         )
-        output = _agent(bridge, sandbox).run(inp)
+        with composed_tuner_effects(
+            monkeypatch, sandbox=sandbox, bridge=bridge, expected_attempts=2
+        ):
+            with composed_run(tmp_path, inp, health=True):
+                output = _agent(bridge, sandbox).run(inp)
 
         assert output.status == "completed"
         assert output.resolved_data_scope == [4, 5, 6, 7, 8, 9]
@@ -157,6 +223,14 @@ class TestPartialScopeNormalizationAndStamps:
             assert record.resolved_data_scope == [4, 5, 6, 7, 8, 9]
             assert record.health_gate_enabled is True
         assert _gates_pass["n"] == 2  # gate machinery reachable each round
+        assert len(sandbox.training_kwargs) == 2
+        for call in sandbox.training_kwargs:
+            scopes = call["task_scopes"]
+            assert scopes.acquired
+            assert scopes.training["partitions"] == [4, 5, 6, 7, 8, 9]
+            assert scopes.evaluation["partitions"] == [4, 5, 6, 7, 8, 9]
+            assert scopes.training["leg"] == "train"
+            assert scopes.evaluation["leg"] == "eval"
 
         # Materialized effective config + run_config stamps on disk.
         effective = os.path.join(str(tmp_path), EFFECTIVE_CONFIG_BASENAME)
@@ -168,7 +242,9 @@ class TestPartialScopeNormalizationAndStamps:
         assert run_config["health_checks_config_effective"] == effective
         assert run_config["health_config_sha256"] == output.health_config_sha256
 
-    def test_snapshot_plan_under_partial_scope_no_normalization(self, tmp_path, _gates_pass):
+    def test_snapshot_plan_under_partial_scope_no_normalization(
+        self, tmp_path, monkeypatch, _gates_pass
+    ):
         bridge = _bridge(1)  # pseudo plan defaults to snapshot
         sandbox = RecordingSandbox(base_dir=str(tmp_path), run_name="clean", canned=_canned(1))
         inp = _input(
@@ -178,18 +254,33 @@ class TestPartialScopeNormalizationAndStamps:
             data_scope=DataScope(file_indices=[4, 5, 6, 7, 8, 9]),
             health_gate_files=[4, 7, 9],
         )
-        output = _agent(bridge, sandbox).run(inp)
+        with composed_tuner_effects(
+            monkeypatch, sandbox=sandbox, bridge=bridge, expected_attempts=1
+        ):
+            with composed_run(tmp_path, inp, health=True):
+                output = _agent(bridge, sandbox).run(inp)
         record = output.all_records[0]
+        assert output.status == "completed"
+        assert output.completed_rounds == 1
+        assert record.status == "success"
         assert record.strategy_normalization_reason is None
         assert record.planned_trial_strategy == "snapshot"
 
-    def test_full_scope_default_behavior(self, tmp_path, _gates_pass):
+    def test_full_scope_default_behavior(self, tmp_path, monkeypatch, _gates_pass):
         """Default scope: full stamps, no normalization, effective config
-        materialized from the shipped default (uniform provenance)."""
+        materialized from this fixture's explicit declaration."""
         bridge = _bridge(1)
         sandbox = RecordingSandbox(base_dir=str(tmp_path), run_name="full", canned=_canned(1))
-        output = _agent(bridge, sandbox).run(_input(tmp_path, "full", rounds=1))
+        inp = _input(tmp_path, "full", rounds=1)
+        with composed_tuner_effects(
+            monkeypatch, sandbox=sandbox, bridge=bridge, expected_attempts=1
+        ):
+            with composed_run(tmp_path, inp, health=True):
+                output = _agent(bridge, sandbox).run(inp)
         assert output.resolved_data_scope == list(range(20))
+        assert output.status == "completed"
+        assert output.completed_rounds == 1
+        assert output.all_records[0].status == "success"
         assert output.all_records[0].strategy_normalization_reason is None
         assert os.path.exists(os.path.join(str(tmp_path), EFFECTIVE_CONFIG_BASENAME))
 
@@ -199,12 +290,20 @@ class TestDisabledMode:
         def _boom(*_a, **_k):  # pragma: no cover — the assert is that it never runs
             raise AssertionError("evaluate_and_persist_health_gates called while disabled")
 
-        monkeypatch.setattr(_fast, "evaluate_and_persist_health_gates", _boom)
+        monkeypatch.setattr(
+            importlib.import_module("nodes.ml_hyperparameter_tune_agent.round_health"),
+            "evaluate_and_persist_health_gates",
+            _boom,
+        )
 
         bridge = _bridge(2)
         sandbox = RecordingSandbox(base_dir=str(tmp_path), run_name="nogates", canned=_canned(2))
         inp = _input(tmp_path, "nogates", rounds=2, health_gate_enabled=False)
-        output = _agent(bridge, sandbox).run(inp)
+        with composed_tuner_effects(
+            monkeypatch, sandbox=sandbox, bridge=bridge, expected_attempts=2
+        ):
+            with composed_run(tmp_path, inp, health=False):
+                output = _agent(bridge, sandbox).run(inp)
 
         assert output.status == "completed"
         assert output.health_gate_enabled is False
@@ -217,11 +316,13 @@ class TestDisabledMode:
             assert record.status == "success"
         # Option B: disabled-mode success records are VALID candidates.
         assert output.best_valid_exp_id is not None
+        assert len(output.all_records) == 2
+        assert output.best_valid_denoising_score == 0.75
         assert output.best_valid_denoising_score == output.best_denoising_score
 
 
 class TestScopeViolationAbort:
-    def test_training_scope_violation_terminates_run(self, tmp_path, _gates_pass):
+    def test_training_scope_violation_terminates_run(self, tmp_path, monkeypatch, _gates_pass):
         violation = {
             "status": "error",
             "error_type": "scope_violation",
@@ -233,7 +334,11 @@ class TestScopeViolationAbort:
         sandbox = RecordingSandbox(base_dir=str(tmp_path), run_name="abort", canned=canned)
         # attempts_per_round=3 would normally retry twice more.
         inp = _input(tmp_path, "abort", rounds=3, attempts_per_round=3)
-        output = _agent(bridge, sandbox).run(inp)
+        with composed_tuner_effects(
+            monkeypatch, sandbox=sandbox, bridge=bridge, expected_attempts=1
+        ):
+            with composed_run(tmp_path, inp, health=True):
+                output = _agent(bridge, sandbox).run(inp)
 
         assert output.status == "failed"
         assert output.termination_reason == "scope_violation"
@@ -241,3 +346,5 @@ class TestScopeViolationAbort:
         # Non-retryable: exactly one planning attempt, one training call.
         assert len([c for c in bridge.calls if c[0] == "plan"]) == 1
         assert len([c for c in sandbox.calls if c[0] == "execute_training"]) == 1
+        assert not any(c[0] in {"execute_inference", "execute_scoring"} for c in sandbox.calls)
+        assert _gates_pass["n"] == 0
