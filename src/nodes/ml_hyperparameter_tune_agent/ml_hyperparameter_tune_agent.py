@@ -1204,17 +1204,27 @@ class HyperparamTuningAgent:
         # --- Load model description (architecture explanation for the LLM) ---
         model_description = None
         try:
-            from ml_models.model_descriptions import get_model_description
+            from ml_models.model_descriptions import (
+                DescriptionSourcePolicy,
+                get_model_description,
+            )
 
             # arXiv U3 (#260): the loader refuses a BUNDLED baseline under
             # isolation (a built-in candidate never reaches the tuner there).
+            source_policy = (
+                agent_input.task_composition_ref.description_source_policy
+                if agent_input.task_composition_ref is not None
+                else DescriptionSourcePolicy.LEGACY
+            )
             model_description = get_model_description(
-                model_type_setting, baseline_isolation=agent_input.baseline_isolation
+                model_type_setting,
+                baseline_isolation=agent_input.baseline_isolation,
+                source_policy=source_policy,
             )
             print(
                 f"Loaded model description for '{model_type_setting}' ({len(model_description)} chars)"
             )
-        except (FileNotFoundError, Exception) as e:
+        except Exception as e:
             print(f"No model description found for '{model_type_setting}': {e}")
 
         # --- Autonomous Research Loop ---

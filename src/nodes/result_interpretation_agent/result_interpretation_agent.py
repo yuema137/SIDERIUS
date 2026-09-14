@@ -322,9 +322,13 @@ class ResultInterpretationAgent:
             # Priority 3: load from description.md on disk (built-in or plugin models)
             # arXiv U3 (#260): under isolation the loader refuses the BUNDLED
             # baseline description, so none can reach the `_stats` cache below.
-            model_descriptions[mt] = get_model_description(
-                mt, baseline_isolation=inp.baseline_isolation
+            loaded_desc = get_model_description(
+                mt,
+                baseline_isolation=inp.baseline_isolation,
+                source_policy=inp.description_source_policy,
             )
+            if loaded_desc:
+                model_descriptions[mt] = loaded_desc
 
         # --- Deterministic pre-computation (ordering.precompute_evidence) ---
         # New models are read from inp.summaries, cached models from their

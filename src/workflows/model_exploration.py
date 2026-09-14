@@ -2599,6 +2599,9 @@ def run_workflow(
             # arXiv U3 (#260) — under isolation the interpreter refuses a
             # bundled built-in description, so none reaches its carried cache.
             baseline_isolation=launch.baseline_isolation,
+            description_source_policy=(
+                "composed" if bindings.task_composition is not None else "legacy"
+            ),
             human_advice=launch.human_advice_interpret,
             runtime_vocab=state.current_runtime_vocab,
             previous_proposal=state.previous_proposal_data,

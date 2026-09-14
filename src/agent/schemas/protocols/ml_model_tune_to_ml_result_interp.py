@@ -24,6 +24,7 @@ from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from agent.schemas.interpretation import InterpretationInput
 from agent.schemas.storage import StorageConfig
 from execute_tools.metric_order import MetricOrder
+from ml_models.model_descriptions import DescriptionSourcePolicy
 from nodes.result_interpretation_agent import (
     reconcile_metric_spec,
     tuning_output_to_model_run_summary,
@@ -69,6 +70,11 @@ def local_all_records(
         summaries=[summary],
         metric_spec=run_metric_spec,
         storage=storage,
+        description_source_policy=(
+            DescriptionSourcePolicy.COMPOSED
+            if output.task_composition_fingerprint is not None
+            else DescriptionSourcePolicy.LEGACY
+        ),
     )
 
 

@@ -1756,6 +1756,7 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
         task_health_binding=task_composition.task_health_binding,
         objective=getattr(task_composition, "objective", None),
         parameter_rules=getattr(task_composition, "parameter_rules", None),
+        description_source_policy="composed",
     )
 
 
