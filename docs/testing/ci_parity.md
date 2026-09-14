@@ -94,7 +94,7 @@ launching ~13,000 tests and reporting dozens of misleading failures.
 | interpreter path | `<root>/.venv/bin/python` resolves within that root (§2.1) |
 | working directory | the execution root |
 | test command | `pytest tests/unit/ -m "not real_run" -q`, or the selector's `pytest_args` |
-| markers | `real_run` deselected; `real_data` / real-training require explicit CLI flags that parity runs never pass |
+| markers | `real_run` deselected; real task data and training qualification live in external task packages |
 | `TMPDIR` | per-shard, isolated |
 | `HOME` | isolated unless a test's contract is explicitly about the user home |
 | thread pools | pinned per shard — see §3.1 |

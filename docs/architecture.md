@@ -249,18 +249,19 @@ nodes untestable in isolation and fragile when the graph is rearranged.
 
 ### 9a. Every external dependency is mockable
 
-The system has exactly two classes of external dependency: **LLM API calls** (through
-`LLMBridge`) and **subprocess execution** (through `TidmadSandbox`). Both are hidden
-behind constructor-injected factory parameters on every node, so a test can substitute
+The system has two relevant classes of external dependency here: **LLM API calls**
+(through `LLMBridge`) and **subprocess execution** (through the sandbox executor).
+Both sit behind constructor-injected factory parameters, so tests can substitute
 recording fakes (`RecordingLLMBridge`, `RecordingSandbox`) without touching production
-code. This is what makes dual-mode testing possible: the same integration test runs
-against real dependencies or recording fakes, selected by a pytest fixture.
+code. Framework dual-mode tests may switch the provider boundary to a real LLM; real
+task data and subprocess training are qualified by each external task package.
 
 The `LLMBridge` singleton invariant (enforced by
 `tests/unit/agent/test_llm_bridge_singleton.py`) guarantees no code outside
 `agent/llm_bridge.py` constructs an `OpenAI()` client. Combined with the DI factories,
-this means a single `--real-api-call` flag controls whether the entire system talks to
-real APIs or to recording fakes. See [`tests/pseudo_data/README.md`](../tests/pseudo_data/README.md)
+this means `--real-llm` controls whether the selected test talks to real APIs or to
+recording fakes. The deprecated `--real-api-call` option is an alias for that LLM axis
+only. See [`tests/pseudo_data/README.md`](../tests/pseudo_data/README.md)
 for the pseudo-mode fixtures.
 
 ---
@@ -775,8 +776,9 @@ behaviorally identical to pre-feature runs. Full design:
 
 Agent tests have five categories. Unit tests and pseudo-full-loop tests run on every
 commit (no external resources needed). The three real-API integration tiers require
-API keys and/or GPU and are gated by `pytest.mark.real_run` + the `--real-api-call`
-flag — they never run in CI. See [`tests/pseudo_data/README.md`](../tests/pseudo_data/README.md)
+provider credentials and are gated by `pytest.mark.real_run` + `--real-llm`; they never
+run in CI. The deprecated `--real-api-call` flag is an LLM-only alias. See
+[`tests/pseudo_data/README.md`](../tests/pseudo_data/README.md)
 for the dual-mode fixtures.
 
 ### Unit tests
@@ -859,14 +861,15 @@ a fixture:
   subprocess results from `tests/pseudo_data/train_outputs/`. No real API calls, no
   real training, no GPU. Runs in milliseconds. The test asserts on prompt content,
   record structure, and call sequence — everything except real LLM behavior.
-- **Real mode** (`--real-api-call`): real `LLMBridge` + real `TidmadSandbox`. Same
-  assertions plus whatever the real API returns. Requires API keys + GPU. Slow.
+- **Real-provider mode** (`--real-llm`): real `LLMBridge` with the same deterministic
+  recording sandbox. Assertions include the actual provider response. Real task data,
+  GPU execution and subprocess training are separate external-task qualifications.
 
 **Markers**:
 - `@pytest.mark.dual_mode`: the test supports both modes. Default = pseudo mode.
-  Switches to real mode when `--real-api-call` is passed.
-- `@pytest.mark.real_run`: the test only works in real mode (no pseudo equivalent).
-  Skipped by default; requires both `-m real_run` AND `--real-api-call`.
+  Switches the provider when `--real-llm` is passed.
+- `@pytest.mark.real_run`: the test only works with a real provider (no pseudo
+  equivalent). Skipped by default; requires both `-m real_run` and `--real-llm`.
 
 **Predefined data**: `tests/pseudo_data/` holds JSON files shaped exactly like the
 real API outputs. These are the test's "expected inputs" from external systems.
