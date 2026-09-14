@@ -810,6 +810,7 @@ def prepare_attempt(
             if agent_input.task_composition_ref is not None
             else None
         ),
+        health_gate_files=agent_input.health_gate_files,
     )
 
     # Segment counts for records and reflector context. EXTRACTED (§E.2):

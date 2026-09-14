@@ -363,6 +363,13 @@ class HealthCoverageRequest(BaseModel):
     evaluation_scope: Any
     round_kind: Literal["trial", "formal"]
     health_binding: Any
+    health_gate_files: tuple[int, ...] | None = Field(
+        default=None,
+        description=(
+            "The run-resolved monitored-file override, if any. The framework "
+            "transports this opaque task-owned vocabulary without interpreting it."
+        ),
+    )
 
 
 class HealthCoverageResult(BaseModel):
