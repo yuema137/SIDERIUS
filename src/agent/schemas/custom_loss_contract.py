@@ -171,10 +171,53 @@ class CustomLossInventory(BaseModel):
         return tuple(entry.name for entry in self.entries)
 
 
+class TaskOwnedCustomLoss(BaseModel):
+    """The exact custom-loss implementation selected by one composition."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(min_length=1)
+    file_path: str = Field(min_length=1)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    contract_snapshot: CapabilityContractSnapshot
+
+
+def _task_owned_metadata(task_loss: TaskOwnedCustomLoss) -> CapabilityMetadata:
+    """Adapt the ephemeral composition projection to the inventory vocabulary."""
+
+    return CapabilityMetadata(
+        name=task_loss.name,
+        capability_type="loss",
+        file_path=task_loss.file_path,
+        created_at="task-composition",
+        description="task-declared custom loss",
+        contract_snapshot=task_loss.contract_snapshot,
+    )
+
+
+def merge_task_owned_custom_loss(
+    loadable_metadata: Iterable[CapabilityMetadata],
+    task_loss: TaskOwnedCustomLoss | None,
+) -> tuple[CapabilityMetadata, ...]:
+    """Merge one selected task loss with global metadata without persistence."""
+
+    metadata = tuple(loadable_metadata)
+    if task_loss is None:
+        return metadata
+    projected = _task_owned_metadata(task_loss)
+    if any(
+        item.name == projected.name and item.file_path != projected.file_path
+        for item in metadata
+    ):
+        raise ValueError(f"custom loss name {projected.name!r} is ambiguous")
+    return tuple(item for item in metadata if item.name != projected.name) + (projected,)
+
+
 class CustomLossTaskProjection(Protocol):
     supervision_target: TensorContract | None
     custom_loss_applicability: CustomLossApplicability | None
     objective: object | None
+    task_owned_custom_loss: TaskOwnedCustomLoss | None
 
 
 def _apply_objective_lock(
@@ -250,7 +293,8 @@ def resolve_custom_loss_inventory(
     agreement; malformed or mismatched rows become named unavailable reasons.
     """
 
-    metadata = tuple(loadable_metadata)
+    task_loss = getattr(task_composition_ref, "task_owned_custom_loss", None)
+    metadata = merge_task_owned_custom_loss(loadable_metadata, task_loss)
     if task_composition_ref is None:
         return CustomLossInventory(
             composed=False,

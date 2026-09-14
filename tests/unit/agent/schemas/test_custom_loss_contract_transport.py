@@ -8,8 +8,10 @@ from pydantic import ValidationError
 
 from agent.schemas.custom_loss_contract import (
     EqualShapeApplicability,
+    TaskOwnedCustomLoss,
     build_custom_loss_contract_snapshot,
     parse_custom_loss_contract_snapshot,
+    resolve_custom_loss_inventory,
 )
 from agent.schemas.model_io_contract import Dimension, ModelIOContract, TensorAxis, TensorContract
 from agent.schemas.task_config import ForwardContract
@@ -100,6 +102,40 @@ def test_task_composition_projection_round_trips_contract_and_preserves_segmenta
     assert restored.custom_loss_applicability == declaration
     assert restored.segmentation_applicability == "not_applicable"
     assert build_task_composition_ref(None) is None
+
+
+def test_task_owned_loss_projection_reaches_inventory_without_registry_write(tmp_path):
+    """A selected local objective is offered even when durable inventory is empty.
+
+    MUTATION TARGET: removing the run-scoped merge makes this composed inventory
+    empty and causes the proposer/implementor/tuner boundary to refuse before
+    their first LLM call; the registry spy also catches accidental persistence.
+    """
+    snapshot = _snapshot()
+    task_loss = TaskOwnedCustomLoss(
+        name="task_loss",
+        file_path=str(tmp_path / "task_loss.py"),
+        content_sha256="a" * 64,
+        contract_snapshot=snapshot,
+    )
+    ref = SimpleNamespace(
+        supervision_target=_tensor("B", 1),
+        custom_loss_applicability=parse_custom_loss_contract_snapshot(snapshot).applicability,
+        objective=SimpleNamespace(loss_type="custom", loss_name="task_loss"),
+        task_owned_custom_loss=task_loss,
+    )
+
+    class _EmptyRegistry:
+        def list(self, *, capability_type):
+            return []
+
+        def register(self, metadata):
+            raise AssertionError("task-owned projection must not register globally")
+
+    inventory = resolve_custom_loss_inventory(
+        _EmptyRegistry().list(capability_type="loss"), snapshot, ref
+    )
+    assert inventory.names == ("task_loss",)
 
 
 def test_custom_loss_spec_json_and_protocol_preserve_framework_snapshot(tmp_path):

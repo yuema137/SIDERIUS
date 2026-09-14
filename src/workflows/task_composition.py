@@ -1816,6 +1816,33 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
     """
     if task_composition is None:
         return None
+    task_owned_custom_loss = None
+    objective = getattr(task_composition, "objective", None)
+    from agent.schemas.custom_loss_contract import custom_loss_snapshot_from_forward_contract
+
+    objective_ref = next(
+        (
+            plugin
+            for plugin in task_composition.provenance.plugins
+            if plugin.absolute_path == task_composition.provenance.source_paths.get("objective")
+            and getattr(objective, "loss_type", None) == "custom"
+        ),
+        None,
+    )
+    if objective_ref is not None:
+        from agent.schemas.custom_loss_contract import TaskOwnedCustomLoss
+
+        expected_snapshot = custom_loss_snapshot_from_forward_contract(
+            task_composition.forward_contract
+        )
+        if expected_snapshot is None:
+            raise ValueError("custom objective has no resolved custom-loss contract")
+        task_owned_custom_loss = TaskOwnedCustomLoss(
+            name=objective.loss_name,
+            file_path=objective_ref.absolute_path,
+            content_sha256=objective_ref.content_sha256,
+            contract_snapshot=expected_snapshot,
+        )
     return TaskCompositionRef(
         semantic_fingerprint=task_composition.semantic_fingerprint,
         task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
@@ -1823,7 +1850,8 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
         segmentation_applicability=task_composition.forward_contract.segmentation_applicability,
         supervision_target=task_composition.forward_contract.supervision_target,
         custom_loss_applicability=task_composition.forward_contract.custom_loss_applicability,
-        objective=getattr(task_composition, "objective", None),
+        objective=objective,
+        task_owned_custom_loss=task_owned_custom_loss,
         parameter_rules=getattr(task_composition, "parameter_rules", None),
         description_source_policy=DescriptionSourcePolicy.COMPOSED,
     )
