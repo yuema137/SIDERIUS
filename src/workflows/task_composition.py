@@ -1820,6 +1820,7 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
     """
     if task_composition is None:
         return None
+    objective = getattr(task_composition, "objective", None)
     return TaskCompositionRef(
         semantic_fingerprint=task_composition.semantic_fingerprint,
         task_data_path_id=type(task_composition.task_data_path).task_data_path_id,

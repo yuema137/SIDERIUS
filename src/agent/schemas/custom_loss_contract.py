@@ -233,7 +233,7 @@ def merge_task_owned_custom_loss(
         for item in same_name
     ):
         raise ValueError(f"custom loss name {projected.name!r} is ambiguous")
-    return tuple(item for item in metadata if item.name != projected.name) + (projected,)
+    return (*(item for item in metadata if item.name != projected.name), projected)
 
 
 class CustomLossTaskProjection(Protocol):
