@@ -495,13 +495,25 @@ def _module_name(logical_ref: str, symbol: str) -> str:
     return _MODULE_NAME_PREFIX + slug
 
 
+def _validate_file_before_symbol_load(
+    section: dict[str, Any],
+    manifest_dir: str,
+    validator: Callable[[str], None],
+) -> None:
+    """Apply a caller-owned check before a declared file can be imported."""
+
+    file_ref = section.get("file")
+    if not isinstance(file_ref, str) or not file_ref.strip():
+        return
+    validator(_resolve_path(file_ref, manifest_dir))
+
+
 def _load_symbol(
     section: dict[str, Any],
     manifest_dir: str,
     where: str,
     *,
     also_require: tuple[str, ...] = (),
-    pre_import_validator: Callable[[str], None] | None = None,
 ) -> tuple[Any, ResolvedPluginRef | None]:
     """Resolve ``{file, symbol}`` or ``{module, symbol}`` to a live object.
 
@@ -587,8 +599,6 @@ def _load_symbol(
         raise TaskCompositionError(f"{where} requires a non-empty string 'file'; got {file_ref!r}.")
     logical = _normalized_ref(file_ref)
     target = _resolve_path(file_ref, manifest_dir)
-    if pre_import_validator is not None:
-        pre_import_validator(target)
     captured = _load_captured_symbol(target, logical, symbol, where, also_require)
     if captured is not None:
         return captured
@@ -1752,12 +1762,16 @@ def _compose_objective(
                 "objective contract metadata refused before plugin import: snapshot mismatch"
             )
 
+    _validate_file_before_symbol_load(
+        implementation,
+        manifest_dir,
+        _validate_contract_before_import,
+    )
     declared_name, resolved_ref = _load_symbol(
         implementation,
         manifest_dir,
         f"{where}.implementation",
         also_require=REQUIRED_LOSS_PLUGIN_SYMBOLS,
-        pre_import_validator=_validate_contract_before_import,
     )
     if not isinstance(declared_name, str) or not declared_name.strip():
         raise TaskCompositionError(

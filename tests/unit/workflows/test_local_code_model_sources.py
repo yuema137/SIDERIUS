@@ -10,7 +10,11 @@ import pytest
 
 from agent.schemas.implementor import LossProvenance
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
-from core.capability_registry import CapabilityMetadata, CapabilityRegistry
+from core.capability_registry import (
+    CapabilityContractSnapshot,
+    CapabilityMetadata,
+    CapabilityRegistry,
+)
 from core.local_code import (
     CodePackageDeclaration,
     LocalCodeError,
@@ -39,6 +43,12 @@ def test_declared_registration_keeps_source_but_still_propagates_loss_and_checks
     loss.write_text("# generated loss source\n")
     description = tmp_path / "description.md"
     description.write_text("A tiny model description.")
+    expected_snapshot = CapabilityContractSnapshot(
+        contract_kind="source-test",
+        contract_version=1,
+        canonical_payload="{}",
+        sha256="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    )
     implementation = SimpleNamespace(
         model_type=MODEL_TYPE,
         model_file_path=str(package.root / "model.py"),
@@ -49,6 +59,7 @@ def test_declared_registration_keeps_source_but_still_propagates_loss_and_checks
             source_iteration="iter_001",
             loss_file_path=str(loss),
             dummy_tensor_validated=True,
+            contract_snapshot=expected_snapshot,
         ),
     )
     construction, losses = [], []
@@ -56,7 +67,8 @@ def test_declared_registration_keeps_source_but_still_propagates_loss_and_checks
         workflow, "_validate_construction_memory", lambda **kw: construction.append(kw)
     )
     monkeypatch.setattr(
-        "ml_models.loss_models_sandbox.register_loss_in_memory", lambda path: losses.append(path)
+        "ml_models.loss_models_sandbox.register_loss_in_memory",
+        lambda path, snapshot: losses.append((path, snapshot)),
     )
     destinations = [tmp_path / "workspace/plugins/iter_001", tmp_path / "tune/plugins/iter_001"]
     loss_destination = tmp_path / "workspace/losses/iter_001"
@@ -67,7 +79,7 @@ def test_declared_registration_keeps_source_but_still_propagates_loss_and_checks
         workflow._promote_model_to_global(implementation)
     assert len(construction) == 1
     assert construction[0]["model_class"].__module__.endswith("._helper")
-    assert losses == [str(loss_destination / "source_test_loss.py")]
+    assert losses == [(str(loss_destination / "source_test_loss.py"), expected_snapshot)]
     assert (loss_destination / "source_test_loss.py").read_bytes() == loss.read_bytes()
     assert all(not (dest / f"{proposal_name}.py").exists() for dest in destinations)
     assert all(

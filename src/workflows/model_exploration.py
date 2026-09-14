@@ -1868,6 +1868,18 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
     )
 
 
+def _expected_custom_loss_snapshot(
+    task_composition: RunTaskComposition | None,
+):
+    """Project optional custom-loss evidence outside the workflow orchestrator."""
+
+    if task_composition is None:
+        return None
+    from agent.schemas.custom_loss_contract import custom_loss_snapshot_from_forward_contract
+
+    return custom_loss_snapshot_from_forward_contract(task_composition.forward_contract)
+
+
 def run_workflow(
     *,
     # --- transit configuration (Step 09.5a C3; the 72 values this run
@@ -2098,13 +2110,7 @@ def run_workflow(
     from ml_models.loss_models_sandbox import preload_global_losses
     from ml_models.plugin_loader import preload_global_models
 
-    _expected_loss_snapshot = None
-    if task_composition is not None:
-        from agent.schemas.custom_loss_contract import custom_loss_snapshot_from_forward_contract
-
-        _expected_loss_snapshot = custom_loss_snapshot_from_forward_contract(
-            task_composition.forward_contract
-        )
+    _expected_loss_snapshot = _expected_custom_loss_snapshot(task_composition)
     _preloaded = preload_global_losses(_expected_loss_snapshot)
     if _preloaded:
         print(f"  Preloaded {len(_preloaded)} global loss plugin(s): {sorted(_preloaded)}")

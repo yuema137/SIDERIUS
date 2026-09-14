@@ -85,7 +85,11 @@ def test_global_preload_excludes_unlisted_before_explicit_registration(
     monkeypatch.setattr(generated_library, f"generated_{plural}_dir", lambda: str(tmp_path))
     owner = plugin_loader if family == "model" else loss_models_sandbox
     observed = []
-    monkeypatch.setattr(owner, f"register_{family}_in_memory", lambda path: observed.append(path))
+    monkeypatch.setattr(
+        owner,
+        f"register_{family}_in_memory",
+        lambda path, *_args, **_kwargs: observed.append(path),
+    )
     with bind_code_package(package):
         getattr(owner, f"preload_global_{plural}")()
     assert observed == [str(tmp_path / "listed.py")]
