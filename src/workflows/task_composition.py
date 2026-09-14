@@ -87,6 +87,7 @@ from core.local_code import (
 from ml_models.model_descriptions import DescriptionSourcePolicy
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from agent.schemas.custom_loss_contract import TaskOwnedCustomLoss
     from agent.schemas.interpretation import InterpretationTaskBlocks
     from agent.schemas.task_config import ForwardContract
     from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
@@ -264,7 +265,6 @@ class RunTaskComposition:
     model_plugins: Any = None
     loss_plugins: Any = None
     objective: Any = None
-    task_owned_custom_loss: Any = None
     """The run's AUTHORITATIVE objective as a validated ``LossConfig``, or ``None``.
 
     Step 12 / PR-12d, F-12d-31. Present only when the manifest declares an
@@ -272,6 +272,9 @@ class RunTaskComposition:
     objective and the planner's choice stands, which is every run that
     exists today.
     """
+
+    task_owned_custom_loss: TaskOwnedCustomLoss | None = None
+    """The exact task-owned custom loss selected at the composition edge."""
 
     parameter_rules: ParameterRules = field(default_factory=ParameterRules)
     """The composition's typed effective-plan constraints.

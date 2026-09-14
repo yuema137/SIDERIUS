@@ -1,7 +1,7 @@
 """Boundary witnesses for immutable custom-loss contract transport."""
 
-import json
 import hashlib
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -11,9 +11,9 @@ from agent.schemas.custom_loss_contract import (
     EqualShapeApplicability,
     TaskOwnedCustomLoss,
     build_custom_loss_contract_snapshot,
+    merge_task_owned_custom_loss,
     parse_custom_loss_contract_snapshot,
     resolve_custom_loss_inventory,
-    merge_task_owned_custom_loss,
 )
 from agent.schemas.model_io_contract import Dimension, ModelIOContract, TensorAxis, TensorContract
 from agent.schemas.task_config import ForwardContract

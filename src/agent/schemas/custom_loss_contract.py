@@ -214,8 +214,14 @@ def merge_task_owned_custom_loss(
         raise ValueError(
             f"task-owned custom loss {task_loss.name!r} implementation is not a .py file"
         )
-    with open(task_loss.file_path, "rb") as handle:
-        actual_digest = hashlib.sha256(handle.read()).hexdigest()
+    from core.local_code import selected_member
+
+    captured = selected_member(task_loss.file_path)
+    if captured is not None:
+        actual_digest = hashlib.sha256(captured.source).hexdigest()
+    else:
+        with open(task_loss.file_path, "rb") as handle:
+            actual_digest = hashlib.sha256(handle.read()).hexdigest()
     if actual_digest != task_loss.content_sha256:
         raise ValueError(
             f"task-owned custom loss {task_loss.name!r} implementation digest mismatch"
