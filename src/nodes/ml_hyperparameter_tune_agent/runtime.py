@@ -337,6 +337,9 @@ def _handle_prephase_gpu_measurement(
                 model_config=model_config,
                 train_config=train_config,
                 inference_batch_size=_inference_batch,
+                segmentation_applicability=(
+                    "not_applicable" if task_probe_data is not None else "temporal"
+                ),
             ),
             request_id=request_id,
             device_uuid=str(getattr(device_identity, "uuid", "")),

@@ -209,6 +209,24 @@ def derive_duration_calibration_record(
     context = obs.calibration_context or {}
     model_family = str(context.get("model_family") or "").strip()
 
+    # A fixed task-owned probe is real bounded evidence, but it has no
+    # temporal segmentation workload. Keep the evidence explainable while
+    # preventing it from entering temporal throughput calibration.
+    if context.get("segmentation_applicability") == "not_applicable" or "seg_size" not in context:
+        return QuarantinedDerivation(
+            reason=(
+                "the measurement has no applicable temporal segmentation "
+                "dimension; it cannot enter temporal calibration"
+            ),
+            missing_identity_fields=("seg_size",),
+            observation_payload={
+                "calibration_context": dict(context),
+                "measurement_unit": unit,
+                "measured_value_ms": float(measurement.unit_time_ms_median),
+            },
+            source_reference=_source_reference(obs, phase),
+        )
+
     missing: list[str] = []
     if identity is None:
         missing.append("identity_context")

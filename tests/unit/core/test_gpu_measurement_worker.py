@@ -117,7 +117,12 @@ def _spec(tmp_path, data_dir: str | None, **over) -> GpuMeasurementSpec:
         request=CandidateMeasurementRequest(
             model_type=MODEL_TYPE,
             planned_identity=build_planned_identity(
-                model_type="punet", model_config={}, train_config={}
+                model_type="punet",
+                model_config={},
+                train_config={},
+                segmentation_applicability=(
+                    "not_applicable" if over.get("task_probe_data") is not None else "temporal"
+                ),
             ),
             request_id="req-01234567",
             device_uuid=UUID,

@@ -279,8 +279,15 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
         # is not 40 000 as well.
         from agent.skills.training_skill.estimator import resolve_model_field
 
-        seg = resolve_model_field(
-            model_type, spec.model_config_payload, "segmentation_size", safety_margin=40_000
+        # A task-owned probe supplies its own semantic batch. It is not a
+        # temporal waveform probe, so there is no segmentation dimension to
+        # resolve and no framework default may be invented for identity.
+        seg = (
+            None
+            if spec.task_probe_data is not None
+            else resolve_model_field(
+                model_type, spec.model_config_payload, "segmentation_size", safety_margin=40_000
+            )
         )
         # TWO batches, deliberately distinct.
         #
@@ -389,6 +396,9 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
             parameter_count=total,
             trainable_parameter_count=trainable,
             inference_batch_size=spec.inference_batch_size,
+            segmentation_applicability=(
+                "not_applicable" if spec.task_probe_data is not None else "temporal"
+            ),
         )
         return CandidateComponents(
             model=model,
