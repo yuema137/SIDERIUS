@@ -100,7 +100,11 @@ class _TransportDataPath(_DataPath):
 class _GateFilesDataPath(_DataPath):
     def validate_health_coverage(self, request):
         assert request.health_gate_files == (4, 7, 9)
-        return {"applicable": True, "covered": True, "reason": "resolved monitored files are covered"}
+        return {
+            "applicable": True,
+            "covered": True,
+            "reason": "resolved monitored files are covered",
+        }
 
 
 def test_covered_opaque_scope_passes_without_framework_inspection():

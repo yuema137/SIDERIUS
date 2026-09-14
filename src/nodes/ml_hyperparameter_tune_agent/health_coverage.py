@@ -44,9 +44,7 @@ def validate_attempt_health_coverage(
             evaluation_scope=evaluation_scope,
             round_kind=round_kind,
             health_binding=health_binding,
-            health_gate_files=(
-                tuple(health_gate_files) if health_gate_files is not None else None
-            ),
+            health_gate_files=(tuple(health_gate_files) if health_gate_files is not None else None),
         )
         raw_result = capability.validate_health_coverage(request)
         result = HealthCoverageResult.model_validate(raw_result)
