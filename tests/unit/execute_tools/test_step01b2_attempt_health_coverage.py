@@ -97,6 +97,12 @@ class _TransportDataPath(_DataPath):
         return {"applicable": True, "covered": True, "reason": "round-trip scope is covered"}
 
 
+class _GateFilesDataPath(_DataPath):
+    def validate_health_coverage(self, request):
+        assert request.health_gate_files == (4, 7, 9)
+        return {"applicable": True, "covered": True, "reason": "resolved monitored files are covered"}
+
+
 def test_covered_opaque_scope_passes_without_framework_inspection():
     result = validate_attempt_health_coverage(
         data_path=_DataPath(),
@@ -121,6 +127,37 @@ def test_explicit_non_applicable_result_is_valid():
     )
     assert result.applicable is False
     assert result.covered is False
+
+
+def test_run_resolved_health_gate_files_reach_task_coverage_unchanged():
+    """Task coverage sees the run override, not a YAML/default value."""
+    result = validate_attempt_health_coverage(
+        data_path=_GateFilesDataPath(),
+        evaluation_scope=object(),
+        round_kind="formal",
+        health_binding="task-health.yaml",
+        health_gate_files=[4, 7, 9],
+        composed=True,
+        health_enabled=True,
+    )
+    assert result is not None and result.covered is True
+
+
+def test_health_gate_files_absence_is_transported_as_none():
+    class NoOverride(_DataPath):
+        def validate_health_coverage(self, request):
+            assert request.health_gate_files is None
+            return {"applicable": False, "covered": False, "reason": "no override"}
+
+    result = validate_attempt_health_coverage(
+        data_path=NoOverride(),
+        evaluation_scope=object(),
+        round_kind="trial",
+        health_binding="task-health.yaml",
+        composed=True,
+        health_enabled=True,
+    )
+    assert result is not None and result.applicable is False
 
 
 def test_uncovered_scope_refuses_before_execution():
@@ -243,6 +280,7 @@ def test_prepare_attempt_refuses_uncovered_scope_before_any_execution_effect(tmp
 
         def validate_health_coverage(self, request):
             self.calls.append("validate_health_coverage")
+            assert request.health_gate_files == (4, 7, 9)
             return {
                 "applicable": True,
                 "covered": False,
@@ -258,7 +296,7 @@ def test_prepare_attempt_refuses_uncovered_scope_before_any_execution_effect(tmp
             raise AssertionError("validation dataset was constructed before coverage")
 
     task = UncoveredTask()
-    agent_input = _composed_input()
+    agent_input = _composed_input().model_copy(update={"health_gate_files": [4, 7, 9]})
     bindings = _bindings(agent_input, tmp_path, task)
     from execute_tools.task_data_path import bind_task_data_path
 

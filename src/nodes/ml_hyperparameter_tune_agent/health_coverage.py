@@ -26,6 +26,7 @@ def validate_attempt_health_coverage(
     evaluation_scope: object,
     round_kind: str,
     health_binding: Any,
+    health_gate_files: list[int] | tuple[int, ...] | None = None,
     composed: bool,
     health_enabled: bool,
 ) -> HealthCoverageResult | None:
@@ -43,6 +44,9 @@ def validate_attempt_health_coverage(
             evaluation_scope=evaluation_scope,
             round_kind=round_kind,
             health_binding=health_binding,
+            health_gate_files=(
+                tuple(health_gate_files) if health_gate_files is not None else None
+            ),
         )
         raw_result = capability.validate_health_coverage(request)
         result = HealthCoverageResult.model_validate(raw_result)
