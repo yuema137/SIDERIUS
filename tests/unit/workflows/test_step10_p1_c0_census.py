@@ -329,9 +329,13 @@ class TestCensusBTransportEmissionSites:
             #   #389 probe-data projection — the isolated resource worker
             #       must receive the active task's semantic inference-batch
             #       maximum instead of selecting from memory evidence alone.
+            #   #309 implementor custom-loss validation — an optional
+            #       task-owned, data-free synthetic pair can only be obtained
+            #       from the already-bound task implementation.
             "src/nodes/ml_hyperparameter_tune_agent/scope_acquisition.py": 1,
             "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py": 2,
             "src/nodes/ml_hyperparameter_tune_agent/probe_data.py": 1,
+            "src/nodes/ml_model_implementor/ml_model_implementor.py": 1,
         }, f"an unexpected parent-side resolve appeared; found {resolves}"
 
     def test_the_workflow_itself_resolves_no_task_data_path(self):

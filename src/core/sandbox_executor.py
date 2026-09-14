@@ -52,6 +52,7 @@ from core.runtime_control.session import RuntimeControlPolicy
 from core.runtime_control.watchdog_deadline import (
     watchdog_deadline_provider as _build_watchdog_deadline_provider,
 )
+from core.training_execution_bindings import TrainingExecutionBindings
 from execute_tools.data_paths import resolve_physical_data_root
 from execute_tools.dataset_config import (
     DataScope,
@@ -1340,8 +1341,7 @@ class TidmadSandbox:
         order_strategy: str = "shuffle",
         file_order: list[int] | None = None,
         eval_sample_set: dict | None = None,
-        task_scopes: object | None = None,
-        expected_custom_loss_snapshot: CapabilityContractSnapshot | dict | None = None,
+        execution_bindings: TrainingExecutionBindings | None = None,
     ):
         """Executes the training physical script.
 
@@ -1372,6 +1372,9 @@ class TidmadSandbox:
                              return is ``{"status": "rejected_time_risk",
                              "runtime_verification": <observation>}`` —
                              distinguishable from every error path.
+            execution_bindings: Resolved task scopes and expected custom-loss
+                                contract transported together without adding a
+                                second authority at the executor boundary.
 
         The returned dict carries ``runtime_verification`` (the subprocess's
         observation sidecar as a dict, or ``None``) on success, rejection,
@@ -1412,7 +1415,10 @@ class TidmadSandbox:
             # empty string, because "flag present but broken" fails closed
             # there and must not be triggered by an absent declaration.
             mio_path = self._write_model_io_config(exp_id)
+            bindings = execution_bindings or TrainingExecutionBindings()
+            task_scopes = bindings.task_scopes
             loss_contract_path = None
+            expected_custom_loss_snapshot = bindings.expected_custom_loss_snapshot
             if expected_custom_loss_snapshot is not None:
                 snapshot = CapabilityContractSnapshot.model_validate(expected_custom_loss_snapshot)
                 loss_contract_path = os.path.abspath(
@@ -2364,8 +2370,7 @@ class StubSandbox(TidmadSandbox):
         order_strategy: str = "shuffle",
         file_order: list[int] | None = None,
         eval_sample_set: dict | None = None,
-        task_scopes: object | None = None,
-        expected_custom_loss_snapshot: CapabilityContractSnapshot | dict | None = None,
+        execution_bindings: TrainingExecutionBindings | None = None,
     ) -> dict[str, Any]:
         """Synthesise a successful training result. No subprocess launch.
 

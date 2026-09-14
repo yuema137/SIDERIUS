@@ -49,6 +49,7 @@ from agent.schemas.model_io_contract import (
     TensorContract,
 )
 from core.sandbox_executor import StubSandbox, TidmadSandbox
+from core.training_execution_bindings import TrainingExecutionBindings
 from execute_tools.dataset_config import DataScope, bind_dataset_profile
 from execute_tools.scoring_utils import validate_sample_set
 from execute_tools.task_data_path import EvalMaterializationParams
@@ -161,7 +162,7 @@ class TestArgvDelta:
             TRAIN_CFG,
             LOSS_CFG,
             sample_set=TRAIN_SS,
-            expected_custom_loss_snapshot=snapshot,
+            execution_bindings=TrainingExecutionBindings(expected_custom_loss_snapshot=snapshot),
         )
 
         (cmd,), _ = mock_run.call_args
@@ -331,6 +332,8 @@ class TestWrapperForwardsTheEvalSet:
             "loss_config": {},
             "sample_set": {"0": [0]},
             "eval_sample_set": {"0": [1, 2]},
+            "task_scopes": "resolved-task-scopes",
+            "expected_custom_loss_snapshot": _loss_snapshot(),
         }
 
     def test_the_production_wrapper_delivers_the_eval_set_to_the_executor(self, tmp_path):
@@ -345,6 +348,9 @@ class TestWrapperForwardsTheEvalSet:
         _run_skill("training_skill", sb, **self._params())
         assert sb.training_kwargs[0]["eval_sample_set"] == {"0": [1, 2]}
         assert sb.training_kwargs[0]["sample_set"] == {"0": [0]}
+        bindings = sb.training_kwargs[0]["execution_bindings"]
+        assert bindings.task_scopes == "resolved-task-scopes"
+        assert bindings.expected_custom_loss_snapshot == _loss_snapshot()
 
     def test_delete_the_hop_a_wrapper_that_drops_the_kwarg_is_observable_as_none(
         self, tmp_path, monkeypatch
@@ -457,7 +463,9 @@ class TestRungB07a2ValidationScopeAxis:
                     "device": "cpu",
                 },
                 {"loss_type": "focal"},
-                task_scopes=attempt_scopes(adapter, train_ss, eval_ss),
+                execution_bindings=TrainingExecutionBindings(
+                    task_scopes=attempt_scopes(adapter, train_ss, eval_ss)
+                ),
                 train_base_seed=5,
             )
         assert out["status"] == "success", out.get("message")

@@ -22,6 +22,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+from core.training_execution_bindings import TrainingExecutionBindings
+
 PACKAGES = (
     "agent",
     "nodes",
@@ -166,7 +168,7 @@ def execute_lifecycle(manifest: Path, workspace: Path) -> dict:
             t_cfg,
             l_cfg,
             train_base_seed=17,
-            task_scopes=scopes,
+            execution_bindings=TrainingExecutionBindings(task_scopes=scopes),
         )
         assert trained["status"] == "success", trained
         assert len(trained["results"]["loss_history"]) == 1, trained

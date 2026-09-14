@@ -8,6 +8,11 @@ nothing. It forwards an already-resolved configuration to the sandbox
 executor, which owns config persistence, DataScope boundary validation,
 subprocess launch, and the runtime watchdog.
 
+The skill groups resolved task scopes and the expected custom-loss snapshot
+into one internal `TrainingExecutionBindings` value at the sandbox boundary.
+This keeps the executor signature bounded while preserving the two independent
+caller-facing keys below; the carrier adds no authority or fallback.
+
 ## Position in the pipeline
 
 ```text
@@ -76,7 +81,8 @@ proposal was rejected) is recorded by the tuner on the `ExperimentRecord`
 
 ### Signature parity with the stub
 
-`StubSandbox.execute_training` mirrors this signature exactly, including
+`StubSandbox.execute_training` mirrors the production executor signature
+exactly, including the grouped execution bindings and
 the ordering parameters and (Step 07a) `eval_sample_set` — scope-validated
 like production, and answered with a plausible multi-epoch train +
 validation `training_history` (R3 only when an eval set was supplied) —
