@@ -38,6 +38,9 @@ Run with:
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
+from copy import deepcopy
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -48,6 +51,7 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningOutput,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from core.hardware_context import HardwareContext
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
@@ -60,6 +64,23 @@ pytestmark = pytest.mark.dual_mode
 _PLUGIN_DIR_REL = "tests/pseudo_data/plugins"
 _PLUGIN_MODEL_TYPE = "pe_wavenet_delta"
 _PSEUDO_AGENT_FOLDER = "ml_hyperparameter_tune_agent_k9_invented"
+
+
+def _recording_sandbox(base_dir: str, run_name: str, *, completed_attempts: int):
+    """Give each completed pseudo attempt its own canned result envelope."""
+    from tests.helpers._pseudo_data import load_pseudo_data
+    from tests.helpers.recording_sandbox import RecordingSandbox
+
+    canned = load_pseudo_data("train_outputs", _PLUGIN_MODEL_TYPE)
+    repeated = {
+        method: (
+            deepcopy(result)
+            if isinstance(result, list)
+            else [deepcopy(result) for _ in range(completed_attempts)]
+        )
+        for method, result in canned.items()
+    }
+    return RecordingSandbox(base_dir=base_dir, run_name=run_name, canned=repeated)
 
 
 def _register_k9_plugin(monkeypatch, request):
@@ -106,7 +127,7 @@ def _disable_sleeps(monkeypatch):
     monkeypatch.setattr(_time, "sleep", lambda *a, **kw: None)
 
 
-def _mock_cuda(monkeypatch):
+def _mock_cuda(monkeypatch) -> HardwareContext:
     """Make the VRAM gate believe it is on a 32 GB GPU with 20 GB free.
 
     The K.2.5-8 warning fires before the device check, but the
@@ -123,6 +144,22 @@ def _mock_cuda(monkeypatch):
         torch.cuda,
         "mem_get_info",
         lambda *a, **kw: (20 * 1024**3, 32 * 1024**3),
+    )
+    return HardwareContext(
+        device_name="synthetic-cuda",
+        total_memory_bytes=32 * 1024**3,
+        compute_capability=(9, 0),
+        multiprocessor_count=1,
+        cuda_runtime_version="fixture-not-discovered",
+        torch_version="fixture-not-discovered",
+        hostname="composed-tuner-fixture",
+        device_available=True,
+        discovered_at=datetime(2000, 1, 1, tzinfo=UTC),
+        cuda_visible_devices="0",
+        visible_device_count=1,
+        devices=[],
+        active_device_uuid="GPU-composed-tuner-fixture",
+        collection_errors=["test fixture: hardware discovery deliberately not executed"],
     )
 
 
@@ -148,12 +185,12 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
                 best score populated from the canned sandbox.
     """
     from agent.llm_bridge import LLMBridge
-    from tests.conftest import _is_real_llm, _is_real_training
+    from tests.conftest import _is_real_llm
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
     from tests.helpers.recording_sandbox import RecordingSandbox
 
     _register_k9_plugin(monkeypatch, request)
-    _mock_cuda(monkeypatch)
+    hardware_context = _mock_cuda(monkeypatch)
     _disable_sleeps(monkeypatch)
 
     workspace = str(tmp_path / "workspace")
@@ -221,22 +258,35 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
         def bridge_factory(**kw):
             return bridge
 
-    if _is_real_training(request):
-        pytest.skip(
-            "--real-training is not supported for K.9: pe_wavenet_delta is a "
-            "test-only plugin, not a registered training target."
-        )
-    else:
-        sandbox = RecordingSandbox.for_model(
-            _PLUGIN_MODEL_TYPE, base_dir=workspace, run_name=run_name
-        )
+    sandbox = _recording_sandbox(workspace, run_name, completed_attempts=2)
 
-        def sandbox_factory(**kw):
-            return sandbox
+    def sandbox_factory(**kw):
+        return sandbox
 
     agent = HyperparamTuningAgent(bridge_factory=bridge_factory, sandbox_factory=sandbox_factory)
 
-    output = agent.run(agent_input)
+    from tests.helpers.tuner_composed_effects import composed_tuner_effects
+    from tests.helpers.tuner_composed_fixture import composed_run
+
+    effect_boundary = (
+        nullcontext()
+        if _is_real_llm(request)
+        else composed_tuner_effects(
+            monkeypatch,
+            sandbox=sandbox,
+            bridge=bridge,
+            expected_attempts=3,
+            hardware_context=hardware_context,
+            preflight_results=[
+                ("MEASURED_PEAK_ABOVE_VRAM_CAP", 0.4),
+                ("COMPLETED_MEASUREMENT", 0.1),
+                ("COMPLETED_MEASUREMENT", 0.1),
+            ],
+        )
+    )
+    with effect_boundary:
+        with composed_run(tmp_path, agent_input, health=False):
+            output = agent.run(agent_input)
 
     # --- Smoke / wiring assertions ---
     # NOTE: ``len(output.all_records) == 2`` is intentionally NOT here; it

@@ -9,7 +9,7 @@ from __future__ import annotations
 import importlib
 import subprocess
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -18,7 +18,7 @@ from typing import Any, NoReturn
 
 import pytest
 
-from agent.skills.evaluate_vram_skill.isolated_probe import IsolatedProbeResult
+from agent.skills.evaluate_vram_skill.isolated_probe import IsolatedProbeResult, PreflightOutcome
 from agent.skills.evaluate_vram_skill.preflight_adapter import adapt_result
 from core.hardware_context import HardwareContext, write_manifest
 from execute_tools.task_data_path import TaskProbeDataSpec
@@ -86,6 +86,8 @@ def composed_tuner_effects(
     sandbox: RecordingSandbox,
     bridge: RecordingLLMBridge,
     expected_attempts: int,
+    hardware_context: HardwareContext | None = None,
+    preflight_results: Sequence[tuple[PreflightOutcome, float]] | None = None,
 ) -> Iterator[ComposedTunerEffects]:
     """Install before composition/run; verify finite consumption on normal exit.
 
@@ -99,9 +101,16 @@ def composed_tuner_effects(
         raise TypeError("Composed tuner witnesses require the recording sandbox and bridge")
     if expected_attempts < 1:
         raise ValueError("expected_attempts must describe a nonempty finite witness")
+    result_specs = (
+        [("COMPLETED_MEASUREMENT", 0.0) for _ in range(expected_attempts)]
+        if preflight_results is None
+        else preflight_results
+    )
+    if len(result_specs) != expected_attempts:
+        raise ValueError("preflight_results must contain one result per expected attempt")
 
     effects = ComposedTunerEffects()
-    hardware = HardwareContext(
+    hardware = hardware_context or HardwareContext(
         device_name="cpu",
         total_memory_bytes=0,
         compute_capability=(0, 0),
@@ -120,14 +129,14 @@ def composed_tuner_effects(
     responses = deque(
         IsolatedProbeResult(
             label=f"supplied-fixture-{index}",
-            outcome="COMPLETED_MEASUREMENT",
+            outcome=outcome,
             detail="Supplied pseudo preflight outcome; no measurement executed",
             verdict="Supplied orchestration-only outcome",
-            device="cpu",
-            estimated_gb=0.0,
+            device="cuda" if hardware.device_available else "cpu",
+            estimated_gb=estimated_gb,
             inference_batch=1,
         )
-        for index in range(expected_attempts)
+        for index, (outcome, estimated_gb) in enumerate(result_specs)
     )
 
     def supplied_hardware(workspace: Path, run_name: str) -> HardwareContext:
@@ -147,7 +156,9 @@ def composed_tuner_effects(
                 "Composed preflight lost its real task probe projection"
             )
         effects.preflight_calls.append(dict(kwargs))
-        return adapt_result(responses.popleft().model_dump())
+        payload = responses.popleft().model_dump()
+        payload["limit_gb"] = kwargs.get("vram_budget_gb") or hardware.usable_cap_gb
+        return adapt_result(payload)
 
     with monkeypatch.context() as scoped:
         _install_effect_backstop(scoped)

@@ -42,6 +42,7 @@ Run with:
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,7 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.integration.workflows.test_k9_invented_model_dual_mode import _mock_cuda
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
@@ -104,24 +106,6 @@ def _disable_sleeps(monkeypatch):
     monkeypatch.setattr(_time, "sleep", lambda *a, **kw: None)
 
 
-def _mock_cuda(monkeypatch):
-    """Make the VRAM gate believe it is on a 32 GB GPU with 20 GB free.
-
-    Same setup as K.9: the 0.8 × 20 GB = 16 GB defensive cap never binds
-    against the operator budget (0.1 GB), so the binding ceiling is the
-    operator's value and verdicts are deterministic on machines without
-    a real GPU.
-    """
-    import torch
-
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(
-        torch.cuda,
-        "mem_get_info",
-        lambda *a, **kw: (20 * 1024**3, 32 * 1024**3),
-    )
-
-
 @pytest.mark.dual_mode
 def test_fail_round_abort_triggers_phase_l_termination(tmp_path, request, monkeypatch, capsys):
     """L.8 — agent runs the 4-round fail-burst loop end-to-end.
@@ -138,12 +122,12 @@ def test_fail_round_abort_triggers_phase_l_termination(tmp_path, request, monkey
       Layer 4 — best score still populated from the canned round 1 success.
     """
     from agent.llm_bridge import LLMBridge
-    from tests.conftest import _is_real_llm, _is_real_training
+    from tests.conftest import _is_real_llm
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
     from tests.helpers.recording_sandbox import RecordingSandbox
 
     _register_plugin(monkeypatch, request)
-    _mock_cuda(monkeypatch)
+    hardware_context = _mock_cuda(monkeypatch)
     _disable_sleeps(monkeypatch)
 
     workspace = str(tmp_path / "workspace")
@@ -207,22 +191,32 @@ def test_fail_round_abort_triggers_phase_l_termination(tmp_path, request, monkey
         def bridge_factory(**kw):
             return bridge
 
-    if _is_real_training(request):
-        pytest.skip(
-            "--real-training is not supported for L.8: pe_wavenet_delta is a "
-            "test-only plugin, not a registered training target."
-        )
-    else:
-        sandbox = RecordingSandbox.for_model(
-            _PLUGIN_MODEL_TYPE, base_dir=workspace, run_name=run_name
-        )
+    sandbox = RecordingSandbox.for_model(_PLUGIN_MODEL_TYPE, base_dir=workspace, run_name=run_name)
 
-        def sandbox_factory(**kw):
-            return sandbox
+    def sandbox_factory(**kw):
+        return sandbox
 
     agent = HyperparamTuningAgent(bridge_factory=bridge_factory, sandbox_factory=sandbox_factory)
 
-    output = agent.run(agent_input)
+    from tests.helpers.tuner_composed_effects import composed_tuner_effects
+    from tests.helpers.tuner_composed_fixture import composed_run
+
+    effect_boundary = (
+        nullcontext()
+        if _is_real_llm(request)
+        else composed_tuner_effects(
+            monkeypatch,
+            sandbox=sandbox,
+            bridge=bridge,
+            expected_attempts=10,
+            hardware_context=hardware_context,
+            preflight_results=[("COMPLETED_MEASUREMENT", 0.1)]
+            + [("MEASURED_PEAK_ABOVE_VRAM_CAP", 0.4)] * 9,
+        )
+    )
+    with effect_boundary:
+        with composed_run(tmp_path, agent_input, health=False):
+            output = agent.run(agent_input)
 
     # --- Smoke / wiring ---
     assert isinstance(output, HyperparamTuningOutput)

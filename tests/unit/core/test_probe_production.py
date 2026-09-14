@@ -10,6 +10,7 @@ resolver). No GPU, no LLM, no real dataset."""
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from core.runtime_control.calibration_registry import CalibrationRegistry
@@ -28,11 +29,28 @@ from core.runtime_control.probe import (
     total_eval_segments,
 )
 from core.runtime_control.probe_production import production_probe_executors
+from execute_tools.dataset_config import tidmad_topology
+from tests.helpers.two_family_profile import write_bound_timeseries
 
 SEG = 256
 FRESH_TYPE = "c6_probe_fresh_candidate"
 
 IDLE = ContentionSnapshot(foreign_compute_processes=0, telemetry_available=True)
+
+
+@pytest.fixture
+def synthetic_h5(tmp_path, synthetic_dataset_profile):
+    """Return this module's explicit one-segment synthetic probe input."""
+
+    def _make(seg_size: int):
+        topology = tidmad_topology(synthetic_dataset_profile)
+        filename = topology.dataset.training_file_name(0)
+        rng = np.random.default_rng(42)
+        values = rng.integers(-128, 127, size=seg_size, dtype=np.int16)
+        write_bound_timeseries(tmp_path / filename, values, values.copy())
+        return str(tmp_path), filename
+
+    return _make
 
 
 def _idle_window(**kwargs):
