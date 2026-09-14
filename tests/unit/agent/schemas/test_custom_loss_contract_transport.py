@@ -191,6 +191,36 @@ def test_task_owned_loss_refuses_a_different_global_implementation_with_the_same
         merge_task_owned_custom_loss((global_loss,), task_loss)
 
 
+def test_task_owned_loss_deduplicates_a_byte_identical_global_copy(tmp_path):
+    """Relocating identical code must not create a false identity conflict.
+
+    MUTATION TARGET: path-based identity would reject a generated-library copy
+    of the exact selected bytes even though content and contract are unchanged.
+    """
+    selected = tmp_path / "selected.py"
+    relocated = tmp_path / "relocated.py"
+    selected.write_text("# same implementation\n", encoding="utf-8")
+    relocated.write_bytes(selected.read_bytes())
+    snapshot = _snapshot()
+    task_loss = TaskOwnedCustomLoss(
+        name="task_loss",
+        file_path=str(selected),
+        content_sha256=hashlib.sha256(selected.read_bytes()).hexdigest(),
+        contract_snapshot=snapshot,
+    )
+    global_copy = CapabilityMetadata(
+        name="task_loss",
+        capability_type="loss",
+        file_path=str(relocated),
+        created_at="fixture",
+        contract_snapshot=snapshot,
+    )
+
+    merged = merge_task_owned_custom_loss((global_copy,), task_loss)
+
+    assert tuple(item.file_path for item in merged) == (str(selected),)
+
+
 def test_task_owned_loss_digest_uses_the_bound_captured_source(tmp_path):
     """Finite package bytes remain authoritative after the source path changes.
 
