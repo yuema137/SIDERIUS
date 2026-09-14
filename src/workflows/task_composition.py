@@ -264,6 +264,7 @@ class RunTaskComposition:
     model_plugins: Any = None
     loss_plugins: Any = None
     objective: Any = None
+    task_owned_custom_loss: Any = None
     """The run's AUTHORITATIVE objective as a validated ``LossConfig``, or ``None``.
 
     Step 12 / PR-12d, F-12d-31. Present only when the manifest declares an
@@ -1816,33 +1817,6 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
     """
     if task_composition is None:
         return None
-    task_owned_custom_loss = None
-    objective = getattr(task_composition, "objective", None)
-    from agent.schemas.custom_loss_contract import custom_loss_snapshot_from_forward_contract
-
-    objective_ref = next(
-        (
-            plugin
-            for plugin in task_composition.provenance.plugins
-            if plugin.absolute_path == task_composition.provenance.source_paths.get("objective")
-            and getattr(objective, "loss_type", None) == "custom"
-        ),
-        None,
-    )
-    if objective_ref is not None:
-        from agent.schemas.custom_loss_contract import TaskOwnedCustomLoss
-
-        expected_snapshot = custom_loss_snapshot_from_forward_contract(
-            task_composition.forward_contract
-        )
-        if expected_snapshot is None:
-            raise ValueError("custom objective has no resolved custom-loss contract")
-        task_owned_custom_loss = TaskOwnedCustomLoss(
-            name=objective.loss_name,
-            file_path=objective_ref.absolute_path,
-            content_sha256=objective_ref.content_sha256,
-            contract_snapshot=expected_snapshot,
-        )
     return TaskCompositionRef(
         semantic_fingerprint=task_composition.semantic_fingerprint,
         task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
@@ -1851,7 +1825,7 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
         supervision_target=task_composition.forward_contract.supervision_target,
         custom_loss_applicability=task_composition.forward_contract.custom_loss_applicability,
         objective=objective,
-        task_owned_custom_loss=task_owned_custom_loss,
+        task_owned_custom_loss=getattr(task_composition, "task_owned_custom_loss", None),
         parameter_rules=getattr(task_composition, "parameter_rules", None),
         description_source_policy=DescriptionSourcePolicy.COMPOSED,
     )
@@ -2634,6 +2608,20 @@ def _compose_resolved_task_bindings(
     composed_objective, objective_ref = _compose_objective(
         raw, manifest_dir, expected_loss_contract
     )
+    task_owned_custom_loss = None
+    if objective_ref is not None:
+        from agent.schemas.custom_loss_contract import TaskOwnedCustomLoss
+
+        if expected_loss_contract is None or composed_objective is None:
+            raise TaskCompositionError(
+                "custom objective resolved without its validated loss contract"
+            )
+        task_owned_custom_loss = TaskOwnedCustomLoss(
+            name=composed_objective.loss_name,
+            file_path=objective_ref.absolute_path,
+            content_sha256=objective_ref.content_sha256,
+            contract_snapshot=expected_loss_contract,
+        )
     if objective_ref is not None:
         source_paths["objective"] = str(objective_ref.absolute_path)
         plugins.append(objective_ref)
@@ -2757,6 +2745,7 @@ def _compose_resolved_task_bindings(
         model_plugins=model_plugin_binding,
         loss_plugins=loss_plugin_roots or None,
         objective=composed_objective,
+        task_owned_custom_loss=task_owned_custom_loss,
         parameter_rules=parameter_rules,
         observables=observables or None,
     )

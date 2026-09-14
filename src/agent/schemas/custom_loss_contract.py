@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Iterable
 from typing import Any, Literal, Protocol, cast
 
@@ -204,10 +205,26 @@ def merge_task_owned_custom_loss(
     metadata = tuple(loadable_metadata)
     if task_loss is None:
         return metadata
+    if not os.path.isfile(task_loss.file_path):
+        raise ValueError(
+            f"task-owned custom loss {task_loss.name!r} implementation is missing: "
+            f"{task_loss.file_path!r}"
+        )
+    if not task_loss.file_path.endswith(".py"):
+        raise ValueError(
+            f"task-owned custom loss {task_loss.name!r} implementation is not a .py file"
+        )
+    with open(task_loss.file_path, "rb") as handle:
+        actual_digest = hashlib.sha256(handle.read()).hexdigest()
+    if actual_digest != task_loss.content_sha256:
+        raise ValueError(
+            f"task-owned custom loss {task_loss.name!r} implementation digest mismatch"
+        )
     projected = _task_owned_metadata(task_loss)
+    same_name = tuple(item for item in metadata if item.name == projected.name)
     if any(
-        item.name == projected.name and item.file_path != projected.file_path
-        for item in metadata
+        item.file_path != projected.file_path or item.contract_snapshot != projected.contract_snapshot
+        for item in same_name
     ):
         raise ValueError(f"custom loss name {projected.name!r} is ambiguous")
     return tuple(item for item in metadata if item.name != projected.name) + (projected,)

@@ -1,6 +1,7 @@
 """Boundary witnesses for immutable custom-loss contract transport."""
 
 import json
+import hashlib
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,7 @@ from agent.schemas.custom_loss_contract import (
     build_custom_loss_contract_snapshot,
     parse_custom_loss_contract_snapshot,
     resolve_custom_loss_inventory,
+    merge_task_owned_custom_loss,
 )
 from agent.schemas.model_io_contract import Dimension, ModelIOContract, TensorAxis, TensorContract
 from agent.schemas.task_config import ForwardContract
@@ -112,10 +114,12 @@ def test_task_owned_loss_projection_reaches_inventory_without_registry_write(tmp
     their first LLM call; the registry spy also catches accidental persistence.
     """
     snapshot = _snapshot()
+    implementation = tmp_path / "task_loss.py"
+    implementation.write_text("PLUGIN_LOSS_TYPE = 'task_loss'\n", encoding="utf-8")
     task_loss = TaskOwnedCustomLoss(
         name="task_loss",
-        file_path=str(tmp_path / "task_loss.py"),
-        content_sha256="a" * 64,
+        file_path=str(implementation),
+        content_sha256=hashlib.sha256(implementation.read_bytes()).hexdigest(),
         contract_snapshot=snapshot,
     )
     ref = SimpleNamespace(
@@ -136,6 +140,26 @@ def test_task_owned_loss_projection_reaches_inventory_without_registry_write(tmp
         _EmptyRegistry().list(capability_type="loss"), snapshot, ref
     )
     assert inventory.names == ("task_loss",)
+
+
+@pytest.mark.parametrize("kind", ["missing", "digest"])
+def test_task_owned_loss_inventory_refuses_unpinned_file(tmp_path, kind):
+    """Inventory refuses a missing or edited implementation before execution.
+
+    MUTATION TARGET: dropping filesystem/digest validation would let a stale
+    composition select code different from the pinned objective.
+    """
+    path = tmp_path / "task_loss.py"
+    if kind == "digest":
+        path.write_text("changed", encoding="utf-8")
+    loss = TaskOwnedCustomLoss(
+        name="task_loss",
+        file_path=str(path),
+        content_sha256="a" * 64,
+        contract_snapshot=_snapshot(),
+    )
+    with pytest.raises(ValueError, match="task_loss"):
+        merge_task_owned_custom_loss((), loss)
 
 
 def test_custom_loss_spec_json_and_protocol_preserve_framework_snapshot(tmp_path):
