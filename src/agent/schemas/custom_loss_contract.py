@@ -205,11 +205,6 @@ def merge_task_owned_custom_loss(
     metadata = tuple(loadable_metadata)
     if task_loss is None:
         return metadata
-    if not os.path.isfile(task_loss.file_path):
-        raise ValueError(
-            f"task-owned custom loss {task_loss.name!r} implementation is missing: "
-            f"{task_loss.file_path!r}"
-        )
     if not task_loss.file_path.endswith(".py"):
         raise ValueError(
             f"task-owned custom loss {task_loss.name!r} implementation is not a .py file"
@@ -220,6 +215,11 @@ def merge_task_owned_custom_loss(
     if captured is not None:
         actual_digest = hashlib.sha256(captured.source).hexdigest()
     else:
+        if not os.path.isfile(task_loss.file_path):
+            raise ValueError(
+                f"task-owned custom loss {task_loss.name!r} implementation is missing: "
+                f"{task_loss.file_path!r}"
+            )
         with open(task_loss.file_path, "rb") as handle:
             actual_digest = hashlib.sha256(handle.read()).hexdigest()
     if actual_digest != task_loss.content_sha256:
