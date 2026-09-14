@@ -215,6 +215,11 @@ class TaskProbeDataSpec(BaseModel):
     training_scope_payload: str = Field(min_length=1)
     sampling: EpochSamplingParams
     max_inference_batch_size: int | None = Field(default=None, ge=1)
+    #: Whether this task-owned probe has temporal segmentation geometry. This
+    #: is explicit transport metadata: a task with a fixed-shape input must
+    #: opt into ``not_applicable`` rather than being inferred from the mere
+    #: presence of a task probe.
+    segmentation_applicability: Literal["temporal", "not_applicable"] = "temporal"
 
 
 class EvalMaterializationParams(BaseModel):

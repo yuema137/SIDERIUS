@@ -322,35 +322,20 @@ def build_realized_identity(
         candidate_config_hash,
     )
 
-    if segmentation_applicability == "temporal":
-        if seg_size is None:
-            raise ValueError("temporal measurement identity requires seg_size")
-        context = build_calibration_context(
-            CalibrationContextInputs(
-                precision=precision,
-                optimizer_type=optimizer_type,
-                model_family=model_type,
-                param_count=trainable_parameter_count or parameter_count,
-                seg_size=seg_size,
-                batch_size=batch_size,
-            )
+    if segmentation_applicability == "temporal" and seg_size is None:
+        raise ValueError("temporal measurement identity requires seg_size")
+    context = build_calibration_context(
+        CalibrationContextInputs(
+            precision=precision,
+            optimizer_type=optimizer_type,
+            model_family=model_type,
+            param_count=trainable_parameter_count or parameter_count,
+            seg_size=seg_size,
+            batch_size=batch_size,
+            segmentation_applicability=segmentation_applicability,
         )
-        realized_hash = candidate_config_hash(context)
-    else:
-        from core.runtime_control.identity import config_hash12
-
-        realized_hash = "non_temporal:" + config_hash12(
-            {
-                "model_type": model_type,
-                "optimizer_type": optimizer_type,
-                "model_family": model_type,
-                "parameter_count": parameter_count,
-                "trainable_parameter_count": trainable_parameter_count,
-                "precision": precision,
-                "batch_size": batch_size,
-                "segmentation_applicability": segmentation_applicability,
-            }
-        )
+    )
+    realized_hash = candidate_config_hash(context)
     return RealizedCandidateIdentity(
         model_type=model_type,
         model_family=model_type,

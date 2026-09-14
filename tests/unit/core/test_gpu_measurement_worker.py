@@ -112,6 +112,7 @@ def _patch_bounded_loader(monkeypatch):
 
 
 def _spec(tmp_path, data_dir: str | None, **over) -> GpuMeasurementSpec:
+    probe = over.get("task_probe_data")
     payload = dict(
         label="c2-worker-test",
         request=CandidateMeasurementRequest(
@@ -121,7 +122,7 @@ def _spec(tmp_path, data_dir: str | None, **over) -> GpuMeasurementSpec:
                 model_config={},
                 train_config={},
                 segmentation_applicability=(
-                    "not_applicable" if over.get("task_probe_data") is not None else "temporal"
+                    probe.segmentation_applicability if probe is not None else "temporal"
                 ),
             ),
             request_id="req-01234567",
@@ -193,6 +194,20 @@ class TestThereIsNoCpuFallback:
 
 
 class TestComposedTaskBatch:
+    def test_task_probe_dimension_marker_is_part_of_the_spec_contract(self, tmp_path, registered):
+        task_ref = TaskProbeDataSpec(
+            manifest_path="/task/composition.yaml",
+            semantic_fingerprint="a" * 64,
+            training_scope_payload='{"kind":"synthetic"}',
+            sampling=EpochSamplingParams(data_dir=registered),
+            segmentation_applicability="not_applicable",
+        )
+        payload = _spec(tmp_path, registered, task_probe_data=task_ref).model_dump(mode="json")
+        payload["request"]["planned_identity"]["seg_size"] = 8
+        payload["request"]["planned_identity"]["segmentation_applicability"] = "temporal"
+        with pytest.raises(ValueError, match="task_probe_data and planned measurement identity"):
+            GpuMeasurementSpec.model_validate(payload)
+
     def test_worker_uses_task_data_path_instead_of_physical_array_loader(
         self, tmp_path, registered, monkeypatch
     ):
@@ -224,6 +239,9 @@ class TestComposedTaskBatch:
             "source": "task_data_path",
             "semantic_fingerprint": "a" * 64,
         }
+        assert components.realized_identity is not None
+        assert components.realized_identity.segmentation_applicability == "temporal"
+        assert components.realized_identity.seg_size == 8
 
 
 class TestTheDeviceIsVerifiedNotAssumed:

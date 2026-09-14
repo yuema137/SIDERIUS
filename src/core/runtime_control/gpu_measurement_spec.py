@@ -278,7 +278,11 @@ class GpuMeasurementSpec(BaseModel):
     @model_validator(mode="after")
     def _probe_and_identity_must_agree(self) -> GpuMeasurementSpec:
         """Do not let the worker measure one shape under another identity."""
-        expected = "not_applicable" if self.task_probe_data is not None else "temporal"
+        expected = (
+            self.task_probe_data.segmentation_applicability
+            if self.task_probe_data is not None
+            else "temporal"
+        )
         actual = self.request.planned_identity.segmentation_applicability
         if actual != expected:
             raise ValueError(

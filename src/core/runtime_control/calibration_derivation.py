@@ -212,7 +212,7 @@ def derive_duration_calibration_record(
     # A fixed task-owned probe is real bounded evidence, but it has no
     # temporal segmentation workload. Keep the evidence explainable while
     # preventing it from entering temporal throughput calibration.
-    if context.get("segmentation_applicability") == "not_applicable" or "seg_size" not in context:
+    if context.get("segmentation_applicability") == "not_applicable":
         return QuarantinedDerivation(
             reason=(
                 "the measurement has no applicable temporal segmentation "

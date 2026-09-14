@@ -17,4 +17,5 @@ existing calibration hash. A task-owned fixed-shape probe carries
 `segmentation_applicability="not_applicable"` and `seg_size=None`; it may
 measure bounded resource use, but the calibration derivation quarantines it
 from temporal throughput evidence. No caller may replace the absent dimension
-with a framework default.
+with a framework default. `TaskProbeDataSpec` carries this typed fact
+explicitly; merely supplying task probe data does not decide applicability.

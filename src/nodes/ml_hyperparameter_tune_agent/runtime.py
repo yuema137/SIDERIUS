@@ -338,7 +338,9 @@ def _handle_prephase_gpu_measurement(
                 train_config=train_config,
                 inference_batch_size=_inference_batch,
                 segmentation_applicability=(
-                    "not_applicable" if task_probe_data is not None else "temporal"
+                    task_probe_data.segmentation_applicability
+                    if task_probe_data is not None
+                    else "temporal"
                 ),
             ),
             request_id=request_id,

@@ -279,12 +279,17 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
         # is not 40 000 as well.
         from agent.skills.training_skill.estimator import resolve_model_field
 
-        # A task-owned probe supplies its own semantic batch. It is not a
-        # temporal waveform probe, so there is no segmentation dimension to
-        # resolve and no framework default may be invented for identity.
+        # A task-owned probe carries an explicit applicability fact.  Its
+        # presence alone does not erase a temporal segmentation dimension:
+        # composed temporal tasks still need that dimension in their identity.
+        task_segmentation_applicability = (
+            spec.task_probe_data.segmentation_applicability
+            if spec.task_probe_data is not None
+            else "temporal"
+        )
         seg = (
             None
-            if spec.task_probe_data is not None
+            if task_segmentation_applicability == "not_applicable"
             else resolve_model_field(
                 model_type, spec.model_config_payload, "segmentation_size", safety_margin=40_000
             )
@@ -396,9 +401,7 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
             parameter_count=total,
             trainable_parameter_count=trainable,
             inference_batch_size=spec.inference_batch_size,
-            segmentation_applicability=(
-                "not_applicable" if spec.task_probe_data is not None else "temporal"
-            ),
+            segmentation_applicability=task_segmentation_applicability,
         )
         return CandidateComponents(
             model=model,
