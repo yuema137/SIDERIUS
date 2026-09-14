@@ -91,6 +91,7 @@ class TestTheProjection:
         assert ref.semantic_fingerprint == composition.semantic_fingerprint
         assert ref.task_health_binding == composition.task_health_binding
         assert ref.task_data_path_id == "quickstart_tabular"
+        assert ref.segmentation_applicability == "not_applicable"
 
     def test_an_un_composed_run_projects_nothing(self):
         assert build_task_composition_ref(None) is None

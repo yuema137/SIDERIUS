@@ -47,6 +47,12 @@ def build_task_probe_data(
         )
     data_path = require_bound_task_data_path()
     capability = resolve_task_scope_capability(data_path)
+    segmentation_applicability = getattr(task_composition_ref, "segmentation_applicability", None)
+    if segmentation_applicability is None:
+        raise ValueError(
+            "a composed training scope reached resource measurement without an "
+            "explicit segmentation_applicability declaration"
+        )
     return TaskProbeDataSpec(
         manifest_path=manifest_path,
         semantic_fingerprint=task_composition_ref.semantic_fingerprint,
@@ -58,4 +64,5 @@ def build_task_probe_data(
             max_samples=max_samples,
         ),
         max_inference_batch_size=resolve_max_inference_batch_size(data_path),
+        segmentation_applicability=segmentation_applicability,
     )

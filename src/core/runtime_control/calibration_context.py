@@ -35,9 +35,9 @@ identity unknowable before launch and so unusable by the gate that needs it.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def training_loop_runtime_flags() -> dict[str, Any]:
@@ -101,8 +101,17 @@ class CalibrationContextInputs(BaseModel):
     model_family: str = Field(min_length=1)
     #: Trainable parameters, from `trainable_param_count`.
     param_count: int = Field(gt=0)
-    seg_size: int = Field(gt=0)
+    seg_size: int | None = Field(default=None, gt=0)
     batch_size: int = Field(gt=0)
+    segmentation_applicability: Literal["temporal", "not_applicable"] = "temporal"
+
+    @model_validator(mode="after")
+    def _segmentation_shape_matches_applicability(self) -> CalibrationContextInputs:
+        if self.segmentation_applicability == "temporal" and self.seg_size is None:
+            raise ValueError("temporal calibration context requires seg_size")
+        if self.segmentation_applicability == "not_applicable" and self.seg_size is not None:
+            raise ValueError("non-temporal calibration context must omit seg_size")
+        return self
 
 
 def build_calibration_context(inputs: CalibrationContextInputs) -> dict[str, Any]:
@@ -112,15 +121,19 @@ def build_calibration_context(inputs: CalibrationContextInputs) -> dict[str, Any
     and the VALUE SPELLING are not. This function is the only definition of
     both.
     """
-    return {
+    context = {
         "precision": inputs.precision,
         "optimizer_type": inputs.optimizer_type,
         "model_family": inputs.model_family,
         "param_count": inputs.param_count,
-        "seg_size": inputs.seg_size,
         "batch_size": inputs.batch_size,
         "runtime_flags": training_loop_runtime_flags(),
     }
+    if inputs.segmentation_applicability == "temporal":
+        context["seg_size"] = inputs.seg_size
+    else:
+        context["segmentation_applicability"] = inputs.segmentation_applicability
+    return context
 
 
 def candidate_config_hash(context: dict[str, Any]) -> str:

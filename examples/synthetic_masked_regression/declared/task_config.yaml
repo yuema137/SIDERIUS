@@ -5,6 +5,7 @@ task_description: |
   to the training objective or terminal metrics.
 
 forward_contract:
+  segmentation_applicability: not_applicable
   model_io:
     input:
       axes:

@@ -1755,6 +1755,7 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
         semantic_fingerprint=task_composition.semantic_fingerprint,
         task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
         task_health_binding=task_composition.task_health_binding,
+        segmentation_applicability=task_composition.forward_contract.segmentation_applicability,
         objective=getattr(task_composition, "objective", None),
         parameter_rules=getattr(task_composition, "parameter_rules", None),
         description_source_policy=DescriptionSourcePolicy.COMPOSED,
@@ -1992,6 +1993,8 @@ def compute_semantic_fingerprint(
         forward_contract_payload.pop("supervision_target", None)
     if forward_contract.custom_loss_applicability is None:
         forward_contract_payload.pop("custom_loss_applicability", None)
+    if forward_contract.segmentation_applicability is None:
+        forward_contract_payload.pop("segmentation_applicability", None)
 
     payload = {
         "task_data_path_id": task_data_path_id,

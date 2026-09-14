@@ -112,12 +112,18 @@ def _patch_bounded_loader(monkeypatch):
 
 
 def _spec(tmp_path, data_dir: str | None, **over) -> GpuMeasurementSpec:
+    probe = over.get("task_probe_data")
     payload = dict(
         label="c2-worker-test",
         request=CandidateMeasurementRequest(
             model_type=MODEL_TYPE,
             planned_identity=build_planned_identity(
-                model_type="punet", model_config={}, train_config={}
+                model_type="punet",
+                model_config={},
+                train_config={},
+                segmentation_applicability=(
+                    probe.segmentation_applicability if probe is not None else "temporal"
+                ),
             ),
             request_id="req-01234567",
             device_uuid=UUID,
@@ -188,6 +194,30 @@ class TestThereIsNoCpuFallback:
 
 
 class TestComposedTaskBatch:
+    def test_task_probe_dimension_marker_is_part_of_the_spec_contract(self, tmp_path, registered):
+        task_ref = TaskProbeDataSpec(
+            manifest_path="/task/composition.yaml",
+            semantic_fingerprint="a" * 64,
+            training_scope_payload='{"kind":"synthetic"}',
+            sampling=EpochSamplingParams(data_dir=registered),
+            segmentation_applicability="not_applicable",
+        )
+        payload = _spec(tmp_path, registered, task_probe_data=task_ref).model_dump(mode="json")
+        payload["request"]["planned_identity"]["seg_size"] = 8
+        payload["request"]["planned_identity"]["segmentation_applicability"] = "temporal"
+        with pytest.raises(ValueError, match="task_probe_data and planned measurement identity"):
+            GpuMeasurementSpec.model_validate(payload)
+
+    def test_task_probe_dimension_marker_cannot_be_omitted(self, registered):
+        """Missing applicability must fail before a worker can invent temporal identity."""
+        with pytest.raises(ValueError, match="segmentation_applicability"):
+            TaskProbeDataSpec(
+                manifest_path="/task/composition.yaml",
+                semantic_fingerprint="a" * 64,
+                training_scope_payload='{"kind":"synthetic"}',
+                sampling=EpochSamplingParams(data_dir=registered),
+            )
+
     def test_worker_uses_task_data_path_instead_of_physical_array_loader(
         self, tmp_path, registered, monkeypatch
     ):
@@ -207,6 +237,7 @@ class TestComposedTaskBatch:
             semantic_fingerprint="a" * 64,
             training_scope_payload='{"kind":"synthetic"}',
             sampling=EpochSamplingParams(data_dir=registered),
+            segmentation_applicability="temporal",
         )
 
         components = build_production_components(
@@ -219,6 +250,9 @@ class TestComposedTaskBatch:
             "source": "task_data_path",
             "semantic_fingerprint": "a" * 64,
         }
+        assert components.realized_identity is not None
+        assert components.realized_identity.segmentation_applicability == "temporal"
+        assert components.realized_identity.seg_size == 8
 
 
 class TestTheDeviceIsVerifiedNotAssumed:

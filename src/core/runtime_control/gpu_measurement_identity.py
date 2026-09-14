@@ -50,7 +50,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 #: Why a planned request and a realized measurement do not describe the same
 #: candidate. Each is separately actionable -- a nonce mismatch means a
@@ -67,7 +67,10 @@ IdentityMismatch = Literal[
     "seg_size_mismatch",
     "batch_size_mismatch",
     "realized_hash_missing",
+    "segmentation_applicability_mismatch",
 ]
+
+SegmentationApplicability = Literal["temporal", "not_applicable"]
 
 #: The fields both sides can state. `param_count` and `precision` are
 #: deliberately absent: only the worker can know them, and demanding that
@@ -110,7 +113,7 @@ class PlannedCandidateIdentity(BaseModel):
     model_type: str = Field(min_length=1)
     model_family: str = Field(min_length=1)
     optimizer_type: str = Field(min_length=1)
-    seg_size: int = Field(gt=0)
+    seg_size: int | None = Field(default=None, gt=0)
     batch_size: int = Field(gt=0)
     #: `cfg:<12 hex>` over the fields above plus the production loop's
     #: runtime flags. Shaped like C1's hash and NOT the same hash -- a
@@ -130,6 +133,18 @@ class PlannedCandidateIdentity(BaseModel):
     #: describes a training configuration -- is not redefined.
     inference_workload_hash: str | None = None
 
+    #: Explicitly records whether the candidate has temporal segmentation
+    #: geometry. ``not_applicable`` is used by a fixed task-owned probe.
+    segmentation_applicability: SegmentationApplicability = "temporal"
+
+    @model_validator(mode="after")
+    def _segmentation_shape_matches_applicability(self) -> PlannedCandidateIdentity:
+        if self.segmentation_applicability == "temporal" and self.seg_size is None:
+            raise ValueError("temporal measurement identity requires seg_size")
+        if self.segmentation_applicability == "not_applicable" and self.seg_size is not None:
+            raise ValueError("non-temporal measurement identity must omit seg_size")
+        return self
+
 
 class RealizedCandidateIdentity(BaseModel):
     """What the worker actually constructed, recomputed from the module.
@@ -144,7 +159,7 @@ class RealizedCandidateIdentity(BaseModel):
     model_type: str = Field(min_length=1)
     model_family: str = Field(min_length=1)
     optimizer_type: str = Field(min_length=1)
-    seg_size: int = Field(gt=0)
+    seg_size: int | None = Field(default=None, gt=0)
     batch_size: int = Field(gt=0)
     precision: str = Field(min_length=1)
     parameter_count: int = Field(gt=0)
@@ -163,6 +178,20 @@ class RealizedCandidateIdentity(BaseModel):
     #: above so C1's definition of "same realized configuration" -- which
     #: describes a training configuration -- is not redefined.
     inference_workload_hash: str | None = None
+
+    #: Fixed task-owned probes are useful for bounded VRAM measurement but do
+    #: not describe a temporal segmentation workload. This fact travels with
+    #: the realized identity so readers cannot mistake the result for a
+    #: temporal calibration observation.
+    segmentation_applicability: SegmentationApplicability = "temporal"
+
+    @model_validator(mode="after")
+    def _segmentation_shape_matches_applicability(self) -> RealizedCandidateIdentity:
+        if self.segmentation_applicability == "temporal" and self.seg_size is None:
+            raise ValueError("temporal measurement identity requires seg_size")
+        if self.segmentation_applicability == "not_applicable" and self.seg_size is not None:
+            raise ValueError("non-temporal measurement identity must omit seg_size")
+        return self
 
 
 def resolve_inference_batch(model_type: str, explicit: int | None = None) -> int:
@@ -199,6 +228,7 @@ def build_planned_identity(
     model_config: dict[str, Any],
     train_config: dict[str, Any],
     inference_batch_size: int | None = None,
+    segmentation_applicability: SegmentationApplicability = "temporal",
 ) -> PlannedCandidateIdentity:
     """The parent's identity for a candidate it has not built.
 
@@ -219,8 +249,10 @@ def build_planned_identity(
     # a workload nobody ran. Resolved through the one authority that reproduces
     # what the model will be constructed with; unchanged whenever the key is
     # present, which is every production plan.
-    seg_size = resolve_model_field(
-        model_type, model_config, "segmentation_size", safety_margin=40_000
+    seg_size = (
+        resolve_model_field(model_type, model_config, "segmentation_size", safety_margin=40_000)
+        if segmentation_applicability == "temporal"
+        else None
     )
     batch_size = int(train_config.get("batch_size", 1))
     optimizer_type = str(train_config.get("optimizer_type", "adamw"))
@@ -228,10 +260,13 @@ def build_planned_identity(
         "model_type": model_type,
         "model_family": model_type,
         "optimizer_type": optimizer_type,
-        "seg_size": seg_size,
         "batch_size": batch_size,
         "runtime_flags": training_loop_runtime_flags(),
     }
+    if segmentation_applicability == "temporal":
+        payload["seg_size"] = seg_size
+    else:
+        payload["segmentation_applicability"] = segmentation_applicability
     planned_hash = f"cfg:{config_hash12(payload)}"
     return PlannedCandidateIdentity(
         model_type=model_type,
@@ -242,6 +277,7 @@ def build_planned_identity(
         planned_config_hash=planned_hash,
         inference_batch_size=inference_batch_size,
         inference_workload_hash=_inference_workload_hash(planned_hash, inference_batch_size),
+        segmentation_applicability=segmentation_applicability,
     )
 
 
@@ -265,12 +301,13 @@ def build_realized_identity(
     *,
     model_type: str,
     optimizer_type: str,
-    seg_size: int,
+    seg_size: int | None,
     batch_size: int,
     precision: str,
     parameter_count: int,
     trainable_parameter_count: int,
     inference_batch_size: int | None = None,
+    segmentation_applicability: SegmentationApplicability = "temporal",
 ) -> RealizedCandidateIdentity:
     """The worker's identity for the candidate it just built.
 
@@ -285,6 +322,8 @@ def build_realized_identity(
         candidate_config_hash,
     )
 
+    if segmentation_applicability == "temporal" and seg_size is None:
+        raise ValueError("temporal measurement identity requires seg_size")
     context = build_calibration_context(
         CalibrationContextInputs(
             precision=precision,
@@ -293,8 +332,10 @@ def build_realized_identity(
             param_count=trainable_parameter_count or parameter_count,
             seg_size=seg_size,
             batch_size=batch_size,
+            segmentation_applicability=segmentation_applicability,
         )
     )
+    realized_hash = candidate_config_hash(context)
     return RealizedCandidateIdentity(
         model_type=model_type,
         model_family=model_type,
@@ -304,11 +345,10 @@ def build_realized_identity(
         precision=precision,
         parameter_count=parameter_count,
         trainable_parameter_count=trainable_parameter_count,
-        realized_config_hash=candidate_config_hash(context),
+        realized_config_hash=realized_hash,
         inference_batch_size=inference_batch_size,
-        inference_workload_hash=_inference_workload_hash(
-            candidate_config_hash(context), inference_batch_size
-        ),
+        inference_workload_hash=_inference_workload_hash(realized_hash, inference_batch_size),
+        segmentation_applicability=segmentation_applicability,
     )
 
 
@@ -335,7 +375,14 @@ def compare_identities(
         return "realized_identity_absent"
     if not realized.realized_config_hash:
         return "realized_hash_missing"
-    for field in COMPARABLE_FIELDS:
+    if planned.segmentation_applicability != realized.segmentation_applicability:
+        return "segmentation_applicability_mismatch"
+    comparable_fields = (
+        COMPARABLE_FIELDS
+        if planned.segmentation_applicability == "temporal"
+        else tuple(field for field in COMPARABLE_FIELDS if field != "seg_size")
+    )
+    for field in comparable_fields:
         if getattr(planned, field) != getattr(realized, field):
             return f"{field}_mismatch"  # type: ignore[return-value]
     if phase == "inference":

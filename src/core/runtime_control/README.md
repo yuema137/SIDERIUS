@@ -8,3 +8,14 @@ Focused admission tests are in [`test_admission.py`](../../../tests/unit/core/te
 forecasts and blocking measurements are distinct authorities.
 
 See [the parent guide](../README.md) for child ownership and the focused validation route.
+
+## Measurement dimensions
+
+Measurement identity records whether temporal segmentation is applicable. The
+ordinary temporal path carries a positive `seg_size` and preserves the
+existing calibration hash. A task-owned fixed-shape probe carries
+`segmentation_applicability="not_applicable"` and `seg_size=None`; it may
+measure bounded resource use, but the calibration derivation quarantines it
+from temporal throughput evidence. No caller may replace the absent dimension
+with a framework default. `TaskProbeDataSpec` carries this typed fact
+explicitly; merely supplying task probe data does not decide applicability.

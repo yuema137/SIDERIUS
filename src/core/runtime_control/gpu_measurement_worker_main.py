@@ -279,8 +279,20 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
         # is not 40 000 as well.
         from agent.skills.training_skill.estimator import resolve_model_field
 
-        seg = resolve_model_field(
-            model_type, spec.model_config_payload, "segmentation_size", safety_margin=40_000
+        # A task-owned probe carries an explicit applicability fact.  Its
+        # presence alone does not erase a temporal segmentation dimension:
+        # composed temporal tasks still need that dimension in their identity.
+        task_segmentation_applicability = (
+            spec.task_probe_data.segmentation_applicability
+            if spec.task_probe_data is not None
+            else "temporal"
+        )
+        seg = (
+            None
+            if task_segmentation_applicability == "not_applicable"
+            else resolve_model_field(
+                model_type, spec.model_config_payload, "segmentation_size", safety_margin=40_000
+            )
         )
         # TWO batches, deliberately distinct.
         #
@@ -324,6 +336,11 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
                 "semantic_fingerprint": spec.task_probe_data.semantic_fingerprint,
             }
         else:
+            if seg is None:  # narrowed from the explicit temporal branch above
+                raise RuntimeError(
+                    "a legacy temporal measurement reached bounded probe loading "
+                    "without a segmentation dimension"
+                )
             bounded = load_bounded_probe_batch(
                 data_dir=spec.data_dir,
                 batch_size=input_batch,
@@ -389,6 +406,7 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
             parameter_count=total,
             trainable_parameter_count=trainable,
             inference_batch_size=spec.inference_batch_size,
+            segmentation_applicability=task_segmentation_applicability,
         )
         return CandidateComponents(
             model=model,
