@@ -229,7 +229,8 @@ def merge_task_owned_custom_loss(
     projected = _task_owned_metadata(task_loss)
     same_name = tuple(item for item in metadata if item.name == projected.name)
     if any(
-        item.file_path != projected.file_path or item.contract_snapshot != projected.contract_snapshot
+        item.file_path != projected.file_path
+        or item.contract_snapshot != projected.contract_snapshot
         for item in same_name
     ):
         raise ValueError(f"custom loss name {projected.name!r} is ambiguous")

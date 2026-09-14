@@ -162,6 +162,35 @@ def test_task_owned_loss_inventory_refuses_unpinned_file(tmp_path, kind):
         merge_task_owned_custom_loss((), loss)
 
 
+def test_task_owned_loss_refuses_a_different_global_implementation_with_the_same_name(tmp_path):
+    """A global namesake must not compete with the selected task implementation.
+
+    MUTATION TARGET: first-wins or name-only de-duplication would let an
+    unrelated global capability execute while provenance pins the task file.
+    """
+    selected = tmp_path / "selected.py"
+    namesake = tmp_path / "namesake.py"
+    selected.write_text("# selected\n", encoding="utf-8")
+    namesake.write_text("# other\n", encoding="utf-8")
+    snapshot = _snapshot()
+    task_loss = TaskOwnedCustomLoss(
+        name="task_loss",
+        file_path=str(selected),
+        content_sha256=hashlib.sha256(selected.read_bytes()).hexdigest(),
+        contract_snapshot=snapshot,
+    )
+    global_loss = CapabilityMetadata(
+        name="task_loss",
+        capability_type="loss",
+        file_path=str(namesake),
+        created_at="fixture",
+        contract_snapshot=snapshot,
+    )
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        merge_task_owned_custom_loss((global_loss,), task_loss)
+
+
 def test_custom_loss_spec_json_and_protocol_preserve_framework_snapshot(tmp_path):
     from agent.schemas.hyperparam_tuning import TaskCompositionRef
     from agent.schemas.proposal import CustomLossSpec, ProposalOutput
