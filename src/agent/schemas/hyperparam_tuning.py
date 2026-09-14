@@ -17,7 +17,7 @@ from typing import Any, Literal, NamedTuple
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
-from agent.schemas.custom_loss_contract import CustomLossApplicability
+from agent.schemas.custom_loss_contract import CustomLossApplicability, TaskOwnedCustomLoss
 from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.model_io_contract import TensorContract
 from agent.schemas.ordering import (
@@ -1424,6 +1424,10 @@ class TaskCompositionRef(BaseModel):
     custom_loss_applicability: CustomLossApplicability | None = Field(
         default=None,
         discriminator="mode",
+    )
+    task_owned_custom_loss: TaskOwnedCustomLoss | None = Field(
+        default=None,
+        description="Exact custom-loss implementation selected by the composition edge.",
     )
     objective: Any = Field(
         default=None,

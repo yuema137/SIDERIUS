@@ -55,6 +55,60 @@ class TestDeclaredObjectiveIsAuthoritative:
         assert ref is not None and ref.objective is not None
         assert ref.objective.loss_name == MASKED_LOSS_NAME
 
+    def test_composed_objective_reaches_every_node_inventory_without_global_registration(self):
+        """The resolved task loss must cross the real composition-to-node boundary.
+
+        MUTATION TARGET: removing the task-owned projection or using the global
+        registry alone makes proposer, implementor or tuner refuse the locked
+        objective before its first LLM/execution effect. Calling ``register``
+        here would expose a task implementation to unrelated runs.
+        """
+        from types import SimpleNamespace
+
+        from nodes.ml_hyperparameter_tune_agent.loss_inventory import (
+            resolve_run_custom_loss_inventory,
+        )
+        from nodes.ml_model_implementor.ml_model_implementor import (
+            _custom_loss_inventory as implementor_inventory,
+        )
+        from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
+            MLModelProposalAgent,
+        )
+        from workflows.task_composition import build_task_composition_ref
+
+        composition = _compose(MASKED_REGRESSION)
+        ref = build_task_composition_ref(composition)
+        assert ref is not None and ref.task_owned_custom_loss is not None
+        assert ref.task_owned_custom_loss.name == MASKED_LOSS_NAME
+
+        class _EmptyRegistry:
+            def list(self, *, capability_type):
+                assert capability_type == "loss"
+                return []
+
+            def register(self, _metadata):
+                raise AssertionError("task-owned loss must remain run-scoped")
+
+        registry = _EmptyRegistry()
+        node_input = SimpleNamespace(
+            forward_contract=composition.forward_contract,
+            task_composition_ref=ref,
+        )
+        proposer = MLModelProposalAgent.__new__(MLModelProposalAgent)
+        proposer._registry = registry
+
+        proposer_view = proposer._custom_loss_inventory(node_input)
+        implementor_view = implementor_inventory(node_input, registry)
+        tuner_view = resolve_run_custom_loss_inventory(
+            registry,
+            composition.forward_contract.model_io,
+            ref,
+        )
+
+        assert proposer_view == implementor_view == tuner_view
+        assert proposer_view.names == (MASKED_LOSS_NAME,)
+        assert proposer_view.generation_allowed is False
+
     def test_an_agent_selected_loss_is_replaced_by_the_declaration(self):
         from workflows.task_composition import build_task_composition_ref
 

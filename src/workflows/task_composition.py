@@ -87,6 +87,7 @@ from core.local_code import (
 from ml_models.model_descriptions import DescriptionSourcePolicy
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from agent.schemas.custom_loss_contract import TaskOwnedCustomLoss
     from agent.schemas.interpretation import InterpretationTaskBlocks
     from agent.schemas.task_config import ForwardContract
     from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
@@ -271,6 +272,9 @@ class RunTaskComposition:
     objective and the planner's choice stands, which is every run that
     exists today.
     """
+
+    task_owned_custom_loss: TaskOwnedCustomLoss | None = None
+    """The exact task-owned custom loss selected at the composition edge."""
 
     parameter_rules: ParameterRules = field(default_factory=ParameterRules)
     """The composition's typed effective-plan constraints.
@@ -1816,6 +1820,7 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
     """
     if task_composition is None:
         return None
+    objective = getattr(task_composition, "objective", None)
     return TaskCompositionRef(
         semantic_fingerprint=task_composition.semantic_fingerprint,
         task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
@@ -1823,7 +1828,8 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
         segmentation_applicability=task_composition.forward_contract.segmentation_applicability,
         supervision_target=task_composition.forward_contract.supervision_target,
         custom_loss_applicability=task_composition.forward_contract.custom_loss_applicability,
-        objective=getattr(task_composition, "objective", None),
+        objective=objective,
+        task_owned_custom_loss=getattr(task_composition, "task_owned_custom_loss", None),
         parameter_rules=getattr(task_composition, "parameter_rules", None),
         description_source_policy=DescriptionSourcePolicy.COMPOSED,
     )
@@ -2606,6 +2612,24 @@ def _compose_resolved_task_bindings(
     composed_objective, objective_ref = _compose_objective(
         raw, manifest_dir, expected_loss_contract
     )
+    task_owned_custom_loss = None
+    if objective_ref is not None:
+        from agent.schemas.custom_loss_contract import TaskOwnedCustomLoss
+
+        if (
+            expected_loss_contract is None
+            or composed_objective is None
+            or composed_objective.loss_name is None
+        ):
+            raise TaskCompositionError(
+                "custom objective resolved without its validated loss contract"
+            )
+        task_owned_custom_loss = TaskOwnedCustomLoss(
+            name=composed_objective.loss_name,
+            file_path=objective_ref.absolute_path,
+            content_sha256=objective_ref.content_sha256,
+            contract_snapshot=expected_loss_contract,
+        )
     if objective_ref is not None:
         source_paths["objective"] = str(objective_ref.absolute_path)
         plugins.append(objective_ref)
@@ -2729,6 +2753,7 @@ def _compose_resolved_task_bindings(
         model_plugins=model_plugin_binding,
         loss_plugins=loss_plugin_roots or None,
         objective=composed_objective,
+        task_owned_custom_loss=task_owned_custom_loss,
         parameter_rules=parameter_rules,
         observables=observables or None,
     )

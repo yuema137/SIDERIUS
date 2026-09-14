@@ -1,5 +1,6 @@
 """Boundary witnesses for immutable custom-loss contract transport."""
 
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -8,8 +9,11 @@ from pydantic import ValidationError
 
 from agent.schemas.custom_loss_contract import (
     EqualShapeApplicability,
+    TaskOwnedCustomLoss,
     build_custom_loss_contract_snapshot,
+    merge_task_owned_custom_loss,
     parse_custom_loss_contract_snapshot,
+    resolve_custom_loss_inventory,
 )
 from agent.schemas.model_io_contract import Dimension, ModelIOContract, TensorAxis, TensorContract
 from agent.schemas.task_config import ForwardContract
@@ -100,6 +104,150 @@ def test_task_composition_projection_round_trips_contract_and_preserves_segmenta
     assert restored.custom_loss_applicability == declaration
     assert restored.segmentation_applicability == "not_applicable"
     assert build_task_composition_ref(None) is None
+
+
+def test_task_owned_loss_projection_reaches_inventory_without_registry_write(tmp_path):
+    """A selected local objective is offered even when durable inventory is empty.
+
+    MUTATION TARGET: removing the run-scoped merge makes this composed inventory
+    empty and causes the proposer/implementor/tuner boundary to refuse before
+    their first LLM call; the registry spy also catches accidental persistence.
+    """
+    snapshot = _snapshot()
+    implementation = tmp_path / "task_loss.py"
+    implementation.write_text("PLUGIN_LOSS_TYPE = 'task_loss'\n", encoding="utf-8")
+    task_loss = TaskOwnedCustomLoss(
+        name="task_loss",
+        file_path=str(implementation),
+        content_sha256=hashlib.sha256(implementation.read_bytes()).hexdigest(),
+        contract_snapshot=snapshot,
+    )
+    ref = SimpleNamespace(
+        supervision_target=_tensor("B", 1),
+        custom_loss_applicability=parse_custom_loss_contract_snapshot(snapshot).applicability,
+        objective=SimpleNamespace(loss_type="custom", loss_name="task_loss"),
+        task_owned_custom_loss=task_loss,
+    )
+
+    class _EmptyRegistry:
+        def list(self, *, capability_type):
+            return []
+
+        def register(self, metadata):
+            raise AssertionError("task-owned projection must not register globally")
+
+    inventory = resolve_custom_loss_inventory(
+        _EmptyRegistry().list(capability_type="loss"), snapshot, ref
+    )
+    assert inventory.names == ("task_loss",)
+
+
+@pytest.mark.parametrize("kind", ["missing", "digest"])
+def test_task_owned_loss_inventory_refuses_unpinned_file(tmp_path, kind):
+    """Inventory refuses a missing or edited implementation before execution.
+
+    MUTATION TARGET: dropping filesystem/digest validation would let a stale
+    composition select code different from the pinned objective.
+    """
+    path = tmp_path / "task_loss.py"
+    if kind == "digest":
+        path.write_text("changed", encoding="utf-8")
+    loss = TaskOwnedCustomLoss(
+        name="task_loss",
+        file_path=str(path),
+        content_sha256="a" * 64,
+        contract_snapshot=_snapshot(),
+    )
+    with pytest.raises(ValueError, match="task_loss"):
+        merge_task_owned_custom_loss((), loss)
+
+
+def test_task_owned_loss_refuses_a_different_global_implementation_with_the_same_name(tmp_path):
+    """A global namesake must not compete with the selected task implementation.
+
+    MUTATION TARGET: first-wins or name-only de-duplication would let an
+    unrelated global capability execute while provenance pins the task file.
+    """
+    selected = tmp_path / "selected.py"
+    namesake = tmp_path / "namesake.py"
+    selected.write_text("# selected\n", encoding="utf-8")
+    namesake.write_text("# other\n", encoding="utf-8")
+    snapshot = _snapshot()
+    task_loss = TaskOwnedCustomLoss(
+        name="task_loss",
+        file_path=str(selected),
+        content_sha256=hashlib.sha256(selected.read_bytes()).hexdigest(),
+        contract_snapshot=snapshot,
+    )
+    global_loss = CapabilityMetadata(
+        name="task_loss",
+        capability_type="loss",
+        file_path=str(namesake),
+        created_at="fixture",
+        contract_snapshot=snapshot,
+    )
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        merge_task_owned_custom_loss((global_loss,), task_loss)
+
+
+def test_task_owned_loss_deduplicates_a_byte_identical_global_copy(tmp_path):
+    """Relocating identical code must not create a false identity conflict.
+
+    MUTATION TARGET: path-based identity would reject a generated-library copy
+    of the exact selected bytes even though content and contract are unchanged.
+    """
+    selected = tmp_path / "selected.py"
+    relocated = tmp_path / "relocated.py"
+    selected.write_text("# same implementation\n", encoding="utf-8")
+    relocated.write_bytes(selected.read_bytes())
+    snapshot = _snapshot()
+    task_loss = TaskOwnedCustomLoss(
+        name="task_loss",
+        file_path=str(selected),
+        content_sha256=hashlib.sha256(selected.read_bytes()).hexdigest(),
+        contract_snapshot=snapshot,
+    )
+    global_copy = CapabilityMetadata(
+        name="task_loss",
+        capability_type="loss",
+        file_path=str(relocated),
+        created_at="fixture",
+        contract_snapshot=snapshot,
+    )
+
+    merged = merge_task_owned_custom_loss((global_copy,), task_loss)
+
+    assert tuple(item.file_path for item in merged) == (str(selected),)
+
+
+def test_task_owned_loss_digest_uses_the_bound_captured_source(tmp_path):
+    """Finite package bytes remain authoritative after the source path changes.
+
+    MUTATION TARGET: reading or requiring the live task checkout after capture
+    makes an immutable run fail or silently validate bytes it will not execute.
+    """
+    from core.local_code import bind_code_package
+    from core.local_code.capture import CodePackageDeclaration, capture_package
+
+    source = tmp_path / "task_loss.py"
+    source.write_text("# captured implementation\n", encoding="utf-8")
+    package = capture_package(
+        CodePackageDeclaration(root=".", files=(source.name,)),
+        tmp_path,
+    )
+    task_loss = TaskOwnedCustomLoss(
+        name="task_loss",
+        file_path=str(source),
+        content_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        contract_snapshot=_snapshot(),
+    )
+    source.unlink()
+
+    with bind_code_package(package):
+        merged = merge_task_owned_custom_loss((), task_loss)
+
+    assert tuple(item.name for item in merged) == ("task_loss",)
 
 
 def test_custom_loss_spec_json_and_protocol_preserve_framework_snapshot(tmp_path):

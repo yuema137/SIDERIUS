@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Iterable
 from typing import Any, Literal, Protocol, cast
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent.schemas.model_io_contract import DtypeAdmissibility, TensorContract
 from core.capability_registry import CapabilityContractSnapshot, CapabilityMetadata
@@ -171,10 +172,83 @@ class CustomLossInventory(BaseModel):
         return tuple(entry.name for entry in self.entries)
 
 
+class TaskOwnedCustomLoss(BaseModel):
+    """The exact custom-loss implementation selected by one composition."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(min_length=1)
+    file_path: str = Field(min_length=1)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    contract_snapshot: CapabilityContractSnapshot
+
+    @field_validator("file_path")
+    @classmethod
+    def _file_path_is_absolute(cls, value: str) -> str:
+        if not os.path.isabs(value):
+            raise ValueError("task-owned custom-loss file_path must be absolute")
+        return value
+
+
+def _task_owned_metadata(task_loss: TaskOwnedCustomLoss) -> CapabilityMetadata:
+    """Adapt the ephemeral composition projection to the inventory vocabulary."""
+
+    return CapabilityMetadata(
+        name=task_loss.name,
+        capability_type="loss",
+        file_path=task_loss.file_path,
+        created_at="task-composition",
+        description="task-declared custom loss",
+        contract_snapshot=task_loss.contract_snapshot,
+    )
+
+
+def _loss_implementation_digest(name: str, file_path: str) -> str:
+    """Hash the selected immutable source, or the live file when unbound."""
+
+    if not file_path.endswith(".py"):
+        raise ValueError(f"custom loss {name!r} implementation is not a .py file")
+    from core.local_code import selected_member
+
+    captured = selected_member(file_path)
+    if captured is not None:
+        return hashlib.sha256(captured.source).hexdigest()
+    if not os.path.isfile(file_path):
+        raise ValueError(f"custom loss {name!r} implementation is missing: {file_path!r}")
+    with open(file_path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
+def merge_task_owned_custom_loss(
+    loadable_metadata: Iterable[CapabilityMetadata],
+    task_loss: TaskOwnedCustomLoss | None,
+) -> tuple[CapabilityMetadata, ...]:
+    """Merge one selected task loss with global metadata without persistence."""
+
+    metadata = tuple(loadable_metadata)
+    if task_loss is None:
+        return metadata
+    actual_digest = _loss_implementation_digest(task_loss.name, task_loss.file_path)
+    if actual_digest != task_loss.content_sha256:
+        raise ValueError(
+            f"task-owned custom loss {task_loss.name!r} implementation digest mismatch"
+        )
+    projected = _task_owned_metadata(task_loss)
+    same_name = tuple(item for item in metadata if item.name == projected.name)
+    if any(
+        item.contract_snapshot != projected.contract_snapshot
+        or _loss_implementation_digest(item.name, item.file_path) != task_loss.content_sha256
+        for item in same_name
+    ):
+        raise ValueError(f"custom loss name {projected.name!r} is ambiguous")
+    return (*(item for item in metadata if item.name != projected.name), projected)
+
+
 class CustomLossTaskProjection(Protocol):
     supervision_target: TensorContract | None
     custom_loss_applicability: CustomLossApplicability | None
     objective: object | None
+    task_owned_custom_loss: TaskOwnedCustomLoss | None
 
 
 def _apply_objective_lock(
@@ -250,7 +324,8 @@ def resolve_custom_loss_inventory(
     agreement; malformed or mismatched rows become named unavailable reasons.
     """
 
-    metadata = tuple(loadable_metadata)
+    task_loss = getattr(task_composition_ref, "task_owned_custom_loss", None)
+    metadata = merge_task_owned_custom_loss(loadable_metadata, task_loss)
     if task_composition_ref is None:
         return CustomLossInventory(
             composed=False,
