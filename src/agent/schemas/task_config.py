@@ -27,7 +27,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agent.schemas.model_io_contract import AxisRole, ModelIOContract
+from agent.schemas.custom_loss_contract import CustomLossApplicability
+from agent.schemas.model_io_contract import AxisRole, ModelIOContract, TensorContract
 
 
 class ForwardContract(BaseModel):
@@ -118,6 +119,23 @@ class ForwardContract(BaseModel):
         "legacy Regime-A form, preserved unchanged.",
     )
 
+    supervision_target: TensorContract | None = Field(
+        default=None,
+        description=(
+            "Optional task-owned supervision target tensor contract. It is "
+            "required when a task declares custom-loss applicability; the "
+            "framework never guesses a target shape from model output."
+        ),
+    )
+    custom_loss_applicability: CustomLossApplicability | None = Field(
+        default=None,
+        description=(
+            "Optional typed custom-loss eligibility declaration. Supported "
+            "forms are explicit_pair and equal_shape; absence is unsupported "
+            "for custom-loss eligibility, never permission."
+        ),
+    )
+
     @model_validator(mode="after")
     def _derive_prose_from_the_normalized_contract(self) -> ForwardContract:
         """Make the normalized contract the single authority when present.
@@ -202,4 +220,6 @@ class ForwardContract(BaseModel):
             and not self.output_head_note
             and not self.task_type
             and not self.task_note
+            and self.supervision_target is None
+            and self.custom_loss_applicability is None
         )

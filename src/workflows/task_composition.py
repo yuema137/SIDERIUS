@@ -1982,6 +1982,15 @@ def compute_semantic_fingerprint(
         # and record only that the binding is of the "explicit config" kind.
         binding_repr = "explicit_config"
 
+    forward_contract_payload = forward_contract.model_dump(mode="json")
+    # These fields were added after the composition fingerprint was frozen.
+    # Preserve legacy fingerprints when the task has not opted into the
+    # custom-loss contract; declared values remain part of the identity.
+    if forward_contract.supervision_target is None:
+        forward_contract_payload.pop("supervision_target", None)
+    if forward_contract.custom_loss_applicability is None:
+        forward_contract_payload.pop("custom_loss_applicability", None)
+
     payload = {
         "task_data_path_id": task_data_path_id,
         "dataset_profile": dataset_profile.to_wire(),
@@ -1994,7 +2003,7 @@ def compute_semantic_fingerprint(
             else None
         ),
         "task_description": task_description,
-        "forward_contract": forward_contract.model_dump(mode="json"),
+        "forward_contract": forward_contract_payload,
         "plugins": sorted(
             (plugin.canonical_identity() for plugin in plugins),
             key=lambda identity: (identity["configured_ref"], identity["symbol"]),
