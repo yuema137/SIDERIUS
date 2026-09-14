@@ -132,7 +132,12 @@ def test_missing_symbol_rolls_back_import_registration_and_captured_entry_hash(
 def test_single_file_composition_and_effective_health_match_base_receipt(
     tmp_path, monkeypatch, isolated_health_plugin_registries
 ):
-    """Independent pre-change56fb57fb hashes pin omission, not a new self-oracle."""
+    """Independent hashes pin the composed package and explicit probe semantics.
+
+    The receipt was re-recorded when the example declared that segmentation is
+    not applicable.  That declaration is identity-bearing because resource
+    observations from temporal and fixed-shape probes are not comparable.
+    """
     from core.generated_library import bind_generated_library_to_workspace
     from execute_tools.health_checks import _plugin_binding
     from execute_tools.health_checks.config import materialize_effective_config
@@ -151,7 +156,7 @@ def test_single_file_composition_and_effective_health_match_base_receipt(
             )
             assert (
                 composition.semantic_fingerprint
-                == "49c6a5f5c90abccf274dc8cec1b316be8b5e49820ced27ad7e0eea6e9bcecd24"
+                == "ea9fa743d45454bab38dfe0edf3c4d15677bf84fc478090a4a666c80a81fa093"
             )
             with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
                 materialize_effective_config(

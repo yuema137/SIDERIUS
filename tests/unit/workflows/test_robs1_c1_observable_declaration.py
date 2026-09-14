@@ -279,11 +279,14 @@ class TestFingerprintAdditivity:
         this framework-owned example's identity did not move because of an
         unconditional observable key. The literal was re-recorded after
         Quickstart declared its framework-provided objective; that independent
-        semantic change is part of the example's current identity.
+        semantic change is part of the example's current identity. It was
+        re-recorded again when Quickstart explicitly declared fixed-shape probe
+        semantics; temporal and non-temporal resource evidence must not share
+        an identity.
         """
         path = os.path.join(REPO_ROOT, "configs", "task_composition", "quickstart.yaml")
         assert compose_run_task_bindings(path).semantic_fingerprint == (
-            "709c260d95a6d4cee0d243ffd3d539d674d6e5fa223fd97659ae8c840fd036d2"
+            "d828fd2a843a5098951292d88ae4102376659e321b7fa940598d72907a1655bb"
         )
 
     def test_the_fingerprint_key_is_absent_for_none_and_for_an_empty_list(self):
