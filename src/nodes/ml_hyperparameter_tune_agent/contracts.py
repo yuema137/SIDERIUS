@@ -108,8 +108,8 @@ class RunBindings:
     brain: Any
     """The ``LLMBridge`` the planner and reflector speak through."""
 
-    registry: Any
-    """The capability registry the planner is made aware of (L6b)."""
+    custom_loss_inventory: Any
+    """The task-compatible loss inventory shared by both planner prompts."""
 
     # --- run-bound task authorities ----------------------------------------
     run_profile: Any

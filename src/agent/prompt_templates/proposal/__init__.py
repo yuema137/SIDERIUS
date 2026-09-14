@@ -348,7 +348,28 @@ def render_available_losses(registry) -> str:
 
     See ``docs/design/enable_loss_inventory.md`` § Commit L5.
     """
-    metas = live_loss_metadata(registry)
+    return _render_loss_metadata(live_loss_metadata(registry))
+
+
+def render_custom_loss_inventory(inventory) -> str:
+    """Render one caller-resolved compatible inventory without re-reading storage."""
+
+    if inventory.entries:
+        return _render_loss_metadata(inventory.entries)
+    if inventory.unavailable_reason and inventory.unavailable_reason != (
+        "no loadable custom losses are registered"
+    ):
+        return (
+            "## Available custom losses\n\n"
+            f"Custom losses are unavailable for this run: {inventory.unavailable_reason}. "
+            "Use the task's permitted builtin objective.\n"
+        )
+    return _LOSS_REGISTRY_EMPTY_FALLBACK
+
+
+def _render_loss_metadata(metas) -> str:
+    """Render already-filtered loss metadata; callers own eligibility."""
+
     if not metas:
         return _LOSS_REGISTRY_EMPTY_FALLBACK
 

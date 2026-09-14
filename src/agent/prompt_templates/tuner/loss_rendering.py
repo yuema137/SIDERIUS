@@ -27,9 +27,8 @@ legal `loss_type` values are the four built-ins (`focal`, `focal_cw`, `ce`,
 }
 
 CUSTOM_COMPATIBILITY_NOTICE = (
-    "Custom loss registration "
-    "and an earlier dummy test do NOT certify compatibility with this task's "
-    "prediction/target geometry. Builtin filtering does not validate custom losses."
+    "Only names in the task-compatible inventory may be selected. That static "
+    "compatibility does not replace runtime numerical validation."
 )
 
 
@@ -74,7 +73,7 @@ def render_loss_choice(context: PlannerLossContext) -> str:
     return (
         f"Compatible builtin loss types: **{', '.join(context.builtin_offers)}**. "
         "These builtin types pass the framework's declared output semantic/temporal compatibility checks. "
-        "When a custom registry entry is present, existing custom/name routing remains available. "
+        "When the task-compatible inventory is non-empty, its custom/name routing remains available. "
         + CUSTOM_COMPATIBILITY_NOTICE
     )
 

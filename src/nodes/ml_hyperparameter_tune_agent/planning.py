@@ -447,7 +447,7 @@ def prepare_attempt(
         # the per-architecture loss_note advertisement of
         # ``loss_type="custom"`` as a legal choice. See
         # docs/design/enable_loss_inventory.md § L6b.
-        registry=bindings.registry,
+        custom_loss_inventory=bindings.custom_loss_inventory,
         # Step 07 PR 07b (P2) — the run-scoped task tokens.
         task_render=run_task_render,
         # Step 07 PR 07b (P3) — the run's golden-metric

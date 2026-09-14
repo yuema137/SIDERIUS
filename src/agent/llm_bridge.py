@@ -994,8 +994,8 @@ class LLMBridge:
         last_mode: str | None = None,
         score_table_md: str | None = None,
         task_description: str = "",
-        # --- L6b — tuner planner registry awareness ---
-        registry=None,
+        # --- task-compatible custom-loss inventory ---
+        custom_loss_inventory=None,
         # --- Step 07 PR 07b (P2) — the run's authority-rendered task tokens ---
         task_render: TunerTaskRender | None = None,
         # --- Step 07 PR 07b (P3) — the run's golden-metric declaration ---
@@ -1121,19 +1121,14 @@ class LLMBridge:
         planner_template = PLANNER_PROMPT
         for token, section in render_loss_sections(loss_context).items():
             planner_template = planner_template.replace("{" + token + "}", section)
-        # L6b — render the AVAILABLE CUSTOM LOSSES block. Imported lazily to
-        # avoid pulling the proposal-module helper into the bridge's import
-        # chain when registry is None (the back-compat path).
-        if registry is not None:
-            from agent.prompt_templates.proposal import render_available_losses
+        # Both planner prompts consume this one already-resolved inventory;
+        # neither re-reads the registry or re-decides task compatibility.
+        if custom_loss_inventory is not None:
+            from agent.prompt_templates.proposal import render_custom_loss_inventory
 
-            available_losses_block = render_available_losses(registry)
+            available_losses_block = render_custom_loss_inventory(custom_loss_inventory)
         else:
             available_losses_block = "No custom losses registered yet.\n"
-        if loss_context is not None and loss_context.objective is not None:
-            available_losses_block = (
-                "Task objective is locked; registry entries are not alternative objectives.\n"
-            )
         # Step 07 PR 07b (P2) — the authority-rendered task tokens travel the
         # SAME `str.replace` seam the task description and the score table
         # already use. Under TIDMAD every one of them renders the exact bytes
@@ -1206,8 +1201,7 @@ class LLMBridge:
             last_time_estimate_minutes=last_time_estimate_minutes,
             last_batch_size=last_batch_size,
             last_mode=last_mode,
-            # L6b — registry awareness in the user prompt's loss_note text
-            registry=registry,
+            custom_loss_inventory=custom_loss_inventory,
             # Step 07 PR 07b (P2) — roster + output-contract shape.
             task_render=task_render,
         )

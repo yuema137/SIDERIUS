@@ -32,7 +32,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
-from agent.prompt_templates.proposal import live_loss_registry_names
+from agent.prompt_templates.proposal import live_loss_metadata
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
@@ -1505,6 +1505,21 @@ class MLModelProposalAgent:
         # leave it None to use ``agent_generated/_capability_index.json``.
         self._registry = CapabilityRegistry(index_path=capability_index_path)
 
+    def _custom_loss_inventory(self, inp: ProposalInput):
+        """Resolve one loss view for every prompt and schema consumer."""
+
+        from agent.schemas.custom_loss_contract import (
+            custom_loss_snapshot_from_forward_contract,
+            resolve_custom_loss_inventory,
+        )
+
+        snapshot = custom_loss_snapshot_from_forward_contract(inp.forward_contract)
+        return resolve_custom_loss_inventory(
+            live_loss_metadata(self._registry),
+            snapshot,
+            inp.task_composition_ref,
+        )
+
     def run(self, inp: ProposalInput) -> ProposalOutput:
         evidence = inp.interpretation_evidence
         print(f"Proposing new architecture based on interpretation of {evidence.model_types} ...")
@@ -1516,7 +1531,12 @@ class MLModelProposalAgent:
             and any(s.enabled for s in inp.reasoning_pipeline.stages)
         )
 
-        output = self._run_pipeline(inp) if has_pipeline else self._run_legacy(inp)
+        loss_inventory = self._custom_loss_inventory(inp)
+        output = (
+            self._run_pipeline(inp, loss_inventory)
+            if has_pipeline
+            else self._run_legacy(inp, loss_inventory)
+        )
 
         # V21 PR E — mint the candidate identity HERE: after the LLM JSON has
         # been parsed into a ProposalOutput, before it is persisted (O-E-4).
@@ -1542,7 +1562,7 @@ class MLModelProposalAgent:
     # Legacy mode (existing 2-call pattern, backward compat)
     # ------------------------------------------------------------------
 
-    def _run_legacy(self, inp: ProposalInput) -> ProposalOutput:
+    def _run_legacy(self, inp: ProposalInput, loss_inventory=None) -> ProposalOutput:
         """Original 2-call pattern: reasoning (text) + commit (JSON).
 
         C1 (runtime_estimation_and_calibration.md §23-C1): the static
@@ -1552,6 +1572,7 @@ class MLModelProposalAgent:
         Legacy mode has no structural-retry inner loop — a
         schema-violating draft raises immediately (unchanged behavior).
         """
+        loss_inventory = loss_inventory or self._custom_loss_inventory(inp)
         reasoning_prompt = _build_reasoning_prompt(inp)
         print(f"    [PROMPT_SIZE] proposer_reasoning: {len(reasoning_prompt)} chars")
         # System prompt has its {TASK_BACKGROUND} placeholder substituted at
@@ -1602,7 +1623,7 @@ class MLModelProposalAgent:
                 "custom_loss_spec": raw.get("custom_loss_spec"),
             },
             context={
-                "loss_registry_names": live_loss_registry_names(self._registry),
+                "loss_registry_names": loss_inventory.names,
                 "model_registry_names": _live_model_registry_names(self._registry),
                 "allowed_output_types": inp.allowed_output_types,
             },
@@ -1622,15 +1643,17 @@ class MLModelProposalAgent:
     # Pipeline mode (B.11 + B.12 — 3-stage reasoning pipeline)
     # ------------------------------------------------------------------
 
-    def _run_pipeline(self, inp: ProposalInput) -> ProposalOutput:
+    def _run_pipeline(self, inp: ProposalInput, loss_inventory=None) -> ProposalOutput:
         """Three-stage pipeline: comparison → reasoning → proposing."""
         from agent.prompt_templates.proposal import (
             load_stage_prompt,
             render_agent_cards,
-            render_available_losses,
             render_available_models,
+            render_custom_loss_inventory,
             render_expert_context,
         )
+
+        loss_inventory = loss_inventory or self._custom_loss_inventory(inp)
         from nodes.proposal_helpers import (
             build_score_summary_line,
             clamp_and_backstop_accumulated,
@@ -1820,7 +1843,7 @@ class MLModelProposalAgent:
             # registry collapses to the fallback message ("No custom losses
             # registered yet — propose a new one..."). See
             # docs/design/enable_loss_inventory.md § Commit L5.
-            "available_losses_block": render_available_losses(self._registry),
+            "available_losses_block": render_custom_loss_inventory(loss_inventory),
             # Symmetric for the model surface — rendered into the
             # ``{available_models_block}`` placeholder by the proposing
             # stage so the LLM can pick Branch B (reuse) for the model
@@ -2244,7 +2267,7 @@ class MLModelProposalAgent:
                         "custom_loss_spec": raw.get("custom_loss_spec"),
                     },
                     context={
-                        "loss_registry_names": live_loss_registry_names(self._registry),
+                        "loss_registry_names": loss_inventory.names,
                         "model_registry_names": _live_model_registry_names(self._registry),
                         "allowed_output_types": inp.allowed_output_types,
                     },

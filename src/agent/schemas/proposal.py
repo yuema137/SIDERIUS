@@ -19,6 +19,7 @@ from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
     ExpertAdviceInput,
     GateExhaustionInfo,
+    TaskCompositionRef,
 )
 from agent.schemas.output_types import OutputTypeName as OutputTypeName
 from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
@@ -855,6 +856,13 @@ class ProposalInput(BaseModel):
         "``ForwardContract()`` (all fields "
         "empty) is for test fixtures only; production callers always populate "
         'via ``ForwardContract(**load_task_config()["forward_contract"])``.',
+    )
+    task_composition_ref: TaskCompositionRef | None = Field(
+        default=None,
+        description=(
+            "The composed task projection used to filter custom-loss offers. "
+            "None preserves standalone/uncomposed registry behavior."
+        ),
     )
     proposal_blocks: ProposalTaskBlocks | None = Field(
         default=None,

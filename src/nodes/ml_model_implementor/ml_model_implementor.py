@@ -31,6 +31,7 @@ from typing import Any
 
 from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
+from agent.prompt_templates.proposal import live_loss_metadata
 from agent.schemas.custom_loss_contract import CustomLossApplicability
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput, LossProvenance
@@ -1031,6 +1032,7 @@ def _dummy_tensor_validate_loss(
     model_io_contract: ModelIOContract | None = None,
     supervision_target: TensorContract | None = None,
     custom_loss_applicability: CustomLossApplicability | None = None,
+    pair_provider=None,
 ) -> str | None:
     """Delegate the assembled-loss probe to its typed validation boundary."""
     from agent.schemas.custom_loss_validation import validate_custom_loss_plugin
@@ -1041,6 +1043,7 @@ def _dummy_tensor_validate_loss(
         model_io_contract,
         supervision_target,
         custom_loss_applicability,
+        pair_provider,
     )
 
 
@@ -1073,17 +1076,29 @@ def _expected_custom_loss_snapshot(inp: ImplementorInput) -> CapabilityContractS
     return snapshot
 
 
-def _require_matching_loss_contract(
-    loss_name: str,
-    metadata: CapabilityMetadata | None,
-    expected_snapshot: CapabilityContractSnapshot | None,
-) -> None:
-    """Refuse registry reuse when immutable evidence differs from the task."""
+def _custom_loss_inventory(inp: ImplementorInput, registry: CapabilityRegistry):
+    """Resolve the implementor's one compatible Branch-B/reuse view."""
 
-    if expected_snapshot is not None and (
-        metadata is None or metadata.contract_snapshot != expected_snapshot
-    ):
-        raise ValueError(f"custom loss {loss_name!r} contract does not match the composed task")
+    from agent.schemas.custom_loss_contract import resolve_custom_loss_inventory
+
+    return resolve_custom_loss_inventory(
+        live_loss_metadata(registry),
+        _expected_custom_loss_snapshot(inp),
+        inp.task_composition_ref,
+    )
+
+
+def _custom_loss_pair_provider(inp: ImplementorInput):
+    """Resolve the optional data-free provider from the active task binding."""
+
+    if inp.task_composition_ref is None:
+        return None
+    from agent.schemas.custom_loss_contract import (
+        resolve_custom_loss_validation_pair_provider,
+    )
+    from execute_tools.task_data_path import require_bound_task_data_path
+
+    return resolve_custom_loss_validation_pair_provider(require_bound_task_data_path())
 
 
 # ---------------------------------------------------------------------------
@@ -1852,12 +1867,13 @@ class MLModelImplementor:
             source_iteration = inp.storage.local.run_name
 
         # ---- 1. Registry-hit short-circuit ------------------------------
-        existing = next(
-            (m for m in self._registry.list(capability_type="loss") if m.name == loss_name),
-            None,
-        )
+        inventory = _custom_loss_inventory(inp, self._registry)
+        if not inventory.generation_allowed:
+            raise ValueError(
+                f"custom loss generation is unavailable: {inventory.unavailable_reason}"
+            )
+        existing = next((m for m in inventory.entries if m.name == loss_name), None)
         if existing is not None:
-            _require_matching_loss_contract(loss_name, existing, expected_snapshot)
             print(
                 f"🔁 Reusing existing loss plugin: '{loss_name}' (from {existing.source_iteration})"
             )
@@ -1873,6 +1889,9 @@ class MLModelImplementor:
                 dummy_tensor_validated=True,
                 contract_snapshot=existing.contract_snapshot,
             )
+        refused = next((item for item in inventory.unavailable if item.name == loss_name), None)
+        if refused is not None:
+            raise ValueError(f"custom loss {loss_name!r} is unavailable: {refused.reason}")
 
         # ---- 2. LLM calls (reasoning + code) ----------------------------
         print(f"🧪 Generating custom loss '{loss_name}' ...")
@@ -1897,12 +1916,14 @@ class MLModelImplementor:
         # ---- 3. Validate → repair loop ----------------------------------
         max_retries = inp.max_retries
         plugin_src = _assemble_loss_plugin(loss_name, spec.description, code, expected_snapshot)
+        pair_provider = _custom_loss_pair_provider(inp)
         error = _dummy_tensor_validate_loss(
             plugin_src,
             loss_name,
             inp.forward_contract.model_io,
             inp.forward_contract.supervision_target,
             inp.forward_contract.custom_loss_applicability,
+            pair_provider,
         )
         attempt = 0
         error_history: list[tuple[int, str]] = []
@@ -1923,6 +1944,7 @@ class MLModelImplementor:
                 inp.forward_contract.model_io,
                 inp.forward_contract.supervision_target,
                 inp.forward_contract.custom_loss_applicability,
+                pair_provider,
             )
 
         if error is not None:
@@ -1996,8 +2018,8 @@ class MLModelImplementor:
             loss_cfg = inp.baseline_config.get("loss_config") or {}
             if loss_cfg.get("loss_type") == "custom":
                 loss_name = loss_cfg.get("loss_name") or ""
-                expected_snapshot = _expected_custom_loss_snapshot(inp)
-                existing_names = {m.name for m in self._registry.list(capability_type="loss")}
+                inventory = _custom_loss_inventory(inp, self._registry)
+                existing_names = set(inventory.names)
                 if not loss_name:
                     raise ValueError(
                         "Implementor received an invalid Branch B proposal: "
@@ -2007,6 +2029,12 @@ class MLModelImplementor:
                         "custom_loss_spec with the full spec) or Branch B (reuse "
                         "an existing registered loss by name)."
                     )
+                refused = next(
+                    (item for item in inventory.unavailable if item.name == loss_name),
+                    None,
+                )
+                if refused is not None:
+                    raise ValueError(f"custom loss {loss_name!r} is unavailable: {refused.reason}")
                 if loss_name not in existing_names:
                     raise ValueError(
                         f"Implementor received Branch B proposal "
@@ -2023,10 +2051,9 @@ class MLModelImplementor:
                     )
                 # Branch B happy path: record the reuse provenance.
                 existing_meta = next(
-                    (m for m in self._registry.list(capability_type="loss") if m.name == loss_name),
+                    (m for m in inventory.entries if m.name == loss_name),
                     None,
                 )
-                _require_matching_loss_contract(loss_name, existing_meta, expected_snapshot)
                 loss_provenance = LossProvenance(
                     loss_name=loss_name,
                     action="reused",

@@ -108,7 +108,7 @@ def planner_kwargs(metric_spec: MetricSpec | None = None) -> dict:
         "last_mode": "trial",
         "score_table_md": "| model | score |\n|---|---|\n| fixture | 0.5 |",
         "task_description": "A synthetic supervised task.",
-        "registry": None,
+        "custom_loss_inventory": None,
         "task_render": TASK_RENDER,
         "metric_spec": metric_spec or accuracy_like_spec("fixture_quality"),
     }

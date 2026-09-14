@@ -163,6 +163,7 @@ class CustomLossInventory(BaseModel):
     entries: tuple[CapabilityMetadata, ...] = ()
     unavailable: tuple[CustomLossRefusal, ...] = ()
     unavailable_reason: str | None = None
+    generation_allowed: bool = True
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -172,6 +173,44 @@ class CustomLossInventory(BaseModel):
 class CustomLossTaskProjection(Protocol):
     supervision_target: TensorContract | None
     custom_loss_applicability: CustomLossApplicability | None
+    objective: object | None
+
+
+def _apply_objective_lock(
+    inventory: CustomLossInventory,
+    task_ref: CustomLossTaskProjection,
+) -> CustomLossInventory:
+    objective = getattr(task_ref, "objective", None)
+    if objective is None:
+        return inventory
+    loss_type = getattr(objective, "loss_type", None)
+    if loss_type != "custom":
+        reason = f"task objective is locked to builtin loss {loss_type!r}"
+        return CustomLossInventory(
+            composed=True,
+            unavailable=inventory.unavailable
+            + tuple(CustomLossRefusal(name=item.name, reason=reason) for item in inventory.entries),
+            unavailable_reason=reason,
+            generation_allowed=False,
+        )
+    required_name = getattr(objective, "loss_name", None)
+    matching = tuple(item for item in inventory.entries if item.name == required_name)
+    if len(matching) != 1:
+        detail = inventory.unavailable_reason or "no exact compatible registry entry"
+        raise ValueError(f"locked custom objective {required_name!r} is unavailable: {detail}")
+    reason = f"task objective is locked to custom loss {required_name!r}"
+    return CustomLossInventory(
+        composed=True,
+        entries=matching,
+        unavailable=inventory.unavailable
+        + tuple(
+            CustomLossRefusal(name=item.name, reason=reason)
+            for item in inventory.entries
+            if item.name != required_name
+        ),
+        unavailable_reason=reason,
+        generation_allowed=False,
+    )
 
 
 def _composed_inventory_error(
@@ -216,7 +255,7 @@ def resolve_custom_loss_inventory(
         )
     contract_error = _composed_inventory_error(expected_snapshot, task_composition_ref)
     if contract_error is not None:
-        return CustomLossInventory(
+        inventory = CustomLossInventory(
             composed=True,
             unavailable=tuple(
                 CustomLossRefusal(
@@ -227,11 +266,13 @@ def resolve_custom_loss_inventory(
             ),
             unavailable_reason=contract_error,
         )
+        return _apply_objective_lock(inventory, task_composition_ref)
     if not metadata:
-        return CustomLossInventory(
+        inventory = CustomLossInventory(
             composed=True,
             unavailable_reason="no loadable custom losses are registered",
         )
+        return _apply_objective_lock(inventory, task_composition_ref)
     assert expected_snapshot is not None
     unavailable: list[CustomLossRefusal] = []
     entries: list[CapabilityMetadata] = []
@@ -267,9 +308,10 @@ def resolve_custom_loss_inventory(
             )
             continue
         entries.append(item)
-    return CustomLossInventory(
+    inventory = CustomLossInventory(
         composed=True, entries=tuple(entries), unavailable=tuple(unavailable)
     )
+    return _apply_objective_lock(inventory, task_composition_ref)
 
 
 def resolve_custom_loss_validation_pair_provider(

@@ -129,6 +129,47 @@ def test_empty_valid_composed_inventory_names_absent_loadable_losses():
     assert inventory.unavailable_reason == "no loadable custom losses are registered"
 
 
+def test_locked_builtin_hides_compatible_custom_losses():
+    *_, expected, projection = _contract_fixture()
+    projection.objective = SimpleNamespace(loss_type="ce", loss_name=None)
+
+    inventory = resolve_custom_loss_inventory(
+        (_metadata("compatible", expected),), expected, projection
+    )
+
+    assert inventory.names == ()
+    assert inventory.unavailable_reason == "task objective is locked to builtin loss 'ce'"
+    assert not inventory.generation_allowed
+
+
+def test_locked_custom_exposes_only_its_exact_compatible_loss():
+    *_, expected, projection = _contract_fixture()
+    projection.objective = SimpleNamespace(loss_type="custom", loss_name="required")
+
+    inventory = resolve_custom_loss_inventory(
+        (_metadata("other", expected), _metadata("required", expected)),
+        expected,
+        projection,
+    )
+
+    assert inventory.names == ("required",)
+    assert {item.name for item in inventory.unavailable} == {"other"}
+    assert inventory.unavailable_reason == "task objective is locked to custom loss 'required'"
+    assert not inventory.generation_allowed
+
+
+def test_locked_custom_missing_exact_loss_refuses_before_callers_can_act():
+    *_, expected, projection = _contract_fixture()
+    projection.objective = SimpleNamespace(loss_type="custom", loss_name="required")
+
+    with pytest.raises(ValueError, match="locked custom objective 'required' is unavailable"):
+        resolve_custom_loss_inventory(
+            (_metadata("other", expected),),
+            expected,
+            projection,
+        )
+
+
 def test_provider_resolution_is_optional_and_never_touches_data_methods():
     class TaskImplementation:
         calls = 0

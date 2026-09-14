@@ -6,7 +6,9 @@ import pytest
 
 from agent.prompt_templates.tuner.loss_context import PlannerLossContext
 from agent.prompt_templates.tuner.rendering import build_tuner_task_render
+from agent.schemas.custom_loss_contract import CustomLossInventory
 from agent.schemas.model_io_contract import ModelIOContract
+from core.capability_registry import CapabilityMetadata
 from ml_models import models_format_sandbox as authority
 from ml_models.models_format_sandbox import LossConfig, OutputSemantic
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
@@ -182,17 +184,25 @@ def test_actual_bridge_refuses_model_conflict_before_call():
 
 
 def test_custom_inventory_is_not_presented_as_task_geometry_certification():
-    meta = SimpleNamespace(
+    meta = CapabilityMetadata(
         name="existing_custom",
+        capability_type="loss",
+        file_path="/test/existing_custom.py",
         created_at="2026-09-12",
         description="test loss",
         source_iteration="test",
     )
-    registry = SimpleNamespace(list=lambda **kwargs: [meta])
+    inventory = CustomLossInventory(composed=True, entries=(meta,))
     bridge = BoundaryRecorderBridge()
-    bridge.plan(**{**planner_kwargs(), "registry": registry, "task_render": _render()})
+    bridge.plan(
+        **{
+            **planner_kwargs(),
+            "custom_loss_inventory": inventory,
+            "task_render": _render(),
+        }
+    )
     _, _, system, user = bridge.captures[0]
     assert "existing_custom" in system
-    assert "do NOT certify compatibility" in system
-    assert "do NOT certify compatibility" in user
-    assert "already generated and validated" not in user
+    assert "task-compatible inventory" in system
+    assert "task-compatible inventory" in user
+    assert "does not replace runtime numerical validation" in user
