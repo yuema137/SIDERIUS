@@ -9,11 +9,17 @@ target contract; shape guesses are never permission.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.model_io_contract import DtypeAdmissibility, TensorContract
+from core.capability_registry import CapabilityContractSnapshot
+
+CUSTOM_LOSS_CONTRACT_KIND = "custom_loss_applicability"
+CUSTOM_LOSS_CONTRACT_VERSION = 1
 
 
 class ExplicitPairApplicability(BaseModel):
@@ -37,6 +43,81 @@ class EqualShapeApplicability(BaseModel):
 
 
 type CustomLossApplicability = ExplicitPairApplicability | EqualShapeApplicability
+
+
+class CustomLossContractPayload(BaseModel):
+    """Semantic payload interpreted only by the custom-loss authority."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prediction: TensorContract
+    supervision_target: TensorContract
+    applicability: CustomLossApplicability = Field(discriminator="mode")
+
+
+def build_custom_loss_contract_snapshot(
+    prediction: TensorContract,
+    supervision_target: TensorContract,
+    applicability: CustomLossApplicability,
+) -> CapabilityContractSnapshot:
+    payload = CustomLossContractPayload(
+        prediction=prediction,
+        supervision_target=supervision_target,
+        applicability=applicability,
+    )
+    canonical = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return CapabilityContractSnapshot(
+        contract_kind=CUSTOM_LOSS_CONTRACT_KIND,
+        contract_version=CUSTOM_LOSS_CONTRACT_VERSION,
+        canonical_payload=canonical,
+        sha256=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+    )
+
+
+def custom_loss_snapshot_from_forward_contract(
+    forward_contract,
+) -> CapabilityContractSnapshot | None:
+    """Project a complete declaration; refuse partial declarations."""
+
+    prediction = forward_contract.model_io.output if forward_contract.model_io is not None else None
+    target = forward_contract.supervision_target
+    applicability = forward_contract.custom_loss_applicability
+    if target is None and applicability is None:
+        return None
+    if prediction is None or target is None or applicability is None:
+        raise ValueError(
+            "custom-loss contract requires model_io.output, supervision_target, "
+            "and custom_loss_applicability together"
+        )
+    snapshot = build_custom_loss_contract_snapshot(prediction, target, applicability)
+    verdict = resolve_custom_loss_snapshot(snapshot)
+    if not verdict.eligible:
+        raise ValueError(f"custom-loss applicability refused: {verdict.reason}")
+    return snapshot
+
+
+def parse_custom_loss_contract_snapshot(
+    snapshot: CapabilityContractSnapshot,
+) -> CustomLossContractPayload:
+    if snapshot.contract_kind != CUSTOM_LOSS_CONTRACT_KIND:
+        raise ValueError(f"unexpected custom-loss contract kind: {snapshot.contract_kind!r}")
+    if snapshot.contract_version != CUSTOM_LOSS_CONTRACT_VERSION:
+        raise ValueError(f"unsupported custom-loss contract version: {snapshot.contract_version}")
+    return CustomLossContractPayload.model_validate_json(snapshot.canonical_payload)
+
+
+def resolve_custom_loss_snapshot(
+    snapshot: CapabilityContractSnapshot,
+    *,
+    target_cast_dtype: str | None = None,
+) -> CustomLossApplicabilityResult:
+    payload = parse_custom_loss_contract_snapshot(snapshot)
+    return resolve_custom_loss_applicability(
+        payload.prediction,
+        payload.supervision_target,
+        payload.applicability,
+        target_cast_dtype=target_cast_dtype,
+    )
 
 
 class CustomLossApplicabilityResult(BaseModel):

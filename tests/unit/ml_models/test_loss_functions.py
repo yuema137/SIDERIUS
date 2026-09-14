@@ -526,7 +526,11 @@ def _l6c_clear_loss_registry():
     I13 — also clears LOSS_TARGET_DTYPE_REGISTRY so dtype-routing tests
     don't leak custom-loss declarations between tests.
     """
-    from ml_models.loss_models_sandbox import LOSS_CONFIG_REGISTRY, LOSS_REGISTRY
+    from ml_models.loss_models_sandbox import (
+        LOSS_CONFIG_REGISTRY,
+        LOSS_CONTRACT_REGISTRY,
+        LOSS_REGISTRY,
+    )
     from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY
 
     saved_loss = dict(LOSS_REGISTRY)
@@ -534,10 +538,12 @@ def _l6c_clear_loss_registry():
     saved_dtype = dict(LOSS_TARGET_DTYPE_REGISTRY)
     LOSS_REGISTRY.clear()
     LOSS_CONFIG_REGISTRY.clear()
+    LOSS_CONTRACT_REGISTRY.clear()
     LOSS_TARGET_DTYPE_REGISTRY.clear()
     yield
     LOSS_REGISTRY.clear()
     LOSS_CONFIG_REGISTRY.clear()
+    LOSS_CONTRACT_REGISTRY.clear()
     LOSS_TARGET_DTYPE_REGISTRY.clear()
     LOSS_REGISTRY.update(saved_loss)
     LOSS_CONFIG_REGISTRY.update(saved_cfg)

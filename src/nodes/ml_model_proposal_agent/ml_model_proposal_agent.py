@@ -1360,6 +1360,20 @@ def _default_output_type(allowed: tuple[str, ...] | None) -> str:
     return "classifier"
 
 
+def _attach_custom_loss_contract(
+    output: ProposalOutput, forward_contract: ForwardContract
+) -> ProposalOutput:
+    """Attach framework-derived contract evidence, never LLM-authored metadata."""
+
+    if output.custom_loss_spec is None:
+        return output
+    from agent.schemas.custom_loss_contract import custom_loss_snapshot_from_forward_contract
+
+    snapshot = custom_loss_snapshot_from_forward_contract(forward_contract)
+    spec = output.custom_loss_spec.model_copy(update={"contract_snapshot": snapshot})
+    return output.model_copy(update={"custom_loss_spec": spec})
+
+
 def _render_commit_system_prompt(
     fc: ForwardContract,
     blocks: Any = None,
@@ -1593,6 +1607,7 @@ class MLModelProposalAgent:
                 "allowed_output_types": inp.allowed_output_types,
             },
         )
+        output = _attach_custom_loss_contract(output, inp.forward_contract)
 
         factor = _run_preflight_check(inp, output)
         if factor is not None and factor > 1.0:
@@ -2234,6 +2249,7 @@ class MLModelProposalAgent:
                         "allowed_output_types": inp.allowed_output_types,
                     },
                 )
+                output = _attach_custom_loss_contract(output, inp.forward_contract)
                 # Citation discipline — warnings, not hard failures.
                 citation_violations = _check_citation_discipline(
                     source_refs=reasoning_output.get("source_refs", []),

@@ -17,7 +17,9 @@ from typing import Any, Literal, NamedTuple
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
+from agent.schemas.custom_loss_contract import CustomLossApplicability
 from agent.schemas.health_feedback import TrialValidityFeedback
+from agent.schemas.model_io_contract import TensorContract
 from agent.schemas.ordering import (
     OrderingValidationError,
     OrderStrategy,
@@ -1417,6 +1419,11 @@ class TaskCompositionRef(BaseModel):
             "Task-owned resource-probe segmentation declaration projected at the "
             "composition edge. None is undeclared, never a temporal default."
         ),
+    )
+    supervision_target: TensorContract | None = Field(default=None)
+    custom_loss_applicability: CustomLossApplicability | None = Field(
+        default=None,
+        discriminator="mode",
     )
     objective: Any = Field(
         default=None,

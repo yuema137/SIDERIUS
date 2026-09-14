@@ -48,7 +48,11 @@ from agent.skills.model_io_probe_skill import (
     input_index_extent,
     probe_config_kwargs,
 )
-from core.capability_registry import CapabilityMetadata, CapabilityRegistry
+from core.capability_registry import (
+    CapabilityContractSnapshot,
+    CapabilityMetadata,
+    CapabilityRegistry,
+)
 from core.hardware_context import HardwareContext
 from workflows.task_config import render_forward_contract
 
@@ -752,6 +756,7 @@ from typing import Self
 {extra_imports}
 
 PLUGIN_LOSS_TYPE = "{loss_name}"
+{contract_literal}
 
 # I13 — target dtype the loss expects. "long" (int64) is the classifier
 # contract; "float" matches a regressor (smooth_l1-style) contract. All
@@ -928,7 +933,12 @@ def _loss_class_name(loss_name: str) -> str:
     return "".join(word.capitalize() for word in loss_name.split("_"))
 
 
-def _assemble_loss_plugin(loss_name: str, description: str, code: dict) -> str:
+def _assemble_loss_plugin(
+    loss_name: str,
+    description: str,
+    code: dict,
+    contract_snapshot: CapabilityContractSnapshot | None = None,
+) -> str:
     """Assemble the final loss plugin source from the LLM-generated JSON sections.
 
     Mirrors ``_assemble_plugin`` for model plugins: the template owns the 3
@@ -997,11 +1007,17 @@ def _assemble_loss_plugin(loss_name: str, description: str, code: dict) -> str:
     # One-line docstring: collapse newlines + strip so the assembled class
     # docstring fits on a single rendered line.
     description_oneline = " ".join(description.split()).replace('"', "'")
+    contract_literal = ""
+    if contract_snapshot is not None:
+        contract_literal = "PLUGIN_CAPABILITY_CONTRACT = " + repr(
+            contract_snapshot.model_dump(mode="json")
+        )
 
     return LOSS_PLUGIN_TEMPLATE.format(
         loss_name=loss_name,
         LossClass=loss_cls,
         description=description_oneline,
+        contract_literal=contract_literal,
         extra_imports=extra_imports,
         config_fields_code=config_fields_code,
         config_validators_code=config_validators_code,
@@ -1194,6 +1210,48 @@ def _dummy_tensor_validate_loss(
         with contextlib.suppress(OSError):
             os.remove(tmp_path)
             os.rmdir(tmp_dir)
+
+
+def _expected_custom_loss_snapshot(inp: ImplementorInput) -> CapabilityContractSnapshot | None:
+    """Resolve one task snapshot and refuse disagreeing transported declarations."""
+
+    from agent.schemas.custom_loss_contract import (
+        build_custom_loss_contract_snapshot,
+        custom_loss_snapshot_from_forward_contract,
+    )
+
+    snapshot = custom_loss_snapshot_from_forward_contract(inp.forward_contract)
+    composition = inp.task_composition_ref
+    if composition is None:
+        return snapshot
+    if snapshot is None:
+        raise ValueError("composed custom-loss use requires a complete task contract")
+    if composition.supervision_target is None or composition.custom_loss_applicability is None:
+        raise ValueError("composed custom-loss transport is incomplete")
+    prediction = inp.forward_contract.model_io.output
+    transported = build_custom_loss_contract_snapshot(
+        prediction,
+        composition.supervision_target,
+        composition.custom_loss_applicability,
+    )
+    if transported != snapshot:
+        raise ValueError(
+            "task composition custom-loss declarations disagree with the forward contract"
+        )
+    return snapshot
+
+
+def _require_matching_loss_contract(
+    loss_name: str,
+    metadata: CapabilityMetadata | None,
+    expected_snapshot: CapabilityContractSnapshot | None,
+) -> None:
+    """Refuse registry reuse when immutable evidence differs from the task."""
+
+    if expected_snapshot is not None and (
+        metadata is None or metadata.contract_snapshot != expected_snapshot
+    ):
+        raise ValueError(f"custom loss {loss_name!r} contract does not match the composed task")
 
 
 # ---------------------------------------------------------------------------
@@ -1945,6 +2003,15 @@ class MLModelImplementor:
         # Caller guarantees this is not None; assert is a pyright hint.
         assert spec is not None
         loss_name = spec.loss_name
+        expected_snapshot = _expected_custom_loss_snapshot(inp)
+        if inp.task_composition_ref is not None and spec.contract_snapshot is None:
+            raise ValueError(
+                "composed custom_loss_spec is missing its transported contract snapshot"
+            )
+        if spec.contract_snapshot is not None and spec.contract_snapshot != expected_snapshot:
+            raise ValueError(
+                "custom_loss_spec contract snapshot disagrees with the task declaration"
+            )
 
         # Source iteration label for registry + provenance. ``storage.local``
         # may be absent for non-local backends; degrade gracefully.
@@ -1958,6 +2025,7 @@ class MLModelImplementor:
             None,
         )
         if existing is not None:
+            _require_matching_loss_contract(loss_name, existing, expected_snapshot)
             print(
                 f"🔁 Reusing existing loss plugin: '{loss_name}' (from {existing.source_iteration})"
             )
@@ -1971,6 +2039,7 @@ class MLModelImplementor:
                 # at original generation time. Reuse therefore inherits that
                 # validation result.
                 dummy_tensor_validated=True,
+                contract_snapshot=existing.contract_snapshot,
             )
 
         # ---- 2. LLM calls (reasoning + code) ----------------------------
@@ -1995,7 +2064,7 @@ class MLModelImplementor:
 
         # ---- 3. Validate → repair loop ----------------------------------
         max_retries = inp.max_retries
-        plugin_src = _assemble_loss_plugin(loss_name, spec.description, code)
+        plugin_src = _assemble_loss_plugin(loss_name, spec.description, code, expected_snapshot)
         error = _dummy_tensor_validate_loss(
             plugin_src,
             loss_name,
@@ -2015,7 +2084,7 @@ class MLModelImplementor:
                 repair_prompt,
                 label="implementor.loss.repair",
             )
-            plugin_src = _assemble_loss_plugin(loss_name, spec.description, code)
+            plugin_src = _assemble_loss_plugin(loss_name, spec.description, code, expected_snapshot)
             error = _dummy_tensor_validate_loss(
                 plugin_src,
                 loss_name,
@@ -2054,6 +2123,7 @@ class MLModelImplementor:
                 # {available_losses_block} can render it for
                 # semantic-similarity judgment (Branch B vs Branch C).
                 mathematical_definition=spec.mathematical_definition,
+                contract_snapshot=expected_snapshot,
             )
         )
         print(f"✅ Registered    → loss '{loss_name}' (source={source_iteration})")
@@ -2065,6 +2135,7 @@ class MLModelImplementor:
             source_iteration=source_iteration,
             loss_file_path=loss_file_path,
             dummy_tensor_validated=True,
+            contract_snapshot=expected_snapshot,
         )
 
     # ------------------------------------------------------------------
@@ -2093,6 +2164,7 @@ class MLModelImplementor:
             loss_cfg = inp.baseline_config.get("loss_config") or {}
             if loss_cfg.get("loss_type") == "custom":
                 loss_name = loss_cfg.get("loss_name") or ""
+                expected_snapshot = _expected_custom_loss_snapshot(inp)
                 existing_names = {m.name for m in self._registry.list(capability_type="loss")}
                 if not loss_name:
                     raise ValueError(
@@ -2122,12 +2194,14 @@ class MLModelImplementor:
                     (m for m in self._registry.list(capability_type="loss") if m.name == loss_name),
                     None,
                 )
+                _require_matching_loss_contract(loss_name, existing_meta, expected_snapshot)
                 loss_provenance = LossProvenance(
                     loss_name=loss_name,
                     action="reused",
                     source_iteration=(existing_meta.source_iteration if existing_meta else None),
                     loss_file_path=(existing_meta.file_path if existing_meta else ""),
                     dummy_tensor_validated=True,
+                    contract_snapshot=(existing_meta.contract_snapshot if existing_meta else None),
                 )
 
         # --- Branch B short-circuit for MODEL surface ---

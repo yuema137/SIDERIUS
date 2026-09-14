@@ -68,6 +68,9 @@ PROPOSAL_OUTPUT_KEYS = {
 
 IMPLEMENTOR_INPUT_KEYS = {
     "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
+    # P0 / 01A3b — the composed task projection now enters through
+    # ImplementorInput construction instead of a post-validation assignment.
+    "task_composition_ref",
     "hardware_context",  # Step 04a / OD-S4-1 — deliberate, this pin forced it
     "vram_budget_gb",  # Step 04a / OD-S4-1 — deliberate, this pin forced it
     # Step 12 / PR-12a C7-4 (D-12a-9) — the operator-ratified additive carrier

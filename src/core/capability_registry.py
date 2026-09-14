@@ -30,12 +30,13 @@ See ``docs/design/enable_loss_inventory.md`` § Commit L1 for the full design.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.layout import checkout_path
 
@@ -54,6 +55,35 @@ _LEGACY_CHECKOUT_INDEX_PATH = checkout_path("agent_generated", "_capability_inde
 # ``tool`` is reserved for data-analysis / feature-extractor plugins that
 # future modules may introduce.
 CapabilityType = Literal["loss", "model", "tool"]
+
+
+class CapabilityContractSnapshot(BaseModel):
+    """Dependency-neutral, immutable evidence attached to a capability.
+
+    Core owns only canonical serialization and digest integrity.  The layer
+    that owns ``contract_kind`` interprets the payload.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    contract_kind: str = Field(min_length=1)
+    contract_version: int = Field(ge=1)
+    canonical_payload: str = Field(min_length=2)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _validate_canonical_payload_and_digest(self):
+        try:
+            payload = json.loads(self.canonical_payload)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError("canonical_payload must be valid JSON") from exc
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        if canonical != self.canonical_payload:
+            raise ValueError("canonical_payload must use canonical JSON encoding")
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        if digest != self.sha256:
+            raise ValueError("capability contract sha256 does not match canonical_payload")
+        return self
 
 
 class CapabilityMetadata(BaseModel):
@@ -97,6 +127,10 @@ class CapabilityMetadata(BaseModel):
             "alone. Default empty string preserves back-compat with pre-L6c "
             "registry entries that don't carry this field."
         ),
+    )
+    contract_snapshot: CapabilityContractSnapshot | None = Field(
+        default=None,
+        description="Immutable, versioned capability contract evidence; semantics are owner-defined.",
     )
 
 

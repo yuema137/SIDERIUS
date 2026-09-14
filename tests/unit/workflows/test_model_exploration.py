@@ -2084,7 +2084,12 @@ _L6C_PROMO_PLUGIN_SRC_B_DIFF_NAME_SAME_CONTENT = _L6C_PROMO_PLUGIN_SRC_A.replace
 # saved under a different .py file name.
 
 
-def _make_impl_output_with_loss_provenance(tmp_path, loss_name="promo_loss_a", action="generated"):
+def _make_impl_output_with_loss_provenance(
+    tmp_path,
+    loss_name="promo_loss_a",
+    action="generated",
+    contract_snapshot=None,
+):
     """Build a minimal ImplementorOutput-shaped object with a real loss file
     on disk for _promote_loss_to_global to consume."""
     from agent.schemas.implementor import ImplementorOutput, LossProvenance
@@ -2116,6 +2121,7 @@ def _make_impl_output_with_loss_provenance(tmp_path, loss_name="promo_loss_a", a
             source_iteration="iter_001",
             loss_file_path=str(loss_file),
             dummy_tensor_validated=True,
+            contract_snapshot=contract_snapshot,
         ),
     )
     return impl
@@ -2157,6 +2163,50 @@ class TestL6cPromoteLossToGlobal:
         impl = _make_impl_output_with_loss_provenance(ws)
         _promote_loss_to_global(impl)
         assert (l6c_global_losses_dir / "promo_loss_a.py").is_file()
+
+    def test_promotion_preserves_contract_in_a_fresh_registry_reader(
+        self, tmp_path, l6c_global_losses_dir
+    ):
+        from agent.schemas.custom_loss_contract import (
+            EqualShapeApplicability,
+            build_custom_loss_contract_snapshot,
+        )
+        from agent.schemas.model_io_contract import Dimension, TensorAxis, TensorContract
+        from core.capability_registry import CapabilityMetadata, CapabilityRegistry
+        from ml_models.models_format_sandbox import DtypeAdmissibility
+        from workflows.model_exploration import _promote_loss_to_global
+
+        tensor = TensorContract(
+            axes=(
+                TensorAxis(dimension=Dimension(symbolic="B")),
+                TensorAxis(dimension=Dimension(fixed=1)),
+            ),
+            dtype=DtypeAdmissibility(admissible=("float32",)),
+        )
+        snapshot = build_custom_loss_contract_snapshot(
+            tensor,
+            tensor,
+            EqualShapeApplicability(dtype=DtypeAdmissibility(admissible=("float32",)), rank=2),
+        )
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        impl = _make_impl_output_with_loss_provenance(ws, contract_snapshot=snapshot)
+        registry = CapabilityRegistry()
+        registry.register(
+            CapabilityMetadata(
+                name="promo_loss_a",
+                capability_type="loss",
+                file_path=impl.loss_provenance.loss_file_path,
+                created_at="2026-09-13T00:00:00Z",
+                contract_snapshot=snapshot,
+            )
+        )
+
+        _promote_loss_to_global(impl)
+
+        restored = CapabilityRegistry().list(capability_type="loss")[0]
+        assert restored.file_path == str(l6c_global_losses_dir / "promo_loss_a.py")
+        assert restored.contract_snapshot == snapshot
 
     def test_skips_reused(self, tmp_path, l6c_global_losses_dir):
         """L6c — action='reused' is a no-op (already promoted by the

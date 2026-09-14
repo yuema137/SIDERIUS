@@ -25,6 +25,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from core.capability_registry import CapabilityContractSnapshot
 from ml_models.models_format_sandbox import LossConfig
 
 # ---------------------------------------------------------------------------
@@ -46,9 +47,13 @@ from ml_models.models_format_sandbox import LossConfig
 # between tests; see ``tests/unit/ml_models/test_loss_models_sandbox.py``.
 LOSS_REGISTRY: dict[str, type] = {}
 LOSS_CONFIG_REGISTRY: dict[str, type] = {}
+LOSS_CONTRACT_REGISTRY: dict[str, CapabilityContractSnapshot] = {}
 
 
-def register_loss_in_memory(plugin_path: str) -> str | None:
+def register_loss_in_memory(
+    plugin_path: str,
+    expected_contract_snapshot: CapabilityContractSnapshot | None = None,
+) -> str | None:
     """Load a loss plugin file and register its classes in ``LOSS_REGISTRY``.
 
     L6c — mirrors ``ml_models.plugin_loader.register_model_in_memory``
@@ -81,7 +86,7 @@ def register_loss_in_memory(plugin_path: str) -> str | None:
         load_loss_plugin_from_path,
     )
 
-    plugin = load_loss_plugin_from_path(plugin_path)
+    plugin = load_loss_plugin_from_path(plugin_path, expected_contract_snapshot)
     if plugin is None:
         return None
     loss_type = plugin["loss_type"]
@@ -97,6 +102,10 @@ def register_loss_in_memory(plugin_path: str) -> str | None:
         )
     LOSS_REGISTRY[loss_type] = new_cls
     LOSS_CONFIG_REGISTRY[loss_type] = plugin["config_class"]
+    if plugin["contract_snapshot"] is not None:
+        LOSS_CONTRACT_REGISTRY[loss_type] = plugin["contract_snapshot"]
+    else:
+        LOSS_CONTRACT_REGISTRY.pop(loss_type, None)
     # I13 — register the target-dtype declaration alongside the class registry
     # so ``get_target_torch_dtype`` can resolve custom losses without scanning
     # disk on every call. ``load_loss_plugin_from_path`` always populates the
@@ -111,7 +120,9 @@ def register_loss_in_memory(plugin_path: str) -> str | None:
     return loss_type
 
 
-def preload_global_losses() -> list[str]:
+def preload_global_losses(
+    expected_contract_snapshot: CapabilityContractSnapshot | None = None,
+) -> list[str]:
     """Load all promoted loss plugins into ``LOSS_REGISTRY``.
 
     L6c — called at workflow startup so cross-process Branch B reuse (e.g.
@@ -165,7 +176,11 @@ def preload_global_losses() -> list[str]:
             if not scan_candidate_allowed(plugin_path):
                 continue
             seen_basenames.add(fname)
-            loss_type = register_loss_in_memory(plugin_path)
+            try:
+                loss_type = register_loss_in_memory(plugin_path, expected_contract_snapshot)
+            except ValueError as exc:
+                print(f"[LossRegistry] Skipping {plugin_path}: {exc}")
+                continue
             if loss_type is not None:
                 loaded.append(loss_type)
     return loaded

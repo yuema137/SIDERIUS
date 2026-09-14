@@ -117,6 +117,7 @@ def test_production_training_engine_consumes_masked_supervision(
     import execute_tools.train_engine_sandbox as train_engine
     from ml_models.loss_models_sandbox import (
         LOSS_CONFIG_REGISTRY,
+        LOSS_CONTRACT_REGISTRY,
         LOSS_REGISTRY,
         register_loss_in_memory,
     )
@@ -133,6 +134,7 @@ def test_production_training_engine_consumes_masked_supervision(
     model_registry = dict(MODEL_REGISTRY)
     loss_registry = dict(LOSS_REGISTRY)
     loss_config_registry = dict(LOSS_CONFIG_REGISTRY)
+    loss_contract_registry = dict(LOSS_CONTRACT_REGISTRY)
     loss_dtype_registry = dict(LOSS_TARGET_DTYPE_REGISTRY)
     loss_reduction_registry = dict(LOSS_REDUCTION_REGISTRY)
     plugin_config_registry = dict(PLUGIN_CONFIG_REGISTRY)
@@ -193,6 +195,8 @@ def test_production_training_engine_consumes_masked_supervision(
         LOSS_REGISTRY.clear()
         LOSS_REGISTRY.update(loss_registry)
         LOSS_CONFIG_REGISTRY.clear()
+        LOSS_CONTRACT_REGISTRY.clear()
+        LOSS_CONTRACT_REGISTRY.update(loss_contract_registry)
         LOSS_CONFIG_REGISTRY.update(loss_config_registry)
         LOSS_TARGET_DTYPE_REGISTRY.clear()
         LOSS_TARGET_DTYPE_REGISTRY.update(loss_dtype_registry)

@@ -63,7 +63,7 @@ import os
 import posixpath
 import re
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -493,6 +493,19 @@ def _read_json(path: str, what: str) -> Any:
 def _module_name(logical_ref: str, symbol: str) -> str:
     slug = re.sub(r"[^0-9a-zA-Z]+", "_", f"{logical_ref}/{symbol}").strip("_")
     return _MODULE_NAME_PREFIX + slug
+
+
+def _validate_file_before_symbol_load(
+    section: dict[str, Any],
+    manifest_dir: str,
+    validator: Callable[[str], None],
+) -> None:
+    """Apply a caller-owned check before a declared file can be imported."""
+
+    file_ref = section.get("file")
+    if not isinstance(file_ref, str) or not file_ref.strip():
+        return
+    validator(_resolve_path(file_ref, manifest_dir))
 
 
 def _load_symbol(
@@ -1602,7 +1615,14 @@ def _refuse_ambiguous_objective(
         )
 
 
-def _compose_objective(raw: dict[str, Any], manifest_dir: str):
+_OBJECTIVE_CONTRACT_UNSPECIFIED = object()
+
+
+def _compose_objective(
+    raw: dict[str, Any],
+    manifest_dir: str,
+    expected_contract_snapshot=_OBJECTIVE_CONTRACT_UNSPECIFIED,
+):
     """The OPTIONAL ``objective`` section → the run's AUTHORITATIVE loss.
 
     Step 12 / PR-12d, F-12d-31. ``loss_plugins:`` made a pack's objective
@@ -1700,8 +1720,53 @@ def _compose_objective(raw: dict[str, Any], manifest_dir: str):
             f"naming the plugin file and the symbol it declares itself with; got "
             f"{implementation!r}."
         )
-    from ml_models.loss_plugin_loader import REQUIRED_LOSS_PLUGIN_SYMBOLS
+    from ml_models.loss_plugin_loader import (
+        REQUIRED_LOSS_PLUGIN_SYMBOLS,
+        parse_loss_contract_snapshot_literal,
+        read_loss_contract_snapshot,
+    )
 
+    legacy_direct_call = expected_contract_snapshot is _OBJECTIVE_CONTRACT_UNSPECIFIED
+    if expected_contract_snapshot is None:
+        raise TaskCompositionError(
+            "a composed custom objective requires supervision_target and "
+            "custom_loss_applicability declarations"
+        )
+    if not legacy_direct_call and implementation.get("module") is not None:
+        raise TaskCompositionError(
+            "a composed custom objective must use a file reference so its contract "
+            "can be validated before import"
+        )
+
+    def _validate_contract_before_import(path: str) -> None:
+        if legacy_direct_call:
+            return
+        try:
+            captured = selected_member(path)
+            actual = (
+                parse_loss_contract_snapshot_literal(captured.source.decode("utf-8"), filename=path)
+                if captured is not None
+                else read_loss_contract_snapshot(path)
+            )
+        except (OSError, SyntaxError, UnicodeDecodeError, ValueError) as exc:
+            raise TaskCompositionError(
+                f"objective contract metadata refused before plugin import: {exc}"
+            ) from exc
+        if actual is None:
+            raise TaskCompositionError(
+                "objective contract metadata refused before plugin import: missing "
+                "PLUGIN_CAPABILITY_CONTRACT"
+            )
+        if actual != expected_contract_snapshot:
+            raise TaskCompositionError(
+                "objective contract metadata refused before plugin import: snapshot mismatch"
+            )
+
+    _validate_file_before_symbol_load(
+        implementation,
+        manifest_dir,
+        _validate_contract_before_import,
+    )
     declared_name, resolved_ref = _load_symbol(
         implementation,
         manifest_dir,
@@ -1756,6 +1821,8 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
         task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
         task_health_binding=task_composition.task_health_binding,
         segmentation_applicability=task_composition.forward_contract.segmentation_applicability,
+        supervision_target=task_composition.forward_contract.supervision_target,
+        custom_loss_applicability=task_composition.forward_contract.custom_loss_applicability,
         objective=getattr(task_composition, "objective", None),
         parameter_rules=getattr(task_composition, "parameter_rules", None),
         description_source_policy=DescriptionSourcePolicy.COMPOSED,
@@ -2513,6 +2580,17 @@ def _compose_resolved_task_bindings(
     if loss_plugin_root is not None:
         source_paths["loss_plugins"] = str(loss_plugin_root)
 
+    task_config_section = _section(raw, "task_config", resolved_manifest)
+    description, contract, _values = _compose_task_config(
+        task_config_section, manifest_dir, profile
+    )
+    source_paths["task_config"] = _resolve_path(
+        _require(task_config_section, "config", "task_config"), manifest_dir
+    )
+    from agent.schemas.custom_loss_contract import custom_loss_snapshot_from_forward_contract
+
+    expected_loss_contract = custom_loss_snapshot_from_forward_contract(contract)
+
     # Step 12 / PR-12d, F-12d-31 wire C — the AUTHORITATIVE objective's content
     # identity. Appended to the SAME `plugins` set the fingerprint already
     # hashes, exactly as seam P does for model plugins, so editing the declared
@@ -2525,7 +2603,9 @@ def _compose_resolved_task_bindings(
     # rejects: exactly ONE file is hashed, the one the manifest explicitly
     # named, and only when a manifest names it. A task declaring no objective
     # adds no plugin entry and its fingerprint is byte-unchanged.
-    composed_objective, objective_ref = _compose_objective(raw, manifest_dir)
+    composed_objective, objective_ref = _compose_objective(
+        raw, manifest_dir, expected_loss_contract
+    )
     if objective_ref is not None:
         source_paths["objective"] = str(objective_ref.absolute_path)
         plugins.append(objective_ref)
@@ -2554,14 +2634,6 @@ def _compose_resolved_task_bindings(
     implementor_blocks, implementor_path = _compose_implementor_blocks(raw, manifest_dir)
     if implementor_path is not None:
         source_paths["implementor_blocks"] = implementor_path
-
-    task_config_section = _section(raw, "task_config", resolved_manifest)
-    description, contract, _values = _compose_task_config(
-        task_config_section, manifest_dir, profile
-    )
-    source_paths["task_config"] = _resolve_path(
-        _require(task_config_section, "config", "task_config"), manifest_dir
-    )
 
     from execute_tools.deliverable_spec import task_names_its_own_deliverables
     from execute_tools.task_data_path import registered_content_identity

@@ -17,6 +17,23 @@ forward_contract:
         - {role: batch, dimension: {symbolic: "B"}}
         - {dimension: {fixed: 1}}
       dtype: {admissible: ["float32"]}
+  supervision_target:
+    axes:
+      - {role: batch, dimension: {symbolic: "B"}}
+      - {dimension: {fixed: 2}}
+    dtype: {admissible: ["float32"]}
+  custom_loss_applicability:
+    mode: explicit_pair
+    prediction:
+      axes:
+        - {role: batch, dimension: {symbolic: "B"}}
+        - {dimension: {fixed: 1}}
+      dtype: {admissible: ["float32"]}
+    target:
+      axes:
+        - {role: batch, dimension: {symbolic: "B"}}
+        - {dimension: {fixed: 2}}
+      dtype: {admissible: ["float32"]}
   input_description: "three continuous synthetic features in [-1, 1]"
   output_description: "one continuous prediction per row"
   task_type: "regression"

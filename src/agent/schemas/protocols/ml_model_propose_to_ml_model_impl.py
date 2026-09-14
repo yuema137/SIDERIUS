@@ -12,12 +12,18 @@ Naming convention:
   data_scope: full_spec — all fields needed by the implementor
 """
 
+from agent.schemas.hyperparam_tuning import TaskCompositionRef
 from agent.schemas.implementor import ImplementorInput
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.storage import StorageConfig
 
 
-def local_full_spec(output: ProposalOutput, storage: StorageConfig) -> ImplementorInput:
+def local_full_spec(
+    output: ProposalOutput,
+    storage: StorageConfig,
+    *,
+    task_composition_ref: TaskCompositionRef | None = None,
+) -> ImplementorInput:
     """
     Map ProposalOutput -> ImplementorInput in-memory.
 
@@ -28,7 +34,9 @@ def local_full_spec(output: ProposalOutput, storage: StorageConfig) -> Implement
     per-attempt paths before invoking the implementor so retries do not
     clobber each other's generated sources.
 
-    custom_loss_spec is forwarded unchanged — it is None when the proposer
+    task_composition_ref is validated as part of ImplementorInput construction,
+    rather than assigned after the typed protocol boundary. custom_loss_spec is
+    forwarded unchanged — it is None when the proposer
     used a built-in loss type, and a CustomLossSpec instance when L4 should
     generate (or reuse) a custom loss plugin. See
     docs/design/enable_loss_inventory.md § Commit L3.
@@ -38,6 +46,7 @@ def local_full_spec(output: ProposalOutput, storage: StorageConfig) -> Implement
         # objects, so this protocol maps it field->field like every other
         # field. None propagates for pre-PR-E / non-proposer candidates.
         candidate_id=output.candidate_id,
+        task_composition_ref=task_composition_ref,
         model_name=output.model_name,
         # V21 PR A3: the output contract must survive this hop. If it is dropped
         # here, a proposal declaring `regressor` silently produces a classifier
