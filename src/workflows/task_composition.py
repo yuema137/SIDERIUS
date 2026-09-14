@@ -2616,7 +2616,11 @@ def _compose_resolved_task_bindings(
     if objective_ref is not None:
         from agent.schemas.custom_loss_contract import TaskOwnedCustomLoss
 
-        if expected_loss_contract is None or composed_objective is None:
+        if (
+            expected_loss_contract is None
+            or composed_objective is None
+            or composed_objective.loss_name is None
+        ):
             raise TaskCompositionError(
                 "custom objective resolved without its validated loss contract"
             )
