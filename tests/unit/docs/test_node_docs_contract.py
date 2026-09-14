@@ -21,7 +21,7 @@ Four defects only these tests catch:
    coincide with an `if __name__ == "__main__":` guard in the node's main
    module, and `absent` with its absence.
 3. **A stale `main()` line in the agent reference.** The `CLI` column of
-   `docs/agent-reference/README.md` cites `file:line`; that line must be a
+   `docs/agent-reference/index.md` cites `file:line`; that line must be a
    `def main`. (It WILL move when PR-12d lands and the tuner's `cli.py`
    changes — that is the point: the doc is then corrected, not left stale.)
 4. **A protocol module the registry docstring does not name.** Every
@@ -44,7 +44,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROTOCOLS_DIR = REPO_ROOT / "src/agent" / "schemas" / "protocols"
 PROTOCOLS_INIT = REPO_ROOT / "src/agent" / "schemas" / "protocols" / "__init__.py"
-AGENT_REFERENCE_README = REPO_ROOT / "docs" / "agent-reference" / "README.md"
+# Detailed node/CLI inventory lives in the non-README contributor index; the
+# README is intentionally a human landing page.
+AGENT_REFERENCE_README = REPO_ROOT / "docs" / "agent-reference" / "index.md"
 
 #: The node docs, literally — so the CI selector derives an edge from each
 #: to this module, and so a new node must be registered here to be guarded

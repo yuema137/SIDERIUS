@@ -277,7 +277,7 @@ Every node (leaf or orchestrator) must satisfy:
   `if __name__ == "__main__":`); `ml_literature_review`'s landed last (#303/#305),
   reading its upstream record from disk by naming convention. The per-node
   `main()` locations are tabulated in
-  [`docs/agent-reference/README.md`](agent-reference/README.md).
+  [`docs/agent-reference/index.md`](agent-reference/index.md).
 - **Schema validation**: input is validated via `model_validate()` at entry; output is
   validated via `model_validate()` before returning.
 - **Stateless w.r.t. other nodes**: does not import, call, or depend on any other node.

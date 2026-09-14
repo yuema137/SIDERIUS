@@ -1,10 +1,10 @@
 # Module README template
 
 **Purpose of this template**: every major subsystem directory carries a
-`README.md` that lets a coding agent (or a new engineer) landing *in that
-directory* work safely without first reading the design archive. A module
+`README.md` that lets a person landing *in that directory* understand its
+purpose and safe next step without first reading the design archive. A module
 README is a **map of the directory and its boundaries** — the cross-cutting
-*semantics* stay in the [mechanism references](README.md#mechanisms), which the
+*semantics* stay in the [mechanism references](mechanisms/README.md), which the
 module README links instead of restating. One home per concept.
 
 Instantiated for: [`workflows/`](../../src/workflows/README.md) ·

@@ -1,5 +1,6 @@
 # Literature review node
 
+Use this optional node when paper evidence can inform a model proposal.
 `MLLiteratureReviewAgent` turns interpretation bottlenecks and model context
 into paper search/resolution, extraction and typed evidence for proposal
 generation. It may use Semantic Scholar/arXiv and write cache artifacts; it
@@ -17,5 +18,7 @@ guide for the invocation and unchanged typed API.
 - Fan-in to proposer: [ml_literature_review_to_ml_model_propose](../../agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py)
 - Focused controlled-bridge/resolver tests: [tests/unit/agent/ml_literature_review](../../../tests/unit/agent/ml_literature_review/)
 
-Live retrieval and PDF extraction are effectful and require an explicitly
-configured run; resolver/extraction helpers are private.
+Effects: live retrieval and PDF extraction require explicit configuration and
+may use the network or cache files. Read the [node contract](ml_literature_review.md)
+for the complete invocation and refusal rules; resolver/extraction helpers are
+private.

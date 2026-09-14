@@ -97,5 +97,5 @@ created by the caller and can be removed after the demonstration.
 
 See the [task declaration guide](define-a-task.md), the
 [composition reference](../reference/task-composition.md), and the
-[node contracts](../agent-reference/README.md#nodes) for complete fields and
+[node contracts](../agent-reference/index.md#nodes) for complete fields and
 route-specific limitations.

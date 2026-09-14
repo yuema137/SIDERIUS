@@ -7,4 +7,4 @@ reference links; failures identify stale public docs rather than runtime code.
 
 `.venv/bin/python -m pytest tests/unit/docs/test_node_docs_contract.py -q`
 
-Owner: node markdown and `docs/agent-reference/README.md`; no provider/runtime effects.
+Owner: node markdown and `docs/agent-reference/index.md`; no provider/runtime effects.

@@ -152,26 +152,6 @@ ALLOWLIST: tuple[tuple[str, str, str], ...] = (
         "using the framework.",
     ),
     (
-        "docs/agent-reference/README.md",
-        "change tuner behaviour",
-        "A maintainer-facing decision table describing which source owner to edit; not a user command.",
-    ),
-    (
-        "docs/agent-reference/README.md",
-        "change what the interpreter reads",
-        "A maintainer-facing decision table describing source ownership; not a user command.",
-    ),
-    (
-        "docs/agent-reference/README.md",
-        "change what the proposer reads",
-        "A maintainer-facing decision table describing source ownership; not a user command.",
-    ),
-    (
-        "docs/agent-reference/README.md",
-        "add a node to the graph",
-        "A maintainer-facing decision table describing the node extension boundary; not a user command.",
-    ),
-    (
         "tests/pseudo_data/README.md",
         "A schema change is a two-file change.",
         "Historical pseudo-data maintenance guidance for preserving fixture parity.",

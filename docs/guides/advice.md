@@ -68,7 +68,7 @@ bytes reached a prompt.
 
 ## Other callers and historical Gate advice
 
-Standalone node inputs follow their own [node contracts](../agent-reference/README.md#nodes).
+Standalone node inputs follow their own [node contracts](../agent-reference/index.md#nodes).
 The external TIDMAD baseline tool now lives at
 `siderius-exp/tasks/tidmad/tools/run_comparison.py`; its separate advice reader
 requires a `tune` key. It is not the chain loader described here. See the

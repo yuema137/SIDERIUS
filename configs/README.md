@@ -1,7 +1,7 @@
 # `configs/` — committed framework policy and synthetic example composition
 
-**Audience**: a coding agent or engineer wondering what a file in this
-directory is, and who owns it.
+**Start here if you need to understand a shipped configuration or choose an
+operator input.**
 **Authority**: the source that loads each file. The user-facing ownership map
 is [docs/reference/configuration-map.md](../docs/reference/configuration-map.md)
 — this README is the directory-level view and does not restate it.

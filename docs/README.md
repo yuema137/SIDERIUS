@@ -1,6 +1,7 @@
 # SIDERIUS documentation
 
-Two audiences, two paths through the same material. Pick yours.
+This is the human route through the documentation. Detailed implementation
+contracts have their own gateway below.
 
 [Repository map](repository-map.md): current directories, six nodes, execution
 owners, infra/exp entrypoints and evidence boundaries.
@@ -44,9 +45,9 @@ A progressive path. Each level assumes the one before it.
 - [Troubleshooting](guides/troubleshooting.md) — symptom-first diagnosis
 - [Browsing results with the dashboard](guides/dashboard.md)
 
-## For coding agents and framework developers
+## For framework developers
 
-- **[Agent reference](agent-reference/README.md)** — start here. Maps an intent
+- **[Agent reference](agent-reference/index.md)** — start here. Maps an intent
   to the 1–3 documents that let you work safely.
 - [Architecture](architecture.md) — the graph, node contract, protocols, skills,
   testing strategy

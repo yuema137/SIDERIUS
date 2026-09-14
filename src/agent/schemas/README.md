@@ -1,6 +1,6 @@
 # `agent/schemas/` — node contracts and typed protocols
 
-**Audience**: a coding agent or engineer changing what flows between nodes.
+**Start here if you need to understand what flows between nodes.**
 **Authority**: the source. Template:
 [`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 
