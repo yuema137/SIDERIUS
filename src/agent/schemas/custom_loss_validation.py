@@ -7,7 +7,7 @@ import math
 import os
 import tempfile
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from agent.schemas.custom_loss_contract import (
     CustomLossApplicability,
@@ -72,8 +72,8 @@ def _prepare_validation_pair(
             provider_hint = "task-owned provider required; " if provider is None else ""
             return None, f"Loss probe contract refused: {provider_hint}{exc}"
     try:
-        prediction = prediction.detach().clone().requires_grad_(True)
-        target = target.detach().clone()
+        prediction = cast(Any, prediction).detach().clone().requires_grad_(True)
+        target = cast(Any, target).detach().clone()
     except AttributeError as exc:
         return None, f"Loss probe tensors could not be prepared: {exc}"
     return (prediction, target, description), None

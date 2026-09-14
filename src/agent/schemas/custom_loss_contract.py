@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -332,7 +332,7 @@ def resolve_custom_loss_validation_pair_provider(
         return None
     if not callable(provider):
         raise ValueError("custom_loss_validation_pair is present but not callable")
-    return provider
+    return cast(SyntheticLossPairProvider, provider)
 
 
 def _dtype_intersection(left: DtypeAdmissibility, right: DtypeAdmissibility) -> tuple[str, ...]:
