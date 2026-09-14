@@ -156,7 +156,7 @@ def test_single_file_composition_and_effective_health_match_base_receipt(
             )
             assert (
                 composition.semantic_fingerprint
-                == "ea9fa743d45454bab38dfe0edf3c4d15677bf84fc478090a4a666c80a81fa093"
+                == "a311b8e2b798980099b0d859ff08e879b9302e0bddf788fb6fdd1b7cb72f0815"
             )
             with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
                 materialize_effective_config(

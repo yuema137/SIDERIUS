@@ -41,12 +41,14 @@ even when it accidentally ends up in a scanned directory.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import os
 import sys
 from types import ModuleType
 from typing import Any
 
+from core.capability_registry import CapabilityContractSnapshot
 from core.layout import checkout_path
 
 # LEGACY CHECKOUT loss-plugin directory: the repository's
@@ -86,12 +88,82 @@ REQUIRED_LOSS_PLUGIN_SYMBOLS: tuple[str, ...] = (
     "PLUGIN_LOSS_CLASS",
 )
 
+LOSS_CONTRACT_LITERAL = "PLUGIN_CAPABILITY_CONTRACT"
+
+
+def parse_loss_contract_snapshot_literal(
+    source: str, *, filename: str = "<loss-plugin>"
+) -> CapabilityContractSnapshot | None:
+    """Parse the template-owned contract literal from source without execution."""
+
+    tree = ast.parse(source, filename=filename)
+    assignments = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        and (
+            (
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name) and target.id == LOSS_CONTRACT_LITERAL
+                    for target in node.targets
+                )
+            )
+            or (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == LOSS_CONTRACT_LITERAL
+            )
+        )
+    ]
+    if not assignments:
+        return None
+    if len(assignments) != 1:
+        raise ValueError(f"{LOSS_CONTRACT_LITERAL} must be assigned exactly once")
+    value_node = assignments[0].value
+    try:
+        literal = ast.literal_eval(value_node)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{LOSS_CONTRACT_LITERAL} must be a static literal") from exc
+    return CapabilityContractSnapshot.model_validate(literal)
+
+
+def read_loss_contract_snapshot(path: str) -> CapabilityContractSnapshot | None:
+    """Read the template-owned contract literal without executing plugin code."""
+
+    with open(path, encoding="utf-8") as source_file:
+        return parse_loss_contract_snapshot_literal(source_file.read(), filename=path)
+
+
+def _validate_expected_contract(
+    actual: CapabilityContractSnapshot | None,
+    expected: CapabilityContractSnapshot | None,
+) -> None:
+    if expected is None:
+        return
+    if actual is None:
+        raise ValueError(f"loss plugin is missing required {LOSS_CONTRACT_LITERAL}")
+    if actual != expected:
+        raise ValueError("loss plugin capability contract does not match the composed task")
+
+
+def _optional_contract_snapshot(path: str) -> CapabilityContractSnapshot | None:
+    """Read valid metadata when present without changing the legacy load route."""
+
+    try:
+        return read_loss_contract_snapshot(path)
+    except (OSError, SyntaxError, ValueError):
+        return None
+
 
 class _InvalidPackageLoss(ValueError):
     """Unwind new modules when required loss metadata is absent."""
 
 
-def _load_loss_plugin(path: str) -> dict[str, Any] | None:
+def _load_loss_plugin(
+    path: str,
+    expected_contract_snapshot: CapabilityContractSnapshot | None = None,
+) -> dict[str, Any] | None:
     """Load a single loss-plugin file. Returns attribute dict or None if invalid.
 
     The module is registered in ``sys.modules`` under a stable, filename-
@@ -108,7 +180,23 @@ def _load_loss_plugin(path: str) -> dict[str, Any] | None:
         the required-attribute check — the loader logs a single line per
         rejection and continues scanning.
     """
-    from core.local_code import LocalCodeError, acquire_module
+    from core.local_code import LocalCodeError, acquire_module, selected_member
+
+    captured_member = selected_member(path)
+    captured_contract = None
+    if captured_member is not None:
+        captured_source = captured_member.source.decode("utf-8")
+        if expected_contract_snapshot is not None:
+            captured_contract = parse_loss_contract_snapshot_literal(captured_source, filename=path)
+        else:
+            try:
+                captured_contract = parse_loss_contract_snapshot_literal(
+                    captured_source, filename=path
+                )
+            except (SyntaxError, ValueError):
+                captured_contract = None
+    if captured_member is not None:
+        _validate_expected_contract(captured_contract, expected_contract_snapshot)
 
     try:
         with acquire_module(path) as captured:
@@ -116,6 +204,7 @@ def _load_loss_plugin(path: str) -> dict[str, Any] | None:
                 attributes = _loss_attributes(captured, path)
                 if attributes is None:
                     raise _InvalidPackageLoss
+                attributes["contract_snapshot"] = captured_contract
                 return attributes
     except LocalCodeError:
         raise
@@ -124,6 +213,14 @@ def _load_loss_plugin(path: str) -> dict[str, Any] | None:
     except Exception as exc:
         print(f"[LossLoader] Failed to load {path}: {exc}")
         return None
+
+    validated_source: str | None = None
+    validated_contract: CapabilityContractSnapshot | None = None
+    if expected_contract_snapshot is not None:
+        with open(path, encoding="utf-8") as source_file:
+            validated_source = source_file.read()
+        validated_contract = parse_loss_contract_snapshot_literal(validated_source, filename=path)
+        _validate_expected_contract(validated_contract, expected_contract_snapshot)
 
     module_name = _MODULE_NAME_PREFIX + os.path.splitext(os.path.basename(path))[0]
     spec = importlib.util.spec_from_file_location(module_name, path)
@@ -135,7 +232,10 @@ def _load_loss_plugin(path: str) -> dict[str, Any] | None:
     # (via ``__name__``) without surprising downstream inspect calls.
     sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
+        if validated_source is None:
+            spec.loader.exec_module(module)
+        else:
+            exec(compile(validated_source, path, "exec"), module.__dict__)
     except Exception as e:
         # Roll back the sys.modules entry on load failure so a broken plugin
         # can be fixed and retried in the same process.
@@ -143,7 +243,14 @@ def _load_loss_plugin(path: str) -> dict[str, Any] | None:
         print(f"[LossLoader] Failed to load {path}: {e}")
         return None
 
-    return _loss_attributes(module, path)
+    attributes = _loss_attributes(module, path)
+    if attributes is not None:
+        attributes["contract_snapshot"] = (
+            validated_contract
+            if expected_contract_snapshot is not None
+            else _optional_contract_snapshot(path)
+        )
+    return attributes
 
 
 def _loss_attributes(module: ModuleType, path: str) -> dict[str, Any] | None:
@@ -241,7 +348,10 @@ def _resolve_loss_dirs() -> list[str]:
     return library_dirs
 
 
-def load_loss_plugin_from_path(plugin_path: str) -> dict[str, Any] | None:
+def load_loss_plugin_from_path(
+    plugin_path: str,
+    expected_contract_snapshot: CapabilityContractSnapshot | None = None,
+) -> dict[str, Any] | None:
     """Load a loss plugin from an explicit file path (no name search).
 
     Thin public wrapper around :func:`_load_loss_plugin`, exposed as a
@@ -257,10 +367,13 @@ def load_loss_plugin_from_path(plugin_path: str) -> dict[str, Any] | None:
         on success. ``None`` when the file can't be loaded or fails the
         required-attribute check (errors are logged by ``_load_loss_plugin``).
     """
-    return _load_loss_plugin(plugin_path)
+    return _load_loss_plugin(plugin_path, expected_contract_snapshot)
 
 
-def load_loss_plugin(loss_name: str) -> dict[str, Any] | None:
+def load_loss_plugin(
+    loss_name: str,
+    expected_contract_snapshot: CapabilityContractSnapshot | None = None,
+) -> dict[str, Any] | None:
     """Look up a loss plugin by its ``PLUGIN_LOSS_TYPE`` key and return its attr dict.
 
     Convenience wrapper consumed by L2's ``_load_custom_loss`` in
@@ -286,7 +399,7 @@ def load_loss_plugin(loss_name: str) -> dict[str, Any] | None:
             path = os.path.join(loss_dir, fname)
             if not scan_candidate_allowed(path):
                 continue
-            plugin = _load_loss_plugin(path)
+            plugin = _load_loss_plugin(path, expected_contract_snapshot)
             if plugin is None:
                 continue
             if plugin["loss_type"] == loss_name:

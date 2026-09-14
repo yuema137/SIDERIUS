@@ -1326,7 +1326,10 @@ def _register_plugin(
             # pre-flight (in-process callers fell through to filesystem
             # with no SIDERIUS_LOSS_DIRS set). Reconstruct the file path.
             _loss_file_for_registry = os.path.join(loss_dest_list[0], f"{loss_prov.loss_name}.py")
-            _registered_loss = register_loss_in_memory(_loss_file_for_registry)
+            _registered_loss = register_loss_in_memory(
+                _loss_file_for_registry,
+                loss_prov.contract_snapshot,
+            )
             if _registered_loss is not None:
                 print(f"    Loss '{_registered_loss}' added to in-memory LOSS_REGISTRY")
 
@@ -1527,6 +1530,7 @@ def _promote_loss_to_global(impl_output) -> None:
             # the proposer's {available_losses_block} rendered description
             # only, never the formula block.
             mathematical_definition=existing.mathematical_definition,
+            contract_snapshot=existing.contract_snapshot,
         )
         registry.replace(promoted_meta)
         print(f"  Updated registry entry '{loss_prov.loss_name}' file_path → {global_dest}")
@@ -2094,7 +2098,14 @@ def run_workflow(
     from ml_models.loss_models_sandbox import preload_global_losses
     from ml_models.plugin_loader import preload_global_models
 
-    _preloaded = preload_global_losses()
+    _expected_loss_snapshot = None
+    if task_composition is not None:
+        from agent.schemas.custom_loss_contract import custom_loss_snapshot_from_forward_contract
+
+        _expected_loss_snapshot = custom_loss_snapshot_from_forward_contract(
+            task_composition.forward_contract
+        )
+    _preloaded = preload_global_losses(_expected_loss_snapshot)
     if _preloaded:
         print(f"  Preloaded {len(_preloaded)} global loss plugin(s): {sorted(_preloaded)}")
     # Model surface — symmetric preload so Branch B model reuse resolves
@@ -2964,6 +2975,9 @@ def run_workflow(
                         attempt_dir, bindings.run_name, impl_attempt
                     )
                     impl_input = local_full_spec(proposal, impl_storage.storage)
+                    impl_input.task_composition_ref = build_task_composition_ref(
+                        bindings.task_composition
+                    )
                     impl_input.plugin_dir = impl_storage.plugin_dir
                     impl_input.test_dir = impl_storage.test_dir
                     # L4b — loss-plugin staging directory. Mirrors plugin_dir

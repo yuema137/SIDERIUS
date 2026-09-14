@@ -25,6 +25,7 @@ from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from agent.schemas.vocab import VocabEntry
+from core.capability_registry import CapabilityContractSnapshot
 from core.hardware_context import HardwareContext
 from execute_tools.dataset_config import (
     DataScope,
@@ -113,6 +114,8 @@ class CustomLossSpec(BaseModel):
     See ``docs/design/enable_loss_inventory.md`` § Commit L3.
     """
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     loss_name: str = Field(
         min_length=1,
         description="Snake_case unique key for this loss. Becomes the "
@@ -141,6 +144,10 @@ class CustomLossSpec(BaseModel):
         "type, default, and meaning. Concrete structure validated at L4 by "
         "the implementor. Empty dict = the plugin has no tunable "
         "hyperparameters (a pure functional loss).",
+    )
+    contract_snapshot: CapabilityContractSnapshot | None = Field(
+        default=None,
+        description="Framework-injected immutable snapshot; never authored by the LLM.",
     )
 
 

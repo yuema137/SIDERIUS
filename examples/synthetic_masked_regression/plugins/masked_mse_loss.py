@@ -7,6 +7,12 @@ from pydantic import BaseModel, ConfigDict
 from torch import nn
 
 PLUGIN_LOSS_TYPE = "synthetic_masked_mse"
+PLUGIN_CAPABILITY_CONTRACT = {
+    "contract_kind": "custom_loss_applicability",
+    "contract_version": 1,
+    "canonical_payload": '{"applicability":{"mode":"explicit_pair","prediction":{"axes":[{"dimension":{"dynamic":false,"fixed":null,"symbolic":"B"},"role":"batch"},{"dimension":{"dynamic":false,"fixed":1,"symbolic":null},"role":null}],"dtype":{"admissible":["float32"]}},"target":{"axes":[{"dimension":{"dynamic":false,"fixed":null,"symbolic":"B"},"role":"batch"},{"dimension":{"dynamic":false,"fixed":2,"symbolic":null},"role":null}],"dtype":{"admissible":["float32"]}}},"prediction":{"axes":[{"dimension":{"dynamic":false,"fixed":null,"symbolic":"B"},"role":"batch"},{"dimension":{"dynamic":false,"fixed":1,"symbolic":null},"role":null}],"dtype":{"admissible":["float32"]}},"supervision_target":{"axes":[{"dimension":{"dynamic":false,"fixed":null,"symbolic":"B"},"role":"batch"},{"dimension":{"dynamic":false,"fixed":2,"symbolic":null},"role":null}],"dtype":{"admissible":["float32"]}}}',
+    "sha256": "988ae88a5d88c4c495946937133394467cfe3df19c22629ac0cbe99748185b85",
+}
 PLUGIN_LOSS_TARGET_DTYPE = "float"
 # The scalar is a mean over the objective's task-defined contributing units.
 # Plugin comparability uses the framework's supported normalization vocabulary;

@@ -160,6 +160,137 @@ def agent_with_mocks(index_path):
 
 
 class TestRegistryHitShortCircuit:
+    def test_composed_branch_b_refuses_mismatch_then_reuses_exact_contract(
+        self, agent_with_mocks, inp_loss_only, tmp_path
+    ):
+        from agent.schemas.custom_loss_contract import (
+            EqualShapeApplicability,
+            custom_loss_snapshot_from_forward_contract,
+        )
+        from agent.schemas.hyperparam_tuning import TaskCompositionRef
+        from agent.schemas.model_io_contract import (
+            Dimension,
+            ModelIOContract,
+            TensorAxis,
+            TensorContract,
+        )
+        from agent.schemas.task_config import ForwardContract
+        from ml_models.models_format_sandbox import DtypeAdmissibility
+
+        def tensor(extent):
+            return TensorContract(
+                axes=(
+                    TensorAxis(dimension=Dimension(symbolic="B")),
+                    TensorAxis(dimension=Dimension(fixed=extent)),
+                ),
+                dtype=DtypeAdmissibility(admissible=("float32",)),
+            )
+
+        expected_tensor = tensor(1)
+        inp_loss_only.forward_contract = ForwardContract(
+            model_io=ModelIOContract(input=tensor(4), output=expected_tensor),
+            supervision_target=expected_tensor,
+            custom_loss_applicability=EqualShapeApplicability(
+                dtype=DtypeAdmissibility(admissible=("float32",)), rank=2
+            ),
+        )
+        inp_loss_only.task_composition_ref = TaskCompositionRef.model_construct(
+            semantic_fingerprint="composed",
+            task_data_path_id="fixture",
+            task_health_binding=None,
+            supervision_target=expected_tensor,
+            custom_loss_applicability=EqualShapeApplicability(
+                dtype=DtypeAdmissibility(admissible=("float32",)), rank=2
+            ),
+        )
+        with pytest.raises(ValueError, match="missing its transported contract snapshot"):
+            agent_with_mocks._generate_loss(inp_loss_only)
+        agent_with_mocks.bridge.generate_text.assert_not_called()
+        agent_with_mocks.bridge.generate.assert_not_called()
+
+        inp_loss_only.custom_loss_spec = None
+        inp_loss_only.baseline_config["model_config"] = {"model_name": "reused_model"}
+        model_file = tmp_path / "reused_model.py"
+        model_file.write_text("# registered model\n")
+        agent_with_mocks._registry.register(
+            CapabilityMetadata(
+                name="snr_weighted_mse",
+                capability_type="loss",
+                file_path="/must/not/be/imported.py",
+                created_at="2026-09-13T00:00:00Z",
+                contract_snapshot=None,
+            )
+        )
+        agent_with_mocks._registry.register(
+            CapabilityMetadata(
+                name="reused_model",
+                capability_type="model",
+                file_path=str(model_file),
+                created_at="2026-09-13T00:00:00Z",
+            )
+        )
+        with pytest.raises(ValueError, match="does not match the composed task"):
+            agent_with_mocks.run(inp_loss_only)
+        agent_with_mocks.bridge.generate_text.assert_not_called()
+        agent_with_mocks.bridge.generate.assert_not_called()
+
+        snapshot = custom_loss_snapshot_from_forward_contract(inp_loss_only.forward_contract)
+        agent_with_mocks._registry.replace(
+            CapabilityMetadata(
+                name="snr_weighted_mse",
+                capability_type="loss",
+                file_path="/must/not/be/imported.py",
+                created_at="2026-09-13T00:00:00Z",
+                contract_snapshot=snapshot,
+            )
+        )
+        output = agent_with_mocks.run(inp_loss_only)
+        assert output.loss_provenance is not None
+        assert output.loss_provenance.action == "reused"
+        assert output.loss_provenance.contract_snapshot == snapshot
+
+    def test_transport_disagreement_refuses_before_reuse(self, agent_with_mocks, inp_loss_only):
+        from agent.schemas.custom_loss_contract import EqualShapeApplicability
+        from agent.schemas.hyperparam_tuning import TaskCompositionRef
+        from agent.schemas.model_io_contract import (
+            Dimension,
+            ModelIOContract,
+            TensorAxis,
+            TensorContract,
+        )
+        from agent.schemas.task_config import ForwardContract
+        from ml_models.models_format_sandbox import DtypeAdmissibility
+
+        def tensor(extent):
+            return TensorContract(
+                axes=(
+                    TensorAxis(dimension=Dimension(symbolic="B")),
+                    TensorAxis(dimension=Dimension(fixed=extent)),
+                ),
+                dtype=DtypeAdmissibility(admissible=("float32",)),
+            )
+
+        expected_tensor = tensor(1)
+        applicability = EqualShapeApplicability(
+            dtype=DtypeAdmissibility(admissible=("float32",)), rank=2
+        )
+        inp_loss_only.forward_contract = ForwardContract(
+            model_io=ModelIOContract(input=tensor(4), output=expected_tensor),
+            supervision_target=expected_tensor,
+            custom_loss_applicability=applicability,
+        )
+        inp_loss_only.task_composition_ref = TaskCompositionRef.model_construct(
+            semantic_fingerprint="composed",
+            task_data_path_id="fixture",
+            task_health_binding=None,
+            supervision_target=tensor(2),
+            custom_loss_applicability=applicability,
+        )
+        with pytest.raises(ValueError, match="disagree with the forward contract"):
+            agent_with_mocks._generate_loss(inp_loss_only)
+        agent_with_mocks.bridge.generate_text.assert_not_called()
+        agent_with_mocks.bridge.generate.assert_not_called()
+
     def test_no_llm_call_on_registry_hit(self, agent_with_mocks, inp_loss_only):
         """When the registry already has an entry for the requested
         loss_name, ``_generate_loss`` must NOT call the bridge."""

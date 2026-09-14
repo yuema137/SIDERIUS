@@ -14,13 +14,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agent.schemas.hyperparam_tuning import ExpertAdviceInput
+from agent.schemas.hyperparam_tuning import ExpertAdviceInput, TaskCompositionRef
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.output_types import OutputTypeName
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
-from core.capability_registry import CapabilityMetadata
+from core.capability_registry import CapabilityContractSnapshot, CapabilityMetadata
 from core.hardware_context import HardwareContext
 
 # Fields the implementor is NEVER allowed to adjust. These are owned by the
@@ -171,6 +171,10 @@ class LossProvenance(BaseModel):
         "passes. A False value would mean the audit trail is being "
         "recorded for a known-broken state — diagnostic only.",
     )
+    contract_snapshot: CapabilityContractSnapshot | None = Field(
+        default=None,
+        description="Immutable contract evidence transported with the loss plugin.",
+    )
 
 
 class ImplementorTaskBlocks(BaseModel):
@@ -235,6 +239,10 @@ class ImplementorInput(BaseModel):
         description="V21 PR E — carried verbatim from ``ProposalOutput.candidate_id`` "
         "by the propose->impl protocol. Observational join identity only "
         "(O-E-5); None = pre-PR-E or non-proposer candidate.",
+    )
+    task_composition_ref: TaskCompositionRef | None = Field(
+        default=None,
+        description="Frozen task projection; None preserves the uncomposed legacy route.",
     )
     model_name: str = Field(
         description="snake_case model type key. Used as the filename and PLUGIN_MODEL_TYPE constant.",
