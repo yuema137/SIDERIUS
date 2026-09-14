@@ -272,17 +272,14 @@ class TestFingerprintAdditivity:
         assert "dynamic_observables" not in raw
         assert "static_observables" not in raw
 
-    def test_quickstarts_undeclared_fingerprint_is_the_PRE_ROBS1_value(self):
+    def test_quickstarts_no_observables_fingerprint_receipt(self):
         """Recorded at `origin/master` 3995400b, BEFORE this family existed.
 
         Hardcoded, never read back from the composition: the claim is that
         this framework-owned example's identity did not move because of an
-        unconditional observable key. The literal was re-recorded after
-        Quickstart declared its framework-provided objective; that independent
-        semantic change is part of the example's current identity. It was
-        re-recorded again when Quickstart explicitly declared fixed-shape probe
-        semantics; temporal and non-temporal resource evidence must not share
-        an identity.
+        unconditional observable key. The current receipt also includes later,
+        independent semantic declarations: its framework-provided objective
+        and explicit fixed-shape probe applicability.
         """
         path = os.path.join(REPO_ROOT, "configs", "task_composition", "quickstart.yaml")
         assert compose_run_task_bindings(path).semantic_fingerprint == (
@@ -304,6 +301,36 @@ class TestFingerprintAdditivity:
             **base, observable_declarations=[{"acquisition": "dynamic", "name": "x"}]
         )
         assert declared != undeclared
+
+    def test_probe_applicability_is_additive_and_identity_bearing(self):
+        """Omission preserves legacy identity; either explicit mode changes it.
+
+        This catches both accidental default serialization and an attempted
+        removal of probe applicability from task identity. Temporal and
+        fixed-shape resource observations must never become comparable merely
+        because the remaining task declaration is identical.
+        """
+        from agent.schemas.task_config import ForwardContract
+
+        base = _fingerprint_kwargs()
+        undeclared = compute_semantic_fingerprint(**base)
+        explicit_none = compute_semantic_fingerprint(
+            **{**base, "forward_contract": ForwardContract(segmentation_applicability=None)}
+        )
+        temporal = compute_semantic_fingerprint(
+            **{**base, "forward_contract": ForwardContract(segmentation_applicability="temporal")}
+        )
+        fixed = compute_semantic_fingerprint(
+            **{
+                **base,
+                "forward_contract": ForwardContract(segmentation_applicability="not_applicable"),
+            }
+        )
+
+        assert explicit_none == undeclared
+        assert temporal != undeclared
+        assert fixed != undeclared
+        assert temporal != fixed
 
     def test_acquisition_reaches_the_fingerprint_THROUGH_the_composition(self, manifest, tmp_path):
         """Acquisition is part of run identity, not decoration — end to end.
