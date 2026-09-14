@@ -165,9 +165,15 @@ def get_model_description(
     refuse_bundled = baseline_isolation or composed
 
     bundled = os.path.join(_ML_MODELS_DIR, model_type, "description.md")
+    workspace_bound = generated_library_is_workspace_bound()
+    # Composed callers have no compatibility route into the checkout-global
+    # ``agent_generated`` tree.  That directory is historical state owned by
+    # no current task/workspace; allowing it here would reintroduce exactly
+    # the cross-run prose contamination this policy closes.  Legacy callers
+    # retain the read-only migration fallback while unbound.
     legacy_candidates = (
         []
-        if generated_library_is_workspace_bound() or _PLUGIN_DESCRIPTIONS_DIR is None
+        if composed or workspace_bound or _PLUGIN_DESCRIPTIONS_DIR is None
         else [os.path.join(_PLUGIN_DESCRIPTIONS_DIR, model_type, "description.md")]
     )
     candidates = [

@@ -132,6 +132,7 @@ from execute_tools.health_checks._composition import HealthBindingState
 from execute_tools.health_checks.candidate_eligibility import resolve_run_scientific_gate_ids
 from execute_tools.impl_attempts import impl_attempt_dir
 from execute_tools.metric_order import MetricOrder
+from ml_models.model_descriptions import DescriptionSourcePolicy
 from ml_models.plugin_loader import register_model_in_memory
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
@@ -2600,7 +2601,9 @@ def run_workflow(
             # bundled built-in description, so none reaches its carried cache.
             baseline_isolation=launch.baseline_isolation,
             description_source_policy=(
-                "composed" if bindings.task_composition is not None else "legacy"
+                DescriptionSourcePolicy.COMPOSED
+                if bindings.task_composition is not None
+                else DescriptionSourcePolicy.LEGACY
             ),
             human_advice=launch.human_advice_interpret,
             runtime_vocab=state.current_runtime_vocab,
