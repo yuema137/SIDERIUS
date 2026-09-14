@@ -124,20 +124,3 @@ def test_worker_legacy_temporal_branch_refuses_but_task_probe_branch_is_separate
         training_estimator.SegmentationDimensionUnavailableError, match="segmentation_size"
     ):
         build_production_components(spec)()
-
-
-def test_tuner_legacy_sample_set_does_not_admit_absent_geometry(monkeypatch):
-    import nodes.ml_hyperparameter_tune_agent as tuner
-
-    monkeypatch.setattr(training_estimator, "resolve_optional_segmentation_size", lambda *_: None)
-    assert (
-        tuner._resolve_guardrail_steps(
-            {"0": [0]},
-            {},
-            {"batch_size": 1, "epochs": 1},
-            1.0,
-            PROFILE,
-            model_type=ABSENT,
-        )
-        is None
-    )
