@@ -231,18 +231,15 @@ def production_probe_executors(
                 f"dataset directory unavailable for the probe: {resolved_dir!r} "
                 "(no silent synthetic fallback — F-1a)"
             )
-        # C12-P / B11. The probe builds its batch at the segmentation size the
-        # model will ACTUALLY be constructed with, resolved by the one authority
-        # that already knows how: `config_cls(**model_config)` two lines above
-        # substitutes the config class's declared default for an absent key, so
-        # a literal `40_000` here was a TIDMAD-scale guess that could disagree
-        # with the very model this closure just built (transformer declares
-        # 20000, a generated plugin declares whatever it declares). Behaviour is
-        # unchanged whenever the key is present, which is every production plan.
-        from agent.skills.training_skill.estimator import resolve_model_field
+        # C12-P / B11. The legacy temporal probe builds its batch at the
+        # declared segmentation size. A task-owned fixed-shape probe would need
+        # a separate transport capability; absent geometry therefore refuses.
+        from agent.skills.training_skill.estimator import (
+            require_declared_segmentation_size,
+        )
 
-        seg = resolve_model_field(
-            model_type, model_config, "segmentation_size", safety_margin=40_000
+        seg = require_declared_segmentation_size(
+            model_type, model_config, consumer="production temporal probe"
         )
         bs = int(train_config.get("batch_size", 1))
         # 07c C2: the ONE builder, the same one the measurement worker goes

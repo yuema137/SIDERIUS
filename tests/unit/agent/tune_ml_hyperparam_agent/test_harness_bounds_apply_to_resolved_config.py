@@ -261,8 +261,8 @@ class TestGuardrailStepsUseTheResolvedWorkload:
         assert absent == declared
         assert absent != old_literal
 
-    def test_it_stays_best_effort_for_an_unknown_model(self):
-        """Defense-in-depth must not become a new crash site."""
+    def test_unknown_model_stays_nonfatal_without_inventing_geometry(self, capsys):
+        """Defense-in-depth neither crashes nor prices an undeclared shape."""
         assert (
             tuner._resolve_guardrail_steps(
                 self._SAMPLE,
@@ -272,8 +272,9 @@ class TestGuardrailStepsUseTheResolvedWorkload:
                 model_type="never_registered_xyz",
                 dataset_profile=_PROFILE,
             )
-            is not None
+            is None
         )
+        assert "requires a declared temporal segmentation_size" in capsys.readouterr().out
 
     def test_an_explicitly_impossible_config_returns_None_not_a_substitute(self):
         """Absent is resolved; explicitly-invalid is refused.

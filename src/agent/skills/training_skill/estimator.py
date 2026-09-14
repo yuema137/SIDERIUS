@@ -176,7 +176,27 @@ def resolve_model_field(
 
 
 class SegmentationDimensionUnavailableError(ValueError):
-    """A legacy temporal probe needs a dimension the run did not declare."""
+    """A legacy temporal analytic consumer lacks required task geometry."""
+
+
+def require_declared_segmentation_size(
+    model_type: str, model_config: dict[str, Any], *, consumer: str
+) -> int:
+    """Resolve a temporal size or refuse without inventing one."""
+    supplied = model_config.get("segmentation_size")
+    if supplied is not None and not _usable(supplied):
+        raise ValueError(
+            f"{consumer} received invalid segmentation_size={supplied!r}; "
+            "explicit invalidity cannot be treated as absence."
+        )
+    resolved = resolve_optional_segmentation_size(model_type, model_config)
+    if resolved is None:
+        raise SegmentationDimensionUnavailableError(
+            f"{consumer} requires a declared temporal segmentation_size; "
+            "the task omitted it. Use the task-owned scope/probe interface "
+            "for fixed-shape inputs."
+        )
+    return resolved
 
 
 def resolve_optional_segmentation_size(model_type: str, model_config: dict[str, Any]) -> int | None:
@@ -403,8 +423,8 @@ def estimate_peak_bytes(
     # V21 PR B1 — resolved against the model's own declaration. The
     # margin is the memory-conservative direction (a larger `seg` costs
     # more), and applies only where nothing declares the field.
-    seg_size = resolve_model_field(
-        model_type, model_config, "segmentation_size", safety_margin=40000
+    seg_size = require_declared_segmentation_size(
+        model_type, model_config, consumer="training peak-memory estimator"
     )
     batch_size = train_config.get("batch_size", 1)  # B1: matches TrainConfig's declared 1
     loss_type = resolve_loss_type(loss_config)
@@ -608,8 +628,8 @@ def estimate_wall_time_seconds(
     # The margin here is the time-conservative direction (a smaller `seg`
     # means more steps), opposite to the VRAM phase's, and is reached only
     # for a model whose config class declares nothing.
-    seg_size = resolve_model_field(
-        model_type, model_config, "segmentation_size", safety_margin=1000
+    seg_size = require_declared_segmentation_size(
+        model_type, model_config, consumer="training wall-time estimator"
     )
     batch_size = int(train_config.get("batch_size", 1))
     epochs = resolve_train_field(train_config, "epochs", safety_margin=1)

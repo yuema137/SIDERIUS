@@ -152,12 +152,12 @@ def estimate_peak_bytes(
     inference_batch_uncalibrated = not is_inference_batch_registered(model_type)
     inf_batch = inference_batch_for(model_type)
 
-    # V21 PR B1 — resolved against the model's declaration; the margin is
-    # the memory-conservative direction. See the training estimator.
-    from agent.skills.training_skill.estimator import resolve_model_field
+    # Temporal inference memory requires a declared size; fixed-shape tasks
+    # must use their task-owned probe/scope path instead.
+    from agent.skills.training_skill.estimator import require_declared_segmentation_size
 
-    seg_size = resolve_model_field(
-        model_type, model_config, "segmentation_size", safety_margin=40000
+    seg_size = require_declared_segmentation_size(
+        model_type, model_config, consumer="inference peak-memory estimator"
     )
 
     weights = num_params * _BYTES_F32
@@ -295,12 +295,12 @@ def estimate_wall_time_seconds(
     inference_batch_uncalibrated = not is_inference_batch_registered(model_type)
     inf_batch = resolve_forecast_batch(inference_batch, model_type)
 
-    # V21 PR B1 — see the training estimator; the margin is the
-    # time-conservative direction (smaller `seg` means more steps).
-    from agent.skills.training_skill.estimator import resolve_model_field
+    # Temporal inference timing requires a declared size; do not price a
+    # fixed-shape task with a historical segmentation margin.
+    from agent.skills.training_skill.estimator import require_declared_segmentation_size
 
-    seg_size = resolve_model_field(
-        model_type, model_config, "segmentation_size", safety_margin=1000
+    seg_size = require_declared_segmentation_size(
+        model_type, model_config, consumer="inference wall-time estimator"
     )
 
     total_steps = _total_inference_steps(sample_set, seg_size, inf_batch, dataset_profile)

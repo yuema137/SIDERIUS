@@ -67,12 +67,12 @@ def _worker_seg_size(model_config: dict) -> int:
     fails if the worker ever stops going through that authority, which is the
     only way this stand-in could drift from the real thing.
     """
-    from agent.skills.training_skill.estimator import resolve_model_field
+    from agent.skills.training_skill.estimator import require_declared_segmentation_size
 
-    return int(
-        resolve_model_field(
-            _DIVERGENT_MODEL, model_config, "segmentation_size", safety_margin=_THE_OLD_LITERAL
-        )
+    return require_declared_segmentation_size(
+        _DIVERGENT_MODEL,
+        model_config,
+        consumer="measurement-worker test stand-in",
     )
 
 
@@ -132,13 +132,16 @@ class TestBothSidesStillGoThroughTheOneAuthority:
     """Structural: the stand-in above stays faithful only while this holds."""
 
     @pytest.mark.parametrize(
-        "rel",
+        ("rel", "resolver"),
         [
-            "src/core/runtime_control/gpu_measurement_identity.py",
-            "src/core/runtime_control/gpu_measurement_worker_main.py",
+            ("src/core/runtime_control/gpu_measurement_identity.py", "resolve_model_field"),
+            (
+                "src/core/runtime_control/gpu_measurement_worker_main.py",
+                "require_declared_segmentation_size",
+            ),
         ],
     )
-    def test_the_site_resolves_through_resolve_model_field(self, rel: str) -> None:
+    def test_the_site_uses_the_shared_resolution_authority(self, rel: str, resolver: str) -> None:
         """DEFECT THIS TEST ALONE CATCHES
             A side reverting to its own literal. The behavioural comparison
             above would still catch a value divergence, but this names the
@@ -153,9 +156,10 @@ class TestBothSidesStillGoThroughTheOneAuthority:
         from pathlib import Path
 
         src = (Path(__file__).resolve().parents[3] / rel).read_text(encoding="utf-8")
-        assert "resolve_model_field" in src, (
-            f"{rel} no longer resolves segmentation_size through the single "
-            f"authority; the planned/measured pairing is unguarded again."
+        assert resolver in src, (
+            f"{rel} no longer resolves segmentation_size through its shared "
+            f"estimator authority {resolver}; the planned/measured pairing is "
+            "unguarded again."
         )
 
         # AST, not a substring. The first version of this guard asserted
