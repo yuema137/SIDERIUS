@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from execute_tools.health_checks._composition import HealthBindingState
 from execute_tools.task_data_path import (
     HealthCoverageResult,
     TaskHealthCoverageError,
@@ -186,6 +187,23 @@ def test_missing_capability_refuses_by_task_identity():
             composed=True,
             health_enabled=True,
         )
+
+
+def test_explicit_health_absence_passes_without_resolving_capability():
+    """Named absence is a valid declaration, not a missing capability."""
+    result = validate_attempt_health_coverage(
+        data_path=_Missing(),
+        evaluation_scope=object(),
+        round_kind="formal",
+        health_binding=HealthBindingState.EXPLICIT_NONE,
+        composed=True,
+        health_enabled=True,
+    )
+    assert result == HealthCoverageResult(
+        applicable=False,
+        covered=False,
+        reason="task explicitly declares no Health coverage demand",
+    )
 
 
 def test_malformed_result_refuses_closed():
