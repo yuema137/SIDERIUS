@@ -17,6 +17,9 @@ task_description: |
 # system prompts. Must describe the exact PyTorch tensor shapes and types
 # expected by the training engine and validator.
 forward_contract:
+  # Required for a composed task-owned resource probe. Declare whether the
+  # probe identity includes a temporal segmentation dimension.
+  segmentation_applicability: not_applicable
   input_shape: "[B, 8] float32"
   input_description: "eight normalized synthetic features"
   output_shape: "[B, 3] float32"

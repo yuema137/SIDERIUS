@@ -25,6 +25,8 @@ See ``docs/design/enable_global_task_config.md`` for the full design.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.custom_loss_contract import CustomLossApplicability
@@ -117,6 +119,15 @@ class ForwardContract(BaseModel):
         "``num_classes`` are DERIVED from it and must not be independently "
         "authored. When absent the prose fields are authored directly — the "
         "legacy Regime-A form, preserved unchanged.",
+    )
+
+    segmentation_applicability: Literal["temporal", "not_applicable"] | None = Field(
+        default=None,
+        description=(
+            "Whether resource-probe identity has a temporal segmentation dimension. "
+            "A composed task that materializes its own probe must declare this; "
+            "the framework does not infer it from a task, model, or tensor shape."
+        ),
     )
 
     supervision_target: TensorContract | None = Field(

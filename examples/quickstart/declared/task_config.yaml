@@ -21,6 +21,7 @@ task_description: |
   in seconds, not to be a benchmark.
 
 forward_contract:
+  segmentation_applicability: not_applicable
   # Step 03 — `model_io:` is THE authority; `input_shape`/`output_shape`/
   # `num_classes` are DERIVED from it and deliberately not authored here
   # (the pets pack's precedent, and its hard-won lesson: with `model_io`

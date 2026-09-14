@@ -208,6 +208,16 @@ class TestComposedTaskBatch:
         with pytest.raises(ValueError, match="task_probe_data and planned measurement identity"):
             GpuMeasurementSpec.model_validate(payload)
 
+    def test_task_probe_dimension_marker_cannot_be_omitted(self, registered):
+        """Missing applicability must fail before a worker can invent temporal identity."""
+        with pytest.raises(ValueError, match="segmentation_applicability"):
+            TaskProbeDataSpec(
+                manifest_path="/task/composition.yaml",
+                semantic_fingerprint="a" * 64,
+                training_scope_payload='{"kind":"synthetic"}',
+                sampling=EpochSamplingParams(data_dir=registered),
+            )
+
     def test_worker_uses_task_data_path_instead_of_physical_array_loader(
         self, tmp_path, registered, monkeypatch
     ):
@@ -227,6 +237,7 @@ class TestComposedTaskBatch:
             semantic_fingerprint="a" * 64,
             training_scope_payload='{"kind":"synthetic"}',
             sampling=EpochSamplingParams(data_dir=registered),
+            segmentation_applicability="temporal",
         )
 
         components = build_production_components(

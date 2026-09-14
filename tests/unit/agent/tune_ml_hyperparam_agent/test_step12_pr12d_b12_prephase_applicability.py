@@ -231,6 +231,7 @@ class TestComposedTasksWithProbeDataAreApplicable:
             training_scope_payload='{"kind":"synthetic"}',
             sampling=EpochSamplingParams(data_dir="/task/data", train_portion=0.25),
             max_inference_batch_size=1,
+            segmentation_applicability="not_applicable",
         )
         assert _call_expecting_spawn(
             tmp_path,

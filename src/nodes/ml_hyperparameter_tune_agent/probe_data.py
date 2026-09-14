@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from execute_tools.task_data_path import (
     EpochSamplingParams,
@@ -22,7 +22,6 @@ def build_task_probe_data(
     epoch_seed: int | None,
     train_portion: float | None,
     max_samples: int | None,
-    segmentation_applicability: Literal["temporal", "not_applicable"] = "temporal",
 ) -> TaskProbeDataSpec | None:
     """Carry the run's resolved task scope to resource measurement.
 
@@ -48,6 +47,12 @@ def build_task_probe_data(
         )
     data_path = require_bound_task_data_path()
     capability = resolve_task_scope_capability(data_path)
+    segmentation_applicability = getattr(task_composition_ref, "segmentation_applicability", None)
+    if segmentation_applicability is None:
+        raise ValueError(
+            "a composed training scope reached resource measurement without an "
+            "explicit segmentation_applicability declaration"
+        )
     return TaskProbeDataSpec(
         manifest_path=manifest_path,
         semantic_fingerprint=task_composition_ref.semantic_fingerprint,

@@ -219,7 +219,7 @@ class TaskProbeDataSpec(BaseModel):
     #: is explicit transport metadata: a task with a fixed-shape input must
     #: opt into ``not_applicable`` rather than being inferred from the mere
     #: presence of a task probe.
-    segmentation_applicability: Literal["temporal", "not_applicable"] = "temporal"
+    segmentation_applicability: Literal["temporal", "not_applicable"]
 
 
 class EvalMaterializationParams(BaseModel):

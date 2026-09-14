@@ -1411,6 +1411,13 @@ class TaskCompositionRef(BaseModel):
             "that carries the task's roster."
         )
     )
+    segmentation_applicability: Literal["temporal", "not_applicable"] | None = Field(
+        default=None,
+        description=(
+            "Task-owned resource-probe segmentation declaration projected at the "
+            "composition edge. None is undeclared, never a temporal default."
+        ),
+    )
     objective: Any = Field(
         default=None,
         description=(

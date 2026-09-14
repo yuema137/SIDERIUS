@@ -404,6 +404,7 @@ def test_resource_worker_accepts_a_task_valid_batch_and_refuses_an_oversized_one
             semantic_fingerprint=composition.semantic_fingerprint,
             training_scope_payload=payload,
             sampling=EpochSamplingParams(data_dir=bundle["data_dir"], epoch_seed=7),
+            segmentation_applicability="not_applicable",
         )
     inputs, supervision = _task_probe_batch(spec.model_dump(), batch_size=8)
     assert tuple(inputs.shape) == (8, 3)
