@@ -37,6 +37,34 @@ def test_finds_builtin_model_description():
     assert text.strip(), "built-in punet description should not be empty"
 
 
+def test_composed_policy_excludes_packaged_and_allows_authorized_absence(monkeypatch):
+    """A composed run must not turn a bundled-only name into task prose."""
+    monkeypatch.delenv("SIDERIUS_CHAIN_WORKSPACE", raising=False)
+    assert (
+        model_descriptions.get_model_description(
+            "punet", source_policy=model_descriptions.DescriptionSourcePolicy.COMPOSED
+        )
+        is None
+    )
+
+
+def test_composed_policy_resolves_declared_pack_description(tmp_path, monkeypatch):
+    """The declared task-pack root remains an authorized composed source."""
+    root = tmp_path / "models" / "punet"
+    root.mkdir(parents=True)
+    body = "# task-owned architecture\n"
+    (root / "description.md").write_text(body, encoding="utf-8")
+    monkeypatch.setattr(
+        model_descriptions, "_declared_pack_candidates", lambda _: [str(root / "description.md")]
+    )
+    assert (
+        model_descriptions.get_model_description(
+            "punet", source_policy=model_descriptions.DescriptionSourcePolicy.COMPOSED
+        )
+        == body
+    )
+
+
 def test_finds_chain_plugin_with_run_scoped_dirname(chain_workspace):
     """Gate 2 Run-4 regression guard: run_name like ``stage2_iter_001``
     that doesn't match the legacy ``iter_NNN`` regex must still be

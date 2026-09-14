@@ -86,7 +86,10 @@ A pack may also ship a `description.md` for its model beside the plugin, at
 `{declared model-plugin root}/{model_type}/description.md`. The tuner reads it
 into the planner prompt; without it the prompt is silently thinner. It is
 searched last, so it never shadows a workspace registration of the same model
-type.
+type. In a composed run, the typed `DescriptionSourcePolicy` excludes packaged
+`ml_models/*/description.md` manuals entirely; missing task-owned prose is
+authorized absence, not a fallback trigger. Standalone callers retain bundled
+manual eligibility.
 
 ## Registration: the two-phase rule
 
