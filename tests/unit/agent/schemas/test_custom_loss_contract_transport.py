@@ -103,6 +103,7 @@ def test_task_composition_projection_round_trips_contract_and_preserves_segmenta
 
 
 def test_custom_loss_spec_json_and_protocol_preserve_framework_snapshot(tmp_path):
+    from agent.schemas.hyperparam_tuning import TaskCompositionRef
     from agent.schemas.proposal import CustomLossSpec, ProposalOutput
     from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
     from agent.schemas.storage import LocalStorageConfig, StorageConfig
@@ -129,14 +130,58 @@ def test_custom_loss_spec_json_and_protocol_preserve_framework_snapshot(tmp_path
         },
         custom_loss_spec=restored_spec,
     )
+    composition_ref = TaskCompositionRef(
+        semantic_fingerprint="fixture-fingerprint",
+        task_data_path_id="fixture-path",
+        task_health_binding="none",
+        supervision_target=_tensor("B", 1),
+        custom_loss_applicability=EqualShapeApplicability(
+            dtype=DtypeAdmissibility(admissible=("float32",)),
+            rank=2,
+        ),
+    )
     implementor_input = local_full_spec(
         proposal,
         StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=str(tmp_path), run_name="transport"),
         ),
+        task_composition_ref=composition_ref,
     )
     assert implementor_input.custom_loss_spec.contract_snapshot == snapshot
+    assert implementor_input.task_composition_ref == composition_ref
+
+
+def test_proposal_protocol_validates_task_composition_ref_during_input_construction(
+    tmp_path,
+):
+    """A malformed typed-hop payload must fail at the protocol boundary.
+
+    MUTATION TARGET: assigning ``task_composition_ref`` after constructing
+    ``ImplementorInput`` bypasses Pydantic validation and makes this call
+    return instead of raising.
+    """
+    from agent.schemas.proposal import ProposalOutput
+    from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
+    from agent.schemas.storage import LocalStorageConfig, StorageConfig
+
+    proposal = ProposalOutput(
+        model_name="transport_model",
+        model_description="model",
+        mathematical_definition="f(x)",
+        motivation="transport",
+        expert_advice={},
+        baseline_config={"model_config": {}, "train_config": {}, "loss_config": {}},
+    )
+    with pytest.raises(ValidationError, match="semantic_fingerprint"):
+        local_full_spec(
+            proposal,
+            StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(workspace=str(tmp_path), run_name="transport"),
+            ),
+            task_composition_ref={"task_data_path_id": "missing-fields"},  # type: ignore[arg-type]
+        )
 
 
 def test_proposer_replaces_llm_contract_metadata_with_task_projection():

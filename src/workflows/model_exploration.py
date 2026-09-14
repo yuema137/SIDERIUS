@@ -2974,9 +2974,10 @@ def run_workflow(
                     impl_storage = impl_attempt_storage(
                         attempt_dir, bindings.run_name, impl_attempt
                     )
-                    impl_input = local_full_spec(proposal, impl_storage.storage)
-                    impl_input.task_composition_ref = build_task_composition_ref(
-                        bindings.task_composition
+                    impl_input = local_full_spec(
+                        proposal,
+                        impl_storage.storage,
+                        task_composition_ref=build_task_composition_ref(bindings.task_composition),
                     )
                     impl_input.plugin_dir = impl_storage.plugin_dir
                     impl_input.test_dir = impl_storage.test_dir
