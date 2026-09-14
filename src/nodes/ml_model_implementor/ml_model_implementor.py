@@ -31,9 +31,10 @@ from typing import Any
 
 from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
+from agent.schemas.custom_loss_contract import CustomLossApplicability
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput, LossProvenance
-from agent.schemas.model_io_contract import ModelIOContract
+from agent.schemas.model_io_contract import ModelIOContract, TensorContract
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
@@ -1013,6 +1014,8 @@ def _dummy_tensor_validate_loss(
     plugin_src: str,
     loss_name: str,
     model_io_contract: ModelIOContract | None = None,
+    supervision_target: TensorContract | None = None,
+    custom_loss_applicability: CustomLossApplicability | None = None,
 ) -> str | None:
     """Run the L2-equivalent dummy-tensor check on an assembled loss-plugin source.
 
@@ -1054,6 +1057,21 @@ def _dummy_tensor_validate_loss(
         describing the first failure. The string is suitable for feeding back
         into ``IMPLEMENTOR_LOSS_REPAIR_PROMPT`` as the ``error`` field.
     """
+    # A composed task that opts into the new contract must be checked before
+    # importing or invoking generated code.  Legacy callers that provide no
+    # task-owned declaration retain the existing compatibility probe; the
+    # declaration path is deliberately explicit rather than inferred here.
+    if custom_loss_applicability is not None or supervision_target is not None:
+        from agent.schemas.custom_loss_contract import resolve_custom_loss_applicability
+
+        applicability = resolve_custom_loss_applicability(
+            model_io_contract.output if model_io_contract is not None else None,
+            supervision_target,
+            custom_loss_applicability,
+        )
+        if not applicability.eligible:
+            return f"Custom loss applicability refused: {applicability.reason}"
+
     # Lazy import keeps torch off the import-time path for callers that
     # only use the model-code helpers above. Mirrors `_smoke_test_plugin`.
     import contextlib
@@ -1978,7 +1996,13 @@ class MLModelImplementor:
         # ---- 3. Validate → repair loop ----------------------------------
         max_retries = inp.max_retries
         plugin_src = _assemble_loss_plugin(loss_name, spec.description, code)
-        error = _dummy_tensor_validate_loss(plugin_src, loss_name, inp.forward_contract.model_io)
+        error = _dummy_tensor_validate_loss(
+            plugin_src,
+            loss_name,
+            inp.forward_contract.model_io,
+            inp.forward_contract.supervision_target,
+            inp.forward_contract.custom_loss_applicability,
+        )
         attempt = 0
         error_history: list[tuple[int, str]] = []
         while error is not None and attempt < max_retries:
@@ -1993,7 +2017,11 @@ class MLModelImplementor:
             )
             plugin_src = _assemble_loss_plugin(loss_name, spec.description, code)
             error = _dummy_tensor_validate_loss(
-                plugin_src, loss_name, inp.forward_contract.model_io
+                plugin_src,
+                loss_name,
+                inp.forward_contract.model_io,
+                inp.forward_contract.supervision_target,
+                inp.forward_contract.custom_loss_applicability,
             )
 
         if error is not None:
