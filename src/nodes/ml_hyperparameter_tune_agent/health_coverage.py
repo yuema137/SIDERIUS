@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from execute_tools.health_checks._composition import HealthBindingState
 from execute_tools.task_data_path import (
     HealthCoverageRequest,
     HealthCoverageResult,
@@ -38,6 +39,12 @@ def validate_attempt_health_coverage(
     """
     if not composed or not health_enabled or round_kind not in ("trial", "formal"):
         return None
+    if health_binding is HealthBindingState.EXPLICIT_NONE:
+        return HealthCoverageResult(
+            applicable=False,
+            covered=False,
+            reason="task explicitly declares no Health coverage demand",
+        )
     capability = resolve_task_health_coverage_capability(data_path)
     try:
         request = HealthCoverageRequest(
