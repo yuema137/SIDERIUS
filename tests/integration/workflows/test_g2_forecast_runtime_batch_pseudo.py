@@ -29,14 +29,16 @@ import pytest
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, HyperparamTuningOutput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
-from tests.helpers.tuner_composed_effects import composed_tuner_effects
+from tests.helpers.tuner_composed_effects import (
+    composed_tuner_effects,
+    recording_sandbox_for_attempts,
+    synthetic_cuda_context,
+)
 from tests.helpers.tuner_composed_fixture import composed_run
 from tests.integration.workflows.test_k9_invented_model_dual_mode import (
     _PLUGIN_MODEL_TYPE,
     _PSEUDO_AGENT_FOLDER,
     _disable_sleeps,
-    _mock_cuda,
-    _recording_sandbox,
     _register_k9_plugin,
 )
 
@@ -52,7 +54,7 @@ def test_preflight_batch_reaches_inference_and_record(tmp_path, request, monkeyp
         pytest.skip("G2 coherence pin is a wiring test — pseudo choreography only.")
 
     _register_k9_plugin(monkeypatch, request)
-    hardware_context = _mock_cuda(monkeypatch)
+    hardware_context = synthetic_cuda_context(monkeypatch)
     _disable_sleeps(monkeypatch)
 
     workspace = str(tmp_path / "workspace")
@@ -82,7 +84,12 @@ def test_preflight_batch_reaches_inference_and_record(tmp_path, request, monkeyp
     )
 
     bridge = RecordingLLMBridge.for_agent(_PSEUDO_AGENT_FOLDER)
-    sandbox = _recording_sandbox(workspace, run_name, completed_attempts=2)
+    sandbox = recording_sandbox_for_attempts(
+        _PLUGIN_MODEL_TYPE,
+        base_dir=workspace,
+        run_name=run_name,
+        completed_attempts=2,
+    )
     runtime_batches: list[int | None] = []
     execute_inference = sandbox.execute_inference
 

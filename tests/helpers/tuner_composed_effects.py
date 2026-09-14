@@ -11,6 +11,7 @@ import subprocess
 from collections import deque
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,6 +48,58 @@ class ComposedTunerEffects:
 
     preflight_calls: list[dict[str, Any]] = field(default_factory=list)
     hardware_calls: list[tuple[Path, str]] = field(default_factory=list)
+
+
+def recording_sandbox_for_attempts(
+    model_type: str,
+    *,
+    base_dir: str,
+    run_name: str,
+    completed_attempts: int,
+) -> RecordingSandbox:
+    """Give every completed pseudo attempt its own canned result envelope."""
+    from tests.helpers._pseudo_data import load_pseudo_data
+
+    if completed_attempts < 1:
+        raise ValueError("completed_attempts must be positive")
+    canned = load_pseudo_data("train_outputs", model_type)
+    repeated = {
+        method: (
+            deepcopy(result)
+            if isinstance(result, list)
+            else [deepcopy(result) for _ in range(completed_attempts)]
+        )
+        for method, result in canned.items()
+    }
+    return RecordingSandbox(base_dir=base_dir, run_name=run_name, canned=repeated)
+
+
+def synthetic_cuda_context(monkeypatch: pytest.MonkeyPatch) -> HardwareContext:
+    """Supply a stable 32-GiB CUDA identity without discovering real hardware."""
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(
+        torch.cuda,
+        "mem_get_info",
+        lambda *args, **kwargs: (20 * 1024**3, 32 * 1024**3),
+    )
+    return HardwareContext(
+        device_name="synthetic-cuda",
+        total_memory_bytes=32 * 1024**3,
+        compute_capability=(9, 0),
+        multiprocessor_count=1,
+        cuda_runtime_version="fixture-not-discovered",
+        torch_version="fixture-not-discovered",
+        hostname="composed-tuner-fixture",
+        device_available=True,
+        discovered_at=datetime(2000, 1, 1, tzinfo=UTC),
+        cuda_visible_devices="0",
+        visible_device_count=1,
+        devices=[],
+        active_device_uuid="GPU-composed-tuner-fixture",
+        collection_errors=["test fixture: hardware discovery deliberately not executed"],
+    )
 
 
 def _install_effect_backstop(monkeypatch: pytest.MonkeyPatch) -> None:

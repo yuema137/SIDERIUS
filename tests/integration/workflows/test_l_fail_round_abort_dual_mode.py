@@ -54,7 +54,7 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
-from tests.integration.workflows.test_k9_invented_model_dual_mode import _mock_cuda
+from tests.helpers.tuner_composed_effects import synthetic_cuda_context
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
@@ -127,7 +127,7 @@ def test_fail_round_abort_triggers_phase_l_termination(tmp_path, request, monkey
     from tests.helpers.recording_sandbox import RecordingSandbox
 
     _register_plugin(monkeypatch, request)
-    hardware_context = _mock_cuda(monkeypatch)
+    hardware_context = synthetic_cuda_context(monkeypatch)
     _disable_sleeps(monkeypatch)
 
     workspace = str(tmp_path / "workspace")
