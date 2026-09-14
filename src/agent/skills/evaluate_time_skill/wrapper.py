@@ -676,14 +676,15 @@ def run_skill(sandbox, **kwargs) -> dict:
             "caller binds the run's topology; this skill does not resolve one."
         )
 
-    # V21 PR B1. These were resolved against literals contradicting the
+    # V21 PR B1. This legacy temporal forecast previously resolved against a
+    # literal contradicting the
     # declarations the run itself uses, and `seg_size` in particular is not
     # only printed: it is a component of the observation-store calibration
     # key (`_store_reuse_decision`). A run whose model really runs at 40000
     # was reading and writing a bucket labelled 1000, mixing incomparable
     # measurements. See the PR B design doc §0.6.5b.
-    seg_size = _training_est.resolve_model_field(
-        model_type, model_config, "segmentation_size", safety_margin=1000
+    seg_size = _training_est.require_declared_segmentation_size(
+        model_type, model_config, consumer="evaluate-time forecast"
     )
     batch_size = int(train_config.get("batch_size", 1))
     epochs = _training_est.resolve_train_field(train_config, "epochs", safety_margin=1)

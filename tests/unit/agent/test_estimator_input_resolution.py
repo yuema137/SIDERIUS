@@ -27,6 +27,8 @@ from __future__ import annotations
 import pytest
 
 from agent.skills.training_skill.estimator import (
+    SegmentationDimensionUnavailableError,
+    require_declared_segmentation_size,
     resolve_model_field,
     resolve_optional_segmentation_size,
     resolve_train_field,
@@ -42,6 +44,17 @@ _PROFILE = make_two_family_profile(
 
 
 class TestResolutionOrder:
+    def test_required_segmentation_refuses_when_no_authority_declares_it(self):
+        with pytest.raises(SegmentationDimensionUnavailableError, match="segmentation_size"):
+            require_declared_segmentation_size(_UNDECLARED, {}, consumer="test temporal formula")
+
+    def test_required_segmentation_preserves_model_declaration(self):
+        assert require_declared_segmentation_size("transformer", {}, consumer="test") == 20000
+
+    def test_required_segmentation_rejects_explicit_invalidity(self):
+        with pytest.raises(ValueError, match="invalid segmentation_size"):
+            require_declared_segmentation_size("transformer", {"segmentation_size": 0}, consumer="test")
+
     def test_optional_segmentation_has_no_historical_margin(self):
         assert resolve_optional_segmentation_size(_UNDECLARED, {}) is None
 
@@ -257,8 +270,8 @@ class TestPhaseMarginsDifferDeliberately:
             assert inf_est["breakdown"]["output_logits_bytes"] == batch * 256 * declared * 4, mt
             assert time["seconds"] > 0, mt
 
-    def test_the_margins_are_opposite_and_that_is_the_point(self):
-        """Undeclared model: memory margin high, time margin low."""
+    def test_temporal_estimators_refuse_undeclared_geometry(self):
+        """Legacy temporal formulas must not consume positive margins."""
         from agent.skills.inference_skill import estimator as inf
         from agent.skills.training_skill import estimator as train
 
@@ -266,12 +279,12 @@ class TestPhaseMarginsDifferDeliberately:
         time_seg = resolve_model_field(_UNDECLARED, {}, "segmentation_size", safety_margin=1000)
         assert vram_seg > time_seg
 
-        # And the production call sites really pass those margins.
-        est = train.estimate_peak_bytes(_UNDECLARED, {}, {"batch_size": 1}, {"loss_type": "ce"}, 1)
-        assert est["breakdown"]["output_logits_bytes"] == 1 * 256 * 40000 * 4
-        inf_est = inf.estimate_peak_bytes(_UNDECLARED, {}, 1)
-        batch = inf_est["breakdown"]["inference_batch"]
-        assert inf_est["breakdown"]["output_logits_bytes"] == batch * 256 * 40000 * 4
+        with pytest.raises(SegmentationDimensionUnavailableError):
+            train.estimate_peak_bytes(
+                _UNDECLARED, {}, {"batch_size": 1}, {"loss_type": "ce"}, 1
+            )
+        with pytest.raises(SegmentationDimensionUnavailableError):
+            inf.estimate_peak_bytes(_UNDECLARED, {}, 1)
 
 
 class TestGeneratedPluginDeclarations:

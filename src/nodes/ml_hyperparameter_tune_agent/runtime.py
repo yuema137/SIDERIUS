@@ -1120,7 +1120,7 @@ def _resolve_guardrail_steps(
     try:
         from agent.skills.training_skill.estimator import (
             _usable,
-            resolve_model_field,
+            require_declared_segmentation_size,
             resolve_train_field,
         )
         from execute_tools.workload_resolvers import resolve_training_workload
@@ -1141,8 +1141,8 @@ def _resolve_guardrail_steps(
 
         return resolve_training_workload(
             train_sample_set,
-            seg_size=resolve_model_field(
-                model_type, model_config, "segmentation_size", safety_margin=1000
+            seg_size=require_declared_segmentation_size(
+                model_type, model_config, consumer="legacy SampleSet guardrail"
             ),
             profile=dataset_profile,
             batch_size=int(train_cfg.get("batch_size", 1)),

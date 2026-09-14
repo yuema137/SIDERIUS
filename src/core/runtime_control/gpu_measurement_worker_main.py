@@ -274,10 +274,11 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
         # states the invariant explicitly: "the defaults for `seg_size` and
         # `batch_size` are the same ones the measurement worker will apply, so
         # the two sides cannot disagree because one of them filled a blank
-        # differently." Both sides now fill the blank through the SAME
-        # authority, so the invariant holds for a model whose declared default
-        # is not 40 000 as well.
-        from agent.skills.training_skill.estimator import resolve_model_field
+        # differently." Both sides now resolve through the SAME authority, and
+        # the legacy temporal branch refuses when no size is declared.
+        from agent.skills.training_skill.estimator import (
+            require_declared_segmentation_size,
+        )
 
         # A task-owned probe carries an explicit applicability fact.  Its
         # presence alone does not erase a temporal segmentation dimension:
@@ -290,8 +291,10 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
         seg = (
             None
             if task_segmentation_applicability == "not_applicable"
-            else resolve_model_field(
-                model_type, spec.model_config_payload, "segmentation_size", safety_margin=40_000
+            else require_declared_segmentation_size(
+                model_type,
+                spec.model_config_payload,
+                consumer="legacy temporal measurement probe",
             )
         )
         # TWO batches, deliberately distinct.
