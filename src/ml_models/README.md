@@ -1,7 +1,7 @@
 # `ml_models/` — built-in models, losses, and the plugin loader
 
-**Audience**: a coding agent or engineer touching model/loss loading, or
-writing a model plugin by hand. **Authority**: the source. Template:
+**Start here if you are using a built-in model or supplying a model/loss
+plugin.** **Authority**: the source. Template:
 [`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 Plugin identity/provenance semantics:
 [plugins mechanism](../../docs/agent-reference/mechanisms/plugins.md).

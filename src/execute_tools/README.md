@@ -1,7 +1,7 @@
 # `execute_tools/` — deterministic execution: engines + task seams
 
-**Audience**: a coding agent or engineer about to modify the execution layer
-or implement a task's data path / metric. **Authority**: the source. Template:
+**Start here if you are connecting a task data path, metric, or deterministic
+execution step.** **Authority**: the source. Template:
 [`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 
 ## Purpose

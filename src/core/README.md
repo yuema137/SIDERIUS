@@ -1,7 +1,7 @@
 # `core/` — run-scoped execution infrastructure
 
-**Audience**: a coding agent or engineer about to modify the execution
-substrate. **Authority**: the source. Template:
+**Start here if you need to understand run-scoped execution, recovery, or
+resource controls.** **Authority**: the source. Template:
 [`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 
 ## Purpose

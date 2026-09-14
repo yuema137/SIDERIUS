@@ -1,7 +1,7 @@
 # `nodes/` — the agent nodes of the graph
 
-**Audience**: a coding agent or engineer about to modify a node, or add one.
-**Authority**: the source, and per node its `<node>/<node>.md` contract doc.
+**Start here if you need to understand a graph node or create one.** **Authority**:
+the source, and per node its `<node>/<node>.md` contract doc.
 Template for those docs: [`NODE_TEMPLATE.md`](NODE_TEMPLATE.md). Directory
 map template:
 [`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).

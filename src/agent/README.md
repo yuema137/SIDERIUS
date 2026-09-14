@@ -1,7 +1,7 @@
 # `agent/` — LLM access, prompt surfaces, and the agents' atomic tools
 
-**Audience**: a coding agent or engineer about to modify how nodes reach an
-LLM, what prompts render, or which atomic tools agents invoke.
+**Start here if you are integrating provider access, prompt rendering, or an
+agent skill.**
 **Authority**: the source. Template:
 [`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 

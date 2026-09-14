@@ -22,7 +22,7 @@ One iteration follows a fixed, deterministic path over six typed nodes. Tuning
 contains training, inference, scoring, and round-level Health checks; its
 records provide evidence for the next iteration. Nodes may also be called by a
 caller-owned workflow when complete validated inputs and task context are
-provided. See the [node contracts](docs/agent-reference/README.md#nodes) and
+provided. See the [node contracts](docs/agent-reference/index.md#nodes) and
 [custom workflow boundary](docs/guides/custom-workflow.md).
 
 ## Start without provider credentials or scientific data

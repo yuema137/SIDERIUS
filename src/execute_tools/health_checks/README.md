@@ -1,7 +1,7 @@
 # `execute_tools/health_checks/` — pluggable validity checks
 
-**Audience**: a coding agent or engineer touching the Health subsystem, or a
-task author writing a custom check. **Authority**: the source. Template:
+**Start here if you need to understand Health checks or write a custom check.**
+**Authority**: the source. Template:
 [`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 Concepts for humans: [health gates](../../../docs/concepts/health-gates.md);
 cross-cutting semantics:

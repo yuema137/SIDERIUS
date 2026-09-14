@@ -1,7 +1,7 @@
 # `scripts/` — operator utilities and point-in-time harnesses
 
-**Audience**: a coding agent or engineer looking for the right tool — or
-wondering whether an old script here is maintained.
+**Start here if you need to run an operator utility or determine whether an
+old script is maintained.**
 **Authority**: the source; the operator-facing command surface is
 [docs/reference/entrypoints.md](../docs/reference/entrypoints.md).
 Template:

@@ -16,7 +16,7 @@ and iteration CLI paths are under `scripts/launch/` and `src/workflows/`.
 | Inspect or resume a workspace | [inspect_run_state.py](../scripts/launch/inspect_run_state.py); [workspace guide](guides/workspaces-and-resume.md) |
 | Supply human advice | [Advice format and ownership](guides/advice.md) |
 | Extend a model or loss | [Model and plugin loaders](../src/ml_models/README.md) |
-| Develop the framework | [CLAUDE.md](../CLAUDE.md), then [agent reference](agent-reference/README.md) |
+| Develop the framework | [CLAUDE.md](../CLAUDE.md), then [agent reference](agent-reference/index.md) |
 
 The launch chain is
 [`run_chain.sh`](../scripts/launch/run_chain.sh) →
@@ -70,7 +70,7 @@ are not shipped capabilities. This inventory removes none of them.
 ## Six nodes and typed connections
 
 Each public implementation has a neighboring `.md` contract. The
-[node CLI table](agent-reference/README.md#nodes) preserves the six tested
+[node CLI table](agent-reference/index.md#nodes) preserves the six tested
 `main()` source citations.
 
 | Public class / implementation | Input → output | Responsibility |

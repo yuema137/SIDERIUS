@@ -1,5 +1,11 @@
 # SIDERIUS Project Rules
 
+README files are human-facing landing pages: lead with purpose, the shortest
+safe route, effects, and links to deeper documentation. Detailed coding-agent
+contracts belong in non-README documents (such as `docs/agent-reference/` or
+node contract pages), so do not describe a README itself as an agent
+instruction surface.
+
 ## Context
 - SIDERIUS is a task-generic closed-loop research framework for supervised
   scientific machine learning. Its agent loop surrounds a deterministic core

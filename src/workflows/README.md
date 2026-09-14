@@ -1,7 +1,7 @@
 # `workflows/` — deterministic graph traversals + task composition
 
-**Audience**: a coding agent or engineer about to modify the workflow layer.
-**Authority**: the source. This README is a map; where they disagree, the
+**Start here if you need to run or extend a composed workflow.** **Authority**:
+the source. This README is a map; where they disagree, the
 module is right. Template:
 [`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
 
