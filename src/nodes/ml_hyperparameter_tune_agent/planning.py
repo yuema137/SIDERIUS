@@ -39,6 +39,9 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     PreparedAttempt,
     RunBindings,
 )
+from nodes.ml_hyperparameter_tune_agent.health_coverage import (
+    validate_attempt_health_coverage,
+)
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _apply_mode_override_chain,
     _apply_plan_overrides,
@@ -789,6 +792,24 @@ def prepare_attempt(
         # single authority, and it is the same one the model is constructed
         # with.
         task_parameters={"seg_size": declared_segmentation_size},
+    )
+
+    # 01B2 — a composed Health-enabled attempt may execute only after the
+    # bound task confirms that THIS opaque evaluation scope covers its own
+    # output-dependent Health demand. The helper is deliberately adjacent to
+    # scope acquisition and before any admission/resource effect; it does not
+    # inspect or enlarge the scope.
+    validate_attempt_health_coverage(
+        composed=agent_input.task_composition_ref is not None,
+        health_enabled=agent_input.health_gate_enabled,
+        data_path=bindings.run_task_data_path,
+        evaluation_scope=task_scopes.evaluation,
+        round_kind=trial_config.mode,
+        health_binding=(
+            agent_input.task_composition_ref.task_health_binding
+            if agent_input.task_composition_ref is not None
+            else None
+        ),
     )
 
     # Segment counts for records and reflector context. EXTRACTED (§E.2):
