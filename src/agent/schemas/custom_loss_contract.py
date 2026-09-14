@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Literal, Protocol
+from collections.abc import Iterable
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.model_io_contract import DtypeAdmissibility, TensorContract
-from core.capability_registry import CapabilityContractSnapshot
+from core.capability_registry import CapabilityContractSnapshot, CapabilityMetadata
 
 CUSTOM_LOSS_CONTRACT_KIND = "custom_loss_applicability"
 CUSTOM_LOSS_CONTRACT_VERSION = 1
@@ -144,6 +145,146 @@ class SyntheticLossPairProvider(Protocol):
         ...
 
 
+class CustomLossRefusal(BaseModel):
+    """Why one loadable custom loss is absent from this invocation's offers."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class CustomLossInventory(BaseModel):
+    """Pure result of filtering loadable metadata for one task invocation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    composed: bool
+    entries: tuple[CapabilityMetadata, ...] = ()
+    unavailable: tuple[CustomLossRefusal, ...] = ()
+    unavailable_reason: str | None = None
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(entry.name for entry in self.entries)
+
+
+class CustomLossTaskProjection(Protocol):
+    supervision_target: TensorContract | None
+    custom_loss_applicability: CustomLossApplicability | None
+
+
+def _composed_inventory_error(
+    expected_snapshot: CapabilityContractSnapshot | None,
+    task_ref: CustomLossTaskProjection,
+) -> str | None:
+    if expected_snapshot is None:
+        return "expected custom-loss snapshot is missing"
+    target = task_ref.supervision_target
+    declaration = task_ref.custom_loss_applicability
+    if target is None or declaration is None:
+        return "composed custom-loss contract is incomplete"
+    try:
+        expected = parse_custom_loss_contract_snapshot(expected_snapshot)
+        verdict = resolve_custom_loss_snapshot(expected_snapshot)
+    except (TypeError, ValueError) as exc:
+        return f"expected custom-loss contract is malformed: {exc}"
+    if expected.supervision_target != target or expected.applicability != declaration:
+        return "task projection disagrees with expected custom-loss snapshot"
+    if not verdict.eligible:
+        return verdict.reason
+    return None
+
+
+def resolve_custom_loss_inventory(
+    loadable_metadata: Iterable[CapabilityMetadata],
+    expected_snapshot: CapabilityContractSnapshot | None = None,
+    task_composition_ref: CustomLossTaskProjection | None = None,
+) -> CustomLossInventory:
+    """Resolve a compatible custom-loss inventory without persistence or imports.
+
+    Uncomposed callers retain historical behavior: every loadable loss is
+    offered. Composed callers require a complete contract and exact snapshot
+    agreement; malformed or mismatched rows become named unavailable reasons.
+    """
+
+    metadata = tuple(loadable_metadata)
+    if task_composition_ref is None:
+        return CustomLossInventory(
+            composed=False,
+            entries=metadata,
+        )
+    contract_error = _composed_inventory_error(expected_snapshot, task_composition_ref)
+    if contract_error is not None:
+        return CustomLossInventory(
+            composed=True,
+            unavailable=tuple(
+                CustomLossRefusal(
+                    name=item.name,
+                    reason=contract_error,
+                )
+                for item in metadata
+            ),
+            unavailable_reason=contract_error,
+        )
+    if not metadata:
+        return CustomLossInventory(
+            composed=True,
+            unavailable_reason="no loadable custom losses are registered",
+        )
+    assert expected_snapshot is not None
+    unavailable: list[CustomLossRefusal] = []
+    entries: list[CapabilityMetadata] = []
+    for item in metadata:
+        if item.contract_snapshot is None:
+            unavailable.append(
+                CustomLossRefusal(
+                    name=item.name,
+                    reason="custom-loss contract snapshot is missing",
+                )
+            )
+            continue
+        try:
+            parse_custom_loss_contract_snapshot(item.contract_snapshot)
+            if item.contract_snapshot != expected_snapshot:
+                unavailable.append(
+                    CustomLossRefusal(
+                        name=item.name,
+                        reason="custom-loss contract snapshot does not match the composed task",
+                    )
+                )
+                continue
+            verdict = resolve_custom_loss_snapshot(item.contract_snapshot)
+            if not verdict.eligible:
+                unavailable.append(CustomLossRefusal(name=item.name, reason=verdict.reason))
+                continue
+        except (TypeError, ValueError) as exc:
+            unavailable.append(
+                CustomLossRefusal(
+                    name=item.name,
+                    reason=f"custom-loss contract is malformed: {exc}",
+                )
+            )
+            continue
+        entries.append(item)
+    return CustomLossInventory(
+        composed=True, entries=tuple(entries), unavailable=tuple(unavailable)
+    )
+
+
+def resolve_custom_loss_validation_pair_provider(
+    task_implementation: object,
+) -> SyntheticLossPairProvider | None:
+    """Resolve the optional task-owned provider without invoking it."""
+
+    provider = getattr(task_implementation, "custom_loss_validation_pair", None)
+    if provider is None:
+        return None
+    if not callable(provider):
+        raise ValueError("custom_loss_validation_pair is present but not callable")
+    return provider
+
+
 def _dtype_intersection(left: DtypeAdmissibility, right: DtypeAdmissibility) -> tuple[str, ...]:
     right_names = {_normalize_dtype(name) for name in right.admissible}
     return tuple(name for name in left.admissible if _normalize_dtype(name) in right_names)
@@ -256,11 +397,77 @@ def resolve_custom_loss_applicability(
     )
 
 
+def _normalized_declared_dtypes(admissibility: DtypeAdmissibility) -> set[str]:
+    return {_normalize_runtime_dtype(item) for item in admissibility.admissible}
+
+
+def _normalize_runtime_dtype(name: str) -> str:
+    normalized = _normalize_dtype(name)
+    return {"int64": "long", "int32": "int"}.get(normalized, normalized)
+
+
+def _validate_synthetic_tensor(name: str, tensor: Any, contract: TensorContract) -> None:
+    if tensor.ndim != contract.rank:
+        raise ValueError(f"synthetic {name} rank {tensor.ndim} != declared {contract.rank}")
+    dtype_name = _normalize_runtime_dtype(str(tensor.dtype).removeprefix("torch."))
+    if dtype_name not in _normalized_declared_dtypes(contract.dtype):
+        raise ValueError(
+            f"synthetic {name} dtype {dtype_name!r} is not admitted by "
+            f"{contract.dtype.admissible!r}"
+        )
+    for index, axis in enumerate(contract.axes):
+        if axis.dimension.fixed is not None and tensor.shape[index] != axis.dimension.fixed:
+            raise ValueError(
+                f"synthetic {name} axis {index} extent {tensor.shape[index]} "
+                f"!= declared {axis.dimension.fixed}"
+            )
+
+
+def _validate_equal_shape_pair(
+    prediction: Any,
+    target: Any,
+    applicability: EqualShapeApplicability,
+) -> None:
+    if prediction.shape != target.shape:
+        raise ValueError("synthetic pair violates equal_shape applicability")
+    admitted = _normalized_declared_dtypes(applicability.dtype)
+    for name, tensor in (("prediction", prediction), ("target", target)):
+        dtype_name = _normalize_runtime_dtype(str(tensor.dtype).removeprefix("torch."))
+        if dtype_name not in admitted:
+            raise ValueError(
+                f"synthetic {name} dtype {dtype_name!r} is not admitted by applicability"
+            )
+
+
+def _validate_shared_symbol_extents(
+    prediction: Any,
+    target: Any,
+    prediction_contract: TensorContract,
+    target_contract: TensorContract,
+) -> None:
+    shared_symbols: dict[str, int] = {}
+    for tensor, contract in (
+        (prediction, prediction_contract),
+        (target, target_contract),
+    ):
+        for index, axis in enumerate(contract.axes):
+            symbol = axis.dimension.symbolic
+            if symbol is None:
+                continue
+            extent = tensor.shape[index]
+            prior = shared_symbols.setdefault(symbol, extent)
+            if prior != extent:
+                raise ValueError(
+                    f"synthetic shared symbol {symbol!r} has extents {prior} and {extent}"
+                )
+
+
 def validate_synthetic_loss_pair(
     pair: tuple[object, object],
     prediction: TensorContract,
     target: TensorContract,
     *,
+    applicability: CustomLossApplicability | None = None,
     max_elements: int = 1_000_000,
 ) -> None:
     """Validate a task-owned tiny pair before invoking a custom criterion.
@@ -282,51 +489,25 @@ def validate_synthetic_loss_pair(
         actual_target, torch.Tensor
     ):
         raise ValueError("synthetic loss pair must contain torch tensors")
-    total_elements = 0
-    for name, tensor, contract in (
+
+    contract_pairs = [
         ("prediction", actual_prediction, prediction),
         ("target", actual_target, target),
-    ):
-        if tensor.ndim != contract.rank:
-            raise ValueError(f"synthetic {name} rank {tensor.ndim} != declared {contract.rank}")
-        total_elements += tensor.numel()
-        if total_elements > max_elements:
-            raise ValueError(
-                f"synthetic pair has {total_elements} elements after {name}; "
-                f"total limit is {max_elements}"
+    ]
+    if isinstance(applicability, ExplicitPairApplicability):
+        contract_pairs.extend(
+            (
+                ("applicability prediction", actual_prediction, applicability.prediction),
+                ("applicability target", actual_target, applicability.target),
             )
-        dtype_name = _normalize_dtype(str(tensor.dtype).removeprefix("torch."))
-        dtype_aliases = {
-            "int64": "long",
-            "int32": "int",
-        }
-        normalized_dtypes = {
-            dtype_aliases.get(_normalize_dtype(item), _normalize_dtype(item))
-            for item in contract.dtype.admissible
-        }
-        if dtype_aliases.get(dtype_name, dtype_name) not in normalized_dtypes:
-            raise ValueError(
-                f"synthetic {name} dtype {dtype_name!r} is not admitted by "
-                f"{contract.dtype.admissible!r}"
-            )
-        for index, axis in enumerate(contract.axes):
-            if axis.dimension.fixed is not None and tensor.shape[index] != axis.dimension.fixed:
-                raise ValueError(
-                    f"synthetic {name} axis {index} extent {tensor.shape[index]} "
-                    f"!= declared {axis.dimension.fixed}"
-                )
-    shared_symbols: dict[str, int] = {}
-    for tensor, contract in (
-        (actual_prediction, prediction),
-        (actual_target, target),
-    ):
-        for index, axis in enumerate(contract.axes):
-            symbol = axis.dimension.symbolic
-            if symbol is None:
-                continue
-            extent = tensor.shape[index]
-            prior = shared_symbols.setdefault(symbol, extent)
-            if prior != extent:
-                raise ValueError(
-                    f"synthetic shared symbol {symbol!r} has extents {prior} and {extent}"
-                )
+        )
+    total_elements = actual_prediction.numel() + actual_target.numel()
+    if total_elements > max_elements:
+        raise ValueError(
+            f"synthetic pair has {total_elements} elements; total limit is {max_elements}"
+        )
+    for name, tensor, contract in contract_pairs:
+        _validate_synthetic_tensor(name, tensor, contract)
+    if isinstance(applicability, EqualShapeApplicability):
+        _validate_equal_shape_pair(actual_prediction, actual_target, applicability)
+    _validate_shared_symbol_extents(actual_prediction, actual_target, prediction, target)

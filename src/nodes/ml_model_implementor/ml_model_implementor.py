@@ -41,7 +41,6 @@ from agent.schemas.task_config import ForwardContract
 from agent.skills.model_io_probe_skill import (
     PROBE_REQUIRED_FIELD_VALUES,
     ProbeConstructionError,
-    build_loss_probe_pair,
     build_model_input,
     declared_output_tensor,
     expected_output_shape,
@@ -1033,183 +1032,16 @@ def _dummy_tensor_validate_loss(
     supervision_target: TensorContract | None = None,
     custom_loss_applicability: CustomLossApplicability | None = None,
 ) -> str | None:
-    """Run the L2-equivalent dummy-tensor check on an assembled loss-plugin source.
+    """Delegate the assembled-loss probe to its typed validation boundary."""
+    from agent.schemas.custom_loss_validation import validate_custom_loss_plugin
 
-    Procedure:
-      1. Write the source to a tmp file (so ``importlib`` can load it).
-      2. Import the module and look up the 3 required PLUGIN_LOSS_* attrs.
-      3. Construct ``PLUGIN_LOSS_CONFIG_CLASS()`` with its declared defaults.
-      4. Instantiate ``PLUGIN_LOSS_CLASS(cfg)`` and run forward with a
-         ``(inputs, targets)`` pair built for the task's DECLARED OUTPUT
-         SEMANTIC (Step 04a, design §4) — categorical gets
-         ``[B, C, T]`` float inputs and ``[B, T]`` int64 targets in
-         ``[0, C)``; continuous gets ``[B, T]`` float on both sides. Before
-         this the pair was classifier-shaped unconditionally, so a
-         declared-regressor custom loss could never pass: it was rejected
-         for a shape accident rather than for anything about the loss.
-      5. Assert ``loss.dim() == 0`` and ``math.isfinite(loss.item())``.
-      6. **Run ``loss.backward()``** and assert ``inputs.grad is not None``
-         and ``torch.isfinite(inputs.grad).all()``. ``requires_grad=True`` on
-         the loss output does NOT guarantee gradient actually flows back to
-         ``inputs`` — a ``.detach()`` on inputs or mid-computation can leave
-         ``requires_grad=True`` on the final tensor while severing the graph.
-         The backward() check is the only reliable detector for this class
-         of bug, and it also surfaces NaN/Inf gradient instabilities the
-         scalar finite check cannot.
-
-    Note this decides only how to BUILD the probe. Whether a loss is legal
-    for an output semantic is answered by the existing Step-03 authority and
-    is deliberately not duplicated here (design §4: never a second
-    ``LossContract``).
-
-    Args:
-        plugin_src: The assembled loss-plugin source code.
-        loss_name: The ``PLUGIN_LOSS_TYPE`` key, used only for error messages.
-        model_io_contract: the task's normalized Model-I/O declaration, or
-            ``None`` for the legacy path, which builds today's tensors.
-
-    Returns:
-        ``None`` if all checks pass; otherwise a human-readable error string
-        describing the first failure. The string is suitable for feeding back
-        into ``IMPLEMENTOR_LOSS_REPAIR_PROMPT`` as the ``error`` field.
-    """
-    # A composed task that opts into the new contract must be checked before
-    # importing or invoking generated code.  Legacy callers that provide no
-    # task-owned declaration retain the existing compatibility probe; the
-    # declaration path is deliberately explicit rather than inferred here.
-    if custom_loss_applicability is not None or supervision_target is not None:
-        from agent.schemas.custom_loss_contract import resolve_custom_loss_applicability
-
-        applicability = resolve_custom_loss_applicability(
-            model_io_contract.output if model_io_contract is not None else None,
-            supervision_target,
-            custom_loss_applicability,
-        )
-        if not applicability.eligible:
-            return f"Custom loss applicability refused: {applicability.reason}"
-
-    # Lazy import keeps torch off the import-time path for callers that
-    # only use the model-code helpers above. Mirrors `_smoke_test_plugin`.
-    import contextlib
-    import importlib.util
-    import math
-
-    import torch
-
-    # Stage in a tmp dir + file (matches `_smoke_test_plugin` convention so
-    # both helpers share the same cleanup pattern).
-    tmp_dir = tempfile.mkdtemp(prefix=f"siderius_loss_dummy_{loss_name}_")
-    tmp_path = os.path.join(tmp_dir, f"{loss_name}.py")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(plugin_src)
-
-        spec = importlib.util.spec_from_file_location(f"siderius_loss_dummy_{loss_name}", tmp_path)
-        if spec is None or spec.loader is None:
-            return f"Could not resolve module spec for assembled loss plugin '{loss_name}'."
-        module = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(module)
-        except Exception as e:
-            return f"Plugin source failed to import: {type(e).__name__}: {e}"
-
-        # The SHARED admission contract, not a local copy. This validator, the
-        # loss loader and the manifest's objective resolver all enforce the
-        # same tuple: a fourth symbol added to the loader must reject an
-        # assembled plugin here too, or an LLM-generated plugin passes
-        # validation, is promoted, is SKIPPED by the registry, and dies at
-        # admission with a misleading "run the implementor first" remediation.
-        from ml_models.loss_plugin_loader import REQUIRED_LOSS_PLUGIN_SYMBOLS
-
-        for attr in REQUIRED_LOSS_PLUGIN_SYMBOLS:
-            if not hasattr(module, attr):
-                return f"Assembled plugin is missing required attribute '{attr}'."
-
-        config_cls = module.PLUGIN_LOSS_CONFIG_CLASS
-        loss_cls = module.PLUGIN_LOSS_CLASS
-        try:
-            cfg = config_cls()
-        except Exception as e:
-            return (
-                f"PLUGIN_LOSS_CONFIG_CLASS() failed to instantiate with defaults: "
-                f"{type(e).__name__}: {e}. Every config field must have a default."
-            )
-        try:
-            loss_fn = loss_cls(cfg)
-        except Exception as e:
-            return f"PLUGIN_LOSS_CLASS(config) failed to construct: {type(e).__name__}: {e}."
-
-        # Dummy tensors mirror L2's test_custom_plugin_forward_pass_runs,
-        # now shaped for the task's declared output semantic (Step 04a).
-        torch.manual_seed(0)
-        try:
-            inputs, targets, pair_description = build_loss_probe_pair(model_io_contract)
-        except ProbeConstructionError as e:
-            return f"Loss probe could not be constructed from the task contract: {e}"
-        try:
-            loss = loss_fn(inputs, targets)
-        except Exception as e:
-            return (
-                f"forward(inputs, targets) raised on dummy tensors: "
-                f"{type(e).__name__}: {e}. The forward must accept "
-                f"{pair_description}."
-            )
-
-        if not isinstance(loss, torch.Tensor):
-            return (
-                f"forward returned {type(loss).__name__}, not a torch.Tensor. "
-                f"It must return a scalar tensor."
-            )
-        if loss.dim() != 0:
-            return (
-                f"forward returned a tensor of shape {tuple(loss.shape)}; "
-                f"expected a SCALAR (dim()==0). Reduce per-element loss to a "
-                f"scalar before returning (e.g. .mean() or .sum())."
-            )
-        try:
-            value = loss.item()
-        except Exception as e:
-            return f"loss.item() raised: {type(e).__name__}: {e}."
-        if not math.isfinite(value):
-            return f"forward returned a non-finite scalar (got {value!r})."
-
-        # Run backward pass to confirm gradient actually flows back to inputs.
-        # requires_grad=True on the loss output does not guarantee this —
-        # a .detach() on inputs or mid-computation can leave requires_grad=True
-        # on the final tensor while severing the gradient graph. See
-        # IMPLEMENTOR_LOSS_REASONING_PROMPT § Gradient-flow requirement for
-        # the safe-vs-unsafe pattern distinction the LLM is shown.
-        try:
-            loss.backward()
-        except Exception as e:
-            return (
-                f"loss.backward() raised: {type(e).__name__}: {e}. "
-                "The loss graph is malformed — check for in-place ops on "
-                "leaf tensors or operations that produce non-differentiable "
-                "outputs on the main path from inputs."
-            )
-        if inputs.grad is None:
-            return (
-                f"Loss '{loss_name}': backward() ran but inputs.grad is None — "
-                "gradient does not flow back to inputs. Check for .detach() on "
-                "inputs (or on any tensor derived from inputs on the main path "
-                "to loss), or for a torch.no_grad() block wrapping the main "
-                "computational path. .detach() on weighting/masking terms is "
-                "OK; .detach() on inputs is not."
-            )
-        if not torch.isfinite(inputs.grad).all():
-            return (
-                f"Loss '{loss_name}': inputs.grad contains NaN or Inf after "
-                "backward(). Loss may be numerically unstable — check for "
-                "log(0), division by small quantities, or unbounded "
-                "exponentials in the forward pass."
-            )
-
-        return None
-    finally:
-        with contextlib.suppress(OSError):
-            os.remove(tmp_path)
-            os.rmdir(tmp_dir)
+    return validate_custom_loss_plugin(
+        plugin_src,
+        loss_name,
+        model_io_contract,
+        supervision_target,
+        custom_loss_applicability,
+    )
 
 
 def _expected_custom_loss_snapshot(inp: ImplementorInput) -> CapabilityContractSnapshot | None:
