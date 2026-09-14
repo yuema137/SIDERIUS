@@ -20,6 +20,8 @@ Plugin interface — each plugin file must define:
 import importlib.util
 import os
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from types import ModuleType
 from typing import get_args
 
@@ -153,6 +155,21 @@ def _load_plugin(path: str) -> dict | None:
         return None
 
     return _plugin_attributes(module, path)
+
+
+@contextmanager
+def inspect_model_plugin(path: str) -> Iterator[dict | None]:
+    """Yield plugin metadata without retaining a legacy module import."""
+    module_name = _MODULE_NAME_PREFIX + os.path.splitext(os.path.basename(path))[0]
+    missing = object()
+    previous = sys.modules.get(module_name, missing)
+    try:
+        yield _load_plugin(path)
+    finally:
+        if previous is missing:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous  # type: ignore[assignment]
 
 
 def _plugin_attributes(module: ModuleType, path: str) -> dict | None:

@@ -64,7 +64,8 @@ def test_declared_registration_keeps_source_but_still_propagates_loss_and_checks
     )
     construction, losses = [], []
     monkeypatch.setattr(
-        workflow, "_validate_construction_memory", lambda **kw: construction.append(kw)
+        "core.runtime_control.construction_memory.admit_construction",
+        lambda **kw: construction.append(kw),
     )
     monkeypatch.setattr(
         "ml_models.loss_models_sandbox.register_loss_in_memory",
@@ -73,6 +74,7 @@ def test_declared_registration_keeps_source_but_still_propagates_loss_and_checks
     destinations = [tmp_path / "workspace/plugins/iter_001", tmp_path / "tune/plugins/iter_001"]
     loss_destination = tmp_path / "workspace/losses/iter_001"
     with bind_code_package(package), bind_run_model_plugins(binding):
+        workflow._admit_generated_model_construction(implementation, proposal_name)
         workflow._register_plugin(
             implementation, proposal_name, [str(p) for p in destinations], str(loss_destination)
         )
@@ -118,12 +120,14 @@ def test_existing_index_row_uses_relocated_declaration_without_rewrite_or_new_of
     inp.model_name = "new_proposal_label"
     construction = []
     monkeypatch.setattr(
-        workflow, "_validate_construction_memory", lambda **kw: construction.append(kw)
+        "core.runtime_control.construction_memory.admit_construction",
+        lambda **kw: construction.append(kw),
     )
     destination = tmp_path / "staged"
     with bind_code_package(package), bind_run_model_plugins(binding):
         assert workflow._cleanup_stale_registry_entries(registry) == (0, [])
         result = agent.run(inp)
+        workflow._admit_generated_model_construction(result, inp.model_name)
         workflow._register_plugin(result, inp.model_name, [str(destination)])
     assert result.model_type == MODEL_TYPE
     assert len(construction) == 1

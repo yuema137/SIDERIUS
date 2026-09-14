@@ -735,16 +735,22 @@ def test_the_workflow_delta_stayed_sibling_shaped():
     # boundary. The loader owns source resolution; this workflow branch only
     # transports which already-declared policy applies.
     #
+    # PR04F (2026-09-14): 130 -> 128. Candidate capability registration and
+    # in-memory publication moved behind the module-level post-admission
+    # helper. The two model-metadata conditionals left this orchestrator;
+    # construction admission and the helper invocation are straight-line.
+    #
     # All of it is the permitted shape: no new phase, no new branch family, no
     # task dispatch, no new mutable local accumulator, no new semantic owner.
-    assert branchish == 130, (
-        f"run_workflow branch-ish count is {branchish}, expected 130 "
+    assert branchish == 128, (
+        f"run_workflow branch-ish count is {branchish}, expected 128 "
         "(130 at C0 + 1 C2 unpack IfExp + 1 C5/W6 binding-selection IfExp "
         "- 1 arXiv-U1 extraction of the lit-review path-resolution If "
         "+ 1 arXiv-#259 constraint-forwarding If - 4 after extracting "
         "cross-iteration negative-feedback restoration + 1 explicit "
         "caller-owned literature-config use-site assertion; "
         "+ 1 #313 composed description-source selection; "
+        "- 2 PR04F post-admission publication extraction; "
         "C3's union closure costs ZERO because the merge rule lives in "
         "core.resume.union_key_findings and this closure only calls it). "
         "If this grew further, the §12.1 tripwire requires re-running the "

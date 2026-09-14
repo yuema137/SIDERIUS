@@ -26,7 +26,9 @@ from unittest.mock import patch
 
 import pytest
 
+from core.capability_registry import CapabilityMetadata
 from core.run_invariants import RUN_INVARIANTS_BASENAME
+from core.runtime_control.construction_memory import CandidateAdmissionError
 from tests.integration.workflows.test_chain_candidate_graduation import _llm_config_pseudo
 from tests.unit.workflows.test_model_exploration import (
     _make_implementor_output,
@@ -134,6 +136,148 @@ def _run(workspace: str, *, isolation: bool, proposal_name: str, out: dict | Non
 
 
 class TestWorkflowReachabilityAndThreading:
+    def test_construction_refusal_retries_before_candidate_state_is_committed(self, tmp_path):
+        """Regression for the rc.3 TIDMAD failure.
+
+        This fails if admission moves after any candidate registry, staging,
+        or promotion effect, or if its typed refusal no longer reaches the
+        next proposer's ``previous_failures``.
+        """
+        workspace = str(tmp_path / "construction-admission")
+        os.makedirs(workspace)
+        composition = compose_run_task_bindings(str(QUICKSTART))
+        refusal = CandidateAdmissionError(
+            "0.75 GiB unexplained constructor memory",
+            model_name="candidate",
+        )
+
+        with (
+            bind_run_task_composition(composition, physical_data_root=workspace),
+            patch("workflows.model_exploration.ResultInterpretationAgent") as interp,
+            patch("workflows.model_exploration.MLModelProposalAgent") as proposer,
+            patch("workflows.model_exploration.MLModelImplementor") as implementor,
+            patch("workflows.model_exploration.MLCodeValidatorAgent") as validator,
+            patch("workflows.model_exploration.HyperparamTuningAgent") as tuner,
+            patch(
+                "workflows.model_exploration._admit_generated_model_construction",
+                side_effect=[refusal, None],
+            ) as admit,
+            patch("workflows.model_exploration._register_plugin") as stage,
+            patch("workflows.model_exploration._promote_model_to_global") as promote_model,
+            patch("workflows.model_exploration._promote_loss_to_global") as promote_loss,
+            patch("core.capability_registry.CapabilityRegistry.register") as register_capability,
+            patch("workflows.model_exploration.register_model_in_memory") as register_memory,
+        ):
+            interp.return_value.run.return_value = _make_interpretation_output()
+            proposer.return_value.run.return_value = _make_proposal_output(model_name="candidate")
+            metadata = CapabilityMetadata(
+                name="candidate",
+                capability_type="model",
+                file_path=str(tmp_path / "candidate.py"),
+                created_at="2026-09-14T00:00:00+00:00",
+                source_iteration="iter_001",
+                description="Construction-admission regression candidate.",
+                mathematical_definition="y = f(x)",
+            )
+            loss_metadata = CapabilityMetadata(
+                name="candidate_loss",
+                capability_type="loss",
+                file_path=str(tmp_path / "candidate_loss.py"),
+                created_at="2026-09-14T00:00:00+00:00",
+                source_iteration="iter_001",
+                description="Attempt-local generated loss.",
+                mathematical_definition="L = |y - y_hat|",
+            )
+            implementor.return_value.run.return_value = _make_implementor_output(
+                model_type="candidate"
+            ).model_copy(
+                update={
+                    "capability_metadata": metadata,
+                    "loss_capability_metadata": loss_metadata,
+                }
+            )
+            validator.return_value.run.return_value = _make_validator_output(passed=True)
+            tuner.return_value.run.return_value = _make_tuning_output(
+                model_type="candidate",
+                fingerprint=composition.semantic_fingerprint,
+            ).model_copy(update={"metric_spec": composition.metric.spec})
+
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    source_paths=[],
+                    max_iterations=1,
+                    start_iteration=1,
+                    max_proposal_attempts=2,
+                    data_dir=workspace,
+                ),
+                workspace=workspace,
+                run_name="construction_admission",
+                llm_config=_llm_config_pseudo(),
+                task_composition=composition,
+            )
+
+        assert admit.call_count == 2
+        assert proposer.return_value.run.call_count == 2
+        failures = proposer.return_value.run.call_args_list[1].args[0].previous_failures
+        assert any("CandidateAdmissionError" in item and "0.75 GiB" in item for item in failures)
+        assert stage.call_count == 1
+        assert promote_model.call_count == 1
+        assert promote_loss.call_count == 2  # early commit plus idempotent end-of-round safety net
+        assert [call.args[0].capability_type for call in register_capability.call_args_list] == [
+            "loss",
+            "model",
+        ]
+        assert register_memory.call_count == 1
+
+    def test_exhausted_construction_refusals_never_tune_a_stale_valid_candidate(self, tmp_path):
+        """A passed validator result is not sufficient after admission refuses.
+
+        This fails if the attempt loop reuses the previous ``validation``
+        object and tunes a candidate that never passed construction admission.
+        """
+        workspace = str(tmp_path / "construction-exhausted")
+        os.makedirs(workspace)
+        composition = compose_run_task_bindings(str(QUICKSTART))
+        refusal = CandidateAdmissionError("unexplained memory", model_name="candidate")
+
+        with (
+            bind_run_task_composition(composition, physical_data_root=workspace),
+            patch("workflows.model_exploration.ResultInterpretationAgent") as interp,
+            patch("workflows.model_exploration.MLModelProposalAgent") as proposer,
+            patch("workflows.model_exploration.MLModelImplementor") as implementor,
+            patch("workflows.model_exploration.MLCodeValidatorAgent") as validator,
+            patch("workflows.model_exploration.HyperparamTuningAgent") as tuner,
+            patch(
+                "workflows.model_exploration._admit_generated_model_construction",
+                side_effect=refusal,
+            ),
+            patch("workflows.model_exploration._register_plugin") as stage,
+        ):
+            interp.return_value.run.return_value = _make_interpretation_output()
+            proposer.return_value.run.return_value = _make_proposal_output(model_name="candidate")
+            implementor.return_value.run.return_value = _make_implementor_output(
+                model_type="candidate"
+            )
+            validator.return_value.run.return_value = _make_validator_output(passed=True)
+
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    source_paths=[],
+                    max_iterations=1,
+                    start_iteration=1,
+                    max_proposal_attempts=2,
+                    data_dir=workspace,
+                ),
+                workspace=workspace,
+                run_name="construction_exhausted",
+                llm_config=_llm_config_pseudo(),
+                task_composition=composition,
+            )
+
+        assert proposer.return_value.run.call_count == 2
+        stage.assert_not_called()
+        tuner.return_value.run.assert_not_called()
+
     def test_a_builtin_proposal_under_isolation_never_reaches_the_implementor(self, tmp_path):
         """The refusal fires inside the attempt loop, whose existing generic
         handler feeds the NAMED violation back to the next proposal attempt;
