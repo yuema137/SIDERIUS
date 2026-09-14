@@ -121,6 +121,8 @@ def parse_loss_contract_snapshot_literal(
     if len(assignments) != 1:
         raise ValueError(f"{LOSS_CONTRACT_LITERAL} must be assigned exactly once")
     value_node = assignments[0].value
+    if value_node is None:
+        raise ValueError(f"{LOSS_CONTRACT_LITERAL} must be a static literal")
     try:
         literal = ast.literal_eval(value_node)
     except (TypeError, ValueError) as exc:
