@@ -41,6 +41,7 @@ from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 from execute_tools.training_history import TrainingHistory
+from ml_models.model_descriptions import DescriptionSourcePolicy
 
 #: What a HealthGate verdict DOES in this run: enforce, or only record.
 #:
@@ -1431,6 +1432,14 @@ class TaskCompositionRef(BaseModel):
             "Task-owned parameter constraints resolved at the composition edge. "
             "None leaves every plan parameter agent-controlled. Typed Any keeps "
             "this projection independent of the parameter-rule implementation."
+        ),
+    )
+    description_source_policy: DescriptionSourcePolicy = Field(
+        default=DescriptionSourcePolicy.COMPOSED,
+        description=(
+            "Description-source authority projected from the composition. "
+            "Composed runs exclude packaged descriptions; legacy callers use "
+            "the standalone policy."
         ),
     )
 

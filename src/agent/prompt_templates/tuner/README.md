@@ -8,6 +8,11 @@ literal in the caller's templates. This child has no task-block loader and
 `README.md` is never selected as model input.
 
 The renderer is imported by the tuner prompt path, not a workflow entrypoint.
+Description loading is governed by the typed `DescriptionSourcePolicy`: legacy
+callers may use bundled manuals, while composed callers resolve only inline,
+carried, workspace/generated, and declared task-pack sources. Missing composed
+description prose is an ordinary absence and does not trigger a bundled
+fallback.
 For composed runs, `loss_context.py` carries declared ModelIO semantic/temporal
 facts and the optional validated task objective on `TunerTaskRender`.
 `loss_rendering.py` uses the existing execution compatibility authority's

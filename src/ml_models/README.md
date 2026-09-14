@@ -22,7 +22,7 @@ decide *which* model runs (the agents do) or *how* training executes
 | `models_format_sandbox.py` | the config schemas (`BaseConfig`, per-model configs, `LossConfig`, `TrainConfig`, `ExperimentConfig`) · `PLUGIN_CONFIG_REGISTRY` · `get_config_class` · `OutputSemantic` + the semantic/loss compatibility validators |
 | `plugin_loader.py` | `extend_registries` (scan the resolved plugin dirs) · `register_model_in_memory(plugin_path)` (single file) · `preload_global_models()` (startup absorption of the global library) · `get_output_type` |
 | `loss_models_sandbox.py` | `LOSS_REGISTRY` / `LOSS_CONFIG_REGISTRY` · `register_loss_in_memory` · `preload_global_losses` · built-ins `FocalLoss1D` / `FocalLoss1DCW` · `get_criterion`, `get_target_torch_dtype` |
-| `model_descriptions.py` | `get_model_description(model_type, *, baseline_isolation=False)` — ordered description lookup described below; raises naming every searched path |
+| `model_descriptions.py` | `DescriptionSourcePolicy` + `get_model_description(...)` — typed legacy/composed lookup; composed lookup excludes bundled prose and may return `None` |
 | `{model}/description.md` | one prompt-facing description per built-in |
 
 ## Inputs
@@ -51,10 +51,13 @@ Plugin directory selection has two different contracts (environment lists use
 | `plugin_loader.py::_resolve_plugin_dirs` | Declared run model roots unioned with `SIDERIUS_PLUGIN_DIRS`; otherwise nonempty explicit env directories alone; otherwise generated-library models, plus legacy checkout models only when unbound |
 | `loss_plugin_loader.py::_resolve_loss_dirs` | `SIDERIUS_LOSS_DIRS` entries first, then generated-library losses; legacy checkout losses appended only when unbound. Explicit loss dirs do not remove the library |
 
-`get_model_description` searches built-ins → generated-library models → legacy
+Legacy `get_model_description` searches built-ins → generated-library models → legacy
 checkout models (unbound only) → workspace `plugins/*` (newest registration
 first) → declared task-pack roots. `baseline_isolation=True` excludes the
-bundled description. An exhausted lookup reports the paths actually searched.
+bundled description. `DescriptionSourcePolicy.COMPOSED` excludes bundled
+descriptions and treats exhausted lookup as authorized absence; it still uses
+generated/workspace/task-pack roots in the same precedence. An exhausted legacy
+lookup reports the paths actually searched.
 
 ## Outputs
 
@@ -123,7 +126,7 @@ create storage when needed. See
 | plugin file missing a required `PLUGIN_*` symbol | the file is not a plugin — refused at load |
 | illegal `PLUGIN_OUTPUT_TYPE` | refused by name, never rewritten |
 | `UnknownOutputContractError` | no registry establishes an output contract for the model type |
-| `FileNotFoundError` from `get_model_description` | no `description.md` in the applicable search locations — the error lists them |
+| `FileNotFoundError` from legacy `get_model_description` | no `description.md` in the applicable search locations — the error lists them |
 
 ## Files normally edited
 

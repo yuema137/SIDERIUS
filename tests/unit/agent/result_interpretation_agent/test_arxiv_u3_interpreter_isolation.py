@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
+from ml_models.model_descriptions import DescriptionSourcePolicy
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 from tests.unit.agent.result_interpretation_agent.test_interpretation_agent import (
     PUNET_SUMMARY,
@@ -58,3 +59,57 @@ def test_isolation_still_caches_an_inline_plugin_description(tmp_path):
     output = _agent().run(inp)
     cached = output.model_knowledge_cache["my_plugin_tcn"]["_stats"]["model_description"]
     assert cached == "# my_plugin_tcn body"
+
+
+def test_composed_absence_completes_without_empty_header_or_cache_prose(tmp_path):
+    """Composed missing prose is a typed absence, not a loader failure."""
+    inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
+    inp.description_source_policy = DescriptionSourcePolicy.COMPOSED
+    output = _agent().run(inp)
+    assert "punet" not in output.model_descriptions
+    stats = output.model_knowledge_cache["punet"].get("_stats", {})
+    assert "model_description" not in stats
+
+
+def test_composed_inline_description_precedes_any_loader(tmp_path):
+    """Current-iteration prose wins before workspace/generated/pack lookup."""
+    summary = PUNET_SUMMARY.model_copy(update={"model_description": "# inline task prose"})
+    inp = make_input(summary, workspace=str(tmp_path))
+    inp.description_source_policy = DescriptionSourcePolicy.COMPOSED
+    with patch(
+        "nodes.result_interpretation_agent.get_model_description",
+        side_effect=AssertionError("inline authority must bypass the loader"),
+    ):
+        output = _agent().run(inp)
+    assert output.model_knowledge_cache["punet"]["_stats"]["model_description"] == (
+        "# inline task prose"
+    )
+
+
+def test_composed_iteration_two_reuses_iteration_one_authored_description(tmp_path):
+    """Iteration two must carry task-owned prose without reopening the loader.
+
+    This is the cross-iteration boundary: deleting it would allow a later
+    iteration to silently fall back to bundled framework prose after the
+    first proposal's description had already been authored and persisted.
+    """
+    first_summary = PUNET_SUMMARY.model_copy(update={"model_description": "# proposal-owned prose"})
+    first_input = make_input(first_summary, workspace=str(tmp_path))
+    first_input.description_source_policy = DescriptionSourcePolicy.COMPOSED
+    first_output = _agent().run(first_input)
+    carried_cache = first_output.model_knowledge_cache
+
+    second_input = make_input(
+        PUNET_SUMMARY.model_copy(update={"model_description": None}), workspace=str(tmp_path)
+    )
+    second_input.description_source_policy = DescriptionSourcePolicy.COMPOSED
+    second_input.model_knowledge_cache = carried_cache
+    with patch(
+        "nodes.result_interpretation_agent.get_model_description",
+        side_effect=AssertionError("iteration two must use the carried task-owned description"),
+    ):
+        second_output = _agent().run(second_input)
+
+    assert second_output.model_knowledge_cache["punet"]["_stats"]["model_description"] == (
+        "# proposal-owned prose"
+    )

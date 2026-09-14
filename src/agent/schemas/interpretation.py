@@ -40,6 +40,7 @@ from execute_tools.evaluation_metric import (
     MetricSpecField,
     NotScoreableResult,
 )
+from ml_models.model_descriptions import DescriptionSourcePolicy
 
 # ---------------------------------------------------------------------------
 # Prediction-accounting vocabulary — the ONE declaration (Step 09a C4, F-09a-17)
@@ -632,6 +633,13 @@ class InterpretationInput(BaseModel):
         "carries one into the model_knowledge_cache `_stats`; plugin and "
         "workspace descriptions resolve as before. Set by the workflow from its "
         "launch config; the lock pins the same value.",
+    )
+    description_source_policy: DescriptionSourcePolicy = Field(
+        default=DescriptionSourcePolicy.LEGACY,
+        description=(
+            "Typed description-source authority. Composed inputs explicitly "
+            "exclude packaged model descriptions and permit authorized absence."
+        ),
     )
     task_description: str = Field(
         default="",

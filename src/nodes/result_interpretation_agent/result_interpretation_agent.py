@@ -322,9 +322,13 @@ class ResultInterpretationAgent:
             # Priority 3: load from description.md on disk (built-in or plugin models)
             # arXiv U3 (#260): under isolation the loader refuses the BUNDLED
             # baseline description, so none can reach the `_stats` cache below.
-            model_descriptions[mt] = get_model_description(
-                mt, baseline_isolation=inp.baseline_isolation
+            loaded_desc = get_model_description(
+                mt,
+                baseline_isolation=inp.baseline_isolation,
+                source_policy=inp.description_source_policy,
             )
+            if loaded_desc:
+                model_descriptions[mt] = loaded_desc
 
         # --- Deterministic pre-computation (ordering.precompute_evidence) ---
         # New models are read from inp.summaries, cached models from their
@@ -559,7 +563,7 @@ class ResultInterpretationAgent:
                 )
                 per_model_prompt = _build_per_model_prompt(
                     summary=summary,
-                    description=model_descriptions[mt],
+                    description=model_descriptions.get(mt),
                     expert_advice_str=expert_advice_str,
                     human_advice=inp.human_advice,
                     structured_health_feedback=inp.enable_structured_health_feedback,
@@ -614,6 +618,8 @@ class ResultInterpretationAgent:
                         fp.model_dump() for fp in per_model_collapse_fingerprints.get(mt, [])
                     ],
                 }
+                if new_stats["model_description"] is None:
+                    del new_stats["model_description"]
                 # Step 10 / P2b C3 — the SAME write beside `failure_counts`, for
                 # the same reason (audit B-6): a model that goes quiet keeps its
                 # secondary evidence across iterations without a fresh LLM call.

@@ -16,6 +16,7 @@ by the interpretation and proposal agents.
 """
 
 import os
+from enum import StrEnum
 
 from core.layout import checkout_path
 
@@ -24,6 +25,13 @@ _ML_MODELS_DIR = os.path.dirname(os.path.abspath(__file__))
 # — promotion writes descriptions under the resolved generated-library
 # models dir now; this location keeps resolving pre-migration copies).
 _PLUGIN_DESCRIPTIONS_DIR = checkout_path("agent_generated", "models")
+
+
+class DescriptionSourcePolicy(StrEnum):
+    """Which description roots a caller is authorized to consult."""
+
+    LEGACY = "legacy"
+    COMPOSED = "composed"
 
 
 def _scan_bundled_model_types() -> frozenset[str]:
@@ -103,7 +111,12 @@ def _declared_pack_candidates(model_type: str) -> list[str]:
     ]
 
 
-def get_model_description(model_type: str, *, baseline_isolation: bool = False) -> str:
+def get_model_description(
+    model_type: str,
+    *,
+    baseline_isolation: bool = False,
+    source_policy: DescriptionSourcePolicy = DescriptionSourcePolicy.LEGACY,
+) -> str | None:
     """
     Load and return the description.md for the given model_type.
 
@@ -140,14 +153,31 @@ def get_model_description(model_type: str, *, baseline_isolation: bool = False) 
     """
     from core.generated_library import generated_library_is_workspace_bound, generated_models_dir
 
+    try:
+        source_policy = DescriptionSourcePolicy(source_policy)
+    except ValueError as exc:
+        raise ValueError(f"Unknown description source policy: {source_policy!r}") from exc
+
+    composed = source_policy is DescriptionSourcePolicy.COMPOSED
+    # A composed run is an explicit authority boundary.  The old flag remains
+    # supported for standalone baseline-isolation witnesses, but never opts a
+    # composed caller back into packaged prose.
+    refuse_bundled = baseline_isolation or composed
+
     bundled = os.path.join(_ML_MODELS_DIR, model_type, "description.md")
+    workspace_bound = generated_library_is_workspace_bound()
+    # Composed callers have no compatibility route into the checkout-global
+    # ``agent_generated`` tree.  That directory is historical state owned by
+    # no current task/workspace; allowing it here would reintroduce exactly
+    # the cross-run prose contamination this policy closes.  Legacy callers
+    # retain the read-only migration fallback while unbound.
     legacy_candidates = (
         []
-        if generated_library_is_workspace_bound() or _PLUGIN_DESCRIPTIONS_DIR is None
+        if composed or workspace_bound or _PLUGIN_DESCRIPTIONS_DIR is None
         else [os.path.join(_PLUGIN_DESCRIPTIONS_DIR, model_type, "description.md")]
     )
     candidates = [
-        *([] if baseline_isolation else [bundled]),
+        *([] if refuse_bundled else [bundled]),
         os.path.join(generated_models_dir(), model_type, "description.md"),
         *legacy_candidates,
         *_chain_workspace_candidates(model_type),
@@ -158,6 +188,9 @@ def get_model_description(model_type: str, *, baseline_isolation: bool = False) 
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
                 return f.read()
+
+    if composed:
+        return None
 
     refused = (
         f"Refused under baseline_isolation (not searched):\n  {bundled}\n"

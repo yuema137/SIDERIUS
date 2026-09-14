@@ -730,15 +730,21 @@ def test_the_workflow_delta_stayed_sibling_shaped():
     # undeclared file after startup validation. Configuration resolution
     # remains in the existing helper and no task dispatch was added.
     #
+    # #313 (declared delta, 2026-09-13): 129 -> 130. One IfExp chooses the
+    # typed model-description source policy at the composed/uncomposed
+    # boundary. The loader owns source resolution; this workflow branch only
+    # transports which already-declared policy applies.
+    #
     # All of it is the permitted shape: no new phase, no new branch family, no
     # task dispatch, no new mutable local accumulator, no new semantic owner.
-    assert branchish == 129, (
-        f"run_workflow branch-ish count is {branchish}, expected 129 "
+    assert branchish == 130, (
+        f"run_workflow branch-ish count is {branchish}, expected 130 "
         "(130 at C0 + 1 C2 unpack IfExp + 1 C5/W6 binding-selection IfExp "
         "- 1 arXiv-U1 extraction of the lit-review path-resolution If "
         "+ 1 arXiv-#259 constraint-forwarding If - 4 after extracting "
         "cross-iteration negative-feedback restoration + 1 explicit "
         "caller-owned literature-config use-site assertion; "
+        "+ 1 #313 composed description-source selection; "
         "C3's union closure costs ZERO because the merge rule lives in "
         "core.resume.union_key_findings and this closure only calls it). "
         "If this grew further, the §12.1 tripwire requires re-running the "
