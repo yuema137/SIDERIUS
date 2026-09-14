@@ -462,7 +462,7 @@ def render_failure_counts(counts: "RecordFailureCounts | None") -> list[str]:
 
 def _build_per_model_prompt(
     summary: ModelRunSummary,
-    description: str,
+    description: str | None,
     expert_advice_str: str = "",
     human_advice: str | None = None,
     *,
@@ -569,10 +569,9 @@ def _build_per_model_prompt(
     if failure_lines:
         lines += ["", "### Record outcomes", *failure_lines]
 
+    if description:
+        lines += ["", "### Architecture Description", description]
     lines += [
-        "",
-        "### Architecture Description",
-        description,
         "",
         "### Best Config",
         json.dumps(summary.best_config, indent=2) if summary.best_config else "none",

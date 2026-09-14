@@ -563,7 +563,7 @@ class ResultInterpretationAgent:
                 )
                 per_model_prompt = _build_per_model_prompt(
                     summary=summary,
-                    description=model_descriptions[mt],
+                    description=model_descriptions.get(mt),
                     expert_advice_str=expert_advice_str,
                     human_advice=inp.human_advice,
                     structured_health_feedback=inp.enable_structured_health_feedback,
@@ -618,6 +618,8 @@ class ResultInterpretationAgent:
                         fp.model_dump() for fp in per_model_collapse_fingerprints.get(mt, [])
                     ],
                 }
+                if new_stats["model_description"] is None:
+                    del new_stats["model_description"]
                 # Step 10 / P2b C3 — the SAME write beside `failure_counts`, for
                 # the same reason (audit B-6): a model that goes quiet keeps its
                 # secondary evidence across iterations without a fresh LLM call.

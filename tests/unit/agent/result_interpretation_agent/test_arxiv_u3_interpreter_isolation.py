@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
+from ml_models.model_descriptions import DescriptionSourcePolicy
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 from tests.unit.agent.result_interpretation_agent.test_interpretation_agent import (
     PUNET_SUMMARY,
@@ -58,3 +59,28 @@ def test_isolation_still_caches_an_inline_plugin_description(tmp_path):
     output = _agent().run(inp)
     cached = output.model_knowledge_cache["my_plugin_tcn"]["_stats"]["model_description"]
     assert cached == "# my_plugin_tcn body"
+
+
+def test_composed_absence_completes_without_empty_header_or_cache_prose(tmp_path):
+    """Composed missing prose is a typed absence, not a loader failure."""
+    inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
+    inp.description_source_policy = DescriptionSourcePolicy.COMPOSED
+    output = _agent().run(inp)
+    assert "punet" not in output.model_descriptions
+    stats = output.model_knowledge_cache["punet"].get("_stats", {})
+    assert "model_description" not in stats
+
+
+def test_composed_inline_description_precedes_any_loader(tmp_path):
+    """Current-iteration prose wins before workspace/generated/pack lookup."""
+    summary = PUNET_SUMMARY.model_copy(update={"model_description": "# inline task prose"})
+    inp = make_input(summary, workspace=str(tmp_path))
+    inp.description_source_policy = DescriptionSourcePolicy.COMPOSED
+    with patch(
+        "nodes.result_interpretation_agent.get_model_description",
+        side_effect=AssertionError("inline authority must bypass the loader"),
+    ):
+        output = _agent().run(inp)
+    assert output.model_knowledge_cache["punet"]["_stats"]["model_description"] == (
+        "# inline task prose"
+    )

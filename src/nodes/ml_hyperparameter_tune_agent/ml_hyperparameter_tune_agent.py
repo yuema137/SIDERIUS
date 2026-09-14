@@ -1221,10 +1221,17 @@ class HyperparamTuningAgent:
                 baseline_isolation=agent_input.baseline_isolation,
                 source_policy=source_policy,
             )
-            print(
-                f"Loaded model description for '{model_type_setting}' ({len(model_description)} chars)"
-            )
-        except Exception as e:
+            if model_description is None:
+                print(
+                    f"No authorized model description for '{model_type_setting}' "
+                    "(composed source absence)"
+                )
+            else:
+                print(
+                    f"Loaded model description for '{model_type_setting}' "
+                    f"({len(model_description)} chars)"
+                )
+        except FileNotFoundError as e:
             print(f"No model description found for '{model_type_setting}': {e}")
 
         # --- Autonomous Research Loop ---

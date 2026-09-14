@@ -146,6 +146,19 @@ class TestModelSelection:
         assert len(result) == 1
         assert result[0]["model_type"] == "wavenet"
 
+    def test_feature_match_uses_supplied_descriptions_only(self):
+        """A bundled-only feature must not re-enter through model selection."""
+        interpretation = {
+            "model_types": ["punet"],
+            "model_descriptions": {},
+            "model_knowledge_cache": {},
+        }
+        result = select_candidate_models(
+            build_proposer_evidence(interpretation),
+            ModelSelectionStrategy(method="feature_match", params={"feature": "positional"}),
+        )
+        assert result == []
+
     def test_source_field_seed_vs_proposed(self):
         strategy = ModelSelectionStrategy(method="all")
         result = select_candidate_models(build_proposer_evidence(FAKE_INTERPRETATION), strategy)
