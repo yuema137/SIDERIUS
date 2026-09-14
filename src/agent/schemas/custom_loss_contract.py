@@ -160,6 +160,7 @@ class CustomLossInventory(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     composed: bool
+    expected_snapshot: CapabilityContractSnapshot | None = None
     entries: tuple[CapabilityMetadata, ...] = ()
     unavailable: tuple[CustomLossRefusal, ...] = ()
     unavailable_reason: str | None = None
@@ -188,6 +189,7 @@ def _apply_objective_lock(
         reason = f"task objective is locked to builtin loss {loss_type!r}"
         return CustomLossInventory(
             composed=True,
+            expected_snapshot=inventory.expected_snapshot,
             unavailable=inventory.unavailable
             + tuple(CustomLossRefusal(name=item.name, reason=reason) for item in inventory.entries),
             unavailable_reason=reason,
@@ -201,6 +203,7 @@ def _apply_objective_lock(
     reason = f"task objective is locked to custom loss {required_name!r}"
     return CustomLossInventory(
         composed=True,
+        expected_snapshot=inventory.expected_snapshot,
         entries=matching,
         unavailable=inventory.unavailable
         + tuple(
@@ -257,6 +260,7 @@ def resolve_custom_loss_inventory(
     if contract_error is not None:
         inventory = CustomLossInventory(
             composed=True,
+            expected_snapshot=expected_snapshot,
             unavailable=tuple(
                 CustomLossRefusal(
                     name=item.name,
@@ -270,6 +274,7 @@ def resolve_custom_loss_inventory(
     if not metadata:
         inventory = CustomLossInventory(
             composed=True,
+            expected_snapshot=expected_snapshot,
             unavailable_reason="no loadable custom losses are registered",
         )
         return _apply_objective_lock(inventory, task_composition_ref)
@@ -309,7 +314,10 @@ def resolve_custom_loss_inventory(
             continue
         entries.append(item)
     inventory = CustomLossInventory(
-        composed=True, entries=tuple(entries), unavailable=tuple(unavailable)
+        composed=True,
+        expected_snapshot=expected_snapshot,
+        entries=tuple(entries),
+        unavailable=tuple(unavailable),
     )
     return _apply_objective_lock(inventory, task_composition_ref)
 

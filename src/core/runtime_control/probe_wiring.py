@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from core.capability_registry import CapabilityContractSnapshot
 from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
 from core.runtime_control.estimator import shared_runtime_components
 from core.runtime_control.measurement_capability import (
@@ -96,6 +97,7 @@ def build_production_probe_runner(
     data_dir: str | None = None,
     device: str = "cuda",
     device_identity: Any | None = None,
+    expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
 ) -> Callable[[ProbeRequest], ProbeResult]:
     """Build the REAL probe runner for one candidate.
 
@@ -120,6 +122,7 @@ def build_production_probe_runner(
                 loss_config=loss_config,
                 data_dir=data_dir,
                 device=device,
+                expected_custom_loss_snapshot=expected_custom_loss_snapshot,
             )
             vram_gb = probe_device_vram_gb()
         except Exception as exc:

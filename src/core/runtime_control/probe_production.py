@@ -28,6 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from core.capability_registry import CapabilityContractSnapshot
 from core.runtime_control.probe import ProbeExecutors, RealizedModelProperties
 from core.runtime_control.registry_schemas import (
     ExecutionEnvironmentProfile,
@@ -176,6 +177,7 @@ def production_probe_executors(
     loss_config: dict[str, Any],
     data_dir: str | None = None,
     device: str = "cuda",
+    expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
 ) -> ProbeExecutors:
     """Real executors over the implemented candidate. All state lives in
     the closure; ``setup`` must run first (engine guarantees ordering)."""
@@ -282,7 +284,10 @@ def production_probe_executors(
             model=model,
             batch=batch,
             optimizer=optimizer,
-            loss_fn=get_criterion(LossConfig(**loss_config)),
+            loss_fn=get_criterion(
+                LossConfig(**loss_config),
+                expected_contract_snapshot=expected_custom_loss_snapshot,
+            ),
             torch=torch,
         )
         return RealizedModelProperties(

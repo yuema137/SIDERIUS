@@ -203,3 +203,16 @@ def test_non_callable_provider_is_a_named_contract_refusal():
         resolve_custom_loss_validation_pair_provider(
             SimpleNamespace(custom_loss_validation_pair="not-a-function")
         )
+
+
+def test_execution_snapshot_uses_the_same_task_projection_as_inventory():
+    from nodes.ml_hyperparameter_tune_agent.loss_inventory import resolve_run_custom_loss_inventory
+
+    prediction, _, _, expected, projection = _contract_fixture()
+    projection.objective = None
+    model_io = SimpleNamespace(output=prediction)
+    inventory = resolve_run_custom_loss_inventory(
+        SimpleNamespace(list=lambda **_kwargs: []), model_io, projection
+    )
+
+    assert inventory.expected_snapshot == expected

@@ -58,6 +58,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.capability_registry import CapabilityContractSnapshot
 from core.execution_calibration import MalformedCeilingOverride
 from core.local_code.child import ChildInvocation, prepare_child
 from core.local_code.failure import raise_if_code_package_failure
@@ -200,6 +201,7 @@ class ProbeWorkerSpec(BaseModel):
     model_config_payload: dict[str, Any] = Field(default_factory=dict)
     train_config: dict[str, Any] = Field(default_factory=dict)
     loss_config: dict[str, Any] = Field(default_factory=dict)
+    expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None
     data_dir: str | None = None
     device: str = "cuda"
     caps: dict[str, Any] = Field(default_factory=dict)

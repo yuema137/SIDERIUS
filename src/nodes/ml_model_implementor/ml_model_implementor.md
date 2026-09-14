@@ -135,6 +135,15 @@ Explicit generated-code directories remain supported for orchestrators. The refe
 
 ## Key behavioral notes
 
+- **Custom-loss validation is task-compatible and data-free.** The implementor
+  receives the same filtered inventory as the proposer/tuner. When a task's
+  semantic target cannot be synthesized generically, the bound task may expose
+  `custom_loss_validation_pair()` to return a tiny deterministic prediction /
+  target pair. The framework validates tensor count, size, declared shape and
+  dtype before generated-plugin import, then applies the existing finite,
+  scalar, backward and finite-gradient checks. The provider never receives a
+  dataset root or scope and is not a preprocessing hook.
+
 - **Two-call chain-of-thought.** Call 1 = `bridge.generate_text(IMPLEMENTOR_REASONING_PROMPT, ...)` — free-form reasoning about PyTorch modules, shape handling, config-field choices. Call 2 = `bridge.generate(IMPLEMENTOR_CODE_PROMPT, ...)` — commit to specific code sections as strict JSON. The LLM never writes raw plugin boilerplate — it writes only the marked sections (`init_body`, `forward_body`, `config_fields_code`, `helper_class_defs`, etc.) and `_assemble_plugin` substitutes them into `PLUGIN_TEMPLATE`.
 - **5-check validation pipeline** runs after every commit/repair call (`_validate_code`):
   1. **Config field consistency** — every `config.<field>` referenced in `init_body` must have a corresponding `Field` declaration in `config_fields_code`.

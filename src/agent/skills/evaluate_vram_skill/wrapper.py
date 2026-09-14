@@ -787,6 +787,7 @@ def run_skill(sandbox, **kwargs):
     model_cfg = kwargs.get("model_config", {})
     train_cfg = kwargs.get("train_config", {})
     loss_cfg = kwargs.get("loss_config", {})
+    expected_custom_loss_snapshot = kwargs.get("expected_custom_loss_snapshot")
     vram_budget_gb: float | None = kwargs.get("vram_budget_gb")
     hardware_context: HardwareContext | None = kwargs.get("hardware_context")
     model_io_contract: ModelIOContract | None = kwargs.get("model_io_contract")
@@ -874,7 +875,10 @@ def run_skill(sandbox, **kwargs):
         _refuse_unrunnable_loss_geometry(model_type, loss_type, model_io_contract)
         try:
             model_for_train = _build_model(model_type, model_cfg, loss_type)
-            loss_module = get_criterion(LossConfig(**loss_cfg))
+            loss_module = get_criterion(
+                LossConfig(**loss_cfg),
+                expected_contract_snapshot=expected_custom_loss_snapshot,
+            )
         except ValidationError as ve:
             if seg_size is None and any(
                 tuple(error.get("loc") or ()) == ("segmentation_size",)

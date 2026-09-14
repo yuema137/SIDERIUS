@@ -397,6 +397,22 @@ Both forms produce the same typed `LossConfig` authority and override the
 planner. The config form cannot select `custom`; custom code must use the
 implementation form so its content joins the run identity.
 
+Custom losses also need a prediction/target compatibility declaration in the
+task's `forward_contract`. Declare `supervision_target` plus either an
+`equal_shape` or `explicit_pair` `custom_loss_applicability`; the framework
+then filters proposer and tuner offers against one immutable contract snapshot
+and transports that snapshot through resource measurement and training. A
+loadable loss whose snapshot is missing or different is unavailable, not a
+fallback candidate.
+
+When the declared target cannot be represented by the framework's generic tiny
+tensor pair, the bound task implementation may expose a zero-argument
+`custom_loss_validation_pair()` sibling. It returns only a small deterministic
+`(prediction, target)` pair for numerical/gradient validation. It receives no
+data root or scope and must not read training data; preprocessing and real
+training batches remain `TaskDataPath` responsibilities. See the shipped
+`synthetic_masked_regression` example for the complete declaration shape.
+
 ## Step 10 — Launch
 
 ```bash

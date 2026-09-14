@@ -9,6 +9,7 @@ def run_skill(sandbox, **kwargs):
         m_cfg=kwargs["model_config"],
         t_cfg=kwargs["train_config"],
         l_cfg=kwargs["loss_config"],
+        expected_custom_loss_snapshot=kwargs.get("expected_custom_loss_snapshot"),
         sample_set=kwargs.get("sample_set"),
         # Step 07a: the tuner's EXISTING run-bound eval SampleSet reaches the
         # trainer (R3 validation pass) — before 07a this kwarg was enumerated

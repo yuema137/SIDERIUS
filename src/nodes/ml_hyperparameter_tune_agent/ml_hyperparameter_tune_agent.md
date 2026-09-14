@@ -1540,11 +1540,14 @@ uncomposed prompt bytes remain unchanged.
 
 An explicit task objective is displayed as the exact `LossConfig`; baseline,
 exploration and collapse guidance do not tell the planner to replace it. The
-last-writer enforcement described above is unchanged. Custom losses remain
-selectable through their existing route, but registration and earlier dummy tests
-do **not** certify prediction/target compatibility for this task. Custom loss
-declarations and generation need a separate compatibility contract; this change
-does not establish their mathematics, stability or quality.
+last-writer enforcement described above is unchanged. Custom losses are offered
+only from the invocation's task-compatible inventory. The task's
+prediction/target applicability becomes one immutable snapshot, shared by the
+system/user prompt surfaces and carried on `PreparedAttempt` through time/VRAM
+measurement and both training paths. Locked builtin objectives expose no custom
+route; locked custom objectives expose exactly their compatible registered
+plugin and never fall back to a builtin. This certifies declared tensor
+compatibility and bounded numerical execution, not scientific quality.
 
 ## Task-composed parameter rules
 

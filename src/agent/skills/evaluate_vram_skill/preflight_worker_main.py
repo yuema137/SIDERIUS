@@ -205,6 +205,29 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
 
+    raw_loss_snapshot = spec.get("expected_custom_loss_snapshot")
+    expected_custom_loss_snapshot = None
+    if raw_loss_snapshot is not None:
+        from core.capability_registry import CapabilityContractSnapshot
+
+        try:
+            expected_custom_loss_snapshot = CapabilityContractSnapshot.model_validate(
+                raw_loss_snapshot
+            )
+        except Exception as exc:
+            _write(
+                result_path,
+                {
+                    "outcome": "PROBE_INFRASTRUCTURE_FAILURE",
+                    "detail": (
+                        "the pre-flight spec carries an 'expected_custom_loss_snapshot' "
+                        f"the worker could not rebuild: {type(exc).__name__}: {exc}"
+                    )[:800],
+                    "phase": "spec_custom_loss_contract",
+                },
+            )
+            return 0
+
     # ``None`` is "no operator ceiling", not "unset". The effective cap was
     # already resolved by the parent; the worker must not invent one.
     budget = spec.get("vram_budget_gb")
@@ -239,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
             model_config=dict(spec.get("model_config_payload") or {}),
             train_config=dict(spec.get("train_config") or {}),
             loss_config=dict(spec.get("loss_config") or {}),
+            expected_custom_loss_snapshot=expected_custom_loss_snapshot,
             vram_budget_gb=budget,
             model_io_contract=model_io_contract,
             # HardwareSnapshot intentionally satisfies the audited

@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -37,6 +38,16 @@ from torch.utils.data import DataLoader
 import agent.skills.training_skill.wrapper as training_wrapper
 import core.sandbox_executor as sandbox_module
 import execute_tools.train_engine_sandbox as tes
+from agent.schemas.custom_loss_contract import (
+    EqualShapeApplicability,
+    build_custom_loss_contract_snapshot,
+)
+from agent.schemas.model_io_contract import (
+    Dimension,
+    DtypeAdmissibility,
+    TensorAxis,
+    TensorContract,
+)
 from core.sandbox_executor import StubSandbox, TidmadSandbox
 from execute_tools.dataset_config import DataScope, bind_dataset_profile
 from execute_tools.scoring_utils import validate_sample_set
@@ -61,6 +72,21 @@ EVAL_SS = {0: [3], 1: [0, 1]}
 
 PYTHON = "<PYTHON>"
 WORKSPACE = "<WS>"
+
+
+def _loss_snapshot():
+    tensor = TensorContract(
+        axes=(
+            TensorAxis(dimension=Dimension(symbolic="B")),
+            TensorAxis(dimension=Dimension(fixed=2)),
+        ),
+        dtype=DtypeAdmissibility(admissible=("float32",)),
+    )
+    return build_custom_loss_contract_snapshot(
+        tensor,
+        tensor,
+        EqualShapeApplicability(dtype=tensor.dtype, rank=2),
+    )
 
 
 def _normalize(cmd: list[str], workspace: str) -> list[str]:
@@ -123,6 +149,29 @@ def _launch_ok(sandbox):
 
 
 class TestArgvDelta:
+    @patch("core.sandbox_executor._run_observed_subprocess")
+    def test_custom_loss_contract_is_written_and_reaches_the_child_argv(self, mock_run, sandbox):
+        snapshot = _loss_snapshot()
+        mock_run.side_effect = _launch_ok(sandbox)
+        sandbox.execute_training(
+            EXP_ID,
+            RUN_NAME,
+            MODEL_TYPE,
+            MODEL_CFG,
+            TRAIN_CFG,
+            LOSS_CFG,
+            sample_set=TRAIN_SS,
+            expected_custom_loss_snapshot=snapshot,
+        )
+
+        (cmd,), _ = mock_run.call_args
+        flag_index = cmd.index("--custom_loss_contract_json")
+        contract_path = cmd[flag_index + 1]
+        assert flag_index < cmd.index("--sample_set_json")
+        assert json.loads(Path(contract_path).read_text(encoding="utf-8")) == snapshot.model_dump(
+            mode="json"
+        )
+
     @patch("core.sandbox_executor._run_observed_subprocess")
     def test_streaming_argv_transports_explicit_root_and_ordered_eval_pair(
         self, mock_run, sandbox, tmp_path

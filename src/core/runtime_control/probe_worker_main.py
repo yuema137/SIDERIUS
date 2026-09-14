@@ -95,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
             loss_config=spec.loss_config,
             data_dir=spec.data_dir,
             device=spec.device,
+            expected_custom_loss_snapshot=spec.expected_custom_loss_snapshot,
         )
 
         def _window(**kwargs):

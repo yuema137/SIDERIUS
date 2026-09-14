@@ -51,6 +51,7 @@ from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.model_io_contract import ModelIOContract
+    from core.capability_registry import CapabilityContractSnapshot
 
 __all__ = [
     "OUTCOME_TO_LEGACY",
@@ -231,6 +232,7 @@ def run_production_preflight(
     host_memory_limit_gb: float | None = None,
     model_io_contract: ModelIOContract | None = None,
     task_probe_data: TaskProbeDataSpec | None = None,
+    expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
 ) -> dict[str, Any]:
     """Run one candidate's pre-flight in a child and return the legacy dict.
 
@@ -283,6 +285,7 @@ def run_production_preflight(
         model_config_payload=dict(model_config or {}),
         train_config=dict(train_config or {}),
         loss_config=dict(loss_config or {}),
+        expected_custom_loss_snapshot=expected_custom_loss_snapshot,
         vram_budget_gb=vram_budget_gb,
         result_path=str(workdir / f"{label}.json"),
         worker_memory_limit_bytes=(
