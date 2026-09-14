@@ -114,6 +114,14 @@ class _ScopeRecorder:
     def deserialize_scope(self, payload):  # pragma: no cover
         raise AssertionError("this test never deserializes")
 
+    def validate_health_coverage(self, request):
+        """This scope-only fixture has no output-dependent Health demand."""
+        return {
+            "applicable": False,
+            "covered": False,
+            "reason": "scope-authoring fixture has no output-dependent Health demand",
+        }
+
 
 class _RefusingScope(_ScopeRecorder):
     """TIDMAD's OWN refusal, quoted rather than re-implemented.
@@ -184,7 +192,7 @@ class _Sandbox:
         return []
 
 
-def _bindings(agent_input, configs_dir) -> RunBindings:
+def _bindings(agent_input, configs_dir, data_path=None) -> RunBindings:
     from execute_tools.metric_order import MetricOrder
     from tests.helpers.metric_fixtures import direction_only_metric
     from tests.helpers.tuner_prompt_fixtures import TASK_RENDER
@@ -234,6 +242,7 @@ def _bindings(agent_input, configs_dir) -> RunBindings:
         started_at=0.0,
         health_checks_config_source=None,
         health_config_sha256=None,
+        run_task_data_path=data_path or _ScopeRecorder(),
     )
 
 
@@ -253,7 +262,7 @@ def _prepare(impl, configs_dir):
     assert agent_input.task_composition_ref is not None, "fixture must be composed"
     with bind_task_data_path(impl):
         return prepare_attempt(
-            _bindings(agent_input, configs_dir),
+            _bindings(agent_input, configs_dir, impl),
             attempt_ordering=AttemptOrdering(),
             iteration=1,
             attempt_in_round=1,

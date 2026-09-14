@@ -68,7 +68,7 @@ from typing import (
     runtime_checkable,
 )
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 if TYPE_CHECKING:  # torch is heavyweight; the seam only names the type
     from torch.utils.data import Dataset
@@ -103,6 +103,16 @@ class TaskScopeCapabilityError(RuntimeError):
     what is absent is an optional sibling capability, and conflating "I cannot
     find your task" with "your task cannot build scopes" would make both
     messages worse.
+    """
+
+
+class TaskHealthCoverageError(RuntimeError):
+    """An attempt's task-owned evaluation scope cannot support its Health demand.
+
+    This is deliberately separate from binding and scope-construction errors:
+    the task may be perfectly able to build a scope, while that particular
+    attempt's evaluation scope is not sufficient for the task's own Health
+    declaration.
     """
 
 
@@ -335,6 +345,50 @@ class ScopeBuildRequest(BaseModel):
     )
 
 
+class HealthCoverageRequest(BaseModel):
+    """Opaque task request for one attempt's Health/evaluation coverage.
+
+    The framework supplies the exact scope object it is about to execute and
+    the already-resolved Health binding. Their contents are task vocabulary;
+    this carrier intentionally permits and transports them without inspection.
+    """
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True, extra="forbid")
+
+    evaluation_scope: Any
+    round_kind: Literal["trial", "formal"]
+    health_binding: Any
+
+
+class HealthCoverageResult(BaseModel):
+    """Validated result of a task-owned Health coverage check.
+
+    ``applicable=False`` is an explicit declaration that no output-dependent
+    Health demand exists. Otherwise ``covered`` states whether the exact
+    evaluation scope covers the task's demand. Every result carries a reason
+    so a refusal is actionable and no state can be inferred from omission.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    applicable: StrictBool
+    covered: StrictBool
+    reason: str = Field(min_length=1)
+
+    @field_validator("reason")
+    @classmethod
+    def reason_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Health coverage reason must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_state(self) -> HealthCoverageResult:
+        if not self.applicable and self.covered:
+            raise ValueError("Health coverage cannot be covered when it is not applicable")
+        return self
+
+
 class DeliverableSourceContext(BaseModel):
     """Run-bound source needed to reconstruct prediction-aligned task values.
 
@@ -528,6 +582,42 @@ _SCOPE_CAPABILITY_METHODS = (
     "serialize_scope",
     "deserialize_scope",
 )
+
+
+@runtime_checkable
+class TaskHealthCoverageCapability(Protocol):
+    """OPTIONAL sibling capability for attempt-scoped Health coverage.
+
+    The task decides whether its opaque evaluation scope covers its own
+    output-dependent Health demand. The framework only validates the typed
+    result and never interprets the scope or Health vocabulary.
+    """
+
+    def validate_health_coverage(self, request: HealthCoverageRequest) -> HealthCoverageResult:
+        """Confirm coverage for the exact evaluation scope of this attempt."""
+        ...
+
+
+_HEALTH_COVERAGE_METHODS = ("validate_health_coverage",)
+
+
+def declares_health_coverage(impl: object) -> TypeGuard[TaskHealthCoverageCapability]:
+    """Whether an implementation declares the Health coverage capability."""
+    return all(callable(getattr(impl, method, None)) for method in _HEALTH_COVERAGE_METHODS)
+
+
+def resolve_task_health_coverage_capability(
+    impl: TaskDataPath,
+) -> TaskHealthCoverageCapability:
+    """Resolve Health coverage fail-closed beside the scope capability."""
+    if not declares_health_coverage(impl):
+        task_id = getattr(impl, "task_data_path_id", "<unknown>")
+        raise TaskHealthCoverageError(
+            f"task data path {task_id!r} has Health enabled for a composed attempt, "
+            "but does not declare validate_health_coverage; explicit task-owned "
+            "coverage is required before execution"
+        )
+    return cast("TaskHealthCoverageCapability", impl)
 
 
 @runtime_checkable
