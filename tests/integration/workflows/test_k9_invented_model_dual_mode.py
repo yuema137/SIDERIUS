@@ -38,6 +38,7 @@ Run with:
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,10 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.helpers.tuner_composed_effects import (
+    recording_sandbox_for_attempts,
+    synthetic_cuda_context,
+)
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
@@ -106,26 +111,6 @@ def _disable_sleeps(monkeypatch):
     monkeypatch.setattr(_time, "sleep", lambda *a, **kw: None)
 
 
-def _mock_cuda(monkeypatch):
-    """Make the VRAM gate believe it is on a 32 GB GPU with 20 GB free.
-
-    The K.2.5-8 warning fires before the device check, but the
-    over/under-budget verdict path is only reachable when
-    ``device == "cuda"`` AND ``torch.cuda.is_available()`` is True.
-    The 0.8 × 20 GB = 16 GB defensive cap never binds against the
-    operator budget (0.3 GB), so this mock keeps the test
-    deterministic on machines without a real GPU.
-    """
-    import torch
-
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(
-        torch.cuda,
-        "mem_get_info",
-        lambda *a, **kw: (20 * 1024**3, 32 * 1024**3),
-    )
-
-
 @pytest.mark.dual_mode
 def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, monkeypatch, capsys):
     """K.9 — agent runs the 2-round invented-model_type loop end-to-end.
@@ -148,12 +133,12 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
                 best score populated from the canned sandbox.
     """
     from agent.llm_bridge import LLMBridge
-    from tests.conftest import _is_real_llm, _is_real_training
+    from tests.conftest import _is_real_llm
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
     from tests.helpers.recording_sandbox import RecordingSandbox
 
     _register_k9_plugin(monkeypatch, request)
-    _mock_cuda(monkeypatch)
+    hardware_context = synthetic_cuda_context(monkeypatch)
     _disable_sleeps(monkeypatch)
 
     workspace = str(tmp_path / "workspace")
@@ -221,22 +206,40 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
         def bridge_factory(**kw):
             return bridge
 
-    if _is_real_training(request):
-        pytest.skip(
-            "--real-training is not supported for K.9: pe_wavenet_delta is a "
-            "test-only plugin, not a registered training target."
-        )
-    else:
-        sandbox = RecordingSandbox.for_model(
-            _PLUGIN_MODEL_TYPE, base_dir=workspace, run_name=run_name
-        )
+    sandbox = recording_sandbox_for_attempts(
+        _PLUGIN_MODEL_TYPE,
+        base_dir=workspace,
+        run_name=run_name,
+        completed_attempts=2,
+    )
 
-        def sandbox_factory(**kw):
-            return sandbox
+    def sandbox_factory(**kw):
+        return sandbox
 
     agent = HyperparamTuningAgent(bridge_factory=bridge_factory, sandbox_factory=sandbox_factory)
 
-    output = agent.run(agent_input)
+    from tests.helpers.tuner_composed_effects import composed_tuner_effects
+    from tests.helpers.tuner_composed_fixture import composed_run
+
+    effect_boundary = (
+        nullcontext()
+        if _is_real_llm(request)
+        else composed_tuner_effects(
+            monkeypatch,
+            sandbox=sandbox,
+            bridge=bridge,
+            expected_attempts=3,
+            hardware_context=hardware_context,
+            preflight_results=[
+                ("MEASURED_PEAK_ABOVE_VRAM_CAP", 0.4),
+                ("COMPLETED_MEASUREMENT", 0.1),
+                ("COMPLETED_MEASUREMENT", 0.1),
+            ],
+        )
+    )
+    with effect_boundary:
+        with composed_run(tmp_path, agent_input, health=False):
+            output = agent.run(agent_input)
 
     # --- Smoke / wiring assertions ---
     # NOTE: ``len(output.all_records) == 2`` is intentionally NOT here; it

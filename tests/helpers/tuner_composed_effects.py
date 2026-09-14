@@ -9,8 +9,9 @@ from __future__ import annotations
 import importlib
 import subprocess
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,7 +19,7 @@ from typing import Any, NoReturn
 
 import pytest
 
-from agent.skills.evaluate_vram_skill.isolated_probe import IsolatedProbeResult
+from agent.skills.evaluate_vram_skill.isolated_probe import IsolatedProbeResult, PreflightOutcome
 from agent.skills.evaluate_vram_skill.preflight_adapter import adapt_result
 from core.hardware_context import HardwareContext, write_manifest
 from execute_tools.task_data_path import TaskProbeDataSpec
@@ -47,6 +48,58 @@ class ComposedTunerEffects:
 
     preflight_calls: list[dict[str, Any]] = field(default_factory=list)
     hardware_calls: list[tuple[Path, str]] = field(default_factory=list)
+
+
+def recording_sandbox_for_attempts(
+    model_type: str,
+    *,
+    base_dir: str,
+    run_name: str,
+    completed_attempts: int,
+) -> RecordingSandbox:
+    """Give every completed pseudo attempt its own canned result envelope."""
+    from tests.helpers._pseudo_data import load_pseudo_data
+
+    if completed_attempts < 1:
+        raise ValueError("completed_attempts must be positive")
+    canned = load_pseudo_data("train_outputs", model_type)
+    repeated = {
+        method: (
+            deepcopy(result)
+            if isinstance(result, list)
+            else [deepcopy(result) for _ in range(completed_attempts)]
+        )
+        for method, result in canned.items()
+    }
+    return RecordingSandbox(base_dir=base_dir, run_name=run_name, canned=repeated)
+
+
+def synthetic_cuda_context(monkeypatch: pytest.MonkeyPatch) -> HardwareContext:
+    """Supply a stable 32-GiB CUDA identity without discovering real hardware."""
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(
+        torch.cuda,
+        "mem_get_info",
+        lambda *args, **kwargs: (20 * 1024**3, 32 * 1024**3),
+    )
+    return HardwareContext(
+        device_name="synthetic-cuda",
+        total_memory_bytes=32 * 1024**3,
+        compute_capability=(9, 0),
+        multiprocessor_count=1,
+        cuda_runtime_version="fixture-not-discovered",
+        torch_version="fixture-not-discovered",
+        hostname="composed-tuner-fixture",
+        device_available=True,
+        discovered_at=datetime(2000, 1, 1, tzinfo=UTC),
+        cuda_visible_devices="0",
+        visible_device_count=1,
+        devices=[],
+        active_device_uuid="GPU-composed-tuner-fixture",
+        collection_errors=["test fixture: hardware discovery deliberately not executed"],
+    )
 
 
 def _install_effect_backstop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -86,6 +139,8 @@ def composed_tuner_effects(
     sandbox: RecordingSandbox,
     bridge: RecordingLLMBridge,
     expected_attempts: int,
+    hardware_context: HardwareContext | None = None,
+    preflight_results: Sequence[tuple[PreflightOutcome, float]] | None = None,
 ) -> Iterator[ComposedTunerEffects]:
     """Install before composition/run; verify finite consumption on normal exit.
 
@@ -99,9 +154,16 @@ def composed_tuner_effects(
         raise TypeError("Composed tuner witnesses require the recording sandbox and bridge")
     if expected_attempts < 1:
         raise ValueError("expected_attempts must describe a nonempty finite witness")
+    result_specs = (
+        [("COMPLETED_MEASUREMENT", 0.0) for _ in range(expected_attempts)]
+        if preflight_results is None
+        else preflight_results
+    )
+    if len(result_specs) != expected_attempts:
+        raise ValueError("preflight_results must contain one result per expected attempt")
 
     effects = ComposedTunerEffects()
-    hardware = HardwareContext(
+    hardware = hardware_context or HardwareContext(
         device_name="cpu",
         total_memory_bytes=0,
         compute_capability=(0, 0),
@@ -120,14 +182,14 @@ def composed_tuner_effects(
     responses = deque(
         IsolatedProbeResult(
             label=f"supplied-fixture-{index}",
-            outcome="COMPLETED_MEASUREMENT",
+            outcome=outcome,
             detail="Supplied pseudo preflight outcome; no measurement executed",
             verdict="Supplied orchestration-only outcome",
-            device="cpu",
-            estimated_gb=0.0,
+            device="cuda" if hardware.device_available else "cpu",
+            estimated_gb=estimated_gb,
             inference_batch=1,
         )
-        for index in range(expected_attempts)
+        for index, (outcome, estimated_gb) in enumerate(result_specs)
     )
 
     def supplied_hardware(workspace: Path, run_name: str) -> HardwareContext:
@@ -147,7 +209,9 @@ def composed_tuner_effects(
                 "Composed preflight lost its real task probe projection"
             )
         effects.preflight_calls.append(dict(kwargs))
-        return adapt_result(responses.popleft().model_dump())
+        payload = responses.popleft().model_dump()
+        payload["limit_gb"] = kwargs.get("vram_budget_gb") or hardware.usable_cap_gb
+        return adapt_result(payload)
 
     with monkeypatch.context() as scoped:
         _install_effect_backstop(scoped)

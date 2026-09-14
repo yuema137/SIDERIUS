@@ -70,8 +70,7 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
-    "real_run: requires external services or task data. Skipped unless a real-mode flag is passed. Run locally only with: pytest -m real_run --real-api-call",
-    "real_data: uses externally configured task data instead of synthetic data. Enable with: pytest --real-data",
+    "real_run: requires an external provider. Skipped unless a real-LLM flag is passed. Run locally only with: pytest -m real_run --real-llm",
     "allow_real_subprocess: this unit test intentionally launches a real training/inference/scoring script. Without it, tests/unit/conftest.py fails fast rather than letting a missing stub start real work.",
 ]
 

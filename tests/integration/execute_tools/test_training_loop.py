@@ -5,9 +5,8 @@ Tests one full training run for every valid model/loss combination.
 Calls run_experiment() directly (bypassing subprocess) so the test is
 self-contained.
 
-Data source (controlled by --real-data flag, see conftest.py):
-  - Synthetic (default): random noise, seg_size=1000, fast
-  - Real (--real-data):  actual TIDMAD abra_training_0000.h5, seg_size=40000
+Data source: a module-owned one-segment synthetic HDF5 input. Real scientific
+data and task qualification belong to the external task repository.
 
 Valid combinations:
   - punet      : ce, focal, focal_cw
@@ -34,10 +33,12 @@ Model configs — two variants per model:
 
 import os
 
+import numpy as np
 import pytest
 import torch
 from torch.utils.data import DataLoader
 
+from execute_tools.dataset_config import tidmad_topology
 from execute_tools.train_engine_sandbox import TIDMADDataset, run_experiment
 from ml_models.models_format_sandbox import (
     AEConfig,
@@ -48,11 +49,27 @@ from ml_models.models_format_sandbox import (
     TransformerConfig,
     WaveNetConfig,
 )
+from tests.helpers.two_family_profile import write_bound_timeseries
 
 # Segmentation size used for all synthetic tests — small enough to be fast,
 # large enough to satisfy the minimum constraint in model configs (ge=1000).
 # Does NOT need to match real data (40000). We only test that the loop works.
 SYNTH_SEG_SIZE = 1000
+
+
+@pytest.fixture
+def h5_source(tmp_path, synthetic_dataset_profile):
+    """Return a local synthetic input factory under an explicit test profile."""
+
+    def _make(seg_size: int):
+        topology = tidmad_topology(synthetic_dataset_profile)
+        filename = topology.dataset.training_file_name(0)
+        rng = np.random.default_rng(42)
+        values = rng.integers(-128, 127, size=seg_size, dtype=np.int16)
+        write_bound_timeseries(tmp_path / filename, values, values.copy())
+        return str(tmp_path), filename
+
+    return _make
 
 
 # ==========================================
@@ -67,8 +84,7 @@ def make_train_cfg():
 def make_model_cfg(model_type, variant="A"):
     """Return model config for the given model type.
 
-    segmentation_size is fixed to SYNTH_SEG_SIZE for synthetic tests and
-    40000 for real-data tests — the loader handles this transparently.
+    segmentation_size is fixed to SYNTH_SEG_SIZE for this synthetic test.
 
     variant="A"  — minimal architecture, fast on CPU.
     variant="B"  — larger architecture, tests model flexibility.
@@ -123,12 +139,11 @@ def make_model_cfg(model_type, variant="A"):
 def make_loader(h5_source_fn, model_cfg):
     """Build a DataLoader from h5_source (a callable) and the model config.
 
-    Calls h5_source_fn(seg_size) so the synthetic fixture generates exactly
-    enough data for this model's segmentation_size. For real data the seg_size
-    argument is ignored and the actual file is used directly.
+    Calls h5_source_fn(seg_size) so the module-owned synthetic fixture generates
+    exactly enough data for this model's segmentation_size.
 
     sample_size=1 : one segment per group — sufficient for testing the loop.
-    max_segments=1: cap at 1 training segment so real-data tests stay fast.
+    max_segments=1: cap at one training segment so the matrix stays bounded.
     """
     data_dir, fname = h5_source_fn(model_cfg.segmentation_size)
     dataset = TIDMADDataset(
@@ -144,8 +159,7 @@ def run_one(model_type, loss_type, h5_source, tmp_path, variant="A"):
     variant="B"  — larger architecture, tests model flexibility.
     Both variants are parametrized in every test. To run a single variant:
         uv run pytest -k "A"   or   uv run pytest -k "B"
-    To run with real data instead of synthetic:
-        uv run pytest --real-data
+    This module has no real-data mode.
     """
     exp_id = f"test_{model_type}_{loss_type}_cfg{variant}"
     model_dir = tmp_path / "cached_models"

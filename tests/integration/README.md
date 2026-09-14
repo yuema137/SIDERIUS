@@ -18,9 +18,10 @@ scoring, skill, and workflow seams; inspect markers before opting into effects.
 
 Dashboard `test_api.py` uses FastAPI TestClient with synthetic local JSON and
 does not need a server. Other dual-mode families default to recording doubles;
-real provider or training paths require `--real-llm`/`--real-training` (the
-deprecated `--real-api-call` enables both). Collection alone is not a live-run
-claim. See the [tests map](../README.md).
+real provider calls require `--real-llm` (the deprecated `--real-api-call` is
+an LLM-only alias). Real task data and training qualification belong to the
+external task package. Collection alone is not a live-run claim. See the
+[tests map](../README.md).
 
 ## Bootstrap composition (manual, offline)
 

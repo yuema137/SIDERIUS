@@ -40,7 +40,8 @@ What this means in practice:
 
 3. **Pseudo mode is NOT a substitute for real-mode tests.**
    Pseudo mode covers everything *except* "did the real LLM produce a valid
-   response". That is what real-mode tests (gated behind `--real-api-call`)
+   response". That is what real-provider tests (gated behind `--real-llm` or
+   its deprecated `--real-api-call` alias)
    exist for. Don't try to use pseudo mode to catch API quirks, schema drift
    on the LLM side, or response-format edge cases. You will fool yourself.
 

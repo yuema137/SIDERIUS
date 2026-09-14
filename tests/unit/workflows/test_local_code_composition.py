@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,28 @@ from workflows.task_composition import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest.fixture
+def isolated_health_plugin_registries() -> Iterator[None]:
+    """Restore task-plugin registrations after a composition witness.
+
+    The single-file composition test imports the masked-regression Health
+    provider as a real side effect.  Without restoring that process-global
+    registry, a later composition of the same pack fails on a duplicate
+    provider even though the later test owns an independent run scope.
+    """
+    from execute_tools.health_checks.registry import _PROVIDER_REGISTRY, _REGISTRY
+
+    checks_before = dict(_REGISTRY)
+    providers_before = dict(_PROVIDER_REGISTRY)
+    try:
+        yield
+    finally:
+        _REGISTRY.clear()
+        _REGISTRY.update(checks_before)
+        _PROVIDER_REGISTRY.clear()
+        _PROVIDER_REGISTRY.update(providers_before)
 
 
 def modular_fixture(root: Path) -> Path:
@@ -106,7 +129,9 @@ def test_missing_symbol_rolls_back_import_registration_and_captured_entry_hash(
     assert registered_task_data_path_ids() == before
 
 
-def test_single_file_composition_and_effective_health_match_base_receipt(tmp_path, monkeypatch):
+def test_single_file_composition_and_effective_health_match_base_receipt(
+    tmp_path, monkeypatch, isolated_health_plugin_registries
+):
     """Independent pre-change56fb57fb hashes pin omission, not a new self-oracle."""
     from core.generated_library import bind_generated_library_to_workspace
     from execute_tools.health_checks import _plugin_binding

@@ -14,21 +14,9 @@ and a focused command. Integration defaults are synthetic or recording; real
 LLM/training paths require explicit markers/options. No map implies a
 full-suite, live-provider, GPU, or scientific-result claim.
 
-## Optional external resources
+## External effects
 
-The shared fixtures behind `--real-data` and `--real-training` read their
-resource root only from the absolute path in `SIDERIUS_TEST_DATA_DIR`.
-Leaving the variable unset visibly skips that optional lane. Setting it to a
-blank, missing, non-directory, or incomplete resource is a qualification
-failure; it never falls back to a developer path or becomes a green skip.
-
-For example:
-
-```bash
-SIDERIUS_TEST_DATA_DIR=/absolute/path/to/test-data \
-  .venv/bin/python -m pytest <selected-test> --real-data -q
-```
-
-The remaining shared real-mode options and their callers require a separate
-ownership census before removal or replacement. This resource contract does
-not make a real scientific task a framework default.
+Framework tests do not provide a shared real-dataset or real-training mode.
+Real scientific data, task-owned executors, GPUs and full workflow evidence
+belong to each external task package. The shared `--real-llm` option selects
+only real provider calls; it never selects data or subprocess training.
