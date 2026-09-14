@@ -529,6 +529,14 @@ class ImplementorOutput(BaseModel):
         "new plugin was generated. See ``feat/v16-fixes`` commit history and "
         "``reports/v16_20260630.md`` §9.10.",
     )
+    loss_capability_metadata: CapabilityMetadata | None = Field(
+        default=None,
+        description="Registry metadata for a newly-generated loss plugin. "
+        "The implementor returns this payload without mutating the capability "
+        "index; the workflow commits it only after the complete candidate "
+        "passes validation and construction admission. ``None`` means the "
+        "candidate uses a built-in or already-registered loss.",
+    )
 
     @model_validator(mode="after")
     def _enforce_adjustment_ownership(self):

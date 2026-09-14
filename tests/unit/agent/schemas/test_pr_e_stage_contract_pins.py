@@ -105,6 +105,7 @@ IMPLEMENTOR_OUTPUT_KEYS = {
     "config_fields",
     "description_file_path",
     "loss_provenance",
+    "loss_capability_metadata",
     "mathematical_definition",
     "model_description",
     "model_file_path",

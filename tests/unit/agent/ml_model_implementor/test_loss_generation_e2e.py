@@ -496,18 +496,13 @@ class TestGenerateLossHappyPath:
         assert "PLUGIN_LOSS_CONFIG_CLASS = SnrWeightedMseConfig" in src
         assert "PLUGIN_LOSS_CLASS = SnrWeightedMse" in src
 
-    def test_registry_entry_written(self, agent_with_mocks, inp_loss_only):
+    def test_registry_entry_is_deferred_to_candidate_admission(
+        self, agent_with_mocks, inp_loss_only
+    ):
+        """Generation may write attempt-local source, but cannot advertise it."""
         agent_with_mocks._generate_loss(inp_loss_only)
         entries = agent_with_mocks._registry.list(capability_type="loss")
-        assert len(entries) == 1
-        e = entries[0]
-        assert e.name == "snr_weighted_mse"
-        assert e.capability_type == "loss"
-        assert e.source_iteration == "iter_007"
-        assert e.file_path.endswith("snr_weighted_mse.py")
-        assert e.created_at  # non-empty ISO-8601 string
-        # Description collapsed to one line.
-        assert "\n" not in e.description
+        assert entries == []
 
     def test_provenance_action_generated(self, agent_with_mocks, inp_loss_only):
         prov = agent_with_mocks._generate_loss(inp_loss_only)
@@ -664,6 +659,11 @@ class TestRunIntegration:
         assert out.loss_provenance is not None
         assert out.loss_provenance.action == "generated"
         assert out.loss_provenance.loss_name == "snr_weighted_mse"
+        assert out.loss_capability_metadata is not None
+        assert out.loss_capability_metadata.name == "snr_weighted_mse"
+        assert out.loss_capability_metadata.capability_type == "loss"
+        assert out.loss_capability_metadata.source_iteration == "iter_007"
+        assert "\n" not in out.loss_capability_metadata.description
 
     def test_run_with_registry_hit_skips_loss_llm(self, agent_with_mocks, inp_loss_only):
         """Pre-populate the registry; ``run()`` should not call the bridge

@@ -120,6 +120,7 @@ from core.run_invariants import (
     ensure_run_invariants,
     validate_stamped_invariants,
 )
+from core.runtime_control.construction_memory import CandidateAdmissionError
 from core.runtime_control.launch_guard import run_launch_self_test
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import DataScope, resolve_dataset_profile
@@ -949,130 +950,55 @@ def _cap_knowledge_cache(
     return capped, evicted
 
 
-_CONSTRUCTION_RSS_THRESHOLD_GB = 0.5  # 500 MB
-
-
-def _validate_construction_memory(
-    model_class: type,
-    config_class: type,
-    model_name: str,
-    representative_T: int = 16000,
-) -> None:
-    """Validate that instantiating the model plugin does not allocate
-    excessive RAM during ``__init__``.
-
-    Catches faulty SSM/attention implementations that pre-allocate buffers
-    scaling with T (e.g. ``[T, T]`` attention matrices, ``[B, T, d_state]``
-    state buffers) in ``__init__`` rather than in ``forward()``. Added after
-    the 2026-06-24 v15 arch chain was OOM-killed at 53 GB during VRAM
-    pre-flight — the suspect was a generated SSM plugin with a T-scaling
-    construction-time allocation that the structural VRAM probe could not
-    catch (because the offending allocation lived in CPU host RAM, not CUDA).
-
-    The check is cheap (one ``__init__`` call, no forward, no autograd)
-    and tight (RSS delta measured around a single ``model_class(cfg)``
-    invocation with ``gc.collect`` on either side).
-
-    Args:
-        model_class: the plugin's ``PLUGIN_MODEL_CLASS``.
-        config_class: the plugin's ``PLUGIN_CONFIG_CLASS``.
-        model_name: used in error messages.
-        representative_T: sequence length to test — defaults to ``16000``
-            which is the §10 attractor value for SSM/FNO families. At
-            T=16000, a single ``[T, T]`` float32 matrix = 1 GB, well above
-            the ``_CONSTRUCTION_RSS_THRESHOLD_GB`` floor. Injected into
-            the config as ``segmentation_size`` when the schema accepts
-            that field; otherwise the config's own defaults are used.
-
-    Raises:
-        ValueError: if construction RSS delta exceeds
-            ``_CONSTRUCTION_RSS_THRESHOLD_GB`` OR if ``__init__`` itself
-            raises (a plugin that cannot be constructed with default
-            config is already rejected by the dummy-tensor validator, but
-            we re-raise here as ``ValueError`` so callers see a uniform
-            failure shape).
-    """
-    import gc as _gc
-    import inspect as _inspect
-
-    import psutil as _psutil
-    import torch as _torch
-
-    # Real plugins are always ``nn.Module`` subclasses (plugin loader
-    # contract: ``PLUGIN_MODEL_CLASS: type — nn.Module subclass``). Stub
-    # classes used by some fixture tests aren't, and would crash inside
-    # ``model_class(cfg)`` for unrelated reasons. Skip with a visible
-    # warning so an accidental non-Module in a real path is still loud.
-    if not (isinstance(model_class, type) and issubclass(model_class, _torch.nn.Module)):
-        print(
-            f"    [MemCheck] '{model_name}' skipped — not an nn.Module subclass "
-            f"(type={type(model_class).__name__}).",
-            flush=True,
-        )
+def _admit_generated_model_construction(impl_output, model_name: str) -> None:
+    """Inspect and admit a generated model before staging or registration."""
+    if not os.path.isfile(impl_output.model_file_path):
+        # Test/pseudo implementations may intentionally provide no source;
+        # staging has the established no-op contract for that case.
         return
+    from core.runtime_control.construction_memory import admit_construction
+    from ml_models.plugin_loader import inspect_model_plugin
 
-    _gc.collect()
-    rss_before = _psutil.Process().memory_info().rss
-
-    model = None
-    cfg = None
-    try:
-        # Inject representative_T as segmentation_size when the schema
-        # accepts it. Pydantic v2 exposes the field map via model_fields.
-        cfg_kwargs: dict[str, Any] = {}
-        fields = getattr(config_class, "model_fields", None) or {}
-        if "segmentation_size" in fields:
-            cfg_kwargs["segmentation_size"] = representative_T
-        try:
-            cfg = config_class(**cfg_kwargs)
-        except Exception:
-            # If representative_T was rejected (out of declared bounds),
-            # fall back to the schema's own defaults. Still better than
-            # skipping — the bug usually trips at any T ≥ a few thousand.
-            cfg = config_class()
-        # Mirror evaluate_vram_skill._build_model: pass loss_type when the
-        # model's __init__ accepts it (fcnet hybrid pattern, plus any
-        # future plugin that adopts the same convention).
-        if "loss_type" in _inspect.signature(model_class.__init__).parameters:
-            model = model_class(cfg, loss_type="focal")
-        else:
-            model = model_class(cfg)
-        # Measure RSS BEFORE releasing the model. ``del model, cfg`` would
-        # let the allocator reclaim the buffers before we ever sample
-        # ``rss_after``, so a faulty plugin's 1+ GB allocation would
-        # cancel out and the check would never trip.
-        _gc.collect()
-        rss_after = _psutil.Process().memory_info().rss
-    except Exception as e:
-        raise ValueError(
-            f"Model plugin '{model_name}': __init__ raised {type(e).__name__}: {e}. "
-            f"The plugin must be constructable with default config."
-        ) from e
-    finally:
-        # Release whatever was successfully constructed. Runs after the
-        # measurement, so even a passing plugin doesn't leak its
-        # construction-time RSS into the next checkpoint.
-        del model, cfg
-        _gc.collect()
-
-    delta_gb = (rss_after - rss_before) / 1024**3
-
-    print(
-        f"    [MemCheck] '{model_name}' __init__ RSS delta: {delta_gb:.3f} GB "
-        f"(threshold: {_CONSTRUCTION_RSS_THRESHOLD_GB} GB)",
-        flush=True,
-    )
-
-    if delta_gb > _CONSTRUCTION_RSS_THRESHOLD_GB:
-        raise ValueError(
-            f"Model plugin '{model_name}' allocated {delta_gb:.2f} GB during "
-            f"__init__ (threshold: {_CONSTRUCTION_RSS_THRESHOLD_GB} GB). "
-            f"This indicates a construction-time buffer that scales with T. "
-            f"Common causes: [T, T] attention/SSM matrices, [B, T, d_state] "
-            f"state buffers, FFT mixing matrices. "
-            f"Fix: move all T-dependent allocations to forward(). "
-            f"SSM hidden states must be shape [B, d_state], not [B, T, d_state]."
+    with inspect_model_plugin(impl_output.model_file_path) as plugin:
+        if plugin is None:
+            raise CandidateAdmissionError(
+                f"Candidate {model_name!r} plugin metadata could not be loaded; "
+                "repair the generated plugin and propose again.",
+                model_name=model_name,
+            )
+        admit_construction(
+            model_class=plugin["model_class"],
+            config_class=plugin["config_class"],
+            model_name=model_name,
         )
+
+
+def _commit_candidate_capabilities(impl_output) -> None:
+    """Publish model/loss capabilities after complete candidate admission."""
+    metadata_items = tuple(
+        metadata
+        for metadata in (
+            getattr(impl_output, "loss_capability_metadata", None),
+            getattr(impl_output, "capability_metadata", None),
+        )
+        if metadata is not None
+    )
+    if metadata_items:
+        from core.capability_registry import CapabilityRegistry
+
+        registry = CapabilityRegistry()
+        for metadata in metadata_items:
+            registry.register(metadata)
+            print(
+                f"    ✅ Registered → {metadata.capability_type} '{metadata.name}' (post-admission)"
+            )
+
+    model_metadata = getattr(impl_output, "capability_metadata", None)
+    if model_metadata is None:
+        return
+    registered = register_model_in_memory(impl_output.model_file_path)
+    if registered is not None:
+        print(f"    ✅ MODEL_REGISTRY ← '{registered}' (in-memory)")
 
 
 def resolve_run_implementor_blocks(task_composition: Any) -> Any:
@@ -1117,6 +1043,18 @@ def resolve_run_proposal_blocks(task_composition: Any) -> Any:
 
 class BaselineIsolationViolation(ValueError):
     """A run under ``--baseline_isolation`` reached for a bundled baseline."""
+
+
+def _proposal_attempt_failure(exc: Exception) -> str:
+    """Render recoverable proposal-node failures; re-raise integrity defects."""
+    from core.local_code.failure import raise_if_code_package_failure
+
+    raise_if_code_package_failure(exc)
+    if isinstance(exc, CandidateAdmissionError):
+        return f"CandidateAdmissionError: Candidate admission refused: {exc}"
+    if isinstance(exc, BaselineIsolationViolation):
+        return f"BaselineIsolationViolation: Candidate proposal refused: {exc}"
+    return f"Node error: {type(exc).__name__}: {exc}"
 
 
 def refuse_builtin_proposal_under_isolation(
@@ -1356,24 +1294,6 @@ def _register_plugin(
         raise_if_code_package_failure(e)
         print(f"    Warning: could not extend registries: {e}")
 
-    # Construction-time RSS validator — catches faulty SSM/attention plugins
-    # that pre-allocate T-scaling buffers in __init__ before the structural
-    # VRAM probe ever runs. Runs OUTSIDE the registry-extension try/except
-    # because a positive verdict here is load-bearing: a faulty plugin that
-    # passes registry extension but allocates 50+ GB at construct time would
-    # OOM-kill the orchestrator at the tuner's VRAM probe. The
-    # ``ValueError`` from this helper propagates up to the iteration loop
-    # so the iteration ends loudly instead of silently advancing.
-    if registered is not None:
-        from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
-        from ml_models.models_sandbox import MODEL_REGISTRY
-
-        _validate_construction_memory(
-            model_class=MODEL_REGISTRY[registered],
-            config_class=PLUGIN_CONFIG_REGISTRY[registered],
-            model_name=model_name,
-        )
-
 
 # ---------------------------------------------------------------------------
 # L6c — Loss promotion to the global library
@@ -1578,12 +1498,11 @@ def _promote_model_to_global(impl_output) -> None:
 
     Trigger condition: ``impl_output.model_file_path`` exists AND
     ``impl_output.model_type`` is registered in the capability index with
-    ``capability_type='model'``. The implementor writes that entry
-    immediately after building the plugin (so by the time the workflow
-    sees ``impl_output``, the index entry already exists), and Branch B
-    reuse paths leave the existing registry entry alone — so this helper
-    no-ops cleanly on Branch B (file already at the global path, registry
-    already correct).
+    ``capability_type='model'``. The workflow writes that entry only after
+    code validation and construction admission; this helper runs later in
+    the same accepted-candidate path. Branch B reuse paths leave the existing
+    registry entry alone, so this helper no-ops cleanly there (file already at
+    the global path, registry already correct).
 
     Content-hash deduplication: before copying, compares SHA256 of the
     source against every ``.py`` in the active library set. Workspace-bound
@@ -2780,6 +2699,10 @@ def run_workflow(
                 )
 
         for attempt in range(1, launch.max_proposal_attempts + 1):
+            # Construction admission happens after code validation. Reset the
+            # validation result so a refused candidate cannot leave a stale
+            # ``passed`` value that escapes a later retry or exhaustion.
+            validation = None
             print(
                 f"  [{iteration}.{attempt}] Proposing new model (attempt {attempt}/{launch.max_proposal_attempts})..."
             )
@@ -3055,6 +2978,7 @@ def run_workflow(
 
                     if validation.passed:
                         print("    All 7 checks passed.\n")
+                        _admit_generated_model_construction(impl_output, proposal.model_name)
                         # Mirror the #92 fix for the model surface: register
                         # the model in ``_capability_index.json`` and load it
                         # into ``MODEL_REGISTRY`` ONLY after validation
@@ -3066,21 +2990,7 @@ def run_workflow(
                         # phantom index entry that every future proposer
                         # then advertised as a Branch B candidate (v16
                         # iter_015 ``gated_dilated_tcn``).
-                        _capmeta = getattr(impl_output, "capability_metadata", None)
-                        if _capmeta is not None:
-                            from core.capability_registry import (
-                                CapabilityRegistry as _CapReg,
-                            )
-
-                            _CapReg().register(_capmeta)
-                            print(f"    ✅ Registered → model '{_capmeta.name}' (post-validation)")
-                            _registered_in_memory = register_model_in_memory(
-                                impl_output.model_file_path
-                            )
-                            if _registered_in_memory is not None:
-                                print(
-                                    f"    ✅ MODEL_REGISTRY ← '{_registered_in_memory}' (in-memory)"
-                                )
+                        _commit_candidate_capabilities(impl_output)
                         break
 
                     previous_validation_failure = (
@@ -3099,10 +3009,8 @@ def run_workflow(
                     print("    Retrying with a new proposal...\n")
 
             except Exception as e:
-                from core.local_code.failure import raise_if_code_package_failure
-
-                raise_if_code_package_failure(e)
-                error_msg = f"Node error: {type(e).__name__}: {e}"
+                validation = None
+                error_msg = _proposal_attempt_failure(e)
                 print(f"    ERROR: {error_msg}")
                 previous_failures.append(error_msg)
                 if attempt < launch.max_proposal_attempts:

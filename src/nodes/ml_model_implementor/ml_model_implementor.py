@@ -1836,10 +1836,9 @@ class MLModelImplementor:
              error back into ``IMPLEMENTOR_LOSS_REPAIR_PROMPT``.
           4. **Write** the assembled source to
              ``{inp.loss_dir}/{spec.loss_name}.py``.
-          5. **Register** in the capability index with
-             ``capability_type="loss"`` and ``source_iteration`` from
-             ``inp.storage.local.run_name``.
-          6. Return ``LossProvenance(action="generated", …)``.
+          5. Return ``LossProvenance(action="generated", …)``. The caller
+             builds registry metadata but does not commit it until the whole
+             candidate passes validation and construction admission.
 
         Raises:
             ValueError: When all retries fail. The error message includes
@@ -1963,26 +1962,7 @@ class MLModelImplementor:
             f.write(plugin_src)
         print(f"✅ Loss written  → {loss_file_path}")
 
-        # ---- 5. Register in the capability index ------------------------
-        registry_description = " ".join(spec.description.split())
-        self._registry.register(
-            CapabilityMetadata(
-                name=loss_name,
-                capability_type="loss",
-                file_path=loss_file_path,
-                created_at=datetime.now(UTC).isoformat(),
-                source_iteration=source_iteration,
-                description=registry_description,
-                # L6c — persist the formula so the proposer's
-                # {available_losses_block} can render it for
-                # semantic-similarity judgment (Branch B vs Branch C).
-                mathematical_definition=spec.mathematical_definition,
-                contract_snapshot=expected_snapshot,
-            )
-        )
-        print(f"✅ Registered    → loss '{loss_name}' (source={source_iteration})")
-
-        # ---- 6. Return provenance ---------------------------------------
+        # ---- 5. Return provenance ---------------------------------------
         return LossProvenance(
             loss_name=loss_name,
             action="generated",
@@ -2002,9 +1982,22 @@ class MLModelImplementor:
         # spend. ``loss_provenance`` is None when the proposer used a
         # built-in loss type (``inp.custom_loss_spec is None``).
         loss_provenance: LossProvenance | None = None
+        loss_capability_metadata: CapabilityMetadata | None = None
         if inp.custom_loss_spec is not None:
             # Branch C: proposer emitted a CustomLossSpec → generate the loss.
             loss_provenance = self._generate_loss(inp)
+            if loss_provenance.action == "generated":
+                spec = inp.custom_loss_spec
+                loss_capability_metadata = CapabilityMetadata(
+                    name=loss_provenance.loss_name,
+                    capability_type="loss",
+                    file_path=loss_provenance.loss_file_path,
+                    created_at=datetime.now(UTC).isoformat(),
+                    source_iteration=loss_provenance.source_iteration,
+                    description=" ".join(spec.description.split()),
+                    mathematical_definition=spec.mathematical_definition,
+                    contract_snapshot=loss_provenance.contract_snapshot,
+                )
         else:
             # Either Branch A (built-in loss) or Branch B (reuse from registry).
             # Discriminate by inspecting baseline_config.loss_config.loss_type.
@@ -2138,6 +2131,7 @@ class MLModelImplementor:
                 # the legacy path for every reuse iteration.
                 model_io_contract=inp.forward_contract.model_io,
                 loss_provenance=loss_provenance,
+                loss_capability_metadata=loss_capability_metadata,
             )
 
         print(f"🔧 Implementing model '{inp.model_name}' ...")
@@ -2304,6 +2298,7 @@ class MLModelImplementor:
             # prose-only path, which the validator preserves unchanged.
             model_io_contract=inp.forward_contract.model_io,
             loss_provenance=loss_provenance,
+            loss_capability_metadata=loss_capability_metadata,
             capability_metadata=capability_metadata,
         )
 
