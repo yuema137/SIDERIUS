@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import torch
 import torch.nn as nn
 
 from agent.skills.evaluate_vram_skill import batch_resolver
@@ -80,6 +81,23 @@ def test_picks_largest_batch_when_all_fit(monkeypatch):
     cap = 10 * 1024**3  # 10 GB — plenty
 
     assert resolve_inference_batch(_NoOp(), segmentation_size=1000, cap_bytes=cap) == 64
+
+
+def test_missing_segmentation_uses_supplied_probe_without_intensity(monkeypatch):
+    """A fixed task probe is measured; absent temporal geometry is not priced."""
+    _install_probe(monkeypatch, lambda B: (1_000_000, B * 1_000_000))
+    probe = torch.zeros((1, 4), dtype=torch.float32)
+    assert (
+        resolve_inference_batch(
+            _NoOp(), segmentation_size=None, supplied_probe=probe, cap_bytes=10 * 1024**3
+        )
+        == 64
+    )
+
+
+def test_missing_segmentation_without_probe_refuses_by_name():
+    with pytest.raises(ValueError, match="segmentation dimension unavailable"):
+        resolve_inference_batch(_NoOp(), segmentation_size=None, cap_bytes=10 * 1024**3)
 
 
 def test_picks_largest_batch_that_fits_vram(monkeypatch):

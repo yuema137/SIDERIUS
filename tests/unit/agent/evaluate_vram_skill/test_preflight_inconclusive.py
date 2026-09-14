@@ -192,7 +192,7 @@ class TestAgentFacingText:
         result = wrapper.run_skill(
             None,
             model_type="synthetic_model",
-            model_config={},
+            model_config={"segmentation_size": 1},
             train_config={},
             loss_config={},
         )

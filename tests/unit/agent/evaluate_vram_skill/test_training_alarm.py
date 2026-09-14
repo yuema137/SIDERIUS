@@ -55,7 +55,7 @@ def test_native_training_alarm_is_reachable_through_wrapper(monkeypatch):
     result = wrapper.run_skill(
         None,
         model_type="synthetic",
-        model_config={},
+        model_config={"segmentation_size": 1},
         train_config={"batch_size": 1},
         loss_config={"loss_type": "smooth_l1"},
         hardware_context=_eligible_context(),

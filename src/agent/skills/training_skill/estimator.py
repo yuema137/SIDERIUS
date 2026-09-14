@@ -175,6 +175,30 @@ def resolve_model_field(
     return safety_margin
 
 
+class SegmentationDimensionUnavailableError(ValueError):
+    """A legacy temporal probe needs a dimension the run did not declare."""
+
+
+def resolve_optional_segmentation_size(model_type: str, model_config: dict[str, Any]) -> int | None:
+    """Resolve a declared segmentation size without inventing a fallback.
+
+    Unlike :func:`resolve_model_field`, this resolver has no safety margin.
+    ``None`` is meaningful: callers may use a task-owned concrete probe that
+    does not have a temporal axis.  It must never be replaced by tensor width
+    or a historical task constant.
+    """
+    supplied = model_config.get("segmentation_size")
+    if supplied is not None and _usable(supplied):
+        return int(supplied)
+
+    from ml_models.models_format_sandbox import get_config_class
+
+    declared = _declared_default(get_config_class(model_type), "segmentation_size")
+    if declared is not None and _usable(declared):
+        return int(declared)
+    return None
+
+
 def resolve_train_field(train_config: dict[str, Any], field: str, *, safety_margin: int) -> int:
     """``resolve_model_field`` for the training config.
 
