@@ -336,6 +336,11 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
                 "semantic_fingerprint": spec.task_probe_data.semantic_fingerprint,
             }
         else:
+            if seg is None:  # narrowed from the explicit temporal branch above
+                raise RuntimeError(
+                    "a legacy temporal measurement reached bounded probe loading "
+                    "without a segmentation dimension"
+                )
             bounded = load_bounded_probe_batch(
                 data_dir=spec.data_dir,
                 batch_size=input_batch,
