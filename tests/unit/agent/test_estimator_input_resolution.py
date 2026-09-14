@@ -53,7 +53,9 @@ class TestResolutionOrder:
 
     def test_required_segmentation_rejects_explicit_invalidity(self):
         with pytest.raises(ValueError, match="invalid segmentation_size"):
-            require_declared_segmentation_size("transformer", {"segmentation_size": 0}, consumer="test")
+            require_declared_segmentation_size(
+                "transformer", {"segmentation_size": 0}, consumer="test"
+            )
 
     def test_optional_segmentation_has_no_historical_margin(self):
         assert resolve_optional_segmentation_size(_UNDECLARED, {}) is None
@@ -280,9 +282,7 @@ class TestPhaseMarginsDifferDeliberately:
         assert vram_seg > time_seg
 
         with pytest.raises(SegmentationDimensionUnavailableError):
-            train.estimate_peak_bytes(
-                _UNDECLARED, {}, {"batch_size": 1}, {"loss_type": "ce"}, 1
-            )
+            train.estimate_peak_bytes(_UNDECLARED, {}, {"batch_size": 1}, {"loss_type": "ce"}, 1)
         with pytest.raises(SegmentationDimensionUnavailableError):
             inf.estimate_peak_bytes(_UNDECLARED, {}, 1)
 
