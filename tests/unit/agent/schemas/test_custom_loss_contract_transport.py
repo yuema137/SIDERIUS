@@ -191,6 +191,35 @@ def test_task_owned_loss_refuses_a_different_global_implementation_with_the_same
         merge_task_owned_custom_loss((global_loss,), task_loss)
 
 
+def test_task_owned_loss_digest_uses_the_bound_captured_source(tmp_path):
+    """Finite package bytes remain authoritative after the source path changes.
+
+    MUTATION TARGET: reading or requiring the live task checkout after capture
+    makes an immutable run fail or silently validate bytes it will not execute.
+    """
+    from core.local_code import bind_code_package
+    from core.local_code.capture import CodePackageDeclaration, capture_package
+
+    source = tmp_path / "task_loss.py"
+    source.write_text("# captured implementation\n", encoding="utf-8")
+    package = capture_package(
+        CodePackageDeclaration(root=".", files=(source.name,)),
+        tmp_path,
+    )
+    task_loss = TaskOwnedCustomLoss(
+        name="task_loss",
+        file_path=str(source),
+        content_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        contract_snapshot=_snapshot(),
+    )
+    source.unlink()
+
+    with bind_code_package(package):
+        merged = merge_task_owned_custom_loss((), task_loss)
+
+    assert tuple(item.name for item in merged) == ("task_loss",)
+
+
 def test_custom_loss_spec_json_and_protocol_preserve_framework_snapshot(tmp_path):
     from agent.schemas.hyperparam_tuning import TaskCompositionRef
     from agent.schemas.proposal import CustomLossSpec, ProposalOutput

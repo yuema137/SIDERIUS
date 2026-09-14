@@ -15,7 +15,7 @@ import os
 from collections.abc import Iterable
 from typing import Any, Literal, Protocol, cast
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent.schemas.model_io_contract import DtypeAdmissibility, TensorContract
 from core.capability_registry import CapabilityContractSnapshot, CapabilityMetadata
@@ -181,6 +181,13 @@ class TaskOwnedCustomLoss(BaseModel):
     file_path: str = Field(min_length=1)
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     contract_snapshot: CapabilityContractSnapshot
+
+    @field_validator("file_path")
+    @classmethod
+    def _file_path_is_absolute(cls, value: str) -> str:
+        if not os.path.isabs(value):
+            raise ValueError("task-owned custom-loss file_path must be absolute")
+        return value
 
 
 def _task_owned_metadata(task_loss: TaskOwnedCustomLoss) -> CapabilityMetadata:
