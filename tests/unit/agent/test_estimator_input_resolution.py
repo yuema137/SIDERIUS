@@ -28,6 +28,7 @@ import pytest
 
 from agent.skills.training_skill.estimator import (
     resolve_model_field,
+    resolve_optional_segmentation_size,
     resolve_train_field,
 )
 from tests.helpers.two_family_profile import make_two_family_profile
@@ -41,6 +42,15 @@ _PROFILE = make_two_family_profile(
 
 
 class TestResolutionOrder:
+    def test_optional_segmentation_has_no_historical_margin(self):
+        assert resolve_optional_segmentation_size(_UNDECLARED, {}) is None
+
+    def test_optional_segmentation_preserves_explicit_and_declared_values(self):
+        assert resolve_optional_segmentation_size("transformer", {}) == 20000
+        assert (
+            resolve_optional_segmentation_size("transformer", {"segmentation_size": 1234}) == 1234
+        )
+
     def test_an_explicit_value_wins_over_the_declaration(self):
         assert resolve_model_field("transformer", {"nhead": 8}, "nhead", safety_margin=2) == 8
 

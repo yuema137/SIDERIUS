@@ -2,14 +2,15 @@
 
 Replaces the deprecated ``_INFERENCE_BATCH_SIZES`` table with a probe-driven
 search. Given a CPU-instantiated model and a VRAM cap, iterate candidate
-batch sizes from largest to smallest; accept the first that satisfies BOTH
-of the Phase 6.6 caps:
+batch sizes from largest to smallest; accept the first that satisfies every
+applicable Phase 6.6 cap:
 
   (1) Predicted peak VRAM ≤ ``cap_bytes`` — from the structural probe plus
       the calibrated CUDA-context term (``overhead.cuda_context_bytes``).
   (2) ``compute_intensity.passes(B, segmentation_size)`` — §3.10's CUDA
-      kernel-watchdog heuristic. A batch that fits VRAM but violates
-      intensity is skipped just as firmly as one that blows the cap.
+      kernel-watchdog heuristic, only when a temporal size is declared.
+      A concrete task-owned probe with no temporal dimension is still
+      measured, but is not judged against invented temporal geometry.
 
 If no candidate satisfies both caps, raise ``ValueError`` whose diagnostic
 names the binding cap ("vram", "compute_intensity", or both) at the
@@ -85,8 +86,9 @@ def _predict_inference_peak_bytes(probe: ProbeResult) -> int:
 
 def _build_probe_input(
     batch_size: int,
-    segmentation_size: int,
+    segmentation_size: int | None,
     model_io_contract: ModelIOContract | None = None,
+    supplied_probe: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Zero/contract-valued input matching the candidate's forward contract.
 
@@ -101,6 +103,17 @@ def _build_probe_input(
     ``evaluate_vram_skill.wrapper._probe_input_tensor`` uses, so the search
     probes the same tensor a real forward would receive.
     """
+    if supplied_probe is not None:
+        if supplied_probe.ndim == 0 or supplied_probe.shape[0] < 1:
+            raise ValueError("supplied probe input must have a batch dimension")
+        # A task-owned probe is concrete evidence. Repeat its first example
+        # only to test candidate batch sizes; no dimension is inferred from it.
+        return supplied_probe[:1].expand((batch_size, *supplied_probe.shape[1:])).clone()
+    if segmentation_size is None:
+        raise ValueError(
+            "segmentation dimension unavailable: inference batch probing needs "
+            "a declared segmentation_size or a task-owned probe input"
+        )
     if model_io_contract is not None:
         from agent.skills.model_io_probe_skill import build_model_input
 
@@ -126,7 +139,7 @@ class BatchSearchTimeout(Exception):
 
 def resolve_inference_batch(
     model: nn.Module,
-    segmentation_size: int,
+    segmentation_size: int | None,
     cap_bytes: int,
     *,
     candidate_batches: Sequence[int] = _DEFAULT_CANDIDATE_BATCHES,
@@ -134,13 +147,15 @@ def resolve_inference_batch(
     model_identity: str | None = None,
     model_io_contract: ModelIOContract | None = None,
     max_batch_size: int | None = None,
+    supplied_probe: torch.Tensor | None = None,
 ) -> int:
     """Return the largest candidate batch that clears both caps.
 
     Args:
         model: CPU-instantiated ``nn.Module``. Probed with zero-valued
             int64 inputs of shape ``(B, segmentation_size)``.
-        segmentation_size: time-axis length T.
+        segmentation_size: declared time-axis length T, or ``None`` when a
+            supplied concrete probe has no applicable temporal dimension.
         cap_bytes: usable VRAM budget, in bytes. Callers typically pass
             ``HardwareContext.usable_cap_bytes`` (see §3.9.1).
         candidate_batches: descending sequence of batch sizes to try. Must
@@ -149,7 +164,8 @@ def resolve_inference_batch(
 
     Returns:
         The first (largest) ``B`` for which
-        ``predicted_peak ≤ cap_bytes`` AND ``compute_intensity.passes(B, T)``.
+        ``predicted_peak ≤ cap_bytes`` and, when T is declared,
+        ``compute_intensity.passes(B, T)``.
 
     Raises:
         ValueError: when no candidate satisfies both caps, or when
@@ -202,7 +218,9 @@ def resolve_inference_batch(
             probe = probe_activation_footprint(
                 model=model,
                 loss_module=None,
-                input_sample=_build_probe_input(B, segmentation_size, model_io_contract),
+                input_sample=_build_probe_input(
+                    B, segmentation_size, model_io_contract, supplied_probe
+                ),
                 target_sample=None,
                 mode="inference",
             )
@@ -260,7 +278,9 @@ def resolve_inference_batch(
             )
         peak = _predict_inference_peak_bytes(probe)
         vram_ok = peak <= cap_bytes
-        intensity_ok = compute_intensity.passes(B, segmentation_size)
+        intensity_ok = (
+            True if segmentation_size is None else compute_intensity.passes(B, segmentation_size)
+        )
 
         if vram_ok and intensity_ok:
             return B
@@ -281,6 +301,15 @@ def resolve_inference_batch(
         reasons.append("compute_intensity")
     binding = "+".join(reasons) if reasons else "unknown"
 
+    remediation = (
+        "reduce model memory or use a smaller task-supported inference batch"
+        if segmentation_size is None
+        else (
+            "if binding includes 'vram', reduce model size or segmentation_size; "
+            "if binding includes 'compute_intensity', reduce segmentation_size "
+            "or batch_size"
+        )
+    )
     raise ValueError(
         f"No candidate batch in {list(candidate_batches)} satisfies both caps "
         f"at segmentation_size={segmentation_size}. "
@@ -288,7 +317,5 @@ def resolve_inference_batch(
         f"At B={last_B}: predicted_peak={last_peak:,} B, "
         f"cap_bytes={cap_bytes:,} B, "
         f"compute_intensity_passes={last_intensity_ok}. "
-        f"If binding includes 'vram', reduce model size or segmentation_size; "
-        f"if binding includes 'compute_intensity', reduce segmentation_size "
-        f"or batch_size."
+        f"Remediation: {remediation}."
     )

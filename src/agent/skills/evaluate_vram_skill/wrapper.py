@@ -76,7 +76,10 @@ from agent.skills.model_io_probe_skill import (
     output_without_class_axis,
     realize_shape,
 )
-from agent.skills.training_skill.estimator import resolve_model_field
+from agent.skills.training_skill.estimator import (
+    SegmentationDimensionUnavailableError,
+    resolve_optional_segmentation_size,
+)
 from core.hardware_context import HardwareContext, discover
 from core.local_code.failure import raise_if_code_package_failure
 from execute_tools.model_input_dtype import TRAINING_SITE_DTYPE, resolve_input_dtype
@@ -585,16 +588,32 @@ def _parse_binding_label(exc_msg: str) -> str:
     return parts[1].split(".", 1)[0].strip()
 
 
+def _require_segmentation_size(seg_size: int | None, *, context: str) -> int:
+    """Return declared segmentation geometry or refuse with its context.
+
+    A task-owned concrete probe can make a VRAM measurement valid without a
+    temporal dimension.  The intensity and combined reports, however, must
+    describe that dimension explicitly; keeping this narrowing at their
+    boundary avoids accidentally restoring a framework default.
+    """
+    if seg_size is None:
+        raise SegmentationDimensionUnavailableError(
+            f"segmentation dimension unavailable: {context} requires a declared segmentation_size"
+        )
+    return seg_size
+
+
 def _render_inference_killer(
     *,
     binding: str,
     model_type: str,
     model_cfg: dict,
     loss_type: str,
-    seg_size: int,
+    seg_size: int | None,
     cap_bytes: int,
     total_memory_bytes: int,
     model_io_contract: ModelIOContract | None = None,
+    supplied_probe: torch.Tensor | None = None,
 ) -> killer_report.KillerReport:
     """Build a killer report for the inference-resolver-failed case.
 
@@ -603,31 +622,53 @@ def _render_inference_killer(
     VRAM-binding failures we re-probe the model once at ``B=1`` so the
     per-layer attribution the Proposer reads is faithful to the failing
     mode (inference, not training)."""
+    if "compute_intensity" in binding and seg_size is None:
+        raise RuntimeError(
+            "compute-intensity cannot bind without a declared segmentation dimension"
+        )
     if binding == "compute_intensity":
         # Intensity failure at ``B=1`` means ``1 × T > 800_000`` — a pure
         # ``segmentation_size`` problem, no layer attribution required.
         return killer_report.render_intensity_report(
             batch_size=1,
-            segmentation_size=seg_size,
+            segmentation_size=_require_segmentation_size(
+                seg_size, context="compute-intensity attribution"
+            ),
         )
 
+    if supplied_probe is None and seg_size is None:
+        raise SegmentationDimensionUnavailableError(
+            "segmentation dimension unavailable: inference killer attribution "
+            "needs a declared segmentation_size or task-owned probe"
+        )
     model_tmp = _build_model(model_type, model_cfg, loss_type)
     inf_probe = probe_activation_footprint(
         model=model_tmp,
         loss_module=None,
-        input_sample=_probe_input_tensor(1, seg_size, model_io_contract),
+        input_sample=(
+            supplied_probe[:1].clone()
+            if supplied_probe is not None
+            else _probe_input_tensor(
+                1,
+                _require_segmentation_size(seg_size, context="VRAM/compute-intensity attribution"),
+                model_io_contract,
+            )
+        ),
         target_sample=None,
         mode="inference",
     )
     inf_peak, _ = _compose_inference_peak(inf_probe)
     if binding == "vram+compute_intensity":
+        declared_seg_size = _require_segmentation_size(
+            seg_size, context="VRAM/compute-intensity attribution"
+        )
         return killer_report.render_combined_report(
             probe=inf_probe,
             predicted_peak_bytes=inf_peak,
             cap_bytes=cap_bytes,
             total_memory_bytes=total_memory_bytes,
             batch_size=1,
-            segmentation_size=seg_size,
+            segmentation_size=declared_seg_size,
         )
     return killer_report.render_vram_report(
         probe=inf_probe,
@@ -649,10 +690,11 @@ def _render_killer(
     model_cfg: dict,
     loss_type: str,
     batch_size: int,
-    seg_size: int,
+    seg_size: int | None,
     cap_bytes: int,
     total_memory_bytes: int,
     model_io_contract: ModelIOContract | None = None,
+    supplied_probe: torch.Tensor | None = None,
 ) -> killer_report.KillerReport:
     """Pick the right renderer based on which cap(s) bound the refusal.
 
@@ -661,6 +703,10 @@ def _render_killer(
     dominates memory + wall time). The attribution for a training
     failure uses the training probe we already have in hand.
     """
+    if not training_intensity_ok and seg_size is None:
+        raise RuntimeError(
+            "training compute-intensity cannot bind without a declared segmentation dimension"
+        )
     if not training_vram_ok and not training_intensity_ok:
         return killer_report.render_combined_report(
             probe=training_probe,
@@ -668,7 +714,9 @@ def _render_killer(
             cap_bytes=cap_bytes,
             total_memory_bytes=total_memory_bytes,
             batch_size=batch_size,
-            segmentation_size=seg_size,
+            segmentation_size=_require_segmentation_size(
+                seg_size, context="VRAM/compute-intensity attribution"
+            ),
         )
     if not training_vram_ok:
         return killer_report.render_vram_report(
@@ -678,7 +726,10 @@ def _render_killer(
             total_memory_bytes=total_memory_bytes,
         )
     if not training_intensity_ok:
-        return killer_report.render_intensity_report(batch_size, seg_size)
+        return killer_report.render_intensity_report(
+            batch_size,
+            _require_segmentation_size(seg_size, context="compute-intensity attribution"),
+        )
     if not inference_ok:
         return _render_inference_killer(
             binding=_parse_binding_label(inference_err or ""),
@@ -689,6 +740,7 @@ def _render_killer(
             cap_bytes=cap_bytes,
             total_memory_bytes=total_memory_bytes,
             model_io_contract=model_io_contract,
+            supplied_probe=supplied_probe,
         )
     raise RuntimeError("_render_killer called with no binding failure")
 
@@ -770,13 +822,25 @@ def run_skill(sandbox, **kwargs):
     # use it; this was the last holdout. The margin keeps the previous last
     # resort, so behaviour is unchanged whenever the key is present — which is
     # every production plan measured across 1,844 persisted planner configs.
-    seg_size = resolve_model_field(model_type, model_cfg, "segmentation_size", safety_margin=40000)
+    # A task-owned concrete probe can be valid without temporal geometry.
+    # Resolve only declarations here; never turn absent geometry into the
+    # historical 40,000 value (or infer it from the probe tensor width).
+    seg_size = resolve_optional_segmentation_size(model_type, model_cfg)
     optimizer = str(train_cfg.get("optimizer") or _DEFAULT_OPTIMIZER).lower()
 
     print(
         f"\n>>> [Skill: VRAMEval] Pre-flight for {model_type.upper()} "
         f"(B={batch_size}, T={seg_size}, loss={loss_type})..."
     )
+
+    # An unknown model has no schema boundary at which to report a malformed
+    # candidate.  Preserve the preflight's early geometry refusal for this
+    # case without restoring a default segmentation size.
+    if seg_size is None and probe_input_sample is None and get_config_class(model_type) is None:
+        raise SegmentationDimensionUnavailableError(
+            "segmentation dimension unavailable: this VRAM pre-flight has no "
+            "declared segmentation_size and no task-owned probe input"
+        )
 
     try:
         # 1. Hardware context → cap ──────────────────────────────────────
@@ -807,21 +871,28 @@ def run_skill(sandbox, **kwargs):
         )
 
         # 2. Instantiate model (schema validation happens here) ───────────
-        #
-        # D2 — the geometry authority's second consumer, and the one a real
-        # run reaches FIRST: admission runs before `execute_training`, and
-        # the probe below calls `loss_module(logits, target)`. Same shared
-        # function the config-validation branches call, so no verdict can
-        # differ between them; re-inlining the rule here is the defect V21
-        # PR A1 deleted.
         _refuse_unrunnable_loss_geometry(model_type, loss_type, model_io_contract)
         try:
             model_for_train = _build_model(model_type, model_cfg, loss_type)
             loss_module = get_criterion(LossConfig(**loss_cfg))
         except ValidationError as ve:
+            if seg_size is None and any(
+                tuple(error.get("loc") or ()) == ("segmentation_size",)
+                and error.get("type") == "missing"
+                for error in ve.errors()
+            ):
+                raise SegmentationDimensionUnavailableError(
+                    "segmentation dimension unavailable: the model config "
+                    "requires segmentation_size and the task probe cannot supply it"
+                ) from ve
             return _schema_violation_response(
                 _extract_schema_violations(ve),
                 model_cfg,
+            )
+        if seg_size is None and probe_input_sample is None:
+            raise SegmentationDimensionUnavailableError(
+                "segmentation dimension unavailable: this VRAM pre-flight has no "
+                "declared segmentation_size and no task-owned probe input"
             )
         num_params = sum(p.numel() for p in model_for_train.parameters())
         print(f"    Parameters : {num_params:,}")
@@ -861,7 +932,7 @@ def run_skill(sandbox, **kwargs):
         else:
             x_train, y_train = _build_probe_tensors(
                 batch_size,
-                seg_size,
+                _require_segmentation_size(seg_size, context="synthetic training probe"),
                 loss_type,
                 loss_name,
                 model_type=model_type,
@@ -880,7 +951,9 @@ def run_skill(sandbox, **kwargs):
             optimizer,
         )
         training_vram_ok = training_peak <= cap_bytes
-        training_intensity_ok = compute_intensity.passes(batch_size, seg_size)
+        training_intensity_ok = (
+            True if seg_size is None else compute_intensity.passes(batch_size, seg_size)
+        )
 
         # Free training-phase objects before building inference models.
         del model_for_train, loss_module, x_train, y_train
@@ -921,6 +994,7 @@ def run_skill(sandbox, **kwargs):
                 budgets=probe_budgets,
                 model_identity=model_type,
                 model_io_contract=model_io_contract,
+                supplied_probe=probe_input_sample,
             )
             del model_for_resolve
             gc.collect()
@@ -930,7 +1004,19 @@ def run_skill(sandbox, **kwargs):
                 inference_probe = probe_activation_footprint(
                     model=model_for_bd,
                     loss_module=None,
-                    input_sample=_probe_input_tensor(inference_batch, seg_size, model_io_contract),
+                    input_sample=(
+                        probe_input_sample[:1]
+                        .expand((inference_batch, *probe_input_sample.shape[1:]))
+                        .clone()
+                        if probe_input_sample is not None
+                        else _probe_input_tensor(
+                            inference_batch,
+                            _require_segmentation_size(
+                                seg_size, context="synthetic inference probe"
+                            ),
+                            model_io_contract,
+                        )
+                    ),
                     target_sample=None,
                     mode="inference",
                 )
@@ -1008,6 +1094,7 @@ def run_skill(sandbox, **kwargs):
             cap_bytes=cap_bytes,
             total_memory_bytes=total_memory_bytes,
             model_io_contract=model_io_contract,
+            supplied_probe=probe_input_sample,
         )
         print(f"    Verdict    : {report.verdict}")
         print("    Feasible   : NO")

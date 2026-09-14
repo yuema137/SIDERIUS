@@ -286,6 +286,56 @@ def test_task_owned_probe_pair_reaches_the_training_loss_without_zero_substituti
     assert set(out["phase_breakdown"].keys()) >= {"training", "inference"}
 
 
+def test_fixed_task_probe_does_not_acquire_an_invented_temporal_dimension(monkeypatch):
+    """Absent geometry skips only the temporal heuristic, not measurement.
+
+    A regression to the historical 40,000 fallback makes either the resolver
+    assertion or the forbidden intensity call fail while the same task-owned
+    tensors still traverse both structural probe phases.
+    """
+    from pydantic import BaseModel
+
+    import ml_models.models_format_sandbox as model_formats
+
+    class FixedProbeConfig(BaseModel):
+        hidden_dim: int = 4
+
+    monkeypatch.setattr(model_formats, "get_config_class", lambda _model_type: FixedProbeConfig)
+    task_input = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
+    task_target = torch.tensor([1])
+    with _Patches() as patches:
+        out = wrapper.run_skill(
+            sandbox=None,
+            hardware_context=_gpu_ctx(),
+            probe_input_sample=task_input,
+            probe_target_sample=task_target,
+            **_run_kwargs(model_type="fixed_probe_model", model_config={}),
+        )
+
+    assert patches.probe.call_count == 2
+    assert patches.resolve.call_args.kwargs["segmentation_size"] is None
+    assert torch.equal(patches.resolve.call_args.kwargs["supplied_probe"], task_input)
+    patches.intensity_passes.assert_not_called()
+    assert out["status"] == "success"
+    assert out["feasible"] is True
+
+
+def test_absent_dimension_without_task_probe_refuses_before_hardware(monkeypatch):
+    """A legacy tensor cannot be constructed by quietly restoring 40,000."""
+    from agent.skills.training_skill.estimator import SegmentationDimensionUnavailableError
+
+    monkeypatch.setattr(
+        wrapper,
+        "discover",
+        lambda: pytest.fail("hardware discovery ran before dimension refusal"),
+    )
+    with pytest.raises(SegmentationDimensionUnavailableError, match="no task-owned probe"):
+        wrapper.run_skill(
+            sandbox=None,
+            **_run_kwargs(model_type="undeclared_fixed_model", model_config={}),
+        )
+
+
 def test_feasible_path_reports_the_measured_values():
     """What the values MEAN. Separated from the shape contract because a
     wrapper that returned the right keys filled with constants would satisfy
