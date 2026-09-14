@@ -392,6 +392,7 @@ def run_admission_preflight(
         model_config=active_params["model_config"],
         train_config=active_params["train_config"],
         loss_config=active_params["loss_config"],
+        expected_custom_loss_snapshot=prepared.expected_custom_loss_snapshot,
         vram_budget_gb=chosen_vram_budget,
         hardware_context=hardware_context,
         workspace=workspace,

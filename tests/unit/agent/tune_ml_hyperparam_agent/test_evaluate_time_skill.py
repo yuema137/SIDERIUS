@@ -277,6 +277,24 @@ def test_run_skill_uses_warmup_when_data_dir_and_measurement_available(monkeypat
     assert result["breakdown"]["ms_per_step_warmup"] == pytest.approx(3.5)
 
 
+def test_run_skill_forwards_expected_custom_loss_snapshot_to_warmup(monkeypatch):
+    """Deleting this hop would let time warmup construct an unchecked loss."""
+    marker = object()
+    seen = {}
+    _patch_count_params(monkeypatch, 100_000)
+
+    def _measure(**kwargs):
+        seen.update(kwargs)
+        return 3.5, _stub_warmup_breakdown("median")
+
+    monkeypatch.setattr(ts, "_measure_ms_per_step", _measure)
+    ts.run_skill(
+        FakeSandbox(),
+        **_base_kwargs(data_dir="/any/path", expected_custom_loss_snapshot=marker),
+    )
+    assert seen["expected_custom_loss_snapshot"] is marker
+
+
 def test_run_skill_falls_back_to_static_when_warmup_returns_none(monkeypatch):
     # Warmup returns None (no CUDA, build failure, etc.) → static formula path.
     # Training estimator reports ms_source="static_formula"; wrapper surfaces

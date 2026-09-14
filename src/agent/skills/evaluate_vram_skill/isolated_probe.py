@@ -51,6 +51,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
+from core.capability_registry import CapabilityContractSnapshot
 from core.runtime_control.process_group import (
     process_group_alive,
     signal_group,
@@ -171,6 +172,7 @@ class IsolatedProbeSpec(BaseModel):
     model_config_payload: dict[str, Any] = Field(default_factory=dict)
     train_config: dict[str, Any] = Field(default_factory=dict)
     loss_config: dict[str, Any] = Field(default_factory=dict)
+    expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None
     #: ``None`` means "no operator ceiling" — the defensive-cap mode the
     #: in-process path has always had. It does NOT mean "unset", and the
     #: worker must not invent a number for it: with ``None`` the cap comes

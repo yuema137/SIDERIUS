@@ -57,6 +57,11 @@ records (`metric_result` / `metric_refusal`), typed training results.
   `direction_words()`.
 - **Scope enforcement in layers** (constructive, boundary, direct-access) —
   never by prompts; violations terminate, non-retryable.
+- **Custom-loss execution is contract-bound**: an expected immutable
+  capability snapshot travels from the composed task through warmups,
+  measurement workers and the training child. In-memory and file-backed loss
+  loaders compare it before loss construction/import; omission remains only
+  the explicit uncomposed compatibility path.
 - **The frozen TIDMAD score formula is byte-identical forever** — new metrics
   plug in beside it (CLAUDE.md invariant).
 

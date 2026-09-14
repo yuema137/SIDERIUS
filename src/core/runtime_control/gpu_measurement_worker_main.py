@@ -379,6 +379,13 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
                 model=model,
                 model_input=model_input,
             )
+        # 01A3c: validate the task/loss contract before target casting,
+        # constructor execution, or any loss-driven effect.
+        loss_fn = get_criterion(
+            loss_cfg,
+            class_weights=None,
+            expected_contract_snapshot=spec.expected_custom_loss_snapshot,
+        )
         target_dtype = get_target_torch_dtype(loss_cfg)
         loss_target = (
             task_target.to(device=spec.device, dtype=target_dtype)
@@ -391,8 +398,6 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
             loss_target = batch.clone()
 
         optimizer = build_training_optimizer(model, train_cfg)
-        loss_fn = get_criterion(loss_cfg, class_weights=None)
-
         total = int(sum(p.numel() for p in model.parameters()))
         trainable = int(sum(p.numel() for p in model.parameters() if p.requires_grad))
         # D-C2-7. THE authoritative measurement identity, and the only

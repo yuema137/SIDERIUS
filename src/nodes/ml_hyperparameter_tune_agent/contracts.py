@@ -34,6 +34,7 @@ from enum import Enum
 from typing import Any
 
 from agent.schemas.ordering import ResolvedOrdering
+from core.capability_registry import CapabilityContractSnapshot
 
 #: Names that must NEVER become ``RunBindings`` fields. Each is rebound or
 #: mutated inside the round/attempt loops, so storing it on a "stable bindings"
@@ -108,8 +109,8 @@ class RunBindings:
     brain: Any
     """The ``LLMBridge`` the planner and reflector speak through."""
 
-    registry: Any
-    """The capability registry the planner is made aware of (L6b)."""
+    custom_loss_inventory: Any
+    """The task-compatible loss inventory shared by both planner prompts."""
 
     # --- run-bound task authorities ----------------------------------------
     run_profile: Any
@@ -284,6 +285,10 @@ class PreparedAttempt:
     #: thing that makes ``hypothesis`` (authored earlier, never updated)
     #: safe for a downstream narrator to read.
     execution_provenance: Any
+    #: 01A3c — task-resolved custom-loss contract carried to every execution
+    #: route. Transient by design: it is not attempt eligibility or record
+    #: state, and ``None`` preserves builtin and uncomposed behavior.
+    expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None
 
 
 @dataclass(frozen=True)

@@ -2855,6 +2855,7 @@ def run_workflow(
                     trial_time_budget_minutes=launch.trial_time_budget_minutes,
                     formal_time_budget_minutes=launch.formal_time_budget_minutes,
                     data_dir=launch.data_dir,
+                    task_composition_ref=build_task_composition_ref(bindings.task_composition),
                     recent_tune_outputs=list(state.recent_tune_outputs),
                     # V19 PR 3 — proposer prompt flag (evidence itself
                     # travels inside the interpretation dump regardless).

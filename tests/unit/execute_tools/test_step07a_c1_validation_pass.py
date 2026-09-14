@@ -627,7 +627,9 @@ class TestStateCensus:
                 return self.inner(out, tgt)
 
         monkeypatch.setattr(
-            tes, "get_criterion", lambda cfg, class_weights=None: _CountingFocal(cfg)
+            tes,
+            "get_criterion",
+            lambda cfg, class_weights=None, expected_contract_snapshot=None: _CountingFocal(cfg),
         )
         with pytest.raises(tes.ObjectiveStateMutationError, match="_CountingFocal"):
             _run(two_family, tmp_path, name="mut", eval_sample_set=two_family.full_sample_set())

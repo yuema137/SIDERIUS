@@ -392,6 +392,7 @@ def load_loss_plugin(
     from core.local_code import bootstrap_code_package, scan_candidate_allowed
 
     bootstrap_code_package()
+    contract_refusals: list[str] = []
     for loss_dir in _resolve_loss_dirs():
         if not os.path.isdir(loss_dir):
             continue
@@ -401,7 +402,19 @@ def load_loss_plugin(
             path = os.path.join(loss_dir, fname)
             if not scan_candidate_allowed(path):
                 continue
-            plugin = _load_loss_plugin(path, expected_contract_snapshot)
+            try:
+                plugin = _load_loss_plugin(path, expected_contract_snapshot)
+            except ValueError as exc:
+                # One generated-library root may hold losses for many tasks.
+                # A contract mismatch proves THIS candidate is unavailable;
+                # it does not prove a later candidate with the requested name
+                # is unavailable. Keep scanning without importing the refused
+                # module, then surface the refusals if no compatible target is
+                # found anywhere.
+                if expected_contract_snapshot is None:
+                    raise
+                contract_refusals.append(f"{fname}: {exc}")
+                continue
             if plugin is None:
                 continue
             if plugin["loss_type"] == loss_name:
@@ -426,6 +439,12 @@ def load_loss_plugin(
                 if plugin["reduction"] is not None:
                     LOSS_REDUCTION_REGISTRY[loss_name] = plugin["reduction"]
                 return plugin
+    if contract_refusals:
+        detail = "; ".join(contract_refusals[:5])
+        raise ValueError(
+            f"Custom loss {loss_name!r} has no loadable plugin matching the "
+            f"composed task contract. Refused before import: {detail}"
+        )
     return None
 
 

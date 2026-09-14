@@ -36,11 +36,36 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agent.schemas.model_io_contract import ModelIOContract
+from agent.schemas.custom_loss_contract import (
+    EqualShapeApplicability,
+    build_custom_loss_contract_snapshot,
+)
+from agent.schemas.model_io_contract import (
+    Dimension,
+    DtypeAdmissibility,
+    ModelIOContract,
+    TensorAxis,
+    TensorContract,
+)
 from agent.skills.evaluate_vram_skill import preflight_worker_main
 from agent.skills.evaluate_vram_skill.isolated_probe import IsolatedProbeSpec
 from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
 from tests.helpers.step04a_fixtures import tidmad_model_io
+
+
+def _loss_snapshot(extent: int = 2):
+    tensor = TensorContract(
+        axes=(
+            TensorAxis(dimension=Dimension(symbolic="B")),
+            TensorAxis(dimension=Dimension(fixed=extent)),
+        ),
+        dtype=DtypeAdmissibility(admissible=("float32",)),
+    )
+    return build_custom_loss_contract_snapshot(
+        tensor,
+        tensor,
+        EqualShapeApplicability(dtype=tensor.dtype, rank=2),
+    )
 
 
 def _spec(tmp_path: Path, **overrides) -> IsolatedProbeSpec:
@@ -70,6 +95,7 @@ class TestTheContractArrivesInTheChild:
         from agent.skills.evaluate_vram_skill.isolated_probe import IsolatedProbeResult
 
         contract = tidmad_model_io(num_classes=16)
+        loss_snapshot = _loss_snapshot()
         captured: dict[str, IsolatedProbeSpec] = {}
 
         def _capture(spec, **_kwargs):
@@ -89,6 +115,7 @@ class TestTheContractArrivesInTheChild:
             workspace=tmp_path,
             label="s05b_c3_parent",
             model_io_contract=contract,
+            expected_custom_loss_snapshot=loss_snapshot,
             # Step 11 C1 — keyword-only with no default, so this transport
             # test must state the run-scoped dirs like production does.
             plugin_dir="/run/scoped/plugins",
@@ -96,8 +123,29 @@ class TestTheContractArrivesInTheChild:
         )
 
         assert captured["spec"].model_io_contract == contract
+        assert captured["spec"].expected_custom_loss_snapshot == loss_snapshot
         assert captured["spec"].plugin_dir == "/run/scoped/plugins"
         assert captured["spec"].loss_dir == "/run/scoped/losses"
+
+    def test_custom_loss_snapshot_reaches_the_worker_consumption_boundary(
+        self, tmp_path, monkeypatch
+    ):
+        snapshot = _loss_snapshot()
+        spec_path = tmp_path / "spec.json"
+        spec_path.write_text(
+            _spec(tmp_path, expected_custom_loss_snapshot=snapshot).model_dump_json(),
+            encoding="utf-8",
+        )
+        seen = {}
+
+        def _fake_run_skill(_sandbox, **kwargs):
+            seen.update(kwargs)
+            return {"status": "success", "feasible": True}
+
+        monkeypatch.setattr("agent.skills.evaluate_vram_skill.wrapper.run_skill", _fake_run_skill)
+        preflight_worker_main.main([str(spec_path)])
+
+        assert seen["expected_custom_loss_snapshot"] == snapshot
 
     def test_it_round_trips_through_the_spec_json_unchanged(self, tmp_path):
         """Serialized, re-read the way the worker reads it, and revalidated
@@ -159,6 +207,25 @@ class TestTheContractArrivesInTheChild:
 
 
 class TestAMalformedContractNeverBecomesNone:
+    def test_malformed_custom_loss_snapshot_stops_before_run_skill(self, tmp_path, monkeypatch):
+        result_path = tmp_path / "s05b_c3.json"
+        spec_path = tmp_path / "spec.json"
+        payload = json.loads(
+            _spec(tmp_path, expected_custom_loss_snapshot=_loss_snapshot()).model_dump_json()
+        )
+        payload["expected_custom_loss_snapshot"]["sha256"] = "0" * 64
+        spec_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        def _must_not_run(_sandbox, **_kwargs):
+            raise AssertionError("run_skill was reached with a broken loss snapshot")
+
+        monkeypatch.setattr("agent.skills.evaluate_vram_skill.wrapper.run_skill", _must_not_run)
+        preflight_worker_main.main([str(spec_path)])
+
+        written = json.loads(result_path.read_text(encoding="utf-8"))
+        assert written["outcome"] == "PROBE_INFRASTRUCTURE_FAILURE"
+        assert "expected_custom_loss_snapshot" in written["detail"]
+
     def test_the_worker_reports_it_as_an_infrastructure_failure(self, tmp_path, monkeypatch):
         """Present-but-unrebuildable is a TRANSPORT failure, and degrading it
         to ``None`` would silently probe the legacy shape. The result names

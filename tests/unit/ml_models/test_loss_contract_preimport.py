@@ -168,6 +168,82 @@ def test_compatible_registration_restores_snapshot_in_memory(tmp_path):
     assert LOSS_CONTRACT_REGISTRY["transport_loss"] == snapshot
 
 
+def test_in_memory_criterion_refuses_mismatch_before_loss_constructor(tmp_path):
+    """Tier 1 must check the task contract before plugin construction."""
+    from pydantic import BaseModel
+    from torch import nn
+
+    from ml_models.loss_models_sandbox import (
+        LOSS_CONFIG_REGISTRY,
+        LOSS_CONTRACT_REGISTRY,
+        LOSS_REGISTRY,
+        get_criterion,
+    )
+    from ml_models.models_format_sandbox import LossConfig
+
+    marker = tmp_path / "constructed"
+
+    class _Config(BaseModel):
+        pass
+
+    class _Loss(nn.Module):
+        def __init__(self, _config):
+            super().__init__()
+            marker.write_text("constructed", encoding="utf-8")
+
+    LOSS_REGISTRY["transport_loss"] = _Loss
+    LOSS_CONFIG_REGISTRY["transport_loss"] = _Config
+    LOSS_CONTRACT_REGISTRY["transport_loss"] = _snapshot(1)
+
+    config = LossConfig(loss_type="custom", loss_name="transport_loss")
+    with pytest.raises(ValueError, match="does not match"):
+        get_criterion(config, expected_contract_snapshot=_snapshot(2))
+    assert not marker.exists()
+
+    get_criterion(config, expected_contract_snapshot=_snapshot(1))
+    assert marker.exists()
+
+
+def test_filesystem_criterion_forwards_expected_contract_before_import(tmp_path, monkeypatch):
+    """Tier 2 may not drop the expected snapshot at the public criterion seam."""
+    from ml_models import loss_plugin_loader
+    from ml_models.loss_models_sandbox import get_criterion
+    from ml_models.models_format_sandbox import LossConfig
+
+    marker = tmp_path / "imported"
+    plugin = tmp_path / "transport_loss.py"
+    plugin.write_text(_plugin_source(_snapshot(1), marker), encoding="utf-8")
+    monkeypatch.setattr(loss_plugin_loader, "_resolve_loss_dirs", lambda: [str(tmp_path)])
+
+    config = LossConfig(loss_type="custom", loss_name="transport_loss")
+    with pytest.raises(ValueError, match="does not match"):
+        get_criterion(config, expected_contract_snapshot=_snapshot(2))
+    assert not marker.exists()
+
+
+def test_filesystem_scan_skips_other_task_loss_and_loads_compatible_target(tmp_path, monkeypatch):
+    """A shared library may contain losses owned by several task contracts."""
+    from ml_models import loss_plugin_loader
+    from ml_models.loss_models_sandbox import get_criterion
+    from ml_models.models_format_sandbox import LossConfig
+
+    other_marker = tmp_path / "other-imported"
+    target_marker = tmp_path / "target-imported"
+    other = _plugin_source(_snapshot(1), other_marker).replace(
+        'PLUGIN_LOSS_TYPE = "transport_loss"', 'PLUGIN_LOSS_TYPE = "other_loss"'
+    )
+    target = _plugin_source(_snapshot(2), target_marker)
+    (tmp_path / "a_other.py").write_text(other, encoding="utf-8")
+    (tmp_path / "z_target.py").write_text(target, encoding="utf-8")
+    monkeypatch.setattr(loss_plugin_loader, "_resolve_loss_dirs", lambda: [str(tmp_path)])
+
+    config = LossConfig(loss_type="custom", loss_name="transport_loss")
+    get_criterion(config, expected_contract_snapshot=_snapshot(2))
+
+    assert not other_marker.exists()
+    assert target_marker.exists()
+
+
 def test_preload_skips_an_unrelated_contract_without_importing_it(tmp_path, monkeypatch):
     from ml_models import loss_plugin_loader
     from ml_models.loss_models_sandbox import (

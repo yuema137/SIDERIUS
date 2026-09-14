@@ -351,6 +351,7 @@ def _handle_prephase_gpu_measurement(
         model_config_payload=model_config,
         train_config=train_config,
         loss_config=dict(active_params.get("loss_config") or {}),
+        expected_custom_loss_snapshot=active_params.get("expected_custom_loss_snapshot"),
         inference_batch_size=_inference_batch,
         data_dir=getattr(agent_input, "data_dir", None),
         # 07c C2. The worker is a clean subprocess, so the run-bound profile
@@ -873,6 +874,7 @@ def _resolve_time_check_probe_request(
             model_config=active_params.get("model_config") or {},
             train_config=active_params.get("train_config") or {},
             loss_config=active_params.get("loss_config") or {},
+            expected_custom_loss_snapshot=active_params.get("expected_custom_loss_snapshot"),
             data_dir=data_dir,
             # V20 PR C. Resolved ONCE at the orchestration boundary and
             # passed down; the probe never discovers a device of its own.

@@ -39,6 +39,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.model_io_contract import ModelIOContract
+from core.capability_registry import CapabilityContractSnapshot
 from core.runtime_control.gpu_measurement_identity import RealizedCandidateIdentity
 from core.runtime_control.gpu_requirement import (
     CandidateMeasurementRequest,
@@ -96,6 +97,7 @@ class GpuMeasurementSpec(BaseModel):
     model_config_payload: dict[str, Any] = Field(default_factory=dict)
     train_config: dict[str, Any] = Field(default_factory=dict)
     loss_config: dict[str, Any] = Field(default_factory=dict)
+    expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None
 
     #: The torch device string. Whatever the caller asked for is what runs;
     #: there is no negotiation and no fallback. A CUDA request on a host

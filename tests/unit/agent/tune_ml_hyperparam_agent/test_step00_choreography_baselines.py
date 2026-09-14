@@ -133,6 +133,18 @@ def project_plan_call(call: tuple) -> dict:
     # in either is an LLM-visible change this baseline must catch.
     metric_spec = projected.pop("metric_spec", None)
     projected["metric_spec"] = None if metric_spec is None else metric_spec.model_dump(mode="json")
+    custom_loss_inventory = projected.pop("custom_loss_inventory", None)
+    projected["custom_loss_inventory"] = (
+        None
+        if custom_loss_inventory is None
+        else {
+            "type": type(custom_loss_inventory).__name__,
+            "composed": custom_loss_inventory.composed,
+            "names": list(custom_loss_inventory.names),
+            "unavailable_reason": custom_loss_inventory.unavailable_reason,
+            "generation_allowed": custom_loss_inventory.generation_allowed,
+        }
+    )
     projected["config_manual_keys"] = (
         sorted(config_manual) if isinstance(config_manual, dict) else config_manual
     )

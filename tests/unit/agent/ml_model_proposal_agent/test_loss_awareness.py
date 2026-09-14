@@ -238,6 +238,85 @@ class TestPipelineTemplateVarsWiring:
         assert "No custom losses registered yet" in captured["available_losses_block"]
 
 
+def test_proposer_and_tuner_resolve_identical_task_compatible_names(
+    index_path: str, tmp_path: Path
+):
+    """A composed registry mismatch must not appear on only one agent surface."""
+
+    from types import SimpleNamespace
+
+    from agent.schemas.custom_loss_contract import (
+        EqualShapeApplicability,
+        build_custom_loss_contract_snapshot,
+    )
+    from agent.schemas.hyperparam_tuning import TaskCompositionRef
+    from agent.schemas.model_io_contract import (
+        Dimension,
+        ModelIOContract,
+        TensorAxis,
+        TensorContract,
+    )
+    from agent.schemas.task_config import ForwardContract
+    from ml_models.models_format_sandbox import DtypeAdmissibility
+    from nodes.ml_hyperparameter_tune_agent.loss_inventory import (
+        resolve_run_custom_loss_inventory,
+    )
+
+    tensor = TensorContract(
+        axes=(
+            TensorAxis(dimension=Dimension(symbolic="B")),
+            TensorAxis(dimension=Dimension(fixed=1)),
+        ),
+        dtype=DtypeAdmissibility(admissible=("float32",)),
+    )
+    applicability = EqualShapeApplicability(
+        dtype=DtypeAdmissibility(admissible=("float32",)), rank=2
+    )
+    forward = ForwardContract(
+        model_io=ModelIOContract(input=tensor, output=tensor),
+        supervision_target=tensor,
+        custom_loss_applicability=applicability,
+    )
+    task_ref = TaskCompositionRef.model_construct(
+        semantic_fingerprint="fixture",
+        task_data_path_id="fixture",
+        task_health_binding=None,
+        supervision_target=tensor,
+        custom_loss_applicability=applicability,
+        objective=None,
+    )
+    snapshot = build_custom_loss_contract_snapshot(tensor, tensor, applicability)
+    loss_dir = tmp_path / "agent_generated" / "losses"
+    loss_dir.mkdir(parents=True)
+    registry = CapabilityRegistry(index_path=index_path)
+    for name, contract_snapshot in (("compatible", snapshot), ("mismatch", None)):
+        path = loss_dir / f"{name}.py"
+        path.write_text("# loadable test plugin\n")
+        registry.register(
+            CapabilityMetadata(
+                name=name,
+                capability_type="loss",
+                file_path=str(path),
+                created_at=_now_iso(),
+                contract_snapshot=contract_snapshot,
+            )
+        )
+    proposer = MLModelProposalAgent.__new__(MLModelProposalAgent)
+    proposer._registry = registry
+    proposal_input = SimpleNamespace(
+        forward_contract=forward,
+        task_composition_ref=task_ref,
+    )
+
+    with patch("agent.prompt_templates.proposal._GLOBAL_LOSS_DIR", str(loss_dir)):
+        proposer_inventory = proposer._custom_loss_inventory(proposal_input)
+        tuner_inventory = resolve_run_custom_loss_inventory(registry, forward.model_io, task_ref)
+
+    assert proposer_inventory.names == tuner_inventory.names == ("compatible",)
+    assert {item.name for item in proposer_inventory.unavailable} == {"mismatch"}
+    assert proposer_inventory == tuner_inventory
+
+
 # ---------------------------------------------------------------------------
 # 3. Schema flow — proposer-emitted JSON shapes round-trip through
 # ProposalOutput for each of the 3 decision branches (built-in / reuse /

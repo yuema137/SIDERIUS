@@ -28,6 +28,16 @@ import torch
 from pydantic import BaseModel, ValidationError
 from torch import nn
 
+from agent.schemas.custom_loss_contract import (
+    EqualShapeApplicability,
+    build_custom_loss_contract_snapshot,
+)
+from agent.schemas.model_io_contract import (
+    Dimension,
+    DtypeAdmissibility,
+    TensorAxis,
+    TensorContract,
+)
 from core.runtime_control.gpu_measurement_identity import (
     build_planned_identity,
     build_realized_identity,
@@ -48,6 +58,21 @@ from tests.helpers.two_family_profile import make_two_family_profile
 MODEL_TYPE = "c2probe"
 UUID = "GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef"
 WORKER_PROFILE = make_two_family_profile()
+
+
+def _loss_snapshot(extent: int):
+    tensor = TensorContract(
+        axes=(
+            TensorAxis(dimension=Dimension(symbolic="B")),
+            TensorAxis(dimension=Dimension(fixed=extent)),
+        ),
+        dtype=DtypeAdmissibility(admissible=("float32",)),
+    )
+    return build_custom_loss_contract_snapshot(
+        tensor,
+        tensor,
+        EqualShapeApplicability(dtype=tensor.dtype, rank=2),
+    )
 
 
 class _ProbeConfig(BaseModel):
@@ -387,6 +412,39 @@ class TestTheBuilderConstructsWhatTheTrainerConstructs:
 
 
 class TestTheWorkerEndToEnd:
+    def test_custom_loss_mismatch_refuses_before_constructor(
+        self, tmp_path, registered, monkeypatch
+    ):
+        from ml_models.loss_models_sandbox import (
+            LOSS_CONFIG_REGISTRY,
+            LOSS_CONTRACT_REGISTRY,
+            LOSS_REGISTRY,
+        )
+
+        marker = tmp_path / "loss-constructed"
+
+        class _LossConfig(BaseModel):
+            pass
+
+        class _Loss(nn.Module):
+            def __init__(self, _config):
+                super().__init__()
+                marker.write_text("constructed", encoding="utf-8")
+
+        monkeypatch.setitem(LOSS_REGISTRY, "worker_loss", _Loss)
+        monkeypatch.setitem(LOSS_CONFIG_REGISTRY, "worker_loss", _LossConfig)
+        monkeypatch.setitem(LOSS_CONTRACT_REGISTRY, "worker_loss", _loss_snapshot(1))
+        spec = _spec(
+            tmp_path,
+            registered,
+            loss_config={"loss_type": "custom", "loss_name": "worker_loss"},
+            expected_custom_loss_snapshot=_loss_snapshot(2),
+        )
+
+        with pytest.raises(ValueError, match="does not match"):
+            build_production_components(spec)()
+        assert not marker.exists()
+
     def test_a_complete_run_reports_a_real_training_phase(self, tmp_path, registered):
         report = measure(_spec(tmp_path, registered))
         assert report.status == "COMPLETED"

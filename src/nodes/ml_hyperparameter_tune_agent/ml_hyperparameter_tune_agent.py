@@ -102,6 +102,9 @@ from nodes.ml_hyperparameter_tune_agent.feedback import (
     _render_gate_exhaustion_trigger_b_summary,
     invoke_reflection,
 )
+from nodes.ml_hyperparameter_tune_agent.loss_inventory import (
+    resolve_run_custom_loss_inventory,
+)
 from nodes.ml_hyperparameter_tune_agent.planning import prepare_attempt
 
 # --- Node-local submodules (Step 07 PR 07b, C7) ------------------------------
@@ -1305,7 +1308,11 @@ class HyperparamTuningAgent:
             agent_input=agent_input,
             sandbox=sandbox,
             brain=brain,
-            registry=self._registry,
+            custom_loss_inventory=resolve_run_custom_loss_inventory(
+                self._registry,
+                run_model_io,
+                agent_input.task_composition_ref,
+            ),
             run_profile=run_profile,
             run_model_io=run_model_io,
             run_deliverable_spec=run_deliverable_spec,

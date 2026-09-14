@@ -28,6 +28,7 @@ import pytest
 from core.runtime_control.phases import RUNTIME_PHASES, RuntimePhase
 from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES
 from core.sandbox_executor import _watchdog_deadline_provider
+from core.training_execution_bindings import TrainingExecutionBindings
 
 #: The 07a Gate-2 regime, from the parent design's §8.4 ADDED-SCOPE clause.
 TRAIN_ACTUAL_S = 9.0
@@ -711,7 +712,9 @@ class TestTheRealTrainerEmitsAValidationComponent:
                     "device": "cpu",
                 },
                 {"loss_type": "focal"},
-                task_scopes=attempt_scopes(adapter, training, evaluation),
+                execution_bindings=TrainingExecutionBindings(
+                    task_scopes=attempt_scopes(adapter, training, evaluation)
+                ),
                 train_base_seed=5,
                 runtime_policy=runtime_policy,
             )

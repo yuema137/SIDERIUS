@@ -424,6 +424,25 @@ scoreability mapping retain their previous fingerprint through this correction.
 5. `verify_composition_is_bound` asserts the bindings are actually live. A
    half-composed run is fatal, not degraded.
 
+### Custom-loss applicability and validation
+
+A composed custom loss is executable only when `forward_contract` declares
+`model_io.output`, `supervision_target`, and `custom_loss_applicability`
+together. The applicability is either `equal_shape` (optionally with rank) or
+an `explicit_pair` of prediction and target tensor contracts. These facts are
+canonicalized into one immutable capability snapshot. Proposer, implementor,
+tuner, time/VRAM measurement, and the training child consume that same
+snapshot; a missing or mismatched plugin contract refuses before plugin import
+or loss construction.
+
+Tasks with semantic targets such as `[value, validity_mask]` may provide an
+optional zero-argument `custom_loss_validation_pair()` on the bound task
+implementation. The provider is a tiny, deterministic validation seam only:
+it is bounded before plugin import, gets no physical data inputs, and does not
+extend the four-method `TaskDataPath` protocol. Its absence is allowed when the
+generic pair already realizes the declaration; otherwise custom generation is
+unavailable with a named reason.
+
 The supported chain/iteration launch requires an explicit task composition and
 physical data directory. Do not omit the manifest expecting a scientific task
 or a legacy child command to be selected automatically.

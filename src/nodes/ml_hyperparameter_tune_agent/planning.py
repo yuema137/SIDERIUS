@@ -447,7 +447,7 @@ def prepare_attempt(
         # the per-architecture loss_note advertisement of
         # ``loss_type="custom"`` as a legal choice. See
         # docs/design/enable_loss_inventory.md § L6b.
-        registry=bindings.registry,
+        custom_loss_inventory=bindings.custom_loss_inventory,
         # Step 07 PR 07b (P2) — the run-scoped task tokens.
         task_render=run_task_render,
         # Step 07 PR 07b (P3) — the run's golden-metric
@@ -839,6 +839,10 @@ def prepare_attempt(
     # Ensure model_config.model_type matches the forced model type
     model_config["model_type"] = model_type
 
+    expected_custom_loss_snapshot = None
+    if plan.loss_cfg.get("loss_type") == "custom":
+        expected_custom_loss_snapshot = bindings.custom_loss_inventory.expected_snapshot
+
     # Lane D / F15 — close the tracker (the model channel is not plan-visible).
     execution_provenance = resolution.finish_with_model(plan, executed_model_type=model_type)
     active_params = {
@@ -848,6 +852,7 @@ def prepare_attempt(
         "model_config": model_config,
         "train_config": plan.train_cfg,
         "loss_config": plan.loss_cfg,
+        "expected_custom_loss_snapshot": expected_custom_loss_snapshot,
         "sample_set": train_sample_set,  # training data (from training files)
         # Step 12 / PR-12bc B6 — the composed run's TASK-BUILT scopes.
         # Empty on an un-composed run, so the emitter yields nothing and
@@ -895,4 +900,5 @@ def prepare_attempt(
         cfg_eval_portion=cfg_eval_portion,
         _planned_portions=_planned_portions,
         execution_provenance=execution_provenance,
+        expected_custom_loss_snapshot=expected_custom_loss_snapshot,
     )

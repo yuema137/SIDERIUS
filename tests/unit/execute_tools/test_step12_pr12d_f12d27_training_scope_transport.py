@@ -36,6 +36,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import core.sandbox_executor as se
+from core.training_execution_bindings import TrainingExecutionBindings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SYNTHETIC_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "synthetic_masked_regression.yaml"
@@ -124,7 +125,7 @@ def _training_argv(*, sample_set, with_scopes: bool, data_root: Path) -> list[st
                     },
                     l_cfg={"loss_type": "custom", "loss_name": "synthetic_masked_mse"},
                     sample_set=sample_set,
-                    task_scopes=scopes,
+                    execution_bindings=TrainingExecutionBindings(task_scopes=scopes),
                 )
             except BaseException:
                 pass

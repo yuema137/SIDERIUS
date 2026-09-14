@@ -1,6 +1,7 @@
 [
   "config_manual",
   "current_round",
+  "custom_loss_inventory",
   "exploration_checklist",
   "force_formal_round",
   "formal_max_epochs",
@@ -16,7 +17,6 @@
   "model_description",
   "plan_overrides",
   "plugin_source_excerpt",
-  "registry",
   "resolved_data_scope",
   "score_table_md",
   "task_description",

@@ -269,7 +269,10 @@ class FocalLoss1DCW(nn.Module):
             return loss
 
 
-def _load_custom_loss(loss_name: str) -> nn.Module:
+def _load_custom_loss(
+    loss_name: str,
+    expected_contract_snapshot: CapabilityContractSnapshot | None = None,
+) -> nn.Module:
     """Load a plugin loss by name, preferring the in-memory ``LOSS_REGISTRY``.
 
     L6c — two-tier lookup:
@@ -305,6 +308,17 @@ def _load_custom_loss(loss_name: str) -> nn.Module:
     """
     # Tier 1 — in-memory registry hit (avoid disk).
     if loss_name in LOSS_REGISTRY:
+        if expected_contract_snapshot is not None:
+            actual_snapshot = LOSS_CONTRACT_REGISTRY.get(loss_name)
+            if actual_snapshot is None:
+                raise ValueError(
+                    f"Custom loss {loss_name!r} is missing its required capability contract"
+                )
+            if actual_snapshot != expected_contract_snapshot:
+                raise ValueError(
+                    f"Custom loss {loss_name!r} capability contract does not match "
+                    "the composed task"
+                )
         config_cls = LOSS_CONFIG_REGISTRY[loss_name]
         return LOSS_REGISTRY[loss_name](config_cls())
 
@@ -312,7 +326,7 @@ def _load_custom_loss(loss_name: str) -> nn.Module:
     # without agent_generated/ on the Python path (legacy isolation tests).
     from ml_models.loss_plugin_loader import load_loss_plugin
 
-    plugin = load_loss_plugin(loss_name)
+    plugin = load_loss_plugin(loss_name, expected_contract_snapshot)
     if plugin is None:
         raise ValueError(
             f"Custom loss '{loss_name}' not found in LOSS_REGISTRY or "
@@ -372,7 +386,11 @@ def get_target_torch_dtype(config: LossConfig) -> torch.dtype:
     return torch.long if declared == "long" else torch.float32
 
 
-def get_criterion(config: LossConfig, class_weights: torch.Tensor | None = None):
+def get_criterion(
+    config: LossConfig,
+    class_weights: torch.Tensor | None = None,
+    expected_contract_snapshot: CapabilityContractSnapshot | None = None,
+):
     """
     Helper function to instantiate the correct loss based on the Agent's LossConfig.
     """
@@ -381,7 +399,7 @@ def get_criterion(config: LossConfig, class_weights: torch.Tensor | None = None)
         # ``enforce_custom_loss_name``; the assert below is for pyright
         # narrowing only and never fires at runtime.
         assert config.loss_name is not None
-        return _load_custom_loss(config.loss_name)
+        return _load_custom_loss(config.loss_name, expected_contract_snapshot)
     elif config.loss_type == "focal":
         return FocalLoss1D(config)
     elif config.loss_type == "focal_cw":

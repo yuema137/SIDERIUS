@@ -20,6 +20,7 @@ from tqdm import tqdm
 # the same id. The uncomposed compatibility path is activated explicitly below.
 from agent.schemas.model_io_contract import ModelIOContract, load_model_io_contract
 from agent.schemas.model_io_resolution import resolve_model_io_contract
+from core.capability_registry import CapabilityContractSnapshot
 from core.runtime_control.provenance import capture_storage_provenance
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.workload import ResolvedPhaseWorkload
@@ -923,6 +924,7 @@ def run_experiment(
     sandbox_dirs: dict,
     exp_id: str,
     model_io: ModelIOContract | None = None,
+    expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
 ):
     device = torch.device(train_cfg.device if torch.cuda.is_available() else "cpu")
 
@@ -946,7 +948,11 @@ def run_experiment(
         if loss_cfg.use_class_weights
         else None
     )
-    criterion = get_criterion(loss_cfg, class_weights)
+    criterion = get_criterion(
+        loss_cfg,
+        class_weights,
+        expected_contract_snapshot=expected_custom_loss_snapshot,
+    )
 
     # Optimizer Setup
     optimizer = build_training_optimizer(model, train_cfg)
@@ -1116,6 +1122,7 @@ def run_experiment_streaming(
     task_scope: object | None = None,
     task_eval_scope: object | None = None,
     validation_requested_rows: int | None = None,
+    expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
 ):
     """
     Multi-file training: rebuild the epoch dataset each epoch, then train on it.
@@ -1249,7 +1256,11 @@ def run_experiment_streaming(
         model = model_class(model_cfg).to(device)
 
     # Criterion — no class weights in streaming mode (matches legacy train.py)
-    criterion = get_criterion(loss_cfg, class_weights=None)
+    criterion = get_criterion(
+        loss_cfg,
+        class_weights=None,
+        expected_contract_snapshot=expected_custom_loss_snapshot,
+    )
 
     # Optimizer (once)
     optimizer = build_training_optimizer(model, train_cfg)
@@ -1877,6 +1888,7 @@ def main():
     parser.add_argument("--model_cfg", type=str, required=True)
     parser.add_argument("--train_cfg", type=str, required=True)
     parser.add_argument("--loss_cfg", type=str, required=True)
+    parser.add_argument("--custom_loss_contract_json", type=str, default=None)
     parser.add_argument(
         "--model_io_json",
         type=str,
@@ -2073,6 +2085,12 @@ def main():
     model_io = (
         load_model_io_contract(args.model_io_json) if args.model_io_json is not None else None
     )
+    expected_custom_loss_snapshot = None
+    if args.custom_loss_contract_json is not None:
+        with open(args.custom_loss_contract_json, encoding="utf-8") as handle:
+            expected_custom_loss_snapshot = CapabilityContractSnapshot.model_validate(
+                json.load(handle)
+            )
 
     # Rung 3-E at the SUBPROCESS boundary. `load_task_config` already
     # cross-validates the contract's class axis against the dataset's
@@ -2213,6 +2231,7 @@ def main():
                 task_scope=task_scope,
                 task_eval_scope=task_eval_scope,
                 validation_requested_rows=args.validation_requested_rows,
+                expected_custom_loss_snapshot=expected_custom_loss_snapshot,
             )
         if results is None:
             # Runtime verification rejected the attempt: the structured
@@ -2231,7 +2250,14 @@ def main():
         )
         loader = DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True)
         results = run_experiment(
-            model_cfg, train_cfg, loss_cfg, loader, sandbox_dirs, args.exp_id, model_io
+            model_cfg,
+            train_cfg,
+            loss_cfg,
+            loader,
+            sandbox_dirs,
+            args.exp_id,
+            model_io,
+            expected_custom_loss_snapshot,
         )
 
     # Save final JSON

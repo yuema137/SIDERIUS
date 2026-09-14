@@ -8,6 +8,11 @@ nothing. It forwards an already-resolved configuration to the sandbox
 executor, which owns config persistence, DataScope boundary validation,
 subprocess launch, and the runtime watchdog.
 
+The skill groups resolved task scopes and the expected custom-loss snapshot
+into one internal `TrainingExecutionBindings` value at the sandbox boundary.
+This keeps the executor signature bounded while preserving the two independent
+caller-facing keys below; the carrier adds no authority or fallback.
+
 ## Position in the pipeline
 
 ```text
@@ -30,6 +35,7 @@ ml_hyperparameter_tune_agent
 | `model_config` | `dict` | Yes | — | Architecture hyperparameters. |
 | `train_config` | `dict` | Yes | — | Training hyperparameters (`lr`, `epochs`, `batch_size`, `device`). |
 | `loss_config` | `dict` | Yes | — | Loss specification. |
+| `expected_custom_loss_snapshot` | `CapabilityContractSnapshot \| None` | No | `None` | Transient task-resolved contract for a custom loss. The executor serializes it to a child-only JSON file; both training paths refuse a missing/mismatched plugin contract before loss construction. `None` preserves builtin and uncomposed behavior. |
 | `sample_set` | `dict \| None` | No | `None` | `{file_index: [segment_indices]}` — the training data scope. `None` selects the legacy single-file path. |
 | `eval_sample_set` | `dict \| None` | No | `None` | **Step 07a** — the tuner's EXISTING run-bound eval SampleSet `{file_index: [segment_indices]}` (VALIDATION file family). Forwarded to `execute_training(eval_sample_set=…)`; in streaming mode (with `sample_set`) the executor validates it by the same DataScope rule as the train set, writes `configs/<run>/eval_sample_set_<exp_id>.json` and passes `--eval_sample_set_json` — the trainer's per-epoch R3 validation pass. Before 07a this kwarg was enumerated away here (the OD-S7-1 transport drop). The tuner decides `expected_validation` from the same value, so a re-dropped eval set now yields an `error_training` record, never a quiet success. |
 | `train_portion` | `float \| None` | No | `None` | Per-epoch subsample fraction from the scope. |
@@ -75,7 +81,8 @@ proposal was rejected) is recorded by the tuner on the `ExperimentRecord`
 
 ### Signature parity with the stub
 
-`StubSandbox.execute_training` mirrors this signature exactly, including
+`StubSandbox.execute_training` mirrors the production executor signature
+exactly, including the grouped execution bindings and
 the ordering parameters and (Step 07a) `eval_sample_set` — scope-validated
 like production, and answered with a plausible multi-epoch train +
 validation `training_history` (R3 only when an eval set was supplied) —

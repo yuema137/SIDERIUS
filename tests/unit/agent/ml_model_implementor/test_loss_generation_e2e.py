@@ -29,10 +29,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agent.prompt_templates.proposal import live_loss_metadata
 from agent.schemas.implementor import ImplementorInput, LossProvenance
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.capability_registry import CapabilityMetadata, CapabilityRegistry
+from core.generated_library import generated_losses_dir
 from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
 
 # ---------------------------------------------------------------------------
@@ -154,12 +156,138 @@ def agent_with_mocks(index_path):
     return agent
 
 
+def _live_loss_file(name: str) -> Path:
+    """Create a loadable registry target in the isolated generated library."""
+
+    path = Path(generated_losses_dir()) / f"{name}.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# registered loss\n")
+    return path
+
+
+def _bind_composed_equal_shape(inp: ImplementorInput, objective) -> None:
+    """Give an implementor fixture one complete composed loss contract."""
+
+    from agent.schemas.custom_loss_contract import EqualShapeApplicability
+    from agent.schemas.hyperparam_tuning import TaskCompositionRef
+    from agent.schemas.model_io_contract import (
+        Dimension,
+        ModelIOContract,
+        TensorAxis,
+        TensorContract,
+    )
+    from agent.schemas.task_config import ForwardContract
+    from ml_models.models_format_sandbox import DtypeAdmissibility
+
+    tensor = TensorContract(
+        axes=(
+            TensorAxis(dimension=Dimension(symbolic="B")),
+            TensorAxis(dimension=Dimension(fixed=1)),
+        ),
+        dtype=DtypeAdmissibility(admissible=("float32",)),
+    )
+    applicability = EqualShapeApplicability(
+        dtype=DtypeAdmissibility(admissible=("float32",)), rank=2
+    )
+    inp.forward_contract = ForwardContract(
+        model_io=ModelIOContract(input=tensor, output=tensor),
+        supervision_target=tensor,
+        custom_loss_applicability=applicability,
+    )
+    inp.task_composition_ref = TaskCompositionRef.model_construct(
+        semantic_fingerprint="composed",
+        task_data_path_id="fixture",
+        task_health_binding=None,
+        supervision_target=tensor,
+        custom_loss_applicability=applicability,
+        objective=objective,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. Registry-hit short-circuit
 # ---------------------------------------------------------------------------
 
 
 class TestRegistryHitShortCircuit:
+    @pytest.mark.parametrize(
+        "objective",
+        [
+            pytest.param(
+                {"loss_type": "ce"},
+                id="locked-builtin",
+            ),
+            pytest.param(
+                {"loss_type": "custom", "loss_name": "required_loss"},
+                id="different-locked-custom",
+            ),
+        ],
+    )
+    def test_locked_objective_refuses_branch_c_before_llm(
+        self, agent_with_mocks, inp_loss_only, objective
+    ):
+        from agent.schemas.custom_loss_contract import (
+            custom_loss_snapshot_from_forward_contract,
+        )
+        from ml_models.models_format_sandbox import LossConfig
+
+        _bind_composed_equal_shape(inp_loss_only, LossConfig.model_validate(objective))
+        snapshot = custom_loss_snapshot_from_forward_contract(inp_loss_only.forward_contract)
+        inp_loss_only.custom_loss_spec = inp_loss_only.custom_loss_spec.model_copy(
+            update={"contract_snapshot": snapshot}
+        )
+
+        with pytest.raises(ValueError, match=r"locked|generation is unavailable"):
+            agent_with_mocks._generate_loss(inp_loss_only)
+
+        agent_with_mocks.bridge.generate_text.assert_not_called()
+        agent_with_mocks.bridge.generate.assert_not_called()
+
+    def test_bound_semantic_pair_provider_reaches_generation_validator(
+        self, monkeypatch, agent_with_mocks, inp_loss_only
+    ):
+        import importlib
+
+        from agent.schemas.custom_loss_contract import (
+            custom_loss_snapshot_from_forward_contract,
+        )
+        from execute_tools.task_data_path import bind_task_data_path
+
+        implementor_module = importlib.import_module(
+            "nodes.ml_model_implementor.ml_model_implementor"
+        )
+
+        _bind_composed_equal_shape(inp_loss_only, objective=None)
+        snapshot = custom_loss_snapshot_from_forward_contract(inp_loss_only.forward_contract)
+        inp_loss_only.custom_loss_spec = inp_loss_only.custom_loss_spec.model_copy(
+            update={"contract_snapshot": snapshot}
+        )
+
+        class TaskImplementation:
+            def custom_loss_validation_pair(self):
+                return "task-owned-prediction", "task-owned-target"
+
+        task = TaskImplementation()
+        observed = {}
+
+        def capture_validator(*args):
+            observed["provider"] = args[-1]
+            return None
+
+        monkeypatch.setattr(
+            implementor_module,
+            "_dummy_tensor_validate_loss",
+            capture_validator,
+        )
+        with bind_task_data_path(task):
+            provenance = agent_with_mocks._generate_loss(inp_loss_only)
+
+        assert provenance.action == "generated"
+        assert observed["provider"]() == (
+            "task-owned-prediction",
+            "task-owned-target",
+        )
+
     def test_composed_branch_b_refuses_mismatch_then_reuses_exact_contract(
         self, agent_with_mocks, inp_loss_only, tmp_path
     ):
@@ -212,15 +340,19 @@ class TestRegistryHitShortCircuit:
         inp_loss_only.baseline_config["model_config"] = {"model_name": "reused_model"}
         model_file = tmp_path / "reused_model.py"
         model_file.write_text("# registered model\n")
+        loss_file = _live_loss_file("snr_weighted_mse")
         agent_with_mocks._registry.register(
             CapabilityMetadata(
                 name="snr_weighted_mse",
                 capability_type="loss",
-                file_path="/must/not/be/imported.py",
+                file_path=str(loss_file),
                 created_at="2026-09-13T00:00:00Z",
                 contract_snapshot=None,
             )
         )
+        assert [item.name for item in live_loss_metadata(agent_with_mocks._registry)] == [
+            "snr_weighted_mse"
+        ]
         agent_with_mocks._registry.register(
             CapabilityMetadata(
                 name="reused_model",
@@ -229,7 +361,7 @@ class TestRegistryHitShortCircuit:
                 created_at="2026-09-13T00:00:00Z",
             )
         )
-        with pytest.raises(ValueError, match="does not match the composed task"):
+        with pytest.raises(ValueError, match="contract snapshot is missing"):
             agent_with_mocks.run(inp_loss_only)
         agent_with_mocks.bridge.generate_text.assert_not_called()
         agent_with_mocks.bridge.generate.assert_not_called()
@@ -239,7 +371,7 @@ class TestRegistryHitShortCircuit:
             CapabilityMetadata(
                 name="snr_weighted_mse",
                 capability_type="loss",
-                file_path="/must/not/be/imported.py",
+                file_path=str(loss_file),
                 created_at="2026-09-13T00:00:00Z",
                 contract_snapshot=snapshot,
             )
@@ -295,11 +427,12 @@ class TestRegistryHitShortCircuit:
         """When the registry already has an entry for the requested
         loss_name, ``_generate_loss`` must NOT call the bridge."""
         # Pre-populate the registry.
+        loss_file = _live_loss_file("snr_weighted_mse")
         agent_with_mocks._registry.register(
             CapabilityMetadata(
                 name="snr_weighted_mse",
                 capability_type="loss",
-                file_path="/abs/agent_generated/losses/snr_weighted_mse.py",
+                file_path=str(loss_file),
                 created_at="2026-06-20T00:00:00+00:00",
                 source_iteration="iter_003",
                 description="Pre-existing entry from a prior iteration.",
@@ -314,17 +447,18 @@ class TestRegistryHitShortCircuit:
         assert prov.loss_name == "snr_weighted_mse"
         assert prov.source_iteration == "iter_003"
         # Reuse points at the ORIGINAL file path, not at inp.loss_dir.
-        assert prov.loss_file_path == "/abs/agent_generated/losses/snr_weighted_mse.py"
+        assert prov.loss_file_path == str(loss_file)
         assert prov.dummy_tensor_validated is True
 
     def test_no_file_written_on_registry_hit(self, agent_with_mocks, inp_loss_only):
         """On a registry hit, the implementor must not write to inp.loss_dir
         (the file is the one the original iteration already wrote)."""
+        loss_file = _live_loss_file("snr_weighted_mse")
         agent_with_mocks._registry.register(
             CapabilityMetadata(
                 name="snr_weighted_mse",
                 capability_type="loss",
-                file_path="/abs/snr_weighted_mse.py",
+                file_path=str(loss_file),
                 created_at="2026-06-20T00:00:00+00:00",
                 source_iteration="iter_003",
                 description="x",
@@ -534,11 +668,12 @@ class TestRunIntegration:
     def test_run_with_registry_hit_skips_loss_llm(self, agent_with_mocks, inp_loss_only):
         """Pre-populate the registry; ``run()`` should not call the bridge
         for the loss but should still call it for the model."""
+        loss_file = _live_loss_file("snr_weighted_mse")
         agent_with_mocks._registry.register(
             CapabilityMetadata(
                 name="snr_weighted_mse",
                 capability_type="loss",
-                file_path="/abs/snr_weighted_mse.py",
+                file_path=str(loss_file),
                 created_at="2026-06-20T00:00:00+00:00",
                 source_iteration="iter_003",
                 description="pre-existing",

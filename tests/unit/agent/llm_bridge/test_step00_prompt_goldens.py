@@ -211,7 +211,7 @@ def planner_fixture_kwargs(force_model: str = "auto") -> dict:
         last_mode="trial",
         score_table_md=_SCORE_TABLE_MD,
         task_description=_TASK_DESCRIPTION,
-        registry=None,
+        custom_loss_inventory=None,
         task_render=tidmad_task_render(),
         metric_spec=shipped_spec(),
     )

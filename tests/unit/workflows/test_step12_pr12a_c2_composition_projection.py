@@ -28,11 +28,14 @@ from __future__ import annotations
 
 import ast
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 import yaml
 
+from agent.schemas.custom_loss_contract import custom_loss_snapshot_from_forward_contract
+from core.capability_registry import CapabilityMetadata
 from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks.registry import _PROVIDER_REGISTRY, _REGISTRY
 from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
@@ -215,6 +218,32 @@ class TestThePerModelLockRecordsTheComposition:
         composition = compose_run_task_bindings(str(MASKED_REGRESSION))
         ref = build_task_composition_ref(composition)
         assert ref is not None
+        loss_snapshot = custom_loss_snapshot_from_forward_contract(composition.forward_contract)
+        assert loss_snapshot is not None
+        generated_root = tmp_path / "generated_library"
+        generated_loss_dir = generated_root / "losses"
+        generated_loss_dir.mkdir(parents=True)
+        loss_plugin = generated_loss_dir / "masked_mse_loss.py"
+        shutil.copyfile(
+            REPO_ROOT / "examples/synthetic_masked_regression/plugins/masked_mse_loss.py",
+            loss_plugin,
+        )
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(generated_root))
+        capability_index = tmp_path / "capability_index.json"
+        capability_index.write_text(
+            json.dumps(
+                [
+                    CapabilityMetadata(
+                        name="synthetic_masked_mse",
+                        capability_type="loss",
+                        file_path=str(loss_plugin),
+                        created_at="2026-09-13T00:00:00Z",
+                        contract_snapshot=loss_snapshot,
+                    ).model_dump(mode="json")
+                ]
+            ),
+            encoding="utf-8",
+        )
 
         with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             chain_workspace = tmp_path / "chain"
@@ -234,6 +263,7 @@ class TestThePerModelLockRecordsTheComposition:
                 tmp_path / "run",
                 monkeypatch,
                 preflight_results=_preflight(),
+                capability_index_path=str(capability_index),
                 input_overrides={
                     "health_gate_enabled": True,
                     "task_composition_ref": ref,

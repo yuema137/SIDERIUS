@@ -202,6 +202,7 @@ def _drive_admission(monkeypatch, payload: dict):
             train_portion=None,
         ),
         task_scopes=None,
+        expected_custom_loss_snapshot=None,
     )
     rejections: list[PhysicalRejection] = []
     outcome = execution.run_admission_preflight(

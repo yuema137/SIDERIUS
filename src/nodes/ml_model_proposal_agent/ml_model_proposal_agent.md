@@ -152,6 +152,13 @@ The constructor accepts `bridge_factory` (test injection — defaults to `LLMBri
 
 ## Key behavioral notes
 
+- **Custom-loss offers are task-compatible, not merely loadable.** A composed
+  invocation filters registry metadata against the task's immutable
+  prediction/target applicability snapshot. Missing, malformed or mismatched
+  entries are unavailable with named reasons; the system prompt, user prompt
+  and Branch-B output validation consume the same inventory. Uncomposed legacy
+  discovery is unchanged.
+
 - **One interpretation reader, and it is typed (Step 10 / P3).** The node used
   to receive `ProposalInput.interpretation: dict[str, Any]` — the upstream
   node's ENTIRE `model_dump()` — and mine it with `.get()` in two independent

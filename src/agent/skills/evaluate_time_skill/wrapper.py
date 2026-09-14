@@ -63,6 +63,7 @@ from typing import cast
 from agent.skills.denoising_score_skill import estimator as _scoring_est
 from agent.skills.inference_skill import estimator as _inference_est
 from agent.skills.training_skill import estimator as _training_est
+from core.capability_registry import CapabilityContractSnapshot
 from execute_tools.dataset_config import (
     DatasetProfile,
     tidmad_topology,
@@ -286,6 +287,7 @@ def _measure_ms_per_step(
     sample_set: dict,
     profile: DatasetProfile,
     task_scope: object | None = None,
+    expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
     n_warmup_batches: int = 3,
     n_timed_batches: int = 7,
 ) -> tuple[float | None, dict]:
@@ -407,7 +409,11 @@ def _measure_ms_per_step(
 
         train_cfg_obj = TrainConfig(**train_config)
         loss_cfg_obj = LossConfig(**loss_config)
-        criterion = get_criterion(loss_cfg_obj, class_weights=None)
+        criterion = get_criterion(
+            loss_cfg_obj,
+            class_weights=None,
+            expected_contract_snapshot=expected_custom_loss_snapshot,
+        )
 
         if train_cfg_obj.optimizer_type == "adamw":
             optimizer = torch.optim.AdamW(
@@ -754,6 +760,7 @@ def run_skill(sandbox, **kwargs) -> dict:
                 sample_set=sample_set,
                 profile=profile,
                 task_scope=getattr(task_scopes, "training", None),
+                expected_custom_loss_snapshot=kwargs.get("expected_custom_loss_snapshot"),
             )
 
         training = _training_est.estimate_wall_time_seconds(

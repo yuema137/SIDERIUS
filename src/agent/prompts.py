@@ -1039,8 +1039,8 @@ def get_planner_user_prompt(
     last_time_estimate_minutes=None,
     last_batch_size=None,
     last_mode=None,
-    # --- L6b — tuner planner registry awareness ---
-    registry=None,
+    # --- task-compatible custom-loss inventory ---
+    custom_loss_inventory=None,
     # --- Step 07 PR 07b (P2) — the run's authority-rendered task tokens ---
     task_render=None,
 ):
@@ -1121,23 +1121,10 @@ def get_planner_user_prompt(
     )
     dynamics_section = f"\n{dynamics_block}\n" if dynamics_block else ""
 
-    # L6b — registry awareness. ``has_custom_losses`` is True when the
-    # capability registry contains at least one ``capability_type="loss"``
-    # entry; in that case the planner is also told it MAY use
-    # ``loss_type="custom"`` + ``loss_name=<entry from the AVAILABLE
-    # CUSTOM LOSSES table in the system prompt>``. Default False (no
-    # registry passed) preserves pre-L6b behaviour where only the four
-    # built-in loss types were advertised. See
-    # docs/design/enable_loss_inventory.md § L6b.
-    has_custom_losses = False
-    if registry is not None:
-        try:
-            has_custom_losses = bool(list(registry.list(capability_type="loss")))
-        except Exception:
-            # Defensive: registry may be a duck-typed stub in tests. Treat
-            # any failure as "no custom losses available" rather than
-            # propagating the error into prompt rendering.
-            has_custom_losses = False
+    # The system table and this user note derive from the same immutable
+    # inventory. Re-reading the registry here used to let the two prompts
+    # disagree when task compatibility filtered an entry on only one side.
+    has_custom_losses = bool(custom_loss_inventory is not None and custom_loss_inventory.entries)
     custom_loss_note = (
         ' You may ALSO use `loss_type="custom"` with a `loss_name` from '
         "the AVAILABLE CUSTOM LOSSES table in the system prompt above — "
