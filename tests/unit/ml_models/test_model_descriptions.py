@@ -65,6 +65,34 @@ def test_composed_policy_resolves_declared_pack_description(tmp_path, monkeypatc
     )
 
 
+def test_composed_loader_prefers_workspace_over_declared_pack(tmp_path, monkeypatch):
+    """A staged workspace description outranks the pack's fallback copy.
+
+    This catches the real contamination boundary: if candidate ordering is
+    accidentally changed, a stale pack description can replace the prose for
+    the model actually staged into this run.
+    """
+    workspace = tmp_path / "workspace"
+    staged = workspace / "plugins" / "iter_002" / "shared_model"
+    staged.mkdir(parents=True)
+    (staged / "description.md").write_text("# workspace description\n", encoding="utf-8")
+    monkeypatch.setenv("SIDERIUS_CHAIN_WORKSPACE", str(workspace))
+
+    pack = tmp_path / "pack" / "shared_model"
+    pack.mkdir(parents=True)
+    (pack / "description.md").write_text("# pack description\n", encoding="utf-8")
+    monkeypatch.setattr(
+        model_descriptions, "_declared_pack_candidates", lambda _: [str(pack / "description.md")]
+    )
+
+    assert (
+        model_descriptions.get_model_description(
+            "shared_model", source_policy=model_descriptions.DescriptionSourcePolicy.COMPOSED
+        )
+        == "# workspace description\n"
+    )
+
+
 def test_finds_chain_plugin_with_run_scoped_dirname(chain_workspace):
     """Gate 2 Run-4 regression guard: run_name like ``stage2_iter_001``
     that doesn't match the legacy ``iter_NNN`` regex must still be

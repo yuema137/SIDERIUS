@@ -84,3 +84,32 @@ def test_composed_inline_description_precedes_any_loader(tmp_path):
     assert output.model_knowledge_cache["punet"]["_stats"]["model_description"] == (
         "# inline task prose"
     )
+
+
+def test_composed_iteration_two_reuses_iteration_one_authored_description(tmp_path):
+    """Iteration two must carry task-owned prose without reopening the loader.
+
+    This is the cross-iteration boundary: deleting it would allow a later
+    iteration to silently fall back to bundled framework prose after the
+    first proposal's description had already been authored and persisted.
+    """
+    first_summary = PUNET_SUMMARY.model_copy(update={"model_description": "# proposal-owned prose"})
+    first_input = make_input(first_summary, workspace=str(tmp_path))
+    first_input.description_source_policy = DescriptionSourcePolicy.COMPOSED
+    first_output = _agent().run(first_input)
+    carried_cache = first_output.model_knowledge_cache
+
+    second_input = make_input(
+        PUNET_SUMMARY.model_copy(update={"model_description": None}), workspace=str(tmp_path)
+    )
+    second_input.description_source_policy = DescriptionSourcePolicy.COMPOSED
+    second_input.model_knowledge_cache = carried_cache
+    with patch(
+        "nodes.result_interpretation_agent.get_model_description",
+        side_effect=AssertionError("iteration two must use the carried task-owned description"),
+    ):
+        second_output = _agent().run(second_input)
+
+    assert second_output.model_knowledge_cache["punet"]["_stats"]["model_description"] == (
+        "# proposal-owned prose"
+    )
