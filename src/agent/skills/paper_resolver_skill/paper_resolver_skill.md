@@ -30,9 +30,12 @@ Normal paths return `{"status": "ok"|"partial"|"error", "data": ..., "message": 
 Resolve data reports source/identifier, S2 metadata where applicable,
 `verbosity_achieved`, `full_text`, and `extraction_method` (`arxiv_source`,
 `pdfplumber_llm`, or `abstract_only`). Search data reports query, mapped
-results, total, offset, and next page information. Invalid inputs, network,
-PDF, and extraction failures become an error or partial envelope rather than a
-normal public exception.
+results, total, offset, and next page information. Missing or semantically
+invalid values that reach the mode handlers, plus network, PDF, and extraction
+failures, become an error or partial envelope. Direct Python callers must pass
+integer-coercible `verbosity`, `limit`, and `offset` values: coercion currently
+occurs while the cache key is built and can raise `TypeError` or `ValueError`
+before an envelope is created.
 
 Remote calls may use Semantic Scholar, arXiv, or an open-access PDF URL.
 Full-text extraction tries arXiv source first and pdfplumber fallback where
