@@ -241,6 +241,49 @@ class TestArgvDelta:
         assert "--eval_sample_set_json" not in cmd
 
     @patch("core.sandbox_executor._run_observed_subprocess")
+    def test_opaque_scope_transports_per_epoch_sampling_and_ordering(self, mock_run, tmp_path):
+        """Opaque task scopes must not erase generic execution controls.
+
+        This is the production failure shape: deleting any transport hop makes
+        the captured child argv omit the requested portion, deterministic seed,
+        or sequential file order even though the parent resolved all four.
+        """
+        data_root = tmp_path / "opaque_data"
+        data_root.mkdir()
+        fixture = write_two_family_fixture(data_root)
+        with bound_trainer_task(tmp_path / "binding", fixture) as adapter:
+            opaque_scope = {0: [0, 1], 1: [0, 1], 2: [0, 1]}
+            scoped_sandbox = TidmadSandbox(
+                run_name=RUN_NAME,
+                workspace=str(tmp_path / "opaque_workspace"),
+                progress_bar=False,
+            )
+            mock_run.side_effect = _launch_ok(scoped_sandbox)
+            scoped_sandbox.execute_training(
+                EXP_ID,
+                RUN_NAME,
+                MODEL_TYPE,
+                MODEL_CFG,
+                TRAIN_CFG,
+                LOSS_CFG,
+                train_portion=0.1,
+                train_base_seed=73,
+                order_strategy="sequential",
+                file_order=[2, 0, 1],
+                execution_bindings=TrainingExecutionBindings(
+                    task_scopes=attempt_scopes(adapter, opaque_scope)
+                ),
+            )
+
+        (cmd,), _ = mock_run.call_args
+        assert "--sample_set_json" not in cmd
+        assert cmd[cmd.index("--train_portion") + 1] == "0.1"
+        assert cmd[cmd.index("--train_base_seed") + 1] == "73"
+        assert cmd[cmd.index("--order_strategy") + 1] == "sequential"
+        order_path = Path(cmd[cmd.index("--file_order_json") + 1])
+        assert json.loads(order_path.read_text(encoding="utf-8")) == [2, 0, 1]
+
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_legacy_mode_never_emits_the_flag_even_when_an_eval_set_is_given(
         self, mock_run, sandbox
     ):
@@ -434,6 +477,43 @@ class TestRungB07a2ValidationScopeAxis:
     Both scopes cross through production serialization; the subprocess argv
     is observed but never patched to add a missing input.
     """
+
+    def test_real_opaque_trainer_materializes_requested_train_portion(self, tmp_path):
+        """The child consumes, rather than merely receives, the transported portion."""
+        (tmp_path / "data").mkdir()
+        fixture = write_two_family_fixture(tmp_path / "data")
+        training_scope = {0: [0, 1, 2, 3], 1: [0, 1, 2, 3], 2: [0, 1, 2, 3]}
+        with bound_trainer_task(tmp_path, fixture) as adapter:
+            scoped_sandbox = TidmadSandbox(
+                run_name="opaque_portion",
+                workspace=str(tmp_path / "ws"),
+                progress_bar=False,
+            )
+            outcome = scoped_sandbox.execute_training(
+                "opaque_portion",
+                "opaque_portion",
+                "wavenet",
+                _wavenet_cfg(fixture.seg_size),
+                {
+                    "lr": 1e-3,
+                    "epochs": 1,
+                    "batch_size": 2,
+                    "optimizer_type": "adam",
+                    "device": "cpu",
+                },
+                {"loss_type": "focal"},
+                train_portion=0.5,
+                train_base_seed=19,
+                runtime_policy={},
+                execution_bindings=TrainingExecutionBindings(
+                    task_scopes=attempt_scopes(adapter, training_scope)
+                ),
+            )
+
+        assert outcome["status"] == "success", outcome.get("message")
+        detail = outcome["runtime_verification"]["components"]["training"]["workload"]["detail"]
+        assert detail["train_portion"] == 0.5
+        assert detail["epoch0_samples"] == 12
 
     def test_real_trainer_emits_r2_and_r3_over_the_validation_family(self, tmp_path, monkeypatch):
         (tmp_path / "data").mkdir()

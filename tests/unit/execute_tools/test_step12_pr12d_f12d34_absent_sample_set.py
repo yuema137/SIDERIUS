@@ -10,8 +10,9 @@ REACHABLE:
 
 The real-task storage-provenance incident and its scientific topology fixture
 live with that external task. This framework module retains the two generic
-decisions: ordering cannot inspect a missing legacy scope, and training may
-proceed when either the legacy mapping or the transported task scope exists.
+decisions: opaque-scope ordering is checked against the materialized dataset's
+declared groups rather than a missing legacy scope, and training may proceed
+when either the legacy mapping or the transported task scope exists.
 """
 
 import pytest
@@ -19,10 +20,9 @@ import pytest
 from execute_tools import train_engine_sandbox as tes
 
 
-class TestOrderingRefusesWithoutAScope:
-    def test_sequential_file_order_without_a_sample_set_is_refused(self):
-        with pytest.raises(ValueError, match="no sample set to order against"):
-            tes.validate_ordering_against_scope("sequential", [4, 5], None)
+class TestOrderingDefersOpaqueScopeValidation:
+    def test_sequential_file_order_without_a_sample_set_is_deferred(self):
+        tes.validate_ordering_against_scope("sequential", [4, 5], None)
 
     def test_the_absent_scope_is_refused_only_when_an_order_needs_checking(self):
         """No file order means nothing to validate — absence is not an error."""
