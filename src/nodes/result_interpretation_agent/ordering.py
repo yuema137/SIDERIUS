@@ -48,7 +48,7 @@ def bind_run_order(inp: InterpretationInput) -> MetricOrder | None:
 
 @dataclass(frozen=True)
 class _CachedAggregationCandidate:
-    """A cached-only model, shaped for the authority partition.
+    """A cached-only Formal result, shaped for the authority partition.
 
     N-2. ``partition_for_aggregation`` reads ``model_type`` and
     ``scientific_authority`` STRUCTURALLY (``HasScientificAuthority``), so a
@@ -57,8 +57,9 @@ class _CachedAggregationCandidate:
     models is exactly what must not exist here: the filter and the aggregate
     have to range over the same set, or the difference is a silence.
 
-    ``scientific_authority`` is ``None`` for a ``_stats`` block written
-    before the verdict travelled with the score. That resolves to
+    Instances are constructed only when the cache carries a Formal score.
+    ``scientific_authority`` is ``None`` for a score-bearing ``_stats`` block
+    written before the verdict travelled with the score. That resolves to
     ``unreconstructable_legacy`` and EXCLUDES the model, which is the frozen
     rule for anything missing the authority contract — fail-closed, and now
     reported instead of dropped.
@@ -131,11 +132,13 @@ def precompute_evidence(
     prevent (V20 PR D, D-C5). Excluded results are not deleted — they stay on
     the summaries and in the returned scope, which the report renders.
 
-    The filter's domain is ``summaries`` PLUS the cached-only models (N-2),
-    because that is the domain ``per_model_formal`` itself has. Narrowing the
-    partition to the new summaries alone put every cached model outside both
-    halves of the verdict, which reads as "nothing was withheld" while its
-    formal score is being dropped.
+    The filter's domain is the score-bearing Formal entries from ``summaries``
+    PLUS score-bearing cached-only models (N-2), because that is the domain
+    ``per_model_formal`` itself has. Narrowing the partition to the new
+    summaries alone put every cached Formal result outside both halves of the
+    verdict, which reads as "nothing was withheld" while its score is being
+    dropped. Widening it to Trial-only entries fabricates the opposite claim:
+    that an absent Formal result is unreconstructable legacy evidence.
 
     ``order`` is keyword-only with NO default (Step 09a C3): every ranking
     below is a direction question, and a defaulted argument is exactly how
@@ -225,12 +228,14 @@ def precompute_evidence(
         if mt in per_model_summary_input:
             continue  # new summary takes precedence
         stats = entry.get("_stats", {})
-        cached_aggregation_candidates.append(
-            _CachedAggregationCandidate(
-                model_type=mt,
-                scientific_authority=stats.get("scientific_authority"),
+        formal_score = stats.get("formal_score")
+        if formal_score is not None:
+            cached_aggregation_candidates.append(
+                _CachedAggregationCandidate(
+                    model_type=mt,
+                    scientific_authority=stats.get("scientific_authority"),
+                )
             )
-        )
         best = stats.get("best_denoising_score")
         best_valid = stats.get("best_valid_denoising_score")
         worst = stats.get("worst_denoising_score")
@@ -241,8 +246,8 @@ def precompute_evidence(
         per_model_raw_best_health_validity[mt] = stats.get("best_raw_health_validity", "unknown")
         per_model_worst[mt] = worst
         per_model_best_config[mt] = stats.get("best_config")
-        if stats.get("formal_score") is not None:
-            per_model_formal[mt] = stats["formal_score"]
+        if formal_score is not None:
+            per_model_formal[mt] = formal_score
 
         if best is not None and (
             overall_best_score is None
@@ -280,21 +285,27 @@ def precompute_evidence(
     # interpretation it then writes.
     #
     # N-2 — THE PARTITION RANGES OVER THE SAME SET THE AGGREGATE DOES.
-    # `per_model_formal` above is filled from the new summaries AND from the
-    # cached `_stats` blocks; partitioning only `summaries` left every
-    # cached-only model outside BOTH halves of the verdict — its formal score
-    # was deleted by the `_authoritative` filter (it can never be in an
-    # `included` list built from summaries) and no exclusion reason existed to
-    # report it, so the withholding was a silence. In a chain subprocess that
-    # is the normal case, not an edge case: after the first iteration the
-    # workflow passes exactly ONE new summary and every other model is cached.
+    # `per_model_formal` above is filled from the score-bearing new summaries
+    # AND score-bearing cached `_stats` blocks; partitioning only fresh results
+    # left every cached-only Formal result outside BOTH halves of the verdict —
+    # its score was deleted by the `_authoritative` filter (it can never be in
+    # an `included` list built from fresh summaries) and no exclusion reason
+    # existed to report it, so the withholding was a silence. In a chain
+    # subprocess that is the normal case, not an edge case: after the first
+    # iteration the workflow passes exactly ONE new summary and every other
+    # model is cached.
     #
-    # A cached entry carries whatever verdict the iteration that produced it
-    # recorded (`_stats["scientific_authority"]`); one written before the
-    # verdict travelled with the score carries none, resolves to
-    # `unreconstructable_legacy`, and is excluded — the frozen rule for
-    # anything missing the authority contract.
-    aggregation_scope = partition_for_aggregation([*summaries, *cached_aggregation_candidates])
+    # The partition is specifically a partition of FORMAL RESULTS. A modern
+    # Trial-only summary has no Formal result to include or exclude; feeding it
+    # to the authority resolver would falsely relabel an ordinary absence as
+    # ``unreconstructable_legacy``. A score-bearing cached entry still carries
+    # whatever verdict the producing iteration recorded; one written before
+    # the verdict travelled with the score carries none and remains excluded
+    # fail-closed as true legacy evidence.
+    fresh_aggregation_candidates = [s for s in summaries if s.formal_score is not None]
+    aggregation_scope = partition_for_aggregation(
+        [*fresh_aggregation_candidates, *cached_aggregation_candidates]
+    )
     _authoritative = set(aggregation_scope.included)
     # F-SCANE-1 — captured BEFORE the filter, and only for models that
     # actually had a formal score to lose. Order is load-bearing: computed
