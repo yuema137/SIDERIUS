@@ -173,10 +173,10 @@ class TestTheCarriedValuesStillReachTheirConsumers:
 
 
 class TestSignatureAndCallers:
-    def test_run_workflow_has_exactly_twenty_one_parameters(self):
+    def test_run_workflow_has_exactly_twenty_two_parameters(self):
         from workflows.model_exploration import run_workflow
 
-        assert len(inspect.signature(run_workflow).parameters) == 21
+        assert len(inspect.signature(run_workflow).parameters) == 22
 
     def test_no_compatibility_wrapper_re_exposes_the_carried_values(self):
         """09.5a rule 2, unchanged: the old surface must not survive beside

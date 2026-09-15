@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # 1. Base Model Configuration
 # ==========================================
 
-type LossTypeName = Literal["focal", "focal_cw", "ce", "smooth_l1", "custom"]
+LossTypeName = Literal["focal", "focal_cw", "ce", "smooth_l1", "custom"]
 
 
 class BaseConfig(BaseModel):

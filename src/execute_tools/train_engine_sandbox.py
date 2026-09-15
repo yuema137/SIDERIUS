@@ -1,6 +1,5 @@
 import argparse
 import gc
-import hashlib
 import inspect
 import json
 import os
@@ -67,7 +66,10 @@ from execute_tools.task_data_path import (
 from execute_tools.task_data_path import (
     ValidationScopeError as ValidationScopeError,
 )
-from execute_tools.trained_model_artifact import TrainingArtifactCandidate
+from execute_tools.trained_model_artifact import (
+    TrainingArtifactCandidate,
+    certified_file_identity,
+)
 from execute_tools.training_history import (
     STATIC_OBSERVATIONS_KEY,
     TRAINING_HISTORY_KEY,
@@ -80,12 +82,6 @@ from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_
 
 # Import your sandboxed components
 from ml_models.models_sandbox import MODEL_REGISTRY
-
-
-def _sha256_file(path: str) -> tuple[str, int]:
-    with open(path, "rb") as handle:
-        payload = handle.read()
-    return hashlib.sha256(payload).hexdigest(), len(payload)
 
 
 def _write_training_artifact_candidate(
@@ -122,9 +118,9 @@ def _write_training_artifact_candidate(
     checkpoint_path = os.path.join(
         sandbox_dirs["models"], f"model_{model_type}_{args.exp_id}_agent.pth"
     )
-    checkpoint_sha, checkpoint_size = _sha256_file(checkpoint_path)
-    config_sha, config_size = _sha256_file(args.model_cfg)
-    plugin_sha, _ = _sha256_file(model_source)
+    checkpoint_sha, checkpoint_size = certified_file_identity(checkpoint_path)
+    config_sha, config_size = certified_file_identity(args.model_cfg)
+    plugin_sha, _ = certified_file_identity(model_source)
     candidate = TrainingArtifactCandidate(
         checkpoint_path=checkpoint_path,
         checkpoint_sha256=checkpoint_sha,

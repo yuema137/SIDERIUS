@@ -85,6 +85,33 @@ class TrainedModelEmissionContext(FrozenModel):
     plugin_configured_ref: NonEmptyStr
 
 
+def certified_file_identity(path: str) -> tuple[str, int]:
+    """Return the byte identity observed by the trained-model artifact boundary."""
+
+    payload = Path(path).read_bytes()
+    return hashlib.sha256(payload).hexdigest(), len(payload)
+
+
+def load_training_artifact_candidate(path: str) -> dict[str, object] | None:
+    """Load an executor sidecar when present without growing the sandbox consumer."""
+
+    source = Path(path)
+    if not source.is_file():
+        return None
+    return TrainingArtifactCandidate.model_validate_json(source.read_bytes()).model_dump(
+        mode="json"
+    )
+
+
+def load_training_candidate(
+    records_directory: str, run_name: str, experiment_id: str
+) -> dict[str, object] | None:
+    """Resolve the one executor sidecar name owned by the artifact boundary."""
+
+    path = Path(records_directory) / run_name / f"trained_model_candidate_{experiment_id}.json"
+    return load_training_artifact_candidate(str(path.resolve()))
+
+
 def _verified_bytes(path: str, expected_sha256: str, expected_size: int | None = None) -> bytes:
     source = Path(path)
     if source.is_symlink() or not source.is_file():

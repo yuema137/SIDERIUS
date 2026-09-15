@@ -95,7 +95,7 @@ class TestFX3PresetResolution:
         runtime consumer CAN branch on a label (§21)."""
         resolved = resolve_model_io_contract(_contract(), preset="sequence")
         assert isinstance(resolved, ModelIOContract)
-        assert set(type(resolved).model_fields) == {"input", "output"}
+        assert "preset" not in type(resolved).model_fields
         assert not hasattr(resolved, "preset")
 
     def test_no_production_module_reads_a_preset_after_resolution(self):

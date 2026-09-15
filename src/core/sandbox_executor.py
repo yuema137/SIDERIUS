@@ -75,6 +75,7 @@ from execute_tools.scope_artifact import task_scope_argv, validation_rows_argv
 # consumers migrate to execute_tools.scoring_utils; tracked in the lane.)
 from execute_tools.scoring_utils import coerce_nonfinite_to_none as coerce_nonfinite_to_none
 from execute_tools.scoring_utils import validate_sample_set
+from execute_tools.trained_model_artifact import load_training_candidate
 from execute_tools.training_history import (
     TRAINING_HISTORY_KEY,
     TrainingHistory,
@@ -1713,26 +1714,12 @@ class TidmadSandbox:
             if os.path.isfile(train_json_path):
                 with open(train_json_path) as f:
                     results = json.load(f)
-            trained_model_candidate = None
-            candidate_path = os.path.abspath(
-                os.path.join(
-                    self.dirs["records"],
-                    run_name,
-                    f"trained_model_candidate_{exp_id}.json",
-                )
-            )
-            if os.path.isfile(candidate_path):
-                from execute_tools.trained_model_artifact import TrainingArtifactCandidate
-
-                with open(candidate_path, "rb") as handle:
-                    trained_model_candidate = TrainingArtifactCandidate.model_validate_json(
-                        handle.read()
-                    ).model_dump(mode="json")
+            candidate = load_training_candidate(self.dirs["records"], run_name, exp_id)
             return {
                 "status": "success",
                 "message": "Training finished.",
                 "results": results,
-                "trained_model_candidate": trained_model_candidate,
+                "trained_model_candidate": candidate,
                 "runtime_verification": runtime_verification,
             }
 

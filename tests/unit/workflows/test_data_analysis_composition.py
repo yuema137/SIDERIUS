@@ -128,11 +128,12 @@ def test_analysis_identity_uses_semantics_not_config_formatting_or_host_path(tmp
     assert first.config_content_sha256 != second.config_content_sha256
     assert first.config_path != second.config_path
     assert first.canonical_identity() == second.canonical_identity()
-    assert hashlib.sha256(
-        json.dumps(first.canonical_identity(), sort_keys=True).encode()
-    ).hexdigest() == hashlib.sha256(
-        json.dumps(second.canonical_identity(), sort_keys=True).encode()
-    ).hexdigest()
+    assert (
+        hashlib.sha256(json.dumps(first.canonical_identity(), sort_keys=True).encode()).hexdigest()
+        == hashlib.sha256(
+            json.dumps(second.canonical_identity(), sort_keys=True).encode()
+        ).hexdigest()
+    )
 
 
 def test_enabling_analysis_changes_composition_identity_once(tmp_path) -> None:

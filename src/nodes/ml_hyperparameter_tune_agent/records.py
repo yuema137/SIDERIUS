@@ -93,10 +93,10 @@ def _trained_model_artifact_ref(
     model_io = bindings.run_model_io
     if model_io is None or model_io.inference is None:
         return None
-    composition_ref = bindings.agent_input.task_composition_ref
+    composition_fingerprint = active_composition_fingerprint()
     task_data_path = bindings.run_task_data_path
     forward_contract = bindings.run_forward_contract
-    if composition_ref is None or task_data_path is None or forward_contract is None:
+    if composition_fingerprint is None or task_data_path is None or forward_contract is None:
         raise ValueError(
             "standard trained-model emission requires composed task, data-path, and forward authorities"
         )
@@ -147,7 +147,7 @@ def _trained_model_artifact_ref(
             dataset_profile=bindings.run_profile.to_wire(),
             task_data_path_id=task_data_path.task_data_path_id,
             task_data_path_content_sha256=task_content,
-            task_composition_fingerprint=composition_ref.semantic_fingerprint,
+            task_composition_fingerprint=composition_fingerprint,
             plugin_configured_ref=configured_ref,
         ),
     )
