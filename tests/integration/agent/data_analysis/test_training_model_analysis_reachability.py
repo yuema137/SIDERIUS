@@ -213,7 +213,9 @@ class _ModelDiagnosticBridge:
             }
         if label == "data_analysis.synthesis":
             results = json.loads(
-                user.split("Certified bounded SkillResults:\n", 1)[1].split("\n\nReturn:", 1)[0]
+                user.split("Certified bounded SkillResults:\n", 1)[1].split(
+                    "\n\nAuthoritative output JSON schema:", 1
+                )[0]
             )
             result = results[0]
             assert result["status"] == "completed"

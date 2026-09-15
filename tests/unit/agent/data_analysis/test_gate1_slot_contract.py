@@ -10,6 +10,7 @@ from agent.data_analysis.plan_validation import (
     validate_binding_information,
     validate_invocation_metadata_selections,
 )
+from agent.schemas.data_analysis.access import RequestedInformation
 from agent.schemas.data_analysis.assets import (
     AnalysisAsset,
     ArtifactIntrinsicScope,
@@ -234,6 +235,16 @@ def test_metadata_wildcards_remain_forbidden() -> None:
             requested_format_id="siderius.numeric-array.v1",
             requested_information=({"information_class": "metadata", "fields": ["*"]},),
         )
+
+
+def test_requested_information_fields_are_conditional_on_metadata() -> None:
+    """Catches named fields becoming an authority for non-metadata information."""
+
+    assert RequestedInformation(information_class="data", fields=()).fields == ()
+    assert RequestedInformation(information_class="metadata", fields=("snr",)).fields == ("snr",)
+
+    with pytest.raises(ValidationError, match="only for metadata"):
+        RequestedInformation(information_class="prediction", fields=("prediction",))
 
 
 def test_requested_format_must_be_accepted_before_materialization() -> None:

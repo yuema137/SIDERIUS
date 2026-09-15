@@ -91,6 +91,7 @@ copies and staging directories are removed after the bounded worker exits.
 ## Key behavioral notes
 
 - Discovery reads manifests only. Selected implementations are imported in a bounded worker after interface resolution.
+- Planning keeps `RequestedInformation` strict: only `metadata` may name explicit `fields`; `data`, `target`, `prediction`, `residual`, and `identity` use no fields. One bounded repair may delete an illegal non-metadata `fields` value because it carries no access authority, but it may not change the information class, metadata field identity, binding, format, sampling, parameters, or other plan semantics.
 - A skill receives only already-authorized `MaterializedAnalysisView` content and cannot resolve asset IDs or scan the workspace.
 - Full results remain append-only; the canonical report contains bounded summaries and certified references.
 - Existing predictions, residuals, histories, and evaluation artifacts may be analyzed when supplied and authorized.

@@ -144,7 +144,28 @@ class DataAnalysisAgent:
     def _plan_semantics(value: object) -> object | None:
         if not isinstance(value, dict) or not isinstance(value.get("invocations"), list):
             return None
-        return {key: item for key, item in value.items() if key != "rationale"}
+
+        def without_non_authoritative_fields(item: object) -> object:
+            if isinstance(item, dict):
+                information_class = item.get("information_class")
+                return {
+                    key: without_non_authoritative_fields(child)
+                    for key, child in item.items()
+                    if not (
+                        key == "fields"
+                        and information_class
+                        in {"identity", "data", "target", "prediction", "residual"}
+                    )
+                }
+            if isinstance(item, list):
+                return [without_non_authoritative_fields(child) for child in item]
+            return item
+
+        return {
+            key: without_non_authoritative_fields(item)
+            for key, item in value.items()
+            if key != "rationale"
+        }
 
     @staticmethod
     def _synthesis_semantics(value: object) -> object | None:

@@ -65,6 +65,12 @@ def render_analysis_plan_prompt(
     system = """Produce one executable AnalysisPlan as strict JSON. Use exact IDs, slots,
 formats, information classes, metadata fields, parameters, cost hints, and question IDs from the
 supplied contracts. Metadata parameters grant no access: the binding must request the exact field.
+RequestedInformation.fields is conditional: use explicit names only when information_class is
+"metadata". For "identity", "data", "target", "prediction", or "residual", fields must be empty.
+Examples: {"information_class":"data","fields":[]} and
+{"information_class":"prediction","fields":[]} are valid;
+{"information_class":"metadata","fields":["snr"]} is valid; and
+{"information_class":"prediction","fields":["prediction"]} is invalid.
 Use one invocation-level sampling plan for aligned bindings. Never materialize or infer hidden data.
 Choose explicit nperseg/frequency/lag/bin parameters when required. Invocation IDs must be safe
 portable path components. Do not include commentary outside JSON."""
@@ -142,7 +148,9 @@ def render_structured_output_repair_prompt(
     system = """Repair one structured output so it conforms to the supplied authoritative JSON
 schema. Preserve every recoverable semantic decision, identifier, ordering, parameter, and claim.
 Correct representation/schema conformance only. Do not replan, add reasoning, expand scope, change
-priorities, or select different skills. Return only the repaired JSON object."""
+priorities, or select different skills. For RequestedInformation, deleting `fields` from a
+non-metadata information class is representation repair; changing information_class or any metadata
+field name is not. Return only the repaired JSON object."""
     user = f"""Authoritative output JSON schema:
 {_json(output_schema)}
 

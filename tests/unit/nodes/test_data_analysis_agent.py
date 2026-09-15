@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 import json
@@ -191,6 +192,54 @@ class _RepairingBridge(_Bridge):
         return super().generate(system, user, label=label)
 
 
+class _PlanRepairingBridge(_Bridge):
+    def __init__(self, *, repair_change: str | None = None, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.repair_change = repair_change
+        self.calls: list[tuple[str, str]] = []
+        self.system_prompts: dict[str, str] = {}
+
+    def _malformed_plan(self, system, user):
+        plan = copy.deepcopy(super().generate(system, user, label="data_analysis.plan"))
+        requested = plan["invocations"][0]["bindings"][0]["requested_information"]
+        requested[0]["fields"] = ["data"]
+        if self.repair_change == "metadata_field":
+            requested.append({"information_class": "metadata", "fields": ["snr"]})
+        return plan
+
+    def generate(self, system, user, *, label):
+        self.calls.append((label, user))
+        self.system_prompts[label] = system
+        if label == "data_analysis.plan":
+            return self._malformed_plan(system, user)
+        if label == "data_analysis.plan.repair":
+            plan = self._malformed_plan(system, user)
+            invocation = plan["invocations"][0]
+            binding = invocation["bindings"][0]
+            binding["requested_information"][0]["fields"] = []
+            changes = {
+                "information_class": lambda: binding["requested_information"][0].update(
+                    information_class="target"
+                ),
+                "metadata_field": lambda: binding["requested_information"][1].update(
+                    fields=["frequency"]
+                ),
+                "skill": lambda: invocation.update(skill_id="nonfinite_and_missingness"),
+                "binding": lambda: binding.update(binding_id="changed-binding"),
+                "asset": lambda: binding.update(asset_id="changed-asset"),
+                "format": lambda: binding.update(requested_format_id="changed-format.v1"),
+                "sampling": lambda: invocation["sampling_plan"]["policy"].update(seed=12),
+                "parameters": lambda: invocation.update(arguments={"ddof": 1}),
+                "priority": lambda: invocation.update(priority=5),
+                "stop_policy": lambda: plan["stop_policy"].update(minimum_remaining_time_s=2.0),
+                "resource_intent": lambda: invocation.update(expected_time_cost="moderate"),
+            }
+            if self.repair_change is not None:
+                changes[self.repair_change]()
+            return plan
+        return super().generate(system, user, label=label)
+
+
 def _input(tmp_path: Path) -> DataAnalysisInput:
     scope = ArtifactIntrinsicScope(split_id="validation", description="Validation data")
     asset = AnalysisAsset(
@@ -362,3 +411,78 @@ def test_schema_repair_cannot_change_recoverable_skill_selection(tmp_path: Path)
     receipt = json.loads((root / "structured_output_receipts.jsonl").read_text())
     assert receipt["repair_passed"] is False
     assert receipt["repair_validation_errors"][0]["error_type"] == ("semantic_decision_changed")
+
+
+@pytest.mark.allow_real_subprocess
+def test_plan_repair_may_only_delete_illegal_nonmetadata_fields(tmp_path: Path) -> None:
+    """Catches the TIDMAD incident where harmless field deletion was called replanning."""
+
+    analysis_input = _input(tmp_path)
+    bridge = _PlanRepairingBridge(analysis_input=analysis_input)
+    report = DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **_kwargs: bridge,
+        provider="test",
+        model_id="fake",
+    ).run(analysis_input)
+
+    assert report.skill_result_summaries[0].skill_id == "summary_statistics"
+    plan_system_rule = (
+        "RequestedInformation.fields is conditional: use explicit names only when information_class is\n"
+        '"metadata".'
+    )
+    assert plan_system_rule in bridge.system_prompts["data_analysis.plan"]
+
+    receipt_path = (
+        tmp_path / "data_analysis" / "standalone" / "request" / "structured_output_receipts.jsonl"
+    )
+    receipts = [json.loads(line) for line in receipt_path.read_text().splitlines()]
+    plan_receipt = next(item for item in receipts if item["stage"] == "data_analysis.plan")
+    assert plan_receipt["initial_validation_passed"] is False
+    assert plan_receipt["validation_errors"][0]["path"].endswith("requested_information.0")
+    assert plan_receipt["repair_attempted"] is True
+    assert plan_receipt["repair_passed"] is True
+    assert plan_receipt["llm_call_count"] == 2
+
+
+@pytest.mark.parametrize(
+    "repair_change",
+    [
+        "information_class",
+        "metadata_field",
+        "skill",
+        "binding",
+        "asset",
+        "format",
+        "sampling",
+        "parameters",
+        "priority",
+        "stop_policy",
+        "resource_intent",
+    ],
+)
+def test_plan_repair_rejects_semantic_changes(tmp_path: Path, repair_change: str) -> None:
+    """Catches one-shot schema repair gaining authority to alter executable plan semantics."""
+
+    analysis_input = _input(tmp_path)
+    bridge = _PlanRepairingBridge(
+        analysis_input=analysis_input,
+        repair_change=repair_change,
+    )
+    with pytest.raises(DataAnalysisStructuredOutputError, match="changed the recoverable"):
+        DataAnalysisAgent(
+            task_analysis_capability=_Capability(),
+            bridge_factory=lambda **_kwargs: bridge,
+            provider="test",
+            model_id="fake",
+        ).run(analysis_input)
+
+    receipt_path = (
+        tmp_path / "data_analysis" / "standalone" / "request" / "structured_output_receipts.jsonl"
+    )
+    receipts = [json.loads(line) for line in receipt_path.read_text().splitlines()]
+    plan_receipt = next(item for item in receipts if item["stage"] == "data_analysis.plan")
+    assert plan_receipt["repair_passed"] is False
+    assert plan_receipt["repair_validation_errors"][0]["error_type"] == (
+        "semantic_decision_changed"
+    )
