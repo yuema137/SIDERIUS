@@ -493,6 +493,20 @@ class TaskEvaluationPayload(BaseModel):
 
 
 @runtime_checkable
+class SequentiallyGroupedTrainingDataset(Protocol):
+    """Optional dataset capability for deterministic group-wise ordering.
+
+    Task implementations opt in structurally by exposing a mapping from the
+    integer group identities used by ``file_order`` to half-open row spans in
+    the materialized dataset. Tasks that do not expose this capability still
+    support the default shuffle strategy and are refused only when sequential
+    ordering is explicitly selected.
+    """
+
+    file_row_ranges: Mapping[int, tuple[int, int]]
+
+
+@runtime_checkable
 class TaskDataPath(Protocol):
     """The four-method executable data-path contract (parent §3, FROZEN).
 
@@ -507,7 +521,12 @@ class TaskDataPath(Protocol):
     task_data_path_id: ClassVar[str]
 
     def training_dataset(self, scope: object, params: EpochSamplingParams) -> Dataset[Any]:
-        """A torch Dataset over ``scope`` yielding (model_input, supervision_target)."""
+        """A torch Dataset over ``scope`` yielding (model_input, supervision_target).
+
+        The returned dataset may implement
+        :class:`SequentiallyGroupedTrainingDataset` when this task supports
+        the optional sequential ordering strategy.
+        """
         ...
 
     def validation_dataset(self, scope: object, params: EvalMaterializationParams) -> Dataset[Any]:

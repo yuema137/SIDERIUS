@@ -168,6 +168,11 @@ def test_file_order_must_permute_the_sample_set(file_order, fragment):
     assert fragment in str(exc.value)
 
 
+def test_sequential_indices_refuse_repeated_loaded_group():
+    with pytest.raises(ValueError, match="repeats loaded training group"):
+        tes.build_sequential_indices({4: (0, 3), 5: (3, 6)}, [4, 4, 5], random.Random(9))
+
+
 def test_valid_permutation_and_defaults_pass():
     sample_set = {"4": [0], "5": [0], "6": [0]}
     tes.validate_ordering_against_scope("sequential", [6, 4, 5], sample_set)

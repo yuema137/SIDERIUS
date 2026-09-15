@@ -1500,27 +1500,31 @@ class TidmadSandbox:
                     with open(ess_path, "w") as f:
                         json.dump(eval_sample_set, f)
                     cmd.extend(["--eval_sample_set_json", ess_path])
-                if train_portion is not None:
-                    cmd.extend(["--train_portion", str(train_portion)])
-                if train_base_seed is not None:
-                    cmd.extend(["--train_base_seed", str(train_base_seed)])
-                # V19 PR 2: RESOLVED ordering only — the subprocess never
-                # learns about proposals or overrides. Flags are appended only
-                # when non-default, so a run that does not use ordering
-                # produces argv identical to pre-PR2.
-                if order_strategy != "shuffle":
-                    cmd.extend(["--order_strategy", str(order_strategy)])
-                if file_order is not None:
-                    fo_path = os.path.abspath(
-                        os.path.join(self.dirs["configs"], f"file_order_{exp_id}.json")
-                    )
-                    with open(fo_path, "w") as f:
-                        json.dump(list(file_order), f)
-                    cmd.extend(["--file_order_json", fo_path])
+
+            # Per-epoch sampling and resolved ordering are task-neutral
+            # execution controls.  They apply equally to a legacy SampleSet
+            # and to a task-owned opaque scope; using SampleSet presence as a
+            # capability predicate silently dropped these controls from every
+            # composed external task.
+            if train_portion is not None:
+                cmd.extend(["--train_portion", str(train_portion)])
+            if train_base_seed is not None:
+                cmd.extend(["--train_base_seed", str(train_base_seed)])
+            # V19 PR 2: RESOLVED ordering only — the subprocess never learns
+            # about proposals or overrides. Flags are appended only when
+            # non-default, preserving the default argv.
+            if order_strategy != "shuffle":
+                cmd.extend(["--order_strategy", str(order_strategy)])
+            if file_order is not None:
+                fo_path = os.path.abspath(
+                    os.path.join(self.dirs["configs"], f"file_order_{exp_id}.json")
+                )
+                with open(fo_path, "w") as f:
+                    json.dump(list(file_order), f)
+                cmd.extend(["--file_order_json", fo_path])
 
             # C12-P B6 — task-neutral runtime control, armed ONCE by
-            # `has_scope_to_launch_from`. A SPLIT, not a hoist: the sampler
-            # flags above stay under `sample_set` (see `launch_argv`).
+            # `has_scope_to_launch_from`.
             armed = has_scope_to_launch_from(sample_set, task_scopes)
             if armed:
                 cmd += runtime_control_argv(
