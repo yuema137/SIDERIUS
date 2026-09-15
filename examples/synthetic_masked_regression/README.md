@@ -5,6 +5,11 @@ outputs, a lower-is-better metric, an observational secondary metric, validity
 masks, and task-owned Health checks. It demonstrates framework contracts; it
 is not a scientific task, benchmark, or quality claim.
 
+It follows the example-pack governance in
+[`siderius_generic_framework_upgrade.md`](../../docs/design/siderius_generic_framework_upgrade.md)
+§22.23; that design record explains why examples demonstrate contracts without
+becoming scientific defaults.
+
 ## Try it
 
 From the repository root, follow the [example test](../../tests/unit/examples/)

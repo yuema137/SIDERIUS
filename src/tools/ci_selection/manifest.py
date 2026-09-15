@@ -24,6 +24,7 @@ ALWAYS_ON: tuple[str, ...] = (
     "tests/unit/test_repo_hygiene.py",
     "tests/unit/tools/test_md_links.py",
     "tests/unit/tools/test_user_contract_docs_census.py",
+    "tests/unit/docs/test_readme_audience_boundary.py",
     "tests/unit/ml_models/test_registry_population_is_self_healing.py",
     "tests/unit/agent/llm_bridge/test_all_calls_labeled.py",
     "tests/unit/nodes/test_node_public_boundary.py",
