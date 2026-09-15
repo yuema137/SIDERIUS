@@ -18,6 +18,7 @@ from agent.data_analysis.materialization import (
 from agent.data_analysis.persistence import AnalysisRunStore
 from agent.data_analysis.plan_validation import resolve_analysis_plan
 from agent.data_analysis.rendering import render_report_markdown
+from agent.data_analysis.structured_output import generate_validated
 from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.data_analysis import (
     render_analysis_plan_prompt,
@@ -126,6 +127,44 @@ class DataAnalysisAgent:
         return self._bridge_factory(**kwargs)
 
     @staticmethod
+    def _selection_semantics(value: object) -> object | None:
+        if not isinstance(value, dict):
+            return None
+        skill_ids = value.get("skill_ids")
+        if (
+            not isinstance(skill_ids, list)
+            or not skill_ids
+            or not all(isinstance(item, str) and item.strip() for item in skill_ids)
+            or len(set(skill_ids)) != len(skill_ids)
+        ):
+            return None
+        return tuple(skill_ids)
+
+    @staticmethod
+    def _plan_semantics(value: object) -> object | None:
+        if not isinstance(value, dict) or not isinstance(value.get("invocations"), list):
+            return None
+        return {key: item for key, item in value.items() if key != "rationale"}
+
+    @staticmethod
+    def _synthesis_semantics(value: object) -> object | None:
+        if not isinstance(value, dict) or not isinstance(value.get("question_outcomes"), list):
+            return None
+
+        def without_rationales(item: object) -> object:
+            if isinstance(item, dict):
+                return {
+                    key: without_rationales(child)
+                    for key, child in item.items()
+                    if key != "confidence_rationale"
+                }
+            if isinstance(item, list):
+                return [without_rationales(child) for child in item]
+            return item
+
+        return without_rationales(value)
+
+    @staticmethod
     def _pre_execution_result(
         *,
         inp: DataAnalysisInput,
@@ -206,9 +245,19 @@ class DataAnalysisAgent:
         store.write_discovery(discovery)
         bridge = self._bridge()
         candidates = self._candidate_cards(inp, discovery)
-        selection_system, selection_user = render_skill_selection_prompt(inp, candidates)
-        selection = _SkillSelection.model_validate(
-            bridge.generate(selection_system, selection_user, label="data_analysis.skill_selection")
+        selection_system, selection_user = render_skill_selection_prompt(
+            inp,
+            candidates,
+            output_schema=_SkillSelection.model_json_schema(),
+        )
+        selection = generate_validated(
+            bridge,
+            store=store,
+            model_type=_SkillSelection,
+            system=selection_system,
+            user=selection_user,
+            label="data_analysis.skill_selection",
+            semantic_projection=self._selection_semantics,
         )
         candidate_by_id = {item.card.skill_id: item for item in candidates}
         try:
@@ -230,8 +279,14 @@ class DataAnalysisAgent:
             for skill in selected
         }
         plan_system, plan_user = render_analysis_plan_prompt(inp, discovery, selected, interfaces)
-        plan = AnalysisPlan.model_validate(
-            bridge.generate(plan_system, plan_user, label="data_analysis.plan")
+        plan = generate_validated(
+            bridge,
+            store=store,
+            model_type=AnalysisPlan,
+            system=plan_system,
+            user=plan_user,
+            label="data_analysis.plan",
+            semantic_projection=self._plan_semantics,
         )
         resolved = resolve_analysis_plan(
             plan,
@@ -384,6 +439,7 @@ class DataAnalysisAgent:
             result_refs=tuple(result_refs),
             invocation_by_result=invocation_by_result,
             inspected_assets=inspected_assets,
+            store=store,
         )
         store.write_report(report, markdown=render_report_markdown(report))
         return report
@@ -400,10 +456,21 @@ class DataAnalysisAgent:
         result_refs,
         invocation_by_result,
         inspected_assets,
+        store,
     ) -> DataAnalysisReport:
-        system, user = render_report_synthesis_prompt(inp, results)
-        draft = _ReportSynthesis.model_validate(
-            bridge.generate(system, user, label="data_analysis.synthesis")
+        system, user = render_report_synthesis_prompt(
+            inp,
+            results,
+            output_schema=_ReportSynthesis.model_json_schema(),
+        )
+        draft = generate_validated(
+            bridge,
+            store=store,
+            model_type=_ReportSynthesis,
+            system=system,
+            user=user,
+            label="data_analysis.synthesis",
+            semantic_projection=DataAnalysisAgent._synthesis_semantics,
         )
         result_by_id = {item.result_id: item for item in results}
         ref_by_id = {item.result_id: item for item in result_refs}

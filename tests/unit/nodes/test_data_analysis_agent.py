@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,7 @@ import pytest
 from agent.data_analysis.discovery import discover_skills
 from agent.data_analysis.persistence import AnalysisPersistenceError
 from agent.data_analysis.reference_packs import builtin_pack_refs
+from agent.data_analysis.structured_output import DataAnalysisStructuredOutputError
 from agent.prompt_templates.proposal import render_data_analysis_evidence
 from agent.schemas.data_analysis.assets import (
     AnalysisAsset,
@@ -29,6 +31,7 @@ from agent.schemas.protocols.data_analysis_to_ml_model_propose import local_type
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from nodes.data_analysis_agent import DataAnalysisAgent
+from nodes.data_analysis_agent.data_analysis_agent import _SkillSelection
 
 
 class _Capability:
@@ -163,6 +166,31 @@ class _Bridge:
         raise AssertionError(label)
 
 
+class _RepairingBridge(_Bridge):
+    def __init__(self, *, change_decision: bool = False, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.change_decision = change_decision
+        self.calls: list[tuple[str, str]] = []
+
+    def generate(self, system, user, *, label):
+        self.calls.append((label, user))
+        if label == "data_analysis.skill_selection":
+            return {
+                "skill_ids": ["summary_statistics"],
+                "rationale": {"reason": "A bounded numeric summary answers the question."},
+            }
+        if label == "data_analysis.skill_selection.repair":
+            return {
+                "skill_ids": (
+                    ["nonfinite_and_missingness"]
+                    if self.change_decision
+                    else ["summary_statistics"]
+                ),
+                "rationale": "A bounded numeric summary answers the question.",
+            }
+        return super().generate(system, user, label=label)
+
+
 def _input(tmp_path: Path) -> DataAnalysisInput:
     scope = ArtifactIntrinsicScope(split_id="validation", description="Validation data")
     asset = AnalysisAsset(
@@ -275,3 +303,62 @@ def test_standalone_agent_runs_typed_pipeline_and_persists_bounded_report(tmp_pa
 
     with pytest.raises(AnalysisPersistenceError, match="different canonical input"):
         agent.run(analysis_input.model_copy(update={"human_advice": "Changed request semantics"}))
+
+
+@pytest.mark.allow_real_subprocess
+def test_one_schema_repair_preserves_selection_and_persists_receipt(tmp_path: Path) -> None:
+    """Catches malformed JSON semantics bypassing validation or repair becoming replanning."""
+
+    analysis_input = _input(tmp_path)
+    bridge = _RepairingBridge(analysis_input=analysis_input)
+    report = DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **_kwargs: bridge,
+        provider="test",
+        model_id="fake",
+    ).run(analysis_input)
+
+    assert report.skill_result_summaries[0].skill_id == "summary_statistics"
+    assert [label for label, _user in bridge.calls] == [
+        "data_analysis.skill_selection",
+        "data_analysis.skill_selection.repair",
+        "data_analysis.plan",
+        "data_analysis.synthesis",
+    ]
+    selection_user = bridge.calls[0][1]
+    authoritative_schema = json.dumps(_SkillSelection.model_json_schema(), sort_keys=True, indent=2)
+    assert authoritative_schema in selection_user
+
+    receipt_path = (
+        tmp_path / "data_analysis" / "standalone" / "request" / "structured_output_receipts.jsonl"
+    )
+    receipts = [json.loads(line) for line in receipt_path.read_text().splitlines()]
+    assert len(receipts) == 3
+    assert receipts[0]["stage"] == "data_analysis.skill_selection"
+    assert receipts[0]["initial_validation_passed"] is False
+    assert receipts[0]["repair_attempted"] is True
+    assert receipts[0]["repair_passed"] is True
+    assert receipts[0]["llm_call_count"] == 2
+    assert receipts[0]["validation_errors"][0]["path"] == "rationale"
+    assert receipts[1]["initial_validation_passed"] is True
+    assert receipts[2]["initial_validation_passed"] is True
+
+
+def test_schema_repair_cannot_change_recoverable_skill_selection(tmp_path: Path) -> None:
+    """Catches a representation repair silently becoming a second planning round."""
+
+    analysis_input = _input(tmp_path)
+    bridge = _RepairingBridge(analysis_input=analysis_input, change_decision=True)
+    with pytest.raises(DataAnalysisStructuredOutputError, match="changed the recoverable"):
+        DataAnalysisAgent(
+            task_analysis_capability=_Capability(),
+            bridge_factory=lambda **_kwargs: bridge,
+            provider="test",
+            model_id="fake",
+        ).run(analysis_input)
+
+    root = tmp_path / "data_analysis" / "standalone" / "request"
+    assert not (root / "plan.json").exists()
+    receipt = json.loads((root / "structured_output_receipts.jsonl").read_text())
+    assert receipt["repair_passed"] is False
+    assert receipt["repair_validation_errors"][0]["error_type"] == ("semantic_decision_changed")

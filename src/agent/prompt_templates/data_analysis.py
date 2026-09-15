@@ -26,6 +26,8 @@ def _json(value) -> str:
 def render_skill_selection_prompt(
     analysis_input: DataAnalysisInput,
     candidates: tuple[DiscoveredSkill, ...],
+    *,
+    output_schema: dict,
 ) -> tuple[str, str]:
     system = """You plan scientific data analysis using only supplied SkillCards and safe asset
 descriptors. Select a small sufficient candidate set. You cannot inspect data, invent fields,
@@ -47,6 +49,9 @@ Safe asset descriptors:
 
 Candidate SkillCards:
 {_json([item.card for item in candidates])}
+
+Authoritative output JSON schema:
+{_json(output_schema)}
 """
     return system, user
 
@@ -90,6 +95,8 @@ AnalysisPlan JSON schema:
 def render_report_synthesis_prompt(
     analysis_input: DataAnalysisInput,
     results: tuple[SkillResult, ...],
+    *,
+    output_schema: dict,
 ) -> tuple[str, str]:
     system = """Synthesize scientific analysis evidence into bounded JSON. Measurements are
 evidence; do not prescribe architectures, preprocessing, dataset mutation, or training changes.
@@ -118,22 +125,31 @@ present in that result. State limitations and sampling coverage honestly. Return
 Certified bounded SkillResults:
 {_json(bounded_results)}
 
-Return:
-{{
-  "executive_summary": "...",
-  "findings": [{{
-    "finding_id": "...", "result_id": "...", "statement": "...",
-    "quantitative_result_ids": ["..."], "confidence_level": "low|medium|high",
-    "confidence_rationale": "...", "confidence_limitations": ["..."],
-    "modeling_relevance": "why the evidence may matter, without making a modeling decision"
-  }}],
-  "question_outcomes": [{{
-    "question_id": "...", "status": "addressed|partially_addressed|unresolved|refused",
-    "summary": "...", "finding_ids": ["..."], "limitation_ids": ["..."]
-  }}],
-  "limitations": [{{"limitation_id": "...", "statement": "...", "affected_question_ids": ["..."]}}],
-  "unresolved_questions": ["..."],
-  "modeling_relevance": ["bounded analysis-level implications only"]
-}}
+Authoritative output JSON schema:
+{_json(output_schema)}
+"""
+    return system, user
+
+
+def render_structured_output_repair_prompt(
+    *,
+    output_schema: dict,
+    original_output: object,
+    validation_errors: list[dict],
+) -> tuple[str, str]:
+    """Render one representation-only repair request from the schema authority."""
+
+    system = """Repair one structured output so it conforms to the supplied authoritative JSON
+schema. Preserve every recoverable semantic decision, identifier, ordering, parameter, and claim.
+Correct representation/schema conformance only. Do not replan, add reasoning, expand scope, change
+priorities, or select different skills. Return only the repaired JSON object."""
+    user = f"""Authoritative output JSON schema:
+{_json(output_schema)}
+
+Original structured output:
+{_json(original_output)}
+
+Concrete validation errors:
+{_json(validation_errors)}
 """
     return system, user

@@ -42,6 +42,10 @@ class AnalysisRunStore:
     def inference_receipts_path(self) -> Path:
         return self.root / "inference_receipts.jsonl"
 
+    @property
+    def structured_output_receipts_path(self) -> Path:
+        return self.root / "structured_output_receipts.jsonl"
+
     def _write_model_once(self, name: str, value: BaseModel) -> CertifiedArtifactRef:
         payload = canonical_json_bytes(value)
         path = self.root / name
@@ -99,6 +103,19 @@ class AnalysisRunStore:
         return CertifiedArtifactRef(
             logical_ref=f"inference_receipts.jsonl#{value.inference_id}",
             sha256=hashlib.sha256(payload).hexdigest(),
+            media_type="application/json",
+            byte_size=len(payload),
+        )
+
+    def append_structured_output_receipt(self, value: BaseModel) -> CertifiedArtifactRef:
+        """Persist internal LLM-to-schema validation provenance append-only."""
+
+        payload = canonical_json_bytes(value)
+        append_line_durably(str(self.structured_output_receipts_path), payload.decode("utf-8"))
+        digest = hashlib.sha256(payload).hexdigest()
+        return CertifiedArtifactRef(
+            logical_ref=f"structured_output_receipts.jsonl#{digest}",
+            sha256=digest,
             media_type="application/json",
             byte_size=len(payload),
         )

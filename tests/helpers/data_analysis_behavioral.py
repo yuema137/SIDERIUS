@@ -277,7 +277,10 @@ class ControlledBehaviorBridge:
             "budget_visible": str(self.inp.resource_envelope.wall_time_budget_s) in user,
         }
         if label == "data_analysis.skill_selection":
-            cards = json.loads(user.split("Candidate SkillCards:\n", 1)[1])
+            cards_text = user.split("Candidate SkillCards:\n", 1)[1].split(
+                "\n\nAuthoritative output JSON schema:\n", 1
+            )[0]
+            cards = json.loads(cards_text)
             self.prompt_receipts[label]["candidate_skill_ids"] = [
                 card["skill_id"] for card in cards
             ]
@@ -348,9 +351,9 @@ class ControlledBehaviorBridge:
                 "rationale": "Use a bounded, non-redundant trajectory for this condition.",
             }
         if label == "data_analysis.synthesis":
-            encoded = user.split("Certified bounded SkillResults:\n", 1)[1].split("\n\nReturn:", 1)[
-                0
-            ]
+            encoded = user.split("Certified bounded SkillResults:\n", 1)[1].split(
+                "\n\nAuthoritative output JSON schema:\n", 1
+            )[0]
             results = json.loads(encoded)
             completed = [item for item in results if item["status"] == "completed"]
             findings = []
