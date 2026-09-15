@@ -263,6 +263,24 @@ def pseudo_run(tmp_path_factory):
 
 
 class TestLivePseudoPath:
+    def test_issue_486_success_records_persist_their_logical_round(self, pseudo_run):
+        """A successful producer must persist the typed attempt's round.
+
+        `core.resume._round_provenance` intentionally refuses to infer a
+        round from record position. Without this top-level field, new success
+        records are indistinguishable from legacy records and resume reports
+        `legacy_unknown` even though the live tuner knew the round identity.
+        """
+        _output, _bridge, sandbox, _ws = pseudo_run
+        successes = [
+            record
+            for record in sandbox.saved_records
+            if record.get("status") in {"success", "failed_mode_collapse"}
+        ]
+
+        assert successes, "the pseudo iteration must persist successful attempts"
+        assert {record["logical_round"] for record in successes} == {1, 2}
+
     def test_every_success_record_carries_history_and_an_ok_present_diagnosis(self, pseudo_run):
         output, _bridge, sandbox, _ws = pseudo_run
         successes = [r for r in output.all_records if r.status == "success"]
