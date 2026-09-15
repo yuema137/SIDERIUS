@@ -230,6 +230,9 @@ class RunBindings:
     state or reconstructs a task's artifact layout.
     """
 
+    run_forward_contract: Any = None
+    """The run-bound ``ForwardContract`` used to certify trained-model artifacts."""
+
     def __post_init__(self) -> None:
         offending = sorted(FORBIDDEN_BINDING_FIELDS & {f.name for f in fields(self)})
         if offending:

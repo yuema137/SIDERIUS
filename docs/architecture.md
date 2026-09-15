@@ -534,6 +534,15 @@ returns a content-certified prediction view plus an executor-certified
 inference receipt. Targets, when authorized for a later diagnostic, follow a
 separate materialization path.
 
+For a composed training run whose task declares complete `model_io.inference`
+semantics, the training executor records the exact checkpoint, validated model
+configuration, approved model-plugin content, effective construction inputs,
+and certified training scope. The tuner turns that evidence into an immutable
+content-addressed `TrainedModelArtifact` and attaches its typed ref to the
+successful `ExperimentRecord`. A legacy record or a task without the inference
+declaration remains valid and never triggers reconstruction guesses from a
+checkpoint filename.
+
 ---
 
 ## Plugin System

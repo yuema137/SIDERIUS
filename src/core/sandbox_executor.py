@@ -1709,10 +1709,26 @@ class TidmadSandbox:
             if os.path.isfile(train_json_path):
                 with open(train_json_path) as f:
                     results = json.load(f)
+            trained_model_candidate = None
+            candidate_path = os.path.abspath(
+                os.path.join(
+                    self.dirs["records"],
+                    run_name,
+                    f"trained_model_candidate_{exp_id}.json",
+                )
+            )
+            if os.path.isfile(candidate_path):
+                from execute_tools.trained_model_artifact import TrainingArtifactCandidate
+
+                with open(candidate_path, "rb") as handle:
+                    trained_model_candidate = TrainingArtifactCandidate.model_validate_json(
+                        handle.read()
+                    ).model_dump(mode="json")
             return {
                 "status": "success",
                 "message": "Training finished.",
                 "results": results,
+                "trained_model_candidate": trained_model_candidate,
                 "runtime_verification": runtime_verification,
             }
 

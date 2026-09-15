@@ -200,9 +200,16 @@ def _bind_invocation(
             raise AnalysisPlanResolutionError(
                 f"binding {binding.binding_id!r} references unknown asset {binding.asset_id!r}"
             )
-        if asset.asset_type not in slot.accepted_asset_types:
+        # An ``infer`` binding names the immutable model that produces the
+        # slot's prediction view.  The slot contract describes what the skill
+        # receives (``predictions``), not the source artifact used to create
+        # it.  Ordinary bindings continue to match their source asset type
+        # directly.
+        delivered_asset_type = "predictions" if binding.operation == "infer" else asset.asset_type
+        if delivered_asset_type not in slot.accepted_asset_types:
             raise AnalysisPlanResolutionError(
-                f"asset type {asset.asset_type!r} is not accepted by slot {slot.slot_id!r}"
+                f"delivered asset type {delivered_asset_type!r} is not accepted by slot "
+                f"{slot.slot_id!r}"
             )
         validate_binding_format(binding, slot)
         if asset.split_id != invocation.sampling_plan.split_id:

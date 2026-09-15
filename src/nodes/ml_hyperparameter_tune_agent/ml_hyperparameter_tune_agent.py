@@ -35,6 +35,7 @@ from agent.schemas.hyperparam_tuning import (
     serialize_expert_advice,
     validate_runtime_config,
 )
+from agent.schemas.task_config import ForwardContract
 from core.hardware_context import get_or_create
 from core.layout import checkout_root
 from core.run_invariants import (
@@ -216,7 +217,7 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
     project_attempt_topology_facts,
 )
-from workflows.task_config import run_bound_model_io_contract
+from workflows.task_config import load_task_config, run_bound_model_io_contract
 
 
 def load_reference_scores() -> object | None:
@@ -712,6 +713,7 @@ class HyperparamTuningAgent:
         # executes this expression — and failing before any GPU work is the
         # direction the fail-closed rule asks for.
         run_model_io = run_bound_model_io_contract()
+        run_forward_contract = ForwardContract(**load_task_config()["forward_contract"])
 
         # --- The run's ONE Deliverable Contract (Step 05c) ---
         # Bound here, from the run profile above, for the same reason: every
@@ -1315,6 +1317,7 @@ class HyperparamTuningAgent:
             ),
             run_profile=run_profile,
             run_model_io=run_model_io,
+            run_forward_contract=run_forward_contract,
             run_deliverable_spec=run_deliverable_spec,
             run_deliverable_naming=run_deliverable_naming,
             run_metric=run_metric,

@@ -1,5 +1,7 @@
 import argparse
 import gc
+import hashlib
+import inspect
 import json
 import os
 import random
@@ -21,6 +23,7 @@ from tqdm import tqdm
 from agent.schemas.model_io_contract import ModelIOContract, load_model_io_contract
 from agent.schemas.model_io_resolution import resolve_model_io_contract
 from core.capability_registry import CapabilityContractSnapshot
+from core.durable_io import publish_json_atomically
 from core.runtime_control.provenance import capture_storage_provenance
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.workload import ResolvedPhaseWorkload
@@ -63,6 +66,7 @@ from execute_tools.task_data_path import (
 from execute_tools.task_data_path import (
     ValidationScopeError as ValidationScopeError,
 )
+from execute_tools.trained_model_artifact import TrainingArtifactCandidate
 from execute_tools.training_history import (
     STATIC_OBSERVATIONS_KEY,
     TRAINING_HISTORY_KEY,
@@ -75,6 +79,68 @@ from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_
 
 # Import your sandboxed components
 from ml_models.models_sandbox import MODEL_REGISTRY
+
+
+def _sha256_file(path: str) -> tuple[str, int]:
+    with open(path, "rb") as handle:
+        payload = handle.read()
+    return hashlib.sha256(payload).hexdigest(), len(payload)
+
+
+def _write_training_artifact_candidate(
+    *,
+    args: argparse.Namespace,
+    model_cfg: object,
+    loss_cfg: LossConfig,
+    model_io: ModelIOContract | None,
+    sandbox_dirs: dict[str, str],
+    result_directory: str,
+) -> None:
+    """Record exact reconstruction inputs when this task declares inference.
+
+    This sidecar is executor evidence, not the final public artifact.  The
+    parent combines it with run-bound task identities and persists the
+    immutable artifact before attaching its typed ref to ExperimentRecord.
+    """
+
+    if model_io is None or model_io.inference is None:
+        return
+    model_type = getattr(model_cfg, "model_type", None)
+    model_class = MODEL_REGISTRY.get(model_type)
+    config_source = inspect.getsourcefile(type(model_cfg))
+    model_source = inspect.getsourcefile(model_class) if model_class is not None else None
+    if (
+        not config_source
+        or not model_source
+        or os.path.realpath(config_source) != os.path.realpath(model_source)
+    ):
+        raise ValueError(
+            "standard historical inference requires model/config classes from one approved "
+            "single-file registered-model plugin"
+        )
+    checkpoint_path = os.path.join(
+        sandbox_dirs["models"], f"model_{model_type}_{args.exp_id}_agent.pth"
+    )
+    checkpoint_sha, checkpoint_size = _sha256_file(checkpoint_path)
+    config_sha, config_size = _sha256_file(args.model_cfg)
+    plugin_sha, _ = _sha256_file(model_source)
+    candidate = TrainingArtifactCandidate(
+        checkpoint_path=checkpoint_path,
+        checkpoint_sha256=checkpoint_sha,
+        checkpoint_byte_size=checkpoint_size,
+        model_config_path=args.model_cfg,
+        model_config_sha256=config_sha,
+        model_config_byte_size=config_size,
+        model_plugin_path=model_source,
+        model_plugin_sha256=plugin_sha,
+        model_plugin_member=os.path.basename(model_source),
+        model_type=model_type,
+        effective_loss_type=loss_cfg.loss_type,
+        training_scope_path=args.task_scope_ref,
+        training_scope_sha256=args.task_scope_digest,
+    )
+    sidecar = os.path.join(result_directory, f"trained_model_candidate_{args.exp_id}.json")
+    publish_json_atomically(sidecar, candidate.model_dump(mode="json"))
 
 
 def _h5_dataset(f: h5py.File, *path: str) -> h5py.Dataset:
@@ -2268,6 +2334,14 @@ def main():
     res_filename = f"experiment_results_{model_cfg.model_type}_{args.exp_id}.json"
     res_path = os.path.join(final_res_dir, res_filename)
 
+    _write_training_artifact_candidate(
+        args=args,
+        model_cfg=model_cfg,
+        loss_cfg=loss_cfg,
+        model_io=model_io,
+        sandbox_dirs=sandbox_dirs,
+        result_directory=final_res_dir,
+    )
     with open(res_path, "w") as f:
         json.dump(results, f, indent=4)
     print(f"Results saved to: {res_path}")
