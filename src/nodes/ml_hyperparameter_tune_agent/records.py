@@ -1468,6 +1468,9 @@ def build_attempt_record(
         # Collapse is a completed result in both trial and formal modes.
         "status": "failed_mode_collapse" if is_degenerate else "success",
         "model_type": model_type,
+        # Resume provenance reads only the persisted top-level logical round;
+        # the memory copy below is for planner context, not identity recovery.
+        "logical_round": round_index,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "file_index": file_index,
         "params": record_params,

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import inspect
 from pathlib import Path
 
 import pytest
@@ -179,3 +180,37 @@ def test_the_helper_is_what_the_live_except_path_calls():
 def test_non_refusal_exceptions_never_gain_failure_type(exc):
     record = _TUNER._build_scoring_failure_record(exc, **_COMMON)
     assert "failure_stage" not in record and "failure_type" not in record
+
+
+def test_failed_scoring_skill_is_infrastructure_failure_before_health():
+    """A child crash is not a non-finite scientific result."""
+    from nodes.ml_hyperparameter_tune_agent.execution import (
+        ScoringSkillExecutionError,
+        _require_successful_scoring_result,
+    )
+
+    with pytest.raises(ScoringSkillExecutionError, match="BrokenProcessPool"):
+        _require_successful_scoring_result(
+            {"status": "error", "message": "BrokenProcessPool: worker import failed"}
+        )
+
+
+def test_successful_scorer_may_still_return_nonfinite_scientific_evidence():
+    """The boundary does not erase the existing successful-scorer policy."""
+    from nodes.ml_hyperparameter_tune_agent.execution import (
+        _require_successful_scoring_result,
+    )
+
+    _require_successful_scoring_result({"status": "success", "results": {"denoising_score": None}})
+
+
+def test_live_subprocess_route_checks_status_before_results_and_health():
+    """Reachability and order, not an isolated-helper-only assertion."""
+    execution = importlib.import_module("nodes.ml_hyperparameter_tune_agent.execution")
+
+    source = inspect.getsource(execution.run_inference_scoring_health)
+    run_skill = source.index('_runtime._run_skill("denoising_score_skill"')
+    require_success = source.index("_require_successful_scoring_result(score_res)")
+    unpack_results = source.index('_child_results = score_res.get("results"')
+    health = source.index("apply_round_health(")
+    assert run_skill < require_success < unpack_results < health

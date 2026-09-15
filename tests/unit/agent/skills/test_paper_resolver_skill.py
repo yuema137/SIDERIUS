@@ -123,6 +123,42 @@ class TestModeDispatch:
         assert out["status"] == "error"
         assert "query" in out["message"]
 
+    @pytest.mark.parametrize(
+        ("mode", "kwargs", "message_part"),
+        [
+            (
+                "resolve",
+                {"source_type": "arxiv", "identifier": "x", "verbosity": "nope"},
+                "verbosity",
+            ),
+            ("search", {"query": "x", "limit": "nope"}, "limit"),
+            ("search", {"query": "x", "offset": "nope"}, "offset"),
+        ],
+    )
+    @patch.object(wrapper.requests, "get")
+    def test_malformed_direct_scalars_return_error_without_network(
+        self, mock_get, mode, kwargs, message_part
+    ):
+        out = wrapper.run_skill(None, mode=mode, **kwargs)
+        assert out["status"] == "error"
+        assert out["data"] is None
+        assert message_part in out["message"]
+        mock_get.assert_not_called()
+
+    @patch.object(wrapper.requests, "get")
+    def test_unhashable_cache_input_returns_error_without_network(self, mock_get):
+        out = wrapper.run_skill(
+            None,
+            mode="resolve",
+            source_type="arxiv",
+            identifier=[],
+            verbosity=0,
+        )
+        assert out["status"] == "error"
+        assert out["data"] is None
+        assert "invalid" in out["message"]
+        mock_get.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Resolve / arxiv — happy paths

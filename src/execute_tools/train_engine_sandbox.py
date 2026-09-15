@@ -7,7 +7,7 @@ import os
 import random
 import sys
 import time
-from collections.abc import Sequence, Sized
+from collections.abc import Mapping, Sequence, Sized
 from typing import Any, cast
 
 import h5py
@@ -56,6 +56,7 @@ from execute_tools.scope_artifact import load_transported_scope
 from execute_tools.task_data_path import (
     EpochSamplingParams,
     EvalMaterializationParams,
+    SequentiallyGroupedTrainingDataset,
     TaskDataPath,
     TaskDataPathResolutionError,
     TrainingScopeError,
@@ -432,18 +433,10 @@ def validate_ordering_against_scope(
         return  # ascending sample-set order, resolved at build time
 
     if sample_set is None:
-        # A permutation cannot be checked against a scope that does not
-        # exist. Composed runs train from a transported task scope and emit
-        # no `--file_order`; a legacy run always carries both. Reaching here
-        # means those two facts came apart upstream — refuse, rather than
-        # raise `TypeError: 'NoneType' is not iterable` from inside a set
-        # comprehension four frames down.
-        raise ValueError(
-            f"file_order={file_order} was supplied under order_strategy="
-            f"'sequential' but this run carries no sample set to order "
-            f"against. A file order is meaningful only for a run whose scope "
-            f"is a legacy SampleSet."
-        )
+        # Opaque task scopes are deliberately uninterpreted here. Their
+        # materialized dataset validates this permutation against its declared
+        # sequential groups below.
+        return
 
     scope = {int(k) for k in sample_set}
     order = list(file_order)
@@ -463,6 +456,61 @@ def validate_ordering_against_scope(
             f"set's files {sorted(scope)}: {'; '.join(problems)}. Ordering must "
             f"reorder the scope, never change it."
         )
+
+
+def resolve_sequential_file_row_ranges(dataset: Dataset) -> dict[int, tuple[int, int]]:
+    """Resolve the optional dataset capability required by sequential order.
+
+    A task may opt in by exposing ``file_row_ranges`` on its materialized
+    training dataset.  The framework treats the mapping as opaque group IDs
+    and row spans: it never infers a task or dataset type from the attribute.
+
+    Raises:
+        TrainingScopeError: if sequential ordering was requested for a
+            dataset that does not provide a valid grouping capability.
+    """
+    if not isinstance(dataset, SequentiallyGroupedTrainingDataset):
+        raise TrainingScopeError(
+            "order_strategy='sequential' requires the task's materialized "
+            "training dataset to expose a non-empty file_row_ranges mapping"
+        )
+    raw = dataset.file_row_ranges
+    if not isinstance(raw, Mapping) or not raw:
+        raise TrainingScopeError(
+            "order_strategy='sequential' requires the task's materialized "
+            "training dataset to expose a non-empty file_row_ranges mapping"
+        )
+    resolved: dict[int, tuple[int, int]] = {}
+    for group_id, span in raw.items():
+        if (
+            not isinstance(group_id, int)
+            or not isinstance(span, tuple)
+            or len(span) != 2
+            or not all(isinstance(value, int) for value in span)
+            or span[0] < 0
+            or span[0] >= span[1]
+            or span[1] > len(cast("Sized", dataset))
+        ):
+            raise TrainingScopeError(
+                "order_strategy='sequential' received an invalid "
+                "file_row_ranges mapping from the task's training dataset"
+            )
+        resolved[group_id] = span
+    ordered_spans = sorted(resolved.values())
+    cursor = 0
+    for start, end in ordered_spans:
+        if start != cursor:
+            raise TrainingScopeError(
+                "order_strategy='sequential' requires file_row_ranges to "
+                "partition every materialized dataset row exactly once"
+            )
+        cursor = end
+    if cursor != len(cast("Sized", dataset)):
+        raise TrainingScopeError(
+            "order_strategy='sequential' requires file_row_ranges to "
+            "partition every materialized dataset row exactly once"
+        )
+    return resolved
 
 
 def build_sequential_indices(
@@ -496,6 +544,16 @@ def build_sequential_indices(
         ValueError: ``file_order`` omits a file the dataset actually loaded.
     """
     order = list(file_order) if file_order is not None else sorted(file_row_ranges)
+    duplicates = sorted(
+        group_id
+        for group_id in set(order)
+        if group_id in file_row_ranges and order.count(group_id) > 1
+    )
+    if duplicates:
+        raise ValueError(
+            f"file_order {order} repeats loaded training group(s) {duplicates}; "
+            "ordering must visit every materialized row exactly once."
+        )
     missing = sorted(set(file_row_ranges) - set(order))
     if missing:
         raise ValueError(
@@ -1536,7 +1594,7 @@ def run_experiment_streaming(
             # Sequential ordering is an optional dataset capability. Tasks
             # that select it must expose the declared row groups.
             epoch_indices = build_sequential_indices(
-                cast("Any", dataset).file_row_ranges, file_order, order_rng
+                resolve_sequential_file_row_ranges(dataset), file_order, order_rng
             )
             # ONE global loader with the global drop_last, exactly as the
             # shuffle path: ordering changes the visit sequence only. Batches

@@ -14,3 +14,5 @@ The estimator route is [tests/unit/agent/denoising_score_skill/test_estimator.py
 executor/scoring integration belongs under
 [tests/integration/execute_tools](../../../../tests/integration/execute_tools/).
 Use a sandbox stub for pseudo-mode call-shape tests, not scientific evidence.
+
+Detailed agent-facing contract: [denoising_score_skill.md](denoising_score_skill.md).
