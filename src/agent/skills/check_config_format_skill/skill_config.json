@@ -1,6 +1,6 @@
 {
   "name": "check_config_format_skill",
-  "description": "Consult this tool to get the EXACT Pydantic schema for PUNet, FCNet (AE), Loss, and Training configs. It provides constraints like range, default values, and forbidden values.",
+  "description": "Consult this tool for the current Pydantic configuration formats exposed by SIDERIUS. Returned schemas describe fields, types, ranges, and defaults; resolved task contracts and execution validators own semantic compatibility and resource validity.",
   "parameters": {
     "type": "object",
     "properties": {}
