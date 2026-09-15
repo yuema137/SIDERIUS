@@ -284,12 +284,11 @@ class TestTheWarningSurvivesTheExclusion:
         assert synthesis.count("Formal score: WITHHELD") == 1
 
     def test_a_model_that_never_had_a_formal_score_is_not_reported_as_withheld(self, tmp_path):
-        """An absence is not a withholding.
+        """An absence is not a scientific result or a withholding.
 
-        ``no_formal`` carries no verdict at all, so the authority resolver
-        excludes it (``unreconstructable_legacy``) exactly like a withheld
-        result. It had no formal score to withhold, and saying otherwise
-        would be a second fabrication — the one this row exists to stop.
+        ``no_formal`` is a current Trial-only summary, not a legacy Formal
+        result whose authority can no longer be reconstructed.  It therefore
+        belongs on neither side of the Formal aggregation partition.
         """
         withheld = _summary(
             "punet", best=0.5, formal=1.0, verdict=_verdict("blocking", "diagnostic", "valid")
@@ -298,9 +297,8 @@ class TestTheWarningSurvivesTheExclusion:
         out, captured = _run(tmp_path, [withheld, no_formal])
         synthesis = _synthesis(captured)
 
-        # Non-vacuity: `fcnet` really is in the excluded list.
-        excluded_ids = {e["record_id"] for e in out.scientific_aggregation["excluded"]}
-        assert excluded_ids == {"punet", "fcnet"}
+        assert out.scientific_aggregation["included"] == []
+        assert [e["record_id"] for e in out.scientific_aggregation["excluded"]] == ["punet"]
 
         assert synthesis.count("Formal score: WITHHELD") == 1
         punet_block = synthesis.split("## Model: punet", 1)[1]
@@ -428,11 +426,7 @@ class TestALaterIterationCorpus:
     def test_a_cached_model_that_never_had_a_formal_score_is_not_reported_as_withheld(
         self, tmp_path
     ):
-        """The absence-is-not-a-withholding rule, on the cached half.
-
-        Widening the partition must not widen the WITHHELD line: this model is
-        excluded (no verdict) but had nothing to withhold.
-        """
+        """The absence-is-not-a-result rule also holds on the cached half."""
         fresh = _summary(
             "punet", best=0.5, formal=1.0, verdict=_verdict("blocking", "scientific", "valid")
         )
@@ -440,9 +434,26 @@ class TestALaterIterationCorpus:
         out, captured = _run(tmp_path, [fresh], cache=cache, iteration=4)
         synthesis = _synthesis(captured)
 
-        # Non-vacuity: it really is excluded, so the absent line is a choice.
-        assert [e["record_id"] for e in out.scientific_aggregation["excluded"]] == ["fcnet"]
+        assert out.scientific_aggregation["excluded"] == []
+        assert out.scientific_aggregation["included"] == ["punet"]
         assert "WITHHELD" not in synthesis
+
+    def test_trial_only_iteration_has_no_formal_aggregation_records(self, tmp_path):
+        """A modern Trial result must not be mislabeled as legacy Formal evidence.
+
+        This is the local RTX 5090 regression: Formal execution failed after a
+        valid Trial, and the next interpretation reported that Trial as
+        ``unreconstructable_legacy``.  Removing the score-domain filter makes
+        this assertion fail with one excluded record.
+        """
+        trial_only = _summary("punet", best=0.5, formal=None, verdict=None)
+
+        out, captured = _run(tmp_path, [trial_only], iteration=2)
+
+        assert out.scientific_aggregation["no_records"] is True
+        assert out.scientific_aggregation["included"] == []
+        assert out.scientific_aggregation["excluded"] == []
+        assert all("unreconstructable_legacy" not in prompt for prompt in captured)
 
     def test_the_verdict_is_cached_beside_the_score_it_judges(self, tmp_path):
         """The transport, at the write side.
