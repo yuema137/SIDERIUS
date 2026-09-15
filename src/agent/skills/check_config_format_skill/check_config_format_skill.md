@@ -4,8 +4,8 @@
 
 This skill is a read-only, in-process schema consultation. It wraps
 `ml_models.models_format_sandbox`; the imported Pydantic classes are authority
-for accepted values. This document and returned quick notes are not schema
-authority.
+for accepted values. This document and returned quick notes are not schema or
+semantic authority.
 
 ## Invocation and output
 
@@ -26,12 +26,15 @@ message; it does not re-raise that exception.
 ## Effects and authority
 
 The wrapper does not spawn processes, access data, write files, or use the
-network. It does not validate candidate configurations or enforce the
-architecture/loss relationship in `quick_notes`; callers must use the owning
-Pydantic classes before execution. The JSON declaration describes PUNet and
-FCNet, while the current wrapper also returns AE and Transformer schemas. The
-live wrapper and imported models determine the actual response until that
-declaration is deliberately changed.
+network. It does not validate candidate configurations or enforce semantic
+compatibility in `quick_notes`; callers must use resolved task contracts and
+execution validators before execution. The schemas are generated from the
+current imported Pydantic models at call time, and the live wrapper and models
+determine the actual response until deliberately changed.
+
+`quick_notes` is intentionally one generic reminder: schemas describe format;
+resolved task contracts and execution validators own model/loss compatibility,
+output shape, class cardinality, segmentation legality, and resource limits.
 
 ## Callers and evidence
 
