@@ -35,7 +35,7 @@
     },
     "inference_batch": 64
   },
-  "logical_round": null,
+  "logical_round": 2,
   "attempt_index": null,
   "failure_stage": null,
   "failure_type": null,
