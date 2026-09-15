@@ -49,6 +49,25 @@ def run(skill_input, parameters: Parameters, runtime):
     prediction_std = prediction_summary["standard_deviation"]
     target_iqr = float(np.quantile(target, 0.75) - np.quantile(target, 0.25))
     prediction_iqr = float(np.quantile(prediction, 0.75) - np.quantile(prediction, 0.25))
+    robust_probabilities = (0.05, 0.5, 0.95)
+    prediction_robust = np.quantile(prediction, robust_probabilities, method="linear")
+    target_robust = np.quantile(target, robust_probabilities, method="linear")
+    prediction_robust_span = float(prediction_robust[2] - prediction_robust[0])
+    target_robust_span = float(target_robust[2] - target_robust[0])
+    target_scale = float(np.max(np.abs(target)))
+    numerical_spread_floor = float(np.spacing(target_scale))
+    std_ratio_reason = None
+    if target_std is None or target_std <= numerical_spread_floor:
+        standard_deviation_ratio = None
+        std_ratio_reason = "target_standard_deviation_zero_or_numerically_unresolvable"
+    else:
+        standard_deviation_ratio = float(prediction_std / target_std)
+    robust_span_ratio_reason = None
+    if target_robust_span <= numerical_spread_floor:
+        robust_span_ratio = None
+        robust_span_ratio_reason = "target_robust_span_zero_or_numerically_unresolvable"
+    else:
+        robust_span_ratio = prediction_robust_span / target_robust_span
     rank = None
     if len(target) >= 2 and np.ptp(target) > 0 and np.ptp(prediction) > 0:
         rank = float(spearmanr(target, prediction).statistic)
@@ -57,10 +76,16 @@ def run(skill_input, parameters: Parameters, runtime):
         "prediction": prediction_summary,
         "target": target_summary,
         "bias": float(np.mean(prediction - target)),
-        "standard_deviation_ratio": (
-            None if target_std in (None, 0.0) else float(prediction_std / target_std)
-        ),
+        "standard_deviation_ratio": standard_deviation_ratio,
+        "standard_deviation_ratio_suppression_reason": std_ratio_reason,
         "iqr_ratio": None if target_iqr == 0 else prediction_iqr / target_iqr,
+        "robust_quantiles": {
+            "probabilities": list(robust_probabilities),
+            "prediction": prediction_robust.tolist(),
+            "target": target_robust.tolist(),
+        },
+        "robust_span_ratio": robust_span_ratio,
+        "robust_span_ratio_suppression_reason": robust_span_ratio_reason,
         "prediction_inside_target_range_fraction": float(
             np.mean((prediction >= np.min(target)) & (prediction <= np.max(target)))
         ),
@@ -73,9 +98,46 @@ def run(skill_input, parameters: Parameters, runtime):
         result,
         "Prediction and target distribution comparison",
     )
-    return SkillPayload(
-        summary=f"Compared {len(target)} finite aligned scalar prediction/target pairs.",
-        quantitative_results=(
+    quantitative_results = [
+        QuantitativeResult(
+            result_key="prediction.mean",
+            value=prediction_summary["mean"],
+            description="Mean scalar prediction",
+        ),
+        QuantitativeResult(
+            result_key="prediction.standard_deviation",
+            value=prediction_std,
+            description="Sample standard deviation of scalar predictions",
+        ),
+        QuantitativeResult(
+            result_key="target.mean",
+            value=target_summary["mean"],
+            description="Mean scalar target",
+        ),
+        QuantitativeResult(
+            result_key="target.standard_deviation",
+            value=target_std,
+            description="Sample standard deviation of scalar targets",
+        ),
+    ]
+    quantitative_results.extend(
+        QuantitativeResult(
+            result_key=f"prediction.q{int(probability * 100):02d}",
+            value=float(prediction_robust[index]),
+            description=f"Prediction quantile at probability {probability:g}",
+        )
+        for index, probability in enumerate(robust_probabilities)
+    )
+    quantitative_results.extend(
+        QuantitativeResult(
+            result_key=f"target.q{int(probability * 100):02d}",
+            value=float(target_robust[index]),
+            description=f"Target quantile at probability {probability:g}",
+        )
+        for index, probability in enumerate(robust_probabilities)
+    )
+    quantitative_results.extend(
+        (
             QuantitativeResult(
                 result_key="bias",
                 value=result["bias"],
@@ -86,6 +148,41 @@ def run(skill_input, parameters: Parameters, runtime):
                 value=result["wasserstein_1"],
                 description="One-dimensional Wasserstein distance in target units",
             ),
-        ),
+            QuantitativeResult(
+                result_key="standard_deviation_ratio",
+                value=standard_deviation_ratio,
+                description=(
+                    "Prediction sample standard deviation divided by target sample standard "
+                    "deviation"
+                ),
+            ),
+        )
+    )
+    if standard_deviation_ratio is None:
+        quantitative_results.append(
+            QuantitativeResult(
+                result_key="standard_deviation_ratio_suppression_reason",
+                value=std_ratio_reason,
+                description="Why the standard-deviation ratio is undefined",
+            )
+        )
+    quantitative_results.append(
+        QuantitativeResult(
+            result_key="robust_span_ratio",
+            value=robust_span_ratio,
+            description="Prediction q95-q05 span divided by target q95-q05 span",
+        )
+    )
+    if robust_span_ratio is None:
+        quantitative_results.append(
+            QuantitativeResult(
+                result_key="robust_span_ratio_suppression_reason",
+                value=robust_span_ratio_reason,
+                description="Why the robust central-span ratio is undefined",
+            )
+        )
+    return SkillPayload(
+        summary=f"Compared {len(target)} finite aligned scalar prediction/target pairs.",
+        quantitative_results=tuple(quantitative_results),
         produced_artifacts=(artifact,),
     )

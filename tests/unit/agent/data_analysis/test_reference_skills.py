@@ -135,6 +135,53 @@ def _regular_view(tmp_path: Path, values: np.ndarray, step: float, *, informatio
     return descriptor, path
 
 
+def _scalar_model_views(
+    tmp_path: Path,
+    *,
+    prediction: np.ndarray,
+    target: np.ndarray,
+    metadata: np.ndarray | None = None,
+):
+    count = len(target)
+    entries = []
+    for binding, slot, information, values in (
+        ("binding-prediction", "predictions", "prediction", prediction),
+        ("binding-target", "targets", "target", target),
+    ):
+        path = tmp_path / f"{binding}.npz"
+        np.savez(path, example_ids=np.arange(count), **{f"information__{information}": values})
+        entries.append(
+            (
+                _descriptor(
+                    path,
+                    binding_id=binding,
+                    slot_id=slot,
+                    format_id="siderius.numeric-array.v1",
+                    certified_information=({"information_class": information},),
+                    count=count,
+                ),
+                path,
+            )
+        )
+    if metadata is not None:
+        path = tmp_path / "binding-metadata.npz"
+        np.savez(path, example_ids=np.arange(count), metadata__x=metadata)
+        entries.append(
+            (
+                _descriptor(
+                    path,
+                    binding_id="binding-metadata",
+                    slot_id="slice_metadata",
+                    format_id="siderius.numeric-array.v1",
+                    certified_information=({"information_class": "metadata", "fields": ["x"]},),
+                    count=count,
+                ),
+                path,
+            )
+        )
+    return tuple(entries)
+
+
 def test_reference_inventory_is_discoverable_without_task_specific_api() -> None:
     snapshot = _snapshot()
     assert len(snapshot.skills) == 17
@@ -297,11 +344,14 @@ def test_prediction_diagnostics_are_generic_and_sparse_groups_are_suppressed(
             metadata_path,
         )
     )
-    _payload, distribution = _run(
+    distribution_payload, distribution = _run(
         tmp_path, "prediction_target_distribution", {}, tuple(entries[:2])
     )
     assert distribution["standard_deviation_ratio"] == pytest.approx(0.6)
-    _payload, sliced = _run(
+    assert {item.result_key: item.value for item in distribution_payload.quantitative_results}[
+        "standard_deviation_ratio"
+    ] == pytest.approx(0.6)
+    sliced_payload, sliced = _run(
         tmp_path,
         "performance_slice_summary",
         {
@@ -314,6 +364,108 @@ def test_prediction_diagnostics_are_generic_and_sparse_groups_are_suppressed(
     )
     assert all(group["metrics"] is None for group in sliced["groups"])
     assert all(group["suppression_reason"] == "insufficient_support" for group in sliced["groups"])
+    canonical = {item.result_key: item.value for item in sliced_payload.quantitative_results}
+    for index, group in enumerate(sliced["groups"]):
+        assert canonical[f"group.{index}.label"] == group["label"]
+        assert canonical[f"group.{index}.count"] == group["count"]
+        assert canonical[f"group.{index}.metrics_suppression_reason"] == ("insufficient_support")
+
+
+def test_performance_slice_canonical_evidence_matches_artifact_and_exposes_extremes(
+    tmp_path: Path,
+) -> None:
+    count = 90
+    target = np.linspace(-2.0, 2.0, count)
+    metadata = np.linspace(0.0, 1.0, count)
+    prediction = target + metadata**2
+    payload, artifact = _run(
+        tmp_path,
+        "performance_slice_summary",
+        {
+            "metadata_field": "x",
+            "grouping": "quantile",
+            "quantile_group_count": 3,
+            "minimum_examples_per_group": 10,
+        },
+        _scalar_model_views(
+            tmp_path,
+            prediction=prediction,
+            target=target,
+            metadata=metadata,
+        ),
+    )
+    canonical = {item.result_key: item.value for item in payload.quantitative_results}
+    assert canonical["group_count"] == 3
+    for index, group in enumerate(artifact["groups"]):
+        assert canonical[f"group.{index}.label"] == group["label"]
+        assert canonical[f"group.{index}.count"] == group["count"]
+        for metric in ("bias", "mae", "rmse", "r_squared"):
+            assert canonical[f"group.{index}.{metric}"] == pytest.approx(group["metrics"][metric])
+    rmse_by_group = [canonical[f"group.{index}.rmse"] for index in range(3)]
+    assert int(np.argmax(rmse_by_group)) == 2
+    assert int(np.argmin(rmse_by_group)) == 0
+
+
+@pytest.mark.parametrize(
+    ("prediction", "target", "expected_bias", "expected_ratio"),
+    (
+        (
+            np.linspace(-2.0, 2.0, 80),
+            np.linspace(-2.0, 2.0, 80),
+            0.0,
+            1.0,
+        ),
+        (
+            0.5 * np.linspace(-2.0, 2.0, 80) + 0.3,
+            np.linspace(-2.0, 2.0, 80),
+            0.3,
+            0.5,
+        ),
+    ),
+)
+def test_prediction_distribution_exposes_signed_bias_and_spread_evidence(
+    tmp_path: Path,
+    prediction: np.ndarray,
+    target: np.ndarray,
+    expected_bias: float,
+    expected_ratio: float,
+) -> None:
+    payload, artifact = _run(
+        tmp_path,
+        "prediction_target_distribution",
+        {},
+        _scalar_model_views(tmp_path, prediction=prediction, target=target),
+    )
+    canonical = {item.result_key: item.value for item in payload.quantitative_results}
+    assert canonical["bias"] == pytest.approx(expected_bias, abs=1e-12)
+    assert canonical["standard_deviation_ratio"] == pytest.approx(expected_ratio)
+    assert canonical["robust_span_ratio"] == pytest.approx(expected_ratio)
+    assert canonical["prediction.mean"] == pytest.approx(artifact["prediction"]["mean"])
+    assert canonical["target.mean"] == pytest.approx(artifact["target"]["mean"])
+    assert "standard_deviation_ratio_suppression_reason" not in canonical
+    assert "robust_span_ratio_suppression_reason" not in canonical
+
+
+def test_prediction_distribution_suppresses_degenerate_target_spread(tmp_path: Path) -> None:
+    target = np.ones(40)
+    prediction = np.linspace(0.8, 1.2, 40)
+    payload, artifact = _run(
+        tmp_path,
+        "prediction_target_distribution",
+        {},
+        _scalar_model_views(tmp_path, prediction=prediction, target=target),
+    )
+    canonical = {item.result_key: item.value for item in payload.quantitative_results}
+    assert canonical["standard_deviation_ratio"] is None
+    assert canonical["robust_span_ratio"] is None
+    assert (
+        canonical["standard_deviation_ratio_suppression_reason"]
+        == (artifact["standard_deviation_ratio_suppression_reason"])
+    )
+    assert (
+        canonical["robust_span_ratio_suppression_reason"]
+        == (artifact["robust_span_ratio_suppression_reason"])
+    )
 
 
 def test_core_distribution_quality_and_correlation_skills(tmp_path: Path) -> None:

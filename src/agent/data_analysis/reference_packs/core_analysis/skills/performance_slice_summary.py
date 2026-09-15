@@ -6,7 +6,7 @@ from typing import Literal
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agent.schemas.data_analysis.skills import SkillPayload
+from agent.schemas.data_analysis.skills import QuantitativeResult, SkillPayload
 
 from .._shared import aligned_scalar, binding_id, join_scalar_inputs, write_json_artifact
 
@@ -70,10 +70,101 @@ def _metrics(prediction: np.ndarray, target: np.ndarray, minimum: int, include_r
     }
     if include_r2:
         denominator = float(np.sum(np.square(target - np.mean(target))))
-        metrics["r_squared"] = (
-            None if denominator == 0 else 1.0 - float(np.sum(np.square(error))) / denominator
-        )
+        if denominator == 0:
+            metrics["r_squared"] = None
+            metrics["r_squared_suppression_reason"] = "zero_target_variance"
+        else:
+            metrics["r_squared"] = 1.0 - float(np.sum(np.square(error))) / denominator
+            metrics["r_squared_suppression_reason"] = None
     return {"count": count, "metrics": metrics, "suppression_reason": None}
+
+
+def _canonical_group_indices(groups: list[dict]) -> tuple[int, ...]:
+    """Keep all modest tables; otherwise retain bounded RMSE extremes and sparse groups."""
+
+    if len(groups) <= 5:
+        return tuple(range(len(groups)))
+    ranked = sorted(
+        (
+            (index, float(group["metrics"]["rmse"]))
+            for index, group in enumerate(groups)
+            if group["metrics"] is not None
+        ),
+        key=lambda item: item[1],
+    )
+    selected = [index for index, _value in ranked[:2]]
+    selected.extend(index for index, _value in ranked[-2:])
+    selected.extend(index for index, group in enumerate(groups) if group["metrics"] is None)
+    return tuple(sorted(tuple(dict.fromkeys(selected))[:5]))
+
+
+def _canonical_results(groups: list[dict]) -> tuple[QuantitativeResult, ...]:
+    selected = _canonical_group_indices(groups)
+    results = [
+        QuantitativeResult(
+            result_key="group_count",
+            value=len(groups),
+            description="Number of requested slice groups in the complete artifact table",
+        ),
+        QuantitativeResult(
+            result_key="canonical_group_count",
+            value=len(selected),
+            description="Number of bounded group summaries exposed as canonical evidence",
+        ),
+    ]
+    for index in selected:
+        group = groups[index]
+        prefix = f"group.{index}"
+        results.extend(
+            (
+                QuantitativeResult(
+                    result_key=f"{prefix}.label",
+                    value=group["label"],
+                    description="Exact requested slice label from the complete artifact table",
+                ),
+                QuantitativeResult(
+                    result_key=f"{prefix}.count",
+                    value=group["count"],
+                    description="Finite aligned examples in this slice",
+                ),
+            )
+        )
+        metrics = group["metrics"]
+        if metrics is None:
+            results.append(
+                QuantitativeResult(
+                    result_key=f"{prefix}.metrics_suppression_reason",
+                    value=group["suppression_reason"],
+                    description="Why performance metrics are suppressed for this visible slice",
+                )
+            )
+            continue
+        for metric in ("bias", "mae", "rmse"):
+            results.append(
+                QuantitativeResult(
+                    result_key=f"{prefix}.{metric}",
+                    value=metrics[metric],
+                    description=f"Scalar-regression {metric} for this slice",
+                )
+            )
+        if "r_squared" in metrics:
+            if metrics["r_squared"] is None:
+                results.append(
+                    QuantitativeResult(
+                        result_key=f"{prefix}.r_squared_suppression_reason",
+                        value=metrics["r_squared_suppression_reason"],
+                        description="Why R-squared is undefined for this supported slice",
+                    )
+                )
+            else:
+                results.append(
+                    QuantitativeResult(
+                        result_key=f"{prefix}.r_squared",
+                        value=metrics["r_squared"],
+                        description="R-squared for this slice",
+                    )
+                )
+    return tuple(results)
 
 
 def run(skill_input, parameters: Parameters, runtime):
@@ -164,5 +255,6 @@ def run(skill_input, parameters: Parameters, runtime):
     )
     return SkillPayload(
         summary=f"Measured prediction error across {len(groups)} groups of {parameters.metadata_field!r}.",
+        quantitative_results=_canonical_results(groups),
         produced_artifacts=(artifact,),
     )
