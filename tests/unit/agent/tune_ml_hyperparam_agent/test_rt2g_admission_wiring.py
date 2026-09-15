@@ -162,6 +162,14 @@ def harness():
                 return train_response
             if skill_folder == "inference_skill":
                 return inference_response
+            if skill_folder == "denoising_score_skill" and scoring_ok:
+                return {
+                    "status": "success",
+                    "results": {
+                        "denoising_score": -2.5,
+                        "file_vector": [-2.5] * 20,
+                    },
+                }
             return {"status": "error", "message": f"unexpected skill {skill_folder}"}
 
         cms = (
@@ -335,6 +343,24 @@ class TestSuccessPathAttachment:
         successes = [r for r in saved if r.get("status") in ("success", "failed_mode_collapse")]
         assert successes
         assert successes[0]["runtime_verification"] is None  # explicit absence
+
+    def test_failed_scoring_subprocess_is_not_scientific_collapse(self, harness, tmp_path):
+        train_ok = {"status": "success", "results": {"final_loss": 0.5, "model_params": 1}}
+        inference_ok = {"status": "success", "message": "ok"}
+        agent, saved, _seen_params, _workspace, cleanup = harness(
+            train_ok,
+            inference_ok,
+            scoring_ok=False,
+        )
+        try:
+            agent.run(_make_input(tmp_path))
+        finally:
+            cleanup()
+
+        assert [record["status"] for record in saved] == ["error_scoring"]
+        assert saved[0]["denoising_score"] is None
+        assert "scoring skill status='error'" in saved[0]["memory"]["conclusion"]
+        assert "health_gate_results" not in saved[0]
 
 
 class TestWatchdogTimeoutRouting:
