@@ -40,6 +40,7 @@ All node calls are mocked — these tests validate:
 import importlib
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -522,6 +523,55 @@ class TestRunWorkflowSingleIteration:
         workflow_env["impl"].return_value.run.assert_called_once()
         workflow_env["valid"].return_value.run.assert_called_once()
         workflow_env["tune"].return_value.run.assert_called_once()
+        interpretation_input = workflow_env["interp"].return_value.run.call_args.args[0]
+        assert interpretation_input.analysis_brief_requested is False
+
+    def test_analysis_enabled_traverses_typed_stage_and_proposer_edge(self, workflow_env):
+        analysis_binding = object()
+        historical_inference_capability = object()
+        composition = replace(
+            workflow_env["composition"],
+            data_analysis=analysis_binding,
+        )
+        analysis_output = MagicMock()
+        analysis_output.report.findings = ()
+        analysis_output.report.skill_result_refs = ()
+
+        with (
+            patch(
+                "workflows.data_analysis_stage.run_optional_data_analysis",
+                return_value=analysis_output,
+            ) as run_analysis,
+            patch(
+                "workflows.data_analysis_stage.attach_analysis_to_proposer",
+                side_effect=lambda proposal_input, _analysis: proposal_input,
+            ) as attach_analysis,
+        ):
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=workflow_env["data_dir"],
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    human_advice_analysis="Inspect the authorized high-noise slice.",
+                ),
+                workspace=workflow_env["workspace"],
+                run_name="test_run",
+                task_composition=composition,
+                historical_model_inference_capability=historical_inference_capability,
+            )
+
+        interpretation_input = workflow_env["interp"].return_value.run.call_args.args[0]
+        assert interpretation_input.analysis_brief_requested is True
+        assert run_analysis.call_args.kwargs["binding"] is analysis_binding
+        assert (
+            run_analysis.call_args.kwargs["human_advice"]
+            == "Inspect the authorized high-noise slice."
+        )
+        assert (
+            run_analysis.call_args.kwargs["historical_model_inference_capability"]
+            is historical_inference_capability
+        )
+        assert attach_analysis.call_args.args[1] is analysis_output
 
     def test_correct_input_types(self, workflow_env):
         from agent.schemas.implementor import ImplementorInput

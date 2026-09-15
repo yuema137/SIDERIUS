@@ -543,7 +543,7 @@ sounds close.
 | Prefix | Module | Example agents |
 |--------|--------|----------------|
 | `ml_` | Machine learning pipeline | `ml_hyperparameter_tune_agent`, `ml_model_proposal_agent`, `ml_model_implementor`, `ml_code_validator_agent` |
-| `data_` | Data processing / analysis | `data_analysis_agent` (hypothetical — planned, not built; no such node exists yet) |
+| `data_` | Data processing / analysis | `data_analysis_agent` (built: caller-independent typed input/report, authorized materialization, pluggable reference skills, and caller-injected historical-model inference) |
 
 When naming a new agent: identify which module it belongs to, use that
 module's prefix, then add a short snake_case descriptor of the specific task.

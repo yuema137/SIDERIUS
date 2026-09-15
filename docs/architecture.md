@@ -288,27 +288,24 @@ Every node (leaf or orchestrator) must satisfy:
 
 ## The Graph (current nodes and edges)
 
-Six nodes are built: `ml_hyperparameter_tune_agent`, `result_interpretation_agent`,
-`ml_literature_review`, `ml_model_proposal_agent`, `ml_model_implementor`,
-`ml_code_validator_agent` (one directory each under `nodes/`).
-`data_analysis_agent` is **planned — not built**: no node directory, no schema,
-no protocol module exists for it yet.
+Seven nodes are built: `ml_hyperparameter_tune_agent`, `result_interpretation_agent`,
+`data_analysis_agent`, `ml_literature_review`, `ml_model_proposal_agent`,
+`ml_model_implementor`, and `ml_code_validator_agent` (one directory each under
+`nodes/`).
 
 ```
 Built:
 
 ml_hyperparameter_tune_agent ─────────────────────────► result_interpretation_agent
 result_interpretation_agent ──────────────────────────► ml_model_proposal_agent
+result_interpretation_agent ──────────────────────────► data_analysis_agent      (optional typed brief edge)
+data_analysis_agent ──────────────────────────────────► ml_model_proposal_agent   (optional typed evidence fan-in)
 result_interpretation_agent ──────────────────────────► ml_literature_review      (input assembled by the workflow; no protocol module)
 ml_literature_review ─────────────────────────────────► ml_model_proposal_agent   (fan-in with the interpretation edge)
 ml_model_proposal_agent ──────────────────────────────► ml_model_implementor
 ml_model_implementor ─────────────────────────────────► ml_code_validator_agent
 ml_code_validator_agent + ml_model_proposal_agent ────► ml_hyperparameter_tune_agent   (fan-in)
 
-Planned — not built (data_analysis_agent does not exist yet):
-
-data_analysis_agent ··································► result_interpretation_agent
-data_analysis_agent ··································► ml_model_proposal_agent
 ```
 
 Every built edge except interpretation → literature review has a protocol
@@ -330,22 +327,24 @@ node needs data from non-adjacent nodes in the graph.
 
 ### Implemented protocols
 
-Naming convention: one file per primary directed edge, named `{source_code}_to_{target_code}.py`.
-Each file contains `local_*` (in-memory) and `database_*` (NotImplementedError placeholder)
-variants. Fan-in sources are additional function parameters beyond the primary source.
+Naming convention: one file per primary directed edge, named
+`{source_code}_to_{target_code}.py`. Implemented transports are explicit in
+each module; the pre-existing ML edges retain `database_*` placeholders while
+the Data Analysis v0.1 edges expose only their implemented local typed path.
+Fan-in sources are additional function parameters beyond the primary source.
 
 This table is the ONE authoritative inventory (issue #262); the package
 docstring in `agent/schemas/protocols/__init__.py` and every node `.md` defer to
-it, and `tests/unit/docs/test_node_docs_contract.py` fails when a node doc or
-this file cites a protocol name that is not a module here. Six modules exist —
-the earlier "five" omitted the literature-review edge. Every `local_*` has a
-`database_*` sibling that raises `NotImplementedError`.
+it. Eight modules exist. The two Data Analysis edges are local typed adapters;
+the six pre-existing ML edges retain their database placeholders.
 
 | protocol module (`agent/schemas/protocols/`) | producer → consumer | function | status | consumes → populates |
 |---|---|---|---|---|
 | `ml_model_tune_to_ml_result_interp.py` | `ml_hyperparameter_tune_agent` → `result_interpretation_agent` | `local_all_records` / `database_all_records` | built; unit-tested. **Not called by `workflows/model_exploration.py`**, which converts tuner output with the interpreter-owned `tuning_output_to_model_run_summary` (`:356`) instead | full `HyperparamTuningOutput` → all experiment records as `SummaryGroup`, model type |
 | `ml_result_interp_to_ml_model_propose.py` | `result_interpretation_agent` → `ml_model_proposal_agent` | `local_full_context` / `database_full_context` | built; used by the workflow (`model_exploration.py:2543`) | full `InterpretationOutput` (+ external-agent channels, chain state) → `ProposalInput` (`interpretation_evidence`, existing model types, constraints) |
 | `ml_literature_review_to_ml_model_propose.py` | `ml_literature_review` → `ml_model_proposal_agent` (fan-in with the interpretation edge) | `local_all_channels` / `database_all_channels` | built; used by the workflow (`model_exploration.py:576-587`, imported directly — not re-exported by `protocols/__init__.py`); unit-tested; **no integration test** | `LiteratureReviewOutput` → the four kwargs (`expert_context`, `agent_cards`, `mindset`, `vocab_seed`) spread into `local_full_context` |
+| `interpreter_to_data_analysis.py` | `result_interpretation_agent` → `data_analysis_agent` | `local_analysis_input` | built; optional workflow edge; unit-tested | validated `AnalysisBrief` + caller-owned context/assets/policy/packs/resources → `DataAnalysisInput` |
+| `data_analysis_to_ml_model_propose.py` | `data_analysis_agent` → `ml_model_proposal_agent` | `local_typed_evidence` | built; optional bounded fan-in; unit-tested | canonical `DataAnalysisReport` → edge-owned `ProposerDataAnalysisEvidence` on `ProposalInput` |
 | `ml_model_propose_to_ml_model_impl.py` | `ml_model_proposal_agent` → `ml_model_implementor` | `local_full_spec` / `database_full_spec` | built; used by the workflow (`model_exploration.py:2666`) | `ProposalOutput` → candidate id, model name, output type, description, math definition, baseline config, custom loss spec (`reference_code` is attached afterwards by the workflow, `:2696`) |
 | `ml_model_impl_to_ml_model_valid.py` | `ml_model_implementor` → `ml_code_validator_agent` | `local_all_fields` / `database_all_fields` | built; used by the workflow (`model_exploration.py:2713`) | `ImplementorOutput` → file paths, config fields, model description, math definition, model I/O contract |
 | `ml_model_valid_to_ml_model_tune.py` | `ml_code_validator_agent` + `ml_model_proposal_agent` (fan-in) → `ml_hyperparameter_tune_agent` | `local_validated_model` / `database_validated_model` | built; used by the workflow (`model_exploration.py:2866`); the ONLY protocol that carries a proposal into the tuner | `ValidatorOutput` + `ProposalOutput` → validated model type, expert advice (deviation notes prepended), baseline config, budgets, scope, health posture, LLM config, task composition |
@@ -356,18 +355,6 @@ Names that appear in older documents and were never defined anywhere —
 `hyperparam_to_interpretation_full_v1`, `validator_to_hyperparam_v1` — were
 placeholders from the original design sketch; the modules above are what
 exists.
-
-### Planned protocols (not built)
-
-`data_analysis_agent` does not exist; no module under `agent/schemas/protocols/`
-implements either edge below. They are kept as the intended design.
-
-| Edge | Description |
-|------|-------------|
-| `data_analysis → result_interpretation` | dataset statistics, shift signals → `dataset_context` |
-| `data_analysis → ml_model_proposal` | distribution properties → `data_constraints` |
-
----
 
 ## Orchestration
 
@@ -380,11 +367,12 @@ conditional branching, and loops by re-traversing cycles.
 ```
 1. ml_hyperparameter_tune_agent → initial tuning run (N rounds)
 2. result_interpretation_agent  → identify bottlenecks        [ml_model_tune_to_ml_result_interp.py::local_all_records]
-3. ml_model_proposal_agent      → propose new architecture    [ml_result_interp_to_ml_model_propose.py::local_full_context]
-4. ml_model_implementor         → write model code + tests    [ml_model_propose_to_ml_model_impl.py::local_full_spec]
-5. ml_code_validator_agent      → run tests, confirm valid    [ml_model_impl_to_ml_model_valid.py::local_all_fields]
-6. ml_hyperparameter_tune_agent → tune the new model          [ml_model_valid_to_ml_model_tune.py::local_validated_model]
-7. goto 2                       → repeat until convergence
+3. data_analysis_agent          → optional authorized analysis [interpreter_to_data_analysis.py::local_analysis_input]
+4. ml_model_proposal_agent      → propose from typed evidence  [data_analysis_to_ml_model_propose.py::local_typed_evidence]
+5. ml_model_implementor         → write model code + tests    [ml_model_propose_to_ml_model_impl.py::local_full_spec]
+6. ml_code_validator_agent      → run tests, confirm valid    [ml_model_impl_to_ml_model_valid.py::local_all_fields]
+7. ml_hyperparameter_tune_agent → tune the new model          [ml_model_valid_to_ml_model_tune.py::local_validated_model]
+8. goto 2                       → repeat until convergence
 ```
 
 (The bracketed names are the real `module::function` pairs under
@@ -399,18 +387,19 @@ Human / Top-level CLI
     ├── model_exploration_workflow          ← Level 1 (workflow)
     │   ├── ml_hyperparameter_tune_agent    ← Level 0
     │   ├── result_interpretation_agent     ← Level 0
+    │   ├── data_analysis_agent             ← Level 0 (optional stage)
     │   ├── ml_literature_review            ← Level 0 (optional stage)
     │   ├── ml_model_proposal_agent         ← Level 0
     │   ├── ml_model_implementor            ← Level 0
     │   └── ml_code_validator_agent         ← Level 0
-    ├── data_analysis_agent                 ← Level 0 (planned — not built)
     └── result_interpretation_agent         ← Level 0 (final cross-model summary)
 ```
 
-A human can substitute for any workflow or orchestrator at any level by manually
-applying protocols and calling nodes via CLI — all six nodes expose one
-(#303 gave `ml_literature_review` its `main()`; upstream records are read
-from disk by the same naming convention the other CLIs use).
+A human can substitute for any workflow or orchestrator at any level by
+manually applying protocols and calling public node interfaces. Six nodes
+expose CLIs; Data Analysis v0.1 exposes its independent typed Python API so the
+caller can provide the executable task-owned materialization capability
+without an implicit filesystem convention.
 
 ### Workflows vs. Orchestrators
 
@@ -528,10 +517,22 @@ Load memory → Propose hypothesis + config (LLM) → Resource check
 | `ml_model_implementor` | Takes a model proposal → writes PyTorch code + unit tests | no | yes | yes |
 | `ml_code_validator_agent` | 7 checks: plugin load, pytest, description, config fields, instantiation, gradient flow, LLM code review with runtime diagnosis | no | no | yes |
 | `ml_literature_review` | Resolves root papers, searches Semantic Scholar around the current bottlenecks, synthesises findings as soft priors (optional stage) | no | no | yes |
-| `data_analysis_agent` (**planned — not built**) | Profiles dataset properties, detects distribution shifts | no | no | yes |
+| `data_analysis_agent` | Executes authorized, resource-bounded scientific-analysis skills and synthesizes a structured report | optional by skill | no | yes |
 
-Six of these are built; `data_analysis_agent` is the intended data-analysis
-advisor and does not exist yet.
+All seven are built. Data Analysis is optional in the reference workflow and
+also exposes an independent Python capability contract.
+
+Model-aware Data Analysis keeps reconstruction outside the agent. A validated
+analysis invocation may request predictions from an immutable descriptive
+`TrainedModelArtifact`, but execution is delegated to a caller-injected
+`HistoricalModelInferenceCapability`. The artifact identifies the checkpoint,
+model configuration, approved plugin, construction protocol and effective
+constructor inputs, Model-I/O semantics, and relevant code/environment
+identity; it never carries an executable path. The capability receives only
+explicitly authorized input materializations, never target information, and
+returns a content-certified prediction view plus an executor-certified
+inference receipt. Targets, when authorized for a later diagnostic, follow a
+separate materialization path.
 
 ---
 

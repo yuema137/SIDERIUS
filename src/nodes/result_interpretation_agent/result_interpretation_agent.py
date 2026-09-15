@@ -51,6 +51,10 @@ from ml_models.model_descriptions import get_model_description
 # lazy `import nodes.result_interpretation_agent.evidence` would fail. Binding
 # them while `__init__` is still executing puts each submodule in `sys.modules`
 # for good. (Same rule the tuner's C7 decomposition follows.)
+from nodes.result_interpretation_agent.analysis_brief import (
+    AnalysisBriefResumeMismatchError,
+    generate_or_resume_analysis_brief,
+)
 from nodes.result_interpretation_agent.evidence import (
     InterpretationContractError,
     _collect_health_evidence,
@@ -194,6 +198,8 @@ class ResultInterpretationAgent:
         **kwargs,
     ):
         self._bridge_factory = bridge_factory or LLMBridge
+        self._provider = provider
+        self._model_id = model_id
         self.bridge = self._bridge_factory(
             provider=provider, model_id=model_id, max_retries=max_retries
         )
@@ -208,7 +214,7 @@ class ResultInterpretationAgent:
         # remain the proposer's concern (available options), so model_types and
         # model_descriptions are intentionally left empty.
         if inp.cold_start:
-            return InterpretationOutput(
+            output = InterpretationOutput(
                 model_types=[],
                 model_descriptions={},
                 total_experiments=0,
@@ -245,6 +251,9 @@ class ResultInterpretationAgent:
                     inp.health_feedback_retention_policy(),
                 ),
             )
+            if inp.analysis_brief_requested:
+                output = self._attach_analysis_brief(inp, output)
+            return output
 
         # --- Bind the run's ordering authority (Step 09a C2) ---
         # ONE MetricOrder for the whole iteration, from the spec the run
@@ -1085,6 +1094,9 @@ class ResultInterpretationAgent:
                 }
             )
 
+            if inp.analysis_brief_requested:
+                output = self._attach_analysis_brief(inp, output)
+
             # --- Persist ---
             if inp.storage.backend == "local" and inp.storage.local:
                 workspace = inp.storage.local.workspace
@@ -1110,6 +1122,11 @@ class ResultInterpretationAgent:
                 )
 
             return output
+        except AnalysisBriefResumeMismatchError:
+            # Resume identity disagreement is not an LLM degradation.  Running
+            # the degraded branch would retry the same incompatible brief and,
+            # worse, could make an identity refusal look recoverable.
+            raise
         except Exception as e:
             print(f"  [DEGRADED] Interpretation LLM flow failed: {type(e).__name__}: {e}")
             print(
@@ -1194,6 +1211,8 @@ class ResultInterpretationAgent:
                     "per_model_secondary_metrics": per_model_secondary_metrics,
                 }
             )
+            if inp.analysis_brief_requested:
+                output = self._attach_analysis_brief(inp, output)
             if inp.storage.backend == "local" and inp.storage.local:
                 workspace = inp.storage.local.workspace
                 run_name = inp.storage.local.run_name
@@ -1213,6 +1232,28 @@ class ResultInterpretationAgent:
                     },
                 )
             return output
+
+    def _attach_analysis_brief(
+        self,
+        inp: InterpretationInput,
+        output: InterpretationOutput,
+    ) -> InterpretationOutput:
+        """Run only the optional second stage; never alter primary interpretation."""
+
+        brief, receipt = generate_or_resume_analysis_brief(
+            bridge=self.bridge,
+            inp=inp,
+            interpretation=output,
+            provider=self._provider,
+            model_id=self._model_id,
+        )
+        if receipt.status != "generated":
+            print(
+                "  [ANALYSIS BRIEF] "
+                f"{receipt.status}: {receipt.failure_code}: {receipt.failure_message}"
+            )
+            return output
+        return output.model_copy(update={"analysis_brief": brief})
 
     def _dedup_promoted(
         self,

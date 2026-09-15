@@ -79,6 +79,10 @@ from execute_tools.evaluation_metric import MetricIdentityKey, metric_identity_f
 #: incidentally through P5 or any other child.
 NOT_CARRIED: dict[str, str] = {
     "cold_start": "already a typed ProposalInput field, populated by the protocol",
+    "analysis_brief": (
+        "owned by the Interpreter-to-DataAnalysis edge; the Proposer receives "
+        "analysis only through ProposerDataAnalysisEvidence"
+    ),
     "scientific_aggregation": "no proposer consumer",
     "best_valid_config": "no proposer consumer (best_config IS read, by the legacy renderer)",
     "runtime_vocab": "the protocol maps it to ProposalInput.vocab_seed",

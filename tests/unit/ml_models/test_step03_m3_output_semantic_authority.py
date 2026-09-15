@@ -88,9 +88,9 @@ class TestSemanticIsDerived:
 
     def test_the_semantic_cannot_be_declared_independently(self):
         """A declared field could contradict the tensor it describes. The
-        contract exposes exactly two fields, so there is nowhere to put a
-        competing declaration."""
-        assert set(ModelIOContract.model_fields) == {"input", "output"}
+        contract exposes no competing semantic field; the optional inference
+        reconstruction contract is orthogonal to tensor semantics."""
+        assert set(ModelIOContract.model_fields) == {"input", "output", "inference"}
         with pytest.raises(ValidationError):
             ModelIOContract(
                 input=_contract(categorical=True).input,

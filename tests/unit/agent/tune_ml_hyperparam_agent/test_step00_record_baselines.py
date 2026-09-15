@@ -61,7 +61,7 @@ _PRESENT = "<present>"
 # detect it; the known-defect register is the guard.
 # ---------------------------------------------------------------------------
 
-EXPERIMENT_RECORD_FIELDS_64 = [
+EXPERIMENT_RECORD_FIELDS_65 = [
     "record_type",
     "exp_id",
     "status",
@@ -89,6 +89,10 @@ EXPERIMENT_RECORD_FIELDS_64 = [
     # position unchanged.
     "training_history",
     "training_diagnosis",
+    # Data Analysis Gate 5 — additive, omitted from legacy serialization when
+    # absent. A successful producer may bind one immutable trained-model
+    # artifact; legacy records never guess reconstruction identity from paths.
+    "trained_model_artifact_ref",
     "static_observations",
     "denoising_score",
     "file_vector",
@@ -214,7 +218,7 @@ def pseudo_run(tmp_path_factory):
 
 class TestREC1FieldLists:
     def test_experiment_record_ordered_fields(self):
-        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_64
+        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_65
 
     def test_output_and_interpretation_field_counts_and_heads(self):
         """REC-3 schema part: HyperparamTuningOutput and

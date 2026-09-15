@@ -536,7 +536,14 @@ class AdviceArtifactError(ValueError):
 #: The union of both schemas the loader tolerates during transition:
 #: 4-key (propose, implement, tune, mindset) and 5-key (interpret, propose,
 #: implement, validate, tune). Any other key reaches NO consumer.
-ADVICE_PER_AGENT_KEYS = ("interpret", "propose", "implement", "validate", "tune")
+ADVICE_PER_AGENT_KEYS = (
+    "interpret",
+    "analysis",
+    "propose",
+    "implement",
+    "validate",
+    "tune",
+)
 ADVICE_RECOGNISED_KEYS = (*ADVICE_PER_AGENT_KEYS, "mindset")
 
 #: The ONE way to say "this key is deliberately not advice". A leading
@@ -1558,7 +1565,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Path to a JSON file with human advice for each agent. "
-        'Schema: {"interpret":"...", "propose":"...", '
+        'Schema: {"interpret":"...", "analysis":"...", "propose":"...", '
         '"implement":"...", "validate":"...", "tune":"...", "mindset":"..."} '
         "— a string or a list of lines per key. The key set is CLOSED: an "
         "unrecognised key is refused as a probable misspelling (prefix it "
@@ -1571,6 +1578,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Human guidance for the interpretation agent.",
+    )
+    parser.add_argument(
+        "--human_advice_analysis",
+        type=str,
+        default=None,
+        help="Human guidance for the optional Data Analysis Agent.",
     )
     parser.add_argument(
         "--human_advice_propose",
@@ -2676,8 +2689,8 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
         # dropped in silence anyway.
         advice = {k: render_advice_value(v) for k, v in advice.items()}
         # 4-key schema: propose, implement, tune, mindset
-        # 5-key schema: interpret, propose, implement, validate, tune
-        for key in ("interpret", "propose", "implement", "validate", "tune"):
+        # Additive schema: analysis is optional and follows the same authority.
+        for key in ADVICE_PER_AGENT_KEYS:
             attr = f"human_advice_{key}"
             if getattr(args, attr) is None:
                 setattr(args, attr, advice.get(key) or None)
@@ -3449,6 +3462,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
                         args.runtime_verification_max_wall_seconds
                     ),
                     human_advice_interpret=args.human_advice_interpret,
+                    human_advice_analysis=args.human_advice_analysis,
                     human_advice_propose=args.human_advice_propose,
                     human_advice_implement=args.human_advice_implement,
                     human_advice_validate=args.human_advice_validate,

@@ -53,7 +53,12 @@ namespaces = true
 
 [tool.setuptools.package-data]
 execute_tools = ["health_checks/resources/health_checks.yaml"]
-agent = ["schemas/*.json", "prompt_templates/**/*.md", "skills/*/skill_config.json"]
+agent = [
+    "schemas/*.json",
+    "prompt_templates/**/*.md",
+    "skills/*/skill_config.json",
+    "data_analysis/reference_packs/**/manifest.json",
+]
 nodes = ["*.md", "*/*.md"]
 ml_models = ["*.md", "*/description.md"]
 dashboard = ["static/*.html", "static/*.js", "static/*.css"]

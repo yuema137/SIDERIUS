@@ -10,7 +10,7 @@ Each module contains protocol functions named {transport}_{data_scope}.
 
 Workflows and orchestrators import from this module and choose which protocol to apply.
 
-Implemented edges (six; the authoritative table is docs/architecture.md
+Implemented edges (eight; the authoritative table is docs/architecture.md
 "Implemented protocols")
 -----------------
 ml_model_tune_to_ml_result_interp         ml_hyperparameter_tune_agent -> result_interpretation_agent
@@ -25,6 +25,9 @@ ml_model_impl_to_ml_model_valid           ml_model_implementor -> ml_code_valida
 ml_model_valid_to_ml_model_tune           ml_code_validator_agent -> ml_hyperparameter_tune_agent
                                           (fan-in: also consumes ProposalOutput; this is the ONLY
                                           protocol that carries a proposal into the tuner)
+interpreter_to_data_analysis              result_interpretation_agent -> data_analysis_agent
+data_analysis_to_ml_model_propose         data_analysis_agent -> ml_model_proposal_agent
+                                          (bounded typed report projection)
 """
 
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import (

@@ -3,7 +3,7 @@
 This is the human route through the documentation. Detailed implementation
 contracts have their own gateway below.
 
-[Repository map](repository-map.md): current directories, six nodes, execution
+[Repository map](repository-map.md): current directories, seven nodes, execution
 owners, infra/exp entrypoints and evidence boundaries.
 
 ---

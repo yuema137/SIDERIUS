@@ -22,6 +22,7 @@ from agent.schemas.hyperparam_tuning import (
     TaskCompositionRef,
 )
 from agent.schemas.output_types import OutputTypeName as OutputTypeName
+from agent.schemas.proposer_data_analysis_evidence import ProposerDataAnalysisEvidence
 from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
@@ -785,6 +786,15 @@ class ProposalInput(BaseModel):
         "construct an input at all. It also replaced the dead typed mirror "
         "``per_model_score_tables``, which had zero readers anywhere: the "
         "evidence now carries the tables as the ONE carrier.",
+    )
+    data_analysis_evidence: ProposerDataAnalysisEvidence | None = Field(
+        default=None,
+        description=(
+            "Typed, bounded consumer view projected from a canonical DataAnalysisReport by "
+            "the Data Analysis -> Proposer protocol edge. None means that the analysis "
+            "topology is disabled or supplied no report; the Proposer never inspects analysis "
+            "storage or a raw report mapping."
+        ),
     )
     existing_model_types: list[str] = Field(
         default_factory=list,

@@ -60,6 +60,7 @@
     "model_descriptions",
     "total_experiments",
     "cold_start",
+    "analysis_brief",
     "per_model_best",
     "per_model_best_valid",
     "per_model_raw_best_health_validity",

@@ -201,9 +201,10 @@ class TestWorkflowHalfIsMissing:
         # 19 at C0 -> 20 at C2 -> 21 at arXiv U3 (declared delta: the
         # interpreter's input gained `baseline_isolation`, the WITHOUT arm's
         # explicit prompt-surface flag) -> 22 at #313 (the typed model-
-        # description source authority). This census fires when a workflow
+        # description source authority) -> 23 for the optional, caller-owned
+        # Data Analysis brief request. This census fires when a workflow
         # field is added without being named here, as designed.
-        assert len(keywords) == 22
+        assert len(keywords) == 23
 
     def test_exactly_two_write_sites_exist_for_the_carrier(self):
         """The §10 rule-4 single-writer contract, for THIS value specifically.

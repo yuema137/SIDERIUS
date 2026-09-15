@@ -67,26 +67,28 @@ documentation stays in README/docs; review evidence is recorded in the PR.
 Ignored `.venv`, caches, local workspaces and old `agent_generated/` content
 are not shipped capabilities. This inventory removes none of them.
 
-## Six nodes and typed connections
+## Seven nodes and typed connections
 
 Each public implementation has a neighboring `.md` contract. The
 [node CLI table](agent-reference/index.md#nodes) preserves the six tested
-`main()` source citations.
+`main()` source citations; Data Analysis is intentionally API-only in v0.1.
 
 | Public class / implementation | Input → output | Responsibility |
 | --- | --- | --- |
 | [`ResultInterpretationAgent`](../src/nodes/result_interpretation_agent/result_interpretation_agent.py) | `InterpretationInput` → `InterpretationOutput` | Interpret accumulated results |
+| [`DataAnalysisAgent`](../src/nodes/data_analysis_agent/data_analysis_agent.py) | `DataAnalysisInput` → `DataAnalysisReport` | Execute authorized scientific analysis skills and synthesize structured evidence |
 | [`MLLiteratureReviewAgent`](../src/nodes/ml_literature_review/ml_literature_review.py) | `LiteratureReviewInput` → `LiteratureReviewOutput` | Optional literature evidence |
 | [`MLModelProposalAgent`](../src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py) | `ProposalInput` → `ProposalOutput` | Propose architecture and prediction |
 | [`MLModelImplementor`](../src/nodes/ml_model_implementor/ml_model_implementor.py) | `ImplementorInput` → `ImplementorOutput` | Implement model/loss plugins |
 | [`MLCodeValidatorAgent`](../src/nodes/ml_code_validator_agent/ml_code_validator_agent.py) | `ValidatorInput` → `ValidatorOutput` | Check generated code |
 | [`HyperparamTuningAgent`](../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py) | `HyperparamTuningInput` → `HyperparamTuningOutput` | Plan, train, infer, score, check validity and reflect |
 
-[`agent/schemas/protocols/`](../src/agent/schemas/protocols/__init__.py) owns six
-edge adapters: tune → interpret, interpret → propose, literature → propose,
-propose → implement, implement → validate, and validate → tune. The last also
-consumes the proposal; literature contributes to the proposal input alongside
-interpretation. [Schemas](../src/agent/schemas/README.md) define the transported
+[`agent/schemas/protocols/`](../src/agent/schemas/protocols/__init__.py) owns
+eight edge adapters: tune → interpret, interpret → analysis, interpret →
+propose, analysis → propose, literature → propose, propose → implement,
+implement → validate, and validate → tune. The last also consumes the proposal;
+literature and Data Analysis contribute separate typed projections to the
+proposal input. [Schemas](../src/agent/schemas/README.md) define the transported
 values. Each node's stored output is its log, not an inter-node channel.
 
 ## Deterministic owners
@@ -100,6 +102,7 @@ values. Each node's stored output is its log, not an inter-node channel.
 | Process isolation and child paths | [`sandbox_executor.py`](../src/core/sandbox_executor.py), including `child_script_path` |
 | Training / inference / composed scoring children | [`train_engine_sandbox.py`](../src/execute_tools/train_engine_sandbox.py), [`inference_single.py`](../src/execute_tools/inference_single.py), [`denoising_score_single.py`](../src/execute_tools/denoising_score_single.py) |
 | Resource admission, probes, measurement, records and watchdog | [`core/runtime_control/`](../src/core/runtime_control) |
+| Historical-model reconstruction and bounded prediction certification | Descriptive contracts in [`trained_model.py`](../src/agent/schemas/data_analysis/trained_model.py) and caller-injected execution in [`historical_model_inference.py`](../src/execute_tools/historical_model_inference.py) |
 | Round validity and Health | Tuner [`execution.py`](../src/nodes/ml_hyperparameter_tune_agent/execution.py) calls the [`round_health.py`](../src/nodes/ml_hyperparameter_tune_agent/round_health.py) boundary; checks live in [`health_checks/`](../src/execute_tools/health_checks/README.md) |
 | Carried state, comparability and recovery | [`chain_state.py`](../src/core/chain_state.py), [`run_invariants.py`](../src/core/run_invariants.py), [`iteration_manifest.py`](../src/core/iteration_manifest.py), [`resume.py`](../src/core/resume.py) |
 | Workspace validation | `core/resume.py::validate_workspace_layout`; no `core/workspace_layout.py` exists |

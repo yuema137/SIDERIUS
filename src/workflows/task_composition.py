@@ -125,6 +125,7 @@ _MANIFEST_KEYS = frozenset(
         "parameter_rules",
         "dynamic_observables",
         "static_observables",
+        "data_analysis",
         "code_package",
     }
 )
@@ -329,6 +330,9 @@ class RunTaskComposition:
     Observables are OBSERVATIONAL: nothing reachable through this field may
     ever become an operand of an ordering expression (`D-BUD-16`).
     """
+
+    data_analysis: Any = None
+    """Optional edge-owned Data Analysis workflow policy, resolved and pinned."""
 
     def __post_init__(self) -> None:
         """Refuse mutable cross-iteration state, by DERIVED name set.
@@ -2035,6 +2039,7 @@ def compute_semantic_fingerprint(
     parameter_rules: ParameterRules | None = None,
     scoreability_bindings: dict[str, Any] | None = None,
     code_package: PackageIdentity | None = None,
+    data_analysis: Any = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -2164,6 +2169,8 @@ def compute_semantic_fingerprint(
     # manifest's fingerprint is byte-unchanged and its resume still validates.
     if observable_declarations:
         payload["observable_declarations"] = observable_declarations
+    if data_analysis is not None:
+        payload["data_analysis"] = data_analysis.canonical_identity()
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
 
@@ -2659,6 +2666,27 @@ def _compose_resolved_task_bindings(
     if implementor_path is not None:
         source_paths["implementor_blocks"] = implementor_path
 
+    from workflows.data_analysis_composition import compose_workflow_data_analysis
+
+    try:
+        data_analysis = compose_workflow_data_analysis(
+            raw.get("data_analysis"),
+            manifest_path=resolved_manifest,
+            task_data_path=impl,
+            task_data_path_id=impl.task_data_path_id,
+            task_description=description,
+            forward_contract=contract,
+            metric=metric,
+            dataset_profile_ref=profile_ref,
+            dataset_profile_path=profile_path,
+        )
+    except Exception as exc:
+        raise TaskCompositionError(
+            f"data_analysis could not be composed: {type(exc).__name__}: {exc}"
+        ) from exc
+    if data_analysis is not None:
+        source_paths["data_analysis"] = data_analysis.config_path
+
     from execute_tools.deliverable_spec import task_names_its_own_deliverables
     from execute_tools.task_data_path import registered_content_identity
 
@@ -2729,6 +2757,7 @@ def _compose_resolved_task_bindings(
         parameter_rules=parameter_rules,
         scoreability_bindings=_scoreability_binding_identity(raw),
         code_package=package.identity if package is not None else None,
+        data_analysis=data_analysis,
     )
 
     return RunTaskComposition(
@@ -2756,6 +2785,7 @@ def _compose_resolved_task_bindings(
         task_owned_custom_loss=task_owned_custom_loss,
         parameter_rules=parameter_rules,
         observables=observables or None,
+        data_analysis=data_analysis,
     )
 
 

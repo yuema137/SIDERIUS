@@ -1,3 +1,5 @@
+import hashlib
+import inspect
 import math
 from typing import Any, cast
 
@@ -811,8 +813,6 @@ def construct_registered_model(model_type: str, config_obj: Any, *, loss_type: s
     Returns:
         The constructed (host-side) model.
     """
-    import inspect
-
     model_cls = MODEL_REGISTRY[model_type]
     try:
         takes_loss_type = "loss_type" in inspect.signature(model_cls.__init__).parameters
@@ -824,6 +824,13 @@ def construct_registered_model(model_type: str, config_obj: Any, *, loss_type: s
     if takes_loss_type:
         return model_cls(config_obj, loss_type=loss_type)
     return model_cls(config_obj)
+
+
+def registered_model_construction_implementation_sha256() -> str:
+    """Content identity of the approved v1 registered-model constructor."""
+
+    source = inspect.getsource(construct_registered_model).encode("utf-8")
+    return hashlib.sha256(source).hexdigest()
 
 
 # Extend MODEL_REGISTRY with any agent-generated plugin models.
