@@ -16,3 +16,5 @@ Focused unit coverage: [test_paper_resolver_skill.py](../../../../tests/unit/age
 and [test_arxiv_source.py](../../../../tests/unit/agent/skills/test_arxiv_source.py);
 live retrieval integration is separate at
 [tests/integration/skills/test_paper_resolver_skill.py](../../../../tests/integration/skills/test_paper_resolver_skill.py).
+
+Detailed agent-facing contract: [paper_resolver_skill.md](paper_resolver_skill.md).
