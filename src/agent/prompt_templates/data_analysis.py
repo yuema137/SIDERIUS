@@ -14,7 +14,13 @@ from agent.schemas.data_analysis.skills import ResolvedSkillInterface, SkillResu
 def _json(value) -> str:
     if hasattr(value, "model_dump"):
         value = value.model_dump(mode="json")
-    return json.dumps(value, sort_keys=True, indent=2, default=str)
+
+    def encode_nested(item):
+        if hasattr(item, "model_dump"):
+            return item.model_dump(mode="json")
+        return str(item)
+
+    return json.dumps(value, sort_keys=True, indent=2, default=encode_nested)
 
 
 def render_skill_selection_prompt(
@@ -32,6 +38,9 @@ Task context:
 
 Human advice:
 {analysis_input.human_advice or "None"}
+
+Resource envelope:
+{_json(analysis_input.resource_envelope)}
 
 Safe asset descriptors:
 {_json(analysis_input.available_assets)}
