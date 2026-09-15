@@ -1794,7 +1794,7 @@ wheels = [
 
 [[package]]
 name = "siderius"
-version = "0.2.0rc4"
+version = "0.2.0rc6"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
