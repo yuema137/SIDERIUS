@@ -32,10 +32,10 @@ Resolve data reports source/identifier, S2 metadata where applicable,
 `pdfplumber_llm`, or `abstract_only`). Search data reports query, mapped
 results, total, offset, and next page information. Missing or semantically
 invalid values that reach the mode handlers, plus network, PDF, and extraction
-failures, become an error or partial envelope. Direct Python callers must pass
-integer-coercible `verbosity`, `limit`, and `offset` values: coercion currently
-occurs while the cache key is built and can raise `TypeError` or `ValueError`
-before an envelope is created.
+failures, become an error or partial envelope. Direct Python callers whose
+`verbosity`, `limit`, or `offset` values are not integer-coercible, or whose
+cache-key inputs are unhashable, receive an error envelope before any network
+request is attempted.
 
 Remote calls may use Semantic Scholar, arXiv, or an open-access PDF URL.
 Full-text extraction tries arXiv source first and pdfplumber fallback where

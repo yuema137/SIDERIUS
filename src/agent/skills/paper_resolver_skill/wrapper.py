@@ -17,6 +17,10 @@ Universal exit contract: every code path returns
 Never raises. ``partial`` covers e.g. S2 metadata fetched but the PDF
 download failed — the caller still gets useful information.
 
+Direct callers whose scalar inputs cannot be coerced for cache identity, or
+whose cache-key values are unhashable, receive the same error envelope before
+any network request is attempted.
+
 Cache (module-level ``_S2_CACHE``) is **per-process, per-run, not
 thread-safe**. Keyed by the full request shape so repeated calls within
 one lit-review run skip the network. Cleared by re-import only.
@@ -599,8 +603,18 @@ def run_skill(sandbox: Any, **kwargs: Any) -> dict[str, Any]:
             "message": f"mode must be 'resolve' or 'search', got {mode!r}",
         }
 
-    cache_key = _make_cache_key(kwargs)
-    cached = _S2_CACHE.get(cache_key)
+    try:
+        cache_key = _make_cache_key(kwargs)
+        cached = _S2_CACHE.get(cache_key)
+    except (TypeError, ValueError) as exc:
+        return {
+            "status": "error",
+            "data": None,
+            "message": (
+                "invalid paper resolver input: verbosity, limit, and offset "
+                f"must be integer-coercible and cache-key inputs hashable ({exc})"
+            ),
+        }
     if cached is not None:
         return cached
 
