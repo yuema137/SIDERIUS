@@ -130,6 +130,28 @@ _records = _import_module("nodes.ml_hyperparameter_tune_agent.records")
 _runtime = _import_module("nodes.ml_hyperparameter_tune_agent.runtime")
 
 
+class ScoringSkillExecutionError(RuntimeError):
+    """The scoring subprocess did not complete successfully."""
+
+
+def _require_successful_scoring_result(score_result: Mapping[str, Any]) -> None:
+    """Refuse a failed scoring subprocess before Health/scientific routing.
+
+    A missing scalar after a *successful* scorer is scientific validity
+    evidence.  A missing scalar because the scorer crashed is infrastructure
+    failure.  Keeping that distinction here, immediately after the subprocess
+    boundary, prevents Health from appearing to pass work that was never
+    scored and prevents ``failed_mode_collapse`` from hiding a broken scorer.
+    """
+
+    status = score_result.get("status")
+    if status == "success":
+        return
+    message = score_result.get("message")
+    detail = str(message) if message else "scoring subprocess returned no failure detail"
+    raise ScoringSkillExecutionError(f"scoring skill status={status!r}: {detail}")
+
+
 def _emit_attempt_record(
     sandbox,
     record: dict,
@@ -1344,6 +1366,7 @@ def run_inference_scoring_health(
                 #   every un-composed FORMAL round has always gone. The old
                 #   comment named a condition the code never tested.
                 score_res = _runtime._run_skill("denoising_score_skill", sandbox, **active_params)
+                _require_successful_scoring_result(score_res)
                 # F2 — carry the same three round facts the anchor route
                 # produces in-process, so the round-boundary gate evaluation
                 # below is genuinely route-independent rather than an anchor

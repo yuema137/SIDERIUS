@@ -25,6 +25,7 @@ The task-facing seams:
 | `sample_set_builder.py` / `scoring_utils.py` | `build_sample_set` (constructive scope enforcement) · `validate_sample_set` (the boundary guarantee before all file I/O) · `score_vector` (legacy compatibility helper; bound task metrics own current scoring semantics) |
 | `data_paths.py` | explicit physical data-root validation plus run-scoped bind/active/resolve transport |
 | `scope_artifact.py` | the hash-verified scope artifact ABI crossing the process boundary |
+| `spawned_file_callable.py` | content-pinned execution of a task-owned `file:` plugin callable in fresh `multiprocessing` spawn workers; use this instead of submitting a dynamically loaded function directly |
 | `task_registration_scope.py` | run-scoped registration visibility/rollback |
 
 The engines (subprocess entrypoints, launched only by `core/sandbox_executor`):
@@ -81,6 +82,11 @@ records (`metric_result` / `metric_refusal`), typed training results.
   ([define a task](../../docs/guides/define-a-task.md)). Data not shaped like
   "N partitions of M units" adds the `TaskScopeCapability` sibling; the four
   base methods are frozen and never grow.
+- A task-owned `file:` plugin that needs process parallelism captures its
+  worker with `SpawnedFileCallable.capture(...)` and maps it through
+  `map_spawned_file_callable(...)`. A raw `ProcessPoolExecutor` cannot submit
+  functions from the composition loader's synthetic module: fresh spawn
+  workers have no import authority for that parent-only module name.
 - **Scoreability contract classes are the one closed vocabulary**: only the
   contract ids declared in `evaluation_metric.py` exist
   (`deliverable_presence` is the generic floor). A genuinely new acceptance
