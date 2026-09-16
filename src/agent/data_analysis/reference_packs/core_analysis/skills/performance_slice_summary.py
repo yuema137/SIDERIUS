@@ -1,7 +1,7 @@
 """Generic prediction error conditioned on one authorized metadata field."""
 
 from itertools import pairwise
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -58,12 +58,17 @@ class Parameters(BaseModel):
         return self
 
 
-def _metrics(prediction: np.ndarray, target: np.ndarray, minimum: int, include_r2: bool):
+def _metrics(
+    prediction: np.ndarray,
+    target: np.ndarray,
+    minimum: int,
+    include_r2: bool,
+) -> dict[str, Any]:
     count = len(target)
     if count < minimum:
         return {"count": count, "metrics": None, "suppression_reason": "insufficient_support"}
     error = prediction - target
-    metrics = {
+    metrics: dict[str, float | str | None] = {
         "bias": float(np.mean(error)),
         "mae": float(np.mean(np.abs(error))),
         "rmse": float(np.sqrt(np.mean(np.square(error)))),

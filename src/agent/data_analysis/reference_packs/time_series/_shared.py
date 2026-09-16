@@ -138,7 +138,7 @@ def aggregate_channel_scalars(records: list[dict[str, Any]], keys: tuple[str, ..
         channels.setdefault(record["channel_id"], []).append(record)
     output = {}
     for channel_id, items in sorted(channels.items()):
-        summary = {"example_count": len(items)}
+        summary: dict[str, Any] = {"example_count": len(items)}
         for key in keys:
             values = np.asarray(
                 [item[key] for item in items if item.get(key) is not None], dtype=np.float64

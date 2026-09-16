@@ -1,5 +1,7 @@
 """Time-frequency energy map without boundary synthesis or padding."""
 
+from typing import Any, cast
+
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from scipy import signal
@@ -48,9 +50,9 @@ def run(skill_input, parameters: Parameters, runtime):
                 window="hann_periodic",
                 nperseg=parameters.nperseg,
                 noverlap=receipt["resolved_noverlap"],
-                detrend="constant",
+                detrend=cast(Any, "constant"),
                 return_onesided=True,
-                boundary=None,
+                boundary=cast(Any, None),
                 padded=False,
                 scaling="psd",
             )

@@ -64,6 +64,8 @@ def run(skill_input, parameters: Parameters, runtime):
             ):
                 raise ValueError("pair requires complete finite certified-regular series")
             sample_rate = view.sample_rate_hz(example_index)
+            if sample_rate is None:
+                raise ValueError("certified-regular series must expose a sample rate")
             receipt = spectral_parameters(
                 parameters.nperseg, parameters.noverlap, len(first), sample_rate
             )

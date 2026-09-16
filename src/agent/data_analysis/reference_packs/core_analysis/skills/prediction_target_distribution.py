@@ -70,7 +70,7 @@ def run(skill_input, parameters: Parameters, runtime):
         robust_span_ratio = prediction_robust_span / target_robust_span
     rank = None
     if len(target) >= 2 and np.ptp(target) > 0 and np.ptp(prediction) > 0:
-        rank = float(spearmanr(target, prediction).statistic)
+        rank = float(spearmanr(target, prediction)[0])
     result = {
         "count": len(target),
         "prediction": prediction_summary,

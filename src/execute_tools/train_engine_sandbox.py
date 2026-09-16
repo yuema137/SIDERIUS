@@ -103,6 +103,8 @@ def _write_training_artifact_candidate(
     if model_io is None or model_io.inference is None:
         return
     model_type = getattr(model_cfg, "model_type", None)
+    if not isinstance(model_type, str) or not model_type:
+        raise ValueError("trained model config must declare a non-empty model_type")
     model_class = MODEL_REGISTRY.get(model_type)
     config_source = inspect.getsourcefile(type(model_cfg))
     model_source = inspect.getsourcefile(model_class) if model_class is not None else None

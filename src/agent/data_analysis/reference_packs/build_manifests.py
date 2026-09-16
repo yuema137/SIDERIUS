@@ -8,6 +8,7 @@ from pathlib import Path
 from agent.data_analysis.discovery import compute_pack_content_sha256
 from agent.schemas.data_analysis.common import canonical_json_bytes
 from agent.schemas.data_analysis.skills import (
+    CostClass,
     InvocationMetadataSelection,
     NumericalTolerance,
     SkillCard,
@@ -51,7 +52,7 @@ def _declaration(
     slots: tuple[SkillInputSlot, ...],
     applicable_when: str,
     *,
-    cost: str = "cheap",
+    cost: CostClass = "cheap",
     artifacts: tuple[str, ...] = ("table",),
 ) -> SkillDeclaration:
     relative_source = f"skills/{skill_id}.py"
