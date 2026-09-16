@@ -10,7 +10,11 @@ from agent.data_analysis.plan_validation import (
     validate_binding_information,
     validate_invocation_metadata_selections,
 )
-from agent.schemas.data_analysis.access import RequestedInformation
+from agent.schemas.data_analysis.access import (
+    AnalysisAccessPolicy,
+    RequestedInformation,
+    SplitAccessRule,
+)
 from agent.schemas.data_analysis.assets import (
     AnalysisAsset,
     ArtifactIntrinsicScope,
@@ -97,6 +101,31 @@ def test_required_information_must_be_requested_before_materialization() -> None
 
     with pytest.raises(AnalysisPlanResolutionError, match="omits required 'target'"):
         validate_binding_information(binding, _slot())
+
+
+def test_target_visible_to_policy_is_still_invalid_for_data_only_slot() -> None:
+    """The plan/slot boundary must reject the observed TIDMAD LLM mistake."""
+
+    policy = AnalysisAccessPolicy(
+        policy_id="validation-diagnostics",
+        policy_version=1,
+        purpose="Permit separate target diagnostics",
+        split_rules=(SplitAccessRule(split_id="validation", targets_visible=True),),
+    )
+    assert policy.permits(split_id="validation", information_class="target")
+    data_only = SkillInputSlot(
+        slot_id="evaluation",
+        description="Observed values only, even if target is visible elsewhere.",
+        accepted_asset_types=("dataset",),
+        accepted_view_formats=("aligned-evaluation.v1",),
+        required_information=({"information_class": "data"},),
+    )
+    binding = _binding(
+        {"information_class": "data"},
+        {"information_class": "target"},
+    )
+    with pytest.raises(AnalysisPlanResolutionError, match="undeclared information class"):
+        validate_binding_information(binding, data_only)
 
 
 def test_request_must_stay_within_required_and_optional_information() -> None:

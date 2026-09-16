@@ -85,6 +85,12 @@ def render_analysis_plan_prompt(
     system = """Produce one executable AnalysisPlan as strict JSON. Use exact IDs, slots,
 formats, information classes, metadata fields, parameters, cost hints, and question IDs from the
 supplied contracts. Metadata parameters grant no access: the binding must request the exact field.
+For each binding, requested_information must include the selected slot's required_information
+and may add only information declared by that same slot's optional_information (plus exact
+invocation-selected metadata when the slot declares it). The access policy may permit target on
+a split, but that does not make target valid for a data-only slot. For a slot requiring only data
+with no optional information, request only {"information_class":"data","fields":[]}; do not add
+target to that binding. Use a declared target-capable slot if the question needs target evidence.
 RequestedInformation.fields is conditional: use explicit names only when information_class is
 "metadata". For "identity", "data", "target", "prediction", or "residual", fields must be empty.
 Examples: {"information_class":"data","fields":[]} and

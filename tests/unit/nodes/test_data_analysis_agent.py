@@ -914,6 +914,15 @@ def test_plan_repair_may_only_delete_illegal_nonmetadata_fields(tmp_path: Path) 
         '"metadata".'
     )
     assert plan_system_rule in bridge.system_prompts["data_analysis.plan"]
+    plan_prompt = bridge.system_prompts["data_analysis.plan"]
+    assert (
+        "requested_information must include the selected slot's required_information" in plan_prompt
+    )
+    assert (
+        "may add only information declared by that same slot's optional_information" in plan_prompt
+    )
+    assert "that does not make target valid for a data-only slot" in plan_prompt
+    assert "Use a declared target-capable slot if the question needs target evidence" in plan_prompt
 
     receipt_path = (
         tmp_path / "data_analysis" / "standalone" / "request" / "structured_output_receipts.jsonl"
