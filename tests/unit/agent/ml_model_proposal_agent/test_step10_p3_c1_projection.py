@@ -6,7 +6,7 @@ authority, its placement and its failure policy), §7 C1; parent §11.2.
 
 What this owns, that nothing else can
 -------------------------------------
-* **The boundary IS the field set.** 30 carried / 12 refused / 2 dead-dropped
+* **The boundary IS the field set.** 30 carried / 13 refused / 2 dead-dropped
   is the claim that this is a consumer view rather than a copy of
   ``InterpretationOutput``. A test that only checked "the carried fields land"
   would stay green while the type drifted into a producer mirror, so the
@@ -50,7 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 class TestTheFieldSetIsABoundary:
-    """30 carried, 12 refused, 2 dead-dropped — asserted against live schemas."""
+    """30 carried, 13 refused, 2 dead-dropped — asserted against live schemas."""
 
     def test_the_carried_and_refused_fields_partition_the_producer_exactly(self) -> None:
         """No upstream field is silently unaccounted for.
@@ -81,8 +81,8 @@ class TestTheFieldSetIsABoundary:
     def test_the_measured_counts_hold(self) -> None:
         """Hardcoded, because the design froze these exact numbers (§4.1)."""
         assert len(ProposerInterpretationEvidence.model_fields) == 30
-        assert len(NOT_CARRIED) == 12
-        assert len(InterpretationOutput.model_fields) == 42
+        assert len(NOT_CARRIED) == 13
+        assert len(InterpretationOutput.model_fields) == 43
 
     def test_every_refusal_carries_a_reason(self) -> None:
         """A reasonless entry would let the refusal list absorb a real field."""

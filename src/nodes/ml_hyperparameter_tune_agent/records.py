@@ -14,6 +14,7 @@ this call site" is how status vocabularies drift apart, and the resume path
 reads exactly what this module wrote.
 """
 
+import hashlib
 import os
 import time
 from typing import Any
@@ -44,6 +45,11 @@ from execute_tools.evaluation_metric import (
 )
 from execute_tools.health_checks.candidate_eligibility import formal_validity_of
 from execute_tools.scoring_utils import coerce_nonfinite_to_none
+from execute_tools.trained_model_artifact import (
+    TrainedModelEmissionContext,
+    TrainingArtifactCandidate,
+    emit_trained_model_artifact,
+)
 from execute_tools.training_history import (
     TrainingResults,
     TrainingResultsContractError,
@@ -75,6 +81,76 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
     _select_best_records,
 )
 from workflows.task_composition import active_composition_fingerprint
+
+
+def _trained_model_artifact_ref(
+    bindings: RunBindings,
+    prepared: PreparedAttempt,
+    trained: TrainingOutcome,
+):
+    """Emit the standard artifact when the run declared complete inference semantics."""
+
+    model_io = bindings.run_model_io
+    if model_io is None or model_io.inference is None:
+        return None
+    composition_fingerprint = active_composition_fingerprint()
+    task_data_path = bindings.run_task_data_path
+    forward_contract = bindings.run_forward_contract
+    if composition_fingerprint is None or task_data_path is None or forward_contract is None:
+        raise ValueError(
+            "standard trained-model emission requires composed task, data-path, and forward authorities"
+        )
+    raw_candidate = (trained.train_status or {}).get("trained_model_candidate")
+    if raw_candidate is None:
+        raise ValueError(
+            "training declared historical-inference semantics but produced no certified model candidate"
+        )
+    candidate = TrainingArtifactCandidate.model_validate(raw_candidate)
+    from execute_tools.task_data_path import content_identity, registered_content_identity
+    from ml_models.plugin_binding import active_run_model_plugins
+
+    task_content_identity = registered_content_identity(
+        task_data_path.task_data_path_id
+    ) or content_identity(task_data_path)
+    # ``content_identity`` is the task-data-path authority's host-independent
+    # qualified identity, not a bare digest.  The model artifact needs a fixed
+    # SHA-256 field, so hash that complete authoritative value instead of
+    # parsing its implementation-specific spelling or rereading source here.
+    task_content = hashlib.sha256(task_content_identity.encode("utf-8")).hexdigest()
+    configured_ref = "run-scoped-model-plugin"
+    binding = active_run_model_plugins()
+    if binding is not None:
+        matched = next(
+            (
+                plugin
+                for plugin in binding.plugins
+                if plugin.model_type == candidate.model_type
+                and plugin.content_sha256 == candidate.model_plugin_sha256
+            ),
+            None,
+        )
+        if matched is not None:
+            configured_ref = matched.configured_ref
+    return emit_trained_model_artifact(
+        candidate,
+        TrainedModelEmissionContext(
+            workspace=bindings.workspace,
+            run_name=bindings.run_name,
+            # The tuner input exposes the upstream candidate identity but not
+            # a separate workflow-iteration ID.  Keep those semantics distinct
+            # instead of duplicating candidate_id under two field names.
+            iteration_id=f"tuner-run:{bindings.run_name}",
+            candidate_id=bindings.agent_input.candidate_id,
+            experiment_id=prepared.exp_id,
+            model_io_contract=model_io,
+            forward_contract=forward_contract,
+            dataset_profile=bindings.run_profile.to_wire(),
+            task_data_path_id=task_data_path.task_data_path_id,
+            task_data_path_content_sha256=task_content,
+            task_composition_fingerprint=composition_fingerprint,
+            plugin_configured_ref=configured_ref,
+        ),
+    )
 
 
 def _may_advise_resource_reduction(status: dict) -> bool:
@@ -1460,6 +1536,9 @@ def build_attempt_record(
             "memory_update": reflection.get("memory_update"),
         },
     }
+    trained_model_ref = _trained_model_artifact_ref(bindings, prepared, trained)
+    if trained_model_ref is not None:
+        final_record["trained_model_artifact_ref"] = trained_model_ref.model_dump(mode="json")
     # Step 10 / P2b — the observational secondaries' three outcomes, written
     # only when non-empty. This builder controls the record dict key-by-key
     # (`LocalRecorder.save_record` is a pass-through), so a run that declared

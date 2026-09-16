@@ -23,6 +23,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
+from agent.schemas.data_analysis.context import AnalysisBrief
 from agent.schemas.health_feedback import (
     CollapseFingerprint,
     CollapseFingerprintHistoryEntry,
@@ -663,6 +664,15 @@ class InterpretationInput(BaseModel):
         description="Optional human-provided guidance (highest priority — overrides expert_advice). "
         "When present, injected into the LLM prompt as high-priority context.",
     )
+    analysis_brief_requested: bool = Field(
+        default=False,
+        exclude_if=lambda value: value is False,
+        description=(
+            "Whether this invocation should run the optional separate AnalysisBrief "
+            "generation stage after legacy interpretation. False preserves the legacy "
+            "prompt, response contract, call count and serialized input identity."
+        ),
+    )
     # --- Vocabulary feedback (Phase C) ---
     runtime_vocab: list[VocabEntry] = Field(
         default_factory=list,
@@ -990,6 +1000,15 @@ class InterpretationOutput(BaseModel):
         "iteration (no prior experimental evidence). Propagated to the proposer so "
         "its prompt states there is no history and treats registries as available "
         "options, not completed runs. False for all history-backed iterations.",
+    )
+    analysis_brief: AnalysisBrief | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Optional Interpreter-owned semantic questions produced by a separate bounded "
+            "stage. Contains no assets, access grants, skills, execution plan, preprocessing "
+            "action or modeling decision."
+        ),
     )
 
     # --- Per-model scores ---

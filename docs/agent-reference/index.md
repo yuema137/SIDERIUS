@@ -41,6 +41,7 @@ Python imports keep their existing names; see the [source guide](../../src/READM
 | change tuner behaviour | [tuner node doc](../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) → [mechanisms/metrics](mechanisms/metrics.md) |
 | understand `TrainingHistory` / `TrainingDiagnosis` | [mechanisms/training-objective-and-diagnosis](mechanisms/training-objective-and-diagnosis.md) |
 | change what the interpreter reads | [interpreter node doc](../../src/nodes/result_interpretation_agent/result_interpretation_agent.md) |
+| understand or extend scientific data analysis | [data analysis node doc](../../src/nodes/data_analysis_agent/data_analysis_agent.md) → [reference/task-composition](../reference/task-composition.md#optional-data-analysis-capability) |
 | change what the proposer reads | [proposer node doc](../../src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) |
 | find which manifest sections are required | [reference/task-composition](../reference/task-composition.md) |
 | create a new external task package | [guides/define-a-task](../guides/define-a-task.md) → [reference/task-composition](../reference/task-composition.md) |
@@ -70,19 +71,21 @@ Each node owns one stage. Its `.md` is the contract.
 
 | node | role | LLM | CLI (`main()`) |
 |---|---|:---:|---|
-| [`result_interpretation_agent`](../../src/nodes/result_interpretation_agent/result_interpretation_agent.md) | synthesise evidence across records; state what it supports | ✅ | `src/nodes/result_interpretation_agent/result_interpretation_agent.py:1303` |
+| [`result_interpretation_agent`](../../src/nodes/result_interpretation_agent/result_interpretation_agent.md) | synthesise evidence across records; state what it supports | ✅ | `src/nodes/result_interpretation_agent/result_interpretation_agent.py:1344` |
+| [`data_analysis_agent`](../../src/nodes/data_analysis_agent/data_analysis_agent.md) | execute authorized scientific-analysis skills and synthesize a bounded report | ✅ | Python capability API only |
 | [`ml_literature_review`](../../src/nodes/ml_literature_review/ml_literature_review.md) | surface papers as soft priors (optional stage) | ✅ | `src/nodes/ml_literature_review/ml_literature_review.py:1133` (explicit task/data binding; upstream record read from disk by naming convention — #303) |
-| [`ml_model_proposal_agent`](../../src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) | propose an architecture and an explicit prediction | ✅ | `src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py:2397` |
+| [`ml_model_proposal_agent`](../../src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) | propose an architecture and an explicit prediction | ✅ | `src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py:2406` |
 | [`ml_model_implementor`](../../src/nodes/ml_model_implementor/ml_model_implementor.md) | write the model plugin (and optional loss plugin) | ✅ | `src/nodes/ml_model_implementor/ml_model_implementor.py:2323` |
 | [`ml_code_validator_agent`](../../src/nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ | `src/nodes/ml_code_validator_agent/ml_code_validator_agent.py:938` |
-| [`ml_hyperparameter_tune_agent`](../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1780` (parser and input builder in `cli.py`) |
+| [`ml_hyperparameter_tune_agent`](../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1783` (parser and input builder in `cli.py`) |
 
-All six nodes currently have a CLI entry: each exposes an `argparse` `main()`
+Six nodes currently have a CLI entry: each exposes an `argparse` `main()`
 behind `if __name__ == "__main__":` at the line cited
 (`ml_literature_review`'s CLI landed with #303/#305). The marker and source
 citations are structural facts only; they do not certify that an invocation
 has all task context needed for a successful run. Invocation boundaries and
-limitations live in each node's own `.md`.
+limitations live in each node's own `.md`. `data_analysis_agent` is the seventh
+node and currently exposes a typed Python capability API rather than a CLI.
 
 Adding a node: [`nodes/NODE_TEMPLATE.md`](../../src/nodes/NODE_TEMPLATE.md) — all
 eight steps, including the connection audit.

@@ -35,6 +35,7 @@ in this repository reads them today.
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -54,9 +55,71 @@ __all__ = [
     "Dimension",
     "DtypeAdmissibility",
     "ModelIOContract",
+    "ModelInferenceContract",
+    "ModelInferenceInformationRequirement",
     "TensorAxis",
     "TensorContract",
 ]
+
+
+class ModelInferenceInformationRequirement(BaseModel):
+    """Information an approved predictor may receive, never an access grant."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    information_class: Literal["data", "metadata"]
+    fields: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_fields(self) -> ModelInferenceInformationRequirement:
+        if len(set(self.fields)) != len(self.fields) or any(not item for item in self.fields):
+            raise ValueError("model-inference information fields must be non-empty and unique")
+        if any("*" in item for item in self.fields):
+            raise ValueError("model-inference metadata wildcards are forbidden")
+        if self.information_class == "metadata" and not self.fields:
+            raise ValueError("model-inference metadata requires explicit fields")
+        if self.information_class == "data" and self.fields:
+            raise ValueError("field names apply only to model-inference metadata")
+        return self
+
+
+class ModelInferenceContract(BaseModel):
+    """Standardized scientific semantics around one model forward pass.
+
+    This is descriptive. Protocol IDs select an operator-approved capability;
+    they are never Python import paths or filesystem entrypoints.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    accepted_input_view_formats: tuple[str, ...]
+    required_information: tuple[ModelInferenceInformationRequirement, ...]
+    prediction_output_format: str
+    prediction_semantic_id: str
+    prediction_decoder_protocol_id: str = "siderius.identity-prediction-decoder.v1"
+    alignment: Literal["one_prediction_per_input"] = "one_prediction_per_input"
+    determinism: Literal["deterministic", "stochastic_seeded"] = "deterministic"
+
+    @model_validator(mode="after")
+    def validate_inference_semantics(self) -> ModelInferenceContract:
+        formats = self.accepted_input_view_formats
+        if not formats or len(set(formats)) != len(formats) or any(not item for item in formats):
+            raise ValueError("accepted inference input formats must be non-empty and unique")
+        classes = [item.information_class for item in self.required_information]
+        if "data" not in classes:
+            raise ValueError("predictor inference requires data information")
+        if len(set(classes)) != len(classes):
+            raise ValueError("model-inference information classes must be unique")
+        for label, value in (
+            ("prediction_output_format", self.prediction_output_format),
+            ("prediction_semantic_id", self.prediction_semantic_id),
+            ("prediction_decoder_protocol_id", self.prediction_decoder_protocol_id),
+        ):
+            if not value.strip():
+                raise ValueError(f"{label} must be non-empty")
+        if ":" in self.prediction_decoder_protocol_id or "/" in self.prediction_decoder_protocol_id:
+            raise ValueError("prediction decoder protocol ID cannot be an executable path")
+        return self
 
 
 class AxisRole(StrEnum):
@@ -230,6 +293,15 @@ class ModelIOContract(BaseModel):
 
     input: TensorContract = Field(description="The single input tensor.")
     output: TensorContract = Field(description="The single output tensor.")
+    inference: ModelInferenceContract | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Optional standardized scientific inference semantics. Required before a trained "
+            "model can become a historical-inference artifact; legacy training remains valid "
+            "without it."
+        ),
+    )
 
     @model_validator(mode="after")
     def _shared_symbols_are_consistent(self) -> ModelIOContract:

@@ -221,7 +221,8 @@ class WorkflowLLMConfig(BaseModel):
       - The tuner uses `TunerLLMConfig` (planner + reflector).
       - The proposal agent uses `ProposalLLMConfig` (comparison + reasoning + proposing).
       - The lit-review node uses `LitReviewLLMConfig` (main + search).
-      - Single-sub-call agents (interpret, implement, validate) use plain `NodeLLMConfig`.
+      - Single-config agents (interpret, data_analysis, implement, validate) use
+        plain `NodeLLMConfig`.
 
     Future agents that grow sub-call needs define their own typed config
     class following the same pattern.
@@ -232,6 +233,10 @@ class WorkflowLLMConfig(BaseModel):
     interpret: NodeLLMConfig | None = Field(
         default=None,
         description="LLM config for the interpretation agent.",
+    )
+    data_analysis: NodeLLMConfig | None = Field(
+        default=None,
+        description="LLM config shared by the Data Analysis agent's bounded LLM stages.",
     )
     propose: ProposalLLMConfig | None = Field(
         default=None,
@@ -305,8 +310,8 @@ class WorkflowLLMConfig(BaseModel):
         the main bridge for the search-decision call.
 
         Args:
-            node_name: One of "interpret", "propose", "implement",
-                       "validate", "tune", "lit_review".
+            node_name: One of "interpret", "data_analysis", "propose",
+                       "implement", "validate", "tune", "lit_review".
 
         Returns:
             Flat dict of LLM kwargs, or `{}` if the node is not configured.
@@ -330,6 +335,8 @@ class WorkflowLLMConfig(BaseModel):
                 "llm_provider": self.interpret.provider,
                 "llm_model_id": self.interpret.model_id,
             }
+        if node_name == "data_analysis" and config is None:
+            config = self.interpret
 
         if config is None:
             return {}

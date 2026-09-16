@@ -398,6 +398,7 @@ class TestArgparseSurface:
             json.dumps(
                 {
                     "interpret": "interp text",
+                    "analysis": "analyze the authorized high-noise slice",
                     "propose": "propose text",
                 }
             )
@@ -412,6 +413,7 @@ class TestArgparseSurface:
         )
         normalized = runner.normalize_args(args)
         assert normalized.human_advice_interpret == "interp text"
+        assert normalized.human_advice_analysis == "analyze the authorized high-noise slice"
         assert normalized.human_advice_propose == "propose text"
 
     def test_human_advice_cli_overrides_file(self, tmp_path):

@@ -52,6 +52,7 @@ AGENT_REFERENCE_README = REPO_ROOT / "docs" / "agent-reference" / "index.md"
 #: to this module, and so a new node must be registered here to be guarded
 #: (`test_node_docs_tuple_matches_the_checkout` enforces that).
 NODE_DOCS: tuple[str, ...] = (
+    "src/nodes/data_analysis_agent/data_analysis_agent.md",
     "src/nodes/ml_code_validator_agent/ml_code_validator_agent.md",
     "src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md",
     "src/nodes/ml_literature_review/ml_literature_review.md",
@@ -62,7 +63,6 @@ NODE_DOCS: tuple[str, ...] = (
 
 PRODUCTION_ROOTS = ("src/agent", "src/nodes", "src/core", "src/execute_tools", "src/workflows")
 
-_PROTOCOL_MODULE = re.compile(r"^ml_[a-z0-9_]+_to_ml_[a-z0-9_]+$")
 #: An identifier-shaped token containing `_to_`, optionally cited as
 #: `path/module.py::function`. Prose never carries underscores, so this is
 #: specific enough to run over whole files including fenced code.
@@ -153,12 +153,8 @@ def test_every_protocol_token_in_node_docs_resolves() -> None:
     for rel in _scanned_documents():
         text = (REPO_ROOT / rel).read_text(encoding="utf-8")
         for name, func in _tokens(text):
-            if _PROTOCOL_MODULE.match(name):
-                if name not in modules:
-                    problems.append(
-                        f"{rel}: `{name}` is not a module under agent/schemas/protocols/"
-                    )
-                elif func is not None and func not in modules[name]:
+            if name in modules:
+                if func is not None and func not in modules[name]:
                     problems.append(f"{rel}: `{name}.py::{func}` — no such function in that module")
             elif name not in identifiers:
                 problems.append(

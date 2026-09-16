@@ -163,14 +163,14 @@ class TestParameterOwnershipCensus:
 
         RE-DERIVED at Step 10 / P1 C5, following that instruction rather than
         deleting the guard: 13 class-A authorities (the original 12 plus
-        `task_composition`), 1 restored-state carrier, 3 capability
-        references, 3 DS7 no-ops and `launch` — **21**, the count the P1
-        design freezes.
+        `task_composition`), 1 restored-state carrier, 4 capability
+        references (including historical-model inference), 3 DS7 no-ops and
+        `launch` — **22** total.
         """
         params = _run_workflow_parameters()
-        assert len(params) == 21, (
-            f"run_workflow has {len(params)} parameters, not the 21 the Step-10 "
-            "P1 design freezes. If a later migration legitimately changes it, "
+        assert len(params) == 22, (
+            f"run_workflow has {len(params)} parameters, not the 22 the Data Analysis "
+            "integration freezes. If a later migration legitimately changes it, "
             "re-derive this count from the new signature rather than deleting "
             "the guard."
         )

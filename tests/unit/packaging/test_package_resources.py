@@ -20,6 +20,7 @@ def _required_assets() -> list[Path]:
         [source / "agent/schemas/vocab_seed.json"],
         [p for p in (source / "agent/prompt_templates").rglob("*.md") if p.name != "README.md"],
         list((source / "agent/skills").glob("*/skill_config.json")),
+        list((source / "agent/data_analysis/reference_packs").glob("*/manifest.json")),
         list((source / "ml_models").glob("*/description.md")),
         [p for p in (source / "nodes").rglob("*.md") if p.name != "README.md"],
         [source / "dashboard/static" / name for name in ("index.html", "app.js", "style.css")],
@@ -61,5 +62,17 @@ def test_removed_health_policy_declaration_is_detected():
     data.pop("execute_tools")
     with pytest.raises(
         AssertionError, match="omitted from package-data: execute_tools/health_checks"
+    ):
+        _assert_declared(data)
+
+
+def test_removed_analysis_manifest_declaration_is_detected():
+    """Editable discovery must not hide a wheel missing every reference SkillCard."""
+
+    config = tomllib.loads((REPO / "pyproject.toml").read_text())
+    data = config["tool"]["setuptools"]["package-data"]
+    data["agent"] = [p for p in data["agent"] if "reference_packs" not in p]
+    with pytest.raises(
+        AssertionError, match="omitted from package-data: agent/data_analysis/reference_packs"
     ):
         _assert_declared(data)

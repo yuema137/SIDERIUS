@@ -23,6 +23,7 @@ Exactly two files per node are public — `<node>.py` (the class with
 |---|---|---|
 | `ml_literature_review/` | evidence corpus → expert context | [`ml_literature_review.md`](ml_literature_review/ml_literature_review.md) |
 | `result_interpretation_agent/` | prior records → interpretation | [`result_interpretation_agent.md`](result_interpretation_agent/result_interpretation_agent.md) |
+| `data_analysis_agent/` | authorized scientific assets → structured analysis report | [`data_analysis_agent.md`](data_analysis_agent/data_analysis_agent.md) |
 | `ml_model_proposal_agent/` | interpretation + evidence → architecture proposal | [`ml_model_proposal_agent.md`](ml_model_proposal_agent/ml_model_proposal_agent.md) |
 | `ml_model_implementor/` | proposal → model plugin code | [`ml_model_implementor.md`](ml_model_implementor/ml_model_implementor.md) |
 | `ml_code_validator_agent/` | plugin code → validation verdict | [`ml_code_validator_agent.md`](ml_code_validator_agent/ml_code_validator_agent.md) |

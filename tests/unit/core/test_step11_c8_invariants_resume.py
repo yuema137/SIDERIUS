@@ -270,8 +270,8 @@ class TestTheStampIsProduced:
         not cosmetic: a composed 2-iteration chain would have refused its own
         iteration-1 OUTPUT at ingress under R-11-9 case 3.
 
-        Both stamps now read the SAME run-scoped authority, so they cannot
-        disagree at all.
+        Both stamps and the trained-model artifact now read the SAME
+        run-scoped authority, so they cannot disagree at all.
         """
         import ast
 
@@ -286,8 +286,9 @@ class TestTheStampIsProduced:
             and isinstance(n.func, ast.Name)
             and n.func.id == "active_composition_fingerprint"
         ]
-        assert len(calls) == 2, (
-            "the record stamp and the output stamp must BOTH read the "
+        assert len(calls) == 3, (
+            "the record stamp, output stamp, and trained-model artifact must "
+            "ALL read the "
             f"run-scoped authority; found {len(calls)} call site(s)"
         )
         # AST, not substring: the explanatory comment above the fix NAMES

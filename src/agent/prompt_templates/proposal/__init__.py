@@ -249,6 +249,53 @@ def render_expert_context(items: list) -> str:
     return "\n".join(lines)
 
 
+def render_data_analysis_evidence(evidence) -> str:
+    """Render the one typed Data Analysis consumer view for the Proposer.
+
+    ``None`` deliberately renders no bytes so analysis-disabled proposal
+    prompts retain their legacy shape.  The renderer never opens report or
+    skill artifact references.
+    """
+
+    if evidence is None:
+        return ""
+    if hasattr(evidence, "model_dump"):
+        evidence = evidence.model_dump(mode="json")
+
+    lines = [
+        "## Data Analysis Evidence",
+        f"Report: {evidence['report_ref']['logical_ref']} "
+        f"(sha256={evidence['report_ref']['sha256']})",
+        f"Executive summary: {evidence['executive_summary']}",
+    ]
+    for outcome in evidence.get("question_outcomes", []):
+        lines.append(
+            f"- Question {outcome['question_id']} [{outcome['status']}]: {outcome['summary']}"
+        )
+    for finding in evidence.get("findings", []):
+        lines.append(
+            f"- Finding {finding['finding_id']} "
+            f"[{finding['confidence_level']} confidence]: {finding['statement']}"
+        )
+        lines.append(f"  Modeling relevance: {finding['modeling_relevance']}")
+        lines.append(f"  Methods: {', '.join(finding['method_skill_ids'])}")
+        for measurement in finding.get("quantitative_evidence", []):
+            unit = f" {measurement['unit']}" if measurement.get("unit") else ""
+            lines.append(
+                f"  Measurement {measurement['result_key']}: "
+                f"{measurement['value']}{unit} ({measurement['description']})"
+            )
+    for limitation in evidence.get("limitations", []):
+        lines.append(f"- Limitation: {limitation}")
+    for question in evidence.get("unresolved_questions", []):
+        lines.append(f"- Unresolved: {question}")
+    lines.append(
+        "Use these measurements as evidence. Do not treat analysis-level relevance as an "
+        "architecture or preprocessing decision."
+    )
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # L5 — Loss-registry awareness in the proposer prompt
 # ---------------------------------------------------------------------------

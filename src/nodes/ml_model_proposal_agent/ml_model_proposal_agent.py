@@ -32,7 +32,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
-from agent.prompt_templates.proposal import live_loss_metadata
+from agent.prompt_templates.proposal import live_loss_metadata, render_data_analysis_evidence
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
@@ -1207,6 +1207,10 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
 
     lines += render_legacy_interpretation_section(inp.interpretation_evidence)
 
+    data_analysis_block = render_data_analysis_evidence(inp.data_analysis_evidence)
+    if data_analysis_block:
+        lines += ["", data_analysis_block, ""]
+
     lines += [
         "## Constraints",
         f"Existing model type keys (your model_name must NOT be any of these): {inp.existing_model_types}",
@@ -1650,6 +1654,7 @@ class MLModelProposalAgent:
             render_agent_cards,
             render_available_models,
             render_custom_loss_inventory,
+            render_data_analysis_evidence,
             render_expert_context,
         )
 
@@ -1732,7 +1737,11 @@ class MLModelProposalAgent:
         data_scope_block = _render_data_scope_block(inp.data_scope)
         constraints_block = _render_constraints_block(inp.constraints, inp.existing_model_types)
         agent_cards_block = render_agent_cards(inp.agent_cards)
-        expert_context_block = render_expert_context(inp.expert_context)
+        expert_context_parts = (
+            render_expert_context(inp.expert_context),
+            render_data_analysis_evidence(inp.data_analysis_evidence),
+        )
+        expert_context_block = "\n\n".join(part for part in expert_context_parts if part)
         vocab_block = self._render_vocabulary(inp.vocab_seed)
         # Explicit cold-start banner — empty string unless inp.cold_start is True,
         # so seeded prompts are byte-for-byte unchanged.

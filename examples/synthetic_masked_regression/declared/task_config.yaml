@@ -17,6 +17,15 @@ forward_contract:
         - {role: batch, dimension: {symbolic: "B"}}
         - {dimension: {fixed: 1}}
       dtype: {admissible: ["float32"]}
+    inference:
+      accepted_input_view_formats: ["siderius.numeric-array.v1"]
+      required_information:
+        - {information_class: data}
+      prediction_output_format: "siderius.numeric-array.v1"
+      prediction_semantic_id: "synthetic.scalar-prediction.v1"
+      prediction_decoder_protocol_id: "siderius.identity-prediction-decoder.v1"
+      alignment: "one_prediction_per_input"
+      determinism: "deterministic"
   supervision_target:
     axes:
       - {role: batch, dimension: {symbolic: "B"}}

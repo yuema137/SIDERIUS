@@ -46,6 +46,7 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `dynamic_observables` | — | quantities observed DURING training, once per epoch | the run observes none: `training_history.observations` stays `{}` |
 | `static_observables` | — | quantities read off the TRAINED model after training | the run observes none: no record key, no rendered bytes |
 | `parameter_rules` | — | deterministic constraints on configured parameter leaves | no task-declared parameter constraints |
+| `data_analysis` | — | optional analysis topology plus a caller-owned policy/config reference | no brief call, analysis node, report, or identity change |
 | `code_package` | — | one finite, content-pinned set of task-local Python files | existing independent file loading and identities, without task-relative helper imports |
 
 ### Why `task_health` is required but may say "none"
@@ -63,6 +64,91 @@ task_health:
 ```
 
 Declaring both `none: true` and `config:` is refused.
+
+### Optional Data Analysis capability
+
+Enable the reference workflow edge with one explicit config reference:
+
+```yaml
+data_analysis:
+  enabled: true
+  config: ./declared/data_analysis.yaml
+```
+
+The bound `task_data_path` object must also implement the sibling
+`TaskAnalysisCapability` protocol: it authorizes/materializes a validated
+request and exports only the resulting certified view. This does not widen the
+ordinary `TaskDataPath` contract. The analysis config supplies the workflow
+caller's scientific framing, safe asset descriptors, access policy, resource
+envelope, and allowed packs. For example:
+
+```yaml
+schema_version: 1
+scientific_goal: Characterize the authorized measurements before modeling.
+input_description: One numeric sensor measurement per example.
+target_description: A continuous response, visible only where policy allows.
+scientific_constraints:
+  - Do not infer conclusions about hidden evaluation labels.
+
+available_assets:
+  - asset_id: validation-values
+    asset_type: dataset
+    description: Safe descriptor for the validation measurements.
+    location:
+      kind: workspace_artifact
+      artifact_ref:
+        logical_ref: task-assets/validation-values
+        sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        media_type: application/x-task-data
+    provenance:
+      producer: task-package
+    authorized_scope:
+      kind: artifact_intrinsic
+      split_id: validation
+      description: Validation split.
+    split_id: validation
+
+access_policy:
+  policy_id: validation-characterization
+  policy_version: 1
+  purpose: Characterize authorized validation inputs.
+  split_rules:
+    - split_id: validation
+      data_visible: true
+      targets_visible: false
+
+resource_envelope:
+  wall_time_budget_s: 300
+  per_skill_timeout_s: 60
+  preferred_device: cpu
+  sampling_policy:
+    mode: representative
+    max_items: 5000
+    strategy: uniform
+    seed: 17
+
+builtin_skill_packs: [core-analysis]
+external_skill_packs: []
+report_schema_version: 1
+```
+
+An external pack uses the public `SkillPackRef` shape under
+`external_skill_packs`; its `pack_root` is resolved relative to the analysis
+config file, while its manifest and optional environment lock are content
+pinned. Discovery validates manifests without importing implementations.
+
+`enabled: false` is a named no-analysis state and may declare no `config`.
+Both an absent section and this state preserve the pre-analysis composition
+fingerprint and workflow behavior. When enabled, the normalized analysis
+policy, safe assets, resource/sampling policy, and pack content identities join
+the task-composition fingerprint. Absolute config and pack paths remain
+diagnostic provenance only.
+
+The Interpreter then receives `analysis_brief_requested=true` and generates a
+separate typed brief stage. The first/legacy interpretation call is unchanged.
+The workflow passes the brief through a typed adapter; neither the adapter nor
+the Data Analysis Agent mines interpretation prose or treats asset presence as
+authorization.
 
 ### What `deliverable` absence means — four states, keyed on capability
 

@@ -70,10 +70,13 @@ import warnings
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import psutil as _psutil
 import yaml
+
+if TYPE_CHECKING:
+    from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
 
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
@@ -1715,6 +1718,60 @@ def _cleanup_stale_registry_entries(registry) -> tuple[int, list[str]]:
 # ---------------------------------------------------------------------------
 
 
+def _run_composed_data_analysis(
+    interpretation,
+    *,
+    binding,
+    iteration: int,
+    run_name: str,
+    storage,
+    human_advice: str | None,
+    llm_kwargs: dict,
+    bridge_factory,
+    historical_model_inference_capability: "HistoricalModelInferenceCapability | None" = None,
+):
+    """Run and log the optional analysis phase outside the core orchestrator.
+
+    The topology check and lazy import live here so the analysis-off workflow
+    neither imports the optional phase nor grows another branch family inside
+    ``run_workflow``.
+    """
+
+    if binding is None:
+        return None
+    from workflows.data_analysis_stage import run_optional_data_analysis
+
+    output = run_optional_data_analysis(
+        interpretation,
+        binding=binding,
+        iteration=iteration,
+        run_name=run_name,
+        storage=storage,
+        human_advice=human_advice,
+        llm_kwargs=llm_kwargs,
+        bridge_factory=bridge_factory,
+        historical_model_inference_capability=historical_model_inference_capability,
+    )
+    if output is not None:
+        print(
+            f"  [{iteration}] Data analysis: "
+            f"{len(output.report.findings)} finding(s), "
+            f"{len(output.report.skill_result_refs)} skill result(s)"
+        )
+        _log_rss(f"post-data-analysis (iter {iteration})")
+    return output
+
+
+def _attach_composed_analysis(proposal_input, analysis_output):
+    """Apply the optional typed edge without branching in ``run_workflow``."""
+
+    if analysis_output is None:
+        return proposal_input
+    from workflows.data_analysis_stage import attach_analysis_to_proposer
+
+    return attach_analysis_to_proposer(proposal_input, analysis_output)
+
+
 def _refuse_data_scope_for_a_foreign_topology(scope_is_partial: bool, task_composition) -> None:
     """`--data_scope` names FILE INDICES; refuse it for a task without them.
 
@@ -1821,6 +1878,7 @@ def run_workflow(
     bridge_factory: Callable | None = None,
     sandbox_factory: Callable | None = None,
     measurement_capability: ResolvedMeasurementCapability | None = None,
+    historical_model_inference_capability: "HistoricalModelInferenceCapability | None" = None,
     # --- restored chain state: ONE typed parameter (Step 10 P1 C5) --------
     # Step 09.5a's C4b hand-off. The launcher used to unpack `RestoredState`
     # into nine separate kwargs and this signature had to declare all nine —
@@ -1882,6 +1940,7 @@ def run_workflow(
             HealthGate checks (None = YAML defaults; only legal with a full
             scope when gates are enabled).
         human_advice_interpret: Human guidance for interpretation steps.
+        human_advice_analysis: Human guidance for the optional analysis step.
         human_advice_propose: Human guidance for proposal steps.
         human_advice_implement: Human guidance for implementation steps.
         human_advice_validate: Human guidance for validation steps.
@@ -2542,6 +2601,9 @@ def run_workflow(
                 else DescriptionSourcePolicy.LEGACY
             ),
             human_advice=launch.human_advice_interpret,
+            analysis_brief_requested=(
+                getattr(bindings.task_composition, "data_analysis", None) is not None
+            ),
             runtime_vocab=state.current_runtime_vocab,
             previous_proposal=state.previous_proposal_data,
             storage=interp_storage,
@@ -2594,6 +2656,18 @@ def run_workflow(
         print(f"    Take-home: {interpretation.take_home_message}")
         print(f"    Best score: {interpretation.best_denoising_score}")
         print(f"    Models: {interpretation.model_types}\n")
+
+        analysis_output = _run_composed_data_analysis(
+            interpretation,
+            binding=getattr(bindings.task_composition, "data_analysis", None),
+            iteration=iteration,
+            run_name=bindings.run_name,
+            storage=interp_storage,
+            human_advice=launch.human_advice_analysis,
+            llm_kwargs=bindings.llm_config.get("data_analysis"),
+            bridge_factory=bridge_factory,
+            historical_model_inference_capability=historical_model_inference_capability,
+        )
 
         # --- Lit-review (Commit 6 sub-step 6e) ---
         # Runs ONCE per iteration (before the propose/impl/valid attempts).
@@ -2784,6 +2858,7 @@ def run_workflow(
                     # travels inside the interpretation dump regardless).
                     enable_structured_health_feedback=(bindings.enable_structured_health_feedback),
                 )
+                propose_input = _attach_composed_analysis(propose_input, analysis_output)
                 propose_input.existing_model_types = list(state.all_model_types)
                 # arXiv U3 (#260) — the proposer's prompt surface names no
                 # bundled baseline under isolation.
@@ -3620,6 +3695,12 @@ def main():
         help="Human guidance for interpretation steps.",
     )
     parser.add_argument(
+        "--advice_analysis",
+        type=str,
+        default=None,
+        help="Human guidance for the optional Data Analysis step.",
+    )
+    parser.add_argument(
         "--advice_propose",
         type=str,
         default=None,
@@ -3683,6 +3764,7 @@ def main():
                 target_score=args.target_score,
                 file_index=args.file_index,
                 human_advice_interpret=args.advice_interpret,
+                human_advice_analysis=args.advice_analysis,
                 human_advice_propose=args.advice_propose,
                 human_advice_implement=args.advice_implement,
                 human_advice_validate=args.advice_validate,

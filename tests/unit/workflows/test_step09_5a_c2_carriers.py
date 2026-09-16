@@ -161,6 +161,9 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     "formal_time_admission_source": "measured",
     # Caller-configurable measurement window; None retains runtime defaults.
     "runtime_verification_max_wall_seconds": None,
+    # Data Analysis workflow integration (2026-09-15). Advice is transit-only
+    # caller input and does not imply that the optional topology is enabled.
+    "human_advice_analysis": None,
 }
 
 

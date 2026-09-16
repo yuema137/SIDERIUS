@@ -292,7 +292,7 @@ class TestTheStampsStillReadTheRunScopedAuthority:
     that would quietly undo it.
     """
 
-    def test_both_stamps_still_call_the_run_scoped_accessor(self):
+    def test_all_stamps_still_call_the_run_scoped_accessor(self):
         source = (TUNER_PACKAGE / "records.py").read_text(encoding="utf-8")
         calls = [
             node
@@ -301,7 +301,9 @@ class TestTheStampsStillReadTheRunScopedAuthority:
             and isinstance(node.func, ast.Name)
             and node.func.id == "active_composition_fingerprint"
         ]
-        assert len(calls) == 2
+        # Record, output, and trained-model artifact identities share the
+        # same run-scoped authority.
+        assert len(calls) == 3
 
     def test_the_record_module_does_not_read_the_projection(self):
         source = (TUNER_PACKAGE / "records.py").read_text(encoding="utf-8")

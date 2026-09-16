@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # 1. Base Model Configuration
 # ==========================================
 
+LossTypeName = Literal["focal", "focal_cw", "ce", "smooth_l1", "custom"]
+
 
 class BaseConfig(BaseModel):
     """General config — abstract base for every concrete model config.
@@ -765,7 +767,7 @@ class LossConfig(BaseModel):
     agent can't accidentally pass them through.
     """
 
-    loss_type: Literal["focal", "focal_cw", "ce", "smooth_l1", "custom"] = "focal"
+    loss_type: LossTypeName = "focal"
 
     # Parameters for Focal / Focal_CW
     alpha: float | None = Field(default=0.5, ge=0.0, le=1.0)
