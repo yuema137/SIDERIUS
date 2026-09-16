@@ -287,11 +287,13 @@ class DataAnalysisAgent:
             semantic_projection=self._plan_semantics,
         )
         planned_generated_identities = {
-            item.program_identity
+            canonical_sha256(item.program_identity)
             for item in plan.invocations
             if isinstance(item, PlannedGeneratedProgramInvocation)
         }
-        prepared_generated_identities = {identity for _program, identity in generated_programs}
+        prepared_generated_identities = {
+            canonical_sha256(identity) for _program, identity in generated_programs
+        }
         if planned_generated_identities != prepared_generated_identities:
             raise ValueError(
                 "final AnalysisPlan must reference exactly the generated programs prepared "
