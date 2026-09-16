@@ -54,7 +54,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import get_args
+from typing import cast, get_args
 
 # A direct one-iteration launch does not pass through run_chain.sh.  Establish
 # the same read-only-checkout policy before importing any SIDERIUS module, and
@@ -104,6 +104,7 @@ from execute_tools.health_checks.launch_policy import (
 )
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.scientific_evidence_stage import EvidenceStageOrder
 from workflows.task_composition import (
     RunTaskComposition,
     bind_run_task_composition,
@@ -814,6 +815,7 @@ class LaunchIdentity:
     lit_review_enabled: bool
     lit_review_config_path: str | None
     lit_review_config_sha256: str | None
+    scientific_evidence_order: EvidenceStageOrder = "analysis_then_literature"
     baseline_isolation: bool = False
     advice_path: str | None = None
     advice_sha256: str | None = None
@@ -1083,6 +1085,8 @@ def write_manifest(
             manifest["lit_review_enabled"] = True
         if launch_identity.lit_review_config_sha256 is not None:
             manifest["lit_review_config_sha256"] = launch_identity.lit_review_config_sha256
+        if launch_identity.scientific_evidence_order != "analysis_then_literature":
+            manifest["scientific_evidence_order"] = launch_identity.scientific_evidence_order
         # arXiv U3 — the isolation flag, under the same omission rule.
         if launch_identity.baseline_isolation:
             manifest["baseline_isolation"] = True
@@ -2188,6 +2192,15 @@ def build_parser() -> argparse.ArgumentParser:
             "against SIDERIUS_ROOT."
         ),
     )
+    parser.add_argument(
+        "--scientific_evidence_order",
+        choices=("analysis_then_literature", "literature_then_analysis"),
+        default="analysis_then_literature",
+        help=(
+            "Workflow-owned ordering of the independent Data Analysis and Literature Review "
+            "capabilities. The current campaign uses literature_then_analysis."
+        ),
+    )
     # arXiv U1 (#254) — the OPAQUE experiment-arm label. Pinned into the
     # workspace lock and stamped on every record / output / manifest; never
     # read to decide behaviour (ruling R2). Absent = unlabelled legacy run.
@@ -2348,6 +2361,7 @@ def resolve_launch_identity(args: argparse.Namespace) -> LaunchIdentity:
         lit_review_config_sha256=lit_review_config_sha256(
             args.ml_lit_review_config, enabled=enabled
         ),
+        scientific_evidence_order=cast(EvidenceStageOrder, args.scientific_evidence_order),
         baseline_isolation=bool(args.baseline_isolation),
         advice_path=None if advice is None else advice.path,
         advice_sha256=None if advice is None else advice.sha256,
@@ -2578,6 +2592,7 @@ def compute_expected_invariants(
         launch_identity=LockLaunchIdentity(
             lit_review_enabled=identity.lit_review_enabled,
             lit_review_config_sha256=identity.lit_review_config_sha256,
+            scientific_evidence_order=identity.scientific_evidence_order,
             experiment_arm=identity.experiment_arm,
             baseline_isolation=identity.baseline_isolation,
             # Gold campaign — the OBSERVED advice identity. `run_workflow`
@@ -2789,6 +2804,7 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
             else None
         ),
         "lit_review_config_sha256": identity.lit_review_config_sha256,
+        "scientific_evidence_order": identity.scientific_evidence_order,
         "baseline_isolation": identity.baseline_isolation,
         "task_composition": args.task_composition or None,
         "advice_file": args.advice or args.human_advice_file or None,
@@ -3174,6 +3190,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
             else ""
         )
     )
+    print(f"  Evidence order   : {launch_identity.scientific_evidence_order}")
 
     # Step 1 — back-compat resolution of @manifest: indirection in the seed
     # list. The legacy chain shell still passes manifests this way; the new
@@ -3480,6 +3497,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
                     health_feedback_history_max_entries_per_model=args.health_feedback_history_max_entries_per_model,
                     lit_review_enabled=launch_identity.lit_review_enabled,
                     lit_review_config_path=launch_identity.lit_review_config_path,
+                    scientific_evidence_order=launch_identity.scientific_evidence_order,
                     # arXiv U1 — opaque; locked + stamped, never interpreted.
                     experiment_arm=launch_identity.experiment_arm,
                     # arXiv U3 — the WITHOUT arm's explicit behaviour flag.

@@ -760,6 +760,7 @@ def _build_lit_review_input(
     config: dict,
     interp_output: InterpretationOutput,
     *,
+    analysis_output=None,
     llm_kwargs: dict,
     storage: StorageConfig,
     run_name: str,
@@ -767,8 +768,9 @@ def _build_lit_review_input(
     """Build a ``LiteratureReviewInput`` from the parsed YAML + workflow state.
 
     Maps the YAML's operator-visible knobs into the schema fields, fills the
-    workflow-supplied fields (``experiment_history`` / ``storage`` / ``run_name``)
-    and the LLM-routing fields from ``llm_kwargs`` (the 4-field flatten from
+    workflow-supplied typed Interpretation evidence, optional Data Analysis
+    evidence, ``storage`` and ``run_name``, plus the LLM-routing fields from
+    ``llm_kwargs`` (the 4-field flatten from
     ``WorkflowLLMConfig.get('lit_review')``).
 
     Schema ``default_factory`` fires for any block omitted from the YAML, but
@@ -787,8 +789,8 @@ def _build_lit_review_input(
             Supplies the lit-review module's own knobs only — root papers,
             search, verbosity, synthesis, confidence rubric. A
             ``task_description`` key here is stale and is ignored.
-        interp_output: This iteration's ``InterpretationOutput``; populates
-            ``experiment_history``.
+        interp_output: This iteration's ``InterpretationOutput``; the edge
+            projects only the bounded fields owned by Literature Review.
         llm_kwargs: 4-field LLM routing flatten from
             ``WorkflowLLMConfig.get('lit_review')``: ``llm_provider``,
             ``llm_model_id``, ``search_llm_provider``,
@@ -801,6 +803,12 @@ def _build_lit_review_input(
     # Lazy import keeps top-of-file imports identical to pre-Commit-6 for
     # the lit-review schema types (which form a long import chain).
     from agent.schemas.literature_review import LiteratureReviewInput
+    from agent.schemas.protocols.data_analysis_to_ml_literature_review import (
+        local_typed_evidence as project_analysis_for_literature,
+    )
+    from agent.schemas.protocols.interpreter_to_ml_literature_review import (
+        local_typed_evidence as project_interpretation_for_literature,
+    )
 
     # Step 04b — SINGLE SOURCE. The task description is resolved from the
     # active task declaration, NOT from the lit-review YAML. `config` is deliberately
@@ -816,20 +824,21 @@ def _build_lit_review_input(
     # it guarded a state the canonical loader cannot produce.
     task_description = get_task_description(load_task_config())
 
-    return LiteratureReviewInput.model_validate(
-        {
-            "experiment_history": interp_output,
-            "root_papers": config.get("root_papers", []),
-            "dynamic_search": config.get("dynamic_search", {}),
-            "synthesis_config": config.get("synthesis", {}),
-            "confidence_rubric": config.get("confidence_rubric", {}),
-            "findings_verbosity": config.get("findings_verbosity", 1),
-            "task_description": task_description,
-            "storage": storage,
-            "run_name": run_name,
-            **llm_kwargs,
-        }
-    )
+    payload = {
+        "interpretation_evidence": project_interpretation_for_literature(interp_output),
+        "root_papers": config.get("root_papers", []),
+        "dynamic_search": config.get("dynamic_search", {}),
+        "synthesis_config": config.get("synthesis", {}),
+        "confidence_rubric": config.get("confidence_rubric", {}),
+        "findings_verbosity": config.get("findings_verbosity", 1),
+        "task_description": task_description,
+        "storage": storage,
+        "run_name": run_name,
+        **llm_kwargs,
+    }
+    if analysis_output is not None:
+        payload["data_analysis_evidence"] = project_analysis_for_literature(analysis_output.report)
+    return LiteratureReviewInput.model_validate(payload)
 
 
 def _acquire_iteration_order(bindings, tune_output) -> MetricOrder | None:
@@ -1729,6 +1738,7 @@ def _run_composed_data_analysis(
     llm_kwargs: dict,
     bridge_factory,
     historical_model_inference_capability: "HistoricalModelInferenceCapability | None" = None,
+    literature_output=None,
 ):
     """Run and log the optional analysis phase outside the core orchestrator.
 
@@ -1751,6 +1761,7 @@ def _run_composed_data_analysis(
         llm_kwargs=llm_kwargs,
         bridge_factory=bridge_factory,
         historical_model_inference_capability=historical_model_inference_capability,
+        literature_output=literature_output,
     )
     if output is not None:
         print(
@@ -1770,6 +1781,18 @@ def _attach_composed_analysis(proposal_input, analysis_output):
     from workflows.data_analysis_stage import attach_analysis_to_proposer
 
     return attach_analysis_to_proposer(proposal_input, analysis_output)
+
+
+def _attach_composed_literature(proposal_input, literature_output):
+    """Apply the optional typed Literature edge outside ``run_workflow``."""
+
+    if literature_output is None:
+        return proposal_input
+    from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import (
+        local_typed_evidence,
+    )
+
+    return local_typed_evidence(literature_output, proposal_input=proposal_input)
 
 
 def _refuse_data_scope_for_a_foreign_topology(scope_is_partial: bool, task_composition) -> None:
@@ -1818,6 +1841,7 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
         lit_review_config_sha256=lit_review_config_sha256(
             launch.lit_review_config_path, enabled=launch.lit_review_enabled
         ),
+        scientific_evidence_order=launch.scientific_evidence_order,
         experiment_arm=launch.experiment_arm,
         # arXiv U3 — the WITHOUT arm's isolation flag is a prompt-surface
         # identity, so it is locked like the topology.
@@ -2657,29 +2681,33 @@ def run_workflow(
         print(f"    Best score: {interpretation.best_denoising_score}")
         print(f"    Models: {interpretation.model_types}\n")
 
-        analysis_output = _run_composed_data_analysis(
-            interpretation,
-            binding=getattr(bindings.task_composition, "data_analysis", None),
-            iteration=iteration,
-            run_name=bindings.run_name,
-            storage=interp_storage,
-            human_advice=launch.human_advice_analysis,
-            llm_kwargs=bindings.llm_config.get("data_analysis"),
-            bridge_factory=bridge_factory,
-            historical_model_inference_capability=historical_model_inference_capability,
-        )
+        def _run_analysis_for_evidence(
+            literature_output,
+            _interpretation=interpretation,
+            _iteration=iteration,
+            _storage=interp_storage,
+        ):
+            return _run_composed_data_analysis(
+                _interpretation,
+                binding=getattr(bindings.task_composition, "data_analysis", None),
+                iteration=_iteration,
+                run_name=bindings.run_name,
+                storage=_storage,
+                human_advice=launch.human_advice_analysis,
+                llm_kwargs=bindings.llm_config.get("data_analysis"),
+                bridge_factory=bridge_factory,
+                historical_model_inference_capability=historical_model_inference_capability,
+                literature_output=literature_output,
+            )
 
-        # --- Lit-review (Commit 6 sub-step 6e) ---
-        # Runs ONCE per iteration (before the propose/impl/valid attempts).
-        # The 4-channel merge output is concatenated with the existing
-        # accumulated context and threaded into every attempt's
-        # ``local_full_context`` call. When ``lit_review_enabled=False``
-        # (default), ``external_outputs`` stays empty and
-        # ``external_channels`` is the 4-channel zero — the merge call
-        # is a no-op and the proposer's behaviour is bit-identical to
-        # pre-Commit-6.
-        external_outputs: list[ExternalAgentOutput] = []
-        if should_run_literature_review(interpretation, enabled=launch.lit_review_enabled):
+        def _run_literature_for_evidence(
+            analysis_output,
+            _interpretation=interpretation,
+            _iteration=iteration,
+            _iter_dir=iter_dir,
+        ):
+            if not should_run_literature_review(_interpretation, enabled=launch.lit_review_enabled):
+                return None
             # arXiv U1 — the same resolver the pre-flight hashed through, so
             # the lock's `lit_review_config_sha256` pins THIS file.
             if launch.lit_review_config_path is None:
@@ -2687,13 +2715,14 @@ def run_workflow(
                     "literature-review config was not validated at workflow startup"
                 )
             yaml_path = resolve_lit_review_config_path(launch.lit_review_config_path)
-            print(f"  [{iteration}] Running lit-review (config: {yaml_path})...")
+            print(f"  [{_iteration}] Running lit-review (config: {yaml_path})...")
             with open(yaml_path, encoding="utf-8") as _f:
                 lit_review_config = yaml.safe_load(_f)
-            lit_storage = _make_storage(iter_dir, bindings.run_name)
+            lit_storage = _make_storage(_iter_dir, bindings.run_name)
             lit_input = _build_lit_review_input(
                 lit_review_config,
-                interpretation,
+                _interpretation,
+                analysis_output=analysis_output,
                 llm_kwargs=bindings.llm_config.get("lit_review"),
                 storage=lit_storage,
                 run_name=bindings.run_name,
@@ -2709,14 +2738,26 @@ def run_workflow(
             )
             _bind_iter_context(lit_agent)
             lit_output = lit_agent.run(lit_input)
-            external_outputs.append(lit_output)
             print(
                 f"    Lit-review: {len(lit_output.findings)} finding(s), "
                 f"{lit_output.search_rounds_used} search round(s), "
                 f"{len(lit_output.retrieved_papers)} paper(s) retrieved"
             )
-            _log_rss(f"post-lit-review (iter {iteration})")
-        external_channels = merge_external_agent_outputs(external_outputs)
+            _log_rss(f"post-lit-review (iter {_iteration})")
+            return lit_output
+
+        from workflows.scientific_evidence_stage import run_scientific_evidence_stage
+
+        evidence_stage = run_scientific_evidence_stage(
+            order=launch.scientific_evidence_order,
+            run_analysis=_run_analysis_for_evidence,
+            run_literature=_run_literature_for_evidence,
+        )
+        analysis_output = evidence_stage.analysis_output
+        lit_output = evidence_stage.literature_output
+        # Other external agents retain the generic four-channel path. Literature
+        # Review now reaches Proposal through its own typed projection below.
+        external_channels = merge_external_agent_outputs([])
 
         # --- Propose → Implement → Validate (retry loop) ---
         proposal = None
@@ -2859,6 +2900,7 @@ def run_workflow(
                     enable_structured_health_feedback=(bindings.enable_structured_health_feedback),
                 )
                 propose_input = _attach_composed_analysis(propose_input, analysis_output)
+                propose_input = _attach_composed_literature(propose_input, lit_output)
                 propose_input.existing_model_types = list(state.all_model_types)
                 # arXiv U3 (#260) — the proposer's prompt surface names no
                 # bundled baseline under isolation.
@@ -3298,6 +3340,7 @@ def run_workflow(
             experiment_arm=_run_invariants.experiment_arm,
             lit_review_enabled=_run_invariants.lit_review_enabled,
             lit_review_config_sha256=_run_invariants.lit_review_config_sha256,
+            scientific_evidence_order=_run_invariants.scientific_evidence_order,
             baseline_isolation=_run_invariants.baseline_isolation,
         )
         if launch.human_advice_tune is not None:

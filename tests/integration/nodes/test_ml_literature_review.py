@@ -31,6 +31,7 @@ from agent.schemas.literature_review import (
     LiteratureReviewInput,
     PaperSource,
 )
+from agent.schemas.protocols.interpreter_to_ml_literature_review import local_typed_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_literature_review import MLLiteratureReviewAgent
 
@@ -74,7 +75,7 @@ def _interp_seed() -> InterpretationOutput:
 )
 def test_node_real_run(tmp_path):
     inp = LiteratureReviewInput(
-        experiment_history=_interp_seed(),
+        interpretation_evidence=local_typed_evidence(_interp_seed()),
         root_papers=[PaperSource(source_type="arxiv", identifier=TIDMAD_ARXIV, verbosity=1)],
         dynamic_search=DynamicSearchConfig(enabled=True, max_rounds=2),
         storage=StorageConfig(

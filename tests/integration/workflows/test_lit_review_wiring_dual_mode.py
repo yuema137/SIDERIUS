@@ -289,33 +289,20 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path,
         "DynamicSearchConfig should reflect that."
     )
 
-    # --- Assertion 2: the canned LiteratureReviewOutput's channels reach
-    # the proposer via the workflow's external_channels merge + the
-    # local_full_context call site.
+    # --- Assertion 2: the canned LiteratureReviewOutput reaches the proposer
+    # through the Proposer-owned typed literature projection.
     assert len(captured_proposal_inputs) == 1, (
         f"Expected MLModelProposalAgent.run to fire once; got "
         f"{len(captured_proposal_inputs)} call(s)."
     )
     prop_input = captured_proposal_inputs[0]
 
-    # agent_cards: the canned output's one AgentCard ("ml_literature_review")
-    # must appear on the ProposalInput.
-    assert len(prop_input.agent_cards) == 1, (
-        f"Expected 1 agent_card on ProposalInput (the lit-review card); "
-        f"got {len(prop_input.agent_cards)}."
-    )
-    assert prop_input.agent_cards[0].agent_name == "ml_literature_review"
-    assert prop_input.agent_cards[0].trust_level == "soft_prior"
-
-    # expert_context: the canned finding's source_ref must reach the
-    # proposer. Other ExpertContextItems may be present from prior-iter
-    # accumulation, so we filter to the lit-review source rather than
-    # asserting on len() exactly.
-    lit_findings = [ec for ec in prop_input.expert_context if ec.source == "ml_literature_review"]
-    assert len(lit_findings) == 1, (
-        f"Expected exactly 1 lit-review finding on ProposalInput; got {len(lit_findings)}."
-    )
-    assert lit_findings[0].source_ref == f"arxiv:{_SENTINEL_ARXIV_ID}"
+    evidence = prop_input.literature_review_evidence
+    assert evidence is not None
+    assert evidence.agent_card.agent_name == "ml_literature_review"
+    assert evidence.agent_card.trust_level == "soft_prior"
+    assert len(evidence.findings) == 1
+    assert evidence.findings[0].source_ref == f"arxiv:{_SENTINEL_ARXIV_ID}"
 
 
 # ---------------------------------------------------------------------------
@@ -415,3 +402,4 @@ def test_lit_review_disabled_tolerates_missing_yaml_path(tmp_path, composed):
         f"With lit-review disabled, no lit-review findings should reach "
         f"the proposer; got {lit_findings}."
     )
+    assert prop_input.literature_review_evidence is None

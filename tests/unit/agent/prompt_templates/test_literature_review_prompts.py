@@ -94,17 +94,43 @@ class TestRenderStructure:
         # Checkpoint B revision: regime on every number + per-model mechanism
         # for benchmark papers.
         system, _ = render_paper_extract_prompt("text")
-        assert "the training regime to EVERY performance number" in system
+        assert "the data, training, and evaluation regime to EVERY" in system
         assert "concrete mechanism" in system
 
-    def test_system_prompt_has_generic_freq_split_rule(self):
+    def test_system_prompt_qualifies_regime_without_task_assumptions(self):
         system, _ = render_paper_extract_prompt("text")
-        # Generic, paper-conditional phrasing — keys off "if the paper reports".
-        assert "frequency-split" in system
-        assert "full-spectrum" in system
-        # Must NOT name a specific paper (that would hallucinate for non-TIDMAD
-        # papers compressed by the same prompt).
-        assert "TIDMAD" not in system
+        # A literature result is comparable only under the declared task regime.
+        assert "Regime and comparability qualifier" in system
+        assert "materially different conditions" in system
+        assert "directly comparable" in system
+        assert "SQUID" not in system
+
+    def test_unrelated_task_does_not_inherit_signal_task_semantics(self):
+        """Catch task-specific search/synthesis assumptions absent from task context."""
+
+        task = "Classify microscopy images by cell-cycle phase using labeled images."
+        extract_system, _ = render_paper_extract_prompt("paper", task_description=task)
+        search_system, _ = render_search_decision_prompt(
+            key_findings=["Rare phases have lower recall."],
+            bottlenecks=["Class imbalance."],
+            take_home_message="Investigate imbalance-aware methods.",
+            explored_models=["baseline"],
+            papers_seen=[],
+            escalation_allowed=False,
+            task_description=task,
+        )
+        synthesis_system, _ = render_synthesis_prompt(
+            key_findings=["Rare phases have lower recall."],
+            bottlenecks=["Class imbalance."],
+            take_home_message="Investigate imbalance-aware methods.",
+            papers=[],
+            task_description=task,
+        )
+        for system in (extract_system, search_system, synthesis_system):
+            assert task in system
+            assert "SQUID" not in system
+            assert "full-spectrum" not in system.lower()
+            assert "denoising" not in system.lower()
 
 
 class TestExtractionInstructions:
@@ -293,21 +319,19 @@ class TestSynthesisPrompt:
         # is not locked.
         system, _ = self._render()
         assert "FOUR SEPARATE keys" in system
-        assert '"source_ref": "arxiv:' in system  # source_ref present as its own key
-        assert '"content_paper_id": "arxiv:' in system  # 2d cite-id-mismatch fix
+        assert '"source_ref": "<paper_id from the supplied paper block>"' in system
+        assert '"content_paper_id": "<paper_id from the supplied paper block>"' in system
         assert (
             '"confidence":' in system
         )  # example: confidence as its own key (value is rubric-driven)
 
-    def test_full_spectrum_guard_locked(self):
-        # Checkpoint C Fix B: the synthesis must NOT recommend frequency-split
-        # techniques (it did on the first run). Lock the guard.
+    def test_task_regime_guard_locked(self):
+        # A task-specific regime cannot be inferred from a generic template.
         system, _ = self._render()
-        assert (
-            "recommend frequency-split" in system
-        )  # the "Do NOT ... recommend frequency-split" guard
-        assert "CAUTIONARY" in system
-        assert "full-spectrum" in system
+        assert "Judge applicability against the task description" in system
+        assert "transfer assumptions and mismatch stated" in system
+        assert "direct validation on this task" in system
+        assert "SQUID" not in system
 
     def test_confidence_rubric_injected(self):
         # Default rubric's bands + omit threshold are rendered into the prompt.
@@ -462,29 +486,26 @@ class TestSearchDecisionPrompt:
         )
 
     def test_jargon_translation_section_locked(self):
-        # Checkpoint C Fix A: queries were polluted with internal jargon
-        # ("file 17", "Impact_Score") → 0 S2 hits. Lock the translation guidance.
+        # Private run labels must be translated into published vocabulary.
         system, _ = self._render()
         assert "Translating the experiment state into a query" in system
-        assert "NEVER put an internal identifier" in system
-        # representative internal terms the section must teach translating away
-        assert "Impact_Score" in system
-        assert "trial_portion" in system
-        # tightened rule: the literal word "file" is banned from queries
-        assert 'the literal word "file"' in system
+        assert "Do not put private identifiers" in system
+        assert "dataset-local row ID" in system
+        assert "private metric name" in system
 
-    def test_full_spectrum_preference_present(self):
+    def test_task_comparability_preference_present(self):
         system, _ = self._render()
-        assert "full-spectrum" in system.lower() or "FULL-SPECTRUM" in system
-        assert "frequency-split" in system
+        assert "comparable to those declared" in system
+        assert "do not treat its score" in system
+        assert "SQUID" not in system
 
     def test_query_form_keyword_guideline_present(self):
         # Fix C (a): keyword-phrase guideline + bad/good example pair.
         system, _ = self._render()
         assert "Query form" in system
         assert "short keyword phrase" in system
-        assert "adaptive loss weighting for hard samples" in system  # BAD example (line-1 portion)
-        assert "hard sample reweighting loss" in system  # GOOD example
+        assert "Which training method could improve predictions" in system
+        assert "rare class calibration regression" in system
 
     def test_mandatory_escalation_assessment_block_present(self):
         # 6.5a Edit D rewrote the binary YES/ESCALATE assessment into an
@@ -554,7 +575,7 @@ class TestSearchDecisionPrompt:
         # on-bottleneck paper has a measurable payoff (higher proposer
         # weight via a higher-band finding).
         assert "Escalating an on-domain on-bottleneck paper" in system
-        assert "unlocks a higher-confidence finding" in system
+        assert "unlock a higher-confidence finding" in system
         # Custom rubric must flow through the new confidence_rubric kwarg.
         custom = ConfidenceRubric(
             bands=[ConfidenceBand(lower=0.55, upper=0.99, criteria="custom-band-marker")],
@@ -1389,7 +1410,7 @@ class TestSynthesisPlacementRule:
         # Negative invariants the rule enforces. (Substrings chosen to fit
         # within a single source line so the test is robust to wrapping.)
         assert "LLM-added reasoning" in system
-        assert "NO bridging-to-SQUID logic" in system
+        assert "NO task-transfer claims" in system
 
     def test_adaptation_is_llm_reasoning_no_raw_equations(self):
         system, _ = _synth_render([])
@@ -1562,7 +1583,7 @@ class TestSynthesisContentPaperIdInOutputContract:
         for key in ("`content`", "`source_ref`", "`content_paper_id`", "`confidence`"):
             assert key in system, f"output contract intro missing {key!r}"
         # The V1 example JSON shows content_paper_id alongside source_ref.
-        assert '"content_paper_id": "arxiv:' in system
+        assert '"content_paper_id": "<paper_id from the supplied paper block>"' in system
 
     def test_v0_contract_also_lists_four_keys_and_content_paper_id(self):
         # findings_verbosity=0 is a supported configuration; V0 must carry
@@ -1576,7 +1597,7 @@ class TestSynthesisContentPaperIdInOutputContract:
             findings_verbosity=0,
         )
         assert "four separate keys" in system  # V0 uses lowercase phrasing
-        assert '"content_paper_id": "arxiv:' in system
+        assert '"content_paper_id": "<paper_id from the supplied paper block>"' in system
 
     def test_v0_id_bullet_mentions_both_cite_id_and_content_paper_id(self):
         # The V0 block's trailing rule used to read "the id belongs ONLY in

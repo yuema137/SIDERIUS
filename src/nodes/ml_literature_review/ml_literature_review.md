@@ -4,10 +4,10 @@
 
 ## Position in the pipeline
 
-- **CLI entry**: **present** — `main()` requires explicit `--task_composition` and `--data_dir`, binds the workspace and full task contract, then calls the same typed `run()` as the workflow. `experiment_history` is read from the upstream interpretation record on disk or an explicit path.
-- **Upstream**: `result_interpretation_agent` (provides `experiment_history: InterpretationOutput` — the current iteration's bottlenecks + key findings that ground every synthesized finding).
-- **Downstream**: `ml_model_proposal_agent` (consumes this node's four channels via the proposer's `agent_cards` / `expert_context` / `mindset` / `vocab_seed` inputs).
-- **Protocol**: `local_all_channels` in `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py` — maps `LiteratureReviewOutput.findings` / `new_vocab_candidates` / `agent_card` / `suggested_mindset` into the proposer's four kwargs. No `reference_library` channel — equations travel inline inside finding `content` (per the Commit 2d revision).
+- **CLI entry**: **present** — `main()` requires explicit `--task_composition` and `--data_dir`, loads an upstream interpretation record, projects it into the Literature-owned input, and calls the same typed `run()` as the workflow.
+- **Upstream**: any caller that constructs `LiteratureReviewInput`. Workflow-owned edges may project bounded evidence from Interpretation and, when ordered after it, Data Analysis.
+- **Downstream**: humans and orchestrators may consume `LiteratureReviewOutput` directly. The reference workflow projects it separately into Data Analysis and/or Proposal according to the selected order.
+- **Protocols**: `interpreter_to_ml_literature_review` and `data_analysis_to_ml_literature_review` build the target-owned inputs. `ml_literature_review_to_data_analysis` and `ml_literature_review_to_ml_model_propose.local_typed_evidence` expose bounded outputs. The old four-channel adapter remains for compatibility but is not the composed workflow path.
 
 ## Input
 
@@ -15,7 +15,8 @@
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `experiment_history` | `InterpretationOutput` | Yes | — | Fresh interpretation output from this iteration. The synthesis prompt grounds every finding in one of `experiment_history.bottlenecks`; `key_findings` is PRIMARY input alongside bottlenecks. |
+| `interpretation_evidence` | `LiteratureReviewInterpretationEvidence` | Yes | — | Literature-owned bounded projection of current model types, findings, bottlenecks, take-home message and cold-start posture. |
+| `data_analysis_evidence` | `LiteratureReviewDataEvidence \| None` | No | `None` | Optional bounded measured observations, limitations and unresolved questions. It conditions search/synthesis but grants no data or execution authority. |
 | `root_papers` | `list[PaperSource]` | No | `[]` | Foundational papers always resolved at agent start. Supplied by the caller's task or experiment config. Per-paper extracts cache under `{root_cache_dir}` for free re-use across runs. |
 | `dynamic_search` | `DynamicSearchConfig` | No | `DynamicSearchConfig()` | Knobs for the per-iteration Semantic Scholar search loop (sub-fields: `enabled`, `max_rounds`, `initial_verbosity`, `escalation_allowed`, `results_per_query`, `max_escalations_per_round`). See Parameter Reference for details. |
 | `synthesis_config` | `SynthesisConfig` | No | `SynthesisConfig()` | Omission / transfer-tolerance knobs for the synthesis step (`transfer_tolerance` default `"moderate"`). |
@@ -40,7 +41,7 @@
 
 | Field | Type | Description |
 |---|---|---|
-| `agent_card` | `AgentCard` | Static self-description of this agent. Carries `trust_level="soft_prior"` (literature findings are inspirational priors; experiment data takes precedence on conflict). Read by the proposer's synthesis rules to weight this agent's contribution. |
+| `agent_card` | `AgentCard` | Task-agnostic self-description with `trust_level="soft_prior"`. Its `trust_guidance` is rendered from this run's effective `confidence_rubric`, including a caller override, so the Proposer sees the same confidence semantics used by synthesis. |
 | `findings` | `list[ExpertContextItem]` | The agent's primary output — each finding is grounded in a specific bottleneck (via its `content` Implication line), attributed to a paper (via `source_ref`), and weighted by `confidence` (per the rubric). For Tier-1 (`arxiv_source`) cited papers, the relevant equation is quoted verbatim inline inside `content` Mechanism; for Tier-2 (`pdfplumber_llm`), the equation is paraphrased with a flag word. |
 | `new_vocab_candidates` | `list[VocabEntry]` | Vocabulary entries the agent proposes for the runtime vocab. Externally-sourced entries set `VocabEntry.origin` to this agent's name. **Wired-empty in v1** — always returns `[]`. |
 | `suggested_mindset` | `str \| None` | Optional directional prior overriding the workflow's explore/exploit default. **Wired-empty in v1** — always returns `None`. |
@@ -102,7 +103,7 @@ no side effects.
 | `--provider` | `gemini` | LLMBridge provider (`gemini` / `openai`) for compression + search-decision + synthesis. The CLI does not expose the optional `search_llm_*` split; the search-decision step falls back to this provider (schema semantics). |
 | `--model_id` | `gemini-3.1-flash-lite-preview` | LLMBridge model id. |
 
-**Limitations of standalone CLI use** (compared to workflow-driven use): no `search_llm_provider` / `search_llm_model_id` split (that routing lives in the chain's `WorkflowLLMConfig`), and no 4-channel merge into the proposer — the CLI produces this node's output JSON only.
+**Limitations of standalone CLI use** (compared to workflow-driven use): no `search_llm_provider` / `search_llm_model_id` split (that routing lives in the chain's `WorkflowLLMConfig`), and no downstream typed edge traversal. The CLI produces this node's output JSON only.
 
 ## Python API usage
 
@@ -112,9 +113,10 @@ from agent.schemas.literature_review import (
     LiteratureReviewInput, PaperSource, DynamicSearchConfig, SynthesisConfig,
 )
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.protocols.interpreter_to_ml_literature_review import local_typed_evidence
 
 inp = LiteratureReviewInput(
-    experiment_history=interp_output,  # from upstream result_interpretation_agent
+    interpretation_evidence=local_typed_evidence(interp_output),
     root_papers=[
         PaperSource(source_type="arxiv", identifier="2406.04378", verbosity=1),
     ],
@@ -141,6 +143,7 @@ The required `root_cache_dir` constructor argument controls where per-paper extr
 
 ## Key behavioral notes
 
+- **Task-specific research assumptions come from the caller's task description and rubric.** The generic search, paper-extract and synthesis templates do not declare a scientific modality, frequency regime, or task-specific architecture. They qualify paper results by their actual data/training/evaluation regime and label transfer assumptions rather than treating a paper's score as validation on the caller's task.
 - **Bottleneck-grounding is the dominant finding-count gate.** The synthesis prompt requires every finding's Implication to address a specific current bottleneck. Papers transferable in principle but not addressing any current bottleneck are correctly omitted. The finding count is naturally bounded by the seed's stable-attractor count — typically `min(num_bottlenecks, corpus_size)`. (For the zero-bottleneck cold-start case, see the next bullet.)
 - **Empty-bottlenecks (cold-start) synthesis render — verified + fixed under issue #303.** With zero bottlenecks (after whitespace cleaning) the synthesis user prompt renders the explicit absence `Open bottlenecks:` / `(none)`, and its closing instruction switches: the legacy closing ("Produce the findings JSON. Omit any paper that does not address one of the bottlenecks above.") would, against an empty list, instruct omitting EVERY paper, so the empty case instead closes with "No open bottlenecks are recorded yet — ground each finding in the task described in the system prompt ('The task the proposer is working on') instead, and omit any paper that is not relevant to that task." The branch keys on the RENDERED bottleneck block (`== "(none)"`), never a separate emptiness predicate, so the instruction can never contradict the list it points at; non-empty renders are byte-identical to the pre-#303 prompt (pinned by the PB-9 user golden). The search-decision prompt needs no such branch: it renders the same `(none)` absence, and three of its four query dimensions (`take_home` / `architectural_gap` / `adjacent_technique`) remain targetable without bottlenecks.
 - **Equations travel inline inside finding `content`** (in Mechanism), not via a separate channel. For Tier-1 (`arxiv_source`) papers the equation is quoted verbatim from the source `.tex`. For Tier-2 (`pdfplumber_llm`) the equation is paraphrased with an explicit flag word ("approximate equation, reconstructed from a degraded PDF"). The Adaptation section MUST NOT contain raw equations (locked placement rule).
@@ -212,15 +215,16 @@ This appendix enumerates every knob that influences the `ml_literature_review` n
 | └─ `omit_below` | `agent/schemas/literature_review.py:301` | `float` ∈ [0,1] | `0.40` | Findings with confidence < this threshold are omitted at synthesis time. **The omit threshold's single source of truth — never duplicated in prompt text.** | **finding count** |
 | └─ `abstract_only_ceiling` | `agent/schemas/literature_review.py:309` | `float` ∈ [0,1] | `0.79` | Maximum confidence a finding may keep when its cited paper was never deep-read (`verbosity_achieved == 0`). Clamped node-side after synthesis. | confidence distribution (no findings dropped — just capped) |
 
-### Grounding context (`LiteratureReviewInput.experiment_history` → `InterpretationOutput`)
+### Grounding context (`LiteratureReviewInput.interpretation_evidence`)
 
 The synthesis prompt requires every finding's **Implication** to ground in one of the listed `bottlenecks`. This makes the experiment seed itself a finding-count parameter — a corpus of 7 papers against 2 bottlenecks yields ~2 stable-attractor findings plus an intermittent third slot. (When the list is empty — a cold start — the prompt's closing instruction grounds on the task description instead; see "Empty-bottlenecks (cold-start) synthesis render" in Key behavioral notes.)
 
 | Parameter | Location | Type / values | Default | Controls | Affects |
 |---|---|---|---|---|---|
-| `experiment_history.bottlenecks` | `agent/schemas/interpretation.py` (InterpretationOutput) | `list[str]` | — (required, from upstream interpretation agent) | Open bottlenecks the proposer is working on. The synthesis prompt explicitly grounds each finding in one of these. | **finding count (the binding constraint via stable-attractor calibration)** |
-| `experiment_history.key_findings` | `agent/schemas/interpretation.py` | `list[str]` | — | Findings carried from prior iterations. Provided to the synthesis LLM as PRIMARY input alongside bottlenecks. | finding quality (relevance) |
-| `experiment_history.take_home_message` | `agent/schemas/interpretation.py` | `str` | — | One-line summary of current state. Surfaced near the top of the synthesis prompt. | finding quality (framing) |
+| `interpretation_evidence.bottlenecks` | `agent/schemas/literature_review.py` | `tuple[str, ...]` | `()` | Open bottlenecks projected by the caller. The synthesis prompt grounds findings against these when present. | **finding count (the binding constraint via stable-attractor calibration)** |
+| `interpretation_evidence.key_findings` | `agent/schemas/literature_review.py` | `tuple[str, ...]` | `()` | Bounded findings supplied by the selected Interpretation edge. | finding quality (relevance) |
+| `interpretation_evidence.take_home_message` | `agent/schemas/literature_review.py` | `str` | `""` | One-line summary of current state. Surfaced near the top of the synthesis prompt. | finding quality (framing) |
+| `data_analysis_evidence` | `agent/schemas/literature_review.py` | `LiteratureReviewDataEvidence \| None` | `None` | Bounded measured observations that may motivate targeted search. It never grants data access. | search relevance, synthesis applicability |
 | `root_papers` (count) | `agent/schemas/literature_review.py:400` length | `list[PaperSource]` length | `[]` | Locked starting set of papers. More roots = more candidate citations, more equations in scope. | finding count, finding quality |
 | `task_description` | `agent/schemas/literature_review.py:494` | `str` | `""` (unreachable from the production path — the task-config loader fails closed on an empty description) | Task-domain anchor injected into `{TASK_DESCRIPTION}` in all three literature prompts. The workflow and standalone CLI resolve it from the composed task-owned `task_config.config` declaration through the same loader. Empty → a hand-built input has no task-domain anchor. | finding quality (relevance grounding), search behavior, extraction quality (`relevance_to_task` field) |
 

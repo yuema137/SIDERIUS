@@ -46,6 +46,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from agent.schemas.data_analysis.common import CertifiedArtifactRef
 from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
     GateExhaustionInfo,
@@ -54,7 +55,8 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.interpretation import InterpretationOutput
-from agent.schemas.proposal import ProposalOutput
+from agent.schemas.literature_review import LiteratureReviewOutput
+from agent.schemas.proposal import AgentCard, ExpertContextItem, ProposalOutput
 from agent.schemas.validator import ValidatorOutput
 from core.resume import RestoredState
 from execute_tools.metric_order import MetricOrder
@@ -64,6 +66,8 @@ from tests.helpers.metric_fixtures import shipped_spec
 #: a REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation
 #: in this file is unchanged; the direction is now stated instead of assumed.
 _STEP09A_ORDER = MetricOrder(shipped_spec())
+from workflows.data_analysis_stage import WorkflowAnalysisOutput
+from workflows.llm_config import NodeLLMConfig, WorkflowLLMConfig
 from workflows.model_exploration import (
     _register_plugin,
     load_tuning_outputs,
@@ -155,6 +159,33 @@ def _make_interpretation_output():
                 "_stats": {"best_denoising_score": 1.5, "completed_rounds": 3},
             }
         },
+    )
+
+
+def _make_literature_output() -> LiteratureReviewOutput:
+    return LiteratureReviewOutput(
+        agent_card=AgentCard(
+            agent_name="ml_literature_review",
+            role="Find relevant methods.",
+            expertise_domain="Scientific machine learning literature.",
+            coverage="Configured scholarly sources.",
+            limitations="External claims require empirical validation.",
+            trust_guidance="Use as hypotheses, not observations.",
+            trust_level="soft_prior",
+        ),
+        findings=[
+            ExpertContextItem(
+                source="ml_literature_review",
+                kind="literature",
+                content="Spectral losses may emphasize localized residual frequencies.",
+                source_ref="doi:10.0000/workflow-order",
+                confidence=0.8,
+            )
+        ],
+        retrieved_papers=[],
+        run_name="workflow-order-review",
+        started_at="2026-01-01T00:00:00Z",
+        finished_at="2026-01-01T00:01:00Z",
     )
 
 
@@ -572,6 +603,113 @@ class TestRunWorkflowSingleIteration:
             is historical_inference_capability
         )
         assert attach_analysis.call_args.args[1] is analysis_output
+
+    @pytest.mark.parametrize(
+        ("order", "expected_trace"),
+        [
+            (
+                "analysis_then_literature",
+                ["analysis:none", "literature:with-analysis"],
+            ),
+            (
+                "literature_then_analysis",
+                ["literature:no-analysis", "analysis:with-literature"],
+            ),
+        ],
+    )
+    def test_scientific_evidence_order_routes_typed_context_and_proposer_fan_in(
+        self,
+        workflow_env,
+        order,
+        expected_trace,
+    ):
+        """The workflow order changes edges, while both node contracts stay fixed.
+
+        This catches a wiring regression where the selected predecessor runs
+        first but its typed evidence is dropped before the second capability,
+        or where either final evidence stream is omitted from ProposalInput.
+        """
+        from tests.unit.agent.protocols.test_composable_scientific_evidence import (
+            _report,
+        )
+
+        config_path = Path(workflow_env["workspace"]).parent / f"lit-{order}.yaml"
+        config_path.write_text(
+            "enabled: true\nroot_papers: []\ndynamic_search:\n  enabled: false\n",
+            encoding="utf-8",
+        )
+        analysis_output = WorkflowAnalysisOutput(
+            report=_report(),
+            report_ref=CertifiedArtifactRef(
+                logical_ref="data_analysis/report.json",
+                sha256="9" * 64,
+                media_type="application/json",
+            ),
+        )
+        literature_output = _make_literature_output()
+        analysis_binding = object()
+        composition = replace(workflow_env["composition"], data_analysis=analysis_binding)
+        trace: list[str] = []
+        analysis_predecessors: list[object | None] = []
+        literature_inputs: list[object] = []
+
+        def run_analysis(_interpretation, **kwargs):
+            predecessor = kwargs["literature_output"]
+            analysis_predecessors.append(predecessor)
+            trace.append("analysis:with-literature" if predecessor is not None else "analysis:none")
+            return analysis_output
+
+        def run_literature(inp):
+            literature_inputs.append(inp)
+            trace.append(
+                "literature:with-analysis"
+                if inp.data_analysis_evidence is not None
+                else "literature:no-analysis"
+            )
+            return literature_output
+
+        with (
+            patch(
+                "workflows.model_exploration._run_composed_data_analysis",
+                side_effect=run_analysis,
+            ),
+            patch("workflows.model_exploration.MLLiteratureReviewAgent") as lit_agent,
+        ):
+            lit_agent.return_value.run.side_effect = run_literature
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=workflow_env["data_dir"],
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    lit_review_enabled=True,
+                    lit_review_config_path=str(config_path),
+                    scientific_evidence_order=order,
+                ),
+                workspace=workflow_env["workspace"],
+                run_name="test_run",
+                task_composition=composition,
+                llm_config=WorkflowLLMConfig(
+                    interpret=NodeLLMConfig(provider="openai", model_id="test")
+                ),
+            )
+
+        assert trace == expected_trace
+        assert len(literature_inputs) == 1
+        assert len(analysis_predecessors) == 1
+        if order == "analysis_then_literature":
+            assert literature_inputs[0].data_analysis_evidence is not None
+            assert analysis_predecessors == [None]
+        else:
+            assert literature_inputs[0].data_analysis_evidence is None
+            assert analysis_predecessors == [literature_output]
+
+        proposal_input = workflow_env["propose"].return_value.run.call_args.args[0]
+        assert proposal_input.data_analysis_evidence is not None
+        assert proposal_input.literature_review_evidence is not None
+        assert (
+            proposal_input.literature_review_evidence.findings[0].source_ref
+            == "doi:10.0000/workflow-order"
+        )
 
     def test_correct_input_types(self, workflow_env):
         from agent.schemas.implementor import ImplementorInput

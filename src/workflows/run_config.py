@@ -54,6 +54,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import OutputTypeName
 from core.runtime_control.admission import AdmissionEnforcement
+from workflows.scientific_evidence_stage import EvidenceStageOrder
 from workflows.strategy_modes import ExplorationMode, FormalRoundStrategy, StrategyMode
 
 
@@ -168,6 +169,7 @@ class WorkflowLaunchConfig:
     health_feedback_history_max_entries_per_model: int = 8
     lit_review_enabled: bool = False
     lit_review_config_path: str | None = None
+    scientific_evidence_order: EvidenceStageOrder = "analysis_then_literature"
     require_probe_runner: bool = False
     # arXiv U1 (#254) — the OPAQUE experiment-arm label. Pure transit: the
     # workflow locks it and forwards it to the tuner; it never interprets
@@ -199,6 +201,15 @@ class WorkflowLaunchConfig:
         the failure mode of every maintained-by-hand deny list.
         """
         from core.chain_state import ChainState
+
+        scientific_evidence_order = getattr(
+            self, "scientific_evidence_order", "analysis_then_literature"
+        )
+        if scientific_evidence_order not in {
+            "analysis_then_literature",
+            "literature_then_analysis",
+        }:
+            raise ValueError(f"unknown scientific_evidence_order: {scientific_evidence_order!r}")
 
         mutable = {f.name for f in dataclass_fields(ChainState)}
         offending = sorted(mutable & {f.name for f in dataclass_fields(self)})

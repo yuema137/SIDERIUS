@@ -24,7 +24,14 @@ See docs/design/enable_global_task_config.md § Commit T4.
 
 from __future__ import annotations
 
-from nodes.ml_literature_review.ml_literature_review import _AGENT_CARD
+from agent.schemas.literature_review import (
+    ConfidenceBand,
+    ConfidenceRubric,
+    DynamicSearchConfig,
+    LiteratureReviewInput,
+    LiteratureReviewInterpretationEvidence,
+)
+from nodes.ml_literature_review.ml_literature_review import _AGENT_CARD, MLLiteratureReviewAgent
 
 
 class TestAgentCardTaskAgnostic:
@@ -101,3 +108,38 @@ class TestAgentCardSerializes:
         assert rehydrated.role == _AGENT_CARD.role
         assert rehydrated.expertise_domain == _AGENT_CARD.expertise_domain
         assert rehydrated.limitations == _AGENT_CARD.limitations
+
+
+def test_published_agent_card_uses_run_rubric(tmp_path):
+    """Catch a default-rubric card mislabeling custom-confidence findings."""
+
+    class EmptySynthesisBridge:
+        def generate(self, *_args, **_kwargs):
+            return {"findings": []}
+
+    rubric = ConfidenceRubric(
+        bands=[ConfidenceBand(lower=0.91, upper=1.0, criteria="replicated on declared task")],
+        omit_below=0.91,
+    )
+    inp = LiteratureReviewInput(
+        interpretation_evidence=LiteratureReviewInterpretationEvidence(
+            take_home_message="Investigate image classification failures."
+        ),
+        dynamic_search=DynamicSearchConfig(enabled=False),
+        storage={
+            "backend": "local",
+            "local": {"workspace": str(tmp_path), "run_name": "rubric-check"},
+        },
+        run_name="rubric-check",
+        llm_provider="openai",
+        llm_model_id="test-model",
+        task_description="Classify microscopy images.",
+        confidence_rubric=rubric,
+    )
+    agent = MLLiteratureReviewAgent(
+        bridge_factory=lambda **_kwargs: EmptySynthesisBridge(),
+        root_cache_dir=str(tmp_path / "cache"),
+    )
+    output = agent.run(inp)
+    assert output.agent_card.trust_guidance == rubric.render_for_consumer()
+    assert output.agent_card.trust_guidance != _AGENT_CARD.trust_guidance

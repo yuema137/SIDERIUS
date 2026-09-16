@@ -1997,6 +1997,12 @@ class HyperparamTuningInput(BaseModel):
             "config. The lock refuses enabled-without-sha at construction."
         ),
     )
+    scientific_evidence_order: Literal["analysis_then_literature", "literature_then_analysis"] = (
+        Field(
+            default="analysis_then_literature",
+            description="Workflow-owned analysis/literature order; locked only by the tuner.",
+        )
+    )
     baseline_isolation: bool = Field(
         default=False,
         description=(

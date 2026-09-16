@@ -32,7 +32,11 @@ from typing import Any
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
-from agent.prompt_templates.proposal import live_loss_metadata, render_data_analysis_evidence
+from agent.prompt_templates.proposal import (
+    live_loss_metadata,
+    render_data_analysis_evidence,
+    render_literature_review_evidence,
+)
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
@@ -1210,6 +1214,9 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     data_analysis_block = render_data_analysis_evidence(inp.data_analysis_evidence)
     if data_analysis_block:
         lines += ["", data_analysis_block, ""]
+    literature_block = render_literature_review_evidence(inp.literature_review_evidence)
+    if literature_block:
+        lines += ["", literature_block, ""]
 
     lines += [
         "## Constraints",
@@ -1656,6 +1663,7 @@ class MLModelProposalAgent:
             render_custom_loss_inventory,
             render_data_analysis_evidence,
             render_expert_context,
+            render_literature_review_evidence,
         )
 
         loss_inventory = loss_inventory or self._custom_loss_inventory(inp)
@@ -1739,6 +1747,7 @@ class MLModelProposalAgent:
         agent_cards_block = render_agent_cards(inp.agent_cards)
         expert_context_parts = (
             render_expert_context(inp.expert_context),
+            render_literature_review_evidence(inp.literature_review_evidence),
             render_data_analysis_evidence(inp.data_analysis_evidence),
         )
         expert_context_block = "\n\n".join(part for part in expert_context_parts if part)

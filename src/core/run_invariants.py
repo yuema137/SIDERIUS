@@ -201,6 +201,9 @@ class RunInvariants(BaseModel):
     # stamps it; nothing reads its VALUE to decide anything.
     lit_review_enabled: bool = False
     lit_review_config_sha256: str | None = None
+    scientific_evidence_order: Literal["analysis_then_literature", "literature_then_analysis"] = (
+        "analysis_then_literature"
+    )
     experiment_arm: str | None = None
     # arXiv U3 (#259 / #260) — BASELINE ISOLATION: the explicit, recorded
     # flag that drives the WITHOUT arm's behaviour (ruling R2: never the arm
@@ -378,6 +381,7 @@ class RunInvariants(BaseModel):
         # arXiv U1 — topology + arm are compared, never interpreted.
         "lit_review_enabled",
         "lit_review_config_sha256",
+        "scientific_evidence_order",
         "experiment_arm",
         # arXiv U3 — the isolation flag is a prompt-surface identity.
         "baseline_isolation",
@@ -632,6 +636,8 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
         payload.pop("lit_review_enabled", None)
     if payload.get("lit_review_config_sha256") is None:
         payload.pop("lit_review_config_sha256", None)
+    if payload.get("scientific_evidence_order") == "analysis_then_literature":
+        payload.pop("scientific_evidence_order", None)
     if payload.get("experiment_arm") is None:
         payload.pop("experiment_arm", None)
     # arXiv U3 — same rule for the isolation flag: omitted at `False`.
@@ -811,6 +817,9 @@ class LockLaunchIdentity(BaseModel):
 
     lit_review_enabled: bool = False
     lit_review_config_sha256: str | None = None
+    scientific_evidence_order: Literal["analysis_then_literature", "literature_then_analysis"] = (
+        "analysis_then_literature"
+    )
     experiment_arm: str | None = None
     baseline_isolation: bool = False
     #: The OBSERVED advice-artifact digest and the path it was read from.
@@ -984,6 +993,7 @@ def build_run_invariants(
             # the generic unlabelled, literature-review-disabled posture.
             lit_review_enabled=_launch_identity.lit_review_enabled,
             lit_review_config_sha256=_launch_identity.lit_review_config_sha256,
+            scientific_evidence_order=_launch_identity.scientific_evidence_order,
             experiment_arm=_launch_identity.experiment_arm,
             baseline_isolation=_launch_identity.baseline_isolation,
             # Advice identity is CANONICAL, so it is threaded explicitly like

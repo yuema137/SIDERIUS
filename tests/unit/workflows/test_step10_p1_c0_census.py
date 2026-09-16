@@ -667,6 +667,8 @@ class TestCensusDLegacyLockKeySet:
             # arXiv U1/U3 — the declared delta documented above.
             "lit_review_enabled",
             "lit_review_config_sha256",
+            # PR-C — workflow-selected capability order changes evidence flow.
+            "scientific_evidence_order",
             "experiment_arm",
             "baseline_isolation",
             # Gold campaign — the declared delta documented above.

@@ -5,7 +5,7 @@
 ## Position in the pipeline
 
 - **CLI entry**: **absent** — standalone callers use the Python capability API because task-owned materialization is an executable protocol object, not an arbitrary filesystem convention.
-- **Upstream**: any caller that can construct `DataAnalysisInput`; the reference workflow uses `local_analysis_input` after interpretation.
+- **Upstream**: any caller that can construct `DataAnalysisInput`; workflow-owned edges may combine an Interpretation-produced `AnalysisBrief` with optional Literature Review evidence. The node has no knowledge of workflow order.
 - **Downstream**: humans and external orchestrators may consume `DataAnalysisReport` directly; the reference Proposer path uses `local_typed_evidence`.
 - **Protocol**: `local_analysis_input` constructs the capability input; `local_typed_evidence` owns the bounded Proposer projection.
 
@@ -21,6 +21,7 @@
 | `analysis_brief` | `AnalysisBrief` | Yes | — | Questions describing what to investigate, not how to execute. |
 | `available_assets` | tuple of `AnalysisAsset` | Yes | — | Safe descriptors and identities only; never bulk content. |
 | `prior_evidence` | tuple of `PriorEvidenceRef` | No | `()` | Explicitly referenced prior evidence. |
+| `literature_evidence` | `DataAnalysisLiteratureEvidence` or `None` | No | `None` | Source-backed hypotheses/caveats supplied by a typed workflow edge. Reasoning context only; it grants no asset, information, skill or preprocessing authority. |
 | `access_policy` | `AnalysisAccessPolicy` | Yes | — | Split-, information-, and field-level anti-leakage authority. |
 | `resource_envelope` | `AnalysisResourceEnvelope` | Yes | — | Overall deadline, per-skill timeout, device, memory, and sampling policy. |
 | `allowed_skill_packs` | tuple of `SkillPackRef` | Yes | — | Caller-approved, content-pinned packs available for discovery. |

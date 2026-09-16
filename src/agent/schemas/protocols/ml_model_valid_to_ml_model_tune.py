@@ -132,6 +132,9 @@ def local_validated_model(
     experiment_arm: str | None = None,
     lit_review_enabled: bool = False,
     lit_review_config_sha256: str | None = None,
+    scientific_evidence_order: Literal[
+        "analysis_then_literature", "literature_then_analysis"
+    ] = "analysis_then_literature",
     baseline_isolation: bool = False,
     max_retries: int | None = None,
     plan_overrides: dict[str, Any] | None = None,
@@ -363,6 +366,7 @@ def local_validated_model(
         experiment_arm=experiment_arm,
         lit_review_enabled=lit_review_enabled,
         lit_review_config_sha256=lit_review_config_sha256,
+        scientific_evidence_order=scientific_evidence_order,
         baseline_isolation=baseline_isolation,
         max_retries=max_retries,
         plan_overrides=plan_overrides or {},

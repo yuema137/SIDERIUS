@@ -24,6 +24,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.output_types import OutputTypeName as OutputTypeName
 from agent.schemas.proposer_data_analysis_evidence import ProposerDataAnalysisEvidence
 from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
+from agent.schemas.proposer_literature_evidence import ProposerLiteratureReviewEvidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from agent.schemas.vocab import VocabEntry
@@ -287,9 +288,10 @@ class ExpertContextItem(BaseModel):
 
 # B.3a — Agent name card (Phase F)
 class AgentCard(BaseModel):
-    """Static self-description of an external contributing agent.
+    """Self-description of an external contributing agent.
 
-    Defined once in the agent's implementation, emitted on every run.
+    Stable role/identity is defined by the agent; run-specific calibration
+    guidance may reflect its validated effective evidence rubric.
     Collected into ProposalInput.agent_cards and rendered as a 'Contributors'
     section near the top of each stage prompt — before the Expert Context block.
 
@@ -794,6 +796,14 @@ class ProposalInput(BaseModel):
             "the Data Analysis -> Proposer protocol edge. None means that the analysis "
             "topology is disabled or supplied no report; the Proposer never inspects analysis "
             "storage or a raw report mapping."
+        ),
+    )
+    literature_review_evidence: ProposerLiteratureReviewEvidence | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Typed, bounded literature evidence attached by a workflow edge. It remains "
+            "distinct from observed Data Analysis evidence and prior interpretation."
         ),
     )
     existing_model_types: list[str] = Field(

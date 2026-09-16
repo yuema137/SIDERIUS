@@ -29,6 +29,7 @@ import nodes.ml_literature_review as node_mod
 from agent.prompt_templates.literature_review import render_synthesis_prompt
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.literature_review import LiteratureReviewInput, LiteratureReviewOutput
+from agent.schemas.protocols.interpreter_to_ml_literature_review import local_typed_evidence
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _REQUIRED_ARGS = [
@@ -273,7 +274,7 @@ class TestMainEndToEnd:
         assert len(captured) == 1
         inp = captured[0]
         assert isinstance(inp, LiteratureReviewInput)
-        assert inp.experiment_history.model_dump() == hist.model_dump()
+        assert inp.interpretation_evidence == local_typed_evidence(hist)
         assert inp.run_name == "r7"
         assert inp.storage.local is not None and inp.storage.local.workspace == str(ws)
         assert inp.llm_provider == "openai"
@@ -322,7 +323,7 @@ class TestMainEndToEnd:
         )
         node_mod.main()
 
-        assert captured[0].experiment_history.bottlenecks == ["real"]
+        assert captured[0].interpretation_evidence.bottlenecks == ("real",)
 
 
 def _cli_case(tmp_path, *, description="fixture task", metric_identity=None):

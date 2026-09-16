@@ -21,7 +21,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from agent.schemas.external_agents import ExternalAgentOutput
-from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.storage import StorageConfig
 
 
@@ -173,9 +172,8 @@ class PaperExtract(BaseModel):
     relevance_to_task: str = Field(
         default="",
         description="Why this paper is relevant to the downstream task "
-        "(≤100 words). Task-agnostic by name so the framework generalizes "
-        "beyond SQUID; the compression prompt injects the concrete task "
-        "description so the LLM knows what 'task' means in context.",
+        "(≤100 words). The compression prompt supplies the concrete task "
+        "description; this field must not assume a particular application.",
     )
     key_equations_md: str = Field(
         default="",
@@ -278,8 +276,8 @@ def _default_confidence_bands() -> list[ConfidenceBand]:
         ConfidenceBand(
             lower=0.80,
             upper=1.00,
-            criteria="deep-read (verbosity >= 1 extract) AND on-domain (1D / "
-            "broadband signal denoising) AND directly addresses a current bottleneck",
+            criteria="deep-read (verbosity >= 1 extract) AND on-domain for the "
+            "declared task AND directly addresses a current bottleneck",
         ),
         ConfidenceBand(
             lower=0.60,
@@ -422,22 +420,75 @@ class SynthesisConfig(BaseModel):
     )
 
 
+class LiteratureReviewInterpretationEvidence(BaseModel):
+    """Literature-owned bounded view of current experimental interpretation."""
+
+    model_types: tuple[str, ...] = Field(default=(), max_length=64)
+    key_findings: tuple[str, ...] = Field(default=(), max_length=32)
+    bottlenecks: tuple[str, ...] = Field(default=(), max_length=32)
+    take_home_message: str = Field(default="", max_length=8000)
+    cold_start: bool = False
+
+    @model_validator(mode="after")
+    def validate_prompt_budget(self) -> LiteratureReviewInterpretationEvidence:
+        if len(self.model_dump_json().encode("utf-8")) > 32_768:
+            raise ValueError("interpretation evidence exceeds the 32768-byte reasoning limit")
+        return self
+
+
+class LiteratureReviewDataMeasurement(BaseModel):
+    """One bounded quantitative observation motivating literature search."""
+
+    result_key: str = Field(max_length=256)
+    value: float | int | str | bool | None = None
+    unit: str | None = None
+    description: str = Field(max_length=2000)
+
+
+class LiteratureReviewDataFinding(BaseModel):
+    """One grounded Data Analysis finding projected for literature review."""
+
+    finding_id: str = Field(max_length=256)
+    statement: str = Field(max_length=8000)
+    confidence_level: Literal["low", "medium", "high"]
+    modeling_relevance: str = Field(max_length=8000)
+    measurements: tuple[LiteratureReviewDataMeasurement, ...] = Field(default=(), max_length=32)
+
+
+class LiteratureReviewDataEvidence(BaseModel):
+    """Literature-owned, non-authoritative view of a Data Analysis report."""
+
+    report_id: str = Field(max_length=256)
+    executive_summary: str = Field(max_length=12000)
+    findings: tuple[LiteratureReviewDataFinding, ...] = Field(default=(), max_length=32)
+    limitations: tuple[str, ...] = Field(default=(), max_length=32)
+    unresolved_questions: tuple[str, ...] = Field(default=(), max_length=32)
+
+    @model_validator(mode="after")
+    def validate_prompt_budget(self) -> LiteratureReviewDataEvidence:
+        if len(self.model_dump_json().encode("utf-8")) > 65_536:
+            raise ValueError("data analysis evidence exceeds the 65536-byte reasoning limit")
+        return self
+
+
 class LiteratureReviewInput(BaseModel):
     """Input to the ml_literature_review node.
 
-    experiment_history is the fresh InterpretationOutput from this iteration
-    (decision Q1 — see docs/commit_plan_ml_literature_review.md). The
-    lit-review prompt reads model_types, model_descriptions, key_findings,
-    bottlenecks, take_home_message, runtime_vocab, new_discoveries — and
-    ignores the rest. If a future use case needs cross-iteration architecture
-    history that InterpretationOutput does not carry, the fix is a new
-    chain_history field at the workflow layer, not a reshape of this schema.
+    ``interpretation_evidence`` and optional ``data_analysis_evidence`` are
+    Literature-owned projections.  The node never receives either upstream
+    capability's complete output object.
     """
 
-    experiment_history: InterpretationOutput = Field(
-        description="Fresh InterpretationOutput from this iteration's "
-        "result_interpretation_agent. Used to ground search queries in the "
-        "current state of exploration.",
+    interpretation_evidence: LiteratureReviewInterpretationEvidence = Field(
+        description="Bounded current-state evidence projected from InterpretationOutput.",
+    )
+    data_analysis_evidence: LiteratureReviewDataEvidence | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Optional bounded observations projected from DataAnalysisReport. Reasoning "
+            "context only: it grants no data access or execution authority."
+        ),
     )
     root_papers: list[PaperSource] = Field(
         default_factory=list,
@@ -502,6 +553,37 @@ class LiteratureReviewInput(BaseModel):
         "leaving the prompt section bare — the LLM gets no task-domain "
         "anchor.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_legacy_experiment_history(cls, value):
+        """Read the old wire form without retaining an upstream schema dependency."""
+
+        if not isinstance(value, dict) or "interpretation_evidence" in value:
+            return value
+        history = value.get("experiment_history")
+        if history is None:
+            return value
+        if hasattr(history, "model_dump"):
+            history = history.model_dump(mode="python")
+        if not isinstance(history, dict):
+            return value
+        migrated = dict(value)
+        migrated.pop("experiment_history", None)
+        migrated["interpretation_evidence"] = {
+            "model_types": history.get("model_types", ()),
+            "key_findings": history.get("key_findings", ()),
+            "bottlenecks": history.get("bottlenecks", ()),
+            "take_home_message": history.get("take_home_message", ""),
+            "cold_start": history.get("cold_start", False),
+        }
+        return migrated
+
+    @property
+    def experiment_history(self) -> LiteratureReviewInterpretationEvidence:
+        """Deprecated read-only alias for pre-PR-C callers."""
+
+        return self.interpretation_evidence
 
 
 class SearchDecisionRecord(BaseModel):

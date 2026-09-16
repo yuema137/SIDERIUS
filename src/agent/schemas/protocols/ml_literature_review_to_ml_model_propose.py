@@ -12,8 +12,11 @@ Protocol naming convention: {transport}_{data_scope}
 
 Implemented
 -----------
-local_all_channels      Direct in-memory transfer of all four external-agent
-                        channels into a dict spreadable into local_full_context.
+local_typed_evidence    Project one review into the Proposer-owned bounded
+                        ``ProposerLiteratureReviewEvidence`` field. This is the
+                        composed-workflow path.
+local_all_channels      Legacy compatibility adapter for callers that still
+                        use the generic four-channel external-agent surface.
 
 Planned
 -------
@@ -25,12 +28,12 @@ database_all_channels   DB-backed transfer: lit-review writes its output to the
 
 Design notes
 ------------
-The downstream node (ml-model-propose) is *not* fed by this protocol alone.
-The interpretation agent's `local_full_context` is the protocol that builds
-the complete ProposalInput; this lit-review protocol returns the four
-external-agent channels as a dict, which the workflow then spreads into
-that upstream protocol via `**channels`. See the workflow integration
-(Commit 6) for the assembly site.
+The workflow first constructs ``ProposalInput`` from Interpretation, then
+attaches Literature and Data Analysis through separate target-owned typed
+projections. The Proposer can therefore distinguish external claims from
+observations measured on the run's own data. ``local_all_channels`` remains
+only for backward-compatible independent callers; the composed workflow does
+not unpack Literature Review through an untyped context dictionary.
 
 Audit finding (Commit 5, no patch required):
   ``ml_result_interp_to_ml_model_propose.local_full_context`` at
@@ -51,6 +54,43 @@ through ``expert_context``.
 from typing import Any
 
 from agent.schemas.literature_review import LiteratureReviewOutput
+from agent.schemas.proposal import ProposalInput
+from agent.schemas.proposer_literature_evidence import (
+    ProposerLiteratureAgentCard,
+    ProposerLiteratureFinding,
+    ProposerLiteratureReviewEvidence,
+)
+
+
+def _project(output: LiteratureReviewOutput) -> ProposerLiteratureReviewEvidence:
+    return ProposerLiteratureReviewEvidence(
+        run_name=output.run_name,
+        agent_card=ProposerLiteratureAgentCard.model_validate(
+            output.agent_card.model_dump(mode="python")
+        ),
+        findings=tuple(
+            ProposerLiteratureFinding(
+                source_ref=item.source_ref,
+                content=item.content,
+                confidence=item.confidence,
+            )
+            for item in output.findings
+        ),
+        retrieved_paper_ids=tuple(item.paper_id for item in output.retrieved_papers),
+        search_rounds_used=output.search_rounds_used,
+    )
+
+
+def local_typed_evidence(
+    output: LiteratureReviewOutput,
+    *,
+    proposal_input: ProposalInput,
+) -> ProposalInput:
+    """Attach Literature Review through the Proposer-owned typed projection."""
+
+    payload = proposal_input.model_dump(mode="python")
+    payload["literature_review_evidence"] = _project(output)
+    return ProposalInput.model_validate(payload)
 
 
 def local_all_channels(output: LiteratureReviewOutput) -> dict[str, Any]:

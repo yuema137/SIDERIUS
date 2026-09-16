@@ -82,9 +82,9 @@ _SYNTHESIS_CONTENT_FORMAT_V1 = """Produce EXACTLY this shape (the four separate 
 structured `content`):
 
   {"findings": [
-     {"content": "**Implication:** Given the optimization-to-metric mismatch under noisy targets, try training on paired noisy realizations instead of clean references when paired SQUID acquisitions are available.\\n**Mechanism:** Noise2Noise trains a denoiser using two independent noisy observations $y_1$, $y_2$ of the same clean signal with the symmetric L2 loss\\n$$\\\\mathcal{L} = \\\\mathbb{E}\\\\left[\\\\|f_\\\\theta(y_1) - y_2\\\\|^2\\\\right]$$\\n(approximate equation, reconstructed from a degraded PDF; the original paper derives this form under zero-mean noise).\\n**Adaptation:** When two SQUID acquisitions of the same dark-matter signal are available, train with one as input and the other as the regression target; this preserves the WaveNet backbone while removing the need for a clean reference.\\n(rationale: deep-read, cross-domain (image -> 1-D signal) but the loss form transfers directly under independent noisy pairs.)",
-      "source_ref": "arxiv:1803.04189",
-      "content_paper_id": "arxiv:1803.04189",
+     {"content": "**Implication:** <one observed bottleneck and a conditional method to investigate>.\\n**Mechanism:** <the paper's source-backed method and its reported regime>.\\n**Adaptation:** <how the method might transfer to the declared task, with assumptions and caveats>.\\n(rationale: <why the cited evidence merits this confidence band>)",
+      "source_ref": "<paper_id from the supplied paper block>",
+      "content_paper_id": "<paper_id from the supplied paper block>",
       "confidence": <a number assigned per the Confidence rubric below>}
   ]}
 
@@ -98,21 +98,20 @@ a closing rationale line.
   lifted from what the per-paper block above provides about the paper —
   architecture / loss / training-regime description, plus any equation or
   pseudocode block the per-paper context exposes. Mechanism contains NO
-  LLM-added reasoning, NO speculation, NO bridging-to-SQUID logic.
+  LLM-added reasoning, NO speculation, NO task-transfer claims.
 - **Adaptation = LLM reasoning on top.** Adaptation is where you write how
-  to bridge from the paper's setup to the SQUID full-spectrum denoising
-  task. Adaptation MUST NOT contain raw equations from the source paper —
+  to bridge from the paper's setup to the declared task. Adaptation MUST NOT contain raw equations
+  from the source paper —
   those belong in Mechanism. Adaptation references the equation by
-  describing the bridging step ("apply the SNR-weighted loss on
-  high-SNR segments"), not by re-quoting it.
+  describing the task-specific bridging step, not by re-quoting it.
 
 The three labeled parts:
 
 - **Implication:** name the specific current bottleneck (or key finding) it
   addresses, and the concrete thing to try next. Ground every implication in
-  one of the listed bottlenecks. NOT "Paper X proposes dilated convolutions",
-  but "Given the high-frequency-overfitting bottleneck, Paper X's
-  receptive-field control suggests a wider dilation schedule." (≤ 40 words)
+  one of the listed bottlenecks. NOT "Paper X proposes a method",
+  but "Given the observed bottleneck, the cited method suggests testing a
+  particular intervention under its stated assumptions." (≤ 40 words)
 - **Mechanism:** the specific architectural / loss / training mechanism from
   the paper — source content only. Quote it directly from the per-paper
   block you were given:
@@ -132,11 +131,11 @@ The three labeled parts:
       Otherwise just name the algorithm in prose.
     * When the marker is `abstract_only`, the per-paper block carries no
       equations or pseudocode — describe the mechanism in prose only.
-    * Carry over any training-regime qualifier ("under frequency-split
-      training") and never present a regime-specific result as general.
+    * Carry over any training-regime qualifier and never present a
+      regime-specific result as general.
   (≤ 80 words; the equation LaTeX itself does not count toward the cap.)
-- **Adaptation:** how to bridge from the paper's domain/setup to the agent's
-  task (full-spectrum 1-D SQUID denoising). LLM reasoning on top of the
+- **Adaptation:** how to bridge from the paper's domain/setup to the declared
+  task. LLM reasoning on top of the
   Mechanism. State a concrete adaptation step or flag a transfer caveat.
   **MUST NOT contain raw equations from the source paper** — those belong
   in Mechanism. Reference equations by their effect, not by re-quoting.
@@ -152,21 +151,20 @@ paper id inside `content`; the id belongs ONLY in `source_ref`."""
 _SYNTHESIS_CONTENT_FORMAT_V0 = """Produce EXACTLY this shape (note the four separate keys per finding):
 
   {"findings": [
-     {"content": "Given the optimization-to-metric mismatch under noisy targets, Noise2Noise\'s symmetric L2 loss across two independent noisy observations suggests training with one SQUID acquisition as input and another as target — removing the need for a clean reference. (rationale: deep-read, cross-domain (image -> 1-D signal) but the loss form transfers directly under independent noisy pairs.)",
-      "source_ref": "arxiv:1803.04189",
-      "content_paper_id": "arxiv:1803.04189",
+     {"content": "Given <observed bottleneck>, <cited method> suggests <conditional intervention> if its assumptions hold for the declared task. (rationale: <source support and transfer caveat>)",
+      "source_ref": "<paper_id from the supplied paper block>",
+      "content_paper_id": "<paper_id from the supplied paper block>",
       "confidence": <a number assigned per the Confidence rubric below>}
   ]}
 
 `content` format — every item MUST:
 - Name the specific current bottleneck (or key finding) it addresses.
 - State the concrete implication for what to try next. NOT "Paper X proposes
-  dilated convolutions", but "Given the high-frequency-overfitting bottleneck,
-  Paper X\'s dilated-convolution receptive-field control suggests a wider
-  dilation schedule."
+  a method", but "Given the observed bottleneck, the cited method suggests
+  testing an intervention under its stated assumptions."
 - End with a one-line rationale in parentheses justifying the `confidence` score.
-- Carry over any training-regime qualifier from the paper (e.g. "under
-  frequency-split training"); never present a regime-specific result as general.
+- Carry over any training-regime qualifier from the paper; never present a
+  regime-specific result as general.
 - Do NOT write the paper id inside `content`; the id belongs ONLY in `source_ref`
   and `content_paper_id` (both must hold the same paper_id — see Hard rules
   in the system prompt)."""
@@ -234,8 +232,8 @@ MUST read through these artifacts and never reproduce them in your output:
 ## Mathematics (degraded source)
 
 Equations extract poorly from this source. **Describe** important mathematical
-methods in plain prose first (e.g. "the denoising score is a log-ratio of
-signal-band to noise-band power"). Then, ONLY when the equation's structure is
+methods in plain prose first (e.g. "the reported objective is a ratio of
+signal and background power"). Then, ONLY when the equation's structure is
 clear enough to be useful, emit an approximate LaTeX form in
 `key_equations_md`. If a paper's equations cannot be reliably reconstructed,
 leave `key_equations_md=""` — degraded LaTeX is worse than no LaTeX.
@@ -351,6 +349,7 @@ def render_search_decision_prompt(
     dimension_counts: dict[str, int] | None = None,
     task_description: str = "",
     confidence_rubric: ConfidenceRubric | None = None,
+    data_analysis_context: str = "",
 ) -> tuple[str, str]:
     """Build the (system, user) prompt for one dynamic-search-loop decision.
 
@@ -482,6 +481,7 @@ def render_search_decision_prompt(
         f"Key findings so far:\n{_bullets(key_findings)}\n\n"
         f"Open bottlenecks:\n{_bullets(bottlenecks)}\n\n"
         f"Take-home message: {take_home_message or '(none)'}\n\n"
+        f"{data_analysis_context}"
         f"{prior_block}"
         f"{escalation_history_block}"
         "## Papers retrieved so far this run\n"
@@ -592,6 +592,7 @@ def render_synthesis_prompt(
     findings_verbosity: Literal[0, 1] = 1,
     synthesis_config: SynthesisConfig | None = None,
     task_description: str = "",
+    data_analysis_context: str = "",
 ) -> tuple[str, str]:
     """Build the (system, user) prompt for the final findings synthesis.
 
@@ -672,11 +673,43 @@ def render_synthesis_prompt(
         f"Open bottlenecks:\n{bottlenecks_block}\n\n"
         f"Key findings:\n{_bullets(key_findings)}\n\n"
         f"Take-home message: {take_home_message or '(none)'}\n\n"
+        f"{data_analysis_context}"
         "## Papers retrieved this iteration\n\n"
         f"{papers_block}\n\n"
         f"{closing_instruction}"
     )
     return system_prompt, user_prompt
+
+
+def render_data_analysis_context(evidence) -> str:
+    """Render bounded observed-data evidence without turning it into authority."""
+
+    if evidence is None:
+        return ""
+    if hasattr(evidence, "model_dump"):
+        evidence = evidence.model_dump(mode="json")
+    lines = [
+        "## Observations measured by Data Analysis",
+        f"Report {evidence['report_id']}: {evidence['executive_summary']}",
+    ]
+    for finding in evidence.get("findings", []):
+        lines.append(f"- [{finding['confidence_level']} confidence] {finding['statement']}")
+        lines.append(f"  Modeling relevance: {finding['modeling_relevance']}")
+        for measurement in finding.get("measurements", []):
+            unit = f" {measurement['unit']}" if measurement.get("unit") else ""
+            lines.append(
+                f"  Measurement {measurement['result_key']}: "
+                f"{measurement.get('value')}{unit} ({measurement['description']})"
+            )
+    for limitation in evidence.get("limitations", []):
+        lines.append(f"- Measurement limitation: {limitation}")
+    for question in evidence.get("unresolved_questions", []):
+        lines.append(f"- Unresolved measured-data question: {question}")
+    lines.append(
+        "Use these as observations that may motivate searches. Do not claim that a cited "
+        "paper validated this specific dataset, and do not treat this context as data access."
+    )
+    return "\n".join(lines) + "\n\n"
 
 
 # ---------------------------------------------------------------------------

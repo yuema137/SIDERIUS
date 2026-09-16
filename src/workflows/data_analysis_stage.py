@@ -9,6 +9,7 @@ from pathlib import Path
 from agent.schemas.data_analysis.common import CallerIdentity, CertifiedArtifactRef
 from agent.schemas.data_analysis.report import DataAnalysisReport
 from agent.schemas.interpretation import InterpretationOutput
+from agent.schemas.literature_review import LiteratureReviewOutput
 from agent.schemas.proposal import ProposalInput
 from agent.schemas.protocols.data_analysis_to_ml_model_propose import local_typed_evidence
 from agent.schemas.protocols.interpreter_to_data_analysis import (
@@ -40,6 +41,7 @@ def run_optional_data_analysis(
     llm_kwargs: dict,
     bridge_factory,
     historical_model_inference_capability: HistoricalModelInferenceCapability | None = None,
+    literature_output: LiteratureReviewOutput | None = None,
 ) -> WorkflowAnalysisOutput | None:
     """Run the independent capability only when the composition enables its edge.
 
@@ -70,6 +72,12 @@ def run_optional_data_analysis(
         )
     except MissingAnalysisBriefError:
         return None
+    if literature_output is not None:
+        from agent.schemas.protocols.ml_literature_review_to_data_analysis import (
+            attach_typed_evidence,
+        )
+
+        analysis_input = attach_typed_evidence(analysis_input, literature_output)
 
     report = DataAnalysisAgent(
         task_analysis_capability=binding.task_analysis_capability,

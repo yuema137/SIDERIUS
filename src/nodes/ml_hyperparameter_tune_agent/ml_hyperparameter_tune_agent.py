@@ -570,6 +570,7 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
         experiment_arm=agent_input.experiment_arm,
         lit_review_enabled=agent_input.lit_review_enabled,
         lit_review_config_sha256=agent_input.lit_review_config_sha256,
+        scientific_evidence_order=agent_input.scientific_evidence_order,
         baseline_isolation=agent_input.baseline_isolation,
         # F-SCANF-1 — the formal round's evaluation FRACTION, CANONICAL, so
         # it is threaded explicitly here rather than read ambiently.

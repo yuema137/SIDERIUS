@@ -18,6 +18,7 @@ from .common import (
     FrozenModel,
     NonEmptyStr,
     Sha256,
+    canonical_json_bytes,
     canonical_sha256,
 )
 from .generated_skill import GeneratedExperimentSkillRegistryRef
@@ -89,6 +90,28 @@ class PriorEvidenceRef(FrozenModel):
     artifact_ref: CertifiedArtifactRef
 
 
+class DataAnalysisLiteratureFinding(FrozenModel):
+    """One source-backed literature item available as reasoning context."""
+
+    source_ref: NonEmptyStr = Field(max_length=1024)
+    content: NonEmptyStr = Field(max_length=8000)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class DataAnalysisLiteratureEvidence(FrozenModel):
+    """Data-Analysis-owned projection; never an access or skill grant."""
+
+    review_run_name: NonEmptyStr = Field(max_length=256)
+    findings: tuple[DataAnalysisLiteratureFinding, ...] = Field(default=(), max_length=32)
+    retrieved_paper_ids: tuple[NonEmptyStr, ...] = Field(default=(), max_length=128)
+
+    @model_validator(mode="after")
+    def validate_prompt_budget(self) -> DataAnalysisLiteratureEvidence:
+        if len(canonical_json_bytes(self)) > 65_536:
+            raise ValueError("literature evidence exceeds the 65536-byte reasoning limit")
+        return self
+
+
 class SkillPackRef(FrozenModel):
     """Configured pack location plus the manifest identity expected by the caller."""
 
@@ -105,6 +128,14 @@ class DataAnalysisInput(FrozenModel):
     analysis_brief: AnalysisBrief
     available_assets: tuple[AnalysisAsset, ...]
     prior_evidence: tuple[PriorEvidenceRef, ...] = ()
+    literature_evidence: DataAnalysisLiteratureEvidence | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Optional source-backed hypotheses and caveats supplied by a workflow edge. "
+            "Reasoning context only; it cannot grant assets, information or operations."
+        ),
+    )
     access_policy: AnalysisAccessPolicy
     resource_envelope: AnalysisResourceEnvelope
     allowed_skill_packs: tuple[SkillPackRef, ...]

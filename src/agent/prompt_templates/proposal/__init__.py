@@ -303,6 +303,34 @@ def render_data_analysis_evidence(evidence) -> str:
     return "\n".join(lines)
 
 
+def render_literature_review_evidence(evidence) -> str:
+    """Render cited literature separately from observed experiment evidence."""
+
+    if evidence is None:
+        return ""
+    if hasattr(evidence, "model_dump"):
+        evidence = evidence.model_dump(mode="json")
+    card = evidence["agent_card"]
+    lines = [
+        "## Machine Learning Literature Review Evidence",
+        f"Contributor: {card['agent_name']} ({card['trust_level']})",
+        f"Coverage: {card['coverage']}",
+        f"Limitations: {card['limitations']}",
+    ]
+    for finding in evidence.get("findings", []):
+        confidence = finding.get("confidence")
+        confidence_label = "unscored" if confidence is None else str(confidence)
+        lines.append(
+            f"- Literature claim [{finding['source_ref']}; confidence={confidence_label}]: "
+            f"{finding['content']}"
+        )
+    lines.append(
+        "Treat these as source-backed external claims, not observations from our data. "
+        "Check applicability against Interpretation and Data Analysis evidence."
+    )
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # L5 — Loss-registry awareness in the proposer prompt
 # ---------------------------------------------------------------------------

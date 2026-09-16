@@ -48,6 +48,7 @@ from pydantic import ValidationError
 from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.literature_review import (
     DIMENSION_LABELS,
+    render_data_analysis_context,
     render_paper_extract_prompt,
     render_search_decision_prompt,
     render_synthesis_prompt,
@@ -97,9 +98,8 @@ _AGENT_CARD = AgentCard(
     trust_level="soft_prior",
     # The proposer reads raw confidence numbers off each finding; the rubric
     # legend here tells it what those numbers mean (single source of truth =
-    # ConfidenceRubric — invariant 3). Uses the DEFAULT rubric. If a run ever
-    # overrides inp.confidence_rubric, this static card would describe the
-    # default instead — build the card per-run from inp.confidence_rubric then.
+    # ConfidenceRubric — invariant 3). The output below replaces this default
+    # legend with the run's effective rubric before publishing the card.
     trust_guidance=ConfidenceRubric().render_for_consumer(),
 )
 
@@ -305,6 +305,12 @@ class MLLiteratureReviewAgent:
     # ------------------------------------------------------------------
     def run(self, inp: LiteratureReviewInput) -> LiteratureReviewOutput:
         inp = LiteratureReviewInput.model_validate(inp)
+        published_agent_card = AgentCard.model_validate(
+            {
+                **_AGENT_CARD.model_dump(),
+                "trust_guidance": inp.confidence_rubric.render_for_consumer(),
+            }
+        )
         started_at = _utc_now()
         self.bridge = self._bridge_factory(provider=inp.llm_provider, model_id=inp.llm_model_id)
         # Search-decision bridge: the cheap, templated query/escalate/done step may
@@ -348,7 +354,7 @@ class MLLiteratureReviewAgent:
         findings = self._synthesize(inp, retrieved)
 
         out = LiteratureReviewOutput(
-            agent_card=_AGENT_CARD,
+            agent_card=published_agent_card,
             findings=findings,
             new_vocab_candidates=[],  # v1: deliberately empty
             suggested_mindset=None,  # v1: deliberately empty
@@ -439,7 +445,8 @@ class MLLiteratureReviewAgent:
         index: dict[str, RetrievedPaper],
     ) -> tuple[int, list[SearchDecisionRecord]]:
         cfg = inp.dynamic_search
-        hist = inp.experiment_history
+        hist = inp.interpretation_evidence
+        data_analysis_context = render_data_analysis_context(inp.data_analysis_evidence)
         rounds = 0  # search rounds executed (== search_rounds_used)
         escalations_this_round = 0  # reset on each search; capped per round
         prior_search_results: list[tuple[str, int]] = []  # (query, hit_count) fed back per round
@@ -485,16 +492,17 @@ class MLLiteratureReviewAgent:
             iters += 1
             papers_seen = [self._paper_summary(rp) for rp in retrieved]
             sys_prompt, user_prompt = render_search_decision_prompt(
-                key_findings=hist.key_findings,
-                bottlenecks=hist.bottlenecks,
+                key_findings=list(hist.key_findings),
+                bottlenecks=list(hist.bottlenecks),
                 take_home_message=hist.take_home_message,
-                explored_models=hist.model_types,
+                explored_models=list(hist.model_types),
                 papers_seen=papers_seen,
                 escalation_allowed=cfg.escalation_allowed,
                 prior_search_results=prior_search_results,
                 prior_escalation_results=prior_escalation_results,  # Fix 3 (6.5b-2)
                 dimension_counts=dimension_counts,  # Fix 5 (6.5b-4)
                 task_description=self._task_description,  # Fix 6 (6.5b-5)
+                data_analysis_context=data_analysis_context,
             )
             # The search-decision is the cheap, templated step — routed through
             # self.search_bridge (a cheaper model when configured; else the main
@@ -762,18 +770,20 @@ class MLLiteratureReviewAgent:
     def _synthesize(
         self, inp: LiteratureReviewInput, retrieved: list[RetrievedPaper]
     ) -> list[ExpertContextItem]:
-        hist = inp.experiment_history
+        hist = inp.interpretation_evidence
+        data_analysis_context = render_data_analysis_context(inp.data_analysis_evidence)
         papers = [self._paper_for_synthesis(rp) for rp in retrieved]
         try:
             sys_prompt, user_prompt = render_synthesis_prompt(
-                key_findings=hist.key_findings,
-                bottlenecks=hist.bottlenecks,
+                key_findings=list(hist.key_findings),
+                bottlenecks=list(hist.bottlenecks),
                 take_home_message=hist.take_home_message,
                 papers=papers,
                 confidence_rubric=inp.confidence_rubric,
                 findings_verbosity=inp.findings_verbosity,
                 synthesis_config=inp.synthesis_config,
                 task_description=self._task_description,  # Fix 6 (6.5b-5)
+                data_analysis_context=data_analysis_context,
             )
             raw = self.bridge.generate(sys_prompt, user_prompt, label="lit_review.synthesis")
         except Exception as e:  # resilience boundary
@@ -1074,6 +1084,10 @@ def _build_cli_input(args: argparse.Namespace) -> LiteratureReviewInput:
     else:
         history_path = Path(args.workspace) / f"interpretation_{args.run_name}.json"
     experiment_history = load_experiment_history(history_path)
+    from agent.schemas.protocols.interpreter_to_ml_literature_review import (
+        local_typed_evidence,
+    )
+
     bound_metric = resolve_bound_run_metric()
     assert bound_metric is not None  # main() owns the full composition lifetime.
     stamp = experiment_history.metric_identity
@@ -1112,7 +1126,7 @@ def _build_cli_input(args: argparse.Namespace) -> LiteratureReviewInput:
 
     return LiteratureReviewInput.model_validate(
         {
-            "experiment_history": experiment_history,
+            "interpretation_evidence": local_typed_evidence(experiment_history),
             "root_papers": lit_review_config.get("root_papers", []),
             "dynamic_search": lit_review_config.get("dynamic_search", {}),
             "synthesis_config": lit_review_config.get("synthesis", {}),
@@ -1158,7 +1172,7 @@ def _run_bound_cli(args: argparse.Namespace) -> None:
 
 def _run_cli_review(agent_input: LiteratureReviewInput) -> None:
     """Execute a validated CLI input and print the existing operator summary."""
-    experiment_history = agent_input.experiment_history
+    experiment_history = agent_input.interpretation_evidence
     assert agent_input.storage.local is not None
     workspace = Path(agent_input.storage.local.workspace)
     print(

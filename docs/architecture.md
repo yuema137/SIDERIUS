@@ -335,14 +335,18 @@ Fan-in sources are additional function parameters beyond the primary source.
 
 This table is the ONE authoritative inventory (issue #262); the package
 docstring in `agent/schemas/protocols/__init__.py` and every node `.md` defer to
-it. Eight modules exist. The two Data Analysis edges are local typed adapters;
-the six pre-existing ML edges retain their database placeholders.
+it. Eleven modules exist. The Data Analysis/Literature composition edges are
+local typed adapters; the six pre-existing ML edges retain their database
+placeholders.
 
 | protocol module (`agent/schemas/protocols/`) | producer → consumer | function | status | consumes → populates |
 |---|---|---|---|---|
 | `ml_model_tune_to_ml_result_interp.py` | `ml_hyperparameter_tune_agent` → `result_interpretation_agent` | `local_all_records` / `database_all_records` | built; unit-tested. **Not called by `workflows/model_exploration.py`**, which converts tuner output with the interpreter-owned `tuning_output_to_model_run_summary` (`:356`) instead | full `HyperparamTuningOutput` → all experiment records as `SummaryGroup`, model type |
 | `ml_result_interp_to_ml_model_propose.py` | `result_interpretation_agent` → `ml_model_proposal_agent` | `local_full_context` / `database_full_context` | built; used by the workflow (`model_exploration.py:2543`) | full `InterpretationOutput` (+ external-agent channels, chain state) → `ProposalInput` (`interpretation_evidence`, existing model types, constraints) |
-| `ml_literature_review_to_ml_model_propose.py` | `ml_literature_review` → `ml_model_proposal_agent` (fan-in with the interpretation edge) | `local_all_channels` / `database_all_channels` | built; used by the workflow (`model_exploration.py:576-587`, imported directly — not re-exported by `protocols/__init__.py`); unit-tested; **no integration test** | `LiteratureReviewOutput` → the four kwargs (`expert_context`, `agent_cards`, `mindset`, `vocab_seed`) spread into `local_full_context` |
+| `interpreter_to_ml_literature_review.py` | `result_interpretation_agent` → `ml_literature_review` | `local_typed_evidence` | built; used by workflow and standalone adapter; tested | `InterpretationOutput` → bounded Literature-owned interpretation evidence |
+| `data_analysis_to_ml_literature_review.py` | `data_analysis_agent` → `ml_literature_review` | `local_typed_evidence` | built; optional workflow edge; tested | canonical report findings, measurements and limitations → `LiteratureReviewDataEvidence` |
+| `ml_literature_review_to_data_analysis.py` | `ml_literature_review` → `data_analysis_agent` | `local_typed_evidence` / `attach_typed_evidence` | built; optional workflow edge; tested | cited findings → non-authoritative `DataAnalysisLiteratureEvidence` |
+| `ml_literature_review_to_ml_model_propose.py` | `ml_literature_review` → `ml_model_proposal_agent` | `local_typed_evidence`; legacy `local_all_channels` | typed path built, workflow-used and integration-tested; legacy channel adapter retained | `LiteratureReviewOutput` → distinct `ProposerLiteratureReviewEvidence` field |
 | `interpreter_to_data_analysis.py` | `result_interpretation_agent` → `data_analysis_agent` | `local_analysis_input` | built; optional workflow edge; unit-tested | validated `AnalysisBrief` + caller-owned context/assets/policy/packs/resources → `DataAnalysisInput` |
 | `data_analysis_to_ml_model_propose.py` | `data_analysis_agent` → `ml_model_proposal_agent` | `local_typed_evidence` | built; optional bounded fan-in; unit-tested | canonical `DataAnalysisReport` → edge-owned `ProposerDataAnalysisEvidence` on `ProposalInput` |
 | `ml_model_propose_to_ml_model_impl.py` | `ml_model_proposal_agent` → `ml_model_implementor` | `local_full_spec` / `database_full_spec` | built; used by the workflow (`model_exploration.py:2666`) | `ProposalOutput` → candidate id, model name, output type, description, math definition, baseline config, custom loss spec (`reference_code` is attached afterwards by the workflow, `:2696`) |
@@ -367,8 +371,8 @@ conditional branching, and loops by re-traversing cycles.
 ```
 1. ml_hyperparameter_tune_agent → initial tuning run (N rounds)
 2. result_interpretation_agent  → identify bottlenecks        [ml_model_tune_to_ml_result_interp.py::local_all_records]
-3. data_analysis_agent          → optional authorized analysis [interpreter_to_data_analysis.py::local_analysis_input]
-4. ml_model_proposal_agent      → propose from typed evidence  [data_analysis_to_ml_model_propose.py::local_typed_evidence]
+3. scientific evidence stage   → optional Data Analysis and Literature Review in workflow-selected order
+4. ml_model_proposal_agent      → propose from separate interpretation, literature and measured-data evidence
 5. ml_model_implementor         → write model code + tests    [ml_model_propose_to_ml_model_impl.py::local_full_spec]
 6. ml_code_validator_agent      → run tests, confirm valid    [ml_model_impl_to_ml_model_valid.py::local_all_fields]
 7. ml_hyperparameter_tune_agent → tune the new model          [ml_model_valid_to_ml_model_tune.py::local_validated_model]
@@ -376,8 +380,9 @@ conditional branching, and loops by re-traversing cycles.
 ```
 
 (The bracketed names are the real `module::function` pairs under
-`agent/schemas/protocols/`; the optional literature-review stage between 2 and
-3 adds `ml_literature_review_to_ml_model_propose.py::local_all_channels`.)
+`agent/schemas/protocols/`. `WorkflowLaunchConfig.scientific_evidence_order`
+selects `analysis_then_literature` or `literature_then_analysis`; neither node
+imports or invokes the other.)
 
 ### Recursive hierarchy
 

@@ -10,16 +10,17 @@ Each module contains protocol functions named {transport}_{data_scope}.
 
 Workflows and orchestrators import from this module and choose which protocol to apply.
 
-Implemented edges (eight; the authoritative table is docs/architecture.md
+Implemented edges (eleven; the authoritative table is docs/architecture.md
 "Implemented protocols")
 -----------------
 ml_model_tune_to_ml_result_interp         ml_hyperparameter_tune_agent -> result_interpretation_agent
 ml_result_interp_to_ml_model_propose      result_interpretation_agent -> ml_model_proposal_agent
+interpreter_to_ml_literature_review       result_interpretation_agent -> ml_literature_review
+data_analysis_to_ml_literature_review     data_analysis_agent -> ml_literature_review
+ml_literature_review_to_data_analysis     ml_literature_review -> data_analysis_agent
 ml_literature_review_to_ml_model_propose  ml_literature_review -> ml_model_proposal_agent
-                                          (fan-in with the interpretation edge: returns the four
-                                          external-agent kwargs the workflow spreads into
-                                          local_full_context; imported directly by
-                                          workflows/model_exploration.py, NOT re-exported here)
+                                          (typed bounded fan-in; a legacy four-channel adapter
+                                          remains for independent compatibility callers)
 ml_model_propose_to_ml_model_impl         ml_model_proposal_agent -> ml_model_implementor
 ml_model_impl_to_ml_model_valid           ml_model_implementor -> ml_code_validator_agent
 ml_model_valid_to_ml_model_tune           ml_code_validator_agent -> ml_hyperparameter_tune_agent

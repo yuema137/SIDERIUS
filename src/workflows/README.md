@@ -19,7 +19,8 @@ into here one iteration at a time.
 
 | file | surface |
 |---|---|
-| `model_exploration.py` | `run_workflow(*, launch, workspace, run_name, …) -> list[HyperparamTuningOutput]` — THE workflow: per iteration interpret → *(literature review)* → propose → implement → validate → tune. Also a module CLI (`python src/workflows/model_exploration.py --help`) accepting `--task_composition` |
+| `model_exploration.py` | `run_workflow(*, launch, workspace, run_name, …) -> list[HyperparamTuningOutput]` — THE workflow: per iteration interpret → workflow-selected scientific evidence stage → propose → implement → validate → tune. Also a module CLI (`python src/workflows/model_exploration.py --help`) accepting `--task_composition` |
+| `scientific_evidence_stage.py` | Workflow-owned optional traversal of the independent Data Analysis and Literature Review capabilities in either `analysis_then_literature` or `literature_then_analysis` order. Nodes never call each other. |
 | `task_composition.py` | `compose_run_task_bindings(manifest_path) -> RunTaskComposition` (resolve the manifest) · `bind_run_task_composition(composition, *, physical_data_root)` (the run-scoped binding contextmanager) · `verify_composition_is_bound` · `active_composition_fingerprint` / `active_task_manifest_path` |
 | `run_config.py` | `WorkflowLaunchConfig` — the pure-transit launch config |
 | `llm_config.py` | `WorkflowLLMConfig` — per-node LLM routing, loaded from a `--llm_config` JSON |
@@ -44,6 +45,11 @@ invariants lock and effective health config (written via `core` /
 
 - **The fixed iteration path** and its retry loop (proposal attempts, tuner
   invocation, record persistence).
+- **Scientific-evidence composition**: `WorkflowLaunchConfig.scientific_evidence_order`
+  selects which independent capability runs first. Typed target-owned edges
+  carry bounded evidence to the second capability, and Proposal receives
+  Literature Review and Data Analysis through distinct fields. The order is
+  canonical run identity and changing it refuses resume into the same workspace.
 - **Manifest resolution**: the typed composition schema owns section names and
   requiredness; an unknown key is *refused, not ignored*; `file:` plugin refs
   resolve against the manifest's own directory and their content sha joins the
