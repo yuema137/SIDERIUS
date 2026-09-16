@@ -673,6 +673,9 @@ class TestCensusDLegacyLockKeySet:
             "baseline_isolation",
             # Gold campaign — the declared delta documented above.
             "advice_sha256",
+            # One inline source directive narrows the analysis run; absent/auto
+            # remains omitted for byte-compatible legacy lock serialization.
+            "analysis_source_prompt_sha256",
             # F-SCANF-1 — the declared delta documented above.
             "formal_eval_portion",
             # Workflow rules determine the executed plan and are compared.

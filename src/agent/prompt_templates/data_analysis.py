@@ -40,6 +40,33 @@ def _literature_context_block(analysis_input: DataAnalysisInput) -> str:
     )
 
 
+def _source_scope_block(analysis_input: DataAnalysisInput) -> str:
+    scope = analysis_input.effective_source_scope()
+    return (
+        f"Analysis sources: {scope.mode}. This single run-wide scope permits only declared "
+        "raw input and immutable prior models, subject to separate access policy. "
+        "Ground truth and persisted model outputs are not analysis sources. "
+        "Prior models may process authorized raw input to produce transient predictions.\n"
+        f"{_json(scope)}\n\n"
+    )
+
+
+def _planning_input(analysis_input: DataAnalysisInput) -> dict:
+    payload = analysis_input.model_dump(mode="json")
+    payload["available_assets"] = [
+        item.model_dump(mode="json") for item in analysis_input.planning_assets()
+    ]
+    payload["source_scope"] = analysis_input.effective_source_scope().model_dump(mode="json")
+    return payload
+
+
+def _source_catalog_block(analysis_input: DataAnalysisInput) -> str:
+    return (
+        "Source identities visible under this request (not an access grant):\n"
+        f"{_json(analysis_input.effective_source_scope())}\n\n"
+    )
+
+
 def render_skill_selection_prompt(
     analysis_input: DataAnalysisInput,
     candidates: tuple[DiscoveredAnalysisSkill, ...],
@@ -60,13 +87,13 @@ Task context:
 Human advice:
 {analysis_input.human_advice or "None"}
 
-{_literature_context_block(analysis_input)}Resource envelope:
+{_source_scope_block(analysis_input)}{_literature_context_block(analysis_input)}Resource envelope:
 {_json(analysis_input.resource_envelope)}
 
 Safe asset descriptors:
-{_json(analysis_input.available_assets)}
+{_json(analysis_input.planning_assets())}
 
-Candidate SkillCards:
+{_source_catalog_block(analysis_input)}Candidate SkillCards:
 {_json([item.card for item in candidates])}
 
 Authoritative output JSON schema:
@@ -128,10 +155,11 @@ portable path components. Do not include commentary outside JSON."""
         }
         for program, identity in generated_programs
     ]
-    user = f"""DataAnalysisInput:
-{_json(analysis_input)}
+    input_label = "DataAnalysisInput (source-scoped descriptors)"
+    user = f"""{input_label}:
+{_json(_planning_input(analysis_input))}
 
-Required identity fields:
+{_source_scope_block(analysis_input)}Required identity fields:
 input_digest = {canonical_sha256(analysis_input)}
 access_policy_digest = {canonical_sha256(analysis_input.access_policy)}
 discovery_snapshot_digest = {discovery.snapshot_digest}
@@ -220,10 +248,10 @@ rejected rather than normalized."""
 Task context:
 {_json(analysis_input.task_context)}
 
-{_literature_context_block(analysis_input)}Safe asset descriptors:
-{_json(analysis_input.available_assets)}
+{_source_scope_block(analysis_input)}{_literature_context_block(analysis_input)}Safe asset descriptors:
+{_json(analysis_input.planning_assets())}
 
-Analysis access policy (authority remains enforced later):
+{_source_catalog_block(analysis_input)}Analysis access policy (authority remains enforced later):
 {_json(analysis_input.access_policy)}
 
 Resource envelope:

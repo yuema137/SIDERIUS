@@ -12,6 +12,7 @@ from agent.schemas.data_analysis.context import (
     SkillPackRef,
 )
 from agent.schemas.data_analysis.resources import AnalysisResourceEnvelope
+from agent.schemas.data_analysis.source_scope import DeclaredAnalysisScope
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.storage import StorageConfig
 
@@ -26,6 +27,7 @@ def local_analysis_input(
     request_id: str,
     task_context: AnalysisTaskContext,
     available_assets: tuple[AnalysisAsset, ...],
+    declared_scope: DeclaredAnalysisScope,
     access_policy: AnalysisAccessPolicy,
     resource_envelope: AnalysisResourceEnvelope,
     allowed_skill_packs: tuple[SkillPackRef, ...],
@@ -50,6 +52,7 @@ def local_analysis_input(
         task_context=task_context,
         analysis_brief=interpretation.analysis_brief,
         available_assets=available_assets,
+        declared_scope=declared_scope,
         prior_evidence=prior_evidence,
         access_policy=access_policy,
         resource_envelope=resource_envelope,

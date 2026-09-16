@@ -164,6 +164,9 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     # Data Analysis workflow integration (2026-09-15). Advice is transit-only
     # caller input and does not imply that the optional topology is enabled.
     "human_advice_analysis": None,
+    # One optional inline source directive. Its exact content is pinned by
+    # _workflow_lock_identity; None/auto do not perturb the legacy lock.
+    "analysis_source_prompt": None,
     # PR-C — workflow-owned ordering of two independent evidence capabilities.
     "scientific_evidence_order": "analysis_then_literature",
 }

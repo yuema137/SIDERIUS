@@ -26,6 +26,7 @@ from agent.schemas.data_analysis.common import (
     canonical_sha256,
 )
 from agent.schemas.data_analysis.resources import SamplingPolicy
+from agent.schemas.data_analysis.source_scope import AnalysisSourceScope
 from agent.schemas.data_analysis.time import TimePrecisionRequirement
 from agent.schemas.data_analysis.trained_model import TrainedModelArtifact
 from agent.schemas.data_analysis.view_formats import TIMESERIES_ARRAY_V1
@@ -46,6 +47,9 @@ class AnalysisMaterializationRequest(FrozenModel):
     operation: AnalysisOperation
     sampling_policy: SamplingPolicy
     access_policy: AnalysisAccessPolicy
+    source_scope: AnalysisSourceScope | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_request_shape(self) -> AnalysisMaterializationRequest:

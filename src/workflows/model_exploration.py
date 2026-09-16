@@ -1773,6 +1773,7 @@ def _run_composed_data_analysis(
     run_name: str,
     storage,
     human_advice: str | None,
+    source_prompt: str | None = None,
     llm_kwargs: dict,
     bridge_factory,
     historical_model_inference_capability: "HistoricalModelInferenceCapability | None" = None,
@@ -1799,6 +1800,7 @@ def _run_composed_data_analysis(
         run_name=run_name,
         storage=storage,
         human_advice=human_advice,
+        source_prompt=source_prompt,
         llm_kwargs=llm_kwargs,
         bridge_factory=bridge_factory,
         historical_model_inference_capability=historical_model_inference_capability,
@@ -1880,6 +1882,8 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
     path the lit-review branch later opens, so the lock always pins the file
     the run reads.
     """
+    from agent.data_analysis.source_scope import source_prompt_identity
+
     return LockLaunchIdentity(
         lit_review_enabled=launch.lit_review_enabled,
         lit_review_config_sha256=lit_review_config_sha256(
@@ -1898,6 +1902,7 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
         # edit it exists to catch.
         advice_sha256=launch.advice_sha256,
         advice_path=launch.advice_path,
+        analysis_source_prompt_sha256=source_prompt_identity(launch.analysis_source_prompt),
         # F-SCANF-1 — the formal round's evaluation FRACTION, from the SAME
         # launch config the tuner child receives it from, so the chain lock
         # and the tuner sub-workspace lock cannot disagree.
@@ -2742,6 +2747,7 @@ def run_workflow(
                 run_name=bindings.run_name,
                 storage=_storage,
                 human_advice=launch.human_advice_analysis,
+                source_prompt=launch.analysis_source_prompt,
                 llm_kwargs=bindings.llm_config.get("data_analysis"),
                 bridge_factory=bridge_factory,
                 historical_model_inference_capability=historical_model_inference_capability,
@@ -3798,6 +3804,12 @@ def main():
         help="Human guidance for the optional Data Analysis step.",
     )
     parser.add_argument(
+        "--analysis_source_prompt",
+        type=str,
+        default=None,
+        help="Inline source directive: auto or lock: raw=<asset IDs|all>; models=<all|none|last:N|ids:IDs>.",
+    )
+    parser.add_argument(
         "--advice_propose",
         type=str,
         default=None,
@@ -3862,6 +3874,7 @@ def main():
                 file_index=args.file_index,
                 human_advice_interpret=args.advice_interpret,
                 human_advice_analysis=args.advice_analysis,
+                analysis_source_prompt=args.analysis_source_prompt,
                 human_advice_propose=args.advice_propose,
                 human_advice_implement=args.advice_implement,
                 human_advice_validate=args.advice_validate,

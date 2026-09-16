@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent.schemas.data_analysis.assets import AnalysisAsset, MaterializedAnalysisView
+from agent.schemas.data_analysis.source_scope import AnalysisSourceScope
 from agent.schemas.data_analysis.trained_model import ModelInferenceReceipt
 from execute_tools.analysis_materialization import TaskAnalysisCapability
 from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
@@ -34,6 +35,7 @@ def prepare_invocation_materializations(
     inference_capability: HistoricalModelInferenceCapability | None,
     available_assets: dict[str, AnalysisAsset],
     access_policy,
+    source_scope: AnalysisSourceScope | None = None,
     resource_envelope,
     deadline_monotonic_s: float,
     destination_root: Path,
@@ -52,6 +54,7 @@ def prepare_invocation_materializations(
         invocation,
         available_assets=available_assets,
         access_policy=access_policy,
+        source_scope=source_scope,
     )
     ordinary_ids = {
         binding.plan_binding.binding_id
@@ -95,6 +98,7 @@ def prepare_invocation_materializations(
             output_requests=requests,
             available_assets=available_assets,
             access_policy=access_policy,
+            source_scope=source_scope,
             input_directory=destination_root / f"{binding_id}-inputs",
             output_directory=destination_root / f"{binding_id}-output",
             resource_envelope=resource_envelope,

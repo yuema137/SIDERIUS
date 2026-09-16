@@ -54,6 +54,17 @@ def test_optional_llm_config_is_not_emitted_as_an_empty_flag() -> None:
     assert "--llm_config" not in tokens
 
 
+def test_inline_analysis_source_lock_reaches_iteration_without_an_advice_file() -> None:
+    base = ("--workspace", "/tmp/workspace", "--run_name", "test")
+    tokens = _build(
+        *base, "--analysis_source_prompt", "'lock: raw=validation-input; models=last:2'"
+    )
+    index = tokens.index("--analysis_source_prompt")
+    assert tokens[index + 1] == "lock: raw=validation-input; models=last:2"
+    assert "--human_advice_file" not in tokens
+    assert "--analysis_source_prompt" not in _build(*base)
+
+
 def test_vram_preflight_watchdogs_reach_each_iteration() -> None:
     """A chain-level override must not stop at the shell wrapper."""
     tokens = _build(

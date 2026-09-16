@@ -6,6 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent.data_analysis.source_scope import apply_source_prompt
 from agent.schemas.data_analysis.common import CallerIdentity, CertifiedArtifactRef
 from agent.schemas.data_analysis.report import DataAnalysisReport
 from agent.schemas.interpretation import InterpretationOutput
@@ -50,6 +51,7 @@ def run_optional_data_analysis(
     run_name: str,
     storage: StorageConfig,
     human_advice: str | None,
+    source_prompt: str | None = None,
     llm_kwargs: dict,
     bridge_factory,
     historical_model_inference_capability: HistoricalModelInferenceCapability | None = None,
@@ -79,6 +81,8 @@ def run_optional_data_analysis(
             binding,
             sources=historical_sources,
             task_composition_fingerprint=task_composition_fingerprint,
+            run_name=run_name,
+            workspace_root=Path(chain_workspace),
         )
         binding = derived.binding
         if derived.artifact_roots_by_sha256 and historical_model_inference_capability is None:
@@ -101,6 +105,7 @@ def run_optional_data_analysis(
             request_id=request_id,
             task_context=binding.task_context,
             available_assets=binding.available_assets,
+            declared_scope=binding.declared_scope,
             access_policy=binding.access_policy,
             resource_envelope=binding.resource_envelope,
             allowed_skill_packs=binding.allowed_skill_packs,
@@ -121,6 +126,8 @@ def run_optional_data_analysis(
         )
 
         analysis_input = attach_typed_evidence(analysis_input, literature_output)
+
+    analysis_input = apply_source_prompt(analysis_input, source_prompt)
 
     report = DataAnalysisAgent(
         task_analysis_capability=binding.task_analysis_capability,

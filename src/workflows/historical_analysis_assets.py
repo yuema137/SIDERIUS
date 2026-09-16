@@ -15,6 +15,7 @@ from agent.schemas.data_analysis.assets import (
     AssetProvenance,
     TrainedModelArtifactLocation,
 )
+from agent.schemas.data_analysis.source_scope import DeclaredAnalysisScope
 from agent.schemas.data_analysis.trained_model import TrainedModelArtifact
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
 from execute_tools.analysis_materialization import (
@@ -102,14 +103,10 @@ def derive_historical_analysis_assets(
     *,
     sources: tuple[HistoricalTuningSource, ...],
     task_composition_fingerprint: str,
+    run_name: str,
+    workspace_root: Path,
 ) -> HistoricalAnalysisAssets:
-    """Expose only certified prior models in the latest eligible tuning output.
-
-    The latest artifact-bearing output is the workflow's already-ordered
-    prior-evidence unit; every artifact-bearing record in it is visible,
-    with no score ranking or filename-based recovery. Earlier outputs are
-    not silently mixed into that iteration's scientific question.
-    """
+    """Expose all certified prior models from this run in completion order."""
 
     base_id = binding.historical_inference_base_asset_id
     if base_id is None or not sources:
@@ -129,72 +126,93 @@ def derive_historical_analysis_assets(
         raise ValueError("dataset profile is not UTF-8 JSON") from exc
 
     dynamic: list[AnalysisAsset] = []
+    dynamic_by_id: dict[str, AnalysisAsset] = {}
     roots: dict[str, Path] = {}
-    latest = next(
-        (
-            source
-            for source in reversed(sources)
-            if any(record.trained_model_artifact_ref for record in source.output.all_records)
-        ),
-        None,
-    )
-    if latest is None:
-        return HistoricalAnalysisAssets(binding=binding, artifact_roots_by_sha256={})
-    for record in latest.output.all_records:
-        if record.trained_model_artifact_ref is None:
-            continue  # A legacy/failed record never becomes a guessed model.
-        artifact = _load_record_artifact(latest, record)
-        task_binding = artifact.task_inference_binding
-        if task_binding.task_composition_fingerprint != task_composition_fingerprint:
-            raise ValueError("historical model belongs to another task composition")
-        config_bytes = read_certified_artifact(latest.artifact_root, artifact.model_config_ref)
-        try:
-            config_json = config_bytes.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError("certified historical model config is not UTF-8 JSON") from exc
-        request = HistoricalInferenceInputDerivationRequest(
-            base_asset=base,
-            model_artifact=artifact,
-            model_config_json=config_json,
-            dataset_profile_json=profile_json,
-        )
-        input_asset = validate_derived_historical_inference_input_asset(
-            request,
-            capability.derive_historical_inference_input_asset(request),
-        )
-        # The task owns scope containment. The model asset shares the exact
-        # task-certified scope; inference still needs an explicit plan binding.
-        model_asset = AnalysisAsset(
-            asset_id=f"historical-model-{artifact.model_artifact_id}",
-            asset_type="trained_model",
-            description=f"Certified historical model {artifact.model_artifact_id}",
-            location=TrainedModelArtifactLocation(
-                artifact_ref=record.trained_model_artifact_ref.artifact_ref,
-                artifact=artifact,
-            ),
-            provenance=AssetProvenance(
-                producer="certified-training-record",
-                run_id=artifact.training_run.run_name,
-                iteration_id=artifact.training_run.iteration_id,
-                source_asset_ids=(input_asset.asset_id,),
-            ),
-            authorized_scope=input_asset.authorized_scope,
-            split_id=input_asset.split_id,
-            allowed_operations=("infer",),
-        )
-        dynamic.extend((input_asset, model_asset))
-        for ref in (artifact.checkpoint.ref, artifact.model_config_ref):
-            previous = roots.setdefault(ref.sha256, latest.artifact_root)
-            if previous != latest.artifact_root:
-                raise ValueError("one artifact digest resolves to conflicting workspace roots")
+    certified_workspace = workspace_root.resolve()
+    for source in sources:
+        if source.output.run_name != run_name:
+            continue
+        if not source.artifact_root.resolve().is_relative_to(certified_workspace):
+            raise ValueError("historical model artifact lies outside the current workspace")
+        for record in source.output.all_records:
+            if record.trained_model_artifact_ref is None:
+                continue  # A legacy/failed record never becomes a guessed model.
+            artifact = _load_record_artifact(source, record)
+            if artifact.training_run.run_name != run_name:
+                raise ValueError("historical model belongs to another run")
+            task_binding = artifact.task_inference_binding
+            if task_binding.task_composition_fingerprint != task_composition_fingerprint:
+                raise ValueError("historical model belongs to another task composition")
+            config_bytes = read_certified_artifact(source.artifact_root, artifact.model_config_ref)
+            try:
+                config_json = config_bytes.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError("certified historical model config is not UTF-8 JSON") from exc
+            request = HistoricalInferenceInputDerivationRequest(
+                base_asset=base,
+                model_artifact=artifact,
+                model_config_json=config_json,
+                dataset_profile_json=profile_json,
+            )
+            input_asset = validate_derived_historical_inference_input_asset(
+                request,
+                capability.derive_historical_inference_input_asset(request),
+            )
+            # The task owns scope containment. The model asset shares its
+            # task-certified input scope; inference needs an explicit binding.
+            model_asset = AnalysisAsset(
+                asset_id=f"historical-model-{artifact.model_artifact_id}",
+                asset_type="trained_model",
+                description=f"Certified historical model {artifact.model_artifact_id}",
+                location=TrainedModelArtifactLocation(
+                    artifact_ref=record.trained_model_artifact_ref.artifact_ref,
+                    artifact=artifact,
+                ),
+                provenance=AssetProvenance(
+                    producer="certified-training-record",
+                    run_id=artifact.training_run.run_name,
+                    iteration_id=artifact.training_run.iteration_id,
+                    source_asset_ids=(input_asset.asset_id,),
+                ),
+                authorized_scope=input_asset.authorized_scope,
+                split_id=input_asset.split_id,
+                allowed_operations=("infer",),
+            )
+            for candidate in (input_asset, model_asset):
+                existing = dynamic_by_id.get(candidate.asset_id)
+                if existing is None:
+                    dynamic_by_id[candidate.asset_id] = candidate
+                    dynamic.append(candidate)
+                elif existing != candidate:
+                    raise ValueError(
+                        "historical inference asset identity maps to conflicting declarations"
+                    )
+            for ref in (artifact.checkpoint.ref, artifact.model_config_ref):
+                previous = roots.setdefault(ref.sha256, source.artifact_root)
+                if previous != source.artifact_root:
+                    raise ValueError("one artifact digest resolves to conflicting workspace roots")
 
     declared_ids = {asset.asset_id for asset in binding.available_assets}
-    derived_ids = [asset.asset_id for asset in dynamic]
-    if len(set(derived_ids)) != len(derived_ids) or declared_ids.intersection(derived_ids):
+    derived_ids = set(dynamic_by_id)
+    if declared_ids.intersection(derived_ids):
         raise ValueError("historical inference asset identities collide with declared assets")
     if not dynamic:
         return HistoricalAnalysisAssets(binding=binding, artifact_roots_by_sha256={})
+    declared_scope = DeclaredAnalysisScope(
+        raw_input_asset_ids=(
+            *binding.declared_scope.raw_input_asset_ids,
+            *(asset.asset_id for asset in dynamic if asset.asset_type == "dataset"),
+        ),
+        historical_model_asset_ids=(
+            *binding.declared_scope.historical_model_asset_ids,
+            *(asset.asset_id for asset in dynamic if asset.asset_type == "trained_model"),
+        ),
+    )
     return HistoricalAnalysisAssets(
-        binding=replace(binding, available_assets=(*binding.available_assets, *dynamic)),
+        binding=replace(
+            binding,
+            available_assets=(*binding.available_assets, *dynamic),
+            declared_scope=declared_scope,
+        ),
         artifact_roots_by_sha256=roots,
     )

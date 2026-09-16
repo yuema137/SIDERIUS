@@ -7,6 +7,21 @@ from agent.schemas.data_analysis.report import DataAnalysisReport
 
 def render_report_markdown(report: DataAnalysisReport) -> str:
     lines = [f"# Data Analysis Report: {report.report_id}", "", report.executive_summary, ""]
+    if report.source_scope is not None:
+        lines.extend(["## Source scope", ""])
+        lines.append(f"- Mode: {report.source_scope.mode}")
+        lines.extend(
+            f"- Raw input: {asset_id}" for asset_id in report.source_scope.raw_input_asset_ids
+        )
+        lines.extend(
+            f"- Historical model: {asset_id}"
+            for asset_id in report.source_scope.historical_model_asset_ids
+        )
+        lines.extend(["", "## Sources actually inspected", ""])
+        lines.extend(f"- {asset_id}" for asset_id in report.assets_inspected)
+        if not report.assets_inspected:
+            lines.append("- None")
+        lines.append("")
     lines.extend(["## Questions", ""])
     for outcome in report.question_outcomes:
         lines.append(f"- **{outcome.question_id}** ({outcome.status}): {outcome.summary}")

@@ -11,6 +11,7 @@ from .assets import AnalysisScopeDescriptor
 from .common import CertifiedArtifactRef, FrozenModel, NonEmptyStr, Sha256, canonical_json_bytes
 from .generated_skill import GeneratedExperimentSkillRegistryRef
 from .skills import AnalysisCoverage, InvocationStatus, QuantitativeResult
+from .source_scope import AnalysisSourceScope
 
 MAX_REPORT_RESULT_SUMMARIES = 100
 MAX_KEY_RESULTS_PER_SUMMARY = 32
@@ -140,6 +141,9 @@ class DataAnalysisReport(FrozenModel):
     executive_summary: NonEmptyStr
     question_outcomes: tuple[QuestionOutcome, ...]
     assets_inspected: tuple[NonEmptyStr, ...]
+    source_scope: AnalysisSourceScope | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     findings: tuple[DataFinding, ...]
     skill_result_summaries: tuple[SkillResultSummary, ...]
     skill_result_refs: tuple[CertifiedResultRef, ...]
@@ -170,6 +174,11 @@ class DataAnalysisReport(FrozenModel):
             "question outcome", [item.question_id for item in self.question_outcomes]
         )
         self._require_unique("asset", list(self.assets_inspected))
+        if self.source_scope is not None and not set(self.assets_inspected).issubset(
+            set(self.source_scope.raw_input_asset_ids)
+            | set(self.source_scope.historical_model_asset_ids)
+        ):
+            raise ValueError("report inspected an asset outside the source scope")
         self._require_unique("finding", [item.finding_id for item in self.findings])
         self._require_unique("limitation", [item.limitation_id for item in self.limitations])
         self._require_unique(

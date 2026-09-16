@@ -23,6 +23,10 @@ from .common import (
 )
 from .generated_skill import GeneratedExperimentSkillRegistryRef
 from .resources import AnalysisResourceEnvelope
+from .source_scope import (
+    AnalysisSourceScope,
+    DeclaredAnalysisScope,
+)
 
 
 class AnalysisTaskContext(FrozenModel):
@@ -127,6 +131,9 @@ class DataAnalysisInput(FrozenModel):
     task_context: AnalysisTaskContext
     analysis_brief: AnalysisBrief
     available_assets: tuple[AnalysisAsset, ...]
+    declared_scope: DeclaredAnalysisScope = Field(
+        description="One caller-declared ceiling over raw input and ordered prior models."
+    )
     prior_evidence: tuple[PriorEvidenceRef, ...] = ()
     literature_evidence: DataAnalysisLiteratureEvidence | None = Field(
         default=None,
@@ -146,6 +153,11 @@ class DataAnalysisInput(FrozenModel):
         default=False, exclude_if=lambda value: value is False
     )
     human_advice: str | None = None
+    source_scope: AnalysisSourceScope | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Exact resolved lock; absent means automatic choice under declared_scope.",
+    )
     storage: StorageConfig
     caller: CallerIdentity
 
@@ -174,7 +186,76 @@ class DataAnalysisInput(FrozenModel):
                 raise ValueError(
                     f"asset {asset.asset_id!r} permits inference but the access policy forbids it"
                 )
+        if self.storage.local is None:
+            raise ValueError("source-scoped analysis requires a local run identity")
+        self.declared_scope.validate_assets(
+            self.available_assets, self.access_policy, run_name=self.storage.local.run_name
+        )
+        if self.source_scope is not None:
+            if not set(self.source_scope.raw_input_asset_ids).issubset(
+                self.declared_scope.raw_input_asset_ids
+            ) or not set(self.source_scope.historical_model_asset_ids).issubset(
+                self.declared_scope.historical_model_asset_ids
+            ):
+                raise ValueError("resolved source scope exceeds its declared raw/model ceiling")
+            if self.source_scope.mode == "automatic" and self.source_scope != (
+                AnalysisSourceScope.automatic(self.declared_scope)
+            ):
+                raise ValueError("automatic scope must contain exactly the declared assets")
+            if self.source_scope.mode == "locked":
+                from .source_directive import resolve_source_prompt
+
+                expected = resolve_source_prompt(
+                    self.source_scope.source_prompt,
+                    declared_scope=self.declared_scope,
+                    available_assets=self.available_assets,
+                    access_policy=self.access_policy,
+                    run_name=self.storage.local.run_name,
+                )
+                if self.source_scope != expected:
+                    raise ValueError("resolved source scope differs from its lock directive")
+            if self.source_scope.historical_model_asset_ids != tuple(
+                asset_id
+                for asset_id in self.declared_scope.historical_model_asset_ids
+                if asset_id in self.source_scope.historical_model_asset_ids
+            ):
+                raise ValueError("resolved model order differs from certified completion order")
         return self
+
+    def effective_source_scope(self) -> AnalysisSourceScope:
+        """Automatic selection is still restricted to the declared ceiling."""
+
+        return self.source_scope or AnalysisSourceScope.automatic(self.declared_scope)
+
+    def planning_assets(self) -> tuple[AnalysisAsset, ...]:
+        """Keep descriptors outside the locked source set out of LLM prompts."""
+
+        scope = self.effective_source_scope()
+        visible = set(scope.raw_input_asset_ids) | set(scope.historical_model_asset_ids)
+        scoped = []
+        for asset in self.available_assets:
+            if asset.asset_id not in visible:
+                continue
+            names = {
+                name
+                for name, source in asset.metadata_sources.items()
+                if source.split_id is not None
+                and scope.permits(
+                    asset_id=asset.asset_id,
+                    information_class=source.information_class,
+                    operation="infer" if asset.asset_type == "trained_model" else "materialize",
+                    fields=source.source_fields,
+                )
+            }
+            scoped.append(
+                asset.model_copy(
+                    update={
+                        "metadata": {name: asset.metadata[name] for name in names},
+                        "metadata_sources": {name: asset.metadata_sources[name] for name in names},
+                    }
+                )
+            )
+        return tuple(scoped)
 
     def canonical_scientific_identity(self) -> dict[str, object]:
         """Host-independent caller-controlled identity for resume comparison."""

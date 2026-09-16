@@ -100,6 +100,7 @@ TRIAL_PORTION=""                    # Lane F2 tri-state: empty == omit == AGENT_
 TRAIN_PORTION=""                    # Lane F2 tri-state: empty == omit == AGENT_CONTROLLED
 EVAL_PORTION=""                     # Lane F2 tri-state: empty == omit == AGENT_CONTROLLED
 HUMAN_ADVICE_FILE=""
+ANALYSIS_SOURCE_PROMPT=""
 ADVICE=""
 # The launcher's OBSERVED sha256 of the advice artifact. Forwarded as a
 # DECLARATION: run_one_iteration.py certifies it against its own read and
@@ -310,6 +311,7 @@ parse_chain_args() {
         --train_portion)          TRAIN_PORTION="$2"; shift 2 ;;
         --eval_portion)           EVAL_PORTION="$2"; shift 2 ;;
         --human_advice_file)      HUMAN_ADVICE_FILE="$2"; shift 2 ;;
+        --analysis_source_prompt) ANALYSIS_SOURCE_PROMPT="$2"; shift 2 ;;
         --advice)                 ADVICE="$2"; shift 2 ;;
         --advice_sha256)          ADVICE_SHA256="$2"; shift 2 ;;
         --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
@@ -596,6 +598,9 @@ build_app_args() {
     # and a digest declared for it must reach the child.
     if [ -n "$ADVICE_SHA256" ]; then
         APP_ARGS+=(--advice_sha256 "$ADVICE_SHA256")
+    fi
+    if [ -n "$ANALYSIS_SOURCE_PROMPT" ]; then
+        APP_ARGS+=(--analysis_source_prompt "$ANALYSIS_SOURCE_PROMPT")
     fi
     if [ -n "$PLAN_OVERRIDES" ]; then
         APP_ARGS+=(--plan_overrides "$PLAN_OVERRIDES")

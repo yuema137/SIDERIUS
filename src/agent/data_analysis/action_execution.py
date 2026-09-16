@@ -162,6 +162,7 @@ def execute_resolved_action(
             inference_capability=inference_capability,
             available_assets={asset.asset_id: asset for asset in inp.available_assets},
             access_policy=inp.access_policy,
+            source_scope=inp.effective_source_scope(),
             resource_envelope=inp.resource_envelope,
             deadline_monotonic_s=deadline_monotonic_s,
             destination_root=materialization_directory,

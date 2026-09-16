@@ -608,6 +608,7 @@ def _input(tmp_path: Path) -> DataAnalysisInput:
             "source_ref": "test",
         },
         available_assets=(asset,),
+        declared_scope={"raw_input_asset_ids": ["dataset"]},
         access_policy={
             "policy_id": "policy",
             "policy_version": 1,

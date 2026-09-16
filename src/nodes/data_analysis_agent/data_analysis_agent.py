@@ -549,6 +549,7 @@ class DataAnalysisAgent:
             executive_summary=draft.executive_summary,
             question_outcomes=outcomes,
             assets_inspected=tuple(sorted(inspected_assets)),
+            source_scope=inp.effective_source_scope(),
             findings=tuple(findings),
             skill_result_summaries=summaries,
             skill_result_refs=result_refs,

@@ -51,6 +51,7 @@ def _write_config(tmp_path, *, indent: int = 2):
                 "split_id": "validation",
             }
         ],
+        "declared_scope": {"raw_input_asset_ids": ["validation-values"]},
         "access_policy": {
             "policy_id": "synthetic-analysis-policy",
             "policy_version": 1,
@@ -119,6 +120,21 @@ def test_enabled_analysis_resolves_caller_policy_without_importing_task_semantic
     assert binding.available_assets[0].asset_id == "validation-values"
     assert binding.allowed_skill_packs[0].pack_id == "core-analysis"
     assert binding.allowed_skill_packs[0].manifest_ref.media_type == "application/json"
+
+
+def test_task_declared_scope_identity_reaches_workflow_binding(tmp_path) -> None:
+    path = _write_config(tmp_path)
+    raw = json.loads(path.read_text())
+    binding = _compose(tmp_path, path)
+    assert binding is not None
+    assert binding.declared_scope.raw_input_asset_ids == ("validation-values",)
+    assert binding.canonical_identity()["declared_scope"]["raw_input_asset_ids"] == [
+        "validation-values"
+    ]
+    raw["declared_scope"]["raw_input_asset_ids"] = ["unknown"]
+    path.write_text(json.dumps(raw))
+    with pytest.raises(ValueError, match="declared raw input"):
+        _compose(tmp_path, path)
 
 
 def test_analysis_identity_uses_semantics_not_config_formatting_or_host_path(tmp_path) -> None:

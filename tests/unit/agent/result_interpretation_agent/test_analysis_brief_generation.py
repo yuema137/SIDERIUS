@@ -8,6 +8,7 @@ from agent.data_analysis.reference_packs import builtin_pack_refs
 from agent.schemas.analysis_brief_generation import AnalysisBriefGenerationReceipt
 from agent.schemas.data_analysis.context import AnalysisTaskContext
 from agent.schemas.data_analysis.resources import AnalysisResourceEnvelope
+from agent.schemas.data_analysis.source_scope import DeclaredAnalysisScope
 from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
 from agent.schemas.protocols.interpreter_to_data_analysis import (
     MissingAnalysisBriefError,
@@ -17,6 +18,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 from tests.helpers.metric_fixtures import shipped_spec
+from tests.unit.agent.data_analysis.test_contracts_and_authorization import _asset
 
 _SUMMARY = ModelRunSummary(
     model_type="synthetic_model",
@@ -112,6 +114,7 @@ def _cold_input(tmp_path, *, requested: bool) -> InterpretationInput:
 
 
 def _adapter_kwargs(tmp_path) -> dict:
+    asset = _asset()
     return {
         "request_id": "analysis-request",
         "task_context": AnalysisTaskContext(
@@ -122,7 +125,8 @@ def _adapter_kwargs(tmp_path) -> dict:
             metric_summary="Lower error is better.",
             forward_contract=ForwardContract(),
         ),
-        "available_assets": (),
+        "available_assets": (asset,),
+        "declared_scope": DeclaredAnalysisScope(raw_input_asset_ids=(asset.asset_id,)),
         "access_policy": {
             "policy_id": "policy",
             "policy_version": 1,

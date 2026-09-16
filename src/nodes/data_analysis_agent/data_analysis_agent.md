@@ -20,6 +20,7 @@
 | `task_context` | `AnalysisTaskContext` | Yes | — | Caller-independent scientific task meaning. |
 | `analysis_brief` | `AnalysisBrief` | Yes | — | Questions describing what to investigate, not how to execute. |
 | `available_assets` | tuple of `AnalysisAsset` | Yes | — | Safe descriptors and identities only; never bulk content. |
+| `declared_scope` | `DeclaredAnalysisScope` | Yes | — | Task/caller-declared raw-input assets and ordered certified prior models; a ceiling, not an access grant. |
 | `prior_evidence` | tuple of `PriorEvidenceRef` | No | `()` | Explicitly referenced prior evidence. |
 | `literature_evidence` | `DataAnalysisLiteratureEvidence` or `None` | No | `None` | Source-backed hypotheses/caveats supplied by a typed workflow edge. Reasoning context only; it grants no asset, information, skill or preprocessing authority. |
 | `access_policy` | `AnalysisAccessPolicy` | Yes | — | Split-, information-, and field-level anti-leakage authority. |
@@ -28,6 +29,7 @@
 | `generated_skill_registry` | `GeneratedExperimentSkillRegistryRef` or `None` | No | `None` | Exact run-scoped generated-skill snapshot explicitly supplied by the caller. |
 | `allow_generated_skill_promotion` | boolean | No | `False` | Allows one bounded reuse decision after successful generated-program execution; grants no data authority. |
 | `human_advice` | string or `None` | No | `None` | Auditable priorities or scope guidance; grants no data access. |
+| `source_scope` | `AnalysisSourceScope` or `None` | No | `None` | One resolved run-wide raw-input/model scope. `None` allows automatic choice only within `declared_scope`; a lock narrows that ceiling. |
 | `storage` | `StorageConfig` | Yes | — | Capability-owned persistence destination. |
 | `caller` | `CallerIdentity` | Yes | — | Identity of the workflow, human, orchestrator, or capability making the request. |
 
@@ -46,6 +48,7 @@
 | `executive_summary` | string | Bounded synthesis of the measured evidence. |
 | `question_outcomes` | tuple of `QuestionOutcome` | Disposition of every brief question. |
 | `assets_inspected` | tuple of strings | Asset identities actually materialized. |
+| `source_scope` | `AnalysisSourceScope` or `None` | Exact effective raw-input/model scope echoed beside actual inspected assets. |
 | `findings` | tuple of `DataFinding` | Structured, cited scientific findings. |
 | `skill_result_summaries` | tuple of `SkillResultSummary` | Legacy-named bounded summaries of full append-only certified analysis-execution results. |
 | `skill_result_refs` | tuple of `CertifiedResultRef` | Identities of full result rows. |
@@ -58,11 +61,34 @@
 
 ## CLI usage
 
-N/A. The v0.1 public standalone surface is the Python API below.
+The standalone capability remains a Python API because materialization is an
+executable protocol object, not a file path. The fixed workflow accepts an
+inline `--analysis_source_prompt` string; no advice file or YAML edit is needed.
+The accepted, inspectable syntax is `auto` or one lock of the form
+`lock: raw=<asset IDs|all>; models=<all|none|last:N|ids:IDs>`. The raw IDs
+and model IDs must already be in the caller's declaration. For example:
+
+```text
+--analysis_source_prompt "lock: raw=validation-input; models=last:2"
+```
+
+The scope never includes ground truth or a previously saved prediction dataset.
+An eligible prior model may process explicitly bound raw input; the resulting
+prediction is transient evidence, not another selectable source. `last:N` uses
+certified completion order from the same workspace and run. Unknown IDs and
+ambiguous directives fail closed. AnalysisAccessPolicy independently checks
+the split, operation and concrete metadata fields; neither the prompt nor
+literature/advice grants access. Online material is cited reasoning context,
+not implicit data or sandbox network access.
+Task-certified model-compatible input views may inherit a selected raw input
+only when they are already declared and provenance names that exact parent.
 
 ### CLI arguments
 
-None.
+Fixed-workflow entry points accept `--analysis_source_prompt`. Standalone callers
+may use `agent.data_analysis.source_scope.apply_source_prompt(inp, prompt)` or
+construct a validated `DataAnalysisInput.source_scope` directly; both routes use
+the same plan-resolution and materialization guards.
 
 ## Python API usage
 

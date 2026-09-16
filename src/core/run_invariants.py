@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator, model_validator
 
 from core.execution_calibration import calibration_provenance
 from core.generated_library import generated_library_provenance
@@ -263,6 +263,7 @@ class RunInvariants(BaseModel):
     # byte-identical.
     advice_sha256: str | None = None
     advice_path: str | None = None
+    analysis_source_prompt_sha256: str | None = None
     # F-SCANF-1 (D-FAIL-7 known_gap G4) — the FRACTION of the eval scope a
     # FORMAL round scores over. It was recorded as per-file-best provenance
     # (`execute_tools/per_file_best.py`, "from run_config; null for legacy")
@@ -392,6 +393,7 @@ class RunInvariants(BaseModel):
         # actually received. Optional, so `None` vs `None` keeps every
         # no-advice workspace resumable (see the field's declaration).
         "advice_sha256",
+        "analysis_source_prompt_sha256",
         # F-SCANF-1 — the formal round's evaluation FRACTION. Aggregate
         # scalars are only comparable within one evaluation scope; this is
         # `resolved_data_scope`'s sibling one axis over (see the field's
@@ -448,9 +450,9 @@ class RunInvariants(BaseModel):
             )
         return value
 
-    @field_validator("advice_sha256")
+    @field_validator("advice_sha256", "analysis_source_prompt_sha256")
     @classmethod
-    def _advice_digest_is_a_bare_sha256(cls, value: str | None) -> str | None:
+    def _advice_digest_is_a_bare_sha256(cls, value: str | None, info: ValidationInfo) -> str | None:
         """The digest is 64 lowercase hex characters, or absent.
 
         The defect this names: ``sha256sum FILE`` prints ``<hex>  <path>``,
@@ -464,7 +466,7 @@ class RunInvariants(BaseModel):
             return value
         if len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
             raise ValueError(
-                f"advice_sha256 must be 64 lowercase hex characters (a bare "
+                f"{info.field_name} must be 64 lowercase hex characters (a bare "
                 f"sha256 digest) or None; got {value!r}. `sha256sum` output "
                 f"includes the FILE NAME — hash the bytes, or strip it."
             )
@@ -665,6 +667,8 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
     # required legacy-compatible row without a second comparison surface.
     if payload.get("advice_sha256") is None:
         payload.pop("advice_sha256", None)
+    if payload.get("analysis_source_prompt_sha256") is None:
+        payload.pop("analysis_source_prompt_sha256", None)
     if payload.get("advice_path") is None:
         payload.pop("advice_path", None)
     # F-SCANF-1 — same rule for the formal eval fraction, and here too the
@@ -827,6 +831,7 @@ class LockLaunchIdentity(BaseModel):
     #: byte-identical lock.
     advice_sha256: str | None = None
     advice_path: str | None = None
+    analysis_source_prompt_sha256: str | None = None
     #: F-SCANF-1 — the FORMAL round's evaluation fraction. It rides the
     #: carrier for the reason the carrier exists: one origin (the launch
     #: argument), one destination (the lock). CANONICAL, so every entry point
@@ -1004,6 +1009,7 @@ def build_run_invariants(
             # that follows the edit it exists to catch is not a pin).
             advice_sha256=_launch_identity.advice_sha256,
             advice_path=_launch_identity.advice_path,
+            analysis_source_prompt_sha256=_launch_identity.analysis_source_prompt_sha256,
             # F-SCANF-1 — CANONICAL, threaded explicitly like the six above.
             formal_eval_portion=_launch_identity.formal_eval_portion,
             workflow_parameter_rules=_launch_identity.workflow_parameter_rules,

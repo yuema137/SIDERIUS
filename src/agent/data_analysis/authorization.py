@@ -101,6 +101,17 @@ def authorize_materialization(
     except ValueError as exc:
         raise _refuse(request, "split_not_allowed", str(exc)) from exc
     for item in request.requested_information:
+        if request.source_scope is not None and not request.source_scope.permits(
+            asset_id=request.asset.asset_id,
+            information_class=item.information_class,
+            operation=request.operation,
+            fields=item.fields,
+        ):
+            raise _refuse(
+                request,
+                "information_not_visible",
+                "requested information exceeds the caller's analysis scope",
+            )
         if not request.access_policy.permits(
             split_id=request.split_id,
             information_class=item.information_class,
@@ -111,6 +122,22 @@ def authorize_materialization(
                 "information_not_visible",
                 f"{item.information_class!r} is not visible for split {request.split_id!r}",
             )
+    if (
+        request.source_scope is not None
+        and request.sampling_policy.strategy == "stratified"
+        and request.operation != "infer"
+        and not request.source_scope.permits(
+            asset_id=request.asset.asset_id,
+            information_class="metadata",
+            operation=request.operation,
+            fields=request.sampling_policy.strata_fields,
+        )
+    ):
+        raise _refuse(
+            request,
+            "information_not_visible",
+            "stratified selection exceeds the caller's analysis scope",
+        )
     if not _scope_is_contained(request):
         raise _refuse(
             request,

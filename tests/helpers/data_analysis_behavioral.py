@@ -482,6 +482,7 @@ def build_behavioral_input(case: BehavioralCase, workspace: Path) -> DataAnalysi
             "source_ref": "behavioral-validation",
         },
         available_assets=(asset,),
+        declared_scope={"raw_input_asset_ids": [asset.asset_id]},
         access_policy={
             "policy_id": "behavioral-data-only",
             "policy_version": 1,

@@ -23,6 +23,7 @@ from agent.schemas.data_analysis.assets import AnalysisAsset, TaskDataAssetLocat
 from agent.schemas.data_analysis.common import CertifiedArtifactRef, FrozenModel, NonEmptyStr
 from agent.schemas.data_analysis.context import AnalysisTaskContext, SkillPackRef
 from agent.schemas.data_analysis.resources import AnalysisResourceEnvelope
+from agent.schemas.data_analysis.source_scope import DeclaredAnalysisScope
 from execute_tools.analysis_materialization import (
     TaskAnalysisCapability,
     TaskHistoricalInferenceInputCapability,
@@ -39,6 +40,7 @@ class DataAnalysisWorkflowConfig(FrozenModel):
     target_description: str | None = None
     scientific_constraints: tuple[NonEmptyStr, ...] = ()
     available_assets: tuple[AnalysisAsset, ...]
+    declared_scope: DeclaredAnalysisScope
     access_policy: AnalysisAccessPolicy
     resource_envelope: AnalysisResourceEnvelope
     builtin_skill_packs: tuple[Literal["core-analysis", "time-series"], ...] = ()
@@ -51,6 +53,10 @@ class DataAnalysisWorkflowConfig(FrozenModel):
     def validate_policy(self) -> DataAnalysisWorkflowConfig:
         if not self.available_assets:
             raise ValueError("an enabled workflow analysis config requires available_assets")
+        if not set(self.declared_scope.raw_input_asset_ids).issubset(
+            {asset.asset_id for asset in self.available_assets}
+        ):
+            raise ValueError("declared raw input must be an available analysis asset")
         pack_ids = [
             *self.builtin_skill_packs,
             *(item.pack_id for item in self.external_skill_packs),
@@ -89,6 +95,7 @@ class ResolvedWorkflowDataAnalysis:
     report_schema_version: int
     config_content_sha256: str
     config_path: str
+    declared_scope: DeclaredAnalysisScope
     allow_generated_skill_promotion: bool = False
     historical_inference_base_asset_id: str | None = None
     dataset_profile_path: str | None = None
@@ -119,6 +126,7 @@ class ResolvedWorkflowDataAnalysis:
             identity["allow_generated_skill_promotion"] = True
         if self.historical_inference_base_asset_id is not None:
             identity["historical_inference_base_asset_id"] = self.historical_inference_base_asset_id
+        identity["declared_scope"] = self.declared_scope.model_dump(mode="json")
         return identity
 
 
@@ -239,6 +247,7 @@ def compose_workflow_data_analysis(
     return ResolvedWorkflowDataAnalysis(
         task_context=task_context,
         available_assets=config.available_assets,
+        declared_scope=config.declared_scope,
         access_policy=config.access_policy,
         resource_envelope=config.resource_envelope,
         allowed_skill_packs=tuple(packs),

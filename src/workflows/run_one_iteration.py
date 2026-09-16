@@ -65,6 +65,7 @@ sys.dont_write_bytecode = True
 import yaml
 from dotenv import load_dotenv
 
+from agent.data_analysis.source_scope import source_prompt_identity
 from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
 from agent.schemas.ordering import ResolvedOrdering, parse_file_order_cli
 from agent.schemas.parameter_rules import ParameterRules
@@ -1590,6 +1591,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Human guidance for the optional Data Analysis Agent.",
     )
     parser.add_argument(
+        "--analysis_source_prompt",
+        type=str,
+        default=None,
+        help="Inline source directive: auto or lock: raw=<asset IDs|all>; models=<all|none|last:N|ids:IDs>.",
+    )
+    parser.add_argument(
         "--human_advice_propose",
         type=str,
         default=None,
@@ -2601,6 +2608,7 @@ def compute_expected_invariants(
             # advice-bound run (the V19 PR 2 rule, one field family over).
             advice_sha256=identity.advice_sha256,
             advice_path=identity.advice_path,
+            analysis_source_prompt_sha256=source_prompt_identity(args.analysis_source_prompt),
             # F-SCANF-1 — the formal round's evaluation FRACTION, from the
             # SAME namespace `WorkflowLaunchConfig` receives it from, so this
             # pre-flight and `run_workflow`'s own lock for this workspace
@@ -3480,6 +3488,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
                     ),
                     human_advice_interpret=args.human_advice_interpret,
                     human_advice_analysis=args.human_advice_analysis,
+                    analysis_source_prompt=args.analysis_source_prompt,
                     human_advice_propose=args.human_advice_propose,
                     human_advice_implement=args.human_advice_implement,
                     human_advice_validate=args.human_advice_validate,

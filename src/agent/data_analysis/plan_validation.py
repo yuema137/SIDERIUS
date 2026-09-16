@@ -87,6 +87,57 @@ ResolvedAnalysisInvocation = (
 )
 
 
+def _validate_source_scope(
+    bindings: tuple[ResolvedAssetBinding, ...],
+    *,
+    analysis_input: DataAnalysisInput,
+    strata_fields: tuple[str, ...],
+) -> None:
+    """Check all reads, including model-worker inputs, before execution starts."""
+
+    scope = analysis_input.effective_source_scope()
+    for resolved in bindings:
+        asset = resolved.asset
+        for item in resolved.plan_binding.requested_information:
+            if not scope.permits(
+                asset_id=asset.asset_id,
+                information_class=item.information_class,
+                operation=resolved.plan_binding.operation,
+                fields=item.fields,
+            ):
+                raise AnalysisPlanResolutionError("planned binding exceeds the analysis scope")
+        for nested in resolved.inference_inputs:
+            for item in nested.plan_binding.requested_information:
+                if not scope.permits(
+                    asset_id=nested.asset.asset_id,
+                    information_class=item.information_class,
+                    operation="materialize",
+                    fields=item.fields,
+                ):
+                    raise AnalysisPlanResolutionError(
+                        "historical inference input exceeds the analysis scope"
+                    )
+    if strata_fields:
+        for resolved in bindings:
+            # Inference output inherits the certified selection of its explicit
+            # input view; the model artifact itself does not expose strata.
+            selection_inputs = (
+                resolved.inference_inputs
+                if resolved.plan_binding.operation == "infer"
+                else (resolved,)
+            )
+            for item in selection_inputs:
+                if not scope.permits(
+                    asset_id=item.asset.asset_id,
+                    information_class="metadata",
+                    operation="materialize",
+                    fields=strata_fields,
+                ):
+                    raise AnalysisPlanResolutionError(
+                        "stratified sampling exceeds the analysis scope"
+                    )
+
+
 def _requirements_by_class(
     requirements: tuple[InformationRequirement, ...],
 ) -> dict[str, set[str]]:
@@ -398,6 +449,11 @@ def resolve_analysis_plan(
                 input_slots=program.input_slots,
                 assets=assets,
             )
+            _validate_source_scope(
+                bindings,
+                analysis_input=analysis_input,
+                strata_fields=sampling.strata_fields if sampling.strategy == "stratified" else (),
+            )
             validated = ValidatedParameters(
                 parameters=parameters,
                 parameter_schema_sha256=program.parameter_schema_sha256(),
@@ -455,6 +511,11 @@ def resolve_analysis_plan(
                 input_slots=skill.card.input_slots,
                 assets=assets,
             )
+            _validate_source_scope(
+                bindings,
+                analysis_input=analysis_input,
+                strata_fields=sampling.strata_fields if sampling.strategy == "stratified" else (),
+            )
             validated = ValidatedParameters(
                 parameters=parameters,
                 parameter_schema_sha256=skill.resolved_interface.parameter_schema_sha256,
@@ -501,6 +562,11 @@ def resolve_analysis_plan(
             invocation,
             input_slots=skill.card.input_slots,
             assets=assets,
+        )
+        _validate_source_scope(
+            bindings,
+            analysis_input=analysis_input,
+            strata_fields=sampling.strata_fields if sampling.strategy == "stratified" else (),
         )
         validated = validate_skill_parameters(
             skill,

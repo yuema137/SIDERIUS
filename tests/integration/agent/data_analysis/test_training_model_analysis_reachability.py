@@ -1,11 +1,13 @@
-"""Production reachability witness for newly trained model-aware analysis.
+"""Training artifact reachability and strict target isolation for analysis.
 
 Defect caught: the historical-inference schemas and worker can all pass while
 normal training records only an opaque ``.pth`` path.  This test starts the
 real training subprocess, consumes its certified reconstruction sidecar through
 the production record helper, persists the typed artifact ref, performs bounded
 target-isolated historical inference, and grounds a report in the resulting
-prediction artifact.
+prediction artifact. The current raw-input/model-only analysis source policy
+must refuse target-dependent planning even when ordinary evaluation may use
+the target independently.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import numpy as np
 import pytest
 
 from agent.data_analysis.discovery import discover_skills
+from agent.data_analysis.plan_validation import AnalysisPlanResolutionError
 from agent.schemas.data_analysis.assets import (
     AnalysisAsset,
     ArtifactIntrinsicScope,
@@ -249,8 +252,8 @@ class _ModelDiagnosticBridge:
 
 
 @pytest.mark.allow_real_subprocess
-def test_new_training_record_reaches_target_isolated_model_aware_report(tmp_path: Path) -> None:
-    """Fails if training emits only a checkpoint or inference bypasses typed artifacts."""
+def test_new_training_record_refuses_target_dependent_analysis(tmp_path: Path) -> None:
+    """A completed model never turns separately scored truth into an analysis source."""
 
     checkout = Path(__file__).resolve().parents[4]
     manifest = checkout / "configs/task_composition/synthetic_masked_regression.yaml"
@@ -404,6 +407,10 @@ def test_new_training_record_reaches_target_isolated_model_aware_report(tmp_path
             "source_ref": "campaign-readiness",
         },
         available_assets=assets,
+        declared_scope={
+            "raw_input_asset_ids": ["validation-features"],
+            "historical_model_asset_ids": ["trained-model"],
+        },
         access_policy={
             "policy_id": "model-diagnostic-policy",
             "policy_version": 1,
@@ -426,7 +433,7 @@ def test_new_training_record_reaches_target_isolated_model_aware_report(tmp_path
         allowed_skill_packs=builtin_pack_refs("core-analysis"),
         storage=StorageConfig(
             backend="local",
-            local=LocalStorageConfig(workspace=str(tmp_path), run_name="model-analysis"),
+            local=LocalStorageConfig(workspace=str(tmp_path), run_name="reachability"),
         ),
         caller={"caller_id": "campaign-readiness", "caller_type": "orchestrator"},
     )
@@ -435,27 +442,14 @@ def test_new_training_record_reaches_target_isolated_model_aware_report(tmp_path
         artifact_exporter=_WorkspaceExporter(tmp_path),
         plugin_resolver=_ExactPluginResolver(model_plugin),
     )
-    report = DataAnalysisAgent(
-        task_analysis_capability=analysis_capability,
-        bridge_factory=lambda **kwargs: _ModelDiagnosticBridge(
-            analysis_input=analysis_input, **kwargs
-        ),
-        provider="test",
-        model_id="controlled",
-        historical_model_inference_capability=inference,
-    ).run(analysis_input)
-
-    assert report.findings
-    assert report.skill_result_summaries[0].skill_id == "prediction_target_distribution"
-    assert report.findings[0].coverage.analyzed_count == len(example_ids)
-    receipt_lines = (
-        (
-            tmp_path
-            / "data_analysis/model-analysis/training-model-analysis-reachability/inference_receipts.jsonl"
-        )
-        .read_text()
-        .splitlines()
-    )
-    inference_receipt = json.loads(receipt_lines[0])
-    assert inference_receipt["target_exposed_to_inference"] is False
-    assert inference_receipt["prediction_count"] == len(example_ids)
+    with pytest.raises(AnalysisPlanResolutionError, match="analysis scope"):
+        DataAnalysisAgent(
+            task_analysis_capability=analysis_capability,
+            bridge_factory=lambda **kwargs: _ModelDiagnosticBridge(
+                analysis_input=analysis_input, **kwargs
+            ),
+            provider="test",
+            model_id="controlled",
+            historical_model_inference_capability=inference,
+        ).run(analysis_input)
+    assert not list(tmp_path.rglob("inference_receipts.jsonl"))

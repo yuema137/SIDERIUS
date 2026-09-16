@@ -119,6 +119,7 @@ def run_historical_inference_binding(
     output_requests: tuple[AuthorizedAnalysisMaterializationRequest, ...],
     available_assets,
     access_policy,
+    source_scope=None,
     input_directory: Path,
     output_directory: Path,
     resource_envelope,
@@ -135,6 +136,7 @@ def run_historical_inference_binding(
         invocation=invocation,
         available_assets=available_assets,
         access_policy=access_policy,
+        source_scope=source_scope,
     )
     input_views = materialize_authorized_invocation(
         task_capability,

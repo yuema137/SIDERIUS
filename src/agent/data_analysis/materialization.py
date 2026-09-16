@@ -7,6 +7,7 @@ from pathlib import Path
 
 from agent.schemas.data_analysis.assets import AnalysisAsset, MaterializedAnalysisView
 from agent.schemas.data_analysis.common import canonical_sha256
+from agent.schemas.data_analysis.source_scope import AnalysisSourceScope
 from agent.schemas.data_analysis.time import TaskProvidedTimePrecisionRequirement
 from agent.schemas.data_analysis.view_formats import TIMESERIES_ARRAY_V1
 from core.campaign_identity import validate_path_component
@@ -62,6 +63,7 @@ def authorize_invocation_bindings(
     *,
     available_assets: dict[str, AnalysisAsset],
     access_policy,
+    source_scope: AnalysisSourceScope | None = None,
 ) -> tuple[AuthorizedAnalysisMaterializationRequest, ...]:
     authorized: list[AuthorizedAnalysisMaterializationRequest] = []
     for resolved in invocation.bindings:
@@ -84,6 +86,7 @@ def authorize_invocation_bindings(
             operation=binding.operation,
             sampling_policy=invocation.invocation.sampling_plan.policy,
             access_policy=access_policy,
+            source_scope=source_scope,
         )
         authorized.append(authorize_materialization(request, available_assets=available_assets))
     return tuple(authorized)
@@ -95,6 +98,7 @@ def authorize_inference_input_bindings(
     invocation: ResolvedAnalysisInvocation,
     available_assets: dict[str, AnalysisAsset],
     access_policy,
+    source_scope: AnalysisSourceScope | None = None,
 ) -> tuple[AuthorizedAnalysisMaterializationRequest, ...]:
     """Authorize the explicit plan-visible inputs of one model inference binding."""
 
@@ -122,6 +126,7 @@ def authorize_inference_input_bindings(
             operation="materialize",
             sampling_policy=invocation.invocation.sampling_plan.policy,
             access_policy=access_policy,
+            source_scope=source_scope,
         )
         authorized.append(authorize_materialization(request, available_assets=available_assets))
     return tuple(authorized)

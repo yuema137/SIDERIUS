@@ -16,6 +16,7 @@ from agent.schemas.data_analysis.report import (
     DataAnalysisReportProvenance,
     QuestionOutcome,
 )
+from agent.schemas.data_analysis.source_scope import DeclaredAnalysisScope
 from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
 from agent.schemas.interpretation import InterpretationOutput
@@ -100,6 +101,7 @@ def _setup(tmp_path: Path):
     binding = ResolvedWorkflowDataAnalysis(
         task_context=template.task_context,
         available_assets=(request.base_asset,),
+        declared_scope=DeclaredAnalysisScope(raw_input_asset_ids=(request.base_asset.asset_id,)),
         access_policy=template.access_policy,
         resource_envelope=template.resource_envelope,
         allowed_skill_packs=template.allowed_skill_packs,
@@ -121,6 +123,8 @@ def test_only_certified_prior_record_exposes_candidate_input_and_model(tmp_path:
         binding,
         sources=(source,),
         task_composition_fingerprint="3" * 64,
+        run_name="synthetic-run",
+        workspace_root=tmp_path,
     )
 
     assert [asset.asset_id for asset in result.binding.available_assets] == [
@@ -128,6 +132,13 @@ def test_only_certified_prior_record_exposes_candidate_input_and_model(tmp_path:
         "candidate-validation-features",
         f"historical-model-{request.model_artifact.model_artifact_id}",
     ]
+    assert result.binding.declared_scope.raw_input_asset_ids == (
+        request.base_asset.asset_id,
+        "candidate-validation-features",
+    )
+    assert result.binding.declared_scope.historical_model_asset_ids == (
+        f"historical-model-{request.model_artifact.model_artifact_id}",
+    )
     assert deriver.seen_request.model_config_json == request.model_config_json
     assert (
         result.artifact_roots_by_sha256[request.model_artifact.model_config_ref.sha256] == tmp_path
@@ -141,6 +152,8 @@ def test_historical_source_refusal_precedes_asset_visibility(tmp_path: Path) -> 
             binding,
             sources=(source,),
             task_composition_fingerprint="4" * 64,
+            run_name="synthetic-run",
+            workspace_root=tmp_path,
         )
     assert deriver.seen_request is None
 
@@ -153,6 +166,8 @@ def test_historical_source_refusal_precedes_asset_visibility(tmp_path: Path) -> 
             binding,
             sources=(source,),
             task_composition_fingerprint="3" * 64,
+            run_name="synthetic-run",
+            workspace_root=tmp_path,
         )
     assert deriver.seen_request is None
 
@@ -168,10 +183,84 @@ def test_latest_artifact_bearing_output_survives_a_later_failed_candidate(tmp_pa
         binding,
         sources=(source, HistoricalTuningSource(output=failed_output, artifact_root=tmp_path)),
         task_composition_fingerprint="3" * 64,
+        run_name="synthetic-run",
+        workspace_root=tmp_path,
     )
     assert result.binding.available_assets[-1].asset_id == (
         f"historical-model-{request.model_artifact.model_artifact_id}"
     )
+
+
+def test_other_run_history_is_not_exposed_as_analysis_source(tmp_path: Path) -> None:
+    _request, binding, source, _deriver = _setup(tmp_path)
+    result = derive_historical_analysis_assets(
+        binding,
+        sources=(source,),
+        task_composition_fingerprint="3" * 64,
+        run_name="different-run",
+        workspace_root=tmp_path,
+    )
+    assert result.binding.available_assets == binding.available_assets
+    assert result.binding.declared_scope.historical_model_asset_ids == ()
+
+
+def test_all_completed_same_run_models_are_visible_in_order(tmp_path: Path) -> None:
+    request, binding, first_source, _deriver = _setup(tmp_path)
+    second_artifact = request.model_artifact.model_copy(
+        update={
+            "model_artifact_id": "model-second",
+            "training_run": request.model_artifact.training_run.model_copy(
+                update={"experiment_id": "experiment-2", "iteration_id": "iteration-2"}
+            ),
+        }
+    )
+    payload = canonical_json_bytes(second_artifact)
+    second_ref = CertifiedArtifactRef(
+        logical_ref="trained_model_artifacts/second.json",
+        sha256=hashlib.sha256(payload).hexdigest(),
+        media_type="application/json",
+        byte_size=len(payload),
+    )
+    (tmp_path / second_ref.logical_ref).write_bytes(payload)
+    second_record = ExperimentRecord(
+        exp_id="experiment-2",
+        status="success",
+        model_type="synthetic_historical",
+        timestamp="2026-09-16 00:01:00",
+        params={},
+        trained_model_artifact_ref=TrainedModelArtifactRef(
+            artifact_ref=second_ref,
+            model_artifact_id="model-second",
+            executable_model_identity_sha256=second_artifact.executable_model_identity_sha256,
+        ),
+    )
+    second_source = HistoricalTuningSource(
+        output=first_source.output.model_copy(update={"all_records": [second_record]}),
+        artifact_root=tmp_path,
+    )
+    result = derive_historical_analysis_assets(
+        binding,
+        sources=(first_source, second_source),
+        task_composition_fingerprint="3" * 64,
+        run_name="synthetic-run",
+        workspace_root=tmp_path,
+    )
+    assert result.binding.declared_scope.historical_model_asset_ids == (
+        f"historical-model-{request.model_artifact.model_artifact_id}",
+        "historical-model-model-second",
+    )
+
+
+def test_same_named_run_outside_workspace_is_refused(tmp_path: Path) -> None:
+    _request, binding, source, _deriver = _setup(tmp_path)
+    with pytest.raises(ValueError, match="outside the current workspace"):
+        derive_historical_analysis_assets(
+            binding,
+            sources=(source,),
+            task_composition_fingerprint="3" * 64,
+            run_name="synthetic-run",
+            workspace_root=tmp_path / "another-workspace",
+        )
 
 
 def test_legacy_directory_is_not_artifact_authority(tmp_path: Path) -> None:
@@ -337,7 +426,11 @@ def test_production_analysis_stage_receives_prior_model_assets_and_inference_cap
         binding=binding,
         iteration=2,
         run_name="synthetic-run",
-        storage=template.storage,
+        storage=template.storage.model_copy(
+            update={
+                "local": template.storage.local.model_copy(update={"run_name": "synthetic-run"})
+            }
+        ),
         human_advice=None,
         llm_kwargs={},
         bridge_factory=None,

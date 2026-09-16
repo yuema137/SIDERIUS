@@ -81,6 +81,7 @@ class WorkflowLaunchConfig:
     result_authority: ResultAuthority | None = None
     human_advice_interpret: str | None = None
     human_advice_analysis: str | None = None
+    analysis_source_prompt: str | None = None
     human_advice_propose: str | None = None
     human_advice_implement: str | None = None
     human_advice_validate: str | None = None
