@@ -20,6 +20,7 @@ from .common import (
     Sha256,
     canonical_sha256,
 )
+from .generated_skill import GeneratedExperimentSkillRegistryRef
 from .resources import AnalysisResourceEnvelope
 
 
@@ -107,6 +108,12 @@ class DataAnalysisInput(FrozenModel):
     access_policy: AnalysisAccessPolicy
     resource_envelope: AnalysisResourceEnvelope
     allowed_skill_packs: tuple[SkillPackRef, ...]
+    generated_skill_registry: GeneratedExperimentSkillRegistryRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    allow_generated_skill_promotion: bool = Field(
+        default=False, exclude_if=lambda value: value is False
+    )
     human_advice: str | None = None
     storage: StorageConfig
     caller: CallerIdentity
@@ -154,6 +161,12 @@ class DataAnalysisInput(FrozenModel):
             }
             for pack in sorted(self.allowed_skill_packs, key=lambda item: item.pack_id)
         ]
+        if self.generated_skill_registry is not None:
+            payload["generated_skill_registry"] = {
+                "registry_id": self.generated_skill_registry.registry_id,
+                "manifest_ref": self.generated_skill_registry.manifest_ref.model_dump(mode="json"),
+                "registry_sha256": self.generated_skill_registry.registry_sha256,
+            }
         return payload
 
     def canonical_scientific_digest(self) -> Sha256:

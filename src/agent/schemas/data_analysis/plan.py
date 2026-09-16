@@ -125,8 +125,36 @@ class PlannedGeneratedProgramInvocation(FrozenModel):
         return self
 
 
+class PlannedGeneratedExperimentSkillInvocation(FrozenModel):
+    """Invoke a discovered local skill while retaining its sandbox trust path."""
+
+    action_kind: Literal["generated_experiment_skill"]
+    invocation_id: NonEmptyStr
+    skill_id: NonEmptyStr
+    question_ids: tuple[NonEmptyStr, ...]
+    bindings: tuple[PlannedAssetBinding, ...]
+    sampling_plan: SamplingPlan
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    expected_time_cost: CostClass
+    expected_memory_cost: Literal["low", "medium", "high"]
+    priority: int = Field(default=3, ge=1, le=5)
+
+    @model_validator(mode="after")
+    def validate_references(self) -> PlannedGeneratedExperimentSkillInvocation:
+        if not self.question_ids or len(set(self.question_ids)) != len(self.question_ids):
+            raise ValueError("invocation question_ids must be non-empty and unique")
+        binding_ids = [item.binding_id for item in self.bindings]
+        if not binding_ids or len(set(binding_ids)) != len(binding_ids):
+            raise ValueError("invocation binding IDs must be non-empty and unique")
+        if any(item.operation != "materialize" for item in self.bindings):
+            raise ValueError("generated experiment skills consume materialized inputs only")
+        return self
+
+
 PlannedAnalysisInvocation = Annotated[
-    PlannedSkillInvocation | PlannedGeneratedProgramInvocation,
+    PlannedSkillInvocation
+    | PlannedGeneratedProgramInvocation
+    | PlannedGeneratedExperimentSkillInvocation,
     Field(discriminator="action_kind"),
 ]
 

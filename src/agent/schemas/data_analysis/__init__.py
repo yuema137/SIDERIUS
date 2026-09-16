@@ -5,6 +5,11 @@ from .action_identity import GeneratedProgramIdentity
 from .assets import AnalysisAsset, MaterializedAnalysisView
 from .context import AnalysisBrief, AnalysisQuestion, AnalysisTaskContext, DataAnalysisInput
 from .generated_program import GeneratedAnalysisProgram
+from .generated_skill import (
+    GeneratedExperimentSkill,
+    GeneratedExperimentSkillRegistry,
+    GeneratedExperimentSkillRegistryRef,
+)
 from .inference import HistoricalModelInferenceRequest
 from .plan import (
     AnalysisPlan,
@@ -40,6 +45,9 @@ __all__ = [
     "DataAnalysisReport",
     "DataFinding",
     "GeneratedAnalysisProgram",
+    "GeneratedExperimentSkill",
+    "GeneratedExperimentSkillRegistry",
+    "GeneratedExperimentSkillRegistryRef",
     "GeneratedProgramIdentity",
     "HistoricalModelInferenceRequest",
     "MaterializedAnalysisView",

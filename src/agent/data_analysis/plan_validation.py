@@ -18,13 +18,18 @@ from agent.schemas.data_analysis.generated_program import (
 from agent.schemas.data_analysis.plan import (
     AnalysisPlan,
     PlannedAssetBinding,
+    PlannedGeneratedExperimentSkillInvocation,
     PlannedGeneratedProgramInvocation,
     PlannedInferenceInputBinding,
     PlannedSkillInvocation,
 )
 from agent.schemas.data_analysis.skills import ResolvedSkillInterface, SkillInputSlot
 
-from .discovery import DiscoveredSkill, DiscoverySnapshot
+from .discovery import (
+    DiscoveredGeneratedExperimentSkill,
+    DiscoveredSkill,
+    DiscoverySnapshot,
+)
 from .executor import validate_skill_parameters
 from .generated_programs import load_generated_program
 from .worker_protocol import ValidatedParameters
@@ -65,7 +70,21 @@ class ResolvedGeneratedProgramInvocation:
     validated_parameters: ValidatedParameters
 
 
-ResolvedAnalysisInvocation = ResolvedPlannedInvocation | ResolvedGeneratedProgramInvocation
+@dataclass(frozen=True)
+class ResolvedGeneratedExperimentSkillInvocation:
+    invocation: PlannedGeneratedExperimentSkillInvocation
+    skill: DiscoveredGeneratedExperimentSkill
+    program: GeneratedAnalysisProgram
+    source_path: Path
+    bindings: tuple[ResolvedAssetBinding, ...]
+    validated_parameters: ValidatedParameters
+
+
+ResolvedAnalysisInvocation = (
+    ResolvedPlannedInvocation
+    | ResolvedGeneratedProgramInvocation
+    | ResolvedGeneratedExperimentSkillInvocation
+)
 
 
 def _requirements_by_class(
@@ -199,7 +218,9 @@ def validate_invocation_metadata_selections(
 
 
 def _bind_invocation(
-    invocation: PlannedSkillInvocation | PlannedGeneratedProgramInvocation,
+    invocation: PlannedSkillInvocation
+    | PlannedGeneratedProgramInvocation
+    | PlannedGeneratedExperimentSkillInvocation,
     *,
     input_slots: tuple[SkillInputSlot, ...],
     assets: dict[str, AnalysisAsset],
@@ -392,8 +413,66 @@ def resolve_analysis_plan(
                 )
             )
             continue
+        if isinstance(invocation, PlannedGeneratedExperimentSkillInvocation):
+            skill = skills.get(invocation.skill_id)
+            if not isinstance(skill, DiscoveredGeneratedExperimentSkill):
+                raise AnalysisPlanResolutionError(
+                    f"invocation references no generated experiment skill {invocation.skill_id!r}"
+                )
+            try:
+                program, source_path = load_generated_program(
+                    root=Path(skill.registry_root),
+                    identity=skill.program_identity,
+                )
+                parameters = validate_generated_parameters(program.parameters, invocation.arguments)
+            except ValueError as exc:
+                raise AnalysisPlanResolutionError(str(exc)) from exc
+            if invocation.expected_time_cost != skill.card.time_cost:
+                raise AnalysisPlanResolutionError(
+                    "generated skill time-cost hint differs from its SkillCard"
+                )
+            if invocation.expected_memory_cost != skill.card.memory_cost:
+                raise AnalysisPlanResolutionError(
+                    "generated skill memory-cost hint differs from its SkillCard"
+                )
+            if (
+                program.resource_request.wall_time_s
+                > analysis_input.resource_envelope.per_skill_timeout_s
+            ):
+                raise AnalysisPlanResolutionError(
+                    "generated skill wall-time request exceeds the resource envelope"
+                )
+            if (
+                analysis_input.resource_envelope.max_host_memory_gb is not None
+                and program.resource_request.max_host_memory_gb
+                > analysis_input.resource_envelope.max_host_memory_gb
+            ):
+                raise AnalysisPlanResolutionError(
+                    "generated skill memory request exceeds the resource envelope"
+                )
+            bindings = _bind_invocation(
+                invocation,
+                input_slots=skill.card.input_slots,
+                assets=assets,
+            )
+            validated = ValidatedParameters(
+                parameters=parameters,
+                parameter_schema_sha256=skill.resolved_interface.parameter_schema_sha256,
+                validated_parameters_sha256=canonical_sha256(parameters),
+            )
+            resolved.append(
+                ResolvedGeneratedExperimentSkillInvocation(
+                    invocation=invocation,
+                    skill=skill,
+                    program=program,
+                    source_path=source_path,
+                    bindings=bindings,
+                    validated_parameters=validated,
+                )
+            )
+            continue
         skill = skills.get(invocation.skill_id)
-        if skill is None:
+        if skill is None or isinstance(skill, DiscoveredGeneratedExperimentSkill):
             raise AnalysisPlanResolutionError(
                 f"invocation references undiscovered skill {invocation.skill_id!r}"
             )
