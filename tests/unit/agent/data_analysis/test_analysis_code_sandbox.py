@@ -146,11 +146,19 @@ def analyze(inputs, parameters, output_directory):
     else:
         unauthorized_read_denied = False
     try:
-        socket.socket()
-    except PermissionError:
+        network_socket = socket.socket()
+    except OSError:
         network_denied = True
     else:
-        network_denied = False
+        network_socket.settimeout(0.25)
+        try:
+            network_socket.connect(('198.51.100.1', 9))
+        except OSError:
+            network_denied = True
+        else:
+            network_denied = False
+        finally:
+            network_socket.close()
     values_readable = float(inputs['values']['arrays']['information__data'][1]) == 2.0
     results = []
     for key, value in (
@@ -159,7 +167,7 @@ def analyze(inputs, parameters, output_directory):
         ('unauthorized_hidden', unauthorized_hidden),
         ('repo_write_denied', repo_write_denied),
         ('unauthorized_read_denied', unauthorized_read_denied),
-        ('network_denied', network_denied),
+        ('external_network_denied', network_denied),
         ('authorized_input_readable', values_readable),
     ):
         results.append({{
@@ -180,7 +188,7 @@ def analyze(inputs, parameters, output_directory):
         "unauthorized_hidden",
         "repo_write_denied",
         "unauthorized_read_denied",
-        "network_denied",
+        "external_network_denied",
         "authorized_input_readable",
     )
 

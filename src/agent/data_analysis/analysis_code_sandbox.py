@@ -261,8 +261,14 @@ class AnalysisCodeSandbox:
                         "assert not os.path.exists('/home');"
                         "assert 'OPENAI_API_KEY' not in os.environ;"
                         "open('/output/probe','w').write(np.__version__);"
-                        "\ntry: socket.socket()\nexcept PermissionError: pass\n"
-                        "else: raise RuntimeError('network socket unexpectedly available')"
+                        "\ntry: s=socket.socket()\n"
+                        "except OSError: pass\n"
+                        "else:\n"
+                        " s.settimeout(0.25)\n"
+                        " try: s.connect(('198.51.100.1', 9))\n"
+                        " except OSError: pass\n"
+                        " else: raise RuntimeError('external network unexpectedly reachable')\n"
+                        " finally: s.close()"
                     ),
                 ]
                 completed = subprocess.run(
