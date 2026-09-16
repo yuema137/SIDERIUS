@@ -46,6 +46,7 @@ def test_workflow_stage_uses_typed_adapters_and_persisted_report_identity(
         report_schema_version=1,
         config_content_sha256="7" * 64,
         config_path=str(tmp_path / "analysis-policy.json"),
+        allow_generated_skill_promotion=True,
     )
     expected_input = local_analysis_input(
         interpretation,
@@ -62,6 +63,7 @@ def test_workflow_stage_uses_typed_adapters_and_persisted_report_identity(
             request_source="iteration:1",
         ),
         human_advice="Measure before interpreting.",
+        allow_generated_skill_promotion=True,
     )
     historical_inference_capability = object()
     seen = {}
@@ -98,6 +100,7 @@ def test_workflow_stage_uses_typed_adapters_and_persisted_report_identity(
     assert projected.data_analysis_evidence is not None
     assert projected.data_analysis_evidence.findings[0].statement.endswith("mean 2.5.")
     assert seen["historical_model_inference_capability"] is historical_inference_capability
+    assert expected_input.allow_generated_skill_promotion is True
 
 
 def test_missing_brief_stops_at_typed_edge_without_invoking_agent(tmp_path) -> None:

@@ -69,6 +69,7 @@ def run_optional_data_analysis(
                 request_source=f"iteration:{iteration}",
             ),
             human_advice=human_advice,
+            allow_generated_skill_promotion=binding.allow_generated_skill_promotion,
         )
     except MissingAnalysisBriefError:
         return None

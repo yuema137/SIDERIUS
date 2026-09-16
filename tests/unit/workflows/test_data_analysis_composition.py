@@ -4,6 +4,8 @@ import hashlib
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from agent.schemas.task_config import ForwardContract
 from execute_tools.dataset_config import DatasetProfile
 from execute_tools.evaluation_metric import MetricSpec, PresenceScoreabilityContract
@@ -166,3 +168,30 @@ def test_enabling_analysis_changes_composition_identity_once(tmp_path) -> None:
     enabled = compute_semantic_fingerprint(**common, data_analysis=binding)
 
     assert disabled != enabled
+
+
+def test_generated_skill_promotion_is_explicit_workflow_policy(tmp_path) -> None:
+    config_path = _write_config(tmp_path)
+    default_binding = _compose(tmp_path, config_path)
+    assert default_binding is not None
+    assert default_binding.allow_generated_skill_promotion is False
+    assert "allow_generated_skill_promotion" not in default_binding.canonical_identity()
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["allow_generated_skill_promotion"] = True
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    promoted_binding = _compose(tmp_path, config_path)
+    assert promoted_binding is not None
+    assert promoted_binding.allow_generated_skill_promotion is True
+    assert promoted_binding.canonical_identity()["allow_generated_skill_promotion"] is True
+    assert promoted_binding.canonical_identity() != default_binding.canonical_identity()
+
+
+def test_generated_skill_promotion_refuses_non_boolean_config(tmp_path) -> None:
+    config_path = _write_config(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["allow_generated_skill_promotion"] = "true"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="allow_generated_skill_promotion"):
+        _compose(tmp_path, config_path)

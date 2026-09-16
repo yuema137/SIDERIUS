@@ -129,6 +129,8 @@ resource_envelope:
 
 builtin_skill_packs: [core-analysis]
 external_skill_packs: []
+# Optional workflow policy; default false. Does not grant data access.
+allow_generated_skill_promotion: false
 report_schema_version: 1
 ```
 
@@ -136,6 +138,11 @@ An external pack uses the public `SkillPackRef` shape under
 `external_skill_packs`; its `pack_root` is resolved relative to the analysis
 config file, while its manifest and optional environment lock are content
 pinned. Discovery validates manifests without importing implementations.
+When `allow_generated_skill_promotion` is true, the workflow passes the existing
+Data Analysis input opt-in through its typed edge. Only a successfully executed
+generated program can be considered for run-local promotion, and promoted code
+remains sandboxed and untrusted. The default false state does not alter the
+legacy composition identity.
 
 `enabled: false` is a named no-analysis state and may declare no `config`.
 Both an absent section and this state preserve the pre-analysis composition
