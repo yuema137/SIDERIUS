@@ -62,6 +62,14 @@ SENSITIVE_FILES: MappingProxyType[str, str] = MappingProxyType(
             "extended: a race two schedulers can lose is load-fragile even "
             "though no wall-clock BOUND appears in the assertion."
         ),
+        "tests/unit/agent/data_analysis/test_skill_substrate.py": (
+            "`test_timeout_terminates_the_worker_process_tree` requires the "
+            "real skill worker to import, start, spawn its child, and write "
+            "`child.pid` before the execution deadline. Under bulk-lane host "
+            "saturation the deadline can expire during worker startup, so the "
+            "process-tree witness never exists even though timeout cleanup is "
+            "correct. This is an event-must-occur-within-T assertion."
+        ),
     }
 )
 
