@@ -77,6 +77,8 @@ import yaml
 
 if TYPE_CHECKING:
     from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
+    from workflows.data_analysis_composition import ResolvedWorkflowDataAnalysis
+    from workflows.historical_analysis_assets import HistoricalTuningSource
 
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
@@ -1727,6 +1729,42 @@ def _cleanup_stale_registry_entries(registry) -> tuple[int, list[str]]:
 # ---------------------------------------------------------------------------
 
 
+def _initial_historical_sources_for_analysis(
+    binding: "ResolvedWorkflowDataAnalysis | None",
+    outputs: list[HyperparamTuningOutput],
+    source_paths: list[str] | None,
+) -> "list[HistoricalTuningSource]":
+    """Keep the historical-model module absent from analysis-off execution."""
+
+    if getattr(binding, "historical_inference_base_asset_id", None) is None:
+        return []
+    from workflows.historical_analysis_assets import pair_prior_tuning_sources
+
+    return pair_prior_tuning_sources(outputs, source_paths)
+
+
+def _capture_historical_source_for_analysis(
+    binding: "ResolvedWorkflowDataAnalysis | None",
+    sources: "list[HistoricalTuningSource]",
+    output: HyperparamTuningOutput,
+    tuning_dir: str,
+) -> None:
+    """Remember only certified tuner workspaces the enabled edge may revisit."""
+
+    if getattr(binding, "historical_inference_base_asset_id", None) is None:
+        return
+    from workflows.historical_analysis_assets import capture_completed_tuning_source
+
+    capture_completed_tuning_source(binding, sources, output, tuning_dir)
+
+
+def _task_composition_fingerprint_for_analysis(bindings) -> str | None:
+    """Keep optional composition transport out of the core loop's branch count."""
+
+    composition = bindings.task_composition
+    return composition.semantic_fingerprint if composition is not None else None
+
+
 def _run_composed_data_analysis(
     interpretation,
     *,
@@ -1738,6 +1776,9 @@ def _run_composed_data_analysis(
     llm_kwargs: dict,
     bridge_factory,
     historical_model_inference_capability: "HistoricalModelInferenceCapability | None" = None,
+    historical_sources: "tuple[HistoricalTuningSource, ...]" = (),
+    task_composition_fingerprint: str | None = None,
+    chain_workspace: str | None = None,
     literature_output=None,
 ):
     """Run and log the optional analysis phase outside the core orchestrator.
@@ -1761,6 +1802,9 @@ def _run_composed_data_analysis(
         llm_kwargs=llm_kwargs,
         bridge_factory=bridge_factory,
         historical_model_inference_capability=historical_model_inference_capability,
+        historical_sources=historical_sources,
+        task_composition_fingerprint=task_composition_fingerprint,
+        chain_workspace=chain_workspace,
         literature_output=literature_output,
     )
     if output is not None:
@@ -2205,6 +2249,10 @@ def run_workflow(
         raise ValueError(
             "Must provide either source_paths OR (data_dir + model_types + source_run_name)."
         )
+    _analysis_binding = getattr(task_composition, "data_analysis", None)
+    historical_sources = _initial_historical_sources_for_analysis(
+        _analysis_binding, tuning_outputs, launch.source_paths
+    )
     # Step 09a C2/C3 — the seeds' own reconciled spec orders their summaries.
     seed_metric_spec = reconcile_metric_spec(tuning_outputs)
     seed_summaries = tuning_outputs_to_summaries(
@@ -2697,6 +2745,9 @@ def run_workflow(
                 llm_kwargs=bindings.llm_config.get("data_analysis"),
                 bridge_factory=bridge_factory,
                 historical_model_inference_capability=historical_model_inference_capability,
+                historical_sources=tuple(historical_sources),
+                task_composition_fingerprint=_task_composition_fingerprint_for_analysis(bindings),
+                chain_workspace=bindings.workspace,
                 literature_output=literature_output,
             )
 
@@ -3361,6 +3412,9 @@ def run_workflow(
         _log_rss(f"pre-vram-probe (iter {iteration}, before tuner.run)")
         tune_output = _tune_agent.run(tune_input)
         state.iteration_results.append(tune_output)
+        _capture_historical_source_for_analysis(
+            _analysis_binding, historical_sources, tune_output, tuning_dir
+        )
 
         # Issue #92 safety net — the primary promotion fires earlier
         # (right after ``_register_plugin``) so the loss is globally

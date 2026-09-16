@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import platform
-import shutil
 from pathlib import Path
 
 from pydantic import Field, model_validator
@@ -280,14 +279,54 @@ def emit_trained_model_artifact(
     )
 
 
-def copy_certified_artifact(root: Path, ref: CertifiedArtifactRef, destination: Path) -> None:
-    """Small filesystem artifact authority used by local production/smoke callers."""
+def _certified_artifact_source(root: Path, ref: CertifiedArtifactRef) -> Path:
+    """Resolve an exact workspace-relative artifact without link traversal."""
 
-    source = (root.resolve() / ref.logical_ref).resolve()
-    if root.resolve() not in source.parents or source.is_symlink() or not source.is_file():
+    logical = Path(ref.logical_ref)
+    if logical.is_absolute() or ".." in logical.parts:
+        raise ValueError("certified trained-model ref must be workspace-relative")
+    candidate = root.resolve()
+    for part in logical.parts:
+        candidate /= part
+        if candidate.is_symlink():
+            raise ValueError("certified trained-model ref may not traverse a symlink")
+    source = candidate.resolve()
+    if root.resolve() not in source.parents or not source.is_file():
         raise ValueError("certified trained-model ref escapes its workspace authority")
+    return source
+
+
+def read_certified_artifact(root: Path, ref: CertifiedArtifactRef) -> bytes:
+    """Read a small workspace-relative artifact after path/content checks."""
+
+    source = _certified_artifact_source(root, ref)
     payload = source.read_bytes()
     if hashlib.sha256(payload).hexdigest() != ref.sha256:
         raise ValueError("certified trained-model artifact digest mismatch")
+    if ref.byte_size is not None and len(payload) != ref.byte_size:
+        raise ValueError("certified trained-model artifact byte size mismatch")
+    return payload
+
+
+def copy_certified_artifact(root: Path, ref: CertifiedArtifactRef, destination: Path) -> None:
+    """Stream a certified artifact without loading a checkpoint into memory."""
+
+    source = _certified_artifact_source(root, ref)
+    if destination.resolve() == source:
+        raise ValueError("certified trained-model source and destination must differ")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, destination)
+    digest = hashlib.sha256()
+    byte_size = 0
+    try:
+        with source.open("rb") as reader, destination.open("wb") as writer:
+            for chunk in iter(lambda: reader.read(1024 * 1024), b""):
+                writer.write(chunk)
+                digest.update(chunk)
+                byte_size += len(chunk)
+        if digest.hexdigest() != ref.sha256:
+            raise ValueError("certified trained-model artifact digest mismatch")
+        if ref.byte_size is not None and byte_size != ref.byte_size:
+            raise ValueError("certified trained-model artifact byte size mismatch")
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise

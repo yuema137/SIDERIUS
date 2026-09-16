@@ -23,7 +23,10 @@ from agent.schemas.data_analysis.assets import AnalysisAsset, TaskDataAssetLocat
 from agent.schemas.data_analysis.common import CertifiedArtifactRef, FrozenModel, NonEmptyStr
 from agent.schemas.data_analysis.context import AnalysisTaskContext, SkillPackRef
 from agent.schemas.data_analysis.resources import AnalysisResourceEnvelope
-from execute_tools.analysis_materialization import TaskAnalysisCapability
+from execute_tools.analysis_materialization import (
+    TaskAnalysisCapability,
+    TaskHistoricalInferenceInputCapability,
+)
 from execute_tools.evaluation_metric import MetricIdentityKey
 
 
@@ -41,6 +44,7 @@ class DataAnalysisWorkflowConfig(FrozenModel):
     builtin_skill_packs: tuple[Literal["core-analysis", "time-series"], ...] = ()
     external_skill_packs: tuple[SkillPackRef, ...] = ()
     allow_generated_skill_promotion: StrictBool = False
+    historical_inference_base_asset_id: NonEmptyStr | None = None
     report_schema_version: Literal[1] = 1
 
     @model_validator(mode="after")
@@ -57,6 +61,18 @@ class DataAnalysisWorkflowConfig(FrozenModel):
             raise ValueError("workflow analysis skill pack IDs must be unique")
         if len(set(self.scientific_constraints)) != len(self.scientific_constraints):
             raise ValueError("workflow analysis scientific constraints must be unique")
+        if self.historical_inference_base_asset_id is not None:
+            if not self.access_policy.allow_model_inference:
+                raise ValueError("historical inference base asset requires model inference policy")
+            matching = [
+                asset
+                for asset in self.available_assets
+                if asset.asset_id == self.historical_inference_base_asset_id
+            ]
+            if len(matching) != 1 or matching[0].asset_type != "dataset":
+                raise ValueError("historical inference base asset must name one dataset asset")
+            if not isinstance(matching[0].location, TaskDataAssetLocation):
+                raise ValueError("historical inference base asset must be task-owned data")
         return self
 
 
@@ -74,6 +90,8 @@ class ResolvedWorkflowDataAnalysis:
     config_content_sha256: str
     config_path: str
     allow_generated_skill_promotion: bool = False
+    historical_inference_base_asset_id: str | None = None
+    dataset_profile_path: str | None = None
 
     def canonical_identity(self) -> dict[str, Any]:
         """Host-independent semantic identity; absolute paths are excluded."""
@@ -99,6 +117,8 @@ class ResolvedWorkflowDataAnalysis:
         }
         if self.allow_generated_skill_promotion:
             identity["allow_generated_skill_promotion"] = True
+        if self.historical_inference_base_asset_id is not None:
+            identity["historical_inference_base_asset_id"] = self.historical_inference_base_asset_id
         return identity
 
 
@@ -162,6 +182,13 @@ def compose_workflow_data_analysis(
             f"task data path {task_data_path_id!r} enables analysis but does not implement "
             "TaskAnalysisCapability"
         )
+    if config.historical_inference_base_asset_id is not None and not isinstance(
+        task_data_path, TaskHistoricalInferenceInputCapability
+    ):
+        raise ValueError(
+            f"task data path {task_data_path_id!r} enables historical inference but does "
+            "not implement TaskHistoricalInferenceInputCapability"
+        )
 
     profile_payload = Path(dataset_profile_path).read_bytes()
     profile_digest = hashlib.sha256(profile_payload).hexdigest()
@@ -220,4 +247,6 @@ def compose_workflow_data_analysis(
         config_content_sha256=hashlib.sha256(payload).hexdigest(),
         config_path=str(config_path),
         allow_generated_skill_promotion=config.allow_generated_skill_promotion,
+        historical_inference_base_asset_id=config.historical_inference_base_asset_id,
+        dataset_profile_path=dataset_profile_path,
     )

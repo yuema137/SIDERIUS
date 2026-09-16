@@ -21,7 +21,10 @@ from agent.schemas.data_analysis.assets import (
     AnalysisAuthorizationReceipt,
     ArtifactIntrinsicScope,
     AssetProvenance,
+    LegacyPartitionScope,
     MaterializedAnalysisView,
+    TaskDataAssetLocation,
+    TaskOpaqueScopeRef,
     TrainedModelArtifactLocation,
 )
 from agent.schemas.data_analysis.common import (
@@ -62,7 +65,10 @@ from agent.schemas.task_config import ForwardContract
 from execute_tools.analysis_materialization import (
     AnalysisAuthorizationError,
     AnalysisMaterializationRequest,
+    HistoricalInferenceInputDerivationRequest,
+    validate_derived_historical_inference_input_asset,
 )
+from execute_tools.dataset_config import DataScope, DatasetProfile
 from execute_tools.historical_model_inference import (
     HistoricalInferenceInputPath,
     HistoricalInferenceRuntimeInputs,
@@ -155,6 +161,7 @@ def _artifact(
     *,
     loss_type: LossTypeName = "smooth_l1",
     construction_sha256: str | None = None,
+    dataset_profile_sha256: str = "2" * 64,
 ) -> TrainedModelArtifact:
     model_io = ModelIOContract(
         input=_tensor_contract(2),
@@ -182,7 +189,7 @@ def _artifact(
     task_binding = TaskInferenceBindingIdentity(
         task_data_path_id="synthetic-source",
         task_data_path_content_sha256="1" * 64,
-        dataset_profile_sha256="2" * 64,
+        dataset_profile_sha256=dataset_profile_sha256,
         task_composition_fingerprint="3" * 64,
     )
     environment = ModelEnvironmentIdentity(
@@ -225,6 +232,120 @@ def _artifact(
             producer="synthetic-test-producer",
         ),
     )
+
+
+def _derivation_fixture() -> tuple[HistoricalInferenceInputDerivationRequest, AnalysisAsset]:
+    """Use distinct raw-file and semantic-profile hashes, as production does."""
+
+    profile = DatasetProfile(
+        partition_count=2,
+        anchor_selection_files=(0,),
+        health_peek_files=(0,),
+    )
+    profile_json = json.dumps(profile.to_wire(), indent=2)
+    config_json = '{"model_type":"synthetic_historical","input_width":2}'
+
+    def ref(name: str, payload: str) -> CertifiedArtifactRef:
+        encoded = payload.encode("utf-8")
+        return CertifiedArtifactRef(
+            logical_ref=name,
+            sha256=hashlib.sha256(encoded).hexdigest(),
+            media_type="application/json",
+            byte_size=len(encoded),
+        )
+
+    model = _artifact(
+        ref("checkpoint.pt", "checkpoint"),
+        ref("model-config.json", config_json),
+        ref("plugin.py", "plugin"),
+        dataset_profile_sha256=canonical_sha256(profile.to_wire()),
+    )
+    base = AnalysisAsset(
+        asset_id="validation-region",
+        asset_type="dataset",
+        description="Caller-authorized validation region",
+        location=TaskDataAssetLocation(
+            task_data_path_id="synthetic-source",
+            dataset_profile_sha256=hashlib.sha256(profile_json.encode("utf-8")).hexdigest(),
+            logical_role="validation_features",
+        ),
+        provenance=AssetProvenance(producer="synthetic-task"),
+        authorized_scope=LegacyPartitionScope(data_scope=DataScope(file_indices=[0])),
+        split_id="validation",
+    )
+    request = HistoricalInferenceInputDerivationRequest(
+        base_asset=base,
+        model_artifact=model,
+        model_config_json=config_json,
+        dataset_profile_json=profile_json,
+    )
+    serialized_scope = '{"partitions":[0],"candidate_width":2}'
+    derived = AnalysisAsset(
+        asset_id="candidate-validation-features",
+        asset_type="dataset",
+        description="Task-certified candidate-compatible validation features",
+        location=TaskDataAssetLocation(
+            task_data_path_id="synthetic-source",
+            dataset_profile_sha256=base.location.dataset_profile_sha256,
+            logical_role="validation_model_input",
+        ),
+        provenance=AssetProvenance(
+            producer="synthetic-task",
+            source_asset_ids=(base.asset_id,),
+        ),
+        authorized_scope=TaskOpaqueScopeRef(
+            task_data_path_id="synthetic-source",
+            serialized_scope=serialized_scope,
+            sha256=hashlib.sha256(serialized_scope.encode("utf-8")).hexdigest(),
+        ),
+        split_id="validation",
+        allowed_operations=("materialize",),
+    )
+    return request, derived
+
+
+def test_historical_input_derivation_checks_raw_and_semantic_profile_identity() -> None:
+    """The source file digest and model artifact's canonical profile are not interchangeable."""
+
+    request, derived = _derivation_fixture()
+    assert validate_derived_historical_inference_input_asset(request, derived) is derived
+    with pytest.raises(ValidationError, match="configuration differs"):
+        HistoricalInferenceInputDerivationRequest(
+            base_asset=request.base_asset,
+            model_artifact=request.model_artifact,
+            model_config_json='{"model_type":"different"}',
+            dataset_profile_json=request.dataset_profile_json,
+        )
+    with pytest.raises(ValidationError, match="profile differs from base asset source"):
+        HistoricalInferenceInputDerivationRequest(
+            base_asset=request.base_asset,
+            model_artifact=request.model_artifact,
+            model_config_json=request.model_config_json,
+            dataset_profile_json=request.dataset_profile_json + " ",
+        )
+
+
+def test_historical_input_derivation_refuses_new_generic_authority() -> None:
+    """A task may change representation, but not split, data owner or operation grant."""
+
+    request, derived = _derivation_fixture()
+    for changed, reason in (
+        (derived.model_copy(update={"split_id": "test"}), "authorized split"),
+        (
+            derived.model_copy(update={"allowed_operations": ("materialize", "infer")}),
+            "may grant only materialization",
+        ),
+        (
+            derived.model_copy(
+                update={
+                    "location": derived.location.model_copy(update={"task_data_path_id": "other"})
+                }
+            ),
+            "task data authority",
+        ),
+    ):
+        with pytest.raises(ValueError, match=reason):
+            validate_derived_historical_inference_input_asset(request, changed)
 
 
 def _selection() -> CertifiedSelectionIdentity:

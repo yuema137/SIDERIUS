@@ -21,6 +21,9 @@ class _AnalysisCapableTask:
     def export_analysis_materialization(self, content_ref, destination):  # pragma: no cover
         raise NotImplementedError
 
+    def derive_historical_inference_input_asset(self, request):  # pragma: no cover
+        raise NotImplementedError
+
 
 def _write_config(tmp_path, *, indent: int = 2):
     config = {
@@ -66,7 +69,7 @@ def _write_config(tmp_path, *, indent: int = 2):
     return path
 
 
-def _compose(tmp_path, config_path):
+def _compose(tmp_path, config_path, *, task_data_path=None):
     profile_path = tmp_path / "profile.json"
     profile_path.write_text('{"synthetic":true}', encoding="utf-8")
     metric = SimpleNamespace(
@@ -79,7 +82,7 @@ def _compose(tmp_path, config_path):
     return compose_workflow_data_analysis(
         {"enabled": True, "config": config_path.name},
         manifest_path=str(tmp_path / "task.yaml"),
-        task_data_path=_AnalysisCapableTask(),
+        task_data_path=task_data_path or _AnalysisCapableTask(),
         task_data_path_id="synthetic-task-data",
         task_description="A generic synthetic regression task.",
         forward_contract=ForwardContract(),
@@ -194,4 +197,44 @@ def test_generated_skill_promotion_refuses_non_boolean_config(tmp_path) -> None:
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
     with pytest.raises(ValueError, match="allow_generated_skill_promotion"):
+        _compose(tmp_path, config_path)
+
+
+def test_historical_inference_base_is_explicit_workflow_policy(tmp_path) -> None:
+    """An enabled inference policy still cannot choose an input asset by convention."""
+
+    config_path = _write_config(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["historical_inference_base_asset_id"] = "validation-values"
+    config["access_policy"]["allow_model_inference"] = True
+    config["access_policy"]["split_rules"][0]["predictions_visible"] = True
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(ValueError, match="task-owned data"):
+        _compose(tmp_path, config_path)
+
+    profile_payload = b'{"synthetic":true}'
+    config["available_assets"][0]["location"] = {
+        "kind": "task_data",
+        "task_data_path_id": "synthetic-task-data",
+        "dataset_profile_sha256": hashlib.sha256(profile_payload).hexdigest(),
+        "logical_role": "validation_features",
+    }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    resolved = _compose(tmp_path, config_path)
+    assert resolved is not None
+    assert resolved.historical_inference_base_asset_id == "validation-values"
+    assert resolved.canonical_identity()["historical_inference_base_asset_id"] == (
+        "validation-values"
+    )
+
+    class NoHistoricalDerivation:
+        materialize_analysis_view = _AnalysisCapableTask.materialize_analysis_view
+        export_analysis_materialization = _AnalysisCapableTask.export_analysis_materialization
+
+    with pytest.raises(ValueError, match="TaskHistoricalInferenceInputCapability"):
+        _compose(tmp_path, config_path, task_data_path=NoHistoricalDerivation())
+
+    config["access_policy"]["allow_model_inference"] = False
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(ValueError, match="requires model inference policy"):
         _compose(tmp_path, config_path)
