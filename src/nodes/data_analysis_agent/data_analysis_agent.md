@@ -24,6 +24,8 @@
 | `access_policy` | `AnalysisAccessPolicy` | Yes | — | Split-, information-, and field-level anti-leakage authority. |
 | `resource_envelope` | `AnalysisResourceEnvelope` | Yes | — | Overall deadline, per-skill timeout, device, memory, and sampling policy. |
 | `allowed_skill_packs` | tuple of `SkillPackRef` | Yes | — | Caller-approved, content-pinned packs available for discovery. |
+| `generated_skill_registry` | `GeneratedExperimentSkillRegistryRef` or `None` | No | `None` | Exact run-scoped generated-skill snapshot explicitly supplied by the caller. |
+| `allow_generated_skill_promotion` | boolean | No | `False` | Allows one bounded reuse decision after successful generated-program execution; grants no data authority. |
 | `human_advice` | string or `None` | No | `None` | Auditable priorities or scope guidance; grants no data access. |
 | `storage` | `StorageConfig` | Yes | — | Capability-owned persistence destination. |
 | `caller` | `CallerIdentity` | Yes | — | Identity of the workflow, human, orchestrator, or capability making the request. |
@@ -90,16 +92,21 @@ gap requires custom analysis, exact generated source and its validated
 declaration are stored content-addressed below `generated_analysis/` before the
 final executable plan is created. Materialization copies and staging
 directories are removed after the bounded worker exits.
+Promoted skill source/declarations and immutable registry manifests live below
+`{workspace}/data_analysis/{run_name}/generated_skill_registry/`; the next
+request sees them only when its typed input carries the exact registry ref
+returned in report provenance.
 
 ## Key behavioral notes
 
 - Discovery reads manifests only. Selected implementations are imported in a bounded worker after interface resolution.
 - Reference/configured skills are preferred when they cleanly answer a question. A real toolbox gap may instead trigger a separate source-generation stage. That stage validates and persists one immutable `GeneratedAnalysisProgram`; only then may the final `AnalysisPlan` reference its exact `GeneratedProgramIdentity`. Resume never regenerates equivalent source.
-- `AnalysisPlan.invocations` is a discriminated union of trusted skill invocations and already-persisted generated-program invocations. Pre-union persisted skill wire forms remain readable.
+- `AnalysisPlan.invocations` is a discriminated union of trusted skill invocations, already-persisted one-off generated-program invocations, and discovered generated-experiment-skill invocations. Pre-union persisted skill wire forms remain readable.
+- Promotion is optional and explicit. A bounded structured decision may add a completed program to an immutable run-scoped registry. The resulting local skill exposes a normal `SkillCard`, `SkillDeclaration`, and resolved parameter interface, but its exact originating program identity remains the execution authority. No directory scanning or mutable global registry is used.
 - Planning keeps `RequestedInformation` strict: only `metadata` may name explicit `fields`; `data`, `target`, `prediction`, `residual`, and `identity` use no fields. One bounded repair may delete an illegal non-metadata `fields` value because it carries no access authority, but it may not change the information class, metadata field identity, binding, format, sampling, parameters, or other plan semantics.
 - A skill receives only already-authorized `MaterializedAnalysisView` content and cannot resolve asset IDs or scan the workspace.
 - A generated program receives the same authorized materializations through a narrow JSON/NPZ runner ABI. It proposes a bounded `SkillPayload`; the trusted parent validates measurement semantics, certifies effective coverage and artifacts, records resources, and constructs the canonical result. Source code is never itself scientific evidence.
-- Execution origin selects the trust path. `reference_skill` and `configured_external_skill` use the operator-approved skill worker. `generated_program` uses `AnalysisCodeSandbox`; no ordinary-subprocess fallback exists. The result/report surfaces retain the exact origin and mutually exclusive skill or generated-program identity.
+- Execution origin selects the trust path. `reference_skill` and `configured_external_skill` use the operator-approved skill worker. `generated_program` and `generated_experiment_skill` use `AnalysisCodeSandbox`; promotion never converts code into trusted code and no ordinary-subprocess fallback exists. The result/report surfaces retain the exact origin and mutually exclusive skill or generated-program identity.
 - Full results remain append-only; the canonical report contains bounded summaries and certified references.
 - Existing predictions, residuals, histories, and evaluation artifacts may be analyzed when supplied and authorized.
 - Active historical inference is an injected capability. A validated plan must identify the immutable `TrainedModelArtifact`, exact input binding, split, selection, prediction contract and evaluation configuration. The inference worker receives no target; target-dependent diagnostics use a separate authorized materialization.
@@ -110,6 +117,6 @@ directories are removed after the bounded worker exits.
 
 ## Dependencies
 
-- **LLM**: three bounded schema-validated stages in a skill-only run: candidate selection, executable planning, and report synthesis. A generated-program run adds one bounded schema-validated source/declaration stage before executable planning.
+- **LLM**: three bounded schema-validated stages in a skill-only run: candidate selection, executable planning, and report synthesis. A generated-program run adds one bounded schema-validated source/declaration stage before executable planning. When promotion is explicitly enabled and a generated program completed, one bounded promotion decision is added; reuse does not regenerate source.
 - **GPU**: optional. An enabled skill or caller-injected historical-inference capability may use one only within the caller's resource envelope.
 - **External services**: none beyond the configured LLM provider; task data remain behind `TaskAnalysisCapability`.

@@ -451,6 +451,124 @@ class _MissingGeneratedArtifactBridge(_GeneratedProgramBridge):
         return super().generate(system, user, label=label)
 
 
+class _PromotingGeneratedProgramBridge(_GeneratedProgramBridge):
+    def generate(self, system, user, *, label):
+        if label == "data_analysis.generated_skill_promotion":
+            self.calls.append(label)
+            return {
+                "promotions": [
+                    {
+                        "program_id": "successive-difference",
+                        "skill_id": "successive_difference_summary",
+                        "title": "Successive difference summary",
+                        "one_line_description": (
+                            "Measures mean absolute successive differences in numeric observations."
+                        ),
+                        "keywords": ["successive", "difference", "adjacent"],
+                        "aliases": ["adjacent difference"],
+                        "tags": ["numeric"],
+                        "applicable_when": (
+                            "Use when later questions need the same adjacent-variation measure."
+                        ),
+                        "time_cost": "cheap",
+                        "memory_cost": "low",
+                        "rationale": "The next analysis question requests the same operation.",
+                    }
+                ],
+                "rationale": "Promote exactly one reusable completed operation.",
+            }
+        return super().generate(system, user, label=label)
+
+
+class _GeneratedSkillReuseBridge(_Bridge):
+    def __init__(self, *, analysis_input: DataAnalysisInput, **_kwargs) -> None:
+        self.inp = analysis_input
+        self.discovery = discover_skills(
+            analysis_input.allowed_skill_packs,
+            generated_skill_registry=analysis_input.generated_skill_registry,
+        )
+        self.calls: list[str] = []
+
+    def generate(self, _system, _user, *, label):
+        self.calls.append(label)
+        if label == "data_analysis.skill_selection":
+            return {
+                "skill_ids": ["successive_difference_summary"],
+                "rationale": "Reuse the exact promoted local operation.",
+            }
+        if label == "data_analysis.plan":
+            scope = self.inp.available_assets[0].authorized_scope.model_dump(mode="json")
+            return {
+                "plan_id": "generated-skill-reuse-plan",
+                "input_digest": canonical_sha256(self.inp),
+                "access_policy_digest": canonical_sha256(self.inp.access_policy),
+                "discovery_snapshot_digest": self.discovery.snapshot_digest,
+                "questions": ["q-reuse"],
+                "invocations": [
+                    {
+                        "action_kind": "generated_experiment_skill",
+                        "invocation_id": "generated-skill-reuse",
+                        "skill_id": "successive_difference_summary",
+                        "question_ids": ["q-reuse"],
+                        "bindings": [
+                            {
+                                "binding_id": "custom-values",
+                                "slot_id": "values",
+                                "asset_id": "dataset",
+                                "requested_format_id": "siderius.numeric-array.v1",
+                                "requested_information": [
+                                    {"information_class": "data", "fields": []}
+                                ],
+                            }
+                        ],
+                        "sampling_plan": {
+                            "split_id": "validation",
+                            "requested_scope": scope,
+                            "policy": {
+                                "mode": "fixed",
+                                "max_items": 4,
+                                "strategy": "uniform",
+                                "seed": 11,
+                            },
+                        },
+                        "arguments": {},
+                        "expected_time_cost": "cheap",
+                        "expected_memory_cost": "low",
+                    }
+                ],
+                "stop_policy": {"max_invocations": 1},
+                "rationale": "Execute the promoted skill without regenerating source.",
+            }
+        if label == "data_analysis.synthesis":
+            return {
+                "executive_summary": "The promoted local skill reproduced the measurement.",
+                "findings": [
+                    {
+                        "finding_id": "finding-reused-difference",
+                        "result_id": f"{self.inp.request_id}.generated-skill-reuse.result",
+                        "statement": "The mean absolute successive difference remains 1.0.",
+                        "quantitative_result_ids": ["mean_absolute_successive_difference"],
+                        "confidence_level": "high",
+                        "confidence_rationale": "The exact promoted content completed.",
+                        "confidence_limitations": [],
+                        "modeling_relevance": "Adjacent variation remains stable.",
+                    }
+                ],
+                "question_outcomes": [
+                    {
+                        "question_id": "q-reuse",
+                        "status": "addressed",
+                        "summary": "The promoted operation was reused.",
+                        "finding_ids": ["finding-reused-difference"],
+                    }
+                ],
+                "limitations": [],
+                "unresolved_questions": [],
+                "modeling_relevance": ["Exact local capability reuse was measured."],
+            }
+        raise AssertionError(label)
+
+
 def _input(tmp_path: Path) -> DataAnalysisInput:
     scope = ArtifactIntrinsicScope(split_id="validation", description="Validation data")
     asset = AnalysisAsset(
@@ -522,6 +640,11 @@ def test_standalone_agent_runs_typed_pipeline_and_persists_bounded_report(tmp_pa
 
     report = agent.run(analysis_input)
 
+    persisted_input = json.loads(
+        (tmp_path / "data_analysis" / "standalone" / "request" / "input.json").read_text()
+    )
+    assert "generated_skill_registry" not in persisted_input
+    assert "allow_generated_skill_promotion" not in persisted_input
     assert report.findings[0].statement.endswith("mean 2.5.")
     assert report.findings[0].coverage.analyzed_count == 4
     assert report.skill_result_summaries[0].execution_origin == "reference_skill"
@@ -537,6 +660,7 @@ def test_standalone_agent_runs_typed_pipeline_and_persists_bounded_report(tmp_pa
     assert not (root / "materializations" / "summary-invocation").exists()
 
     report_bytes = (root / "report.json").read_bytes()
+    assert "generated_skill_registry" not in json.loads(report_bytes)["provenance"]
     evidence = build_proposer_data_analysis_evidence(
         report,
         report_ref=CertifiedArtifactRef(
@@ -629,6 +753,61 @@ def test_generated_program_is_persisted_before_plan_and_certified_as_evidence(
         "data_analysis.plan",
         "data_analysis.synthesis",
     ]
+
+
+@pytest.mark.allow_real_subprocess
+def test_generated_program_promotes_then_reuses_exact_local_skill(tmp_path: Path) -> None:
+    """Catches promotion regenerating code or routing a local skill through trusted execution."""
+
+    capability = AnalysisCodeSandbox().probe()
+    if not capability.available:
+        pytest.skip(f"host cannot enforce sandbox: {capability.reason}")
+
+    first_input = _input(tmp_path).model_copy(update={"allow_generated_skill_promotion": True})
+    first_bridge = _PromotingGeneratedProgramBridge(analysis_input=first_input)
+    first_report = DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **_kwargs: first_bridge,
+        provider="test",
+        model_id="fake",
+    ).run(first_input)
+    registry_ref = first_report.provenance.generated_skill_registry
+    assert registry_ref is not None
+    assert "data_analysis.generated_skill_promotion" in first_bridge.calls
+
+    second_payload = first_input.model_dump(mode="json")
+    second_payload.update(
+        request_id="request-reuse",
+        analysis_brief={
+            "brief_id": "brief-reuse",
+            "questions": [
+                {
+                    "question_id": "q-reuse",
+                    "question": "Repeat the same adjacent-variation measurement.",
+                }
+            ],
+            "source": "human",
+            "source_ref": "test",
+        },
+        generated_skill_registry=registry_ref.model_dump(mode="json"),
+        allow_generated_skill_promotion=False,
+    )
+    second_input = DataAnalysisInput.model_validate(second_payload)
+    second_bridge = _GeneratedSkillReuseBridge(analysis_input=second_input)
+    second_report = DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **_kwargs: second_bridge,
+        provider="test",
+        model_id="fake",
+    ).run(second_input)
+
+    summary = second_report.skill_result_summaries[0]
+    assert summary.execution_origin == "generated_experiment_skill"
+    assert summary.skill_id == "successive_difference_summary"
+    assert summary.generated_program_id is None
+    assert second_report.findings[0].method_skill_ids == ("successive_difference_summary",)
+    assert "data_analysis.generated_program" not in second_bridge.calls
+    assert second_report.provenance.generated_skill_registry == registry_ref
 
 
 @pytest.mark.allow_real_subprocess

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from pydantic import model_validator
 
+from agent.schemas.data_analysis.action_identity import GeneratedProgramIdentity
 from agent.schemas.data_analysis.common import (
     CertifiedArtifactRef,
     FrozenModel,
@@ -19,7 +20,9 @@ from agent.schemas.data_analysis.common import (
     canonical_sha256,
 )
 from agent.schemas.data_analysis.context import SkillPackRef
+from agent.schemas.data_analysis.generated_skill import GeneratedExperimentSkillRegistryRef
 from agent.schemas.data_analysis.skills import (
+    ResolvedSkillInterface,
     SkillCard,
     SkillContentFile,
     SkillEntrypoint,
@@ -50,10 +53,27 @@ class DiscoveredSkill(FrozenModel):
         return self.model_dump(mode="json", exclude={"pack_root"})
 
 
+class DiscoveredGeneratedExperimentSkill(FrozenModel):
+    """A SkillCard whose exact implementation remains an untrusted program."""
+
+    identity: SkillIdentity
+    card: SkillCard
+    program_identity: GeneratedProgramIdentity
+    resolved_interface: ResolvedSkillInterface
+    registry_root: NonEmptyStr
+    program_declaration_ref: CertifiedArtifactRef
+
+    def identity_dump(self) -> dict[str, object]:
+        return self.model_dump(mode="json", exclude={"registry_root"})
+
+
+DiscoveredAnalysisSkill = DiscoveredSkill | DiscoveredGeneratedExperimentSkill
+
+
 class DiscoverySnapshot(FrozenModel):
     enabled_pack_ids: tuple[NonEmptyStr, ...]
     manifest_digests: tuple[Sha256, ...]
-    skills: tuple[DiscoveredSkill, ...]
+    skills: tuple[DiscoveredAnalysisSkill, ...]
     snapshot_digest: Sha256
 
     @model_validator(mode="after")
@@ -183,10 +203,14 @@ def load_verified_manifest(pack_ref: SkillPackRef) -> SkillPackManifest:
     return manifest
 
 
-def discover_skills(pack_refs: tuple[SkillPackRef, ...]) -> DiscoverySnapshot:
+def discover_skills(
+    pack_refs: tuple[SkillPackRef, ...],
+    *,
+    generated_skill_registry: GeneratedExperimentSkillRegistryRef | None = None,
+) -> DiscoverySnapshot:
     """Read and certify manifest data only; no implementation module is imported."""
 
-    discovered: list[DiscoveredSkill] = []
+    discovered: list[DiscoveredAnalysisSkill] = []
     manifest_digests: list[str] = []
     seen_skill_ids: set[str] = set()
     for pack_ref in sorted(pack_refs, key=lambda item: item.pack_id):
@@ -223,13 +247,42 @@ def discover_skills(pack_refs: tuple[SkillPackRef, ...]) -> DiscoverySnapshot:
                     environment_lock_ref=pack_ref.environment_lock_ref,
                 )
             )
+    enabled_pack_ids = sorted(pack.pack_id for pack in pack_refs)
+    if generated_skill_registry is not None:
+        from .generated_skill_registry import load_generated_skill_registry
+
+        registry = load_generated_skill_registry(generated_skill_registry)
+        manifest_digests.append(generated_skill_registry.manifest_ref.sha256)
+        for promoted in registry.skills:
+            skill_id = promoted.skill_identity.skill_id
+            pack_id = promoted.skill_identity.pack_id
+            if pack_id in enabled_pack_ids:
+                raise SkillDiscoveryError(
+                    f"generated experiment pack ID {pack_id!r} collides with an enabled pack"
+                )
+            enabled_pack_ids.append(pack_id)
+            if skill_id in seen_skill_ids:
+                raise SkillDiscoveryError(
+                    f"duplicate skill ID {skill_id!r} across enabled packs; shadowing is forbidden"
+                )
+            seen_skill_ids.add(skill_id)
+            discovered.append(
+                DiscoveredGeneratedExperimentSkill(
+                    identity=promoted.skill_identity,
+                    card=promoted.declaration.card,
+                    program_identity=promoted.program_identity,
+                    resolved_interface=promoted.resolved_interface,
+                    registry_root=generated_skill_registry.registry_root,
+                    program_declaration_ref=promoted.program_declaration_ref,
+                )
+            )
     identity_body = {
-        "enabled_pack_ids": sorted(pack.pack_id for pack in pack_refs),
+        "enabled_pack_ids": sorted(enabled_pack_ids),
         "manifest_digests": manifest_digests,
         "skills": [item.identity_dump() for item in discovered],
     }
     return DiscoverySnapshot(
-        enabled_pack_ids=tuple(sorted(pack.pack_id for pack in pack_refs)),
+        enabled_pack_ids=tuple(sorted(enabled_pack_ids)),
         manifest_digests=tuple(manifest_digests),
         skills=tuple(discovered),
         snapshot_digest=canonical_sha256(identity_body),
@@ -241,14 +294,14 @@ def search_skill_cards(
     query: str,
     *,
     limit: int = 8,
-) -> tuple[DiscoveredSkill, ...]:
+) -> tuple[DiscoveredAnalysisSkill, ...]:
     """Deterministic v0.1 keyword/tag/alias matching over lightweight cards."""
 
     if limit < 1:
         raise ValueError("skill search limit must be positive")
     tokens = {token for token in re.findall(r"[a-z0-9_+-]+", query.casefold()) if token}
 
-    def rank(item: DiscoveredSkill) -> tuple[int, str, str]:
+    def rank(item: DiscoveredAnalysisSkill) -> tuple[int, str, str]:
         card = item.card
         exact = {card.skill_id.casefold(), *(alias.casefold() for alias in card.aliases)}
         indexed = {

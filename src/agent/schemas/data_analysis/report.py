@@ -9,6 +9,7 @@ from pydantic import Field, model_validator
 from .action_identity import AnalysisExecutionOrigin
 from .assets import AnalysisScopeDescriptor
 from .common import CertifiedArtifactRef, FrozenModel, NonEmptyStr, Sha256, canonical_json_bytes
+from .generated_skill import GeneratedExperimentSkillRegistryRef
 from .skills import AnalysisCoverage, InvocationStatus, QuantitativeResult
 
 MAX_REPORT_RESULT_SUMMARIES = 100
@@ -122,6 +123,9 @@ class DataAnalysisReportProvenance(FrozenModel):
     discovery_snapshot_digest: Sha256
     skill_result_set_digest: Sha256
     generated_at: NonEmptyStr
+    generated_skill_registry: GeneratedExperimentSkillRegistryRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class DataAnalysisReport(FrozenModel):

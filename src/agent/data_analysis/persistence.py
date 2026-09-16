@@ -31,8 +31,13 @@ class AnalysisRunStore:
             raise NotImplementedError("Data Analysis currently requires a local StorageConfig")
         run_name = validate_path_component(storage.local.run_name, kind="analysis run name")
         request_name = validate_path_component(request_id, kind="analysis request id")
-        self.root = Path(storage.local.workspace) / "data_analysis" / run_name / request_name
+        self.run_root = Path(storage.local.workspace) / "data_analysis" / run_name
+        self.root = self.run_root / request_name
         self.artifact_root = self.root / "artifacts"
+
+    @property
+    def generated_skill_registry_root(self) -> Path:
+        return self.run_root / "generated_skill_registry"
 
     @property
     def skill_results_path(self) -> Path:

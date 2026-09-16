@@ -40,6 +40,7 @@ from .materialization import AnalysisMaterializationError
 from .persistence import AnalysisRunStore
 from .plan_validation import (
     ResolvedAnalysisInvocation,
+    ResolvedGeneratedExperimentSkillInvocation,
     ResolvedGeneratedProgramInvocation,
     ResolvedPlannedInvocation,
 )
@@ -70,6 +71,10 @@ def _pre_execution_result(
         execution_origin = "generated_program"
         skill_identity = None
         generated_program_identity = item.invocation.program_identity
+    elif isinstance(item, ResolvedGeneratedExperimentSkillInvocation):
+        execution_origin = "generated_experiment_skill"
+        skill_identity = item.skill.identity
+        generated_program_identity = None
     else:
         execution_origin = trusted_skill_execution_origin(item.skill)
         skill_identity = item.skill.identity
@@ -126,7 +131,10 @@ def execute_resolved_action(
     started_at = utc_now()
     started_monotonic = time.monotonic()
     sandbox: AnalysisCodeSandbox | None = None
-    if isinstance(item, ResolvedGeneratedProgramInvocation):
+    if isinstance(
+        item,
+        (ResolvedGeneratedProgramInvocation, ResolvedGeneratedExperimentSkillInvocation),
+    ):
         sandbox = AnalysisCodeSandbox()
         capability = sandbox.probe()
         if not capability.available:
@@ -215,7 +223,10 @@ def execute_resolved_action(
             inspected_asset_ids=(),
         )
 
-    if isinstance(item, ResolvedGeneratedProgramInvocation):
+    if isinstance(
+        item,
+        (ResolvedGeneratedProgramInvocation, ResolvedGeneratedExperimentSkillInvocation),
+    ):
         allowed_media_types = tuple(
             sorted({artifact.media_type for artifact in item.program.expected_artifacts})
         )
@@ -272,7 +283,22 @@ def execute_resolved_action(
                     result_id=f"{inp.request_id}.{item.invocation.invocation_id}.result",
                     invocation_id=item.invocation.invocation_id,
                     program=item.program,
-                    identity=item.invocation.program_identity,
+                    identity=(
+                        item.invocation.program_identity
+                        if isinstance(item, ResolvedGeneratedProgramInvocation)
+                        else item.skill.program_identity
+                    ),
+                    execution_origin=(
+                        "generated_program"
+                        if isinstance(item, ResolvedGeneratedProgramInvocation)
+                        else "generated_experiment_skill"
+                    ),
+                    skill_identity=(
+                        None
+                        if isinstance(item, ResolvedGeneratedProgramInvocation)
+                        else item.skill.identity
+                    ),
+                    parameter_schema_sha256=(item.validated_parameters.parameter_schema_sha256),
                     source_path=item.source_path,
                     parameters=item.validated_parameters.parameters,
                     materializations=bundle.views,

@@ -19,6 +19,7 @@ from agent.schemas.data_analysis.skills import (
     QuantitativeResult,
     SkillExecutionProvenance,
     SkillFailure,
+    SkillIdentity,
     SkillResult,
 )
 
@@ -95,6 +96,9 @@ def _failed_result(
     result_id: str,
     invocation_id: str,
     identity: GeneratedProgramIdentity,
+    execution_origin: Literal["generated_program", "generated_experiment_skill"],
+    skill_identity: SkillIdentity | None,
+    parameter_schema_sha256: str,
     plan_sha256: str,
     validated_parameters_sha256: str,
     materializations: tuple[MaterializedAnalysisView, ...],
@@ -106,8 +110,9 @@ def _failed_result(
     return SkillResult(
         result_id=result_id,
         invocation_id=invocation_id,
-        execution_origin="generated_program",
-        generated_program_identity=identity,
+        execution_origin=execution_origin,
+        skill_identity=skill_identity,
+        generated_program_identity=(identity if execution_origin == "generated_program" else None),
         status=status,
         summary="Generated analysis did not produce certified scientific evidence.",
         quantitative_results=(),
@@ -120,7 +125,7 @@ def _failed_result(
         ),
         provenance=SkillExecutionProvenance(
             plan_sha256=plan_sha256,
-            parameter_schema_sha256=identity.parameter_schema_sha256,
+            parameter_schema_sha256=parameter_schema_sha256,
             validated_parameters_sha256=validated_parameters_sha256,
             authorization_receipts=tuple(view.authorization_receipt for view in materializations),
             inference_receipts=(),
@@ -144,6 +149,11 @@ def execute_generated_program(
     invocation_id: str,
     program: GeneratedAnalysisProgram,
     identity: GeneratedProgramIdentity,
+    execution_origin: Literal["generated_program", "generated_experiment_skill"] = (
+        "generated_program"
+    ),
+    skill_identity: SkillIdentity | None = None,
+    parameter_schema_sha256: str | None = None,
     source_path: Path,
     parameters: dict[str, Any],
     materializations: tuple[MaterializedAnalysisView, ...],
@@ -160,6 +170,11 @@ def execute_generated_program(
     """Execute fixed source, then certify its untrusted payload in the parent."""
 
     validated_parameters_sha256 = canonical_sha256(parameters)
+    if execution_origin == "generated_program" and skill_identity is not None:
+        raise ValueError("one-off generated execution cannot carry a skill identity")
+    if execution_origin == "generated_experiment_skill" and skill_identity is None:
+        raise ValueError("generated experiment skill execution requires its skill identity")
+    resolved_parameter_schema_sha256 = parameter_schema_sha256 or identity.parameter_schema_sha256
     descriptors = {
         view.binding_id: {
             "binding_id": view.binding_id,
@@ -198,6 +213,9 @@ def execute_generated_program(
             result_id=result_id,
             invocation_id=invocation_id,
             identity=identity,
+            execution_origin=execution_origin,
+            skill_identity=skill_identity,
+            parameter_schema_sha256=resolved_parameter_schema_sha256,
             plan_sha256=plan_sha256,
             validated_parameters_sha256=validated_parameters_sha256,
             materializations=materializations,
@@ -222,6 +240,9 @@ def execute_generated_program(
             result_id=result_id,
             invocation_id=invocation_id,
             identity=identity,
+            execution_origin=execution_origin,
+            skill_identity=skill_identity,
+            parameter_schema_sha256=resolved_parameter_schema_sha256,
             plan_sha256=plan_sha256,
             validated_parameters_sha256=validated_parameters_sha256,
             materializations=materializations,
@@ -233,8 +254,9 @@ def execute_generated_program(
     return SkillResult(
         result_id=result_id,
         invocation_id=invocation_id,
-        execution_origin="generated_program",
-        generated_program_identity=identity,
+        execution_origin=execution_origin,
+        skill_identity=skill_identity,
+        generated_program_identity=(identity if execution_origin == "generated_program" else None),
         status="completed",
         summary=payload.summary,
         quantitative_results=payload.quantitative_results,
@@ -244,7 +266,7 @@ def execute_generated_program(
         warnings=payload.warnings,
         provenance=SkillExecutionProvenance(
             plan_sha256=plan_sha256,
-            parameter_schema_sha256=identity.parameter_schema_sha256,
+            parameter_schema_sha256=resolved_parameter_schema_sha256,
             validated_parameters_sha256=validated_parameters_sha256,
             authorization_receipts=tuple(view.authorization_receipt for view in materializations),
             inference_receipts=(),

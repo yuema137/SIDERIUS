@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import json
 
-from agent.data_analysis.discovery import DiscoveredSkill, DiscoverySnapshot
+from agent.data_analysis.discovery import (
+    DiscoveredAnalysisSkill,
+    DiscoveredGeneratedExperimentSkill,
+    DiscoverySnapshot,
+)
 from agent.schemas.data_analysis.action_identity import GeneratedProgramIdentity
 from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.data_analysis.context import DataAnalysisInput
 from agent.schemas.data_analysis.generated_program import GeneratedAnalysisProgram
+from agent.schemas.data_analysis.generated_skill import GeneratedSkillPromotionDraft
 from agent.schemas.data_analysis.plan import AnalysisPlan
 from agent.schemas.data_analysis.skills import ResolvedSkillInterface, SkillPayload, SkillResult
 
@@ -27,7 +32,7 @@ def _json(value) -> str:
 
 def render_skill_selection_prompt(
     analysis_input: DataAnalysisInput,
-    candidates: tuple[DiscoveredSkill, ...],
+    candidates: tuple[DiscoveredAnalysisSkill, ...],
     *,
     output_schema: dict,
 ) -> tuple[str, str]:
@@ -63,7 +68,7 @@ Authoritative output JSON schema:
 def render_analysis_plan_prompt(
     analysis_input: DataAnalysisInput,
     discovery: DiscoverySnapshot,
-    selected: tuple[DiscoveredSkill, ...],
+    selected: tuple[DiscoveredAnalysisSkill, ...],
     interfaces: dict[str, ResolvedSkillInterface],
     generated_programs: tuple[tuple[GeneratedAnalysisProgram, GeneratedProgramIdentity], ...] = (),
 ) -> tuple[str, str]:
@@ -83,6 +88,11 @@ portable path components. Do not include commentary outside JSON."""
         {
             "card": skill.card.model_dump(mode="json"),
             "resolved_interface": interfaces[skill.card.skill_id].model_dump(mode="json"),
+            "required_action_kind": (
+                "generated_experiment_skill"
+                if isinstance(skill, DiscoveredGeneratedExperimentSkill)
+                else "skill"
+            ),
         }
         for skill in selected
     ]
@@ -113,6 +123,10 @@ Persisted generated programs available to the final plan:
 Generated programs already exist and are immutable. A generated-program invocation must use
 action_kind="generated_program" and reference one exact supplied program_identity. Never embed
 source code or request code generation in AnalysisPlan.
+
+A selected interface marked required_action_kind="generated_experiment_skill" is a promoted,
+untrusted local skill. Invoke it with that exact action_kind and skill_id. It remains sandboxed;
+never rewrite it as action_kind="skill" or request source regeneration.
 
 AnalysisPlan JSON schema:
 {_json(AnalysisPlan.model_json_schema())}
@@ -244,6 +258,35 @@ Certified bounded SkillResults:
 {_json(bounded_results)}
 
 Authoritative output JSON schema:
+{_json(output_schema)}
+"""
+    return system, user
+
+
+def render_generated_skill_promotion_prompt(
+    analysis_input: DataAnalysisInput,
+    *,
+    completed_programs: list[dict],
+    output_schema: dict,
+) -> tuple[str, str]:
+    """Ask for an explicit reuse decision; promotion never changes code."""
+
+    system = """Decide whether any successfully executed one-off generated analysis program is
+likely to be reused later in this same experiment. Promotion only adds a discoverable SkillCard;
+it does not change source, parameters, inputs, outputs, authority, or trust. Do not promote every
+program automatically. Promote only when the same scientific operation is plausibly useful for a
+later question or iteration. Return strict JSON. Each promotion must reference an exact supplied
+program_id and describe that same operation without adding new semantics."""
+    user = f"""Analysis questions:
+{_json(analysis_input.analysis_brief.questions)}
+
+Completed generated programs and certified results:
+{_json(completed_programs)}
+
+Promotion draft schema:
+{_json(GeneratedSkillPromotionDraft.model_json_schema())}
+
+Authoritative output schema:
 {_json(output_schema)}
 """
     return system, user

@@ -4,14 +4,24 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Literal
 
 from pydantic import model_validator
 
 from agent.data_analysis.action_execution import execute_resolved_action
-from agent.data_analysis.discovery import DiscoveredSkill, discover_skills, search_skill_cards
+from agent.data_analysis.discovery import (
+    DiscoveredAnalysisSkill,
+    DiscoveredGeneratedExperimentSkill,
+    discover_skills,
+    search_skill_cards,
+)
 from agent.data_analysis.executor import resolve_skill_interface
 from agent.data_analysis.generated_program_planning import prepare_generated_program
+from agent.data_analysis.generated_skill_registry import (
+    load_generated_skill_registry,
+    promote_generated_program,
+)
 from agent.data_analysis.persistence import AnalysisRunStore
 from agent.data_analysis.plan_validation import resolve_analysis_plan
 from agent.data_analysis.rendering import render_report_markdown
@@ -19,11 +29,16 @@ from agent.data_analysis.structured_output import generate_validated
 from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.data_analysis import (
     render_analysis_plan_prompt,
+    render_generated_skill_promotion_prompt,
     render_report_synthesis_prompt,
     render_skill_selection_prompt,
 )
 from agent.schemas.data_analysis.common import FrozenModel, NonEmptyStr, canonical_sha256, utc_now
 from agent.schemas.data_analysis.context import DataAnalysisInput
+from agent.schemas.data_analysis.generated_skill import (
+    GeneratedExperimentSkillRegistryRef,
+    GeneratedSkillPromotionDraft,
+)
 from agent.schemas.data_analysis.plan import AnalysisPlan, PlannedGeneratedProgramInvocation
 from agent.schemas.data_analysis.report import (
     AnalysisResourceSummary,
@@ -92,6 +107,21 @@ class _ReportSynthesis(FrozenModel):
     limitations: tuple[_LimitationDraft, ...] = ()
     unresolved_questions: tuple[NonEmptyStr, ...] = ()
     modeling_relevance: tuple[NonEmptyStr, ...] = ()
+
+
+class _GeneratedSkillPromotionDecision(FrozenModel):
+    promotions: tuple[GeneratedSkillPromotionDraft, ...] = ()
+    rationale: NonEmptyStr
+
+    @model_validator(mode="after")
+    def validate_promotions(self):
+        program_ids = [item.program_id for item in self.promotions]
+        skill_ids = [item.skill_id for item in self.promotions]
+        if len(set(program_ids)) != len(program_ids):
+            raise ValueError("a generated program may be promoted at most once")
+        if len(set(skill_ids)) != len(skill_ids):
+            raise ValueError("promoted generated skill IDs must be unique")
+        return self
 
 
 class DataAnalysisAgent:
@@ -184,7 +214,7 @@ class DataAnalysisAgent:
         return without_rationales(value)
 
     @staticmethod
-    def _candidate_cards(inp: DataAnalysisInput, discovery) -> tuple[DiscoveredSkill, ...]:
+    def _candidate_cards(inp: DataAnalysisInput, discovery) -> tuple[DiscoveredAnalysisSkill, ...]:
         by_identity = {}
         for question in inp.analysis_brief.questions:
             query = " ".join(
@@ -212,7 +242,10 @@ class DataAnalysisAgent:
         if resumed is not None:
             return resumed
         store.write_input(inp)
-        discovery = discover_skills(inp.allowed_skill_packs)
+        discovery = discover_skills(
+            inp.allowed_skill_packs,
+            generated_skill_registry=inp.generated_skill_registry,
+        )
         store.write_discovery(discovery)
         bridge = self._bridge()
         candidates = self._candidate_cards(inp, discovery)
@@ -262,11 +295,15 @@ class DataAnalysisAgent:
         control_root = store.root / "control"
         control_root.mkdir(parents=True, exist_ok=True)
         interfaces = {
-            skill.card.skill_id: resolve_skill_interface(
-                skill,
-                control_directory=control_root / f"interface-{skill.card.skill_id}",
-                timeout_s=inp.resource_envelope.per_skill_timeout_s,
-                max_host_memory_gb=inp.resource_envelope.max_host_memory_gb,
+            skill.card.skill_id: (
+                skill.resolved_interface
+                if isinstance(skill, DiscoveredGeneratedExperimentSkill)
+                else resolve_skill_interface(
+                    skill,
+                    control_directory=control_root / f"interface-{skill.card.skill_id}",
+                    timeout_s=inp.resource_envelope.per_skill_timeout_s,
+                    max_host_memory_gb=inp.resource_envelope.max_host_memory_gb,
+                )
             )
             for skill in selected
         }
@@ -337,6 +374,13 @@ class DataAnalysisAgent:
             if result.status != "completed" and not plan.stop_policy.continue_after_skill_failure:
                 break
 
+        generated_skill_registry = self._promote_generated_skills(
+            bridge,
+            inp=inp,
+            store=store,
+            generated_programs=generated_programs,
+            results=tuple(results),
+        )
         report = self._synthesize_report(
             bridge,
             inp=inp,
@@ -348,6 +392,7 @@ class DataAnalysisAgent:
             invocation_by_result=invocation_by_result,
             inspected_assets=inspected_assets,
             store=store,
+            generated_skill_registry=generated_skill_registry,
         )
         store.write_report(report, markdown=render_report_markdown(report))
         return report
@@ -365,6 +410,7 @@ class DataAnalysisAgent:
         invocation_by_result,
         inspected_assets,
         store,
+        generated_skill_registry,
     ) -> DataAnalysisReport:
         system, user = render_report_synthesis_prompt(
             inp,
@@ -520,5 +566,89 @@ class DataAnalysisAgent:
                     [item.model_dump(mode="json") for item in result_refs]
                 ),
                 generated_at=utc_now(),
+                generated_skill_registry=generated_skill_registry,
             ),
         )
+
+    @staticmethod
+    def _promotion_semantics(value: object) -> object | None:
+        if not isinstance(value, dict) or not isinstance(value.get("promotions", []), list):
+            return None
+        return value.get("promotions", [])
+
+    @staticmethod
+    def _promote_generated_skills(
+        bridge,
+        *,
+        inp: DataAnalysisInput,
+        store: AnalysisRunStore,
+        generated_programs,
+        results: tuple[SkillResult, ...],
+    ) -> GeneratedExperimentSkillRegistryRef | None:
+        current_ref = inp.generated_skill_registry
+        if not inp.allow_generated_skill_promotion:
+            return current_ref
+        completed = {
+            result.generated_program_identity.program_id: result
+            for result in results
+            if result.status == "completed" and result.generated_program_identity is not None
+        }
+        programs = {
+            program.program_id: (program, identity) for program, identity in generated_programs
+        }
+        promotable = sorted(set(completed) & set(programs))
+        if not promotable:
+            return current_ref
+        system, user = render_generated_skill_promotion_prompt(
+            inp,
+            completed_programs=[
+                {
+                    "program_id": program_id,
+                    "program_identity": programs[program_id][1].model_dump(mode="json"),
+                    "summary": completed[program_id].summary,
+                    "quantitative_result_keys": [
+                        item.result_key for item in completed[program_id].quantitative_results
+                    ],
+                }
+                for program_id in promotable
+            ],
+            output_schema=_GeneratedSkillPromotionDecision.model_json_schema(),
+        )
+        decision = generate_validated(
+            bridge,
+            store=store,
+            model_type=_GeneratedSkillPromotionDecision,
+            system=system,
+            user=user,
+            label="data_analysis.generated_skill_promotion",
+            semantic_projection=DataAnalysisAgent._promotion_semantics,
+        )
+        if not decision.promotions:
+            return current_ref
+        if not {item.program_id for item in decision.promotions}.issubset(promotable):
+            raise ValueError("promotion decision references a non-completed generated program")
+        registry_root = store.generated_skill_registry_root
+        if (
+            current_ref is not None
+            and Path(current_ref.registry_root).resolve() != registry_root.resolve()
+        ):
+            raise ValueError("promotion cannot write outside this analysis run's registry")
+        existing = None if current_ref is None else load_generated_skill_registry(current_ref)
+        registry_id = (
+            f"generated-skills-{canonical_sha256({'run_name': inp.storage.local.run_name})}"
+        )
+        updated_ref = current_ref
+        for draft in decision.promotions:
+            program, identity = programs[draft.program_id]
+            existing, updated_ref = promote_generated_program(
+                source_root=store.root,
+                registry_root=registry_root,
+                registry_id=registry_id,
+                existing=existing,
+                program=program,
+                program_identity=identity,
+                draft=draft,
+                originating_request_id=inp.request_id,
+                originating_result_id=completed[draft.program_id].result_id,
+            )
+        return updated_ref
