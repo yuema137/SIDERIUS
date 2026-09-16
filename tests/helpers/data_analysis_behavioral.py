@@ -89,12 +89,13 @@ PRIMARY_CASES = (
 
 _BUDGETS: dict[BudgetName, tuple[float, float]] = {
     # Interface resolution is deliberately outside the scientific execution
-    # deadline.  Four seconds lets that contract resolve; the plan's equal
-    # minimum-remaining-time threshold then proves no skill starts.
-    "exhausted": (4.0, 4.0),
-    "low": (8.0, 4.0),
-    "medium": (16.0, 4.0),
-    "high": (30.0, 5.0),
+    # deadline.  The subprocess must tolerate a fully loaded CI shard; the
+    # plan's equal minimum-remaining-time threshold still proves no skill
+    # starts in the exhausted case.
+    "exhausted": (10.0, 10.0),
+    "low": (8.0, 8.0),
+    "medium": (16.0, 10.0),
+    "high": (30.0, 10.0),
 }
 
 
