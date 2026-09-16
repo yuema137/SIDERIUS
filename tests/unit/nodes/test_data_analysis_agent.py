@@ -266,6 +266,9 @@ class _GeneratedProgramBridge(_Bridge):
             assert "`default`" in system
             assert "must be null" in system
             assert "explicit non-negative `seed`" in system
+            assert "information arrays `[N,C,T]`" in system
+            assert "`valid_mask[N,T]`" in system
+            assert "counts must sum exactly to `dropped_count`" in system
             assert "Authoritative JSON schema for the payload returned by analyze" in user
             assert '"title": "SkillPayload"' in user
             assert '"relative_path"' in user

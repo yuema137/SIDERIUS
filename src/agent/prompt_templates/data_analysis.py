@@ -157,7 +157,20 @@ conditional rule: `required=true` means the caller must supply the value and the
 must be null; a parameter with a usable default must set `required=false`. Do not redundantly mark
 a parameter required while also assigning its value. The source and declaration will be persisted
 and content-addressed before any executable plan exists. If `determinism` is `deterministic`,
-declare an explicit non-negative `seed`; do not leave it null."""
+declare an explicit non-negative `seed`; do not leave it null.
+
+The raw runner ABI has these fixed shapes. Numeric views use `example_ids[N]`, information arrays
+whose leading axis is N, optional scalar or `[N]` metadata, and optional per-example
+`valid_mask[N]`. Time-series views use information arrays `[N,C,T]`, `channel_ids[C]`, and
+per-observation `valid_mask[N,T]`; the mask is not an example-level boolean. A regular time axis is
+`time_start_seconds[N]` plus `time_step_seconds[N]`; an explicit axis is `time[N,T]`. Do not guess
+or transpose these certified axes.
+
+SkillPayload also has validator-owned rules not fully expressed by JSON Schema: `analysis_usage`
+counts population units, every dropped unit has exactly one reason, drop reasons are unique, and
+their counts must sum exactly to `dropped_count`. Emitted quantitative result keys and artifact
+types must match the declaration exactly. An absent required artifact, approximate field name, or
+unbalanced usage count will be rejected rather than normalized."""
     user = f"""Questions requiring custom analysis:
 {_json(questions)}
 
