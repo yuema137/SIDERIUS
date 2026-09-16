@@ -266,6 +266,8 @@ class _GeneratedProgramBridge(_Bridge):
             assert "`default`" in system
             assert "must be null" in system
             assert "explicit non-negative `seed`" in system
+            assert "Binding IDs are chosen after source generation" in system
+            assert '`descriptor["slot_id"]`' in system
             assert "information arrays `[N,C,T]`" in system
             assert "`valid_mask[N,T]`" in system
             assert "counts must sum exactly to `dropped_count`" in system

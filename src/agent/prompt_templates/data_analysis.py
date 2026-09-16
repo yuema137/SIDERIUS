@@ -139,7 +139,10 @@ schema. Source must define exactly:
 
     def analyze(inputs, parameters, output_directory): ...
 
-`inputs` maps binding IDs to read-only objects with `descriptor` and `arrays` mappings. `arrays`
+`inputs` maps final-plan binding IDs to read-only objects with `descriptor` and `arrays` mappings.
+Binding IDs are chosen after source generation and need not equal declared slot IDs. Never
+hard-code a binding ID or look up `inputs[slot_id]`; locate inputs by the certified
+`descriptor["slot_id"]`, and support the declared slot cardinality. `arrays`
 contains only the executor-authorized NPZ arrays: `example_ids`, `information__<class>`,
 `metadata__<field>`, optional `valid_mask`, and for time-series views `channel_ids` plus exactly one
 certified time-axis encoding (`time` or `time_start_seconds`/`time_step_seconds`). Never open task
