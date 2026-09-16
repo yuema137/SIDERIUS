@@ -1,7 +1,11 @@
-"""The frozen sensitive-test manifest.
+"""The reviewed sensitive-test manifest.
 
 FROZEN 2026-08-24 on CP-6 evidence, after CP-8 closed and confirmed no further
-environment-sensitive class exists (docs/audit/ci_parity_audit.md).
+environment-sensitive class existed at that time
+(docs/audit/ci_parity_audit.md). Generated-analysis sandbox tests added a new,
+explicit class in 2026-09: kernel namespace qualification must fail closed
+when a saturated host cannot allocate the isolated process tree, while the
+positive execution witness still needs one quiescent capability-qualified run.
 
 Membership requires **semantic** sensitivity, established by reading the test.
 The presence of ``time.sleep``, a polling loop or a timeout literal is NOT
@@ -13,6 +17,7 @@ The discriminator is the DIRECTION of the assertion:
     "the event must occur WITHIN T"      host saturation can exceed T   -> sensitive
     "A happened before B", A and B on
       different schedulers               saturation can invert it       -> sensitive
+    "kernel isolation is available"      host task pressure can refuse  -> sensitive
     "the event must NOT occur within T"  saturation makes it MORE true  -> bulk
     sleep only sequences, or lets a thread start                        -> bulk
 
@@ -61,6 +66,13 @@ SENSITIVE_FILES: MappingProxyType[str, str] = MappingProxyType(
             "while passing on an unloaded 24-core host — the CP-6 discriminator "
             "extended: a race two schedulers can lose is load-fragile even "
             "though no wall-clock BOUND appears in the assertion."
+        ),
+        "tests/unit/nodes/test_data_analysis_agent.py": (
+            "runs positive end-to-end generated-analysis witnesses through real "
+            "user/network namespaces and Bubblewrap. Under four-shard host task "
+            "pressure the mandatory sandbox capability probe may correctly fail "
+            "closed before execution; the same tests must run alone so PASS means "
+            "the qualified isolation path executed rather than weakening refusal."
         ),
     }
 )
