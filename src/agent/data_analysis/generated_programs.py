@@ -200,6 +200,11 @@ def load_generated_program(
         / program_id
         / f"{identity.declaration_sha256}.json"
     )
+    current = declaration_path
+    while current != root:
+        if current.is_symlink():
+            raise ValueError("persisted generated declaration may not use symbolic links")
+        current = current.parent
     try:
         declaration_bytes = declaration_path.read_bytes()
         program = GeneratedAnalysisProgram.model_validate_json(declaration_bytes)
@@ -207,12 +212,16 @@ def load_generated_program(
         raise ValueError("persisted generated program declaration is missing") from exc
     if program.identity(runtime_environment_sha256=runtime_environment_identity()) != identity:
         raise ValueError("persisted generated program identity differs from the plan")
-    source_path = (root / program.source_ref.logical_ref).resolve()
+    source_candidate = root / program.source_ref.logical_ref
+    current = source_candidate
+    while current != root:
+        if current.is_symlink():
+            raise ValueError("persisted generated source may not use symbolic links")
+        current = current.parent
+    source_path = source_candidate.resolve()
     resolved_root = root.resolve()
     if resolved_root not in source_path.parents or not source_path.is_file():
         raise ValueError("persisted generated source is missing or escapes the run root")
-    if source_path.is_symlink():
-        raise ValueError("persisted generated source may not be a symbolic link")
     source_bytes = source_path.read_bytes()
     if len(source_bytes) != program.source_ref.byte_size:
         raise ValueError("persisted generated source byte size changed")

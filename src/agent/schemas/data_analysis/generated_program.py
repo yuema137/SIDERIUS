@@ -137,6 +137,8 @@ class GeneratedAnalysisProgram(FrozenModel):
         artifact_types = [item.artifact_type for item in self.expected_artifacts]
         if len(set(artifact_types)) != len(artifact_types):
             raise ValueError("expected generated artifact types must be unique")
+        if len(self.expected_artifacts) > self.resource_request.max_artifact_count:
+            raise ValueError("generated artifact declarations exceed the resource request")
         if self.determinism == "deterministic" and self.seed is None:
             raise ValueError("deterministic generated programs require an explicit seed")
         return self
