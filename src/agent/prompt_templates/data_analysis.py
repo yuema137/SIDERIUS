@@ -170,10 +170,14 @@ per-observation `valid_mask[N,T]`; the mask is not an example-level boolean. A r
 or transpose these certified axes.
 
 SkillPayload also has validator-owned rules not fully expressed by JSON Schema: `analysis_usage`
-counts population units, every dropped unit has exactly one reason, drop reasons are unique, and
-their counts must sum exactly to `dropped_count`. Emitted quantitative result keys and artifact
-types must match the declaration exactly. An absent required artifact, approximate field name, or
-unbalanced usage count will be rejected rather than normalized."""
+counts the certified `descriptor["population_unit"]` (usually examples), not channel-series or
+windows. `effective_count + dropped_count` must equal the certified selected/materialized count;
+every dropped population unit has exactly one reason, drop reasons are unique, and their counts
+must sum exactly to `dropped_count`. Every emitted quantitative result must copy its declared
+`result_key`, `unit`, and `description` exactly, including description wording; only `value` is
+computed at runtime. Artifact type and media type must likewise match their declarations exactly.
+An absent required artifact, approximate field/description, or unbalanced usage count will be
+rejected rather than normalized."""
     user = f"""Questions requiring custom analysis:
 {_json(questions)}
 

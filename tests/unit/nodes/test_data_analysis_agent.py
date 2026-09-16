@@ -270,7 +270,10 @@ class _GeneratedProgramBridge(_Bridge):
             assert '`descriptor["slot_id"]`' in system
             assert "information arrays `[N,C,T]`" in system
             assert "`valid_mask[N,T]`" in system
-            assert "counts must sum exactly to `dropped_count`" in system
+            assert "`effective_count + dropped_count` must equal" in system
+            assert "drop reasons are unique" in system
+            assert '`descriptor["population_unit"]`' in system
+            assert "including description wording" in system
             assert "Authoritative JSON schema for the payload returned by analyze" in user
             assert '"title": "SkillPayload"' in user
             assert '"relative_path"' in user
