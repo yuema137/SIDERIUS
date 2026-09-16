@@ -559,7 +559,9 @@ def test_timeout_terminates_the_worker_process_tree(tmp_path: Path) -> None:
         staging_directory=staging,
         control_directory=store.root / "control" / "execute-1",
         plan_sha256="4" * 64,
-        timeout_s=0.3,
+        # Leave enough time for a loaded CI runner to import the worker and
+        # spawn the child whose process-tree cleanup this test exercises.
+        timeout_s=2.0,
     )
 
     assert result.status == "timed_out"
