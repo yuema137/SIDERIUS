@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from agent.schemas.data_analysis.assets import AnalysisAuthorizationReceipt
 from agent.schemas.data_analysis.common import canonical_sha256, utc_now
 from agent.schemas.data_analysis.context import DataAnalysisInput
 from agent.schemas.data_analysis.plan import AnalysisPlan
@@ -62,6 +63,7 @@ def _pre_execution_result(
     materialization_occurred: bool,
     started_at: str,
     started_monotonic: float,
+    authorization_receipts: tuple[AnalysisAuthorizationReceipt, ...] = (),
     inference_receipts: tuple[ModelInferenceReceipt, ...] = (),
 ) -> SkillResult:
     if isinstance(item, ResolvedGeneratedProgramInvocation):
@@ -98,7 +100,7 @@ def _pre_execution_result(
             plan_sha256=canonical_sha256(plan),
             parameter_schema_sha256=item.validated_parameters.parameter_schema_sha256,
             validated_parameters_sha256=(item.validated_parameters.validated_parameters_sha256),
-            authorization_receipts=(),
+            authorization_receipts=authorization_receipts,
             inference_receipts=inference_receipts,
             environment_lock_verified=False,
             started_at=started_at,
@@ -300,6 +302,9 @@ def execute_resolved_action(
                     materialization_occurred=True,
                     started_at=started_at,
                     started_monotonic=started_monotonic,
+                    authorization_receipts=tuple(
+                        view.authorization_receipt for view in bundle.views
+                    ),
                 )
     finally:
         store.cleanup_staging(staging)

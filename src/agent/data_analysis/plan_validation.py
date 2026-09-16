@@ -328,6 +328,15 @@ def resolve_analysis_plan(
     assets = {asset.asset_id: asset for asset in analysis_input.available_assets}
     resolved: list[ResolvedAnalysisInvocation] = []
     for invocation in plan.invocations:
+        sampling = invocation.sampling_plan.policy
+        if sampling.strategy == "stratified" and not analysis_input.access_policy.permits(
+            split_id=invocation.sampling_plan.split_id,
+            information_class="metadata",
+            source_fields=sampling.strata_fields,
+        ):
+            raise AnalysisPlanResolutionError(
+                "stratified sampling fields are not visible under the access policy"
+            )
         if isinstance(invocation, PlannedGeneratedProgramInvocation):
             if generated_program_root is None:
                 raise AnalysisPlanResolutionError(
@@ -401,7 +410,6 @@ def resolve_analysis_plan(
             raise AnalysisPlanResolutionError(
                 "invocation memory-cost hint differs from its skill card"
             )
-        sampling = invocation.sampling_plan.policy
         if not skill.card.supports_sampling and (
             sampling.mode != "full_if_feasible"
             or sampling.max_items is not None
@@ -409,14 +417,6 @@ def resolve_analysis_plan(
         ):
             raise AnalysisPlanResolutionError(
                 f"skill {skill.card.skill_id!r} does not support sampled execution"
-            )
-        if sampling.strategy == "stratified" and not analysis_input.access_policy.permits(
-            split_id=invocation.sampling_plan.split_id,
-            information_class="metadata",
-            source_fields=sampling.strata_fields,
-        ):
-            raise AnalysisPlanResolutionError(
-                "stratified sampling fields are not visible under the access policy"
             )
         bindings = _bind_invocation(
             invocation,

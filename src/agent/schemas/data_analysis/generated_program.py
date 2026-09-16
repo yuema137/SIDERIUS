@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from pydantic import Field, model_validator
@@ -54,6 +55,13 @@ class GeneratedParameterDeclaration(FrozenModel):
                 and self.minimum > self.maximum
             ):
                 raise ValueError("generated parameter minimum cannot exceed maximum")
+        numeric_values = (
+            (self.default, *self.choices, self.minimum, self.maximum)
+            if self.value_type in {"integer", "number"}
+            else ()
+        )
+        if any(value is not None and not math.isfinite(float(value)) for value in numeric_values):
+            raise ValueError("generated numeric parameter declarations must be finite")
         return self
 
 
@@ -177,8 +185,16 @@ def validate_generated_parameters(
             raise ValueError(f"required generated program parameter {name!r} is missing")
         else:
             value = declaration.default
+        if value is None and declaration.required:
+            raise ValueError(f"required generated program parameter {name!r} cannot be null")
         if not declaration._matches_type(value, declaration.value_type):
             raise ValueError(f"generated program parameter {name!r} has the wrong type")
+        if (
+            value is not None
+            and declaration.value_type in {"integer", "number"}
+            and not math.isfinite(float(value))
+        ):
+            raise ValueError(f"generated program parameter {name!r} must be finite")
         if declaration.choices and value not in declaration.choices:
             raise ValueError(f"generated program parameter {name!r} is outside its choices")
         if value is not None and declaration.value_type in {"integer", "number"}:

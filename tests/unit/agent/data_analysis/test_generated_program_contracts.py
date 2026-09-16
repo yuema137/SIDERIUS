@@ -23,7 +23,9 @@ from agent.schemas.data_analysis.common import CertifiedArtifactRef, canonical_s
 from agent.schemas.data_analysis.generated_program import (
     GeneratedAnalysisProgram,
     GeneratedMeasurementDeclaration,
+    GeneratedParameterDeclaration,
     GeneratedProgramResourceRequest,
+    validate_generated_parameters,
 )
 from agent.schemas.data_analysis.plan import AnalysisPlan
 from agent.schemas.data_analysis.report import (
@@ -268,6 +270,28 @@ def test_deterministic_seed_is_rejected_at_draft_boundary_before_persistence() -
             determinism="deterministic",
             seed=None,
             rationale="Invalid deterministic draft.",
+        )
+
+
+def test_generated_numeric_parameters_reject_null_and_nonfinite_values() -> None:
+    """Defect: required/null or nonfinite scalar arguments entered executable identity."""
+
+    required = GeneratedParameterDeclaration(
+        name="order",
+        value_type="number",
+        description="Finite required order",
+    )
+    with pytest.raises(ValueError, match="cannot be null"):
+        validate_generated_parameters((required,), {"order": None})
+    with pytest.raises(ValueError, match="must be finite"):
+        validate_generated_parameters((required,), {"order": float("inf")})
+    with pytest.raises(ValidationError, match="declarations must be finite"):
+        GeneratedParameterDeclaration(
+            name="delay",
+            value_type="number",
+            description="Finite optional delay",
+            required=False,
+            default=float("nan"),
         )
 
 
