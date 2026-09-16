@@ -28,6 +28,7 @@ from core.runtime_control.process_group import process_group_alive
 
 SANDBOX_PROTOCOL_ID = "siderius.generated-analysis-sandbox.v1"
 MAX_GENERATED_PAYLOAD_BYTES = 1024 * 1024
+GENERATED_PROCESS_HEADROOM = 64
 
 
 class AnalysisCodeSandboxUnavailable(RuntimeError):
@@ -67,13 +68,33 @@ class SandboxExecutionReceipt:
     stderr_sha256: str
 
 
-def _sandbox_preexec(*, max_address_space_bytes: int, cpu_seconds: int) -> None:
+def _sandbox_preexec(
+    *,
+    max_address_space_bytes: int,
+    cpu_seconds: int,
+    uid_process_limit: int,
+) -> None:
     resource.setrlimit(resource.RLIMIT_AS, (max_address_space_bytes, max_address_space_bytes))
     resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 1))
     resource.setrlimit(resource.RLIMIT_FSIZE, (64 * 1024 * 1024, 64 * 1024 * 1024))
     resource.setrlimit(resource.RLIMIT_NOFILE, (128, 128))
-    resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
+    resource.setrlimit(resource.RLIMIT_NPROC, (uid_process_limit, uid_process_limit))
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
+def _current_uid_process_count() -> int:
+    """Count the host-UID baseline used by RLIMIT_NPROC before user unshare."""
+
+    uid = os.getuid()
+    count = 0
+    for process in psutil.process_iter(("uids",)):
+        try:
+            uids = process.info["uids"]
+            if uids is not None and uids.real == uid:
+                count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return count
 
 
 def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
@@ -398,6 +419,7 @@ class AnalysisCodeSandbox:
         ]
         started_at = utc_now()
         started = time.monotonic()
+        uid_process_limit = _current_uid_process_count() + GENERATED_PROCESS_HEADROOM
         stdout_path = control_directory / "stdout.log"
         stderr_path = control_directory / "stderr.log"
         with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
@@ -410,6 +432,7 @@ class AnalysisCodeSandbox:
                 preexec_fn=lambda: _sandbox_preexec(
                     max_address_space_bytes=max(1, int(max_host_memory_gb * 1024**3)),
                     cpu_seconds=max(1, int(timeout_s) + 1),
+                    uid_process_limit=uid_process_limit,
                 ),
             )
             ps_process = psutil.Process(process.pid)
@@ -483,6 +506,8 @@ class AnalysisCodeSandbox:
                 measurement_limitations=(
                     "CPU time was not measured per process group.",
                     "RLIMIT_AS bounds virtual address space; peak RSS is observed separately.",
+                    "RLIMIT_NPROC is host-UID-scoped and permits a fixed increment above the "
+                    "observed pre-launch UID process baseline.",
                 ),
             ),
             payload=payload,
