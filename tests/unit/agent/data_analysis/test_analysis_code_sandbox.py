@@ -202,6 +202,39 @@ def analyze(inputs, parameters, output_directory):
 
 
 @pytest.mark.allow_real_subprocess
+def test_sandbox_output_directory_matches_declared_artifact_paths(tmp_path: Path) -> None:
+    """Defect: the runner prepended artifacts twice and made valid outputs uncertifiable."""
+
+    source = """from pathlib import Path
+
+def analyze(inputs, parameters, output_directory):
+    artifact = Path(output_directory) / 'artifacts' / 'measurement.txt'
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text('measured', encoding='utf-8')
+    return {
+        'summary': 'Produced one bounded artifact.',
+        'quantitative_results': [{
+            'result_key': 'artifact_written', 'value': True, 'unit': None,
+            'description': 'Artifact was written below the sandbox output root.',
+        }],
+        'produced_artifacts': [{
+            'artifact_type': 'table', 'logical_name': 'measurement',
+            'media_type': 'text/plain', 'relative_path': 'artifacts/measurement.txt',
+            'description': 'Bounded generated measurement artifact.',
+        }],
+        'analysis_usage': {'effective_count': 2, 'dropped_count': 0, 'drop_reasons': []},
+        'warnings': [],
+    }
+"""
+    receipt = _execute(tmp_path, source, keys=("artifact_written",))
+
+    assert receipt.status == "completed"
+    assert receipt.payload is not None
+    assert receipt.payload.produced_artifacts[0].relative_path == "artifacts/measurement.txt"
+    assert (tmp_path / "output" / "artifacts" / "measurement.txt").read_text() == "measured"
+
+
+@pytest.mark.allow_real_subprocess
 def test_timeout_kills_generated_process_group(tmp_path: Path) -> None:
     """Catches a generated child process surviving the invocation deadline."""
 

@@ -377,7 +377,7 @@ class AnalysisCodeSandbox:
                     "parameters": parameters,
                     "determinism": program.determinism,
                     "seed": program.seed,
-                    "output_directory": "/output/artifacts",
+                    "output_directory": "/output",
                 }
             ),
         )
