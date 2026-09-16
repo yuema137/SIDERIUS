@@ -10,7 +10,7 @@ from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.data_analysis.context import DataAnalysisInput
 from agent.schemas.data_analysis.generated_program import GeneratedAnalysisProgram
 from agent.schemas.data_analysis.plan import AnalysisPlan
-from agent.schemas.data_analysis.skills import ResolvedSkillInterface, SkillResult
+from agent.schemas.data_analysis.skills import ResolvedSkillInterface, SkillPayload, SkillResult
 
 
 def _json(value) -> str:
@@ -175,6 +175,9 @@ Resource envelope:
 
 Authoritative GeneratedProgramDraft JSON schema:
 {_json(output_schema)}
+
+Authoritative JSON schema for the payload returned by analyze(...):
+{_json(SkillPayload.model_json_schema())}
 """
     return system, user
 

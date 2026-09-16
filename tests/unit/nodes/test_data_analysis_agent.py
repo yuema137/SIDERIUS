@@ -266,6 +266,10 @@ class _GeneratedProgramBridge(_Bridge):
             assert "`default`" in system
             assert "must be null" in system
             assert "explicit non-negative `seed`" in system
+            assert "Authoritative JSON schema for the payload returned by analyze" in user
+            assert '"title": "SkillPayload"' in user
+            assert '"relative_path"' in user
+            assert '"effective_count"' in user
             return {
                 "program_id": "successive-difference",
                 "question_ids": ["q-summary"],
