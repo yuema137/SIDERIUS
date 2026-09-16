@@ -17,9 +17,21 @@ from agent.schemas.protocols.interpreter_to_data_analysis import (
     local_analysis_input,
 )
 from agent.schemas.storage import StorageConfig
-from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
+from execute_tools.historical_model_inference import (
+    HistoricalModelInferenceCapability,
+    LocalPytorchHistoricalModelInferenceCapability,
+)
+from ml_models.plugin_binding import active_run_model_plugins
 from nodes.data_analysis_agent import DataAnalysisAgent
 from workflows.data_analysis_composition import ResolvedWorkflowDataAnalysis
+from workflows.historical_analysis_assets import (
+    HistoricalTuningSource,
+    derive_historical_analysis_assets,
+)
+from workflows.historical_inference_bindings import (
+    RunBoundHistoricalArtifactExporter,
+    RunBoundHistoricalModelPluginResolver,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +53,9 @@ def run_optional_data_analysis(
     llm_kwargs: dict,
     bridge_factory,
     historical_model_inference_capability: HistoricalModelInferenceCapability | None = None,
+    historical_sources: tuple[HistoricalTuningSource, ...] = (),
+    task_composition_fingerprint: str | None = None,
+    chain_workspace: str | None = None,
     literature_output: LiteratureReviewOutput | None = None,
 ) -> WorkflowAnalysisOutput | None:
     """Run the independent capability only when the composition enables its edge.
@@ -52,6 +67,33 @@ def run_optional_data_analysis(
 
     if binding is None:
         return None
+    # A failed Interpreter brief is already a typed no-analysis disposition.
+    # Do not inspect historical artifacts merely because a workflow edge exists.
+    if interpretation.analysis_brief is None:
+        return None
+    assert storage.local is not None
+    if binding.historical_inference_base_asset_id is not None and historical_sources:
+        if task_composition_fingerprint is None or chain_workspace is None:
+            raise ValueError("historical analysis requires explicit workflow composition identity")
+        derived = derive_historical_analysis_assets(
+            binding,
+            sources=historical_sources,
+            task_composition_fingerprint=task_composition_fingerprint,
+        )
+        binding = derived.binding
+        if derived.artifact_roots_by_sha256 and historical_model_inference_capability is None:
+            from core.sandbox_executor import get_plugin_dir
+
+            historical_model_inference_capability = LocalPytorchHistoricalModelInferenceCapability(
+                workspace=Path(storage.local.workspace),
+                artifact_exporter=RunBoundHistoricalArtifactExporter(
+                    derived.artifact_roots_by_sha256
+                ),
+                plugin_resolver=RunBoundHistoricalModelPluginResolver(
+                    declared_plugins=active_run_model_plugins(),
+                    generated_plugin_dir=Path(get_plugin_dir(chain_workspace, run_name)),
+                ),
+            )
     request_id = f"iteration-{iteration:03d}"
     try:
         analysis_input = local_analysis_input(
@@ -86,7 +128,6 @@ def run_optional_data_analysis(
         bridge_factory=bridge_factory,
         **llm_kwargs,
     ).run(analysis_input)
-    assert storage.local is not None
     relative = Path("data_analysis") / storage.local.run_name / request_id / "report.json"
     path = Path(storage.local.workspace) / relative
     payload = path.read_bytes()

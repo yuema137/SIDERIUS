@@ -144,6 +144,23 @@ generated program can be considered for run-local promotion, and promoted code
 remains sandboxed and untrusted. The default false state does not alter the
 legacy composition identity.
 
+For active analysis of a model trained in an earlier workflow iteration, the
+caller may additionally name `historical_inference_base_asset_id` in this
+analysis config. It must identify one task-owned dataset asset in
+`available_assets`, and `access_policy.allow_model_inference` must be true.
+The task data path must implement the optional
+`TaskHistoricalInferenceInputCapability` sibling. Given a digest-verified
+trained-model artifact, its exact model config, and the declared base region,
+that sibling derives a candidate-compatible input asset and certifies that its
+scope remains within the base region. It cannot grant visibility or perform
+materialization. The normal validated plan must still bind both the derived
+input and exact model asset, and the existing access policy still controls
+data and prediction visibility. No prior model is guessed from checkpoint
+names: only `trained_model_artifact_ref` on validated earlier training records
+is eligible. The workflow exposes the latest artifact-bearing tuning output's
+certified models, without scoring or ranking them for the planner. The absent
+field preserves the previous workflow identity and behavior.
+
 `enabled: false` is a named no-analysis state and may declare no `config`.
 Both an absent section and this state preserve the pre-analysis composition
 fingerprint and workflow behavior. When enabled, the normalized analysis
