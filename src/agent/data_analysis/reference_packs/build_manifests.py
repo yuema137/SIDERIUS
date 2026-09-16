@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import cast
 
 from agent.data_analysis.discovery import compute_pack_content_sha256
 from agent.schemas.data_analysis.common import canonical_json_bytes
@@ -379,7 +380,7 @@ def _time_manifest(root: Path) -> SkillPackManifest:
         ),
     )
     skills = tuple(
-        _declaration(root, *specification[:6], cost=specification[6])
+        _declaration(root, *specification[:6], cost=cast(CostClass, specification[6]))
         for specification in specifications
     )
     return SkillPackManifest(

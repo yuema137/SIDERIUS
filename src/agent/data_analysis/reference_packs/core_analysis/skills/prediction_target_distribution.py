@@ -1,5 +1,7 @@
 """Generic scalar-regression prediction/target distribution diagnostics."""
 
+from typing import cast
+
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from scipy.stats import spearmanr, wasserstein_distance
@@ -70,7 +72,7 @@ def run(skill_input, parameters: Parameters, runtime):
         robust_span_ratio = prediction_robust_span / target_robust_span
     rank = None
     if len(target) >= 2 and np.ptp(target) > 0 and np.ptp(prediction) > 0:
-        rank = float(spearmanr(target, prediction)[0])
+        rank = float(cast(float, spearmanr(target, prediction)[0]))
     result = {
         "count": len(target),
         "prediction": prediction_summary,
