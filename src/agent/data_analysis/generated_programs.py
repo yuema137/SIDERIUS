@@ -57,6 +57,8 @@ class GeneratedProgramDraft(FrozenModel):
         validate_path_component(self.program_id, kind="generated analysis program id")
         if self.determinism not in {"deterministic", "nondeterministic"}:
             raise ValueError("generated program determinism posture is invalid")
+        if self.determinism == "deterministic" and self.seed is None:
+            raise ValueError("deterministic generated programs require an explicit seed")
         try:
             tree = ast.parse(self.source_code, filename=f"{self.program_id}.py", mode="exec")
         except SyntaxError as exc:

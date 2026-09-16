@@ -251,6 +251,26 @@ def test_generated_program_source_identity_mismatch_is_refused() -> None:
         GeneratedAnalysisProgram.model_validate(payload)
 
 
+def test_deterministic_seed_is_rejected_at_draft_boundary_before_persistence() -> None:
+    """Defect: an invalid draft wrote source bytes before immutable declaration refusal."""
+
+    program = _program()
+    with pytest.raises(ValidationError, match="require an explicit seed"):
+        GeneratedProgramDraft(
+            program_id=program.program_id,
+            question_ids=program.question_ids,
+            source_code=(
+                "def analyze(inputs, parameters, output_directory):\n    return {'summary': 'ok'}\n"
+            ),
+            input_slots=program.input_slots,
+            expected_measurements=program.expected_measurements,
+            resource_request=program.resource_request,
+            determinism="deterministic",
+            seed=None,
+            rationale="Invalid deterministic draft.",
+        )
+
+
 def test_persisted_source_mutation_is_refused_and_resume_never_regenerates(
     tmp_path: Path,
 ) -> None:

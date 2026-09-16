@@ -265,6 +265,7 @@ class _GeneratedProgramBridge(_Bridge):
             assert "`required=true`" in system
             assert "`default`" in system
             assert "must be null" in system
+            assert "explicit non-negative `seed`" in system
             return {
                 "program_id": "successive-difference",
                 "question_ids": ["q-summary"],

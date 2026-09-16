@@ -153,7 +153,8 @@ only concrete input information and view formats. Generated parameter declaratio
 conditional rule: `required=true` means the caller must supply the value and therefore `default`
 must be null; a parameter with a usable default must set `required=false`. Do not redundantly mark
 a parameter required while also assigning its value. The source and declaration will be persisted
-and content-addressed before any executable plan exists."""
+and content-addressed before any executable plan exists. If `determinism` is `deterministic`,
+declare an explicit non-negative `seed`; do not leave it null."""
     user = f"""Questions requiring custom analysis:
 {_json(questions)}
 
