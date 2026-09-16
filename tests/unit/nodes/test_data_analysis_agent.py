@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from agent.data_analysis.analysis_code_sandbox import AnalysisCodeSandbox
 from agent.data_analysis.discovery import discover_skills
 from agent.data_analysis.persistence import AnalysisPersistenceError
 from agent.data_analysis.reference_packs import builtin_pack_refs
@@ -571,6 +572,10 @@ def test_generated_program_is_persisted_before_plan_and_certified_as_evidence(
 ) -> None:
     """Catches execution-time generation or generated source bypassing result certification."""
 
+    capability = AnalysisCodeSandbox().probe()
+    if not capability.available:
+        pytest.skip(f"host cannot enforce sandbox: {capability.reason}")
+
     analysis_input = _input(tmp_path)
     bridge = _GeneratedProgramBridge(analysis_input=analysis_input)
     agent = DataAnalysisAgent(
@@ -629,6 +634,10 @@ def test_generated_program_is_persisted_before_plan_and_certified_as_evidence(
 @pytest.mark.allow_real_subprocess
 def test_generated_program_cannot_claim_an_artifact_it_did_not_write(tmp_path: Path) -> None:
     """Catches untrusted artifact declarations being treated as certified files."""
+
+    capability = AnalysisCodeSandbox().probe()
+    if not capability.available:
+        pytest.skip(f"host cannot enforce sandbox: {capability.reason}")
 
     analysis_input = _input(tmp_path)
     bridge = _MissingGeneratedArtifactBridge(analysis_input=analysis_input)
