@@ -16,7 +16,7 @@ from .materialization import (
     export_materialized_view_content,
     materialize_authorized_invocation,
 )
-from .plan_validation import ResolvedPlannedInvocation
+from .plan_validation import ResolvedAnalysisInvocation, ResolvedPlannedInvocation
 
 
 @dataclass(frozen=True)
@@ -29,7 +29,7 @@ class InvocationMaterializationBundle:
 
 def prepare_invocation_materializations(
     *,
-    invocation: ResolvedPlannedInvocation,
+    invocation: ResolvedAnalysisInvocation,
     task_capability: TaskAnalysisCapability,
     inference_capability: HistoricalModelInferenceCapability | None,
     available_assets: dict[str, AnalysisAsset],
@@ -82,6 +82,10 @@ def prepare_invocation_materializations(
     inspected_asset_ids = {view.asset_id for view in ordinary_views}
     for binding in inference_bindings:
         assert inference_capability is not None
+        if not isinstance(invocation, ResolvedPlannedInvocation):
+            raise HistoricalInferenceError(
+                "generated-program invocations cannot request historical inference"
+            )
         binding_id = binding.plan_binding.binding_id
         view, path = run_historical_inference_binding(
             capability=inference_capability,

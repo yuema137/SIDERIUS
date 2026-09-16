@@ -11,9 +11,14 @@ from agent.schemas.data_analysis.access import InformationRequirement
 from agent.schemas.data_analysis.assets import AnalysisAsset, TrainedModelArtifactLocation
 from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.data_analysis.context import DataAnalysisInput
+from agent.schemas.data_analysis.generated_program import (
+    GeneratedAnalysisProgram,
+    validate_generated_parameters,
+)
 from agent.schemas.data_analysis.plan import (
     AnalysisPlan,
     PlannedAssetBinding,
+    PlannedGeneratedProgramInvocation,
     PlannedInferenceInputBinding,
     PlannedSkillInvocation,
 )
@@ -21,6 +26,7 @@ from agent.schemas.data_analysis.skills import ResolvedSkillInterface, SkillInpu
 
 from .discovery import DiscoveredSkill, DiscoverySnapshot
 from .executor import validate_skill_parameters
+from .generated_programs import load_generated_program
 from .worker_protocol import ValidatedParameters
 
 
@@ -48,6 +54,18 @@ class ResolvedPlannedInvocation:
     skill: DiscoveredSkill
     bindings: tuple[ResolvedAssetBinding, ...]
     validated_parameters: ValidatedParameters
+
+
+@dataclass(frozen=True)
+class ResolvedGeneratedProgramInvocation:
+    invocation: PlannedGeneratedProgramInvocation
+    program: GeneratedAnalysisProgram
+    source_path: Path
+    bindings: tuple[ResolvedAssetBinding, ...]
+    validated_parameters: ValidatedParameters
+
+
+ResolvedAnalysisInvocation = ResolvedPlannedInvocation | ResolvedGeneratedProgramInvocation
 
 
 def _requirements_by_class(
@@ -181,12 +199,12 @@ def validate_invocation_metadata_selections(
 
 
 def _bind_invocation(
-    invocation: PlannedSkillInvocation,
+    invocation: PlannedSkillInvocation | PlannedGeneratedProgramInvocation,
     *,
-    skill: DiscoveredSkill,
+    input_slots: tuple[SkillInputSlot, ...],
     assets: dict[str, AnalysisAsset],
 ) -> tuple[ResolvedAssetBinding, ...]:
-    slots = {slot.slot_id: slot for slot in skill.card.input_slots}
+    slots = {slot.slot_id: slot for slot in input_slots}
     grouped: dict[str, list[PlannedAssetBinding]] = defaultdict(list)
     resolved: list[ResolvedAssetBinding] = []
     for binding in invocation.bindings:
@@ -290,7 +308,8 @@ def resolve_analysis_plan(
     discovery: DiscoverySnapshot,
     resolved_interfaces: Mapping[str, ResolvedSkillInterface],
     control_root: Path,
-) -> tuple[ResolvedPlannedInvocation, ...]:
+    generated_program_root: Path | None = None,
+) -> tuple[ResolvedAnalysisInvocation, ...]:
     """Bind and validate every invocation before authorization or materialization."""
 
     if plan.input_digest != canonical_sha256(analysis_input):
@@ -307,8 +326,72 @@ def resolve_analysis_plan(
 
     skills = {skill.card.skill_id: skill for skill in discovery.skills}
     assets = {asset.asset_id: asset for asset in analysis_input.available_assets}
-    resolved: list[ResolvedPlannedInvocation] = []
+    resolved: list[ResolvedAnalysisInvocation] = []
     for invocation in plan.invocations:
+        sampling = invocation.sampling_plan.policy
+        if sampling.strategy == "stratified" and not analysis_input.access_policy.permits(
+            split_id=invocation.sampling_plan.split_id,
+            information_class="metadata",
+            source_fields=sampling.strata_fields,
+        ):
+            raise AnalysisPlanResolutionError(
+                "stratified sampling fields are not visible under the access policy"
+            )
+        if isinstance(invocation, PlannedGeneratedProgramInvocation):
+            if generated_program_root is None:
+                raise AnalysisPlanResolutionError(
+                    "plan references a generated program without an experiment-local store"
+                )
+            try:
+                program, source_path = load_generated_program(
+                    root=generated_program_root,
+                    identity=invocation.program_identity,
+                )
+                parameters = validate_generated_parameters(
+                    program.parameters,
+                    invocation.arguments,
+                )
+            except ValueError as exc:
+                raise AnalysisPlanResolutionError(str(exc)) from exc
+            if not set(invocation.question_ids).issubset(program.question_ids):
+                raise AnalysisPlanResolutionError(
+                    "generated invocation questions exceed its persisted declaration"
+                )
+            if (
+                program.resource_request.wall_time_s
+                > analysis_input.resource_envelope.per_skill_timeout_s
+            ):
+                raise AnalysisPlanResolutionError(
+                    "generated program wall-time request exceeds the resource envelope"
+                )
+            if (
+                analysis_input.resource_envelope.max_host_memory_gb is not None
+                and program.resource_request.max_host_memory_gb
+                > analysis_input.resource_envelope.max_host_memory_gb
+            ):
+                raise AnalysisPlanResolutionError(
+                    "generated program memory request exceeds the resource envelope"
+                )
+            bindings = _bind_invocation(
+                invocation,
+                input_slots=program.input_slots,
+                assets=assets,
+            )
+            validated = ValidatedParameters(
+                parameters=parameters,
+                parameter_schema_sha256=program.parameter_schema_sha256(),
+                validated_parameters_sha256=canonical_sha256(parameters),
+            )
+            resolved.append(
+                ResolvedGeneratedProgramInvocation(
+                    invocation=invocation,
+                    program=program,
+                    source_path=source_path,
+                    bindings=bindings,
+                    validated_parameters=validated,
+                )
+            )
+            continue
         skill = skills.get(invocation.skill_id)
         if skill is None:
             raise AnalysisPlanResolutionError(
@@ -327,7 +410,6 @@ def resolve_analysis_plan(
             raise AnalysisPlanResolutionError(
                 "invocation memory-cost hint differs from its skill card"
             )
-        sampling = invocation.sampling_plan.policy
         if not skill.card.supports_sampling and (
             sampling.mode != "full_if_feasible"
             or sampling.max_items is not None
@@ -336,15 +418,11 @@ def resolve_analysis_plan(
             raise AnalysisPlanResolutionError(
                 f"skill {skill.card.skill_id!r} does not support sampled execution"
             )
-        if sampling.strategy == "stratified" and not analysis_input.access_policy.permits(
-            split_id=invocation.sampling_plan.split_id,
-            information_class="metadata",
-            source_fields=sampling.strata_fields,
-        ):
-            raise AnalysisPlanResolutionError(
-                "stratified sampling fields are not visible under the access policy"
-            )
-        bindings = _bind_invocation(invocation, skill=skill, assets=assets)
+        bindings = _bind_invocation(
+            invocation,
+            input_slots=skill.card.input_slots,
+            assets=assets,
+        )
         validated = validate_skill_parameters(
             skill,
             interface,

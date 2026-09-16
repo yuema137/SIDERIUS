@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from .action_identity import AnalysisExecutionOrigin
 from .assets import AnalysisScopeDescriptor
 from .common import CertifiedArtifactRef, FrozenModel, NonEmptyStr, Sha256, canonical_json_bytes
 from .skills import AnalysisCoverage, InvocationStatus, QuantitativeResult
@@ -39,7 +40,8 @@ class DataFinding(FrozenModel):
     evidence: tuple[EvidencePointer, ...]
     confidence: ConfidenceAssessment
     scope: AnalysisScopeDescriptor = Field(discriminator="kind")
-    method_skill_ids: tuple[NonEmptyStr, ...]
+    method_skill_ids: tuple[NonEmptyStr, ...] = ()
+    method_generated_program_ids: tuple[NonEmptyStr, ...] = ()
     coverage: AnalysisCoverage
     modeling_relevance: NonEmptyStr
 
@@ -47,10 +49,12 @@ class DataFinding(FrozenModel):
     def validate_finding(self) -> DataFinding:
         if not self.evidence:
             raise ValueError("a data finding requires at least one evidence pointer")
-        if not self.method_skill_ids:
-            raise ValueError("a data finding requires at least one method skill ID")
+        if not self.method_skill_ids and not self.method_generated_program_ids:
+            raise ValueError("a data finding requires at least one method identity")
         if len(set(self.method_skill_ids)) != len(self.method_skill_ids):
             raise ValueError("finding method skill IDs must be unique")
+        if len(set(self.method_generated_program_ids)) != len(self.method_generated_program_ids):
+            raise ValueError("finding generated program IDs must be unique")
         return self
 
 
@@ -69,8 +73,12 @@ class QuestionOutcome(FrozenModel):
 
 
 class SkillResultSummary(FrozenModel):
+    """Legacy-named bounded summary for any certified analysis execution."""
+
     result_ref: CertifiedResultRef
-    skill_id: NonEmptyStr
+    execution_origin: AnalysisExecutionOrigin = "configured_external_skill"
+    skill_id: NonEmptyStr | None = None
+    generated_program_id: NonEmptyStr | None = None
     status: InvocationStatus
     summary: NonEmptyStr
     coverage: AnalysisCoverage | None = None
@@ -79,6 +87,11 @@ class SkillResultSummary(FrozenModel):
 
     @model_validator(mode="after")
     def validate_bound(self) -> SkillResultSummary:
+        if self.execution_origin == "generated_program":
+            if self.generated_program_id is None or self.skill_id is not None:
+                raise ValueError("generated-program summary requires only generated program ID")
+        elif self.skill_id is None or self.generated_program_id is not None:
+            raise ValueError("skill summary requires only skill ID")
         if len(self.key_quantitative_results) > MAX_KEY_RESULTS_PER_SUMMARY:
             raise ValueError(
                 f"skill result summary exceeds {MAX_KEY_RESULTS_PER_SUMMARY} key results"

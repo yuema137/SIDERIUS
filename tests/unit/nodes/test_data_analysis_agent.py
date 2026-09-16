@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from agent.data_analysis.analysis_code_sandbox import AnalysisCodeSandbox
 from agent.data_analysis.discovery import discover_skills
 from agent.data_analysis.persistence import AnalysisPersistenceError
 from agent.data_analysis.reference_packs import builtin_pack_refs
@@ -240,6 +241,216 @@ class _PlanRepairingBridge(_Bridge):
         return super().generate(system, user, label=label)
 
 
+class _GeneratedProgramBridge(_Bridge):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.calls: list[str] = []
+
+    @staticmethod
+    def _generated_identity(plan_prompt: str) -> dict:
+        start = plan_prompt.index("Persisted generated programs available to the final plan:")
+        start = plan_prompt.index("[", start)
+        end = plan_prompt.index("\n\nGenerated programs already exist", start)
+        payload = json.loads(plan_prompt[start:end])
+        return payload[0]["identity"]
+
+    def generate(self, system, user, *, label):
+        self.calls.append(label)
+        if label == "data_analysis.skill_selection":
+            return {
+                "skill_ids": [],
+                "generated_program_question_ids": ["q-summary"],
+                "rationale": "No configured skill measures successive absolute differences.",
+            }
+        if label == "data_analysis.generated_program":
+            assert "`required=true`" in system
+            assert "`default`" in system
+            assert "must be null" in system
+            assert "explicit non-negative `seed`" in system
+            assert "Binding IDs are chosen after source generation" in system
+            assert '`descriptor["slot_id"]`' in system
+            assert "information arrays `[N,C,T]`" in system
+            assert "`valid_mask[N,T]`" in system
+            assert "`effective_count + dropped_count` must equal" in system
+            assert "drop reasons are unique" in system
+            assert '`descriptor["population_unit"]`' in system
+            assert "including description wording" in system
+            assert "Authoritative JSON schema for the payload returned by analyze" in user
+            assert '"title": "SkillPayload"' in user
+            assert '"relative_path"' in user
+            assert '"effective_count"' in user
+            return {
+                "program_id": "successive-difference",
+                "question_ids": ["q-summary"],
+                "source_code": (
+                    "import numpy as np\n\n"
+                    "def analyze(inputs, parameters, output_directory):\n"
+                    "    values = inputs['custom-values']['arrays']['information__data']\n"
+                    "    measured = float(np.mean(np.abs(np.diff(values))))\n"
+                    "    return {\n"
+                    "        'summary': 'Measured mean absolute successive difference.',\n"
+                    "        'quantitative_results': [{\n"
+                    "            'result_key': 'mean_absolute_successive_difference',\n"
+                    "            'value': measured,\n"
+                    "            'unit': None,\n"
+                    "            'description': 'Mean absolute difference of successive values',\n"
+                    "        }],\n"
+                    "        'produced_artifacts': [],\n"
+                    "        'analysis_usage': {\n"
+                    "            'effective_count': 4, 'dropped_count': 0, 'drop_reasons': []\n"
+                    "        },\n"
+                    "        'warnings': [],\n"
+                    "    }\n"
+                ),
+                "input_slots": [
+                    {
+                        "slot_id": "values",
+                        "description": "Authorized numeric values",
+                        "accepted_asset_types": ["dataset"],
+                        "accepted_view_formats": ["siderius.numeric-array.v1"],
+                        "required_information": [{"information_class": "data", "fields": []}],
+                    }
+                ],
+                "parameters": [],
+                "expected_measurements": [
+                    {
+                        "result_key": "mean_absolute_successive_difference",
+                        "description": "Mean absolute difference of successive values",
+                        "value_type": "number",
+                    }
+                ],
+                "expected_artifacts": [],
+                "resource_request": {
+                    "wall_time_s": 4.0,
+                    "max_host_memory_gb": 1.0,
+                    "max_artifact_count": 0,
+                    "max_artifact_bytes": 0,
+                },
+                "determinism": "deterministic",
+                "seed": 11,
+                "rationale": "This bounded statistic is absent from the configured toolbox.",
+            }
+        if label == "data_analysis.plan":
+            identity = self._generated_identity(user)
+            scope = self.inp.available_assets[0].authorized_scope.model_dump(mode="json")
+            return {
+                "plan_id": "generated-plan",
+                "input_digest": canonical_sha256(self.inp),
+                "access_policy_digest": canonical_sha256(self.inp.access_policy),
+                "discovery_snapshot_digest": self.discovery.snapshot_digest,
+                "questions": ["q-summary"],
+                "invocations": [
+                    {
+                        "action_kind": "generated_program",
+                        "invocation_id": "generated-invocation",
+                        "program_identity": identity,
+                        "question_ids": ["q-summary"],
+                        "bindings": [
+                            {
+                                "binding_id": "custom-values",
+                                "slot_id": "values",
+                                "asset_id": "dataset",
+                                "requested_format_id": "siderius.numeric-array.v1",
+                                "requested_information": [
+                                    {"information_class": "data", "fields": []}
+                                ],
+                            }
+                        ],
+                        "sampling_plan": {
+                            "split_id": "validation",
+                            "requested_scope": scope,
+                            "policy": {
+                                "mode": "fixed",
+                                "max_items": 4,
+                                "strategy": "uniform",
+                                "seed": 11,
+                            },
+                        },
+                        "arguments": {},
+                    }
+                ],
+                "stop_policy": {"max_invocations": 1},
+                "rationale": "Execute the already-persisted custom analysis.",
+            }
+        if label == "data_analysis.synthesis":
+            return {
+                "executive_summary": "Successive values differ by 1.0 on average.",
+                "findings": [
+                    {
+                        "finding_id": "finding-successive-difference",
+                        "result_id": f"{self.inp.request_id}.generated-invocation.result",
+                        "statement": "The mean absolute successive difference is 1.0.",
+                        "quantitative_result_ids": ["mean_absolute_successive_difference"],
+                        "confidence_level": "high",
+                        "confidence_rationale": "All four selected values were analyzed.",
+                        "confidence_limitations": [],
+                        "modeling_relevance": "Adjacent variation is now measured.",
+                    }
+                ],
+                "question_outcomes": [
+                    {
+                        "question_id": "q-summary",
+                        "status": "addressed",
+                        "summary": "The custom statistic was measured.",
+                        "finding_ids": ["finding-successive-difference"],
+                    }
+                ],
+                "limitations": [],
+                "unresolved_questions": [],
+                "modeling_relevance": ["Adjacent variation is explicit."],
+            }
+        raise AssertionError(label)
+
+
+class _MissingGeneratedArtifactBridge(_GeneratedProgramBridge):
+    def generate(self, system, user, *, label):
+        if label == "data_analysis.generated_program":
+            payload = super().generate(system, user, label=label)
+            payload["expected_artifacts"] = [
+                {
+                    "artifact_type": "table",
+                    "media_type": "text/csv",
+                    "description": "Required generated table",
+                    "required": True,
+                }
+            ]
+            payload["resource_request"]["max_artifact_count"] = 1
+            payload["resource_request"]["max_artifact_bytes"] = 1024
+            payload["source_code"] = payload["source_code"].replace(
+                "'produced_artifacts': [],",
+                "'produced_artifacts': [{'artifact_type': 'table', "
+                "'logical_name': 'missing', 'media_type': 'text/csv', "
+                "'relative_path': 'artifacts/missing.csv', "
+                "'description': 'Required generated table'}],",
+            )
+            return payload
+        if label == "data_analysis.synthesis":
+            self.calls.append(label)
+            return {
+                "executive_summary": "Generated output could not be certified.",
+                "findings": [],
+                "question_outcomes": [
+                    {
+                        "question_id": "q-summary",
+                        "status": "unresolved",
+                        "summary": "The declared artifact was absent.",
+                        "finding_ids": [],
+                        "limitation_ids": ["missing-artifact"],
+                    }
+                ],
+                "limitations": [
+                    {
+                        "limitation_id": "missing-artifact",
+                        "statement": "Generated artifact certification failed.",
+                        "affected_question_ids": ["q-summary"],
+                    }
+                ],
+                "unresolved_questions": ["q-summary"],
+                "modeling_relevance": [],
+            }
+        return super().generate(system, user, label=label)
+
+
 def _input(tmp_path: Path) -> DataAnalysisInput:
     scope = ArtifactIntrinsicScope(split_id="validation", description="Validation data")
     asset = AnalysisAsset(
@@ -313,6 +524,7 @@ def test_standalone_agent_runs_typed_pipeline_and_persists_bounded_report(tmp_pa
 
     assert report.findings[0].statement.endswith("mean 2.5.")
     assert report.findings[0].coverage.analyzed_count == 4
+    assert report.skill_result_summaries[0].execution_origin == "reference_skill"
     assert report.assets_inspected == ("dataset",)
     root = tmp_path / "data_analysis" / "standalone" / "request"
     assert (root / "input.json").is_file()
@@ -352,6 +564,97 @@ def test_standalone_agent_runs_typed_pipeline_and_persists_bounded_report(tmp_pa
 
     with pytest.raises(AnalysisPersistenceError, match="different canonical input"):
         agent.run(analysis_input.model_copy(update={"human_advice": "Changed request semantics"}))
+
+
+@pytest.mark.allow_real_subprocess
+def test_generated_program_is_persisted_before_plan_and_certified_as_evidence(
+    tmp_path: Path,
+) -> None:
+    """Catches execution-time generation or generated source bypassing result certification."""
+
+    capability = AnalysisCodeSandbox().probe()
+    if not capability.available:
+        pytest.skip(f"host cannot enforce sandbox: {capability.reason}")
+
+    analysis_input = _input(tmp_path)
+    bridge = _GeneratedProgramBridge(analysis_input=analysis_input)
+    agent = DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **_kwargs: bridge,
+        provider="test",
+        model_id="fake",
+    )
+
+    report = agent.run(analysis_input)
+
+    assert bridge.calls == [
+        "data_analysis.skill_selection",
+        "data_analysis.generated_program",
+        "data_analysis.plan",
+        "data_analysis.synthesis",
+    ]
+    root = tmp_path / "data_analysis" / "standalone" / "request"
+    plan = json.loads((root / "plan.json").read_text())
+    invocation = plan["invocations"][0]
+    assert invocation["action_kind"] == "generated_program"
+    assert "source_code" not in invocation
+    assert list((root / "generated_analysis" / "sources").glob("*.py"))
+    assert list((root / "generated_analysis" / "programs").glob("*/*.json"))
+    summary = report.skill_result_summaries[0]
+    assert summary.execution_origin == "generated_program"
+    assert summary.generated_program_id == "successive-difference"
+    assert summary.key_quantitative_results[0].value == 1.0
+    assert report.findings[0].method_generated_program_ids == ("successive-difference",)
+    assert report.findings[0].method_skill_ids == ()
+    report_bytes = (root / "report.json").read_bytes()
+    proposer_evidence = build_proposer_data_analysis_evidence(
+        report,
+        report_ref=CertifiedArtifactRef(
+            logical_ref="data_analysis/standalone/request/report.json",
+            sha256=hashlib.sha256(report_bytes).hexdigest(),
+            media_type="application/json",
+            byte_size=len(report_bytes),
+        ),
+    )
+    assert proposer_evidence.findings[0].method_generated_program_ids == ("successive-difference",)
+    assert "generated_program:successive-difference" in render_data_analysis_evidence(
+        proposer_evidence
+    )
+
+    resumed = agent.run(analysis_input)
+    assert resumed == report
+    assert bridge.calls == [
+        "data_analysis.skill_selection",
+        "data_analysis.generated_program",
+        "data_analysis.plan",
+        "data_analysis.synthesis",
+    ]
+
+
+@pytest.mark.allow_real_subprocess
+def test_generated_program_cannot_claim_an_artifact_it_did_not_write(tmp_path: Path) -> None:
+    """Catches untrusted artifact declarations being treated as certified files."""
+
+    capability = AnalysisCodeSandbox().probe()
+    if not capability.available:
+        pytest.skip(f"host cannot enforce sandbox: {capability.reason}")
+
+    analysis_input = _input(tmp_path)
+    bridge = _MissingGeneratedArtifactBridge(analysis_input=analysis_input)
+    report = DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **_kwargs: bridge,
+        provider="test",
+        model_id="fake",
+    ).run(analysis_input)
+
+    summary = report.skill_result_summaries[0]
+    assert summary.status == "failed"
+    assert report.findings == ()
+    root = tmp_path / "data_analysis" / "standalone" / "request"
+    result = json.loads((root / "skill_results.jsonl").read_text())
+    assert result["failure"]["failure_type"] == "generated_payload_certification"
+    assert "missing or escapes staging" in result["failure"]["message"]
 
 
 @pytest.mark.allow_real_subprocess

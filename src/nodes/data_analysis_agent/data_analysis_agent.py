@@ -8,13 +8,10 @@ from typing import Literal
 
 from pydantic import model_validator
 
+from agent.data_analysis.action_execution import execute_resolved_action
 from agent.data_analysis.discovery import DiscoveredSkill, discover_skills, search_skill_cards
-from agent.data_analysis.executor import execute_skill, resolve_skill_interface
-from agent.data_analysis.historical_inference import HistoricalInferenceError
-from agent.data_analysis.invocation_materialization import prepare_invocation_materializations
-from agent.data_analysis.materialization import (
-    AnalysisMaterializationError,
-)
+from agent.data_analysis.executor import resolve_skill_interface
+from agent.data_analysis.generated_program_planning import prepare_generated_program
 from agent.data_analysis.persistence import AnalysisRunStore
 from agent.data_analysis.plan_validation import resolve_analysis_plan
 from agent.data_analysis.rendering import render_report_markdown
@@ -27,7 +24,7 @@ from agent.prompt_templates.data_analysis import (
 )
 from agent.schemas.data_analysis.common import FrozenModel, NonEmptyStr, canonical_sha256, utc_now
 from agent.schemas.data_analysis.context import DataAnalysisInput
-from agent.schemas.data_analysis.plan import AnalysisPlan
+from agent.schemas.data_analysis.plan import AnalysisPlan, PlannedGeneratedProgramInvocation
 from agent.schemas.data_analysis.report import (
     AnalysisResourceSummary,
     CertifiedResultRef,
@@ -40,29 +37,26 @@ from agent.schemas.data_analysis.report import (
     ReportLimitation,
     SkillResultSummary,
 )
-from agent.schemas.data_analysis.resources import ResourceUsage
-from agent.schemas.data_analysis.skills import (
-    ArtifactOutputContract,
-    SkillExecutionProvenance,
-    SkillFailure,
-    SkillInput,
-    SkillResult,
-)
-from execute_tools.analysis_materialization import (
-    AnalysisAuthorizationError,
-    TaskAnalysisCapability,
-)
+from agent.schemas.data_analysis.skills import SkillResult
+from execute_tools.analysis_materialization import TaskAnalysisCapability
 from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
 
 
 class _SkillSelection(FrozenModel):
-    skill_ids: tuple[NonEmptyStr, ...]
+    skill_ids: tuple[NonEmptyStr, ...] = ()
+    generated_program_question_ids: tuple[NonEmptyStr, ...] = ()
     rationale: NonEmptyStr
 
     @model_validator(mode="after")
     def validate_ids(self):
-        if not self.skill_ids or len(set(self.skill_ids)) != len(self.skill_ids):
-            raise ValueError("selected skill IDs must be non-empty and unique")
+        if len(set(self.skill_ids)) != len(self.skill_ids):
+            raise ValueError("selected skill IDs must be unique")
+        if len(set(self.generated_program_question_ids)) != len(
+            self.generated_program_question_ids
+        ):
+            raise ValueError("generated-program question IDs must be unique")
+        if not self.skill_ids and not self.generated_program_question_ids:
+            raise ValueError("selection requires a skill or generated program")
         return self
 
 
@@ -131,14 +125,18 @@ class DataAnalysisAgent:
         if not isinstance(value, dict):
             return None
         skill_ids = value.get("skill_ids")
+        generated_question_ids = value.get("generated_program_question_ids", [])
         if (
             not isinstance(skill_ids, list)
-            or not skill_ids
             or not all(isinstance(item, str) and item.strip() for item in skill_ids)
             or len(set(skill_ids)) != len(skill_ids)
+            or not isinstance(generated_question_ids, list)
+            or not all(isinstance(item, str) and item.strip() for item in generated_question_ids)
+            or len(set(generated_question_ids)) != len(generated_question_ids)
+            or (not skill_ids and not generated_question_ids)
         ):
             return None
-        return tuple(skill_ids)
+        return (tuple(skill_ids), tuple(generated_question_ids))
 
     @staticmethod
     def _plan_semantics(value: object) -> object | None:
@@ -184,54 +182,6 @@ class DataAnalysisAgent:
             return item
 
         return without_rationales(value)
-
-    @staticmethod
-    def _pre_execution_result(
-        *,
-        inp: DataAnalysisInput,
-        item,
-        plan: AnalysisPlan,
-        status: Literal["failed", "refused"],
-        failure_type: str,
-        message: str,
-        materialization_occurred: bool,
-        authorization_receipts=(),
-        inference_receipts=(),
-        started_at: str,
-        started_monotonic: float,
-    ) -> SkillResult:
-        return SkillResult(
-            result_id=f"{inp.request_id}.{item.invocation.invocation_id}.result",
-            invocation_id=item.invocation.invocation_id,
-            skill_identity=item.skill.identity,
-            status=status,
-            summary="Skill invocation could not reach bounded execution.",
-            resource_usage=ResourceUsage(
-                wall_time_s=max(0.0, time.monotonic() - started_monotonic),
-                peak_rss_bytes=0,
-                device="cpu",
-                measurement_limitations=(
-                    "No skill worker was launched; resource usage covers orchestration only.",
-                ),
-            ),
-            failure=SkillFailure(
-                failure_type=failure_type,
-                message=message,
-                materialization_occurred=materialization_occurred,
-                refusal_code=failure_type if status == "refused" else None,
-            ),
-            provenance=SkillExecutionProvenance(
-                plan_sha256=canonical_sha256(plan),
-                parameter_schema_sha256=item.validated_parameters.parameter_schema_sha256,
-                validated_parameters_sha256=(item.validated_parameters.validated_parameters_sha256),
-                authorization_receipts=tuple(authorization_receipts),
-                inference_receipts=tuple(inference_receipts),
-                environment_lock_verified=False,
-                started_at=started_at,
-                finished_at=utc_now(),
-                host_details={"supervisor_disposition": "worker_not_started"},
-            ),
-        )
 
     @staticmethod
     def _candidate_cards(inp: DataAnalysisInput, discovery) -> tuple[DiscoveredSkill, ...]:
@@ -288,6 +238,27 @@ class DataAnalysisAgent:
                 f"planner selected unavailable candidate skill {exc.args[0]!r}"
             ) from exc
 
+        available_question_ids = {item.question_id for item in inp.analysis_brief.questions}
+        if not set(selection.generated_program_question_ids).issubset(available_question_ids):
+            raise ValueError("planner requested generated code for an unknown question")
+        generated_programs = ()
+        if selection.generated_program_question_ids:
+            generated_programs = (
+                prepare_generated_program(
+                    bridge=bridge,
+                    store=store,
+                    analysis_input=inp,
+                    question_ids=selection.generated_program_question_ids,
+                    provider=self._provider,
+                    requested_model_id=self._model_id,
+                    llm_config={
+                        "provider": self._provider,
+                        "model_id": self._model_id,
+                        "max_retries": self._max_retries,
+                    },
+                ),
+            )
+
         control_root = store.root / "control"
         control_root.mkdir(parents=True, exist_ok=True)
         interfaces = {
@@ -299,7 +270,13 @@ class DataAnalysisAgent:
             )
             for skill in selected
         }
-        plan_system, plan_user = render_analysis_plan_prompt(inp, discovery, selected, interfaces)
+        plan_system, plan_user = render_analysis_plan_prompt(
+            inp,
+            discovery,
+            selected,
+            interfaces,
+            generated_programs=generated_programs,
+        )
         plan = generate_validated(
             bridge,
             store=store,
@@ -309,12 +286,26 @@ class DataAnalysisAgent:
             label="data_analysis.plan",
             semantic_projection=self._plan_semantics,
         )
+        planned_generated_identities = {
+            canonical_sha256(item.program_identity)
+            for item in plan.invocations
+            if isinstance(item, PlannedGeneratedProgramInvocation)
+        }
+        prepared_generated_identities = {
+            canonical_sha256(identity) for _program, identity in generated_programs
+        }
+        if planned_generated_identities != prepared_generated_identities:
+            raise ValueError(
+                "final AnalysisPlan must reference exactly the generated programs prepared "
+                "during its two-stage lifecycle"
+            )
         resolved = resolve_analysis_plan(
             plan,
             analysis_input=inp,
             discovery=discovery,
             resolved_interfaces=interfaces,
             control_root=control_root,
+            generated_program_root=store.root,
         )
         plan_ref = store.write_plan(plan)
         deadline = time.monotonic() + inp.resource_envelope.wall_time_budget_s
@@ -325,130 +316,26 @@ class DataAnalysisAgent:
         for item in resolved:
             if time.monotonic() + plan.stop_policy.minimum_remaining_time_s >= deadline:
                 break
-            started_at = utc_now()
-            started_monotonic = time.monotonic()
-            materialization_directory = (
-                store.root / "materializations" / item.invocation.invocation_id
-            )
-            try:
-                bundle = prepare_invocation_materializations(
-                    invocation=item,
-                    task_capability=self._capability,
-                    inference_capability=self._historical_inference_capability,
-                    available_assets={asset.asset_id: asset for asset in inp.available_assets},
-                    access_policy=inp.access_policy,
-                    resource_envelope=inp.resource_envelope,
-                    deadline_monotonic_s=deadline,
-                    destination_root=materialization_directory,
-                )
-                views = bundle.views
-                materialization_paths = bundle.paths
-                for receipt in bundle.inference_receipts:
-                    store.append_inference_receipt(receipt)
-            except AnalysisAuthorizationError as exc:
-                result = self._pre_execution_result(
-                    inp=inp,
-                    item=item,
-                    plan=plan,
-                    status="refused",
-                    failure_type=exc.refusal.code,
-                    message=exc.refusal.message,
-                    materialization_occurred=False,
-                    started_at=started_at,
-                    started_monotonic=started_monotonic,
-                )
-                result_refs.append(store.append_skill_result(result))
-                results.append(result)
-                invocation_by_result[result.result_id] = item.invocation
-                if not plan.stop_policy.continue_after_skill_failure:
-                    break
-                continue
-            except AnalysisMaterializationError as exc:
-                store.cleanup_materializations(materialization_directory)
-                result = self._pre_execution_result(
-                    inp=inp,
-                    item=item,
-                    plan=plan,
-                    status="failed",
-                    failure_type="materialization_contract",
-                    message=str(exc),
-                    materialization_occurred=True,
-                    started_at=started_at,
-                    started_monotonic=started_monotonic,
-                )
-                result_refs.append(store.append_skill_result(result))
-                results.append(result)
-                invocation_by_result[result.result_id] = item.invocation
-                if not plan.stop_policy.continue_after_skill_failure:
-                    break
-                continue
-            except HistoricalInferenceError as exc:
-                store.cleanup_materializations(materialization_directory)
-                if exc.receipt is not None:
-                    store.append_inference_receipt(exc.receipt)
-                result = self._pre_execution_result(
-                    inp=inp,
-                    item=item,
-                    plan=plan,
-                    status="refused" if exc.refused else "failed",
-                    failure_type=(
-                        "historical_inference_capability_unavailable"
-                        if exc.refused
-                        else "historical_inference_failed"
-                    ),
-                    message=str(exc),
-                    materialization_occurred=not exc.refused,
-                    inference_receipts=(exc.receipt,) if exc.receipt is not None else (),
-                    started_at=started_at,
-                    started_monotonic=started_monotonic,
-                )
-                result_refs.append(store.append_skill_result(result))
-                results.append(result)
-                invocation_by_result[result.result_id] = item.invocation
-                if not plan.stop_policy.continue_after_skill_failure:
-                    break
-                continue
-            inspected_assets.update(bundle.inspected_asset_ids)
-            artifact_contract = ArtifactOutputContract(
-                output_directory_ref=f"staging/{item.invocation.invocation_id}",
-                allowed_media_types=("application/json", "image/png", "text/csv"),
-            )
-            skill_input = SkillInput(
-                invocation_id=item.invocation.invocation_id,
-                skill_identity=item.skill.identity,
-                materializations=views,
-                question_ids=item.invocation.question_ids,
+            outcome = execute_resolved_action(
+                item=item,
+                inp=inp,
+                plan=plan,
+                store=store,
+                task_capability=self._capability,
+                inference_capability=self._historical_inference_capability,
+                control_root=control_root,
                 deadline_monotonic_s=deadline,
-                artifact_output_contract=artifact_contract,
             )
-            staging = store.staging_directory(item.invocation.invocation_id)
-            try:
-                result = execute_skill(
-                    result_id=f"{inp.request_id}.{item.invocation.invocation_id}.result",
-                    skill=item.skill,
-                    validated_parameters=item.validated_parameters,
-                    skill_input=skill_input,
-                    materialization_paths=materialization_paths,
-                    store=store,
-                    staging_directory=staging,
-                    control_directory=control_root / f"execute-{item.invocation.invocation_id}",
-                    plan_sha256=canonical_sha256(plan),
-                    timeout_s=min(
-                        inp.resource_envelope.per_skill_timeout_s,
-                        max(0.0, deadline - time.monotonic()),
-                    ),
-                    max_host_memory_gb=inp.resource_envelope.max_host_memory_gb,
-                    pre_execution_resource_usage=tuple(
-                        receipt.resource_usage for receipt in bundle.inference_receipts
-                    ),
-                )
-            finally:
-                store.cleanup_staging(staging)
-                store.cleanup_materializations(materialization_directory)
+            for receipt in outcome.inference_receipts:
+                store.append_inference_receipt(receipt)
+            inspected_assets.update(outcome.inspected_asset_ids)
+            result = outcome.result
             result_ref = store.append_skill_result(result)
             results.append(result)
             result_refs.append(result_ref)
             invocation_by_result[result.result_id] = item.invocation
+            if result.status != "completed" and not plan.stop_policy.continue_after_skill_failure:
+                break
 
         report = self._synthesize_report(
             bridge,
@@ -521,7 +408,16 @@ class DataAnalysisAgent:
                         limitations=item.confidence_limitations,
                     ),
                     scope=invocation.sampling_plan.requested_scope,
-                    method_skill_ids=(result.skill_identity.skill_id,),
+                    method_skill_ids=(
+                        (result.skill_identity.skill_id,)
+                        if result.skill_identity is not None
+                        else ()
+                    ),
+                    method_generated_program_ids=(
+                        (result.generated_program_identity.program_id,)
+                        if result.generated_program_identity is not None
+                        else ()
+                    ),
                     coverage=result.coverage,
                     modeling_relevance=item.modeling_relevance,
                 )
@@ -553,7 +449,15 @@ class DataAnalysisAgent:
         summaries = tuple(
             SkillResultSummary(
                 result_ref=ref_by_id[result.result_id],
-                skill_id=result.skill_identity.skill_id,
+                execution_origin=result.execution_origin,
+                skill_id=(
+                    result.skill_identity.skill_id if result.skill_identity is not None else None
+                ),
+                generated_program_id=(
+                    result.generated_program_identity.program_id
+                    if result.generated_program_identity is not None
+                    else None
+                ),
                 status=result.status,
                 summary=result.summary,
                 coverage=result.coverage,
