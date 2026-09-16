@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import model_validator
+from pydantic import StrictBool, model_validator
 
 from agent.data_analysis.discovery import discover_skills
 from agent.data_analysis.reference_packs import builtin_pack_refs
@@ -40,6 +40,7 @@ class DataAnalysisWorkflowConfig(FrozenModel):
     resource_envelope: AnalysisResourceEnvelope
     builtin_skill_packs: tuple[Literal["core-analysis", "time-series"], ...] = ()
     external_skill_packs: tuple[SkillPackRef, ...] = ()
+    allow_generated_skill_promotion: StrictBool = False
     report_schema_version: Literal[1] = 1
 
     @model_validator(mode="after")
@@ -72,11 +73,12 @@ class ResolvedWorkflowDataAnalysis:
     report_schema_version: int
     config_content_sha256: str
     config_path: str
+    allow_generated_skill_promotion: bool = False
 
     def canonical_identity(self) -> dict[str, Any]:
         """Host-independent semantic identity; absolute paths are excluded."""
 
-        return {
+        identity = {
             "task_context": self.task_context.model_dump(mode="json"),
             "available_assets": [item.model_dump(mode="json") for item in self.available_assets],
             "access_policy": self.access_policy.model_dump(mode="json"),
@@ -95,6 +97,9 @@ class ResolvedWorkflowDataAnalysis:
             ],
             "report_schema_version": self.report_schema_version,
         }
+        if self.allow_generated_skill_promotion:
+            identity["allow_generated_skill_promotion"] = True
+        return identity
 
 
 def _resolve_external_pack(pack: SkillPackRef, *, config_dir: Path) -> SkillPackRef:
@@ -214,4 +219,5 @@ def compose_workflow_data_analysis(
         report_schema_version=config.report_schema_version,
         config_content_sha256=hashlib.sha256(payload).hexdigest(),
         config_path=str(config_path),
+        allow_generated_skill_promotion=config.allow_generated_skill_promotion,
     )
