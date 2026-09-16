@@ -133,11 +133,6 @@ def persist_generated_program(
     source_sha256 = hashlib.sha256(source_bytes).hexdigest()
     source_relative = Path("generated_analysis") / "sources" / f"{source_sha256}.py"
     source_path = root / source_relative
-    try:
-        publish_bytes_write_once(str(source_path), source_bytes)
-    except FileExistsError:
-        if source_path.read_bytes() != source_bytes:
-            raise ValueError("generated source content-address collision") from None
     source_ref = CertifiedArtifactRef(
         logical_ref=source_relative.as_posix(),
         sha256=source_sha256,
@@ -159,6 +154,11 @@ def persist_generated_program(
         generation_provenance=generation_provenance,
     )
     identity = program.identity(runtime_environment_sha256=runtime_environment_identity())
+    try:
+        publish_bytes_write_once(str(source_path), source_bytes)
+    except FileExistsError:
+        if source_path.read_bytes() != source_bytes:
+            raise ValueError("generated source content-address collision") from None
     declaration_relative = (
         Path("generated_analysis") / "programs" / program_id / f"{identity.declaration_sha256}.json"
     )

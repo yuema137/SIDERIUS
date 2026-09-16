@@ -271,6 +271,44 @@ def test_deterministic_seed_is_rejected_at_draft_boundary_before_persistence() -
         )
 
 
+def test_discovery_identity_cannot_be_materialized_or_leave_orphan_source(tmp_path: Path) -> None:
+    """Defect: generated code requested discovery identity and persisted unusable source."""
+
+    program = _program()
+    identity_slot = SkillInputSlot(
+        slot_id="series",
+        description="Incorrectly requests discovery identity",
+        accepted_asset_types=("dataset",),
+        accepted_view_formats=("siderius.timeseries-array.v1",),
+        required_information=(
+            InformationRequirement(information_class="identity"),
+            InformationRequirement(information_class="data"),
+        ),
+    )
+    draft = GeneratedProgramDraft(
+        program_id=program.program_id,
+        question_ids=program.question_ids,
+        source_code=(
+            "def analyze(inputs, parameters, output_directory):\n    return {'summary': 'ok'}\n"
+        ),
+        input_slots=(identity_slot,),
+        expected_measurements=program.expected_measurements,
+        resource_request=program.resource_request,
+        determinism=program.determinism,
+        seed=program.seed,
+        rationale="Invalid discovery-only identity request.",
+    )
+
+    with pytest.raises(ValidationError, match="identity information is discovery-only"):
+        persist_generated_program(
+            root=tmp_path,
+            draft=draft,
+            generation_provenance=_provenance(),
+        )
+
+    assert not (tmp_path / "generated_analysis" / "sources").exists()
+
+
 def test_persisted_source_mutation_is_refused_and_resume_never_regenerates(
     tmp_path: Path,
 ) -> None:

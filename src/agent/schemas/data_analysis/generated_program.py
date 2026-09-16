@@ -111,6 +111,15 @@ class GeneratedAnalysisProgram(FrozenModel):
             raise ValueError("generated program input slot IDs must be non-empty and unique")
         if any(slot.invocation_metadata_selection is not None for slot in self.input_slots):
             raise ValueError("one-off generated programs require concrete metadata declarations")
+        if any(
+            requirement.information_class == "identity"
+            for slot in self.input_slots
+            for requirement in (*slot.required_information, *slot.optional_information)
+        ):
+            raise ValueError(
+                "generated program identity information is discovery-only and cannot be "
+                "materialized"
+            )
         parameter_names = [item.name for item in self.parameters]
         if len(set(parameter_names)) != len(parameter_names):
             raise ValueError("generated program parameter names must be unique")

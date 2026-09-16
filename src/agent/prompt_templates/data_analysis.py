@@ -143,7 +143,10 @@ schema. Source must define exactly:
 contains only the executor-authorized NPZ arrays: `example_ids`, `information__<class>`,
 `metadata__<field>`, optional `valid_mask`, and for time-series views `channel_ids` plus exactly one
 certified time-axis encoding (`time` or `time_start_seconds`/`time_step_seconds`). Never open task
-paths yourself. `parameters` contains validated scalar values. `output_directory` is the only
+paths yourself. `example_ids` are structural alignment values supplied with every authorized view;
+do not declare `information_class="identity"` to obtain them. Identity information is available
+only in safe discovery descriptors and cannot be requested for split materialization. `parameters`
+contains validated scalar values. `output_directory` is the only
 writable artifact directory. Return a plain JSON-serializable payload matching the SkillPayload
 shape: summary, quantitative_results, produced_artifacts, analysis_usage, warnings. Write declared
 artifacts below output_directory and use paths relative to the sandbox output root (therefore
