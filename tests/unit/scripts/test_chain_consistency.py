@@ -535,6 +535,31 @@ class TestDryRunSmoke:
         assert f"--health_checks_config {config_path}" in stdout
         assert f"HealthGate config: {config_path}" in stdout
 
+    def test_scientific_evidence_order_is_forwarded_only_when_explicitly_changed(
+        self, workspace, seed_path
+    ):
+        rc, stdout, stderr = _run_dry("lilab", workspace, 1, seed_path)
+        assert rc == 0, stderr
+        assert "--scientific_evidence_order" not in stdout
+
+        rc, stdout, stderr = _run_dry(
+            "lilab",
+            workspace,
+            1,
+            seed_path,
+            "--scientific_evidence_order",
+            "literature_then_analysis",
+        )
+        assert rc == 0, stderr
+        assert "--scientific_evidence_order literature_then_analysis" in stdout
+
+    def test_scientific_evidence_order_refuses_unknown_value(self, workspace, seed_path):
+        rc, _stdout, stderr = _run_dry(
+            "lilab", workspace, 1, seed_path, "--scientific_evidence_order", "unknown"
+        )
+        assert rc != 0
+        assert "Invalid --scientific_evidence_order" in stderr
+
     def test_sdsc_emits_afterany_dependency_for_iter_two_and_three(self, workspace, seed_path):
         rc, stdout, stderr = _run_dry("sdsc", workspace, 3, seed_path)
         assert rc == 0, f"non-zero exit: stdout={stdout!r}\nstderr={stderr!r}"

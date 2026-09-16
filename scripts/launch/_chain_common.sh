@@ -261,6 +261,9 @@ ML_LIT_REVIEW_ENABLED=""
 # Optional task-owned literature-review config. Empty preserves the child's
 # historical default; a supplied path is transported unchanged.
 ML_LIT_REVIEW_CONFIG=""
+# Workflow-owned evidence ordering. The runner's legacy default is omitted
+# from child argv for compatibility; the alternative order must be transported.
+SCIENTIFIC_EVIDENCE_ORDER="analysis_then_literature"
 # arXiv U1 (#254) — opaque experiment-arm label. Empty = unlabelled (the
 # legacy default); forwarded to run_one_iteration.py ONLY when set, so an
 # unlabelled chain's child argv is byte-identical to pre-U1.
@@ -365,6 +368,12 @@ parse_chain_args() {
         --ml_lit_review_enabled)     ML_LIT_REVIEW_ENABLED=1; shift ;;
         --no-ml_lit_review_enabled)  ML_LIT_REVIEW_ENABLED=0; shift ;;
         --ml_lit_review_config)      ML_LIT_REVIEW_CONFIG="$2"; shift 2 ;;
+        --scientific_evidence_order)
+            case "${2:-}" in
+                analysis_then_literature|literature_then_analysis)
+                    SCIENTIFIC_EVIDENCE_ORDER="$2"; shift 2 ;;
+                *) echo "Invalid --scientific_evidence_order: ${2:-<missing>}" >&2; exit 1 ;;
+            esac ;;
         --experiment_arm)         EXPERIMENT_ARM="$2"; shift 2 ;;
         --baseline_isolation)     BASELINE_ISOLATION=1; shift ;;
         --allowed_output_types)   ALLOWED_OUTPUT_TYPES="$2"; shift 2 ;;
@@ -685,6 +694,9 @@ build_app_args() {
     fi
     if [ -n "$ML_LIT_REVIEW_CONFIG" ]; then
         APP_ARGS+=(--ml_lit_review_config "$ML_LIT_REVIEW_CONFIG")
+    fi
+    if [ "$SCIENTIFIC_EVIDENCE_ORDER" != "analysis_then_literature" ]; then
+        APP_ARGS+=(--scientific_evidence_order "$SCIENTIFIC_EVIDENCE_ORDER")
     fi
     # arXiv U1 — the arm label is forwarded only when set (unlabelled chains
     # reproduce pre-U1 argv byte-identically).

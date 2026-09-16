@@ -39,6 +39,8 @@
 #
 # Frequently-used flags:
 #   --num_iterations N   number of iterations (default 2)
+#   --scientific_evidence_order analysis_then_literature|literature_then_analysis
+#                        workflow-owned ordering when both optional capabilities run
 #   --dry-run            walk the chain, print exact commands, no side effects
 #   --auto_resume        pick up where a partial chain left off (default ON)
 #   --no_auto_resume     force fresh start regardless of workspace state
