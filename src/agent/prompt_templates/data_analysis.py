@@ -149,8 +149,11 @@ shape: summary, quantitative_results, produced_artifacts, analysis_usage, warnin
 artifacts below output_directory and use paths relative to the sandbox output root (therefore
 prefix artifact paths with `artifacts/`). Do not import SIDERIUS internals, inspect the workspace,
 access credentials or network, install packages, alter data, or perform modeling/training. Declare
-only concrete input information and view formats. The source and declaration will be persisted and
-content-addressed before any executable plan exists."""
+only concrete input information and view formats. Generated parameter declarations obey this
+conditional rule: `required=true` means the caller must supply the value and therefore `default`
+must be null; a parameter with a usable default must set `required=false`. Do not redundantly mark
+a parameter required while also assigning its value. The source and declaration will be persisted
+and content-addressed before any executable plan exists."""
     user = f"""Questions requiring custom analysis:
 {_json(questions)}
 

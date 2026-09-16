@@ -262,6 +262,9 @@ class _GeneratedProgramBridge(_Bridge):
                 "rationale": "No configured skill measures successive absolute differences.",
             }
         if label == "data_analysis.generated_program":
+            assert "`required=true`" in system
+            assert "`default`" in system
+            assert "must be null" in system
             return {
                 "program_id": "successive-difference",
                 "question_ids": ["q-summary"],
