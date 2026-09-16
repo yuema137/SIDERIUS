@@ -82,8 +82,8 @@ def _sandbox_preexec(
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
 
-def _current_uid_process_count() -> int:
-    """Count the host-UID baseline used by RLIMIT_NPROC before user unshare."""
+def _current_uid_task_count() -> int:
+    """Count the host-UID task baseline used by RLIMIT_NPROC before user unshare."""
 
     uid = os.getuid()
     count = 0
@@ -91,7 +91,7 @@ def _current_uid_process_count() -> int:
         try:
             uids = process.info["uids"]
             if uids is not None and uids.real == uid:
-                count += 1
+                count += process.num_threads()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     return count
@@ -419,7 +419,7 @@ class AnalysisCodeSandbox:
         ]
         started_at = utc_now()
         started = time.monotonic()
-        uid_process_limit = _current_uid_process_count() + GENERATED_PROCESS_HEADROOM
+        uid_process_limit = _current_uid_task_count() + GENERATED_PROCESS_HEADROOM
         stdout_path = control_directory / "stdout.log"
         stderr_path = control_directory / "stderr.log"
         with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
@@ -507,7 +507,7 @@ class AnalysisCodeSandbox:
                     "CPU time was not measured per process group.",
                     "RLIMIT_AS bounds virtual address space; peak RSS is observed separately.",
                     "RLIMIT_NPROC is host-UID-scoped and permits a fixed increment above the "
-                    "observed pre-launch UID process baseline.",
+                    "observed pre-launch UID task baseline.",
                 ),
             ),
             payload=payload,
