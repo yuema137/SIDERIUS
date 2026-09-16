@@ -1758,6 +1758,13 @@ def _capture_historical_source_for_analysis(
     capture_completed_tuning_source(binding, sources, output, tuning_dir)
 
 
+def _task_composition_fingerprint_for_analysis(bindings) -> str | None:
+    """Keep optional composition transport out of the core loop's branch count."""
+
+    composition = bindings.task_composition
+    return composition.semantic_fingerprint if composition is not None else None
+
+
 def _run_composed_data_analysis(
     interpretation,
     *,
@@ -2739,11 +2746,7 @@ def run_workflow(
                 bridge_factory=bridge_factory,
                 historical_model_inference_capability=historical_model_inference_capability,
                 historical_sources=tuple(historical_sources),
-                task_composition_fingerprint=(
-                    bindings.task_composition.semantic_fingerprint
-                    if bindings.task_composition is not None
-                    else None
-                ),
+                task_composition_fingerprint=_task_composition_fingerprint_for_analysis(bindings),
                 chain_workspace=bindings.workspace,
                 literature_output=literature_output,
             )
