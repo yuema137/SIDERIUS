@@ -278,7 +278,14 @@ def render_data_analysis_evidence(evidence) -> str:
             f"[{finding['confidence_level']} confidence]: {finding['statement']}"
         )
         lines.append(f"  Modeling relevance: {finding['modeling_relevance']}")
-        lines.append(f"  Methods: {', '.join(finding['method_skill_ids'])}")
+        methods = [
+            *(f"skill:{item}" for item in finding.get("method_skill_ids", [])),
+            *(
+                f"generated_program:{item}"
+                for item in finding.get("method_generated_program_ids", [])
+            ),
+        ]
+        lines.append(f"  Methods: {', '.join(methods)}")
         for measurement in finding.get("quantitative_evidence", []):
             unit = f" {measurement['unit']}" if measurement.get("unit") else ""
             lines.append(

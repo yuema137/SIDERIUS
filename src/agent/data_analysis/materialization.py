@@ -17,7 +17,7 @@ from execute_tools.analysis_materialization import (
 )
 
 from .authorization import authorize_materialization
-from .plan_validation import ResolvedAssetBinding, ResolvedPlannedInvocation
+from .plan_validation import ResolvedAnalysisInvocation, ResolvedAssetBinding
 
 
 class AnalysisMaterializationError(ValueError):
@@ -58,7 +58,7 @@ def export_materialized_view_content(
 
 
 def authorize_invocation_bindings(
-    invocation: ResolvedPlannedInvocation,
+    invocation: ResolvedAnalysisInvocation,
     *,
     available_assets: dict[str, AnalysisAsset],
     access_policy,
@@ -92,7 +92,7 @@ def authorize_invocation_bindings(
 def authorize_inference_input_bindings(
     resolved: ResolvedAssetBinding,
     *,
-    invocation: ResolvedPlannedInvocation,
+    invocation: ResolvedAnalysisInvocation,
     available_assets: dict[str, AnalysisAsset],
     access_policy,
 ) -> tuple[AuthorizedAnalysisMaterializationRequest, ...]:
@@ -130,7 +130,7 @@ def authorize_inference_input_bindings(
 def materialize_authorized_invocation(
     capability: TaskAnalysisCapability,
     *,
-    invocation: ResolvedPlannedInvocation,
+    invocation: ResolvedAnalysisInvocation,
     requests: tuple[AuthorizedAnalysisMaterializationRequest, ...],
 ) -> tuple[MaterializedAnalysisView, ...]:
     """Materialize bindings, then require one exact shared selection identity."""

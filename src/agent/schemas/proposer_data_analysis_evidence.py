@@ -38,11 +38,18 @@ class ProposerDataFinding(FrozenModel):
     statement: NonEmptyStr
     confidence_level: Literal["low", "medium", "high"]
     confidence_rationale: NonEmptyStr
-    method_skill_ids: tuple[NonEmptyStr, ...]
+    method_skill_ids: tuple[NonEmptyStr, ...] = ()
+    method_generated_program_ids: tuple[NonEmptyStr, ...] = ()
     modeling_relevance: NonEmptyStr
     coverage: AnalysisCoverage
     quantitative_evidence: tuple[QuantitativeResult, ...] = ()
     result_refs: tuple[NonEmptyStr, ...]
+
+    @model_validator(mode="after")
+    def validate_methods(self) -> ProposerDataFinding:
+        if not self.method_skill_ids and not self.method_generated_program_ids:
+            raise ValueError("projected finding requires an analysis method identity")
+        return self
 
 
 class ProposerDataAnalysisEvidence(FrozenModel):
@@ -114,6 +121,7 @@ def build_proposer_data_analysis_evidence(
                 confidence_level=finding.confidence.level,
                 confidence_rationale=finding.confidence.rationale,
                 method_skill_ids=finding.method_skill_ids,
+                method_generated_program_ids=finding.method_generated_program_ids,
                 modeling_relevance=finding.modeling_relevance,
                 coverage=finding.coverage,
                 quantitative_evidence=tuple(quantitative),

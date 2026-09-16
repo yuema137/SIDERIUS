@@ -198,11 +198,17 @@ class AnalysisRunStore:
                 raise AnalysisPersistenceError(
                     f"skill artifact media type {declaration.media_type!r} is not allowed"
                 )
-            path = (staging_root / declaration.relative_path).resolve()
+            candidate = staging_root / declaration.relative_path
+            current = candidate
+            while current != staging_root:
+                if current.is_symlink():
+                    raise AnalysisPersistenceError(
+                        "skill artifacts and their staging parents may not be symbolic links"
+                    )
+                current = current.parent
+            path = candidate.resolve()
             if path == staging_root or staging_root not in path.parents or not path.is_file():
                 raise AnalysisPersistenceError("skill artifact path is missing or escapes staging")
-            if path.is_symlink():
-                raise AnalysisPersistenceError("skill artifacts may not be symbolic links")
             payload = path.read_bytes()
             total_bytes += len(payload)
             if total_bytes > contract.max_total_bytes:

@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 
 from agent.data_analysis.discovery import DiscoveredSkill, DiscoverySnapshot
+from agent.schemas.data_analysis.action_identity import GeneratedProgramIdentity
 from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.data_analysis.context import DataAnalysisInput
+from agent.schemas.data_analysis.generated_program import GeneratedAnalysisProgram
 from agent.schemas.data_analysis.plan import AnalysisPlan
 from agent.schemas.data_analysis.skills import ResolvedSkillInterface, SkillResult
 
@@ -29,9 +31,11 @@ def render_skill_selection_prompt(
     *,
     output_schema: dict,
 ) -> tuple[str, str]:
-    system = """You plan scientific data analysis using only supplied SkillCards and safe asset
-descriptors. Select a small sufficient candidate set. You cannot inspect data, invent fields,
-or use a skill outside the cards. Return JSON with skill_ids and rationale."""
+    system = """Choose how to answer scientific analysis questions using supplied SkillCards and
+safe asset descriptors. Prefer a validated skill whenever it cleanly answers the question. If and
+only if the toolbox is insufficient or materially awkward, list the exact question IDs requiring
+one bounded experiment-local generated program. Generated code grants no additional data access.
+You cannot inspect data, invent fields, or use a skill outside the cards. Return strict JSON."""
     user = f"""Analysis brief:
 {_json(analysis_input.analysis_brief)}
 
@@ -61,6 +65,7 @@ def render_analysis_plan_prompt(
     discovery: DiscoverySnapshot,
     selected: tuple[DiscoveredSkill, ...],
     interfaces: dict[str, ResolvedSkillInterface],
+    generated_programs: tuple[tuple[GeneratedAnalysisProgram, GeneratedProgramIdentity], ...] = (),
 ) -> tuple[str, str]:
     system = """Produce one executable AnalysisPlan as strict JSON. Use exact IDs, slots,
 formats, information classes, metadata fields, parameters, cost hints, and question IDs from the
@@ -81,6 +86,16 @@ portable path components. Do not include commentary outside JSON."""
         }
         for skill in selected
     ]
+    generated_payload = [
+        {
+            "identity": identity.model_dump(mode="json"),
+            "declaration": program.model_dump(
+                mode="json",
+                exclude={"source_ref", "source_sha256", "generation_provenance"},
+            ),
+        }
+        for program, identity in generated_programs
+    ]
     user = f"""DataAnalysisInput:
 {_json(analysis_input)}
 
@@ -92,8 +107,67 @@ discovery_snapshot_digest = {discovery.snapshot_digest}
 Selected interfaces:
 {_json(interface_payload)}
 
+Persisted generated programs available to the final plan:
+{_json(generated_payload)}
+
+Generated programs already exist and are immutable. A generated-program invocation must use
+action_kind="generated_program" and reference one exact supplied program_identity. Never embed
+source code or request code generation in AnalysisPlan.
+
 AnalysisPlan JSON schema:
 {_json(AnalysisPlan.model_json_schema())}
+"""
+    return system, user
+
+
+def render_generated_program_prompt(
+    analysis_input: DataAnalysisInput,
+    *,
+    question_ids: tuple[str, ...],
+    output_schema: dict,
+) -> tuple[str, str]:
+    """Render the source-generation stage that precedes the final plan."""
+
+    questions = [
+        item.model_dump(mode="json")
+        for item in analysis_input.analysis_brief.questions
+        if item.question_id in question_ids
+    ]
+    system = """Create one bounded experiment-local scientific analysis program only because the
+reference/configured toolbox was judged insufficient. Return strict JSON matching the authoritative
+schema. Source must define exactly:
+
+    def analyze(inputs, parameters, output_directory): ...
+
+`inputs` maps binding IDs to read-only objects with `descriptor` and `arrays` mappings. `arrays`
+contains only the executor-authorized NPZ arrays: `example_ids`, `information__<class>`,
+`metadata__<field>`, optional `valid_mask`, and for time-series views `channel_ids` plus exactly one
+certified time-axis encoding (`time` or `time_start_seconds`/`time_step_seconds`). Never open task
+paths yourself. `parameters` contains validated scalar values. `output_directory` is the only
+writable artifact directory. Return a plain JSON-serializable payload matching the SkillPayload
+shape: summary, quantitative_results, produced_artifacts, analysis_usage, warnings. Write declared
+artifacts below output_directory and use paths relative to the sandbox output root (therefore
+prefix artifact paths with `artifacts/`). Do not import SIDERIUS internals, inspect the workspace,
+access credentials or network, install packages, alter data, or perform modeling/training. Declare
+only concrete input information and view formats. The source and declaration will be persisted and
+content-addressed before any executable plan exists."""
+    user = f"""Questions requiring custom analysis:
+{_json(questions)}
+
+Task context:
+{_json(analysis_input.task_context)}
+
+Safe asset descriptors:
+{_json(analysis_input.available_assets)}
+
+Analysis access policy (authority remains enforced later):
+{_json(analysis_input.access_policy)}
+
+Resource envelope:
+{_json(analysis_input.resource_envelope)}
+
+Authoritative GeneratedProgramDraft JSON schema:
+{_json(output_schema)}
 """
     return system, user
 
@@ -111,7 +185,15 @@ present in that result. State limitations and sampling coverage honestly. Return
     bounded_results = [
         {
             "result_id": result.result_id,
-            "skill_id": result.skill_identity.skill_id,
+            "execution_origin": result.execution_origin,
+            "skill_id": (
+                result.skill_identity.skill_id if result.skill_identity is not None else None
+            ),
+            "generated_program_id": (
+                result.generated_program_identity.program_id
+                if result.generated_program_identity is not None
+                else None
+            ),
             "status": result.status,
             "summary": result.summary,
             "quantitative_results": [

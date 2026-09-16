@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from .access import InformationRequirement
+from .action_identity import AnalysisExecutionOrigin, GeneratedProgramIdentity
 from .assets import AnalysisAssetType, AnalysisAuthorizationReceipt, MaterializedAnalysisView
 from .common import CertifiedArtifactRef, FrozenModel, NonEmptyStr, Sha256, canonical_json_bytes
 from .resources import ResourceUsage
@@ -390,9 +391,13 @@ class SkillExecutionProvenance(FrozenModel):
 
 
 class SkillResult(FrozenModel):
+    """Legacy-named certified analysis-execution result envelope."""
+
     result_id: NonEmptyStr
     invocation_id: NonEmptyStr
-    skill_identity: SkillIdentity
+    execution_origin: AnalysisExecutionOrigin = "configured_external_skill"
+    skill_identity: SkillIdentity | None = None
+    generated_program_identity: GeneratedProgramIdentity | None = None
     status: InvocationStatus
     summary: NonEmptyStr
     quantitative_results: tuple[QuantitativeResult, ...] = ()
@@ -405,6 +410,12 @@ class SkillResult(FrozenModel):
 
     @model_validator(mode="after")
     def validate_outcome(self) -> SkillResult:
+        generated = self.execution_origin == "generated_program"
+        if generated:
+            if self.generated_program_identity is None or self.skill_identity is not None:
+                raise ValueError("generated-program result requires only generated identity")
+        elif self.skill_identity is None or self.generated_program_identity is not None:
+            raise ValueError("skill result requires only skill identity")
         if self.status == "completed":
             if self.coverage is None:
                 raise ValueError("completed skill result requires measured coverage")

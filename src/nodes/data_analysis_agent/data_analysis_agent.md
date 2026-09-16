@@ -44,7 +44,7 @@
 | `question_outcomes` | tuple of `QuestionOutcome` | Disposition of every brief question. |
 | `assets_inspected` | tuple of strings | Asset identities actually materialized. |
 | `findings` | tuple of `DataFinding` | Structured, cited scientific findings. |
-| `skill_result_summaries` | tuple of `SkillResultSummary` | Bounded summaries of full append-only results. |
+| `skill_result_summaries` | tuple of `SkillResultSummary` | Legacy-named bounded summaries of full append-only certified analysis-execution results. |
 | `skill_result_refs` | tuple of `CertifiedResultRef` | Identities of full result rows. |
 | `artifacts` | tuple of `CertifiedArtifactRef` | Certified plots/tables/files produced by skills. |
 | `modeling_relevance` | tuple of strings | Scientific relevance statements; never modeling decisions. |
@@ -85,22 +85,31 @@ For local storage, the node writes beneath
 `{workspace}/data_analysis/{run_name}/{request_id}/`: `input.json`,
 `discovery.json`, `plan.json`, append-only `skill_results.jsonl`, append-only
 `inference_receipts.jsonl` when historical inference is requested, immutable
-certified artifacts, and bounded `report.json` / `report.md`. Materialization
-copies and staging directories are removed after the bounded worker exits.
+certified artifacts, and bounded `report.json` / `report.md`. When a capability
+gap requires custom analysis, exact generated source and its validated
+declaration are stored content-addressed below `generated_analysis/` before the
+final executable plan is created. Materialization copies and staging
+directories are removed after the bounded worker exits.
 
 ## Key behavioral notes
 
 - Discovery reads manifests only. Selected implementations are imported in a bounded worker after interface resolution.
+- Reference/configured skills are preferred when they cleanly answer a question. A real toolbox gap may instead trigger a separate source-generation stage. That stage validates and persists one immutable `GeneratedAnalysisProgram`; only then may the final `AnalysisPlan` reference its exact `GeneratedProgramIdentity`. Resume never regenerates equivalent source.
+- `AnalysisPlan.invocations` is a discriminated union of trusted skill invocations and already-persisted generated-program invocations. Pre-union persisted skill wire forms remain readable.
 - Planning keeps `RequestedInformation` strict: only `metadata` may name explicit `fields`; `data`, `target`, `prediction`, `residual`, and `identity` use no fields. One bounded repair may delete an illegal non-metadata `fields` value because it carries no access authority, but it may not change the information class, metadata field identity, binding, format, sampling, parameters, or other plan semantics.
 - A skill receives only already-authorized `MaterializedAnalysisView` content and cannot resolve asset IDs or scan the workspace.
+- A generated program receives the same authorized materializations through a narrow JSON/NPZ runner ABI. It proposes a bounded `SkillPayload`; the trusted parent validates measurement semantics, certifies effective coverage and artifacts, records resources, and constructs the canonical result. Source code is never itself scientific evidence.
+- Execution origin selects the trust path. `reference_skill` and `configured_external_skill` use the operator-approved skill worker. `generated_program` uses `AnalysisCodeSandbox`; no ordinary-subprocess fallback exists. The result/report surfaces retain the exact origin and mutually exclusive skill or generated-program identity.
 - Full results remain append-only; the canonical report contains bounded summaries and certified references.
 - Existing predictions, residuals, histories, and evaluation artifacts may be analyzed when supplied and authorized.
 - Active historical inference is an injected capability. A validated plan must identify the immutable `TrainedModelArtifact`, exact input binding, split, selection, prediction contract and evaluation configuration. The inference worker receives no target; target-dependent diagnostics use a separate authorized materialization.
 - `TrainedModelArtifact` is descriptive and immutable. It records checkpoint/config/plugin/construction/I/O identities but carries no Python callable or executable path. The approved inference capability owns reconstruction and emits an executor-certified receipt.
-- Skill packs are trusted operator-approved Python code. Process limits provide resource containment, not a security sandbox.
+- Skill packs are trusted operator-approved Python code. Their existing process limits provide resource containment, not a security sandbox.
+- Generated analysis is untrusted. The Linux v1 sandbox requires both `unshare` user/network namespaces and Bubblewrap. It exposes only the exact Python runtime, dependency environment, runner, immutable source/request, read-only authorized materializations, a private `/tmp`, and the writable invocation output directory. It clears inherited credentials/environment, omits the checkout and user home, creates PID/IPC/UTS namespaces, denies network sockets in the qualified runtime, applies CPU/address-space/file/process limits, monitors output count/bytes, and kills the process group on exit or timeout. Capability probing is mandatory and failure is closed.
+- The v1 sandbox does not claim a seccomp filter, cgroup accounting, arbitrary dependency installation, GPU access, or protection on hosts whose namespace/Bubblewrap probe fails. `RLIMIT_AS` bounds virtual address space, while RSS is observed separately; CPU time is not yet measured per process group. One-off generated programs may consume ordinary authorized materializations only and cannot request historical inference.
 
 ## Dependencies
 
-- **LLM**: three bounded schema-validated stages in a normal run: candidate selection, executable planning, and report synthesis.
+- **LLM**: three bounded schema-validated stages in a skill-only run: candidate selection, executable planning, and report synthesis. A generated-program run adds one bounded schema-validated source/declaration stage before executable planning.
 - **GPU**: optional. An enabled skill or caller-injected historical-inference capability may use one only within the caller's resource envelope.
 - **External services**: none beyond the configured LLM provider; task data remain behind `TaskAnalysisCapability`.

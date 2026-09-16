@@ -37,7 +37,7 @@ def render_report_markdown(report: DataAnalysisReport) -> str:
         lines.append("- None reported.")
     lines.extend(["", "## Resource usage", ""])
     lines.append(
-        f"Attempted {report.resource_usage.attempted_invocations} skill invocation(s); "
+        f"Attempted {report.resource_usage.attempted_invocations} analysis invocation(s); "
         f"completed {report.resource_usage.completed_invocations}; "
         f"total observed wall time {report.resource_usage.total_wall_time_s:.3f} s."
     )

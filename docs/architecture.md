@@ -517,7 +517,7 @@ Load memory → Propose hypothesis + config (LLM) → Resource check
 | `ml_model_implementor` | Takes a model proposal → writes PyTorch code + unit tests | no | yes | yes |
 | `ml_code_validator_agent` | 7 checks: plugin load, pytest, description, config fields, instantiation, gradient flow, LLM code review with runtime diagnosis | no | no | yes |
 | `ml_literature_review` | Resolves root papers, searches Semantic Scholar around the current bottlenecks, synthesises findings as soft priors (optional stage) | no | no | yes |
-| `data_analysis_agent` | Executes authorized, resource-bounded scientific-analysis skills and synthesizes a structured report | optional by skill | no | yes |
+| `data_analysis_agent` | Executes authorized, resource-bounded scientific analysis and synthesizes a structured report | optional by action | experiment-local only | yes |
 
 All seven are built. Data Analysis is optional in the reference workflow and
 also exposes an independent Python capability contract.
@@ -533,6 +533,30 @@ explicitly authorized input materializations, never target information, and
 returns a content-certified prediction view plus an executor-certified
 inference receipt. Targets, when authorized for a later diagnostic, follow a
 separate materialization path.
+
+Data Analysis is not limited to the configured skill inventory. The inventory
+is the preferred standard toolbox; when it cannot cleanly express a scientific
+question, the agent may create one experiment-local `GeneratedAnalysisProgram`.
+Generation and execution are distinct stages: source plus declaration are
+schema-validated, persisted content-addressed in the run workspace, and assigned
+an immutable identity before the final executable `AnalysisPlan` is built. The
+plan therefore selects an ordered union of trusted skill invocations and exact
+already-existing generated-program invocations; it never asks execution to
+generate code dynamically.
+
+Generated analysis is untrusted even though it shares the canonical result,
+coverage, artifact, report, and resume pipeline. A narrow JSON/NPZ runner ABI
+receives only authorized read-only materializations and one writable output
+directory. The trusted outer executor validates the returned payload, computes
+coverage from certified materializations, certifies observed artifacts, and
+records execution provenance. On qualified Linux deployments the dedicated
+`AnalysisCodeSandbox` uses user/network and PID/IPC/UTS namespaces, Bubblewrap
+mount isolation, a scrubbed environment, private temporary storage, explicit
+resource/output limits, and process-tree cleanup. If that capability probe
+fails, generated execution is refused; there is no plain-subprocess fallback.
+Trusted configured/reference skills continue to use their existing execution
+path. Dynamic promotion and registration of generated experiment skills is a
+separate capability and is not part of the one-off program boundary.
 
 For a composed training run whose task declares complete `model_io.inference`
 semantics, the training executor records the exact checkpoint, validated model

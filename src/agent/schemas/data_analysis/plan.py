@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, model_validator
 
 from .access import RequestedInformation
+from .action_identity import GeneratedProgramIdentity
 from .assets import AnalysisOperation, AnalysisScopeDescriptor
 from .common import FrozenModel, NonEmptyStr, Sha256
 from .inference import HistoricalInferenceConfiguration
@@ -72,6 +73,9 @@ class PlannedAssetBinding(FrozenModel):
 
 
 class PlannedSkillInvocation(FrozenModel):
+    action_kind: Literal["skill"] = Field(
+        default="skill", exclude_if=lambda value: value == "skill"
+    )
     invocation_id: NonEmptyStr
     skill_id: NonEmptyStr
     question_ids: tuple[NonEmptyStr, ...]
@@ -97,6 +101,36 @@ class PlannedSkillInvocation(FrozenModel):
         return self
 
 
+class PlannedGeneratedProgramInvocation(FrozenModel):
+    """Execute one already-persisted generated program; never generate at runtime."""
+
+    action_kind: Literal["generated_program"]
+    invocation_id: NonEmptyStr
+    program_identity: GeneratedProgramIdentity
+    question_ids: tuple[NonEmptyStr, ...]
+    bindings: tuple[PlannedAssetBinding, ...]
+    sampling_plan: SamplingPlan
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    priority: int = Field(default=3, ge=1, le=5)
+
+    @model_validator(mode="after")
+    def validate_references(self) -> PlannedGeneratedProgramInvocation:
+        if not self.question_ids or len(set(self.question_ids)) != len(self.question_ids):
+            raise ValueError("invocation question_ids must be non-empty and unique")
+        binding_ids = [item.binding_id for item in self.bindings]
+        if not binding_ids or len(set(binding_ids)) != len(binding_ids):
+            raise ValueError("invocation binding IDs must be non-empty and unique")
+        if any(item.operation != "materialize" for item in self.bindings):
+            raise ValueError("v1 generated programs consume materialized inputs only")
+        return self
+
+
+PlannedAnalysisInvocation = Annotated[
+    PlannedSkillInvocation | PlannedGeneratedProgramInvocation,
+    Field(discriminator="action_kind"),
+]
+
+
 class StopPolicy(FrozenModel):
     max_invocations: int = Field(gt=0, le=100)
     stop_when_questions_addressed: bool = True
@@ -110,9 +144,25 @@ class AnalysisPlan(FrozenModel):
     access_policy_digest: Sha256
     discovery_snapshot_digest: Sha256
     questions: tuple[NonEmptyStr, ...]
-    invocations: tuple[PlannedSkillInvocation, ...]
+    invocations: tuple[PlannedAnalysisInvocation, ...]
     stop_policy: StopPolicy
     rationale: NonEmptyStr
+
+    @model_validator(mode="before")
+    @classmethod
+    def preserve_legacy_skill_wire_form(cls, value: object) -> object:
+        """Tag pre-union skill invocations without changing their serialized form."""
+
+        if not isinstance(value, dict) or not isinstance(value.get("invocations"), (list, tuple)):
+            return value
+        normalized = dict(value)
+        invocations = []
+        for invocation in value["invocations"]:
+            if isinstance(invocation, dict) and "action_kind" not in invocation:
+                invocation = {"action_kind": "skill", **invocation}
+            invocations.append(invocation)
+        normalized["invocations"] = invocations
+        return normalized
 
     @model_validator(mode="after")
     def validate_plan(self) -> AnalysisPlan:

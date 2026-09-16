@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent.schemas.data_analysis.assets import MaterializedAnalysisView
 from agent.schemas.data_analysis.common import canonical_json_bytes, utc_now
 from agent.schemas.data_analysis.resources import ResourceUsage
 from agent.schemas.data_analysis.skills import (
@@ -26,6 +27,7 @@ from core.runtime_control.process_group import process_group_alive, signal_group
 from core.subprocess_env import subprocess_env
 
 from .discovery import DiscoveredSkill
+from .execution_origin import trusted_skill_execution_origin
 from .persistence import AnalysisPersistenceError, AnalysisRunStore
 from .worker_protocol import SkillWorkerRequest, SkillWorkerResponse, ValidatedParameters
 
@@ -45,11 +47,14 @@ class SkillExecutorError(RuntimeError):
     """Pre-materialization validation failed or its worker could not be certified."""
 
 
-def _certify_coverage(
-    skill_input: SkillInput,
+def certify_analysis_coverage(
+    views: tuple[MaterializedAnalysisView, ...],
     usage: SkillAnalysisUsage | None,
 ) -> AnalysisCoverage:
-    views = skill_input.materializations
+    """Certify untrusted usage against the exact authorized materializations."""
+
+    if not views:
+        raise ValueError("coverage certification requires materialized views")
     selection = views[0].selection_identity
     if any(view.selection_identity != selection for view in views):
         raise ValueError("materialized views do not share an identical certified selection")
@@ -268,6 +273,7 @@ def execute_skill(
 ) -> SkillResult:
     """Execute one already-planned and already-authorized invocation."""
 
+    execution_origin = trusted_skill_execution_origin(skill)
     request = SkillWorkerRequest(
         mode="execute",
         discovered_skill=skill,
@@ -349,6 +355,7 @@ def execute_skill(
             result_id=result_id,
             invocation_id=skill_input.invocation_id,
             skill_identity=skill.identity,
+            execution_origin=execution_origin,
             status="timed_out",
             summary="Skill execution exceeded its hard deadline.",
             resource_usage=resource_usage,
@@ -364,6 +371,7 @@ def execute_skill(
             result_id=result_id,
             invocation_id=skill_input.invocation_id,
             skill_identity=skill.identity,
+            execution_origin=execution_origin,
             status="failed",
             summary="Skill execution exceeded its host-memory limit.",
             resource_usage=resource_usage,
@@ -384,6 +392,7 @@ def execute_skill(
             result_id=result_id,
             invocation_id=skill_input.invocation_id,
             skill_identity=skill.identity,
+            execution_origin=execution_origin,
             status="failed",
             summary="Skill worker failed before producing a valid result.",
             resource_usage=resource_usage,
@@ -397,12 +406,13 @@ def execute_skill(
 
     payload = response.payload
     try:
-        coverage = _certify_coverage(skill_input, payload.analysis_usage)
+        coverage = certify_analysis_coverage(skill_input.materializations, payload.analysis_usage)
     except ValueError as exc:
         return SkillResult(
             result_id=result_id,
             invocation_id=skill_input.invocation_id,
             skill_identity=skill.identity,
+            execution_origin=execution_origin,
             status="failed",
             summary="Skill reported analysis usage inconsistent with certified materialization.",
             quantitative_results=payload.quantitative_results,
@@ -423,6 +433,7 @@ def execute_skill(
             result_id=result_id,
             invocation_id=skill_input.invocation_id,
             skill_identity=skill.identity,
+            execution_origin=execution_origin,
             status="failed",
             summary="Skill declared artifacts outside its discovery card.",
             quantitative_results=payload.quantitative_results,
@@ -447,6 +458,7 @@ def execute_skill(
             result_id=result_id,
             invocation_id=skill_input.invocation_id,
             skill_identity=skill.identity,
+            execution_origin=execution_origin,
             status="failed",
             summary="Skill artifacts failed executor certification.",
             quantitative_results=payload.quantitative_results,
@@ -464,6 +476,7 @@ def execute_skill(
         result_id=result_id,
         invocation_id=skill_input.invocation_id,
         skill_identity=skill.identity,
+        execution_origin=execution_origin,
         status="completed",
         summary=payload.summary,
         quantitative_results=payload.quantitative_results,
