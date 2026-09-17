@@ -711,6 +711,8 @@ class TestCensusDLegacyLockKeySet:
             "analysis_source_prompt_sha256",
             # F-SCANF-1 — the declared delta documented above.
             "formal_eval_portion",
+            # Formal training scope ownership is part of resume identity.
+            "formal_training_scope_source",
             # Workflow rules determine the executed plan and are compared.
             "workflow_parameter_rules",
             "trial_time_admission_source",
