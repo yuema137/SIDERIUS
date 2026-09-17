@@ -408,9 +408,7 @@ class LLMBridge:
     """
 
     @staticmethod
-    def _create_completion(
-        client: OpenAI, *, reasoning_effort: str | None, **kwargs: Any
-    ) -> Any:
+    def _create_completion(client: OpenAI, *, reasoning_effort: str | None, **kwargs: Any) -> Any:
         """Apply one optional SDK argument at the shared Chat Completions edge.
 
         The SDK overloads are not compatible with a dynamic ``**`` spread;
