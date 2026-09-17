@@ -470,7 +470,11 @@ Notes:
   rules validate baseline fields the Proposer supplied; an omitted non-exact
   field remains agent-controlled and is checked on the tuner's final plan.
   No task-specific default is invented, and an unconstrained caller keeps the
-  previous behavior.
+  previous behavior. Serialization keeps only the active rule kind, so a
+  validated rule survives the Literature/Data Analysis → Proposer typed
+  projections and later validation without turning inactive optional fields
+  into additional declarations. `{"exact": null}` remains an explicit exact
+  rule; it is not equivalent to omitting a rule.
 - `dynamic_observables` / `static_observables` are the two **observable**
   families (`R-OBS-1`, `D-BUD-16`). The split is a **type**, not a naming
   convention: an implementation subclasses either

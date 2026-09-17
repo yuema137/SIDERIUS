@@ -15,6 +15,7 @@ from agent.schemas.data_analysis.common import CertifiedArtifactRef, canonical_s
 from agent.schemas.data_analysis.report import DataAnalysisReport
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.literature_review import LiteratureReviewOutput
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import AgentCard, ExpertContextItem, ProposalInput
 from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.protocols.data_analysis_to_ml_literature_review import (
@@ -267,6 +268,30 @@ def test_proposer_renders_observed_and_external_evidence_as_separate_streams() -
     assert "## Machine Learning Literature Review Evidence" in external
     assert "doi:10.0000/example" in external
     assert "external claims, not observations from our data" in external
+
+
+def test_proposer_fan_in_preserves_exact_workflow_rule_after_both_edges() -> None:
+    """Catches the real TIDMAD incident where nested rule nulls blocked ProposalInput."""
+    rules = ParameterRules.model_validate({"model_config.segmentation_size": {"exact": 40_000}})
+    proposal = ProposalInput(
+        interpretation_evidence=build_proposer_evidence({}),
+        workflow_parameter_rules=rules,
+    )
+
+    proposal = literature_to_proposer(_literature(), proposal_input=proposal)
+    proposal = analysis_to_proposer(
+        _report(),
+        report_ref=CertifiedArtifactRef(
+            logical_ref="data_analysis/report.json",
+            sha256="9" * 64,
+            media_type="application/json",
+        ),
+        proposal_input=proposal,
+    )
+
+    assert proposal.workflow_parameter_rules == rules
+    assert proposal.literature_review_evidence is not None
+    assert proposal.data_analysis_evidence is not None
 
 
 def test_literature_edge_projections_refuse_unbounded_prompt_payloads(tmp_path) -> None:
