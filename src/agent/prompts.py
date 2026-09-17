@@ -24,6 +24,7 @@ from agent.prompt_templates.tuner.rendering import (
     render_planner_dynamics_block,
     render_reflector_dynamics_block,
 )
+from agent.prompt_templates.tuner.runtime_evidence import render_training_epoch_evidence
 
 # Step 07 PR 07b (P2) — collapse advice about a health check the run does not
 # actually run would tell the planner to look for a signal it can never
@@ -1314,6 +1315,7 @@ def get_planner_user_prompt(
         val_s = t.get("validation_time_s")
         train_line = render_planner_train_term(train_s, val_s)
         attribution_note = TIMING_ATTRIBUTION_NOTE if is_coherent_split(train_s, val_s) else ""
+        epoch_evidence = render_training_epoch_evidence(last)
         slow_warning = (
             f"\n### ⏱  LAST EXPERIMENT TIMING:\n"
             f"{train_line}, inference={infer_s / 60:.1f} min, "
@@ -1321,6 +1323,7 @@ def get_planner_user_prompt(
             + (f" (segmentation_size={seg})" if seg else "")
             + ".\n"
             + attribution_note
+            + epoch_evidence
             + "The time budget is a HARD UPPER LIMIT, not a target. If the last "
             "run exceeded it, reduce model complexity. If it was well under, "
             "do NOT scale up just because there is headroom — smaller "
