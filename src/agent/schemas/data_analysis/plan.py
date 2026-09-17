@@ -15,9 +15,19 @@ from .resources import SamplingPolicy
 from .skills import CostClass
 
 
+class CertifiedAssetScopeRef(FrozenModel):
+    """Use one plan-visible asset's exact certified scope, without copying opaque bytes."""
+
+    kind: Literal["certified_asset_scope"] = "certified_asset_scope"
+    asset_id: NonEmptyStr
+
+
+PlanScopeDescriptor = AnalysisScopeDescriptor | CertifiedAssetScopeRef
+
+
 class SamplingPlan(FrozenModel):
     split_id: NonEmptyStr
-    requested_scope: AnalysisScopeDescriptor = Field(discriminator="kind")
+    requested_scope: PlanScopeDescriptor = Field(discriminator="kind")
     policy: SamplingPolicy
 
 

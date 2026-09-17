@@ -92,6 +92,7 @@ def _resolved(
     )
     return ResolvedPlannedInvocation(
         invocation=invocation,
+        resolved_scope=invocation.sampling_plan.requested_scope,
         skill=cast(Any, None),
         bindings=(ResolvedAssetBinding(plan_binding=binding, slot=slot, asset=asset),),
         validated_parameters=ValidatedParameters(

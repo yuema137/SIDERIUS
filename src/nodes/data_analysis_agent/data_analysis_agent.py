@@ -390,7 +390,7 @@ class DataAnalysisAgent:
             result_ref = store.append_skill_result(result)
             results.append(result)
             result_refs.append(result_ref)
-            invocation_by_result[result.result_id] = item.invocation
+            invocation_by_result[result.result_id] = item
             if result.status != "completed" and not plan.stop_policy.continue_after_skill_failure:
                 break
 
@@ -473,7 +473,7 @@ class DataAnalysisAgent:
                         rationale=item.confidence_rationale,
                         limitations=item.confidence_limitations,
                     ),
-                    scope=invocation.sampling_plan.requested_scope,
+                    scope=invocation.resolved_scope,
                     method_skill_ids=(
                         (result.skill_identity.skill_id,)
                         if result.skill_identity is not None
@@ -535,7 +535,7 @@ class DataAnalysisAgent:
         scopes = []
         scope_digests = set()
         for invocation in invocation_by_result.values():
-            scope = invocation.sampling_plan.requested_scope
+            scope = invocation.resolved_scope
             digest = canonical_sha256(scope)
             if digest not in scope_digests:
                 scopes.append(scope)

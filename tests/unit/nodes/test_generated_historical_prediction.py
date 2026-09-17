@@ -19,6 +19,7 @@ from agent.schemas.data_analysis.assets import (
 from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.data_analysis.context import DataAnalysisInput
 from nodes.data_analysis_agent import DataAnalysisAgent
+from tests.unit.agent.data_analysis.test_contracts_and_authorization import _scope
 from tests.unit.agent.data_analysis.test_historical_model_inference import _fixture
 from tests.unit.nodes.test_data_analysis_agent import _GeneratedProgramBridge, _input
 
@@ -72,9 +73,10 @@ class _ModelInputCapability:
 
 
 class _PredictionBridge(_GeneratedProgramBridge):
-    def __init__(self, *, repair_seed: bool = False, **kwargs) -> None:
+    def __init__(self, *, repair_seed: bool = False, use_scope_ref: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
         self.repair_seed = repair_seed
+        self.use_scope_ref = use_scope_ref
         self.initial_plan = None
 
     def generate(self, system, user, *, label):
@@ -146,6 +148,11 @@ class _PredictionBridge(_GeneratedProgramBridge):
                 }
             ]
             invocation["sampling_plan"]["policy"]["max_items"] = 2
+            if self.use_scope_ref:
+                invocation["sampling_plan"]["requested_scope"] = {
+                    "kind": "certified_asset_scope",
+                    "asset_id": "historical-model",
+                }
             if self.repair_seed:
                 invocation["bindings"][0]["inference_configuration"].update(
                     determinism="deterministic", seed=0
@@ -185,8 +192,9 @@ class _PredictionBridge(_GeneratedProgramBridge):
 
 @pytest.mark.allow_real_subprocess
 @pytest.mark.parametrize("repair_seed", (False, True))
+@pytest.mark.parametrize("use_scope_ref", (False, True))
 def test_generated_program_consumes_only_certified_transient_predictions(
-    tmp_path: Path, repair_seed: bool
+    tmp_path: Path, repair_seed: bool, use_scope_ref: bool
 ) -> None:
     probe = AnalysisCodeSandbox().probe()
     if not probe.available:
@@ -196,6 +204,8 @@ def test_generated_program_consumes_only_certified_transient_predictions(
     model = historical_request.model_artifact
     base = _input(tmp_path)
     payload = base.model_dump(mode="json")
+    if use_scope_ref:
+        payload["available_assets"][0]["authorized_scope"] = _scope().model_dump(mode="json")
     payload["available_assets"].append(
         AnalysisAsset(
             asset_id="historical-model",
@@ -206,7 +216,9 @@ def test_generated_program_consumes_only_certified_transient_predictions(
                 artifact=model,
             ),
             provenance=AssetProvenance(producer="training", run_id=model.training_run.run_name),
-            authorized_scope=base.available_assets[0].authorized_scope,
+            authorized_scope=_scope()
+            if use_scope_ref
+            else base.available_assets[0].authorized_scope,
             split_id="validation",
             allowed_operations=("infer",),
         ).model_dump(mode="json")
@@ -221,7 +233,9 @@ def test_generated_program_consumes_only_certified_transient_predictions(
     payload["resource_envelope"]["wall_time_budget_s"] = 90
     payload["resource_envelope"]["per_skill_timeout_s"] = 45
     inp = DataAnalysisInput.model_validate(payload)
-    bridge = _PredictionBridge(analysis_input=inp, repair_seed=repair_seed)
+    bridge = _PredictionBridge(
+        analysis_input=inp, repair_seed=repair_seed, use_scope_ref=use_scope_ref
+    )
     agent = DataAnalysisAgent(
         task_analysis_capability=_ModelInputCapability(
             Path(runtime_inputs.paths[0].path).read_bytes()

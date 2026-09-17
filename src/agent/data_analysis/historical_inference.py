@@ -173,7 +173,7 @@ def run_historical_inference_binding(
         model_authorization_receipt=output_authorization.authorization_receipt,
         input_views=input_views,
         split_id=invocation.invocation.sampling_plan.split_id,
-        requested_scope=invocation.invocation.sampling_plan.requested_scope,
+        requested_scope=invocation.resolved_scope,
         selection_identity=input_views[0].selection_identity,
         requested_prediction_format=resolved.plan_binding.requested_format_id,
         requested_information=resolved.plan_binding.requested_information,

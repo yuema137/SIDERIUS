@@ -45,6 +45,26 @@ def render_report_markdown(report: DataAnalysisReport) -> str:
             )
     else:
         lines.extend(["No supported findings were produced.", ""])
+    lines.extend(["## Certified measurements", ""])
+    for result in report.skill_result_summaries:
+        method = result.skill_id or result.generated_program_id
+        lines.append(f"### {method} ({result.status})")
+        lines.extend(["", result.summary, ""])
+        if result.coverage is not None:
+            lines.append(
+                f"Coverage: {result.coverage.analyzed_count} "
+                f"{result.coverage.population_unit} on {result.coverage.split_id}"
+            )
+        for measurement in result.key_quantitative_results:
+            value = measurement.value
+            rendered = "suppressed" if value is None else str(value)
+            unit = f" {measurement.unit}" if measurement.unit else ""
+            lines.append(
+                f"- {measurement.result_key}: {rendered}{unit} — {measurement.description}"
+            )
+        if not result.key_quantitative_results:
+            lines.append("- No certified quantitative values.")
+        lines.append("")
     lines.extend(["## Limitations", ""])
     if report.limitations:
         lines.extend(f"- {item.statement}" for item in report.limitations)

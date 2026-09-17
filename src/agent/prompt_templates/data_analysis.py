@@ -140,6 +140,12 @@ produces a certified prediction view before untrusted analysis code runs. Genera
 not load or execute the model itself. At most one inference binding is supported per generated
 invocation. Never request metadata fields absent from the split access policy.
 Use one invocation-level sampling plan for aligned bindings. Never materialize or infer hidden data.
+An invocation's scope must be valid for EVERY bound asset, including the nested inference input.
+For task-owned opaque scopes, do not copy a legacy file-partition scope from a different raw
+asset. When all assets bound to an invocation share one exact certified scope, use
+requested_scope={"kind":"certified_asset_scope","asset_id":"<one bound asset ID>"}.
+The executor resolves this short reference from the certified asset descriptor; it grants no
+new access. Never reference an unbound asset or use it to combine different certified scopes.
 Choose explicit nperseg/frequency/lag/bin parameters when required. Invocation IDs must be safe
 portable path components. Do not include commentary outside JSON."""
     if analysis_input.literature_evidence is not None:
@@ -302,7 +308,12 @@ def render_report_synthesis_prompt(
     system = """Synthesize scientific analysis evidence into bounded JSON. Measurements are
 evidence; do not prescribe architectures, preprocessing, dataset mutation, or training changes.
 Every finding must cite exactly one completed result_id and only quantitative result_key values
-present in that result. State limitations and sampling coverage honestly. Return JSON only."""
+present in that result. Prioritize measurements that answer the supplied questions or distinguish
+plausible explanations; do not restate the same raw-data fact in multiple findings. If certified
+historical-model predictions were analyzed, report their measured behavior and any supported
+between-model contrast, naming the compared scopes and avoiding claims about unmeasured targets.
+If model-aware analysis was attempted but not completed, say so explicitly rather than implying
+the model was inspected. State limitations and sampling coverage honestly. Return JSON only."""
     bounded_results = [
         {
             "result_id": result.result_id,
