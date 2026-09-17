@@ -22,6 +22,7 @@ from agent.schemas.hyperparam_tuning import (
     TaskCompositionRef,
 )
 from agent.schemas.output_types import OutputTypeName as OutputTypeName
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposer_data_analysis_evidence import ProposerDataAnalysisEvidence
 from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
 from agent.schemas.proposer_literature_evidence import ProposerLiteratureReviewEvidence
@@ -882,6 +883,16 @@ class ProposalInput(BaseModel):
         description=(
             "The composed task projection used to filter custom-loss offers. "
             "None preserves standalone/uncomposed registry behavior."
+        ),
+    )
+    workflow_parameter_rules: ParameterRules | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Typed experiment-owned parameter constraints, applied to the effective "
+            "baseline configuration before Proposer preflight and later to tuner plans. "
+            "Exact rules select an effective value; other kinds validate without "
+            "selecting one. None preserves the legacy unconstrained behavior."
         ),
     )
     proposal_blocks: ProposalTaskBlocks | None = Field(

@@ -26,18 +26,22 @@ proposing call.
 
 from __future__ import annotations
 
+import importlib
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import (
     ProposalInput,
+    ProposalOutput,
     ReasoningPipelineConfig,
     ReasoningStage,
 )
 from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
+from execute_tools.dataset_config import DatasetProfile, bind_dataset_profile
 from nodes.ml_model_proposal_agent import (
     MLModelProposalAgent,
     _build_preflight_advisory_note,
@@ -248,6 +252,57 @@ def _advisory_notes(output) -> list[str]:
 
 
 class TestPipelineAdvisoryPath:
+    @pytest.mark.parametrize("authored_seg", [None, 16_384])
+    def test_exact_candidate_dimension_reaches_preflight_before_estimation(
+        self, tmp_path, monkeypatch, authored_seg
+    ):
+        """Catches rules arriving after schema validation or only at the tuner."""
+        draft = _proposing_output(num_params=50_000)
+        if authored_seg is None:
+            del draft["baseline_config"]["model_config"]["segmentation_size"]
+        else:
+            draft["baseline_config"]["model_config"]["segmentation_size"] = authored_seg
+        bridge = MagicMock()
+        bridge.generate.side_effect = [
+            FAKE_COMPARISON_OUTPUT,
+            FAKE_REASONING_OUTPUT,
+            draft,
+        ]
+        inp = _pipeline_input(tmp_path)
+        inp.workflow_parameter_rules = ParameterRules.model_validate(
+            {"model_config.segmentation_size": {"exact": 40_000}}
+        )
+        seen: list[int] = []
+        validated: list[int] = []
+
+        original_validate = ProposalOutput.model_validate
+
+        def capture_validation(payload, *args, **kwargs):
+            validated.append(payload["baseline_config"]["model_config"]["segmentation_size"])
+            return original_validate(payload, *args, **kwargs)
+
+        def capture_preflight(_inp, output):
+            seen.append(output.baseline_config["model_config"]["segmentation_size"])
+            return None
+
+        proposer_module = importlib.import_module(
+            "nodes.ml_model_proposal_agent.ml_model_proposal_agent"
+        )
+        monkeypatch.setattr(ProposalOutput, "model_validate", capture_validation)
+        monkeypatch.setattr(proposer_module, "_run_preflight_check", capture_preflight)
+        with bind_dataset_profile(
+            DatasetProfile(partition_count=3, anchor_selection_files=[0], health_peek_files=[1])
+        ):
+            output = _agent(bridge).run(inp)
+
+        assert validated == [40_000]
+        assert seen == [40_000]
+        assert output.baseline_config["model_config"]["segmentation_size"] == 40_000
+        assert (
+            "model_config.segmentation_size: exact 40000"
+            in bridge.generate.call_args_list[-1].args[1]
+        )
+
     def test_over_budget_draft_emitted_without_revision(self, tmp_path):
         """Pre-C1: the bad draft triggered a revision and FAKE_GOOD_DRAFT
         was emitted after 4 calls. Post-C1: the bad draft itself is emitted

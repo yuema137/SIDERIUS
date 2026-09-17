@@ -21,6 +21,7 @@ Tests cover:
 import pytest
 
 from agent.schemas.interpretation import InterpretationOutput
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import ProposalInput
 from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import (
@@ -72,6 +73,23 @@ def interp_output():
 
 
 class TestLocalFullContext:
+    def test_workflow_parameter_rule_reaches_typed_proposer_input(self, storage):
+        """Fails if the workflow lock is dropped before Proposer preflight."""
+        rules = ParameterRules.model_validate({"model_config.segmentation_size": {"exact": 40_000}})
+
+        result = local_full_context(
+            make_interpretation_output([]),
+            storage,
+            workflow_parameter_rules=rules,
+        )
+
+        assert result.workflow_parameter_rules == rules
+
+    def test_absent_workflow_rules_do_not_change_legacy_input_serialization(self, storage):
+        """Fails if the additive default leaks a new null key into old inputs."""
+        result = local_full_context(make_interpretation_output([]), storage)
+        assert "workflow_parameter_rules" not in result.model_dump(mode="json")
+
     def test_baseline_serialisation_and_storage_pass_through(self, storage):
         """Single multi-assertion baseline: every documented field of the
         InterpretationOutput must be present on the TYPED

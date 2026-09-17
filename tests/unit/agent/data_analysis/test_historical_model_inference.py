@@ -379,8 +379,9 @@ def _request(
     artifact_ref: CertifiedArtifactRef,
     input_ref: CertifiedArtifactRef,
     *,
-    timeout_s: float = 20.0,
+    timeout_s: float = 60.0,
 ) -> HistoricalModelInferenceRequest:
+    """Allow contended CI cold start; the timeout test overrides this to 50 ms."""
     selection = _selection()
     input_view = MaterializedAnalysisView(
         materialization_id="materialization-model-input",

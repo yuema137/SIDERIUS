@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -214,11 +215,39 @@ def apply_parameter_rules(
     """
     from agent.schemas.hyperparam_tuning import ExperimentPlan
 
+    document = resolve_parameter_rule_document(
+        plan.model_dump(by_alias=True),
+        task_rules=task_rules,
+        workflow_rules=workflow_rules,
+    )
+    try:
+        return ExperimentPlan.model_validate(document)
+    except Exception as exc:
+        raise ParameterRuleError(
+            f"parameter rules produced an invalid effective ExperimentPlan: {exc}"
+        ) from exc
+
+
+def resolve_parameter_rule_document(
+    document: Mapping[str, Any],
+    *,
+    task_rules: ParameterRules | None = None,
+    workflow_rules: ParameterRules | None = None,
+    defer_missing_non_exact: bool = False,
+) -> dict[str, Any]:
+    """Resolve the same typed rules on a plan or proposal baseline mapping.
+
+    The caller owns its resulting schema. This function never mutates the
+    authored input: exact rules create effective values in the returned copy,
+    while other rule kinds only validate existing values. A proposal baseline
+    may defer an omitted non-exact field until the tuner chooses it; the tuner
+    itself uses the strict default and must validate the effective plan.
+    """
     declarations = (
         ("task", task_rules or ParameterRules()),
         ("workflow", workflow_rules or ParameterRules()),
     )
-    document = plan.model_dump(by_alias=True)
+    resolved = deepcopy(dict(document))
     paths = {path for _, rules in declarations for path in rules.rules}
     for path in sorted(paths):
         exact_values = [
@@ -232,15 +261,36 @@ def apply_parameter_rules(
                 f"task and workflow exact rules conflict for {path!r}: {exact_values!r}"
             )
         if exact_values:
-            _write_path(document, path, exact_values[0])
-        value = _read_path(document, path)
+            _write_path(resolved, path, exact_values[0])
+        try:
+            value = _read_path(resolved, path)
+        except ParameterRuleError:
+            if defer_missing_non_exact and not exact_values:
+                continue
+            raise
         for owner, rules in declarations:
             rule = rules.rules.get(path)
             if rule is not None:
                 _validate_value(path, value, rule, owner)
-    try:
-        return ExperimentPlan.model_validate(document)
-    except Exception as exc:
+    return resolved
+
+
+def validate_parameter_rule_ownership(
+    *,
+    objective_declared: bool,
+    task_rules: ParameterRules | None,
+    workflow_rules: ParameterRules | None,
+) -> None:
+    """Keep task-owned objectives from competing with loss parameter rules."""
+    if not objective_declared:
+        return
+    if any(
+        path == "loss_config" or path.startswith("loss_config.")
+        for rules in (task_rules, workflow_rules)
+        if rules is not None
+        for path in rules.rules
+    ):
         raise ParameterRuleError(
-            f"parameter rules produced an invalid effective ExperimentPlan: {exc}"
-        ) from exc
+            "parameter_rules must not constrain loss_config when the task declares "
+            "an authoritative objective; the objective is the sole owner of loss semantics"
+        )

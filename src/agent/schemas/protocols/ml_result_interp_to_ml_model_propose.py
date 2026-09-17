@@ -30,6 +30,7 @@ from agent.schemas.hyperparam_tuning import (
     serialize_expert_advice,
 )
 from agent.schemas.interpretation import InterpretationOutput
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import (
     AgentCard,
     ExpertContextItem,
@@ -64,6 +65,7 @@ def local_full_context(
     formal_time_budget_minutes: float | None = None,
     data_dir: str | None = None,
     task_composition_ref: TaskCompositionRef | None = None,
+    workflow_parameter_rules: ParameterRules | None = None,
     # --- Cross-iteration feedback (Phase K.7 → Phase N — see §10.13, §14.N) ---
     recent_tune_outputs: Sequence[HyperparamTuningOutput] = (),
     # --- Structured HealthGate feedback flag (V19 PR 3 §3.7/§3.9) ---
@@ -237,6 +239,8 @@ def local_full_context(
         result["data_dir"] = data_dir
     if task_composition_ref is not None:
         result["task_composition_ref"] = task_composition_ref
+    if workflow_parameter_rules is not None:
+        result["workflow_parameter_rules"] = workflow_parameter_rules
 
     # Phase N (§14.N) — aggregate gate-exhaustion reports across up to K
     # recent iterations. Oldest-first order is preserved from the caller;
