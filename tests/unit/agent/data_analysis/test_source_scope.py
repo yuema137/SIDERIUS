@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from agent.data_analysis.authorization import authorize_materialization
+from agent.data_analysis.discovery import DiscoverySnapshot
 from agent.data_analysis.plan_validation import (
     AnalysisPlanResolutionError,
     ResolvedAssetBinding,
@@ -16,9 +17,13 @@ from agent.data_analysis.source_scope import (
     apply_source_prompt,
     source_prompt_identity,
 )
-from agent.prompt_templates.data_analysis import render_skill_selection_prompt
+from agent.prompt_templates.data_analysis import (
+    render_analysis_plan_prompt,
+    render_skill_selection_prompt,
+)
 from agent.schemas.data_analysis.access import RequestedInformation
 from agent.schemas.data_analysis.assets import AssetProvenance
+from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.data_analysis.plan import PlannedAssetBinding, PlannedInferenceInputBinding
 from agent.schemas.data_analysis.skills import SkillInputSlot
 from agent.schemas.data_analysis.source_directive import _resolve_models
@@ -36,6 +41,7 @@ from workflows.run_config import WorkflowLaunchConfig
 
 def test_automatic_scope_contains_only_declared_raw_input(tmp_path) -> None:
     inp = _input(tmp_path)
+    assert "history_run_names" not in inp.model_dump(mode="json")["declared_scope"]
     scope = inp.effective_source_scope()
     assert scope.mode == "automatic"
     assert scope.raw_input_asset_ids == ("dataset",)
@@ -107,6 +113,17 @@ def test_locked_prompt_hides_unselected_declared_source_ids(tmp_path) -> None:
     _, prompt = render_skill_selection_prompt(locked, (), output_schema={})
     assert "other-raw-input" not in prompt
     assert "Other raw source" not in prompt
+    discovery = DiscoverySnapshot(
+        enabled_pack_ids=(),
+        manifest_digests=(),
+        skills=(),
+        snapshot_digest=canonical_sha256(
+            {"enabled_pack_ids": [], "manifest_digests": [], "skills": []}
+        ),
+    )
+    _, plan_prompt = render_analysis_plan_prompt(locked, discovery, (), {})
+    assert "other-raw-input" not in plan_prompt
+    assert "Other raw source" not in plan_prompt
 
 
 def test_lock_on_raw_parent_includes_only_declared_certified_input_derivation(tmp_path) -> None:
@@ -190,6 +207,50 @@ def test_historical_model_selection_uses_certified_completion_order() -> None:
     assert _resolve_models("none", history) == ()
     with pytest.raises(ValueError, match="outside the declared history"):
         _resolve_models("ids:foreign-model", history)
+
+
+def test_recent_round_policy_counts_empty_rounds_not_model_files(tmp_path) -> None:
+    raw = _input(tmp_path).available_assets[0]
+    models = (
+        raw.model_copy(
+            update={
+                "asset_id": "model-1a",
+                "provenance": AssetProvenance(producer="test", run_id="iter_001"),
+            }
+        ),
+        raw.model_copy(
+            update={
+                "asset_id": "model-1b",
+                "provenance": AssetProvenance(producer="test", run_id="iter_001"),
+            }
+        ),
+        raw.model_copy(
+            update={
+                "asset_id": "model-3",
+                "provenance": AssetProvenance(producer="test", run_id="iter_003"),
+            }
+        ),
+    )
+    declared = tuple(asset.asset_id for asset in models)
+    timeline = ("iter_001", "iter_002", "iter_003", "iter_004")
+    assert (
+        _resolve_models("last_rounds:1", declared, assets=models, history_run_names=timeline) == ()
+    )
+    assert _resolve_models(
+        "last_rounds:2", declared, assets=models, history_run_names=timeline
+    ) == ("model-3",)
+    assert (
+        _resolve_models("last_rounds:4", declared, assets=models, history_run_names=timeline)
+        == declared
+    )
+    assert _resolve_models("last:2", declared) == ("model-1b", "model-3")
+    two_rounds = source_prompt_identity("lock: raw=all; models=last_rounds:2")
+    three_rounds = source_prompt_identity("lock: raw=all; models=last_rounds:3")
+    assert two_rounds is not None and two_rounds != three_rounds
+    with pytest.raises(ValueError, match="requires declared prior iteration history"):
+        _resolve_models("last_rounds:2", declared, assets=models)
+    with pytest.raises(ValueError, match="positive integer"):
+        source_prompt_identity("lock: raw=all; models=last_rounds:0")
 
 
 def test_direct_typed_scope_cannot_expand_caller_declaration(tmp_path) -> None:

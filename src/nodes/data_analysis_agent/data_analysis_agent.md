@@ -66,18 +66,25 @@ The standalone capability remains a Python API because materialization is an
 executable protocol object, not a file path. The fixed workflow accepts an
 inline `--analysis_source_prompt` string; no advice file or YAML edit is needed.
 The accepted, inspectable syntax is `auto` or one lock of the form
-`lock: raw=<asset IDs|all>; models=<all|none|last:N|ids:IDs>`. The raw IDs
+`lock: raw=<asset IDs|all>; models=<all|none|last:N|last_rounds:N|ids:IDs>`. The raw IDs
 and model IDs must already be in the caller's declaration. For example:
 
 ```text
---analysis_source_prompt "lock: raw=validation-input; models=last:2"
+--analysis_source_prompt "lock: raw=validation-input; models=last_rounds:2"
 ```
 
 The scope never includes ground truth or a previously saved prediction dataset.
 An eligible prior model may process explicitly bound raw input; the resulting
-prediction is transient evidence, not another selectable source. `last:N` uses
-certified completion order from the same workspace and run. Unknown IDs and
-ambiguous directives fail closed. AnalysisAccessPolicy independently checks
+prediction is transient evidence, not another selectable source. `last:N`
+selects the most recent N certified models; `last_rounds:N` selects models
+trained in the previous N workflow iterations, counting an iteration with no
+model as a round. The latter requires a caller-declared chronological iteration
+history; the fixed workflow supplies it from its own iteration sequence.
+Absent/`auto` and `models=all` retain all eligible prior models. The workflow
+certifies each prior artifact against its exact tuning record, task composition,
+and current chain workspace; the model's training iteration need not equal the
+current analysis iteration. Unknown IDs and ambiguous directives fail closed.
+AnalysisAccessPolicy independently checks
 the split, operation and concrete metadata fields; neither the prompt nor
 literature/advice grants access. Online material is cited reasoning context,
 not implicit data or sandbox network access.

@@ -28,7 +28,8 @@ def _parse_directive(prompt: str) -> _Directive:
     if not separator or prefix.strip().lower() != "lock":
         raise ValueError(
             "analysis source directive must be 'auto' or "
-            "'lock: raw=<asset IDs|all>; models=<all|none|last:N|ids:IDs>'"
+            "'lock: raw=<asset IDs|all>; "
+            "models=<all|none|last:N|last_rounds:N|ids:IDs>'"
         )
     parts = [part.strip() for part in body.split(";")]
     if len(parts) != 2 or any(not part for part in parts):
@@ -83,23 +84,44 @@ def _include_certified_derived_inputs(
     return tuple(asset_id for asset_id in declared if asset_id in included)
 
 
-def _resolve_models(value: str, declared: tuple[str, ...]) -> tuple[str, ...]:
+def _positive_count(value: str, *, prefix: str) -> int:
+    count_text = value[len(prefix) :]
+    if not count_text.isdecimal() or int(count_text) < 1:
+        raise ValueError(f"{prefix}N requires a positive integer N")
+    return int(count_text)
+
+
+def _resolve_models(
+    value: str,
+    declared: tuple[str, ...],
+    *,
+    assets: tuple[AnalysisAsset, ...] = (),
+    history_run_names: tuple[str, ...] = (),
+) -> tuple[str, ...]:
     lowered = value.lower()
     if lowered == "all":
         return declared
     if lowered == "none":
         return ()
     if lowered.startswith("last:"):
-        count_text = value[5:]
-        if not count_text.isdecimal() or int(count_text) < 1:
-            raise ValueError("last:N requires a positive integer N")
-        return declared[-int(count_text) :]
+        return declared[-_positive_count(value, prefix="last:") :]
+    if lowered.startswith("last_rounds:"):
+        count = _positive_count(value, prefix="last_rounds:")
+        if not declared:
+            return ()
+        if not history_run_names:
+            raise ValueError("last_rounds:N requires declared prior iteration history")
+        by_id = {asset.asset_id: asset for asset in assets}
+        selected_runs = set(history_run_names[-count:])
+        return tuple(
+            asset_id for asset_id in declared if by_id[asset_id].provenance.run_id in selected_runs
+        )
     if lowered.startswith("ids:"):
         selected = _ids(value[4:])
         if not set(selected).issubset(declared):
             raise ValueError("source lock names a model outside the declared history")
         return tuple(asset_id for asset_id in declared if asset_id in selected)
-    raise ValueError("models must be all, none, last:N, or ids:<asset IDs>")
+    raise ValueError("models must be all, none, last:N, last_rounds:N, or ids:<asset IDs>")
 
 
 def source_prompt_identity(prompt: str | None) -> str | None:
@@ -110,12 +132,12 @@ def source_prompt_identity(prompt: str | None) -> str | None:
     directive = _parse_directive(prompt)
     if directive.raw.lower() != "all":
         _ids(directive.raw)
-    if directive.models.lower().startswith("last:"):
+    if directive.models.lower().startswith(("last:", "last_rounds:")):
         _resolve_models(directive.models, ())
     elif directive.models.lower().startswith("ids:"):
         _ids(directive.models[4:])
     elif directive.models.lower() not in {"all", "none"}:
-        raise ValueError("models must be all, none, last:N, or ids:<asset IDs>")
+        raise ValueError("models must be all, none, last:N, last_rounds:N, or ids:<asset IDs>")
     return hashlib.sha256(prompt.strip().encode("utf-8")).hexdigest()
 
 
@@ -125,11 +147,10 @@ def resolve_source_prompt(
     declared_scope: DeclaredAnalysisScope,
     available_assets: tuple[AnalysisAsset, ...],
     access_policy: AnalysisAccessPolicy,
-    run_name: str,
 ) -> AnalysisSourceScope:
     """Resolve exact IDs from a finite declaration, never from the filesystem."""
 
-    declared_scope.validate_assets(available_assets, access_policy, run_name=run_name)
+    declared_scope.validate_assets(available_assets, access_policy)
     if prompt is None or prompt.strip().lower() == "auto":
         return AnalysisSourceScope.automatic(declared_scope)
     directive = _parse_directive(prompt)
@@ -142,7 +163,10 @@ def resolve_source_prompt(
             assets=available_assets,
         ),
         historical_model_asset_ids=_resolve_models(
-            directive.models, declared_scope.historical_model_asset_ids
+            directive.models,
+            declared_scope.historical_model_asset_ids,
+            assets=available_assets,
+            history_run_names=declared_scope.history_run_names,
         ),
         source_prompt=prompt.strip(),
     )

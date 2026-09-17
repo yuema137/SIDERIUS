@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from agent.data_analysis.source_scope import apply_source_prompt
 from agent.schemas.data_analysis.access import AnalysisAccessPolicy, SplitAccessRule
 from agent.schemas.data_analysis.common import CertifiedArtifactRef, canonical_json_bytes
 from agent.schemas.data_analysis.report import (
@@ -16,6 +17,7 @@ from agent.schemas.data_analysis.report import (
     DataAnalysisReportProvenance,
     QuestionOutcome,
 )
+from agent.schemas.data_analysis.source_directive import _resolve_models
 from agent.schemas.data_analysis.source_scope import DeclaredAnalysisScope
 from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
@@ -36,6 +38,7 @@ from workflows.historical_inference_bindings import (
     RunBoundHistoricalArtifactExporter,
     RunBoundHistoricalModelPluginResolver,
 )
+from workflows.model_exploration import _run_composed_data_analysis
 
 
 class _TaskDeriver:
@@ -52,6 +55,36 @@ class _TaskDeriver:
 
     def export_analysis_materialization(self, _ref, _destination):  # pragma: no cover
         raise AssertionError("derivation must not export data")
+
+
+@pytest.mark.parametrize(
+    ("iteration", "expected"),
+    ((1, ()), (4, ("iter_001", "iter_002", "iter_003"))),
+)
+def test_workflow_passes_complete_prior_iteration_timeline(
+    monkeypatch, iteration: int, expected: tuple[str, ...]
+) -> None:
+    seen = {}
+
+    def capture_stage(*_args, **kwargs):
+        seen["history_run_names"] = kwargs["history_run_names"]
+        return None
+
+    monkeypatch.setattr("workflows.data_analysis_stage.run_optional_data_analysis", capture_stage)
+    assert (
+        _run_composed_data_analysis(
+            None,
+            binding=object(),
+            iteration=iteration,
+            run_name=f"iter_{iteration:03d}",
+            storage=None,
+            human_advice=None,
+            llm_kwargs={},
+            bridge_factory=None,
+        )
+        is None
+    )
+    assert seen["history_run_names"] == expected
 
 
 def _setup(tmp_path: Path):
@@ -123,7 +156,6 @@ def test_only_certified_prior_record_exposes_candidate_input_and_model(tmp_path:
         binding,
         sources=(source,),
         task_composition_fingerprint="3" * 64,
-        run_name="synthetic-run",
         workspace_root=tmp_path,
     )
 
@@ -152,7 +184,6 @@ def test_historical_source_refusal_precedes_asset_visibility(tmp_path: Path) -> 
             binding,
             sources=(source,),
             task_composition_fingerprint="4" * 64,
-            run_name="synthetic-run",
             workspace_root=tmp_path,
         )
     assert deriver.seen_request is None
@@ -166,7 +197,6 @@ def test_historical_source_refusal_precedes_asset_visibility(tmp_path: Path) -> 
             binding,
             sources=(source,),
             task_composition_fingerprint="3" * 64,
-            run_name="synthetic-run",
             workspace_root=tmp_path,
         )
     assert deriver.seen_request is None
@@ -183,7 +213,6 @@ def test_latest_artifact_bearing_output_survives_a_later_failed_candidate(tmp_pa
         binding,
         sources=(source, HistoricalTuningSource(output=failed_output, artifact_root=tmp_path)),
         task_composition_fingerprint="3" * 64,
-        run_name="synthetic-run",
         workspace_root=tmp_path,
     )
     assert result.binding.available_assets[-1].asset_id == (
@@ -191,26 +220,121 @@ def test_latest_artifact_bearing_output_survives_a_later_failed_candidate(tmp_pa
     )
 
 
-def test_other_run_history_is_not_exposed_as_analysis_source(tmp_path: Path) -> None:
+def test_source_run_identity_must_match_certified_artifact(tmp_path: Path) -> None:
     _request, binding, source, _deriver = _setup(tmp_path)
-    result = derive_historical_analysis_assets(
+    altered = HistoricalTuningSource(
+        output=source.output.model_copy(update={"run_name": "unrelated-run"}),
+        artifact_root=source.artifact_root,
+    )
+    with pytest.raises(ValueError, match="typed training record"):
+        derive_historical_analysis_assets(
+            binding,
+            sources=(altered,),
+            task_composition_fingerprint="3" * 64,
+            workspace_root=tmp_path,
+        )
+
+
+def test_public_scope_rejects_model_provenance_mismatch(tmp_path: Path) -> None:
+    _request, binding, source, _deriver = _setup(tmp_path)
+    derived = derive_historical_analysis_assets(
         binding,
         sources=(source,),
         task_composition_fingerprint="3" * 64,
-        run_name="different-run",
         workspace_root=tmp_path,
     )
-    assert result.binding.available_assets == binding.available_assets
-    assert result.binding.declared_scope.historical_model_asset_ids == ()
+    policy = AnalysisAccessPolicy(
+        policy_id="synthetic-model-aware",
+        policy_version=1,
+        purpose="Bounded prior-model inference",
+        allow_model_inference=True,
+        split_rules=(
+            SplitAccessRule(
+                split_id="validation",
+                data_visible=True,
+                predictions_visible=True,
+            ),
+        ),
+    )
+    assets = derived.binding.available_assets
+    derived.binding.declared_scope.validate_assets(assets, policy)
+    outside = derived.binding.declared_scope.model_copy(
+        update={"history_run_names": ("another-iteration",)}
+    )
+    with pytest.raises(ValueError, match="outside declared history"):
+        outside.validate_assets(assets, policy)
+    model = assets[-1]
+    for field in ("run_id", "iteration_id"):
+        altered = model.model_copy(
+            update={"provenance": model.provenance.model_copy(update={field: "foreign"})}
+        )
+        with pytest.raises(ValueError, match="inconsistent provenance"):
+            derived.binding.declared_scope.validate_assets((*assets[:-1], altered), policy)
 
 
-def test_all_completed_same_run_models_are_visible_in_order(tmp_path: Path) -> None:
+def test_standalone_recent_round_lock_uses_same_certified_model_scope(tmp_path: Path) -> None:
+    _request, binding, source, _deriver = _setup(tmp_path)
+    derived = derive_historical_analysis_assets(
+        binding,
+        sources=(source,),
+        task_composition_fingerprint="3" * 64,
+        workspace_root=tmp_path,
+        history_run_names=("synthetic-run",),
+    )
+    template = _input(tmp_path)
+    payload = template.model_dump(mode="json")
+    payload["available_assets"] = [
+        asset.model_dump(mode="json") for asset in derived.binding.available_assets
+    ]
+    payload["declared_scope"] = derived.binding.declared_scope.model_dump(mode="json")
+    payload["access_policy"] = AnalysisAccessPolicy(
+        policy_id="synthetic-model-aware",
+        policy_version=1,
+        purpose="Bounded prior-model inference",
+        allow_model_inference=True,
+        split_rules=(
+            SplitAccessRule(
+                split_id="validation",
+                data_visible=True,
+                predictions_visible=True,
+            ),
+        ),
+    ).model_dump(mode="json")
+    standalone = type(template).model_validate(payload)
+    locked = apply_source_prompt(standalone, "lock: raw=all; models=last_rounds:1")
+    assert locked.source_scope is not None
+    assert locked.source_scope.historical_model_asset_ids == (
+        f"historical-model-{source.output.all_records[0].trained_model_artifact_ref.model_artifact_id}",
+    )
+    assert locked.storage.local is not None
+    assert locked.storage.local.run_name == "standalone"
+    # The immediately preceding iteration can be empty; it still consumes N=1.
+    empty_recent = type(standalone).model_validate(
+        {
+            **standalone.model_dump(mode="json"),
+            "declared_scope": {
+                **standalone.declared_scope.model_dump(mode="json"),
+                "history_run_names": ["synthetic-run", "iter_002"],
+            },
+        }
+    )
+    last_round_only = apply_source_prompt(empty_recent, "lock: raw=all; models=last_rounds:1")
+    assert last_round_only.source_scope is not None
+    assert last_round_only.source_scope.historical_model_asset_ids == ()
+    assert all(asset.asset_type != "trained_model" for asset in last_round_only.planning_assets())
+
+
+def test_completed_models_across_iterations_follow_declared_history(tmp_path: Path) -> None:
     request, binding, first_source, _deriver = _setup(tmp_path)
     second_artifact = request.model_artifact.model_copy(
         update={
             "model_artifact_id": "model-second",
             "training_run": request.model_artifact.training_run.model_copy(
-                update={"experiment_id": "experiment-2", "iteration_id": "iteration-2"}
+                update={
+                    "experiment_id": "experiment-2",
+                    "iteration_id": "tuner-run:iter_003",
+                    "run_name": "iter_003",
+                }
             ),
         }
     )
@@ -235,19 +359,34 @@ def test_all_completed_same_run_models_are_visible_in_order(tmp_path: Path) -> N
         ),
     )
     second_source = HistoricalTuningSource(
-        output=first_source.output.model_copy(update={"all_records": [second_record]}),
+        output=first_source.output.model_copy(
+            update={"run_name": "iter_003", "all_records": [second_record]}
+        ),
         artifact_root=tmp_path,
     )
+    timeline = ("synthetic-run", "iter_002", "iter_003", "iter_004")
     result = derive_historical_analysis_assets(
         binding,
         sources=(first_source, second_source),
         task_composition_fingerprint="3" * 64,
-        run_name="synthetic-run",
         workspace_root=tmp_path,
+        history_run_names=timeline,
     )
-    assert result.binding.declared_scope.historical_model_asset_ids == (
+    declared = result.binding.declared_scope.historical_model_asset_ids
+    assert declared == (
         f"historical-model-{request.model_artifact.model_artifact_id}",
         "historical-model-model-second",
+    )
+    assets = result.binding.available_assets
+    assert (
+        _resolve_models("last_rounds:1", declared, assets=assets, history_run_names=timeline) == ()
+    )
+    assert _resolve_models(
+        "last_rounds:2", declared, assets=assets, history_run_names=timeline
+    ) == ("historical-model-model-second",)
+    assert (
+        _resolve_models("last_rounds:4", declared, assets=assets, history_run_names=timeline)
+        == declared
     )
 
 
@@ -258,7 +397,6 @@ def test_same_named_run_outside_workspace_is_refused(tmp_path: Path) -> None:
             binding,
             sources=(source,),
             task_composition_fingerprint="3" * 64,
-            run_name="synthetic-run",
             workspace_root=tmp_path / "another-workspace",
         )
 
@@ -425,16 +563,15 @@ def test_production_analysis_stage_receives_prior_model_assets_and_inference_cap
         interpretation,
         binding=binding,
         iteration=2,
-        run_name="synthetic-run",
+        run_name="iter_002",
         storage=template.storage.model_copy(
-            update={
-                "local": template.storage.local.model_copy(update={"run_name": "synthetic-run"})
-            }
+            update={"local": template.storage.local.model_copy(update={"run_name": "iter_002"})}
         ),
         human_advice=None,
         llm_kwargs={},
         bridge_factory=None,
         historical_sources=(source,),
+        history_run_names=("synthetic-run",),
         task_composition_fingerprint="3" * 64,
         chain_workspace=str(tmp_path),
     )

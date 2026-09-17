@@ -1605,7 +1605,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--analysis_source_prompt",
         type=str,
         default=None,
-        help="Inline source directive: auto or lock: raw=<asset IDs|all>; models=<all|none|last:N|ids:IDs>.",
+        help=(
+            "Inline source directive: auto or lock: raw=<asset IDs|all>; "
+            "models=<all|none|last:N|last_rounds:N|ids:IDs>. "
+            "last:N counts models; last_rounds:N counts prior iterations, including empty ones."
+        ),
     )
     parser.add_argument(
         "--human_advice_propose",

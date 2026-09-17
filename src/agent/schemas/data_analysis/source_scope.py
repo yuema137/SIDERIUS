@@ -20,13 +20,23 @@ class DeclaredAnalysisScope(FrozenModel):
     """Exact caller-visible assets, with prior models ordered oldest to newest.
 
     The task/caller declares raw-input asset identities. A workflow may append
-    certified prior model identities after training; their order is the only
-    authority for a prompt's ``last:N`` selection. This declaration grants no
-    data access without the independent AnalysisAccessPolicy.
+    certified prior model identities after training; their order is the
+    authority for a prompt's ``last:N`` selection. A separate chronological
+    iteration list, when supplied, also accounts for rounds without a model
+    under ``last_rounds:N``. This declaration grants no data access without
+    the independent AnalysisAccessPolicy.
     """
 
     raw_input_asset_ids: tuple[NonEmptyStr, ...] = Field(min_length=1)
     historical_model_asset_ids: tuple[NonEmptyStr, ...] = ()
+    history_run_names: tuple[NonEmptyStr, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+        description=(
+            "Prior iteration run names in chronological order, including iterations "
+            "without a trained model. Used only for previous-N-iterations selection."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_ids(self) -> DeclaredAnalysisScope:
@@ -36,16 +46,16 @@ class DeclaredAnalysisScope(FrozenModel):
             raise ValueError("analysis scope asset IDs must be unique within each category")
         if set(raw) & set(models):
             raise ValueError("one asset cannot be both raw input and a trained model")
+        if len(set(self.history_run_names)) != len(self.history_run_names):
+            raise ValueError("history iteration run names must be unique")
         return self
 
     def validate_assets(
         self,
         assets: tuple[AnalysisAsset, ...],
         policy: AnalysisAccessPolicy,
-        *,
-        run_name: str,
     ) -> None:
-        """Prove each declared identity is a usable object of the right kind."""
+        """Prove each declared identity is a usable, self-consistent object."""
 
         by_id = {asset.asset_id: asset for asset in assets}
         for asset_id in self.raw_input_asset_ids:
@@ -56,6 +66,8 @@ class DeclaredAnalysisScope(FrozenModel):
                 split_id=asset.split_id, information_class="data"
             ):
                 raise ValueError(f"raw input {asset_id!r} is not authorized for materialization")
+        history_positions = {name: index for index, name in enumerate(self.history_run_names)}
+        previous_position = -1
         for asset_id in self.historical_model_asset_ids:
             asset = by_id.get(asset_id)
             if asset is None or asset.asset_type != "trained_model":
@@ -66,11 +78,19 @@ class DeclaredAnalysisScope(FrozenModel):
                 raise ValueError(f"historical model {asset_id!r} is not authorized for inference")
             if not policy.permits(split_id=asset.split_id, information_class="prediction"):
                 raise ValueError(f"historical model {asset_id!r} has no prediction visibility")
-            if (
-                asset.location.artifact.training_run.run_name != run_name
-                or asset.provenance.run_id != run_name
+            training_run = asset.location.artifact.training_run
+            if asset.provenance.run_id != training_run.run_name or (
+                asset.provenance.iteration_id is not None
+                and asset.provenance.iteration_id != training_run.iteration_id
             ):
-                raise ValueError(f"historical model {asset_id!r} belongs to another run")
+                raise ValueError(f"historical model {asset_id!r} has inconsistent provenance")
+            if history_positions:
+                position = history_positions.get(training_run.run_name)
+                if position is None:
+                    raise ValueError(f"historical model {asset_id!r} is outside declared history")
+                if position < previous_position:
+                    raise ValueError("historical models must follow declared iteration order")
+                previous_position = position
 
 
 class AnalysisSourceScope(FrozenModel):

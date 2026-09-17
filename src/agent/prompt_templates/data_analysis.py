@@ -53,6 +53,9 @@ def _source_scope_block(analysis_input: DataAnalysisInput) -> str:
 
 def _planning_input(analysis_input: DataAnalysisInput) -> dict:
     payload = analysis_input.model_dump(mode="json")
+    # The declaration is a caller-side ceiling and may name locked-out assets.
+    # The planner receives only the resolved scope and its filtered descriptors.
+    payload.pop("declared_scope", None)
     payload["available_assets"] = [
         item.model_dump(mode="json") for item in analysis_input.planning_assets()
     ]

@@ -117,7 +117,7 @@ from core.layout import checkout_root, package_root, require_checkout
 # THIS module, so the cycle that forced `RestoredState` under TYPE_CHECKING and
 # `union_key_findings` into a function-local import is gone. Both are ordinary
 # top-level imports again.
-from core.resume import RestoredState, union_key_findings
+from core.resume import RestoredState, _iter_run_name, union_key_findings
 from core.run_invariants import (
     LockLaunchIdentity,
     RunHealthMaterialization,
@@ -1807,6 +1807,7 @@ def _run_composed_data_analysis(
         bridge_factory=bridge_factory,
         historical_model_inference_capability=historical_model_inference_capability,
         historical_sources=historical_sources,
+        history_run_names=tuple(_iter_run_name(index) for index in range(1, iteration)),
         task_composition_fingerprint=task_composition_fingerprint,
         chain_workspace=chain_workspace,
         literature_output=literature_output,
@@ -3830,7 +3831,11 @@ def main():
         "--analysis_source_prompt",
         type=str,
         default=None,
-        help="Inline source directive: auto or lock: raw=<asset IDs|all>; models=<all|none|last:N|ids:IDs>.",
+        help=(
+            "Inline source directive: auto or lock: raw=<asset IDs|all>; "
+            "models=<all|none|last:N|last_rounds:N|ids:IDs>. "
+            "last:N counts models; last_rounds:N counts prior iterations, including empty ones."
+        ),
     )
     parser.add_argument(
         "--data_analysis_enabled",

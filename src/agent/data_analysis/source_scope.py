@@ -18,13 +18,11 @@ def apply_source_prompt(inp: DataAnalysisInput, prompt: str | None) -> DataAnaly
         return inp
     if inp.source_scope is not None:
         raise ValueError("source prompt cannot override an already resolved source scope")
-    assert inp.storage.local is not None
     scope = resolve_source_prompt(
         prompt,
         declared_scope=inp.declared_scope,
         available_assets=inp.available_assets,
         access_policy=inp.access_policy,
-        run_name=inp.storage.local.run_name,
     )
     return DataAnalysisInput.model_validate(
         {**inp.model_dump(mode="json"), "source_scope": scope.model_dump(mode="json")}

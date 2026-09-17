@@ -195,9 +195,7 @@ class DataAnalysisInput(FrozenModel):
                 )
         if self.storage.local is None:
             raise ValueError("source-scoped analysis requires a local run identity")
-        self.declared_scope.validate_assets(
-            self.available_assets, self.access_policy, run_name=self.storage.local.run_name
-        )
+        self.declared_scope.validate_assets(self.available_assets, self.access_policy)
         if self.source_scope is not None:
             if not set(self.source_scope.raw_input_asset_ids).issubset(
                 self.declared_scope.raw_input_asset_ids
@@ -217,7 +215,6 @@ class DataAnalysisInput(FrozenModel):
                     declared_scope=self.declared_scope,
                     available_assets=self.available_assets,
                     access_policy=self.access_policy,
-                    run_name=self.storage.local.run_name,
                 )
                 if self.source_scope != expected:
                     raise ValueError("resolved source scope differs from its lock directive")

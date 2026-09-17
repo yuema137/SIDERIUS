@@ -103,10 +103,10 @@ def derive_historical_analysis_assets(
     *,
     sources: tuple[HistoricalTuningSource, ...],
     task_composition_fingerprint: str,
-    run_name: str,
     workspace_root: Path,
+    history_run_names: tuple[str, ...] = (),
 ) -> HistoricalAnalysisAssets:
-    """Expose all certified prior models from this run in completion order."""
+    """Expose exact prior models from this chain workspace in completion order."""
 
     base_id = binding.historical_inference_base_asset_id
     if base_id is None or not sources:
@@ -130,16 +130,12 @@ def derive_historical_analysis_assets(
     roots: dict[str, Path] = {}
     certified_workspace = workspace_root.resolve()
     for source in sources:
-        if source.output.run_name != run_name:
-            continue
         if not source.artifact_root.resolve().is_relative_to(certified_workspace):
             raise ValueError("historical model artifact lies outside the current workspace")
         for record in source.output.all_records:
             if record.trained_model_artifact_ref is None:
                 continue  # A legacy/failed record never becomes a guessed model.
             artifact = _load_record_artifact(source, record)
-            if artifact.training_run.run_name != run_name:
-                raise ValueError("historical model belongs to another run")
             task_binding = artifact.task_inference_binding
             if task_binding.task_composition_fingerprint != task_composition_fingerprint:
                 raise ValueError("historical model belongs to another task composition")
@@ -207,6 +203,7 @@ def derive_historical_analysis_assets(
             *binding.declared_scope.historical_model_asset_ids,
             *(asset.asset_id for asset in dynamic if asset.asset_type == "trained_model"),
         ),
+        history_run_names=history_run_names,
     )
     return HistoricalAnalysisAssets(
         binding=replace(

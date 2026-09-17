@@ -109,7 +109,8 @@ available_assets:
     split_id: validation
 
 # One task/caller-declared ceiling. Historical model IDs are added only after
-# completed records are certified in the same workspace and run.
+# completed records are certified inside the same chain workspace and task
+# composition. Their training iteration names differ from the current one.
 declared_scope:
   raw_input_asset_ids: [validation-values]
   historical_model_asset_ids: []
@@ -143,7 +144,7 @@ report_schema_version: 1
 `declared_scope` is required for enabled Data Analysis. It identifies only
 task/caller-declared raw-input assets and immutable, certified prior models.
 The fixed workflow appends all eligible models from earlier completed
-iterations of the same workspace and run in completion order; a failed or
+iterations of the same chain workspace in completion order; a failed or
 legacy checkpoint is never guessed into this list. The declaration is a
 ceiling, not a second access grant. `AnalysisAccessPolicy`, asset scope, skill
 slots, and materialization independently enforce every read. Ground truth and
@@ -153,9 +154,12 @@ produce a transient prediction, without exposing target to the inference
 worker.
 
 The fixed workflow accepts one per-run inline directive, for example
-`--analysis_source_prompt "lock: raw=validation-values; models=last:2"`.
+`--analysis_source_prompt "lock: raw=validation-values; models=last_rounds:2"`.
 `raw=all` selects all declared raw inputs. `models` may be `all`, `none`,
-`last:N`, or `ids:<comma-separated model asset IDs>`. An absent flag or `auto`
+`last:N`, `last_rounds:N`, or `ids:<comma-separated model asset IDs>`.
+`last:N` counts models, while `last_rounds:N` counts previous workflow
+iterations, including iterations that produced no model; it requires a declared
+chronological iteration history. An absent flag or `auto`
 lets the agent choose within the declared scope; it does not enable target or
 saved-output access. Standalone callers use the same `apply_source_prompt`
 resolver or pass the equivalent typed `DataAnalysisInput.source_scope`.

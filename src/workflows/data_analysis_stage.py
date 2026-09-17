@@ -57,6 +57,7 @@ def run_optional_data_analysis(
     bridge_factory,
     historical_model_inference_capability: HistoricalModelInferenceCapability | None = None,
     historical_sources: tuple[HistoricalTuningSource, ...] = (),
+    history_run_names: tuple[str, ...] = (),
     task_composition_fingerprint: str | None = None,
     chain_workspace: str | None = None,
     literature_output: LiteratureReviewOutput | None = None,
@@ -82,8 +83,8 @@ def run_optional_data_analysis(
             binding,
             sources=historical_sources,
             task_composition_fingerprint=task_composition_fingerprint,
-            run_name=run_name,
             workspace_root=Path(chain_workspace),
+            history_run_names=history_run_names,
         )
         binding = derived.binding
         if derived.artifact_roots_by_sha256 and historical_model_inference_capability is None:
