@@ -158,6 +158,7 @@ MAX_IMPL_ATTEMPTS=3                 # implementation retries per proposal
 # §3.2 — Trial / formal strategy + formal-scope (13.C-bis)
 TRIAL_STRATEGY="snapshot"           # DEPRECATED no-op (DS7); parsed, not forwarded
 FORMAL_STRATEGY="snapshot"          # choices: snapshot|anchors|target
+FORMAL_TRAINING_SCOPE_SOURCE="operator" # choices: operator|agent
 FORMAL_PORTION=0.1                  # segments per file for formal training scope
 FORMAL_TRAIN_PORTION=1.0            # per-epoch iteration fraction for formal training
 FORMAL_ROUND_STRATEGY="full_clone"  # canonical: full_clone|hybrid_params|independent (legacy aliases inherit_best_trial|llm_propose accepted, schema canonicalises)
@@ -396,6 +397,7 @@ parse_chain_args() {
         # §3.2 — Trial / formal strategy + formal-scope (13.C-bis)
         --trial_strategy)            TRIAL_STRATEGY="$2"; shift 2 ;;
         --formal_strategy)           FORMAL_STRATEGY="$2"; shift 2 ;;
+        --formal_training_scope_source) FORMAL_TRAINING_SCOPE_SOURCE="$2"; shift 2 ;;
         --formal_portion)            FORMAL_PORTION="$2"; shift 2 ;;
         --formal_train_portion)      FORMAL_TRAIN_PORTION="$2"; shift 2 ;;
         --formal_round_strategy)     FORMAL_ROUND_STRATEGY="$2"; shift 2 ;;
@@ -505,6 +507,7 @@ build_app_args() {
         --max_impl_attempts "$MAX_IMPL_ATTEMPTS"
         --max_failed_iterations "$MAX_FAILED_ITERATIONS"
         --formal_strategy "$FORMAL_STRATEGY"
+        --formal_training_scope_source "$FORMAL_TRAINING_SCOPE_SOURCE"
         --formal_portion "$FORMAL_PORTION"
         --formal_train_portion "$FORMAL_TRAIN_PORTION"
         --formal_round_strategy "$FORMAL_ROUND_STRATEGY"
@@ -799,7 +802,7 @@ print_chain_header() {
     echo "    Propose retry  : max_proposal_attempts=$MAX_PROPOSAL_ATTEMPTS, max_impl_attempts=$MAX_IMPL_ATTEMPTS"
     echo "    Chain brake    : max_failed_iterations=$MAX_FAILED_ITERATIONS  (halt on streak of failed iter manifests)"
     echo "    Trial strategy : $TRIAL_STRATEGY"
-    echo "    Formal scope   : strategy=$FORMAL_STRATEGY, portion=$FORMAL_PORTION, train_portion=$FORMAL_TRAIN_PORTION"
+    echo "    Formal scope   : source=$FORMAL_TRAINING_SCOPE_SOURCE, strategy=$FORMAL_STRATEGY, operator_portion=$FORMAL_PORTION, operator_train_portion=$FORMAL_TRAIN_PORTION"
     echo "    Formal round   : policy=$FORMAL_ROUND_STRATEGY"
     echo "    Degen reaction : penalty=${DEGENERATE_PENALTY_SCORE:-(null score on collapse)}"
     if [ ${#TARGET_FILES[@]} -gt 0 ]; then

@@ -1960,6 +1960,7 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
         # launch config the tuner child receives it from, so the chain lock
         # and the tuner sub-workspace lock cannot disagree.
         formal_eval_portion=launch.formal_eval_portion,
+        formal_training_scope_source=launch.formal_training_scope_source,
         workflow_parameter_rules=(
             None
             if launch.workflow_parameter_rules is None
@@ -3407,6 +3408,7 @@ def run_workflow(
             vram_preflight_total_timeout_seconds=(launch.vram_preflight_total_timeout_seconds),
             vram_preflight_host_memory_limit_gb=(launch.vram_preflight_host_memory_limit_gb),
             formal_strategy=launch.formal_strategy,
+            formal_training_scope_source=launch.formal_training_scope_source,
             formal_portion=launch.formal_portion,
             formal_train_portion=launch.formal_train_portion,
             formal_eval_portion=launch.formal_eval_portion,

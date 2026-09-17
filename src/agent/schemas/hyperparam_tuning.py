@@ -1480,11 +1480,11 @@ class TaskCompositionRef(BaseModel):
 #: (review C4 closed the shared-name gap): TWO different sets both used to be
 #: called this. The tuner CLI's ``--is_trial`` BUNDLE is only
 #: {is_trial, trial_portion, eval_portion}; the RESOLVER's formal branch
-#: (``_resolve_sample_set_cfg("formal")``) replaces FIVE plan fields —
-#: trial_strategy, trial_portion, train_portion, eval_strategy,
-#: eval_portion — so an override on ANY of them (plus ``is_trial`` itself,
-#: which the mode chain flips) is discarded on a formal round. This set is
-#: the resolver's, the superset; the schema validator and the node's
+#: (``_resolve_sample_set_cfg("formal")``) replaces FIVE plan fields by
+#: default — trial_strategy, trial_portion, train_portion, eval_strategy,
+#: eval_portion. In opt-in agent-owned formal training, the two training
+#: portions remain effective. This set is the legacy superset; the schema
+#: validator and the node's
 #: formal-round disclosure both consume it, so ``--plan_overrides
 #: '{"train_portion": 1.0}'`` can no longer be silently discarded one key
 #: outside the guarded set. Layering: defined HERE because the schema may
@@ -1704,6 +1704,14 @@ class HyperparamTuningInput(BaseModel):
             "planner's trial_strategy on any round promoted to formal. Eval "
             "strategy is always locked to ``snapshot``; eval scope is "
             "controlled by ``formal_eval_portion`` (default 1.0)."
+        ),
+    )
+    formal_training_scope_source: Literal["operator", "agent"] = Field(
+        default="operator",
+        description=(
+            "Source of formal training portions. 'operator' uses formal_portion "
+            "and formal_train_portion; 'agent' uses the validated ExperimentPlan. "
+            "Formal evaluation always uses formal_eval_portion."
         ),
     )
     formal_portion: float = Field(
@@ -2722,11 +2730,10 @@ class HyperparamTuningInput(BaseModel):
         """Lane F / F14 (fresh-user witness, 2026-08-26): an override that
         can never apply is a lie the run tells the operator.
 
-        Trial-scoped ``plan_overrides`` keys (``TRIAL_SCOPED_OVERRIDE_KEYS``
-        — the resolver's FULL formal-branch replacement set, not just the
-        CLI bundle; review B4/C4) constrain trial rounds — a formal round's
-        workload comes from the ``formal_*`` operator knobs by design
-        (``_resolve_sample_set_cfg``). With ``is_trial=True`` (trial mode
+        Overrides discarded by the formal resolver constrain only Trial
+        rounds. Under agent-owned formal training, the two training portions
+        are also effective in Formal, so they cannot trigger this refusal.
+        With ``is_trial=True`` (trial mode
         allowed), ``max_rounds == 1`` and ``force_formal_round`` (default
         True), the run's ONLY round is formal-forced, so the override would
         apply to ZERO rounds while "Plan overrides applied" prints that it
@@ -2740,7 +2747,10 @@ class HyperparamTuningInput(BaseModel):
         ``train_portion``) — the override demonstrably applies, so refusing
         there was simply wrong.
         """
-        trial_scoped = TRIAL_SCOPED_OVERRIDE_KEYS & set(self.plan_overrides)
+        discarded = TRIAL_SCOPED_OVERRIDE_KEYS
+        if self.formal_training_scope_source == "agent":
+            discarded = discarded - {"trial_portion", "train_portion"}
+        trial_scoped = discarded & set(self.plan_overrides)
         if trial_scoped and self.is_trial and self.max_rounds == 1 and self.force_formal_round:
             # Remedy ORDER is deliberate (F-316 finding: a remedy must be
             # REACHABLE from the surface that names it). The refusal fires

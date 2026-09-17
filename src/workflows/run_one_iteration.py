@@ -1486,6 +1486,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Training-side strategy on formal rounds (default snapshot).",
     )
     parser.add_argument(
+        "--formal_training_scope_source",
+        choices=["operator", "agent"],
+        default="operator",
+        help="Source of formal training portions; formal evaluation stays operator-owned.",
+    )
+    parser.add_argument(
         "--formal_portion",
         # F-RC-1: the shared parser floor (see `_portion_floor`).
         type=_portion_floor,
@@ -3472,6 +3478,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
                     eval_portion=args.eval_portion,
                     sampling_seed=args.sampling_seed,
                     formal_strategy=args.formal_strategy,
+                    formal_training_scope_source=args.formal_training_scope_source,
                     formal_portion=args.formal_portion,
                     formal_train_portion=args.formal_train_portion,
                     formal_eval_portion=args.formal_eval_portion,
