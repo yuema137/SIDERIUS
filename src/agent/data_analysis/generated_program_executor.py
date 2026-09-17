@@ -13,6 +13,7 @@ from agent.schemas.data_analysis.generated_program import (
     GeneratedAnalysisProgram,
     GeneratedMeasurementDeclaration,
 )
+from agent.schemas.data_analysis.resources import ResourceUsage
 from agent.schemas.data_analysis.skills import (
     ArtifactOutputContract,
     ProducedArtifact,
@@ -22,10 +23,42 @@ from agent.schemas.data_analysis.skills import (
     SkillIdentity,
     SkillResult,
 )
+from agent.schemas.data_analysis.trained_model import ModelInferenceReceipt
 
 from .analysis_code_sandbox import AnalysisCodeSandbox
 from .executor import certify_analysis_coverage
 from .persistence import AnalysisPersistenceError, AnalysisRunStore
+
+
+def _inference_evidence(
+    materializations: tuple[MaterializedAnalysisView, ...],
+    observed_usage: ResourceUsage,
+) -> tuple[tuple[ModelInferenceReceipt, ...], ResourceUsage]:
+    """Account for trusted inference before untrusted generated execution."""
+
+    receipts = tuple(
+        view.historical_inference_receipt
+        for view in materializations
+        if view.historical_inference_receipt is not None
+    )
+    if not receipts:
+        return (), observed_usage
+    usages = (observed_usage, *(receipt.resource_usage for receipt in receipts))
+    cpu_times = [usage.cpu_time_s for usage in usages]
+    return receipts, ResourceUsage(
+        wall_time_s=sum(usage.wall_time_s for usage in usages),
+        cpu_time_s=(
+            sum(value for value in cpu_times if value is not None)
+            if all(value is not None for value in cpu_times)
+            else None
+        ),
+        peak_rss_bytes=max((usage.peak_rss_bytes or 0 for usage in usages), default=0),
+        peak_vram_bytes=max((usage.peak_vram_bytes or 0 for usage in usages), default=0) or None,
+        device="+".join(sorted({usage.device for usage in usages})),
+        measurement_limitations=tuple(
+            note for usage in usages for note in usage.measurement_limitations
+        ),
+    )
 
 
 def _value_matches(value: object, declaration: GeneratedMeasurementDeclaration) -> bool:
@@ -107,6 +140,9 @@ def _failed_result(
     message: str,
     status: Literal["failed", "timed_out"] = "failed",
 ) -> SkillResult:
+    inference_receipts, resource_usage = _inference_evidence(
+        materializations, receipt.resource_usage
+    )
     return SkillResult(
         result_id=result_id,
         invocation_id=invocation_id,
@@ -116,7 +152,7 @@ def _failed_result(
         status=status,
         summary="Generated analysis did not produce certified scientific evidence.",
         quantitative_results=(),
-        resource_usage=receipt.resource_usage,
+        resource_usage=resource_usage,
         warnings=(),
         failure=SkillFailure(
             failure_type=failure_type,
@@ -128,7 +164,7 @@ def _failed_result(
             parameter_schema_sha256=parameter_schema_sha256,
             validated_parameters_sha256=validated_parameters_sha256,
             authorization_receipts=tuple(view.authorization_receipt for view in materializations),
-            inference_receipts=(),
+            inference_receipts=inference_receipts,
             environment_lock_verified=True,
             started_at=receipt.started_at,
             finished_at=receipt.finished_at,
@@ -251,6 +287,9 @@ def execute_generated_program(
             message=str(exc),
         )
 
+    inference_receipts, resource_usage = _inference_evidence(
+        materializations, receipt.resource_usage
+    )
     return SkillResult(
         result_id=result_id,
         invocation_id=invocation_id,
@@ -262,14 +301,14 @@ def execute_generated_program(
         quantitative_results=payload.quantitative_results,
         artifact_refs=artifact_refs,
         coverage=coverage,
-        resource_usage=receipt.resource_usage,
+        resource_usage=resource_usage,
         warnings=payload.warnings,
         provenance=SkillExecutionProvenance(
             plan_sha256=plan_sha256,
             parameter_schema_sha256=resolved_parameter_schema_sha256,
             validated_parameters_sha256=validated_parameters_sha256,
             authorization_receipts=tuple(view.authorization_receipt for view in materializations),
-            inference_receipts=(),
+            inference_receipts=inference_receipts,
             environment_lock_verified=True,
             started_at=receipt.started_at,
             finished_at=receipt.finished_at,

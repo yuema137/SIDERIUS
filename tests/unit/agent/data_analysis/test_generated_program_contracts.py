@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -212,6 +212,84 @@ def test_old_skill_invocation_wire_form_remains_readable() -> None:
     plan = AnalysisPlan.model_validate(payload)
     assert plan.invocations[0].action_kind == "skill"
     assert "action_kind" not in plan.model_dump(mode="json")["invocations"][0]
+
+
+@pytest.mark.parametrize("action_kind", ["generated_program", "generated_experiment_skill"])
+def test_generated_action_plan_accepts_one_explicit_historical_prediction(
+    action_kind: str,
+) -> None:
+    """A generated prediction consumer must not be blocked before authorization."""
+
+    invocation: dict[str, Any] = {
+        "action_kind": action_kind,
+        "invocation_id": "generated-prediction",
+        "question_ids": ["q1"],
+        "bindings": [
+            {
+                "binding_id": "prediction-view",
+                "slot_id": "predictions",
+                "asset_id": "historical-model",
+                "operation": "infer",
+                "requested_format_id": "siderius.numeric-array.v1",
+                "requested_information": [{"information_class": "prediction", "fields": []}],
+                "inference_inputs": [
+                    {
+                        "binding_id": "model-raw-input",
+                        "asset_id": "raw-input",
+                        "requested_format_id": "siderius.numeric-array.v1",
+                        "requested_information": [{"information_class": "data", "fields": []}],
+                    }
+                ],
+                "inference_configuration": {"batch_size": 8, "device": "cpu"},
+            }
+        ],
+        "sampling_plan": {
+            "split_id": "validation",
+            "requested_scope": {
+                "kind": "artifact_intrinsic",
+                "split_id": "validation",
+                "description": "Synthetic validation rows",
+            },
+            "policy": SamplingPolicy().model_dump(mode="json"),
+        },
+        "priority": 3,
+    }
+    if action_kind == "generated_program":
+        invocation["program_identity"] = (
+            _program().identity(runtime_environment_sha256="7" * 64).model_dump(mode="json")
+        )
+    else:
+        invocation.update(
+            skill_id="generated_prediction_summary",
+            expected_time_cost="cheap",
+            expected_memory_cost="low",
+        )
+    payload: dict[str, Any] = {
+        "plan_id": "generated-prediction-plan",
+        "input_digest": "1" * 64,
+        "access_policy_digest": "2" * 64,
+        "discovery_snapshot_digest": "3" * 64,
+        "questions": ["q1"],
+        "invocations": [invocation],
+        "stop_policy": {"max_invocations": 1},
+        "rationale": "Measure certified historical predictions.",
+    }
+
+    assert AnalysisPlan.model_validate(payload).invocations[0].bindings[0].operation == "infer"
+    invocation["bindings"][0]["requested_information"] = [
+        {"information_class": "target", "fields": []}
+    ]
+    with pytest.raises(ValidationError, match="only prediction"):
+        AnalysisPlan.model_validate(payload)
+
+    invocation["bindings"][0]["requested_information"] = [
+        {"information_class": "prediction", "fields": []}
+    ]
+    invocation["bindings"][0]["operation"] = "read"
+    invocation["bindings"][0].pop("inference_inputs")
+    invocation["bindings"][0].pop("inference_configuration")
+    with pytest.raises(ValidationError, match="materialize or infer"):
+        AnalysisPlan.model_validate(payload)
 
 
 def test_generated_finding_and_summary_use_generated_identity_only() -> None:

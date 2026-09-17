@@ -29,7 +29,7 @@ from .materialization import (
     export_materialized_view_content,
     materialize_authorized_invocation,
 )
-from .plan_validation import ResolvedAssetBinding, ResolvedPlannedInvocation
+from .plan_validation import ResolvedAnalysisInvocation, ResolvedAssetBinding
 
 
 class HistoricalInferenceError(RuntimeError):
@@ -122,7 +122,7 @@ def run_historical_inference_binding(
     *,
     capability: HistoricalModelInferenceCapability,
     task_capability: TaskAnalysisCapability,
-    invocation: ResolvedPlannedInvocation,
+    invocation: ResolvedAnalysisInvocation,
     resolved: ResolvedAssetBinding,
     output_requests: tuple[AuthorizedAnalysisMaterializationRequest, ...],
     available_assets,

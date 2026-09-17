@@ -128,6 +128,14 @@ Examples: {"information_class":"data","fields":[]} and
 {"information_class":"prediction","fields":[]} are valid;
 {"information_class":"metadata","fields":["snr"]} is valid; and
 {"information_class":"prediction","fields":["prediction"]} is invalid.
+For historical-model predictions, bind the trained-model asset with operation="infer"
+only to a declared predictions slot. Its requested_information must be exactly
+[{"information_class":"prediction","fields":[]}], with one explicit inference_inputs
+binding for the authorized raw model input and the model's declared input format/information.
+This also applies to generated programs and generated experiment skills: trusted inference
+produces a certified prediction view before untrusted analysis code runs. Generated code must
+not load or execute the model itself. At most one inference binding is supported per generated
+invocation. Never request metadata fields absent from the split access policy.
 Use one invocation-level sampling plan for aligned bindings. Never materialize or infer hidden data.
 Choose explicit nperseg/frequency/lag/bin parameters when required. Invocation IDs must be safe
 portable path components. Do not include commentary outside JSON."""
@@ -223,7 +231,10 @@ shape: summary, quantitative_results, produced_artifacts, analysis_usage, warnin
 artifacts below output_directory and use paths relative to the sandbox output root (therefore
 prefix artifact paths with `artifacts/`). Do not import SIDERIUS internals, inspect the workspace,
 access credentials or network, install packages, alter data, or perform modeling/training. Declare
-only concrete input information and view formats. Generated parameter declarations obey this
+only concrete input information and view formats. A predictions input slot may consume certified
+transient output from the trusted historical-inference capability; generated source never loads a
+model or reads its raw inference inputs. Do not require metadata fields that the supplied access
+policy does not authorize on the analysis split. Generated parameter declarations obey this
 conditional rule: `required=true` means the caller must supply the value and therefore `default`
 must be null; a parameter with a usable default must set `required=false`. Do not redundantly mark
 a parameter required while also assigning its value. The source and declaration will be persisted

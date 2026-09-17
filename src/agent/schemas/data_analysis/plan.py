@@ -120,8 +120,7 @@ class PlannedGeneratedProgramInvocation(FrozenModel):
         binding_ids = [item.binding_id for item in self.bindings]
         if not binding_ids or len(set(binding_ids)) != len(binding_ids):
             raise ValueError("invocation binding IDs must be non-empty and unique")
-        if any(item.operation != "materialize" for item in self.bindings):
-            raise ValueError("v1 generated programs consume materialized inputs only")
+        _validate_generated_inference_bindings(self.bindings)
         return self
 
 
@@ -146,9 +145,22 @@ class PlannedGeneratedExperimentSkillInvocation(FrozenModel):
         binding_ids = [item.binding_id for item in self.bindings]
         if not binding_ids or len(set(binding_ids)) != len(binding_ids):
             raise ValueError("invocation binding IDs must be non-empty and unique")
-        if any(item.operation != "materialize" for item in self.bindings):
-            raise ValueError("generated experiment skills consume materialized inputs only")
+        _validate_generated_inference_bindings(self.bindings)
         return self
+
+
+def _validate_generated_inference_bindings(bindings: tuple[PlannedAssetBinding, ...]) -> None:
+    """Keep generated actions within v1's single certified prediction input."""
+
+    if any(binding.operation not in {"materialize", "infer"} for binding in bindings):
+        raise ValueError("generated actions require materialize or infer bindings")
+    inferred = [binding for binding in bindings if binding.operation == "infer"]
+    if len(inferred) > 1:
+        raise ValueError("v1 generated actions support at most one inference binding")
+    binding_ids = {binding.binding_id for binding in bindings}
+    nested_ids = [nested.binding_id for binding in bindings for nested in binding.inference_inputs]
+    if len(nested_ids) != len(set(nested_ids)) or binding_ids.intersection(nested_ids):
+        raise ValueError("generated action inference-input binding IDs must be unique")
 
 
 PlannedAnalysisInvocation = Annotated[

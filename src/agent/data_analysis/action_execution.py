@@ -412,6 +412,7 @@ def execute_resolved_action(
                     authorization_receipts=tuple(
                         view.authorization_receipt for view in bundle.views
                     ),
+                    inference_receipts=bundle.inference_receipts,
                 )
     finally:
         try:
