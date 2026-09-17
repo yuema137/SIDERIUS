@@ -77,9 +77,12 @@ def test_resume_refuses_training_scope_source_change(tmp_path):
         runtime_policy_identity="pol-1",
     )
     workspace = str(tmp_path / "locked")
-    assert ensure_run_invariants(
-        workspace, RunInvariants(**common, formal_training_scope_source="agent")
-    ) == "created"
+    assert (
+        ensure_run_invariants(
+            workspace, RunInvariants(**common, formal_training_scope_source="agent")
+        )
+        == "created"
+    )
     with pytest.raises(RunInvariantsViolation, match="formal_training_scope_source"):
         validate_run_invariants(
             workspace, RunInvariants(**common, formal_training_scope_source="operator")

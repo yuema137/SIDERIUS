@@ -523,6 +523,7 @@ class TestTheAttributionClaimIsTrue:
             formal_portion = 1.0
             formal_train_portion = 1.0
             formal_eval_portion = 1.0
+            formal_training_scope_source = "operator"
 
         trial = _resolve_sample_set_cfg("trial", _Input(), _Plan())  # type: ignore[arg-type]
         assert trial["eval_portion"] == 0.37, (

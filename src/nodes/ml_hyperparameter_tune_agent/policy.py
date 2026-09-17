@@ -1212,7 +1212,9 @@ def _resolve_sample_set_cfg(
         return {
             "trial_strategy": plan.trial_strategy if agent_scope else agent_input.formal_strategy,
             "trial_portion": plan.trial_portion if agent_scope else agent_input.formal_portion,
-            "train_portion": plan.train_portion if agent_scope else agent_input.formal_train_portion,
+            "train_portion": plan.train_portion
+            if agent_scope
+            else agent_input.formal_train_portion,
             "eval_strategy": "snapshot",
             "eval_portion": agent_input.formal_eval_portion,
         }
@@ -1307,9 +1309,7 @@ def _disclose_inapplicable_trial_overrides(
         return None
     if mode == "formal":
         training_source = agent_input.formal_training_scope_source
-        strategy_source = (
-            "plan.trial_strategy" if training_source == "agent" else "formal_strategy"
-        )
+        strategy_source = "plan.trial_strategy" if training_source == "agent" else "formal_strategy"
         governs = (
             f"formal workload source={training_source}; "
             f"training_strategy_source={strategy_source} "
