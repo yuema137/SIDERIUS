@@ -160,6 +160,7 @@ def local_validated_model(
     vram_preflight_host_memory_limit_gb: float | None = None,
     # --- Formal-mode training levers (Phase M) + eval-scope (Phase R) ---
     formal_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
+    formal_training_scope_source: Literal["operator", "agent"] = "operator",
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
     formal_eval_portion: float = 1.0,
@@ -258,6 +259,10 @@ def local_validated_model(
         operator-configurable training-side sample-set knobs for any round
         promoted to formal (Phase M). Defaults snapshot / 0.1 / 1.0.
         See docs/resource_estimator_implement.md §12.
+      - formal_training_scope_source : ownership of Formal training-side
+        strategy and portions. ``operator`` preserves the historical
+        operator-owned behavior; ``agent`` lets the validated plan choose
+        those training fields while Formal evaluation remains operator-owned.
       - formal_eval_portion :
         Phase R (§13) — eval-side scope knob. Default 1.0 reproduces the
         legacy full-clone behaviour required for cross-architecture score
@@ -392,6 +397,7 @@ def local_validated_model(
         vram_preflight_total_timeout_seconds=vram_preflight_total_timeout_seconds,
         vram_preflight_host_memory_limit_gb=vram_preflight_host_memory_limit_gb,
         formal_strategy=formal_strategy,
+        formal_training_scope_source=formal_training_scope_source,
         formal_portion=formal_portion,
         formal_train_portion=formal_train_portion,
         formal_eval_portion=formal_eval_portion,
