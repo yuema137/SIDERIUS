@@ -16,6 +16,7 @@ from agent.schemas.data_analysis.generated_program import GeneratedAnalysisProgr
 from agent.schemas.data_analysis.generated_skill import GeneratedSkillPromotionDraft
 from agent.schemas.data_analysis.plan import AnalysisPlan
 from agent.schemas.data_analysis.skills import ResolvedSkillInterface, SkillPayload, SkillResult
+from agent.schemas.data_analysis.view_formats import GENERATED_PROGRAM_VIEW_FORMATS_V1
 
 
 def _json(value) -> str:
@@ -245,6 +246,11 @@ must sum exactly to `dropped_count`. Every emitted quantitative result must copy
 computed at runtime. Artifact type and media type must likewise match their declarations exactly.
 An absent required artifact, approximate field/description, or unbalanced usage count will be
 rejected rather than normalized."""
+    system += (
+        "\nUse only these exact v1 accepted_view_formats identifiers: "
+        + ", ".join(sorted(GENERATED_PROGRAM_VIEW_FORMATS_V1))
+        + ". Do not invent spelling variants.\n"
+    )
     user = f"""Questions requiring custom analysis:
 {_json(questions)}
 

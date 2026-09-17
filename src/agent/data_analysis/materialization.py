@@ -12,6 +12,7 @@ from agent.schemas.data_analysis.time import TaskProvidedTimePrecisionRequiremen
 from agent.schemas.data_analysis.view_formats import TIMESERIES_ARRAY_V1
 from core.campaign_identity import validate_path_component
 from execute_tools.analysis_materialization import (
+    AnalysisAuthorizationError,
     AnalysisMaterializationRequest,
     AuthorizedAnalysisMaterializationRequest,
     TaskAnalysisCapability,
@@ -22,7 +23,7 @@ from .plan_validation import ResolvedAnalysisInvocation, ResolvedAssetBinding
 
 
 class AnalysisMaterializationError(ValueError):
-    """A task capability returned a view broader or different than authorized."""
+    """A task refused materialization or returned a view violating its request."""
 
 
 def export_materialized_view_content(
@@ -141,7 +142,16 @@ def materialize_authorized_invocation(
     """Materialize bindings, then require one exact shared selection identity."""
 
     expected = {item.request.binding_id: item for item in requests}
-    views = tuple(capability.materialize_analysis_view(item) for item in requests)
+    try:
+        views = tuple(capability.materialize_analysis_view(item) for item in requests)
+    except AnalysisAuthorizationError:
+        raise
+    except AnalysisMaterializationError:
+        raise
+    except ValueError as exc:
+        raise AnalysisMaterializationError(
+            "task capability refused analysis materialization"
+        ) from exc
     if len(views) != len(expected):
         raise AnalysisMaterializationError("task capability returned the wrong number of views")
     seen: set[str] = set()

@@ -29,6 +29,10 @@ from agent.schemas.data_analysis.time import (
     FixedTimePrecisionRequirement,
     TaskProvidedTimePrecisionRequirement,
 )
+from execute_tools.analysis_materialization import (
+    AnalysisAuthorizationError,
+    AnalysisMaterializationRefusal,
+)
 
 
 def _scope() -> ArtifactIntrinsicScope:
@@ -200,6 +204,62 @@ def test_materializer_cannot_substitute_requested_format() -> None:
             invocation=invocation,
             requests=requests,
         )
+
+
+def test_task_materializer_refusal_is_typed_instead_of_aborting_the_workflow() -> None:
+    """A task-owned ValueError must become a failed invocation, not a chain traceback."""
+
+    asset = _asset()
+    invocation = _resolved(asset)
+    requests = authorize_invocation_bindings(
+        invocation,
+        available_assets={asset.asset_id: asset},
+        access_policy=_policy(),
+    )
+
+    class RefusingCapability:
+        def materialize_analysis_view(self, _authorized):
+            raise ValueError("unsupported requested view format at private/task/path")
+
+    with pytest.raises(
+        AnalysisMaterializationError, match="task capability refused analysis materialization"
+    ) as caught:
+        materialize_authorized_invocation(
+            RefusingCapability(),  # type: ignore[arg-type]
+            invocation=invocation,
+            requests=requests,
+        )
+    assert "private/task/path" not in str(caught.value)
+    assert isinstance(caught.value.__cause__, ValueError)
+
+
+def test_task_authorization_refusal_is_not_reclassified_as_materialization_failure() -> None:
+    """Authorization is a ValueError subtype and must retain its refusal status."""
+
+    asset = _asset()
+    invocation = _resolved(asset)
+    requests = authorize_invocation_bindings(
+        invocation,
+        available_assets={asset.asset_id: asset},
+        access_policy=_policy(),
+    )
+    refusal = AnalysisMaterializationRefusal(
+        code="task_materialization_refused",
+        message="task denied this scope",
+        request_id=requests[0].request.request_id,
+    )
+
+    class RefusingCapability:
+        def materialize_analysis_view(self, _authorized):
+            raise AnalysisAuthorizationError(refusal)
+
+    with pytest.raises(AnalysisAuthorizationError) as caught:
+        materialize_authorized_invocation(
+            RefusingCapability(),  # type: ignore[arg-type]
+            invocation=invocation,
+            requests=requests,
+        )
+    assert caught.value.refusal is refusal
 
 
 def test_materializer_must_preserve_precision_requirement() -> None:

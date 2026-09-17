@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -14,12 +16,14 @@ from agent.data_analysis.generated_programs import (
     persist_generated_program,
 )
 from agent.data_analysis.persistence import AnalysisPersistenceError, AnalysisRunStore
+from agent.prompt_templates.data_analysis import render_generated_program_prompt
 from agent.schemas.data_analysis.access import InformationRequirement
 from agent.schemas.data_analysis.action_identity import (
     GeneratedProgramGenerationProvenance,
 )
 from agent.schemas.data_analysis.assets import ArtifactIntrinsicScope
 from agent.schemas.data_analysis.common import CertifiedArtifactRef, canonical_sha256
+from agent.schemas.data_analysis.context import DataAnalysisInput
 from agent.schemas.data_analysis.generated_program import (
     GeneratedAnalysisProgram,
     GeneratedMeasurementDeclaration,
@@ -251,6 +255,61 @@ def test_generated_program_source_identity_mismatch_is_refused() -> None:
     payload["source_sha256"] = "9" * 64
     with pytest.raises(ValidationError, match="source ref does not match"):
         GeneratedAnalysisProgram.model_validate(payload)
+
+
+def test_generated_program_rejects_unloadable_view_format_before_plan_or_resume() -> None:
+    """A plausible format typo must fail before materialization or resume."""
+
+    program = _program()
+    invalid_slot = SkillInputSlot.model_validate(
+        {
+            **program.input_slots[0].model_dump(mode="json"),
+            "accepted_view_formats": ["siderius.time-series-array.v1"],
+        }
+    )
+    with pytest.raises(ValidationError, match="unsupported generated-program view formats"):
+        GeneratedProgramDraft(
+            program_id=program.program_id,
+            question_ids=program.question_ids,
+            source_code=(
+                "def analyze(inputs, parameters, output_directory):\n    return {'summary': 'ok'}\n"
+            ),
+            input_slots=(invalid_slot,),
+            expected_measurements=program.expected_measurements,
+            resource_request=program.resource_request,
+            determinism=program.determinism,
+            seed=program.seed,
+            rationale="Measure a bounded time-series property.",
+        )
+
+    persisted_payload = program.model_dump(mode="json")
+    persisted_payload["input_slots"] = [invalid_slot.model_dump(mode="json")]
+    with pytest.raises(ValidationError, match="unsupported generated-program view formats"):
+        GeneratedAnalysisProgram.model_validate(persisted_payload)
+
+
+def test_generated_program_prompt_names_the_exact_supported_view_abis() -> None:
+    """The generator must not have to guess the time-series format spelling."""
+
+    scope = SimpleNamespace(mode="auto")
+    analysis_input = SimpleNamespace(
+        analysis_brief=SimpleNamespace(questions=()),
+        task_context={},
+        literature_evidence=None,
+        effective_source_scope=lambda: scope,
+        planning_assets=lambda: (),
+        access_policy={},
+        resource_envelope={},
+    )
+    system, _user = render_generated_program_prompt(
+        cast(DataAnalysisInput, analysis_input),
+        question_ids=(),
+        output_schema={},
+    )
+
+    assert "siderius.numeric-array.v1" in system
+    assert "siderius.timeseries-array.v1" in system
+    assert "siderius.time-series-array.v1" not in system
 
 
 def test_deterministic_seed_is_rejected_at_draft_boundary_before_persistence() -> None:

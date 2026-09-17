@@ -10,8 +10,24 @@ from pydantic import Field, model_validator
 from .action_identity import GeneratedProgramGenerationProvenance, GeneratedProgramIdentity
 from .common import CertifiedArtifactRef, FrozenModel, NonEmptyStr, Sha256, canonical_sha256
 from .skills import SkillInputSlot
+from .view_formats import GENERATED_PROGRAM_VIEW_FORMATS_V1
 
 GeneratedParameterValue = str | int | float | bool | None
+
+
+def validate_generated_input_formats(input_slots: tuple[SkillInputSlot, ...]) -> None:
+    """Refuse format names the v1 generated runner cannot load or certify."""
+
+    unsupported = sorted(
+        {
+            format_id
+            for slot in input_slots
+            for format_id in slot.accepted_view_formats
+            if format_id not in GENERATED_PROGRAM_VIEW_FORMATS_V1
+        }
+    )
+    if unsupported:
+        raise ValueError(f"unsupported generated-program view formats: {unsupported}")
 
 
 class GeneratedParameterDeclaration(FrozenModel):
@@ -106,6 +122,7 @@ class GeneratedAnalysisProgram(FrozenModel):
 
     @model_validator(mode="after")
     def validate_program(self) -> GeneratedAnalysisProgram:
+        validate_generated_input_formats(self.input_slots)
         if self.source_ref.sha256 != self.source_sha256:
             raise ValueError("generated program source ref does not match source_sha256")
         if self.source_ref.media_type != "text/x-python":

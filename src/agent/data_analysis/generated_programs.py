@@ -29,6 +29,7 @@ from agent.schemas.data_analysis.generated_program import (
     GeneratedMeasurementDeclaration,
     GeneratedParameterDeclaration,
     GeneratedProgramResourceRequest,
+    validate_generated_input_formats,
 )
 from agent.schemas.data_analysis.skills import SkillInputSlot
 from core.campaign_identity import validate_path_component
@@ -55,6 +56,7 @@ class GeneratedProgramDraft(FrozenModel):
     @model_validator(mode="after")
     def validate_source_shape(self) -> GeneratedProgramDraft:
         validate_path_component(self.program_id, kind="generated analysis program id")
+        validate_generated_input_formats(self.input_slots)
         if self.determinism not in {"deterministic", "nondeterministic"}:
             raise ValueError("generated program determinism posture is invalid")
         if self.determinism == "deterministic" and self.seed is None:
@@ -101,6 +103,7 @@ def runtime_environment_identity() -> str:
         module_root / "executor.py",
         module_root / "persistence.py",
         schema_root / "generated_program.py",
+        schema_root / "view_formats.py",
         schema_root / "skills.py",
     )
     runtime_files = {
