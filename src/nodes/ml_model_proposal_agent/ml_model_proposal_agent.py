@@ -73,6 +73,10 @@ from nodes.ml_model_proposal_agent.evidence_rendering import (
     render_metric_context_block,
     truncate_description,
 )
+from nodes.ml_model_proposal_agent.parameter_rules import (
+    render_proposal_parameter_rules,
+    resolve_proposal_baseline_config,
+)
 from nodes.proposal_helpers import evidence_order
 from workflows.task_config import (
     get_task_description,
@@ -1225,6 +1229,11 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     for c in inp.constraints:
         lines.append(f"  - {c}")
     lines.append("")
+    parameter_rule_block = render_proposal_parameter_rules(
+        inp.task_composition_ref, inp.workflow_parameter_rules
+    )
+    if parameter_rule_block:
+        lines += [parameter_rule_block, ""]
 
     if inp.previous_failures:
         lines.append("## Previous Failed Proposals (DO NOT repeat these mistakes)")
@@ -1616,6 +1625,11 @@ class MLModelProposalAgent:
                 f"Re-run or adjust the constraints."
             )
 
+        validation_context = {
+            "loss_registry_names": loss_inventory.names,
+            "model_registry_names": _live_model_registry_names(self._registry),
+            "allowed_output_types": inp.allowed_output_types,
+        }
         output = ProposalOutput.model_validate(
             {
                 "model_name": proposed_name,
@@ -1629,15 +1643,15 @@ class MLModelProposalAgent:
                 "mathematical_definition": raw.get("mathematical_definition", ""),
                 "motivation": raw.get("motivation", ""),
                 "expert_advice": raw.get("expert_advice", {}),
-                "baseline_config": raw.get("baseline_config", {}),
+                "baseline_config": resolve_proposal_baseline_config(
+                    raw.get("baseline_config", {}),
+                    composition_ref=inp.task_composition_ref,
+                    workflow_rules=inp.workflow_parameter_rules,
+                ),
                 "parameter_count_estimate": raw.get("parameter_count_estimate"),
                 "custom_loss_spec": raw.get("custom_loss_spec"),
             },
-            context={
-                "loss_registry_names": loss_inventory.names,
-                "model_registry_names": _live_model_registry_names(self._registry),
-                "allowed_output_types": inp.allowed_output_types,
-            },
+            context=validation_context,
         )
         output = _attach_custom_loss_contract(output, inp.forward_contract)
 
@@ -1743,7 +1757,16 @@ class MLModelProposalAgent:
         # so production runs never saw them — dangling pointers in the system prompts).
         hardware_block = _render_hardware_context_block(inp.hardware_context, inp.vram_budget_gb)
         data_scope_block = _render_data_scope_block(inp.data_scope)
-        constraints_block = _render_constraints_block(inp.constraints, inp.existing_model_types)
+        constraints_block = "\n\n".join(
+            block
+            for block in (
+                _render_constraints_block(inp.constraints, inp.existing_model_types),
+                render_proposal_parameter_rules(
+                    inp.task_composition_ref, inp.workflow_parameter_rules
+                ),
+            )
+            if block
+        )
         agent_cards_block = render_agent_cards(inp.agent_cards)
         expert_context_parts = (
             render_expert_context(inp.expert_context),
@@ -2263,6 +2286,11 @@ class MLModelProposalAgent:
                         f"Choose a different name."
                     )
 
+                validation_context = {
+                    "loss_registry_names": loss_inventory.names,
+                    "model_registry_names": _live_model_registry_names(self._registry),
+                    "allowed_output_types": inp.allowed_output_types,
+                }
                 output = ProposalOutput.model_validate(
                     {
                         "model_name": proposed_name,
@@ -2274,7 +2302,11 @@ class MLModelProposalAgent:
                         "mathematical_definition": raw.get("mathematical_definition", ""),
                         "motivation": raw.get("motivation", ""),
                         "expert_advice": raw.get("expert_advice", {}),
-                        "baseline_config": raw.get("baseline_config", {}),
+                        "baseline_config": resolve_proposal_baseline_config(
+                            raw.get("baseline_config", {}),
+                            composition_ref=inp.task_composition_ref,
+                            workflow_rules=inp.workflow_parameter_rules,
+                        ),
                         "inherited_components": inherited,
                         "falsifiable_prediction": prediction,
                         "proposed_vocab_links": vocab_links,
@@ -2284,11 +2316,7 @@ class MLModelProposalAgent:
                         "parameter_count_estimate": raw.get("parameter_count_estimate"),
                         "custom_loss_spec": raw.get("custom_loss_spec"),
                     },
-                    context={
-                        "loss_registry_names": loss_inventory.names,
-                        "model_registry_names": _live_model_registry_names(self._registry),
-                        "allowed_output_types": inp.allowed_output_types,
-                    },
+                    context=validation_context,
                 )
                 output = _attach_custom_loss_contract(output, inp.forward_contract)
                 # Citation discipline — warnings, not hard failures.
