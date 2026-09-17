@@ -1435,6 +1435,16 @@ their pre-F-SCANE-3 bytes when it is `None`. They also refuse an
 **incoherent** split — negative, or larger than `train_time_s` — which
 production cannot produce, rather than printing a negative residual.
 
+For a successful record with coherent `params.train_config.epochs` and
+`runtime_verification.components.training.workload.detail.epochs`, the
+planner's same timing block also states the measured training-phase seconds
+and steps per epoch. This is distinct from `timing.train_time_s`, which is
+the whole subprocess. Missing or conflicting measurements produce no new
+claim; no runtime or budget admission semantics change. At fixed model,
+training scope and batch size, additional epochs add roughly proportional
+optimizer steps. Validation may run each epoch too, so the prompt explicitly
+does not extrapolate whole-attempt time from training-phase time alone.
+
 ### `memory.time_mode` is timing metadata, not a second authority
 
 `memory.time_mode` records **which wall-time budget was active** for a round.
