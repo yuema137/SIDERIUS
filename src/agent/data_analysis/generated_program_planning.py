@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import io
+import symtable
 import tokenize
 from typing import Any
 
@@ -20,11 +22,13 @@ from .persistence import AnalysisRunStore
 from .structured_output import generate_validated
 
 
-def _python_source_repair_anchor(source: str) -> tuple[tuple[int, str], ...]:
+def _python_source_repair_anchor(
+    source: str,
+) -> tuple[tuple[tuple[int, str], ...], tuple[str, ...]]:
     """Permit only Python-literal spelling repair, not new analysis logic."""
 
     replacements = {"null": "None", "true": "True", "false": "False"}
-    return tuple(
+    tokens = tuple(
         (
             token.type,
             replacements.get(token.string, token.string)
@@ -33,6 +37,32 @@ def _python_source_repair_anchor(source: str) -> tuple[tuple[int, str], ...]:
         )
         for token in tokenize.generate_tokens(io.StringIO(source).readline)
     )
+    tree = ast.parse(source, mode="exec")
+    loaded_literal_names = {
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in replacements
+    }
+    pending_scopes = [symtable.symtable(source, "<generated-analysis>", "exec")]
+    while pending_scopes:
+        scope = pending_scopes.pop()
+        for name in loaded_literal_names.intersection(scope.get_identifiers()):
+            symbol = scope.lookup(name)
+            if (
+                symbol.is_assigned()
+                or symbol.is_imported()
+                or symbol.is_parameter()
+                or symbol.is_declared_global()
+                or symbol.is_nonlocal()
+            ):
+                raise ValueError(f"JSON literal name {name!r} has a Python binding")
+        pending_scopes.extend(scope.get_children())
+    match_patterns = tuple(
+        ast.dump(node.pattern, include_attributes=False)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.match_case)
+    )
+    return tokens, match_patterns
 
 
 def generated_draft_semantics(value: object) -> object | None:
@@ -57,7 +87,7 @@ def generated_draft_semantics(value: object) -> object | None:
         return None
     try:
         anchored["source_code"] = _python_source_repair_anchor(source)
-    except (tokenize.TokenError, IndentationError):
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
         return None
     return anchored
 

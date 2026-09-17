@@ -135,6 +135,56 @@ def test_python_source_refuses_json_literals_before_persistence() -> None:
     assert generated_draft_semantics(draft) != generated_draft_semantics(changed_logic)
 
 
+def test_literal_repair_cannot_change_match_capture_into_literal() -> None:
+    """A capture matches every value; the repaired singleton matches only None."""
+
+    source = (
+        "def analyze(inputs, parameters, output_directory):\n"
+        "    match inputs['x']:\n"
+        "        case null:\n"
+        "            result = 1\n"
+        "    return {'result': result, 'enabled': true}\n"
+    )
+    draft = {
+        "program_id": "capture-repair",
+        "question_ids": ["q1"],
+        "source_code": source,
+        "input_slots": [],
+        "expected_measurements": [],
+        "resource_request": {},
+        "determinism": "deterministic",
+    }
+    safe_repair = dict(draft, source_code=source.replace("true", "True"))
+    changed_pattern = dict(
+        draft,
+        source_code=source.replace("case null:", "case None:").replace("true", "True"),
+    )
+
+    assert generated_draft_semantics(draft) == generated_draft_semantics(safe_repair)
+    assert generated_draft_semantics(draft) != generated_draft_semantics(changed_pattern)
+
+
+def test_literal_repair_refuses_bound_python_name() -> None:
+    """Replacing a locally bound name changes the measured value."""
+
+    source = (
+        "def analyze(inputs, parameters, output_directory):\n"
+        "    true = False\n"
+        "    return {'enabled': true}\n"
+    )
+    draft = {
+        "program_id": "bound-name-repair",
+        "question_ids": ["q1"],
+        "source_code": source,
+        "input_slots": [],
+        "expected_measurements": [],
+        "resource_request": {},
+        "determinism": "deterministic",
+    }
+
+    assert generated_draft_semantics(draft) is None
+
+
 def _coverage() -> AnalysisCoverage:
     return AnalysisCoverage(
         population_unit="example",
