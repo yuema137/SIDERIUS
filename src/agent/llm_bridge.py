@@ -407,6 +407,18 @@ class LLMBridge:
     where the singleton check does not run.
     """
 
+    @staticmethod
+    def _create_completion(client: OpenAI, *, reasoning_effort: str | None, **kwargs: Any) -> Any:
+        """Apply one optional SDK argument at the shared Chat Completions edge.
+
+        The SDK overloads are not compatible with a dynamic ``**`` spread;
+        only this call edge is cast, while request-shape tests inspect all
+        three public request paths.
+        """
+        if reasoning_effort is not None:
+            kwargs["reasoning_effort"] = reasoning_effort
+        return cast(Any, client.chat.completions.create)(**kwargs)
+
     def __init__(
         self,
         provider: str = "gemini",
@@ -415,6 +427,8 @@ class LLMBridge:
         api_key: str | None = None,
         reflect_provider: str | None = None,
         reflect_model_id: str | None = None,
+        reasoning_effort: str | None = None,
+        reflect_reasoning_effort: str | None = None,
         max_retries: int | None = None,
         request_timeout: float | None = None,
         timeout_retries: int | None = None,
@@ -507,6 +521,9 @@ class LLMBridge:
         """
         load_dotenv()
         self.provider = provider.lower()
+        if reasoning_effort is not None and self.provider != "openai":
+            raise ValueError("reasoning_effort requires the OpenAI provider")
+        self.reasoning_effort = reasoning_effort
         self.max_retries = max_retries
         self.request_timeout = (
             DEFAULT_REQUEST_TIMEOUT_SECONDS if request_timeout is None else float(request_timeout)
@@ -578,6 +595,15 @@ class LLMBridge:
             reflect_provider.lower() if reflect_provider else self.provider
         )
         self.reflect_provider = normalized_reflect_provider
+        if reflect_reasoning_effort is not None and normalized_reflect_provider != "openai":
+            raise ValueError("reflect_reasoning_effort requires the OpenAI provider")
+        self.reflect_reasoning_effort = (
+            reflect_reasoning_effort
+            if reflect_reasoning_effort is not None
+            else reasoning_effort
+            if normalized_reflect_provider == self.provider
+            else None
+        )
 
         if normalized_reflect_provider == self.provider:
             # Same provider — reuse the main client. Saves a connection
@@ -1718,12 +1744,19 @@ class LLMBridge:
         # to self.reflect_provider when the reflect client is in use.
         if provider is None:
             provider = self.reflect_provider if client is self.reflect_client else self.provider
+        # The reflector has a dedicated fixed call-site label; selecting here
+        # preserves the established _chat_json override contract for stubs.
+        effort = (
+            self.reflect_reasoning_effort if label == "tuner.reflector" else self.reasoning_effort
+        )
         last_text = ""
         last_err_label = ""
         wait = self._CONTENT_RETRY_INITIAL_WAIT
         for attempt in range(self._CONTENT_RETRY_BUDGET + 1):
             response = self._call_with_retry(
-                lambda: client.chat.completions.create(
+                lambda: self._create_completion(
+                    client,
+                    reasoning_effort=effort,
                     model=model_name,
                     messages=[
                         {"role": "system", "content": system_prompt},
@@ -1903,7 +1936,9 @@ class LLMBridge:
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("generate_text")
         response = self._call_with_retry(
-            lambda: self.client.chat.completions.create(
+            lambda: self._create_completion(
+                self.client,
+                reasoning_effort=self.reasoning_effort,
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -1967,7 +2002,9 @@ class LLMBridge:
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("tool_call")
         response = self._call_with_retry(
-            lambda: self.client.chat.completions.create(
+            lambda: self._create_completion(
+                self.client,
+                reasoning_effort=self.reasoning_effort,
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -2111,6 +2148,8 @@ class StubLLMBridge(LLMBridge):
         model_id: str | None = None,
         reflect_provider: str | None = None,
         reflect_model_id: str | None = None,
+        reasoning_effort: str | None = None,
+        reflect_reasoning_effort: str | None = None,
         max_retries: int | None = 0,
     ):
         """Initialise stub bridge state without any OpenAI client.

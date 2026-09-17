@@ -98,6 +98,45 @@ def _tool_call_response(name: str, arguments: dict, call_id: str = "call_abc123"
 
 
 class TestInit:
+    def test_explicit_openai_effort_is_sent_on_each_request_path(self):
+        with patch("agent.llm_bridge.OpenAI") as mock_openai:
+            client = mock_openai.return_value
+            client.chat.completions.create.return_value = _chat_response(VALID_JSON_STR)
+            bridge = LLMBridge(provider="openai", model_id="gpt-5.6-sol", reasoning_effort="medium")
+            bridge.generate(SYSTEM_PROMPT, USER_PROMPT, label="test.json")
+            assert client.chat.completions.create.call_args.kwargs["reasoning_effort"] == "medium"
+            client.chat.completions.create.return_value = _chat_response(PLAIN_TEXT)
+            bridge.generate_text(SYSTEM_PROMPT, USER_PROMPT, label="test.text")
+            assert client.chat.completions.create.call_args.kwargs["reasoning_effort"] == "medium"
+            client.chat.completions.create.return_value = _tool_call_response("done", {})
+            bridge.tool_call(SYSTEM_PROMPT, USER_PROMPT, [], label="test.tool")
+            assert client.chat.completions.create.call_args.kwargs["reasoning_effort"] == "medium"
+
+    def test_reflector_can_use_independent_effort_without_affecting_main(self):
+        with patch("agent.llm_bridge.OpenAI") as mock_openai:
+            client = mock_openai.return_value
+            client.chat.completions.create.return_value = _chat_response(VALID_JSON_STR)
+            bridge = LLMBridge(
+                provider="openai",
+                model_id="gpt-5.6-sol",
+                reasoning_effort="medium",
+                reflect_reasoning_effort="high",
+            )
+            bridge._chat_json(
+                bridge.reflect_client,
+                bridge.reflect_model_name,
+                SYSTEM_PROMPT,
+                USER_PROMPT,
+                label="tuner.reflector",
+            )
+            assert client.chat.completions.create.call_args.kwargs["reasoning_effort"] == "high"
+            bridge.generate(SYSTEM_PROMPT, USER_PROMPT, label="test.main")
+            assert client.chat.completions.create.call_args.kwargs["reasoning_effort"] == "medium"
+
+    def test_other_providers_cannot_silently_accept_openai_effort(self):
+        with pytest.raises(ValueError, match="requires the OpenAI provider"):
+            LLMBridge(provider="gemini", reasoning_effort="medium")
+
     def test_known_provider_gemini(self):
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
             bridge = LLMBridge(provider="gemini", model_id="test-model")

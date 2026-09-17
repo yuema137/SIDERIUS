@@ -312,15 +312,21 @@ class MLLiteratureReviewAgent:
             }
         )
         started_at = _utc_now()
-        self.bridge = self._bridge_factory(provider=inp.llm_provider, model_id=inp.llm_model_id)
+        main_kwargs: dict[str, Any] = {"provider": inp.llm_provider, "model_id": inp.llm_model_id}
+        if inp.llm_reasoning_effort is not None:
+            main_kwargs["reasoning_effort"] = inp.llm_reasoning_effort
+        self.bridge = self._bridge_factory(**main_kwargs)
         # Search-decision bridge: the cheap, templated query/escalate/done step may
         # run on a cheaper model (e.g. deepseek-v4) while compression + synthesis
         # stay on the main model. Falls back to the main bridge when unconfigured.
-        if inp.search_llm_provider or inp.search_llm_model_id:
-            self.search_bridge = self._bridge_factory(
-                provider=inp.search_llm_provider or inp.llm_provider,
-                model_id=inp.search_llm_model_id or inp.llm_model_id,
-            )
+        if inp.search_llm_provider or inp.search_llm_model_id or inp.search_llm_reasoning_effort:
+            search_kwargs: dict[str, Any] = {
+                "provider": inp.search_llm_provider or inp.llm_provider,
+                "model_id": inp.search_llm_model_id or inp.llm_model_id,
+            }
+            if inp.search_llm_reasoning_effort is not None:
+                search_kwargs["reasoning_effort"] = inp.search_llm_reasoning_effort
+            self.search_bridge = self._bridge_factory(**search_kwargs)
         else:
             self.search_bridge = self.bridge
         # Fix 6 (6.5b-5) + Commit F: the task description threaded into all

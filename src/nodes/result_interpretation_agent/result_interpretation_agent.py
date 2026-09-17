@@ -194,15 +194,17 @@ class ResultInterpretationAgent:
         provider: str = "gemini",
         model_id: str = "gemini-3.1-flash-lite-preview",
         max_retries: int | None = None,
+        reasoning_effort: str | None = None,
         bridge_factory=None,
         **kwargs,
     ):
         self._bridge_factory = bridge_factory or LLMBridge
         self._provider = provider
         self._model_id = model_id
-        self.bridge = self._bridge_factory(
-            provider=provider, model_id=model_id, max_retries=max_retries
-        )
+        bridge_kwargs = {"provider": provider, "model_id": model_id, "max_retries": max_retries}
+        if reasoning_effort is not None:
+            bridge_kwargs["reasoning_effort"] = reasoning_effort
+        self.bridge = self._bridge_factory(**bridge_kwargs)
 
     def run(self, inp: InterpretationInput) -> InterpretationOutput:
         # --- Cold-start branch (explicit workflow state) ---
