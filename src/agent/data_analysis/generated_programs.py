@@ -65,6 +65,19 @@ class GeneratedProgramDraft(FrozenModel):
             tree = ast.parse(self.source_code, filename=f"{self.program_id}.py", mode="exec")
         except SyntaxError as exc:
             raise ValueError(f"generated program source is invalid Python: {exc.msg}") from exc
+        json_literal_names = {
+            node.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Load)
+            and node.id in {"null", "true", "false"}
+        }
+        if json_literal_names:
+            names = ", ".join(sorted(json_literal_names))
+            raise ValueError(
+                "generated Python source contains JSON literal name(s) "
+                f"{names}; use Python None, True and False instead"
+            )
         analyze_functions = [
             node
             for node in tree.body

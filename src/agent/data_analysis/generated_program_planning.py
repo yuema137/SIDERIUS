@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import tokenize
 from typing import Any
 
 from agent.prompt_templates.data_analysis import render_generated_program_prompt
@@ -18,8 +20,23 @@ from .persistence import AnalysisRunStore
 from .structured_output import generate_validated
 
 
+def _python_source_repair_anchor(source: str) -> tuple[tuple[int, str], ...]:
+    """Permit only Python-literal spelling repair, not new analysis logic."""
+
+    replacements = {"null": "None", "true": "True", "false": "False"}
+    return tuple(
+        (
+            token.type,
+            replacements.get(token.string, token.string)
+            if token.type == tokenize.NAME
+            else token.string,
+        )
+        for token in tokenize.generate_tokens(io.StringIO(source).readline)
+    )
+
+
 def generated_draft_semantics(value: object) -> object | None:
-    """Anchor every executable decision; only rationale may change in repair."""
+    """Anchor executable decisions; allow only JSON-to-Python literal spelling repair."""
 
     if not isinstance(value, dict):
         return None
@@ -34,7 +51,15 @@ def generated_draft_semantics(value: object) -> object | None:
     }
     if not required.issubset(value):
         return None
-    return {key: item for key, item in value.items() if key != "rationale"}
+    anchored = {key: item for key, item in value.items() if key != "rationale"}
+    source = anchored.get("source_code")
+    if not isinstance(source, str):
+        return None
+    try:
+        anchored["source_code"] = _python_source_repair_anchor(source)
+    except (tokenize.TokenError, IndentationError):
+        return None
+    return anchored
 
 
 def prepare_generated_program(

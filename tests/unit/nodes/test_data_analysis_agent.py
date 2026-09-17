@@ -815,6 +815,63 @@ def test_generated_program_is_persisted_before_plan_and_certified_as_evidence(
 
 
 @pytest.mark.allow_real_subprocess
+def test_generated_python_json_literal_gets_one_audited_repair_before_persistence(
+    tmp_path: Path,
+) -> None:
+    probe = AnalysisCodeSandbox().probe()
+    if not probe.available:
+        pytest.skip(f"host cannot enforce sandbox: {probe.reason}")
+
+    class JsonLiteralBridge(_GeneratedProgramBridge):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.initial_draft = None
+
+        def generate(self, system, user, *, label):
+            if label == "data_analysis.generated_program.repair":
+                self.calls.append(label)
+                assert self.initial_draft is not None
+                repaired = copy.deepcopy(self.initial_draft)
+                repaired["source_code"] = repaired["source_code"].replace(
+                    "'unit': null", "'unit': None"
+                )
+                return repaired
+            draft = super().generate(system, user, label=label)
+            if label == "data_analysis.generated_program":
+                assert "source_code` is Python, not JSON" in system
+                draft["source_code"] = draft["source_code"].replace("'unit': None", "'unit': null")
+                self.initial_draft = copy.deepcopy(draft)
+            return draft
+
+    inp = _input(tmp_path)
+    bridge = JsonLiteralBridge(analysis_input=inp)
+    agent = DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **_kwargs: bridge,
+        provider="test",
+        model_id="fake",
+    )
+    report = agent.run(inp)
+    assert report.skill_result_summaries[0].status == "completed"
+    assert bridge.calls.count("data_analysis.generated_program.repair") == 1
+    root = tmp_path / "data_analysis" / "standalone" / "request"
+    persisted_source = next((root / "generated_analysis" / "sources").glob("*.py")).read_text()
+    assert "'unit': None" in persisted_source
+    assert "'unit': null" not in persisted_source
+    receipts = [
+        json.loads(line)
+        for line in (root / "structured_output_receipts.jsonl").read_text().splitlines()
+    ]
+    generation = next(
+        item for item in receipts if item["stage"] == "data_analysis.generated_program"
+    )
+    assert generation["initial_validation_passed"] is False
+    assert generation["repair_attempted"] is True
+    assert generation["repair_passed"] is True
+    assert agent.run(inp) == report
+
+
+@pytest.mark.allow_real_subprocess
 def test_generated_program_promotes_then_reuses_exact_local_skill(tmp_path: Path) -> None:
     """Catches promotion regenerating code or routing a local skill through trusted execution."""
 

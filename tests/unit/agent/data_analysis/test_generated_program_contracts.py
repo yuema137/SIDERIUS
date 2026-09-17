@@ -10,6 +10,7 @@ from typing import Any, cast
 import pytest
 from pydantic import ValidationError
 
+from agent.data_analysis.generated_program_planning import generated_draft_semantics
 from agent.data_analysis.generated_programs import (
     GeneratedProgramDraft,
     load_generated_program,
@@ -98,6 +99,40 @@ def _program(*, model_id: str = "model-a") -> GeneratedAnalysisProgram:
         seed=7,
         generation_provenance=_provenance(model_id=model_id),
     )
+
+
+def test_python_source_refuses_json_literals_before_persistence() -> None:
+    program = _program()
+    draft = {
+        "program_id": program.program_id,
+        "question_ids": list(program.question_ids),
+        "source_code": (
+            "def analyze(inputs, parameters, output_directory):\n"
+            "    return {'summary': 'ok', 'unit': null, 'enabled': true}\n"
+        ),
+        "input_slots": [item.model_dump(mode="json") for item in program.input_slots],
+        "expected_measurements": [
+            item.model_dump(mode="json") for item in program.expected_measurements
+        ],
+        "resource_request": program.resource_request.model_dump(mode="json"),
+        "determinism": "deterministic",
+        "seed": 7,
+        "rationale": "Inspect a generic bounded property.",
+    }
+    with pytest.raises(ValidationError, match="JSON literal name"):
+        GeneratedProgramDraft.model_validate(draft)
+    repaired = dict(draft)
+    repaired["source_code"] = (
+        repaired["source_code"].replace("null", "None").replace("true", "True")
+    )
+    assert (
+        GeneratedProgramDraft.model_validate(repaired).source_code
+        == repaired["source_code"].strip()
+    )
+    assert generated_draft_semantics(draft) == generated_draft_semantics(repaired)
+    changed_logic = dict(repaired)
+    changed_logic["source_code"] = repaired["source_code"].replace("'ok'", "'different'")
+    assert generated_draft_semantics(draft) != generated_draft_semantics(changed_logic)
 
 
 def _coverage() -> AnalysisCoverage:
