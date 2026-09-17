@@ -298,17 +298,6 @@ case "$MODE" in
     *) echo "Invalid --mode '$MODE' (must be 'lilab' or 'sdsc')" >&2; exit 1 ;;
 esac
 
-# R-RETENTION-1 honesty guard: submit_one_iteration.slurm FORCE-INJECTS
-# --cleanup_denoised into any sdsc job that omits it (:188-189), so a
-# retention request in sdsc mode would be silently violated one layer down.
-# Refuse the combination instead of lying about it.
-if [ "$MODE" = "sdsc" ] && [ "${CLEANUP_DENOISED:-1}" -eq 0 ]; then
-    echo "ERROR: --no-cleanup_denoised cannot be honored in --mode sdsc:" >&2
-    echo "  submit_one_iteration.slurm force-injects --cleanup_denoised into jobs that" >&2
-    echo "  omit it. Campaign retention runs (R-RETENTION-1) use --mode lilab." >&2
-    exit 1
-fi
-
 # Resolve the Python interpreter for both modes. Lilab uses it to run
 # run_one_iteration.py directly; SDSC only uses it on the submission node
 # to run scripts/launch/inspect_run_state.py for auto-resume. The Slurm iteration

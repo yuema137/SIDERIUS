@@ -1774,6 +1774,7 @@ def _run_composed_data_analysis(
     storage,
     human_advice: str | None,
     source_prompt: str | None = None,
+    retain_model_outputs: bool = False,
     llm_kwargs: dict,
     bridge_factory,
     historical_model_inference_capability: "HistoricalModelInferenceCapability | None" = None,
@@ -1801,6 +1802,7 @@ def _run_composed_data_analysis(
         storage=storage,
         human_advice=human_advice,
         source_prompt=source_prompt,
+        retain_model_outputs=retain_model_outputs,
         llm_kwargs=llm_kwargs,
         bridge_factory=bridge_factory,
         historical_model_inference_capability=historical_model_inference_capability,
@@ -1919,6 +1921,7 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
         advice_sha256=launch.advice_sha256,
         advice_path=launch.advice_path,
         analysis_source_prompt_sha256=source_prompt_identity(launch.analysis_source_prompt),
+        retain_model_outputs=launch.retain_model_outputs,
         # F-SCANF-1 — the formal round's evaluation FRACTION, from the SAME
         # launch config the tuner child receives it from, so the chain lock
         # and the tuner sub-workspace lock cannot disagree.
@@ -2762,6 +2765,7 @@ def run_workflow(
                 storage=_storage,
                 human_advice=launch.human_advice_analysis,
                 source_prompt=launch.analysis_source_prompt,
+                retain_model_outputs=launch.retain_model_outputs,
                 llm_kwargs=bindings.llm_config.get("data_analysis"),
                 bridge_factory=bridge_factory,
                 historical_model_inference_capability=historical_model_inference_capability,
@@ -3327,6 +3331,7 @@ def run_workflow(
             sampling_seed=launch.sampling_seed,
             train_base_seed=launch.train_base_seed,
             cleanup_denoised=launch.cleanup_denoised,
+            retain_model_outputs=launch.retain_model_outputs,
             max_epochs=launch.max_epochs,
             # D-BUD-6 — per-mode epoch ceilings, carried through unchanged
             # including `None` (None = mode-agnostic max_epochs governs).

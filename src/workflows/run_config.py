@@ -113,6 +113,7 @@ class WorkflowLaunchConfig:
     sampling_seed: int | None = None
     train_base_seed: int | None = None
     cleanup_denoised: bool = False
+    retain_model_outputs: bool = False
     max_epochs: int | None = None
     # D-BUD-6 — per-mode epoch ceilings (trial/formal split). None = the
     # mode-agnostic max_epochs governs that role, byte-identical to the
@@ -205,6 +206,13 @@ class WorkflowLaunchConfig:
         the failure mode of every maintained-by-hand deny list.
         """
         from core.chain_state import ChainState
+
+        if getattr(self, "cleanup_denoised", False) and getattr(
+            self, "retain_model_outputs", False
+        ):
+            raise ValueError(
+                "cleanup_denoised and retain_model_outputs request contradictory output lifetimes"
+            )
 
         scientific_evidence_order = getattr(
             self, "scientific_evidence_order", "analysis_then_literature"

@@ -97,26 +97,55 @@ class TestCensusAFiveDefaultMechanisms:
         with pytest.raises(TaskDataPathResolutionError, match="No task data path is bound"):
             resolve_bound_task_data_path()
 
-    def test_default_3_run_invariants_omits_the_task_health_binding_keyword(self):
-        """``materialize_effective_config`` HAS the parameter (08b) and
-        ``build_run_invariants`` does not pass it, so the run resolves
-        ``LEGACY_OMITTED``. C2 makes it a pass-through; the un-composed call
-        must keep omitting it."""
+    def test_default_3_run_invariants_omits_the_task_health_binding_keyword(self, monkeypatch):
+        """The uncomposed path omits the binding even through its helper.
+
+        A composed binding is passed through; absence must still resolve as
+        ``LEGACY_OMITTED`` rather than an explicit ``None`` keyword.
+        """
         import core.run_invariants as ri
-        from execute_tools.health_checks.config import materialize_effective_config
+        import execute_tools.health_checks.config as health_config
 
-        assert "task_health_binding" in inspect.signature(materialize_effective_config).parameters
+        assert (
+            "task_health_binding"
+            in inspect.signature(health_config.materialize_effective_config).parameters
+        )
 
-        tree = ast.parse(inspect.getsource(ri.build_run_invariants))
-        calls = [
+        observed: list[dict[str, object]] = []
+
+        def capture(*_args, **kwargs):
+            observed.append(kwargs)
+            return "effective.yaml", "digest"
+
+        monkeypatch.setattr(health_config, "materialize_effective_config", capture)
+        build_tree = ast.parse(inspect.getsource(ri.build_run_invariants))
+        helper_calls = [
             node
-            for node in ast.walk(tree)
+            for node in ast.walk(build_tree)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id == "materialize_effective_config"
+            and node.func.id == "_materialize_run_health_config"
         ]
-        assert len(calls) == 1, "one materialization call site expected"
-        assert "task_health_binding" not in {kw.arg for kw in calls[0].keywords}
+        assert len(helper_calls) == 1, "the run must reach the Health materialization helper"
+        assert any(
+            keyword.arg == "inputs"
+            and isinstance(keyword.value, ast.Name)
+            and keyword.value.id == "health_materialization"
+            for keyword in helper_calls[0].keywords
+        )
+        inputs = (None, ri.RunHealthMaterialization(task_health_binding=object()))
+        for value in inputs:
+            ri._materialize_run_health_config(
+                enabled=True,
+                config_path=None,
+                monitored_files=None,
+                workspace="workspace",
+                resolved_scope=[],
+                inputs=value,
+            )
+
+        assert "task_health_binding" not in observed[0]
+        assert "task_health_binding" in observed[1]
 
     def test_default_4_the_tuner_has_exactly_one_declared_metric_acquisition_site(self):
         """The tuner resolves one bound metric and contains no task fallback."""
@@ -668,6 +697,8 @@ class TestCensusDLegacyLockKeySet:
             "lit_review_enabled",
             # Explicit Data Analysis treatment is part of workflow topology.
             "data_analysis_enabled",
+            # Output lifetime is part of run/resume identity.
+            "retain_model_outputs",
             "lit_review_config_sha256",
             # PR-C — workflow-selected capability order changes evidence flow.
             "scientific_evidence_order",

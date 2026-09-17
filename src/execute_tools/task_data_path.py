@@ -288,7 +288,12 @@ class ScopeBuildRequest(BaseModel):
     portion: float = Field(
         gt=0.0,
         le=1.0,
-        description="Fraction of each selected partition's index space to sample.",
+        description=(
+            "Fraction of each selected partition's index space to sample. "
+            "For a task declaring a frozen training pool, Trial training "
+            "interprets this fraction relative to its parent pool; Formal "
+            "training uses the complete parent. Evaluation remains independent."
+        ),
     )
     seed: int | None = Field(
         default=None,
@@ -485,6 +490,45 @@ class TaskEvaluationPayload(BaseModel):
 
     value: Any
     deliverables: dict[int, str]
+
+
+class TaskOutputArtifactInventory(BaseModel):
+    """Task-certified files written for one exact inference attempt.
+
+    Paths are relative to ``EvaluationReadRequest.deliverable_dir``. The task
+    owns output naming; the framework validates containment and retires only
+    these files after scoring and Health have finished. An empty inventory is
+    valid when inference failed before writing any output.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    run_name: str = Field(min_length=1)
+    exp_id: str = Field(min_length=1)
+    model_type: str = Field(min_length=1)
+    relative_paths: tuple[str, ...] = ()
+
+    @field_validator("relative_paths")
+    @classmethod
+    def paths_must_be_unique(cls, paths: tuple[str, ...]) -> tuple[str, ...]:
+        if len(paths) != len(set(paths)):
+            raise ValueError("output artifact paths must be unique")
+        return paths
+
+
+@runtime_checkable
+class TaskOutputArtifactCapability(Protocol):
+    """Optional task-owned output enumeration; not a new scoring authority.
+
+    An implementation must list every per-sample artifact currently present
+    for the exact request, including sidecars and partially written outputs.
+    It must not list checkpoints, source data, or another attempt's outputs.
+    The framework never guesses task filenames when this capability is absent.
+    """
+
+    def enumerate_output_artifacts(
+        self, request: EvaluationReadRequest
+    ) -> TaskOutputArtifactInventory: ...
 
 
 # ---------------------------------------------------------------------------

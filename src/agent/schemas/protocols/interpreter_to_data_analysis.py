@@ -36,6 +36,7 @@ def local_analysis_input(
     prior_evidence: tuple[PriorEvidenceRef, ...] = (),
     human_advice: str | None = None,
     allow_generated_skill_promotion: bool = False,
+    retain_model_outputs: bool = False,
 ) -> DataAnalysisInput:
     """Combine an Interpreter-owned brief with caller-owned run authorities.
 
@@ -61,4 +62,5 @@ def local_analysis_input(
         storage=storage,
         caller=caller,
         allow_generated_skill_promotion=allow_generated_skill_promotion,
+        retain_model_outputs=retain_model_outputs,
     )

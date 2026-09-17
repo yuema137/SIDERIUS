@@ -29,6 +29,7 @@ from typing import Any
 
 import pytest
 
+from execute_tools.model_output_retention import apply_output_retention
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
     EpochSamplingParams,
@@ -553,6 +554,36 @@ def test_deliverable_codec_and_metric_outcomes(bundle: dict[str, str], tmp_path:
             )
             assert type(refused).__name__ == "NotScoreableResult"
             assert refused.verdict.failures[0].requirement == "completeness"
+
+
+def test_quickstart_inventory_retires_only_this_attempt(tmp_path: Path, pack_module: Any) -> None:
+    """The framework example must declare its output lifetime, not rely on a core glob."""
+    task = pack_module.QuickstartTaskDataPath()
+    request = EvaluationReadRequest(
+        deliverable_dir=str(tmp_path),
+        run_name="run-a",
+        exp_id="attempt-a",
+        model_type="model-a",
+    )
+    own = tmp_path / task.deliverable_name(
+        model_type=request.model_type,
+        run_name=request.run_name,
+        exp_id=request.exp_id,
+    )
+    neighbor = tmp_path / task.deliverable_name(
+        model_type=request.model_type,
+        run_name=request.run_name,
+        exp_id="attempt-b",
+    )
+    own.write_text("{}", encoding="utf-8")
+    neighbor.write_text("{}", encoding="utf-8")
+
+    receipt = apply_output_retention(task=task, request=request, retain_model_outputs=False)
+
+    assert receipt.status == "completed"
+    assert [item.relative_path for item in receipt.artifacts] == [own.name]
+    assert not own.exists()
+    assert neighbor.exists()
 
 
 def test_deliverable_codec_accepts_the_composed_childs_positional_outputs(

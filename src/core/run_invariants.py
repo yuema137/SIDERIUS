@@ -201,6 +201,7 @@ class RunInvariants(BaseModel):
     # stamps it; nothing reads its VALUE to decide anything.
     lit_review_enabled: bool = False
     data_analysis_enabled: bool | None = None
+    retain_model_outputs: bool = False
     lit_review_config_sha256: str | None = None
     scientific_evidence_order: Literal["analysis_then_literature", "literature_then_analysis"] = (
         "analysis_then_literature"
@@ -383,6 +384,7 @@ class RunInvariants(BaseModel):
         # arXiv U1 — topology + arm are compared, never interpreted.
         "lit_review_enabled",
         "data_analysis_enabled",
+        "retain_model_outputs",
         "lit_review_config_sha256",
         "scientific_evidence_order",
         "experiment_arm",
@@ -640,6 +642,8 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
         payload.pop("lit_review_enabled", None)
     if payload.get("data_analysis_enabled") is None:
         payload.pop("data_analysis_enabled", None)
+    if payload.get("retain_model_outputs") is False:
+        payload.pop("retain_model_outputs", None)
     if payload.get("lit_review_config_sha256") is None:
         payload.pop("lit_review_config_sha256", None)
     if payload.get("scientific_evidence_order") == "analysis_then_literature":
@@ -825,6 +829,7 @@ class LockLaunchIdentity(BaseModel):
 
     lit_review_enabled: bool = False
     data_analysis_enabled: bool | None = None
+    retain_model_outputs: bool = False
     lit_review_config_sha256: str | None = None
     scientific_evidence_order: Literal["analysis_then_literature", "literature_then_analysis"] = (
         "analysis_then_literature"
@@ -860,6 +865,37 @@ class RunHealthMaterialization:
 
     task_health_binding: Any = None
     dataset_partition_count: int | None = None
+
+
+def _materialize_run_health_config(
+    *,
+    enabled: bool,
+    config_path: str | None,
+    monitored_files: list[int] | None,
+    workspace: str,
+    resolved_scope: list[int],
+    inputs: RunHealthMaterialization | None,
+) -> tuple[str | None, str | None]:
+    """Own the optional Health-config side effect before the lock is built."""
+    if not enabled:
+        return None, None
+    # Keep this import deferred: lock-only callers do not need Health code.
+    from execute_tools.health_checks.config import materialize_effective_config
+
+    health_inputs = inputs or RunHealthMaterialization()
+    health_kwargs = (
+        {}
+        if health_inputs.task_health_binding is None
+        else {"task_health_binding": health_inputs.task_health_binding}
+    )
+    return materialize_effective_config(
+        config_path,
+        monitored_files,
+        workspace,
+        resolved_scope=resolved_scope,
+        dataset_partition_count=health_inputs.dataset_partition_count,
+        **health_kwargs,
+    )
 
 
 def build_run_invariants(
@@ -932,37 +968,17 @@ def build_run_invariants(
         ``(invariants, effective_config_path)`` — the path is ``None`` when
         gates are disabled (no effective config exists for disabled runs).
     """
-    # Imported here, not at module top: keeps this generic module importable
-    # without the health-check package for consumers that only need the
-    # lock primitives (and avoids widening core→execute_tools coupling to
-    # every importer of the lock).
     _launch_identity = (
         launch_identity if launch_identity is not None else UNLABELLED_LAUNCH_IDENTITY
     )
-    from execute_tools.health_checks.config import materialize_effective_config
-
-    if health_gate_enabled:
-        # Step 10 / P1: the composed task Health binding is PASSED THROUGH to
-        # 08b's existing keyword. Omitting it (the un-composed default) is
-        # what resolves `LEGACY_OMITTED`, so a legacy run materializes the
-        # byte-identical effective config it always did — the call shape is
-        # the branch, and there is no task name on either side of it.
-        health_inputs = health_materialization or RunHealthMaterialization()
-        health_kwargs = (
-            {}
-            if health_inputs.task_health_binding is None
-            else {"task_health_binding": health_inputs.task_health_binding}
-        )
-        effective_path, sha = materialize_effective_config(
-            health_checks_config,
-            health_gate_files,
-            workspace,
-            resolved_scope=resolved_data_scope,
-            dataset_partition_count=health_inputs.dataset_partition_count,
-            **health_kwargs,
-        )
-    else:
-        effective_path, sha = None, None
+    effective_path, sha = _materialize_run_health_config(
+        enabled=health_gate_enabled,
+        config_path=health_checks_config,
+        monitored_files=health_gate_files,
+        workspace=workspace,
+        resolved_scope=resolved_data_scope,
+        inputs=health_materialization,
+    )
     # F-SCANH-1 — pin the task-config FILE an un-composed run reads. The
     # deferred function-scope import matches the module's convention above
     # (the lock primitives stay importable without the workflows package).
@@ -1003,6 +1019,7 @@ def build_run_invariants(
             # the generic unlabelled, literature-review-disabled posture.
             lit_review_enabled=_launch_identity.lit_review_enabled,
             data_analysis_enabled=_launch_identity.data_analysis_enabled,
+            retain_model_outputs=_launch_identity.retain_model_outputs,
             lit_review_config_sha256=_launch_identity.lit_review_config_sha256,
             scientific_evidence_order=_launch_identity.scientific_evidence_order,
             experiment_arm=_launch_identity.experiment_arm,

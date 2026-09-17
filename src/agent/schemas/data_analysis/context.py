@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, StrictBool, model_validator
 
 from agent.schemas.storage import StorageConfig
 from agent.schemas.task_config import ForwardContract
@@ -157,6 +157,13 @@ class DataAnalysisInput(FrozenModel):
         default=None,
         exclude_if=lambda value: value is None,
         description="Exact resolved lock; absent means automatic choice under declared_scope.",
+    )
+    retain_model_outputs: StrictBool = Field(
+        default=False,
+        description=(
+            "Retain per-sample historical predictions after their analysis action. "
+            "False retires exact output bytes; neither value changes source authorization."
+        ),
     )
     storage: StorageConfig
     caller: CallerIdentity

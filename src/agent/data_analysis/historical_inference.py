@@ -11,7 +11,7 @@ from agent.schemas.data_analysis.assets import (
 )
 from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.data_analysis.inference import HistoricalModelInferenceRequest
-from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
+from agent.schemas.data_analysis.trained_model import ModelInferenceReceipt, TrainedModelArtifactRef
 from core.campaign_identity import validate_path_component
 from execute_tools.analysis_materialization import (
     AuthorizedAnalysisMaterializationRequest,
@@ -35,9 +35,17 @@ from .plan_validation import ResolvedAssetBinding, ResolvedPlannedInvocation
 class HistoricalInferenceError(RuntimeError):
     """A model-inference capability returned a failed or inconsistent receipt."""
 
-    def __init__(self, message: str, *, receipt=None, refused: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        receipt: ModelInferenceReceipt | None = None,
+        completed_receipts: tuple[ModelInferenceReceipt, ...] = (),
+        refused: bool = False,
+    ) -> None:
         super().__init__(message)
         self.receipt = receipt
+        self.completed_receipts = tuple(completed_receipts)
         self.refused = refused
 
 
@@ -189,7 +197,37 @@ def run_historical_inference_binding(
             refused=materialization.receipt.status == "refused",
         )
     view = materialization.view
-    expected = output_authorization.request
+    try:
+        return _certify_and_export_prediction(
+            capability=capability,
+            request=request,
+            view=view,
+            expected=output_authorization.request,
+            authorization_receipt=output_authorization.authorization_receipt,
+            input_views=input_views,
+            output_directory=output_directory,
+        )
+    except Exception as exc:
+        # The worker has already produced a certified prediction. Even if a
+        # later view/export check fails, the caller must retire that exact
+        # output under the run's retention policy.
+        raise HistoricalInferenceError(
+            str(exc),
+            receipt=materialization.receipt,
+            completed_receipts=(materialization.receipt,),
+        ) from exc
+
+
+def _certify_and_export_prediction(
+    *,
+    capability: HistoricalModelInferenceCapability,
+    request: HistoricalModelInferenceRequest,
+    view: MaterializedAnalysisView,
+    expected,
+    authorization_receipt,
+    input_views: tuple[MaterializedAnalysisView, ...],
+    output_directory: Path,
+) -> tuple[MaterializedAnalysisView, str]:
     if (
         view.invocation_id != expected.invocation_id
         or view.binding_id != expected.binding_id
@@ -198,7 +236,7 @@ def run_historical_inference_binding(
         or view.split_id != expected.split_id
         or view.format_id != expected.requested_format_id
         or view.certified_information != expected.requested_information
-        or view.authorization_receipt != output_authorization.authorization_receipt
+        or view.authorization_receipt != authorization_receipt
         or view.selection_identity != input_views[0].selection_identity
     ):
         raise HistoricalInferenceError("prediction view differs from its authorized binding")

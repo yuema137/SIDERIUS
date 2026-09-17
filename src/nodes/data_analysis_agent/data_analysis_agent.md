@@ -30,6 +30,7 @@
 | `allow_generated_skill_promotion` | boolean | No | `False` | Allows one bounded reuse decision after successful generated-program execution; grants no data authority. |
 | `human_advice` | string or `None` | No | `None` | Auditable priorities or scope guidance; grants no data access. |
 | `source_scope` | `AnalysisSourceScope` or `None` | No | `None` | One resolved run-wide raw-input/model scope. `None` allows automatic choice only within `declared_scope`; a lock narrows that ceiling. |
+| `retain_model_outputs` | boolean | No | `False` | Output lifetime only. Historical predictions generated for an action are retired after its consumer unless explicitly retained; this does not change source authorization. The value participates in the input/plan identity. |
 | `storage` | `StorageConfig` | Yes | — | Capability-owned persistence destination. |
 | `caller` | `CallerIdentity` | Yes | — | Identity of the workflow, human, orchestrator, or capability making the request. |
 
@@ -113,7 +114,7 @@ report = DataAnalysisAgent(
 For local storage, the node writes beneath
 `{workspace}/data_analysis/{run_name}/{request_id}/`: `input.json`,
 `discovery.json`, `plan.json`, append-only `skill_results.jsonl`, append-only
-`inference_receipts.jsonl` when historical inference is requested, immutable
+`inference_receipts.jsonl` and `prediction_retention_receipts.jsonl` when historical inference is requested, immutable
 certified artifacts, and bounded `report.json` / `report.md`. When a capability
 gap requires custom analysis, exact generated source and its validated
 declaration are stored content-addressed below `generated_analysis/` before the
@@ -135,8 +136,9 @@ returned in report provenance.
 - A generated program receives the same authorized materializations through a narrow JSON/NPZ runner ABI. It proposes a bounded `SkillPayload`; the trusted parent validates measurement semantics, certifies effective coverage and artifacts, records resources, and constructs the canonical result. Source code is never itself scientific evidence.
 - Execution origin selects the trust path. `reference_skill` and `configured_external_skill` use the operator-approved skill worker. `generated_program` and `generated_experiment_skill` use `AnalysisCodeSandbox`; promotion never converts code into trusted code and no ordinary-subprocess fallback exists. The result/report surfaces retain the exact origin and mutually exclusive skill or generated-program identity.
 - Full results remain append-only; the canonical report contains bounded summaries and certified references.
-- Existing predictions, residuals, histories, and evaluation artifacts may be analyzed when supplied and authorized.
+- The run-wide source scope covers authorized raw inputs and certified historical models. Per-sample historical predictions are generated on demand for a consuming action, not treated as a long-lived source inventory. Targets and stored historical outputs do not enter this scope.
 - Active historical inference is an injected capability. A validated plan must identify the immutable `TrainedModelArtifact`, exact input binding, split, selection, prediction contract and evaluation configuration. The inference worker receives no target; target-dependent diagnostics use a separate authorized materialization.
+- After the consuming action, the injected capability verifies and either retains or retires its exact certified prediction according to `retain_model_outputs`; failures are recorded and cannot produce a completed finding. A retirement tombstone prevents a deleted prediction from being mistaken for a resumable cache hit. See [model-output retention](../../../docs/reference/model-output-retention.md).
 - In the fixed workflow, an optional caller-owned `historical_inference_base_asset_id` can make prior certified training records available as model assets. The task-owned `TaskHistoricalInferenceInputCapability` derives candidate-compatible inference input geometry from verified model/profile content within the declared base region. This workflow edge only prepares plan-visible assets and a run-bound inference capability; the Data Analysis node still chooses explicit bindings under the same access policy. No artifact is inferred from a legacy checkpoint path.
 - The fixed workflow may transport an explicit `data_analysis_enabled` treatment from its launcher. `None` preserves composition behavior, `False` bypasses the Interpreter brief and analysis edge, and `True` requires a composed analysis binding. This is workflow routing only; the standalone Data Analysis input and its authorization contract are unchanged.
 - `TrainedModelArtifact` is descriptive and immutable. It records checkpoint/config/plugin/construction/I/O identities but carries no Python callable or executable path. The approved inference capability owns reconstruction and emits an executor-certified receipt.

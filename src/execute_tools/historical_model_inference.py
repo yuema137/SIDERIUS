@@ -67,6 +67,29 @@ class HistoricalModelInferenceCapability(Protocol):
     ) -> None: ...
 
 
+class HistoricalPredictionRetentionReceipt(FrozenModel):
+    """Observed lifetime of one certified historical prediction artifact."""
+
+    inference_id: NonEmptyStr
+    prediction_artifact_ref: CertifiedArtifactRef
+    retain_model_outputs: bool
+    status: Literal["retained", "retired", "failed"]
+    failure_code: str | None = None
+    failure_message: str | None = None
+
+
+@runtime_checkable
+class HistoricalPredictionRetentionCapability(Protocol):
+    """Optional exact-output lifecycle sibling of historical inference."""
+
+    def apply_prediction_retention(
+        self,
+        receipt: ModelInferenceReceipt,
+        *,
+        retain_model_outputs: bool,
+    ) -> HistoricalPredictionRetentionReceipt: ...
+
+
 @runtime_checkable
 class HistoricalModelArtifactExporter(Protocol):
     """Resolve immutable refs supplied by the caller's artifact authority."""
@@ -203,6 +226,24 @@ class LocalPytorchHistoricalModelInferenceCapability:
         )
 
     @staticmethod
+    def _discard_failed_prediction(
+        receipt: ModelInferenceReceipt, output_path: Path
+    ) -> HistoricalInferenceMaterialization:
+        """A failed worker never leaves a partial prediction as reusable data."""
+
+        try:
+            output_path.unlink(missing_ok=True)
+        except OSError as exc:
+            receipt = ModelInferenceReceipt.model_validate(
+                {
+                    **receipt.model_dump(mode="python"),
+                    "failure_code": "partial_prediction_cleanup_failed",
+                    "failure_message": f"{receipt.failure_code}: {receipt.failure_message}; {exc}",
+                }
+            )
+        return HistoricalInferenceMaterialization(receipt=receipt)
+
+    @staticmethod
     def _prediction_view(
         request: HistoricalModelInferenceRequest,
         receipt: ModelInferenceReceipt,
@@ -258,6 +299,25 @@ class LocalPytorchHistoricalModelInferenceCapability:
             return None
         return HistoricalInferenceMaterialization(view=view, receipt=receipt)
 
+    @staticmethod
+    def _prediction_was_retired(directory: Path) -> bool:
+        """Distinguish deliberate output retirement from corrupt cache storage."""
+
+        try:
+            original = ModelInferenceReceipt.model_validate_json(
+                (directory / "receipt.json").read_bytes()
+            )
+            retired = HistoricalPredictionRetentionReceipt.model_validate_json(
+                (directory / "prediction_retention.json").read_bytes()
+            )
+        except (OSError, ValueError):
+            return False
+        return (
+            retired.status == "retired"
+            and retired.inference_id == original.inference_id
+            and retired.prediction_artifact_ref == original.prediction_artifact_ref
+        )
+
     def run_historical_inference(
         self,
         request: HistoricalModelInferenceRequest,
@@ -306,14 +366,23 @@ class LocalPytorchHistoricalModelInferenceCapability:
         )
         directory = self._root / request.scientific_identity_sha256 / execution_key
         if directory.exists():
-            reused = self._reuse_completed_prediction(request, directory)
-            if reused is not None:
-                return reused
+            retired = self._prediction_was_retired(directory)
+            if not retired:
+                reused = self._reuse_completed_prediction(request, directory)
+                if reused is not None:
+                    return reused
             receipt = self._failure_receipt(
                 request,
                 status="refused",
-                code="inference_identity_incomplete",
-                message="inference identity already has incomplete or unverifiable storage",
+                code=(
+                    "inference_prediction_retired" if retired else "inference_identity_incomplete"
+                ),
+                message=(
+                    "the exact inference output was deliberately retired; a new invocation "
+                    "identity is required to recompute it"
+                    if retired
+                    else "inference identity already has incomplete or unverifiable storage"
+                ),
                 usage=ResourceUsage(wall_time_s=0.0, device=request.configuration.device),
             )
             return HistoricalInferenceMaterialization(receipt=receipt)
@@ -410,7 +479,7 @@ class LocalPytorchHistoricalModelInferenceCapability:
                 message="historical inference process tree exceeded its deadline",
                 usage=usage,
             )
-            return HistoricalInferenceMaterialization(receipt=receipt)
+            return self._discard_failed_prediction(receipt, output_path)
         if memory_exceeded:
             receipt = self._failure_receipt(
                 request,
@@ -419,7 +488,7 @@ class LocalPytorchHistoricalModelInferenceCapability:
                 message="historical inference process tree exceeded its RSS limit",
                 usage=usage,
             )
-            return HistoricalInferenceMaterialization(receipt=receipt)
+            return self._discard_failed_prediction(receipt, output_path)
         vram_limit = request.resource_envelope.max_vram_gb
         if (
             vram_limit is not None
@@ -433,7 +502,7 @@ class LocalPytorchHistoricalModelInferenceCapability:
                 message="historical inference exceeded its observed VRAM envelope",
                 usage=usage,
             )
-            return HistoricalInferenceMaterialization(receipt=receipt)
+            return self._discard_failed_prediction(receipt, output_path)
         if response is None or response.status != "completed" or returncode != 0:
             code = "invalid_worker_response" if response is None else response.error_type
             message = (
@@ -446,7 +515,7 @@ class LocalPytorchHistoricalModelInferenceCapability:
                 message=message or "historical inference worker failed",
                 usage=usage,
             )
-            return HistoricalInferenceMaterialization(receipt=receipt)
+            return self._discard_failed_prediction(receipt, output_path)
 
         try:
             if output_path.is_symlink() or not output_path.is_file():
@@ -472,7 +541,7 @@ class LocalPytorchHistoricalModelInferenceCapability:
                 message=str(exc) or type(exc).__name__,
                 usage=usage,
             )
-            return HistoricalInferenceMaterialization(receipt=receipt)
+            return self._discard_failed_prediction(receipt, output_path)
         prediction_ref = CertifiedArtifactRef(
             logical_ref=str(output_path.relative_to(self._root.parent)),
             sha256=hashlib.sha256(payload).hexdigest(),
@@ -527,3 +596,55 @@ class LocalPytorchHistoricalModelInferenceCapability:
         self._verify_export(source, content_ref)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
+
+    def apply_prediction_retention(
+        self,
+        receipt: ModelInferenceReceipt,
+        *,
+        retain_model_outputs: bool,
+    ) -> HistoricalPredictionRetentionReceipt:
+        """Verify and retire only the exact prediction after its analysis action.
+
+        The inference receipt and retirement tombstone stay in capability
+        storage. A later request for the same deleted prediction refuses with
+        an explicit retired-output disposition, not a false cache hit.
+        """
+
+        ref = receipt.prediction_artifact_ref
+        if receipt.status != "completed" or ref is None:
+            raise ValueError("retention requires a completed inference receipt")
+        source = self._root.parent / ref.logical_ref
+        try:
+            if source.is_symlink() or source.name != "prediction.npz":
+                raise ValueError("prediction ref is not an executor-owned regular output")
+            resolved = source.resolve(strict=True)
+            if self._root not in resolved.parents:
+                raise ValueError("prediction ref escapes historical inference storage")
+            self._verify_export(resolved, ref)
+            if not retain_model_outputs:
+                resolved.unlink()
+                retirement = HistoricalPredictionRetentionReceipt(
+                    inference_id=receipt.inference_id,
+                    prediction_artifact_ref=ref,
+                    retain_model_outputs=retain_model_outputs,
+                    status="retired",
+                )
+                publish_bytes_write_once(
+                    str(resolved.parent / "prediction_retention.json"),
+                    canonical_json_bytes(retirement),
+                )
+        except (OSError, ValueError) as exc:
+            return HistoricalPredictionRetentionReceipt(
+                inference_id=receipt.inference_id,
+                prediction_artifact_ref=ref,
+                retain_model_outputs=retain_model_outputs,
+                status="failed",
+                failure_code="prediction_retention_failed",
+                failure_message=str(exc) or type(exc).__name__,
+            )
+        return HistoricalPredictionRetentionReceipt(
+            inference_id=receipt.inference_id,
+            prediction_artifact_ref=ref,
+            retain_model_outputs=retain_model_outputs,
+            status="retained" if retain_model_outputs else "retired",
+        )

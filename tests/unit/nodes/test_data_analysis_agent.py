@@ -978,3 +978,15 @@ def test_plan_repair_rejects_semantic_changes(tmp_path: Path, repair_change: str
     assert plan_receipt["repair_validation_errors"][0]["error_type"] == (
         "semantic_decision_changed"
     )
+
+
+def test_output_retention_changes_standalone_identity_not_data_authority(tmp_path: Path) -> None:
+    default = _input(tmp_path)
+    retained = DataAnalysisInput.model_validate(
+        {**default.model_dump(mode="python"), "retain_model_outputs": True}
+    )
+
+    assert default.retain_model_outputs is False
+    assert canonical_sha256(default) != canonical_sha256(retained)
+    assert retained.declared_scope == default.declared_scope
+    assert retained.access_policy == default.access_policy

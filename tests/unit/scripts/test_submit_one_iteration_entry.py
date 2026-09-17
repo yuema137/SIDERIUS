@@ -138,6 +138,20 @@ def test_full_wrapper_matrix_preserves_argv_defaults_and_cleanup(tmp_path: Path)
     assert (tmp_path / "canonical/ws/iter_001/manifest.json").is_file()
     assert not canonical.probe_tmp.exists()
 
+    retained = _run(
+        tmp_path / "retained",
+        "--workspace",
+        str(tmp_path / "retained/ws"),
+        "--start_iteration",
+        "1",
+        "--seed_paths",
+        str(tmp_path / "seed one.json"),
+        "--retain_model_outputs",
+    )
+    assert retained.returncode == 0, retained.stderr
+    assert "--retain_model_outputs" in _captured(retained)["argv"]
+    assert "--cleanup_denoised" not in _captured(retained)["argv"]
+
     legacy = _run(
         tmp_path / "legacy",
         "--workspace",

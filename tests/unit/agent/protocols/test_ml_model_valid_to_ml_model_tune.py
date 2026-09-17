@@ -91,6 +91,24 @@ def proposal_output():
 
 
 class TestLocalValidatedModel:
+    def test_model_output_retention_is_transport_not_inferred(
+        self, validator_output, proposal_output, storage
+    ):
+        default = local_validated_model(validator_output, proposal_output, storage)
+        retained = local_validated_model(
+            validator_output, proposal_output, storage, retain_model_outputs=True
+        )
+        assert default.retain_model_outputs is False
+        assert retained.retain_model_outputs is True
+        with pytest.raises(ValueError, match="contradictory output lifetimes"):
+            local_validated_model(
+                validator_output,
+                proposal_output,
+                storage,
+                retain_model_outputs=True,
+                cleanup_denoised=True,
+            )
+
     def test_returns_hyperparam_tuning_input(self, validator_output, proposal_output, storage):
         result = local_validated_model(validator_output, proposal_output, storage)
         assert isinstance(result, HyperparamTuningInput)

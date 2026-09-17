@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 from typing import Any, Literal, NamedTuple
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
 from agent.schemas.custom_loss_contract import CustomLossApplicability, TaskOwnedCustomLoss
@@ -2912,10 +2912,26 @@ class HyperparamTuningInput(BaseModel):
             "Scores and file_vector are preserved in the experiment record."
         ),
     )
+    retain_model_outputs: StrictBool = Field(
+        default=False,
+        description=(
+            "Whether to retain per-sample model outputs after inference, scoring, "
+            "and Health have consumed them. False retires only exact task-declared "
+            "output artifacts; model checkpoints and scientific receipts remain."
+        ),
+    )
     progress_bar: bool = Field(
         default=False,
         description="Stream live tqdm progress bars from training/inference subprocesses.",
     )
+
+    @model_validator(mode="after")
+    def _validate_output_retention_switches(self):
+        if self.cleanup_denoised and self.retain_model_outputs:
+            raise ValueError(
+                "cleanup_denoised and retain_model_outputs request contradictory output lifetimes"
+            )
+        return self
 
     task_composition_ref: TaskCompositionRef | None = Field(
         default=None,

@@ -52,6 +52,7 @@ def run_optional_data_analysis(
     storage: StorageConfig,
     human_advice: str | None,
     source_prompt: str | None = None,
+    retain_model_outputs: bool = False,
     llm_kwargs: dict,
     bridge_factory,
     historical_model_inference_capability: HistoricalModelInferenceCapability | None = None,
@@ -117,6 +118,7 @@ def run_optional_data_analysis(
             ),
             human_advice=human_advice,
             allow_generated_skill_promotion=binding.allow_generated_skill_promotion,
+            retain_model_outputs=retain_model_outputs,
         )
     except MissingAnalysisBriefError:
         return None

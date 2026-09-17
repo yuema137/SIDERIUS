@@ -76,3 +76,16 @@ def forbid_real_preflight_worker():
 
     with patch.object(isolated, "run_isolated_preflight", side_effect=_refuse):
         yield
+
+
+@pytest.fixture(autouse=True)
+def isolate_output_retention_from_tuner_decision_tests():
+    """Fake sandboxes write no output files; lifetime is tested separately.
+
+    The dedicated output-retention tests exercise the real exact-path helper
+    and production finally branch. Budget/order/record tests in this package
+    should not fail because their MagicMock sandbox has no deliverable root.
+    """
+    execution = importlib.import_module("nodes.ml_hyperparameter_tune_agent.execution")
+    with patch.object(execution, "finalize_attempt_outputs"):
+        yield

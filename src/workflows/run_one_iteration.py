@@ -817,6 +817,7 @@ class LaunchIdentity:
     lit_review_config_path: str | None
     lit_review_config_sha256: str | None
     data_analysis_enabled: bool | None = None
+    retain_model_outputs: bool = False
     scientific_evidence_order: EvidenceStageOrder = "analysis_then_literature"
     baseline_isolation: bool = False
     advice_path: str | None = None
@@ -1087,6 +1088,8 @@ def write_manifest(
             manifest["lit_review_enabled"] = True
         if launch_identity.data_analysis_enabled is not None:
             manifest["data_analysis_enabled"] = launch_identity.data_analysis_enabled
+        if launch_identity.retain_model_outputs:
+            manifest["retain_model_outputs"] = True
         if launch_identity.lit_review_config_sha256 is not None:
             manifest["lit_review_config_sha256"] = launch_identity.lit_review_config_sha256
         if launch_identity.scientific_evidence_order != "analysis_then_literature":
@@ -1566,7 +1569,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cleanup_denoised",
         action="store_true",
-        help="Delete denoised H5 files after scoring (recommended for production).",
+        help="Legacy cleanup request; incompatible with --retain_model_outputs.",
+    )
+    parser.add_argument(
+        "--retain_model_outputs",
+        action="store_true",
+        help="Keep per-sample model outputs after scoring and Health (default: retire them).",
     )
     parser.add_argument(
         "--human_advice_file",
@@ -2367,6 +2375,10 @@ def resolve_launch_identity(args: argparse.Namespace) -> LaunchIdentity:
     """
     from workflows.model_exploration import lit_review_config_sha256
 
+    retain_model_outputs = bool(getattr(args, "retain_model_outputs", False))
+    if getattr(args, "cleanup_denoised", False) and retain_model_outputs:
+        raise ValueError("--cleanup_denoised conflicts with --retain_model_outputs")
+
     enabled = resolve_lit_review_enabled(args.ml_lit_review_enabled, args.ml_lit_review_config)
     # The advice pin comes from the SAME single read the advice CONTENT does
     # (`resolve_advice_artifact` is the one authority and caches on `args`),
@@ -2377,6 +2389,7 @@ def resolve_launch_identity(args: argparse.Namespace) -> LaunchIdentity:
         experiment_arm=args.experiment_arm,
         lit_review_enabled=enabled,
         data_analysis_enabled=args.data_analysis_enabled,
+        retain_model_outputs=retain_model_outputs,
         lit_review_config_path=args.ml_lit_review_config,
         lit_review_config_sha256=lit_review_config_sha256(
             args.ml_lit_review_config, enabled=enabled
@@ -2612,6 +2625,7 @@ def compute_expected_invariants(
         launch_identity=LockLaunchIdentity(
             lit_review_enabled=identity.lit_review_enabled,
             data_analysis_enabled=identity.data_analysis_enabled,
+            retain_model_outputs=identity.retain_model_outputs,
             lit_review_config_sha256=identity.lit_review_config_sha256,
             scientific_evidence_order=identity.scientific_evidence_order,
             experiment_arm=identity.experiment_arm,
@@ -2821,6 +2835,7 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
         "experiment_arm": identity.experiment_arm,
         "lit_review_enabled": identity.lit_review_enabled,
         "data_analysis_enabled": identity.data_analysis_enabled,
+        "retain_model_outputs": identity.retain_model_outputs,
         "lit_review_config_path": (
             resolve_lit_review_config_path(identity.lit_review_config_path)
             if identity.lit_review_config_path is not None
@@ -3460,6 +3475,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
                     formal_round_strategy=args.formal_round_strategy,
                     degenerate_penalty_score=args.degenerate_penalty_score,
                     cleanup_denoised=args.cleanup_denoised,
+                    retain_model_outputs=launch_identity.retain_model_outputs,
                     max_epochs=args.max_epochs,
                     # D-BUD-6 — per-mode epoch ceilings, forwarded including
                     # `None` (None = mode-agnostic max_epochs governs).
