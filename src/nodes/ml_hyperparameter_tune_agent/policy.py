@@ -1193,8 +1193,10 @@ def _resolve_sample_set_cfg(
     score comparability) but is now operator-controllable via
     ``agent_input.formal_eval_portion`` for smoke / CI runs that need to fit
     a tight ``formal_time_budget_minutes`` (Phase R, §13). Formal training
-    levers come from ``agent_input.formal_*``. Trial-mode values come from
-    the planner. Single-file mode uses safe defaults.
+    portions come from ``agent_input.formal_*`` by default, or the validated
+    plan when ``formal_training_scope_source='agent'``. Formal evaluation
+    remains operator-owned. Trial-mode values come from the planner.
+    Single-file mode uses safe defaults.
 
     Args:
         mode: One of ``"trial"``, ``"formal"``, ``"single_file"``.
@@ -1206,10 +1208,11 @@ def _resolve_sample_set_cfg(
         ``train_portion``, ``eval_strategy``, ``eval_portion``.
     """
     if mode == "formal":
+        agent_scope = agent_input.formal_training_scope_source == "agent"
         return {
-            "trial_strategy": agent_input.formal_strategy,
-            "trial_portion": agent_input.formal_portion,
-            "train_portion": agent_input.formal_train_portion,
+            "trial_strategy": plan.trial_strategy if agent_scope else agent_input.formal_strategy,
+            "trial_portion": plan.trial_portion if agent_scope else agent_input.formal_portion,
+            "train_portion": plan.train_portion if agent_scope else agent_input.formal_train_portion,
             "eval_strategy": "snapshot",
             "eval_portion": agent_input.formal_eval_portion,
         }
@@ -1261,7 +1264,8 @@ def _apply_plan_overrides(plan: ExperimentPlan, overrides: dict[str, Any]) -> Ex
 #: fix exempted ``is_trial=False`` from the refusal, which is exactly the
 #: condition that reaches single_file, so single_file must DISCLOSE or F14's
 #: class survives there). Per ``_resolve_sample_set_cfg``: the formal branch
-#: replaces all six; the single_file branch forces ``trial_strategy`` /
+#: replaces all six in the legacy operator-owned mode, but retains the two
+#: plan training portions in opt-in agent-owned mode. The single_file branch forces ``trial_strategy`` /
 #: ``eval_strategy`` to "snapshot" and ``eval_portion`` to 1.0 while READING
 #: ``trial_portion`` / ``train_portion`` — and the mode chain's trial
 #: lockout discards an ``is_trial`` override on the way there. Trial mode
@@ -1279,8 +1283,9 @@ def _disclose_inapplicable_trial_overrides(
 
     ``_apply_plan_overrides`` prints "Plan overrides applied" for EVERY
     attempt, but the resolved mode can discard some of what was just
-    applied: a FORMAL round sources its whole workload from
-    ``agent_input.formal_*`` (plus the snapshot eval lock); a SINGLE_FILE
+    applied: a legacy FORMAL round sources its workload from
+    ``agent_input.formal_*`` (plus the snapshot eval lock), while opt-in
+    agent-owned Formal retains the two plan training portions; a SINGLE_FILE
     round forces the strategies and ``eval_portion`` while reading the
     portions. Before this disclosure, that pairing let a
     ``--trial_portion 1.0`` request train on the 10% ``formal_portion``
@@ -1291,12 +1296,23 @@ def _disclose_inapplicable_trial_overrides(
     discarded_for_mode = _DISCARDED_OVERRIDE_KEYS_BY_MODE.get(mode)
     if discarded_for_mode is None:
         return None
+    if mode == "formal" and agent_input.formal_training_scope_source == "agent":
+        discarded_for_mode = discarded_for_mode - {
+            "trial_strategy",
+            "trial_portion",
+            "train_portion",
+        }
     trial_scoped = discarded_for_mode & set(agent_input.plan_overrides or {})
     if not trial_scoped:
         return None
     if mode == "formal":
+        training_source = agent_input.formal_training_scope_source
+        strategy_source = (
+            "plan.trial_strategy" if training_source == "agent" else "formal_strategy"
+        )
         governs = (
-            f"formal workload comes from formal_strategy={agent_input.formal_strategy} "
+            f"formal workload source={training_source}; "
+            f"training_strategy_source={strategy_source} "
             f"formal_portion={agent_input.formal_portion} "
             f"formal_train_portion={agent_input.formal_train_portion} "
             f"formal_eval_portion={agent_input.formal_eval_portion} "

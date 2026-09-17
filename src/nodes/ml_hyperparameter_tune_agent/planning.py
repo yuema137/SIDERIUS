@@ -433,7 +433,24 @@ def prepare_attempt(
         # T4a — task config injection. Substituted into the
         # {TASK_DESCRIPTION} placeholder in PLANNER_PROMPT.
         # See docs/design/enable_global_task_config.md § T4a.
-        task_description=agent_input.task_description,
+        task_description=(
+            agent_input.task_description
+            + (
+                "\n\nRUN-SPECIFIC DATA/SCORE CONTRACT: Trial training strategy and fractions "
+                "(`trial_portion`, `train_portion`) and Trial validation "
+                "fraction (`eval_portion`) are your choices. Formal training "
+                "strategy and fractions also come from your validated plan's "
+                "`trial_strategy`, `trial_portion` "
+                "and `train_portion`; choose them for the Formal round. "
+                "Formal validation does not use your `eval_portion`: it is "
+                f"operator-fixed at {agent_input.formal_eval_portion:.6g} of "
+                "the declared validation scope. A valid full-scope Formal "
+                "score is the official comparable result; Trial scores are "
+                "development feedback, not the official result."
+                if agent_input.formal_training_scope_source == "agent"
+                else ""
+            )
+        ),
         # L6b — loss-registry awareness. Drives both the
         # AVAILABLE CUSTOM LOSSES system-prompt block and
         # the per-architecture loss_note advertisement of

@@ -302,6 +302,7 @@ class RunInvariants(BaseModel):
     # Omitted from the serialized lock at 1.0 (see `write_run_invariants`), so
     # every legacy and every full-eval lock file stays byte-identical.
     formal_eval_portion: float = 1.0
+    formal_training_scope_source: Literal["operator", "agent"] = "operator"
     # Workflow-owned parameter rules change the effective plan and therefore
     # the scientific treatment. Store their canonical validated JSON shape;
     # None is the unconstrained legacy state.
@@ -403,6 +404,7 @@ class RunInvariants(BaseModel):
         # `resolved_data_scope`'s sibling one axis over (see the field's
         # declaration for the five-row table and the legacy-lock consequence).
         "formal_eval_portion",
+        "formal_training_scope_source",
         "workflow_parameter_rules",
         "trial_time_admission_source",
         "formal_time_admission_source",
@@ -687,6 +689,8 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
     # the residual this accepts).
     if payload.get("formal_eval_portion") == 1.0:
         payload.pop("formal_eval_portion", None)
+    if payload.get("formal_training_scope_source") == "operator":
+        payload.pop("formal_training_scope_source", None)
     if payload.get("workflow_parameter_rules") is None:
         payload.pop("workflow_parameter_rules", None)
     if payload.get("trial_time_admission_source") is None:
@@ -849,6 +853,7 @@ class LockLaunchIdentity(BaseModel):
     #: arrive ambiently. The default is the framework's own full-eval value,
     #: so a caller that omits it gets a byte-identical lock.
     formal_eval_portion: float = 1.0
+    formal_training_scope_source: Literal["operator", "agent"] = "operator"
     workflow_parameter_rules: dict[str, Any] | None = None
     trial_time_admission_source: Literal["forecast", "measured"] | None = None
     formal_time_admission_source: Literal["forecast", "measured"] | None = None
@@ -1035,6 +1040,7 @@ def build_run_invariants(
             analysis_source_prompt_sha256=_launch_identity.analysis_source_prompt_sha256,
             # F-SCANF-1 — CANONICAL, threaded explicitly like the six above.
             formal_eval_portion=_launch_identity.formal_eval_portion,
+            formal_training_scope_source=_launch_identity.formal_training_scope_source,
             workflow_parameter_rules=_launch_identity.workflow_parameter_rules,
             trial_time_admission_source=_launch_identity.trial_time_admission_source,
             formal_time_admission_source=_launch_identity.formal_time_admission_source,

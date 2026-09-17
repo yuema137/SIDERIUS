@@ -170,9 +170,11 @@ You can choose how much data to use for each experiment:
 - **Trial mode** (`is_trial=true`): Train and evaluate on a sparse sample of segments across
   multiple files. Fast iteration — use this for early exploration when you are still searching
   for good hyperparameters. Scores are anchor-normalized and comparable across runs.
-- **Formal mode** (`is_trial=false`): Train and evaluate on the full dataset (all segments
-  across all validation files). Much slower but gives a definitive, comprehensive score.
-  Use this when you have a promising config and want to validate it.
+- **Formal mode** (`is_trial=false`): The operator's formal evaluation scope
+  determines the comparable formal score. Its training strategy and scope may
+  be either operator-fixed or chosen from your plan; see the run-specific task
+  contract.
+  Use it when you have a promising config to validate.
 
 Trial strategies (only relevant when `is_trial=true`):
 - `"snapshot"`: Sample uniformly across all validation files. Each file gets
@@ -195,7 +197,8 @@ often mean insufficient training data, not bad hyperparameters.
 
 `eval_portion` (0.01-1.0): fraction of segments per file for **validation** (inference +
 scoring). Controls score fidelity. Can match trial_portion for fast checks, or be larger
-for more reliable scores. In formal mode this is always 1.0.
+for more reliable scores. In formal mode your proposed `eval_portion` is
+replaced by the operator's formal evaluation fraction.
 
 `train_portion` (0.01-1.0): per-epoch subsample from the training scope. Default 0.1.
 Each epoch sees a different random 10% of the training scope. Over multiple epochs the
@@ -215,8 +218,8 @@ model sees diverse data without loading everything at once.
 When reviewing past experiments in Research Memory:
 - Compare `training_psd_segments` across records. The baseline typically trains on {FULL_SCOPE_SEGMENTS} segments.
   If your experiments train on 200 segments, you have 20× less data — increase trial_portion.
-- Scores from larger portions are more reliable. A formal score (eval_portion=1.0) is the most
-  definitive.
+- Scores from larger portions are more reliable. A full-scope formal score is
+  the definitive comparable result when the run enables full formal evaluation.
 
 ### AVAILABLE CUSTOM LOSSES:
 

@@ -45,6 +45,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import fields as dataclass_fields
+from typing import Literal
 
 from agent.schemas.hyperparam_tuning import (
     HealthGateMode,
@@ -140,6 +141,7 @@ class WorkflowLaunchConfig:
     vram_preflight_total_timeout_seconds: float = 900.0
     vram_preflight_host_memory_limit_gb: float | None = None
     formal_strategy: StrategyMode = "snapshot"
+    formal_training_scope_source: Literal["operator", "agent"] = "operator"
     formal_portion: float = 0.1
     formal_train_portion: float = 1.0
     formal_eval_portion: float = 1.0

@@ -182,6 +182,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["snapshot", "anchors", "target"],
         help="Training-side sampling strategy in formal mode (default: snapshot).",
     )
+    parser.add_argument(
+        "--formal_training_scope_source",
+        choices=["operator", "agent"],
+        default="operator",
+        help="Source of formal training portions; formal evaluation stays operator-owned.",
+    )
 
     # V19 PR 2 — data-ordering OVERRIDE. Ordering is agent-proposable; these
     # flags let an operator force one value for the whole chain (e.g. for a
@@ -674,6 +680,7 @@ def build_agent_input(
     # Phase M — formal-mode training levers. Always forwarded (trial or not)
     # because they apply whenever a round is promoted to formal.
     input_dict["formal_strategy"] = args.formal_strategy
+    input_dict["formal_training_scope_source"] = args.formal_training_scope_source
     input_dict["formal_portion"] = args.formal_portion
     input_dict["formal_train_portion"] = args.formal_train_portion
     input_dict["formal_eval_portion"] = args.formal_eval_portion

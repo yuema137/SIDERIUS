@@ -70,6 +70,7 @@ their own artifact path.
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `formal_strategy` | `Literal["snapshot", "anchors", "target"]` | No | `"snapshot"` | Training-side sampling strategy in formal mode. Overrides the planner's `trial_strategy` on any round promoted to formal. |
+| `formal_training_scope_source` | `Literal["operator", "agent"]` | No | `"operator"` | Generic ownership switch for Formal training strategy and portions. `operator` uses the `formal_*` fields; `agent` uses the validated plan's `trial_strategy`, `trial_portion`, and `train_portion`. It never changes Formal evaluation ownership. |
 | `formal_portion` | `float` | No | `0.1` | Fraction of segments per file for training scope in formal mode. |
 | `formal_train_portion` | `float` | No | `1.0` | Per-epoch iteration fraction from the formal training scope. |
 | `formal_eval_portion` | `float` | No | `1.0` | Fraction of segments per file used for formal-mode eval scope (`snapshot` strategy). Default `1.0` reproduces the legacy full-clone behavior. |

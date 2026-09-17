@@ -1176,6 +1176,7 @@ class HyperparamTuningAgent:
             # from committed data (never from current defaults). Legacy
             # run_configs without these keys correctly resolve to null.
             "formal_strategy": agent_input.formal_strategy,
+            "formal_training_scope_source": agent_input.formal_training_scope_source,
             "formal_eval_portion": agent_input.formal_eval_portion,
             # V19 PR 2 — the run's ordering CONTROL POLICY (the operator
             # override, or null for none). Per-round RESOLVED ordering is
