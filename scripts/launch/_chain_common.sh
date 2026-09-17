@@ -260,6 +260,9 @@ FORCE_FORMAL_ROUND=1
 # than inherited from a YAML default. Closes the same bash-wrapper gap as
 # --no-force_formal_round, originally surfaced during loss-inventory Gate 3.
 ML_LIT_REVIEW_ENABLED=""
+# Explicit task-composed Data Analysis override. Empty preserves the task
+# composition; 1 and 0 forward the corresponding existing Python CLI flags.
+DATA_ANALYSIS_ENABLED=""
 # Optional task-owned literature-review config. Empty preserves the child's
 # historical default; a supplied path is transported unchanged.
 ML_LIT_REVIEW_CONFIG=""
@@ -370,6 +373,8 @@ parse_chain_args() {
         --no-force_formal_round)  FORCE_FORMAL_ROUND=0; shift ;;
         --ml_lit_review_enabled)     ML_LIT_REVIEW_ENABLED=1; shift ;;
         --no-ml_lit_review_enabled)  ML_LIT_REVIEW_ENABLED=0; shift ;;
+        --data_analysis_enabled)     DATA_ANALYSIS_ENABLED=1; shift ;;
+        --no-data_analysis_enabled)  DATA_ANALYSIS_ENABLED=0; shift ;;
         --ml_lit_review_config)      ML_LIT_REVIEW_CONFIG="$2"; shift 2 ;;
         --scientific_evidence_order)
             case "${2:-}" in
@@ -707,6 +712,11 @@ build_app_args() {
     fi
     if [ -n "$ML_LIT_REVIEW_CONFIG" ]; then
         APP_ARGS+=(--ml_lit_review_config "$ML_LIT_REVIEW_CONFIG")
+    fi
+    if [ "$DATA_ANALYSIS_ENABLED" = "1" ]; then
+        APP_ARGS+=(--data_analysis_enabled)
+    elif [ "$DATA_ANALYSIS_ENABLED" = "0" ]; then
+        APP_ARGS+=(--no-data_analysis_enabled)
     fi
     if [ "$SCIENTIFIC_EVIDENCE_ORDER" != "analysis_then_literature" ]; then
         APP_ARGS+=(--scientific_evidence_order "$SCIENTIFIC_EVIDENCE_ORDER")

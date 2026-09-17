@@ -560,6 +560,19 @@ class TestDryRunSmoke:
         assert rc != 0
         assert "Invalid --scientific_evidence_order" in stderr
 
+    @pytest.mark.parametrize(
+        "override",
+        (None, "--data_analysis_enabled", "--no-data_analysis_enabled"),
+    )
+    def test_data_analysis_override_reaches_iteration(self, workspace, seed_path, override):
+        """The chain must retain explicit ON/OFF rather than composition fallback."""
+        flags = () if override is None else (override,)
+        rc, stdout, stderr = _run_dry("lilab", workspace, 1, seed_path, *flags)
+        assert rc == 0, stderr
+        command = stdout.split("[DRY-RUN] would exec", 1)[1]
+        for flag in ("--data_analysis_enabled", "--no-data_analysis_enabled"):
+            assert (flag in command) is (flag == override)
+
     def test_sdsc_emits_afterany_dependency_for_iter_two_and_three(self, workspace, seed_path):
         rc, stdout, stderr = _run_dry("sdsc", workspace, 3, seed_path)
         assert rc == 0, f"non-zero exit: stdout={stdout!r}\nstderr={stderr!r}"
