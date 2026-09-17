@@ -90,7 +90,10 @@ class _Capability:
 class _Bridge:
     def __init__(self, *, analysis_input: DataAnalysisInput, **_kwargs) -> None:
         self.inp = analysis_input
-        self.discovery = discover_skills(analysis_input.allowed_skill_packs)
+        self.discovery = discover_skills(
+            analysis_input.allowed_skill_packs,
+            generated_skill_registry=analysis_input.generated_skill_registry,
+        )
 
     def generate(self, _system, _user, *, label):
         if label == "data_analysis.skill_selection":
@@ -455,6 +458,7 @@ class _PromotingGeneratedProgramBridge(_GeneratedProgramBridge):
     def generate(self, system, user, *, label):
         if label == "data_analysis.generated_skill_promotion":
             self.calls.append(label)
+            self.promotion_prompt = (system, user)
             return {
                 "promotions": [
                     {
@@ -775,6 +779,10 @@ def test_generated_program_promotes_then_reuses_exact_local_skill(tmp_path: Path
     registry_ref = first_report.provenance.generated_skill_registry
     assert registry_ref is not None
     assert "data_analysis.generated_skill_promotion" in first_bridge.calls
+    promotion_system, promotion_user = first_bridge.promotion_prompt
+    assert "generic scientific operation" in promotion_system
+    assert '"source_code"' in promotion_user
+    assert "def analyze(inputs, parameters, output_directory):" in promotion_user
 
     second_payload = first_input.model_dump(mode="json")
     second_payload.update(
@@ -924,6 +932,7 @@ def test_plan_repair_may_only_delete_illegal_nonmetadata_fields(tmp_path: Path) 
     )
     assert "that does not make target valid for a data-only slot" in plan_prompt
     assert "Use a declared target-capable slot if the question needs target evidence" in plan_prompt
+    assert 'determinism="deterministic" must omit seed' in plan_prompt
 
     receipt_path = (
         tmp_path / "data_analysis" / "standalone" / "request" / "structured_output_receipts.jsonl"
@@ -935,6 +944,56 @@ def test_plan_repair_may_only_delete_illegal_nonmetadata_fields(tmp_path: Path) 
     assert plan_receipt["repair_attempted"] is True
     assert plan_receipt["repair_passed"] is True
     assert plan_receipt["llm_call_count"] == 2
+
+
+def test_plan_repair_may_drop_only_a_forbidden_deterministic_inference_seed() -> None:
+    """The real round-2 seed error is representational, not permission to replan."""
+
+    original = {
+        "invocations": [
+            {
+                "invocation_id": "measure-prior-model",
+                "bindings": [
+                    {
+                        "asset_id": "trained-model-a",
+                        "information_class": "prediction",
+                        "inference_configuration": {
+                            "batch_size": 8,
+                            "device": "cpu",
+                            "determinism": "deterministic",
+                            "seed": 0,
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+    repaired = copy.deepcopy(original)
+    del repaired["invocations"][0]["bindings"][0]["inference_configuration"]["seed"]
+    assert DataAnalysisAgent._plan_semantics(original) == DataAnalysisAgent._plan_semantics(
+        repaired
+    )
+
+    changed = copy.deepcopy(repaired)
+    changed["invocations"][0]["bindings"][0]["inference_configuration"]["determinism"] = (
+        "stochastic_seeded"
+    )
+    changed["invocations"][0]["bindings"][0]["inference_configuration"]["seed"] = 0
+    assert DataAnalysisAgent._plan_semantics(original) != DataAnalysisAgent._plan_semantics(changed)
+
+    changed = copy.deepcopy(repaired)
+    changed["invocations"][0]["bindings"][0]["inference_configuration"]["batch_size"] = 16
+    assert DataAnalysisAgent._plan_semantics(original) != DataAnalysisAgent._plan_semantics(changed)
+
+    parameter_change = copy.deepcopy(repaired)
+    parameter_change["invocations"][0]["arguments"] = {
+        "inference_configuration": {"determinism": "deterministic", "seed": 0}
+    }
+    without_parameter_seed = copy.deepcopy(parameter_change)
+    del without_parameter_seed["invocations"][0]["arguments"]["inference_configuration"]["seed"]
+    assert DataAnalysisAgent._plan_semantics(parameter_change) != DataAnalysisAgent._plan_semantics(
+        without_parameter_seed
+    )
 
 
 @pytest.mark.parametrize(

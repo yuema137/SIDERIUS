@@ -15,6 +15,7 @@ from agent.data_analysis.generated_programs import GeneratedProgramDraft, persis
 from agent.data_analysis.generated_skill_registry import (
     GeneratedSkillRegistryError,
     generated_parameter_json_schema,
+    import_generated_skill_registry_snapshot,
     load_generated_skill_registry,
     promote_generated_program,
 )
@@ -29,9 +30,9 @@ from agent.schemas.data_analysis.generated_skill import GeneratedSkillPromotionD
 from agent.schemas.data_analysis.skills import SkillInputSlot, SkillResult
 
 
-def _persist_program(root: Path):
+def _persist_program(root: Path, *, program_id: str = "permutation-entropy"):
     draft = GeneratedProgramDraft(
-        program_id="permutation-entropy",
+        program_id=program_id,
         question_ids=("q-nonlinear",),
         source_code=(
             "def analyze(inputs, parameters, output_directory):\n"
@@ -76,10 +77,12 @@ def _persist_program(root: Path):
     )
 
 
-def _promotion_draft() -> GeneratedSkillPromotionDraft:
+def _promotion_draft(
+    *, program_id: str = "permutation-entropy", skill_id: str = "permutation_entropy_summary"
+) -> GeneratedSkillPromotionDraft:
     return GeneratedSkillPromotionDraft(
-        program_id="permutation-entropy",
-        skill_id="permutation_entropy_summary",
+        program_id=program_id,
+        skill_id=skill_id,
         title="Permutation entropy summary",
         one_line_description="Measures ordinal-pattern complexity in an authorized time series.",
         keywords=("ordinal", "complexity", "nonlinear"),
@@ -121,6 +124,53 @@ def test_promotion_is_explicit_run_scoped_and_discoverable(tmp_path: Path) -> No
         "generated-experiment.run-a-generated-skills.permutation_entropy_summary",
     )
     assert search_skill_cards(snapshot, "ordinal complexity", limit=3) == snapshot.skills
+
+
+def test_prior_registry_import_allows_new_promotion_without_mutating_prior(tmp_path: Path) -> None:
+    """A later iteration retains the old skill while publishing a new snapshot."""
+
+    source_root = tmp_path / "request-1"
+    program, identity = _persist_program(source_root)
+    prior_root = tmp_path / "iter-1" / "generated_skill_registry"
+    prior, prior_ref = promote_generated_program(
+        source_root=source_root,
+        registry_root=prior_root,
+        registry_id="chain-generated-skills",
+        existing=None,
+        program=program,
+        program_identity=identity,
+        draft=_promotion_draft(),
+        originating_request_id="request-1",
+        originating_result_id="result-1",
+    )
+    next_root = tmp_path / "iter-2" / "generated_skill_registry"
+    imported = import_generated_skill_registry_snapshot(prior_ref, destination_root=next_root)
+
+    next_source = tmp_path / "request-2"
+    next_program, next_identity = _persist_program(next_source, program_id="alternate-entropy")
+    updated, updated_ref = promote_generated_program(
+        source_root=next_source,
+        registry_root=next_root,
+        registry_id=imported.registry_id,
+        existing=imported,
+        program=next_program,
+        program_identity=next_identity,
+        draft=_promotion_draft(
+            program_id="alternate-entropy", skill_id="alternate_entropy_summary"
+        ),
+        originating_request_id="request-2",
+        originating_result_id="result-2",
+    )
+
+    assert imported == prior
+    copied_program = next_root / program.source_ref.logical_ref
+    assert copied_program.read_bytes() == (prior_root / program.source_ref.logical_ref).read_bytes()
+    assert load_generated_skill_registry(prior_ref) == prior
+    assert load_generated_skill_registry(updated_ref) == updated
+    assert {item.skill_identity.skill_id for item in updated.skills} == {
+        "permutation_entropy_summary",
+        "alternate_entropy_summary",
+    }
 
 
 def test_promoted_optional_null_parameter_schema_matches_executor_semantics() -> None:

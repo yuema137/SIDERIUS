@@ -182,6 +182,31 @@ def _copy_program_into_registry(
     )
 
 
+def import_generated_skill_registry_snapshot(
+    ref: GeneratedExperimentSkillRegistryRef, *, destination_root: Path
+) -> GeneratedExperimentSkillRegistry:
+    """Copy only verified executable content into this analysis run's registry.
+
+    The prior manifest is an immutable input, not a writable shared registry.
+    A later promotion will publish a new snapshot under ``destination_root``;
+    an unchanged toolbox continues to use its original exact ref.
+    """
+
+    registry = load_generated_skill_registry(ref)
+    source_root = Path(ref.registry_root)
+    for skill in registry.skills:
+        program, _source = load_generated_program(root=source_root, identity=skill.program_identity)
+        copied_ref = _copy_program_into_registry(
+            source_root=source_root,
+            registry_root=destination_root,
+            program=program,
+            identity=skill.program_identity,
+        )
+        if copied_ref != skill.program_declaration_ref:
+            raise GeneratedSkillRegistryError("imported program declaration identity changed")
+    return registry
+
+
 def promote_generated_program(
     *,
     source_root: Path,

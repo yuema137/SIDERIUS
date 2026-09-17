@@ -18,7 +18,9 @@ from agent.data_analysis.discovery import (
 )
 from agent.data_analysis.executor import resolve_skill_interface
 from agent.data_analysis.generated_program_planning import prepare_generated_program
+from agent.data_analysis.generated_programs import load_generated_program
 from agent.data_analysis.generated_skill_registry import (
+    import_generated_skill_registry_snapshot,
     load_generated_skill_registry,
     promote_generated_program,
 )
@@ -177,24 +179,38 @@ class DataAnalysisAgent:
         if not isinstance(value, dict) or not isinstance(value.get("invocations"), list):
             return None
 
-        def without_non_authoritative_fields(item: object) -> object:
+        def without_non_authoritative_fields(item: object, *, path: tuple[str, ...] = ()) -> object:
             if isinstance(item, dict):
                 information_class = item.get("information_class")
                 return {
-                    key: without_non_authoritative_fields(child)
+                    key: without_non_authoritative_fields(child, path=(*path, key))
                     for key, child in item.items()
                     if not (
                         key == "fields"
                         and information_class
                         in {"identity", "data", "target", "prediction", "residual"}
                     )
+                    and not (
+                        path
+                        == (
+                            "invocations",
+                            "[]",
+                            "bindings",
+                            "[]",
+                            "inference_configuration",
+                        )
+                        and key == "seed"
+                        and item.get("determinism", "deterministic") == "deterministic"
+                    )
                 }
             if isinstance(item, list):
-                return [without_non_authoritative_fields(child) for child in item]
+                return [
+                    without_non_authoritative_fields(child, path=(*path, "[]")) for child in item
+                ]
             return item
 
         return {
-            key: without_non_authoritative_fields(item)
+            key: without_non_authoritative_fields(item, path=(key,))
             for key, item in value.items()
             if key != "rationale"
         }
@@ -601,15 +617,35 @@ class DataAnalysisAgent:
         programs = {
             program.program_id: (program, identity) for program, identity in generated_programs
         }
-        promotable = sorted(set(completed) & set(programs))
+        # Large sources remain valid one-off programs, but cannot be reviewed
+        # in full by this bounded promotion stage. Never promote from a
+        # truncated source preview.
+        max_review_source_bytes = 24 * 1024
+        promotable = sorted(
+            program_id
+            for program_id in set(completed) & set(programs)
+            if programs[program_id][0].source_ref.byte_size is not None
+            and programs[program_id][0].source_ref.byte_size <= max_review_source_bytes
+        )
         if not promotable:
             return current_ref
+        reviewed_sources = {}
+        for program_id in promotable:
+            program, identity = programs[program_id]
+            persisted, source_path = load_generated_program(root=store.root, identity=identity)
+            if persisted != program:
+                raise ValueError("promotion source differs from its immutable declaration")
+            reviewed_sources[program_id] = source_path.read_text(encoding="utf-8")
         system, user = render_generated_skill_promotion_prompt(
             inp,
             completed_programs=[
                 {
                     "program_id": program_id,
                     "program_identity": programs[program_id][1].model_dump(mode="json"),
+                    "declaration": programs[program_id][0].model_dump(
+                        mode="json", exclude={"generation_provenance"}
+                    ),
+                    "source_code": reviewed_sources[program_id],
                     "summary": completed[program_id].summary,
                     "quantitative_result_keys": [
                         item.result_key for item in completed[program_id].quantitative_results
@@ -633,14 +669,18 @@ class DataAnalysisAgent:
         if not {item.program_id for item in decision.promotions}.issubset(promotable):
             raise ValueError("promotion decision references a non-completed generated program")
         registry_root = store.generated_skill_registry_root
-        if (
-            current_ref is not None
-            and Path(current_ref.registry_root).resolve() != registry_root.resolve()
-        ):
-            raise ValueError("promotion cannot write outside this analysis run's registry")
-        existing = None if current_ref is None else load_generated_skill_registry(current_ref)
+        if current_ref is None:
+            existing = None
+        elif Path(current_ref.registry_root).resolve() == registry_root.resolve():
+            existing = load_generated_skill_registry(current_ref)
+        else:
+            existing = import_generated_skill_registry_snapshot(
+                current_ref, destination_root=registry_root
+            )
         registry_id = (
-            f"generated-skills-{canonical_sha256({'run_name': inp.storage.local.run_name})}"
+            existing.registry_id
+            if existing is not None
+            else f"generated-skills-{canonical_sha256({'run_name': inp.storage.local.run_name})}"
         )
         updated_ref = current_ref
         for draft in decision.promotions:

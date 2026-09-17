@@ -367,7 +367,7 @@ def test_generated_program_rejects_unloadable_view_format_before_plan_or_resume(
 
 
 def test_generated_program_prompt_names_the_exact_supported_view_abis() -> None:
-    """The generator must not have to guess the time-series format spelling."""
+    """The generator must not guess view names or treat read-only mappings as missing."""
 
     scope = SimpleNamespace(mode="auto")
     analysis_input = SimpleNamespace(
@@ -388,6 +388,8 @@ def test_generated_program_prompt_names_the_exact_supported_view_abis() -> None:
     assert "siderius.numeric-array.v1" in system
     assert "siderius.timeseries-array.v1" in system
     assert "siderius.time-series-array.v1" not in system
+    assert "collections.abc.Mapping" in system
+    assert "never use `isinstance(value, dict)`" in system
 
 
 def test_deterministic_seed_is_rejected_at_draft_boundary_before_persistence() -> None:

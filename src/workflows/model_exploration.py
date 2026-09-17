@@ -70,6 +70,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import psutil as _psutil
@@ -78,11 +79,13 @@ import yaml
 if TYPE_CHECKING:
     from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
     from workflows.data_analysis_composition import ResolvedWorkflowDataAnalysis
+    from workflows.data_analysis_stage import WorkflowAnalysisOutput
     from workflows.historical_analysis_assets import HistoricalTuningSource
 
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
 from agent.prompt_templates.proposal.task_blocks import load_proposal_task_blocks
+from agent.schemas.data_analysis.generated_skill import GeneratedExperimentSkillRegistryRef
 from agent.schemas.external_agents import ExternalAgentOutput
 from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import (
@@ -1765,6 +1768,34 @@ def _task_composition_fingerprint_for_analysis(bindings) -> str | None:
     return composition.semantic_fingerprint if composition is not None else None
 
 
+def _restore_composed_generated_skill_registry(
+    binding: "ResolvedWorkflowDataAnalysis | None",
+    restored_state: RestoredState | None,
+    workspace: str,
+) -> GeneratedExperimentSkillRegistryRef | None:
+    """Rebuild the typed local-skill edge from committed prior output only."""
+
+    if binding is None or restored_state is None:
+        return None
+    from workflows.data_analysis_stage import restore_prior_generated_skill_registry
+
+    return restore_prior_generated_skill_registry(
+        workspace=Path(workspace),
+        committed_iterations=tuple(restored_state.committed_iters),
+    )
+
+
+def _carry_composed_generated_skill_registry(
+    current_ref: GeneratedExperimentSkillRegistryRef | None,
+    analysis_output: "WorkflowAnalysisOutput | None",
+) -> GeneratedExperimentSkillRegistryRef | None:
+    """Carry a new immutable registry snapshot without dropping an older one."""
+
+    if analysis_output is None:
+        return current_ref
+    return analysis_output.report.provenance.generated_skill_registry or current_ref
+
+
 def _run_composed_data_analysis(
     interpretation,
     *,
@@ -1782,6 +1813,7 @@ def _run_composed_data_analysis(
     task_composition_fingerprint: str | None = None,
     chain_workspace: str | None = None,
     literature_output=None,
+    generated_skill_registry=None,
 ):
     """Run and log the optional analysis phase outside the core orchestrator.
 
@@ -1811,6 +1843,7 @@ def _run_composed_data_analysis(
         task_composition_fingerprint=task_composition_fingerprint,
         chain_workspace=chain_workspace,
         literature_output=literature_output,
+        generated_skill_registry=generated_skill_registry,
     )
     if output is not None:
         print(
@@ -2275,6 +2308,9 @@ def run_workflow(
             "Must provide either source_paths OR (data_dir + model_types + source_run_name)."
         )
     _analysis_binding = _resolve_analysis_binding(task_composition, launch.data_analysis_enabled)
+    generated_skill_registry_ref = _restore_composed_generated_skill_registry(
+        _analysis_binding, restored_state, workspace
+    )
     historical_sources = _initial_historical_sources_for_analysis(
         _analysis_binding, tuning_outputs, launch.source_paths
     )
@@ -2757,6 +2793,7 @@ def run_workflow(
             _interpretation=interpretation,
             _iteration=iteration,
             _storage=interp_storage,
+            _generated_skill_registry=generated_skill_registry_ref,
         ):
             return _run_composed_data_analysis(
                 _interpretation,
@@ -2774,6 +2811,7 @@ def run_workflow(
                 task_composition_fingerprint=_task_composition_fingerprint_for_analysis(bindings),
                 chain_workspace=bindings.workspace,
                 literature_output=literature_output,
+                generated_skill_registry=_generated_skill_registry,
             )
 
         def _run_literature_for_evidence(
@@ -2830,6 +2868,9 @@ def run_workflow(
             run_literature=_run_literature_for_evidence,
         )
         analysis_output = evidence_stage.analysis_output
+        generated_skill_registry_ref = _carry_composed_generated_skill_registry(
+            generated_skill_registry_ref, analysis_output
+        )
         lit_output = evidence_stage.literature_output
         # Other external agents retain the generic four-channel path. Literature
         # Review now reaches Proposal through its own typed projection below.

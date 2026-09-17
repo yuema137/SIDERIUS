@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -71,7 +72,18 @@ class _ModelInputCapability:
 
 
 class _PredictionBridge(_GeneratedProgramBridge):
+    def __init__(self, *, repair_seed: bool = False, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.repair_seed = repair_seed
+        self.initial_plan = None
+
     def generate(self, system, user, *, label):
+        if label == "data_analysis.plan.repair":
+            self.calls.append(label)
+            assert self.initial_plan is not None
+            repaired = copy.deepcopy(self.initial_plan)
+            del repaired["invocations"][0]["bindings"][0]["inference_configuration"]["seed"]
+            return repaired
         if label == "data_analysis.generated_program":
             draft = super().generate(system, user, label=label)
             draft["program_id"] = "historical-prediction-mean"
@@ -134,6 +146,11 @@ class _PredictionBridge(_GeneratedProgramBridge):
                 }
             ]
             invocation["sampling_plan"]["policy"]["max_items"] = 2
+            if self.repair_seed:
+                invocation["bindings"][0]["inference_configuration"].update(
+                    determinism="deterministic", seed=0
+                )
+                self.initial_plan = copy.deepcopy(plan)
             return plan
         if label == "data_analysis.synthesis":
             self.calls.append(label)
@@ -167,7 +184,10 @@ class _PredictionBridge(_GeneratedProgramBridge):
 
 
 @pytest.mark.allow_real_subprocess
-def test_generated_program_consumes_only_certified_transient_predictions(tmp_path: Path) -> None:
+@pytest.mark.parametrize("repair_seed", (False, True))
+def test_generated_program_consumes_only_certified_transient_predictions(
+    tmp_path: Path, repair_seed: bool
+) -> None:
     probe = AnalysisCodeSandbox().probe()
     if not probe.available:
         pytest.skip(f"host cannot enforce sandbox: {probe.reason}")
@@ -201,7 +221,7 @@ def test_generated_program_consumes_only_certified_transient_predictions(tmp_pat
     payload["resource_envelope"]["wall_time_budget_s"] = 90
     payload["resource_envelope"]["per_skill_timeout_s"] = 45
     inp = DataAnalysisInput.model_validate(payload)
-    bridge = _PredictionBridge(analysis_input=inp)
+    bridge = _PredictionBridge(analysis_input=inp, repair_seed=repair_seed)
     agent = DataAnalysisAgent(
         task_analysis_capability=_ModelInputCapability(
             Path(runtime_inputs.paths[0].path).read_bytes()
@@ -217,6 +237,8 @@ def test_generated_program_consumes_only_certified_transient_predictions(tmp_pat
     assert report.skill_result_summaries[0].status == "completed"
     assert report.skill_result_summaries[0].key_quantitative_results[0].value == 1.5
     assert report.findings[0].method_generated_program_ids == ("historical-prediction-mean",)
+    assert report.source_scope == inp.effective_source_scope()
+    assert set(report.assets_inspected) == {"dataset", "historical-model"}
     root = tmp_path / "data_analysis" / "standalone" / "request"
     inference_receipts = [
         json.loads(line) for line in (root / "inference_receipts.jsonl").read_text().splitlines()
@@ -230,5 +252,14 @@ def test_generated_program_consumes_only_certified_transient_predictions(tmp_pat
     ]
     assert len(retention) == 1
     assert retention[0]["status"] == "retired"
+    if repair_seed:
+        receipts = [
+            json.loads(line)
+            for line in (root / "structured_output_receipts.jsonl").read_text().splitlines()
+        ]
+        plan_receipt = next(item for item in receipts if item["stage"] == "data_analysis.plan")
+        assert plan_receipt["initial_validation_passed"] is False
+        assert plan_receipt["repair_attempted"] is True
+        assert plan_receipt["repair_passed"] is True
     assert agent.run(inp) == report
     assert bridge.calls.count("data_analysis.generated_program") == 1

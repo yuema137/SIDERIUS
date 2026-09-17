@@ -130,15 +130,21 @@ directories are removed after the bounded worker exits.
 Promoted skill source/declarations and immutable registry manifests live below
 `{workspace}/data_analysis/{run_name}/generated_skill_registry/`; the next
 request sees them only when its typed input carries the exact registry ref
-returned in report provenance.
+returned in the prior report's provenance. The fixed workflow restores that ref only from an
+explicitly committed prior iteration in the same chain workspace, verifies its
+content, and passes it through the Interpreter-to-Analysis typed adapter.
+An additional promotion copies verified prior program content into the new
+iteration's registry before publishing a new immutable snapshot; it never
+mutates the prior registry. Standalone callers may pass the same typed ref
+directly.
 
 ## Key behavioral notes
 
 - Discovery reads manifests only. Selected implementations are imported in a bounded worker after interface resolution.
 - Reference/configured skills are preferred when they cleanly answer a question. A real toolbox gap may instead trigger a separate source-generation stage. That stage validates and persists one immutable `GeneratedAnalysisProgram`; only then may the final `AnalysisPlan` reference its exact `GeneratedProgramIdentity`. Resume never regenerates equivalent source.
 - `AnalysisPlan.invocations` is a discriminated union of trusted skill invocations, already-persisted one-off generated-program invocations, and discovered generated-experiment-skill invocations. Pre-union persisted skill wire forms remain readable.
-- Promotion is optional and explicit. A bounded structured decision may add a completed program to an immutable run-scoped registry. The resulting local skill exposes a normal `SkillCard`, `SkillDeclaration`, and resolved parameter interface, but its exact originating program identity remains the execution authority. No directory scanning or mutable global registry is used.
-- Planning keeps `RequestedInformation` strict: only `metadata` may name explicit `fields`; `data`, `target`, `prediction`, `residual`, and `identity` use no fields. Each binding must include its selected input slot's required information and may add only that slot's declared optional information or validated invocation-selected metadata. Split-level target visibility does not make target valid for a data-only slot. One bounded repair may delete an illegal non-metadata `fields` value because it carries no access authority, but it may not change the information class, metadata field identity, binding, format, sampling, parameters, or other plan semantics.
+- Promotion is optional and explicit. A bounded structured decision may add a completed program to an immutable run-scoped registry. The decision sees the exact verified declaration and complete source (at most 24 KiB); larger programs remain one-off rather than being promoted from a truncated preview. The review asks whether the operation is generic across unrelated datasets, not merely useful again on the present task. This is an LLM judgment, not proof of scientific correctness. The resulting local skill exposes a normal `SkillCard`, `SkillDeclaration`, and resolved parameter interface, but its exact originating program identity remains the execution authority. No directory scanning or mutable global registry is used.
+- Planning keeps `RequestedInformation` strict: only `metadata` may name explicit `fields`; `data`, `target`, `prediction`, `residual`, and `identity` use no fields. Each binding must include its selected input slot's required information and may add only that slot's declared optional information or validated invocation-selected metadata. Split-level target visibility does not make target valid for a data-only slot. One bounded repair may delete an illegal non-metadata `fields` value because it carries no access authority. It may also remove a forbidden seed from deterministic historical inference; a stochastic seed, determinism posture, model, binding, format, sampling, parameters, and other plan semantics remain protected.
 - A skill receives only already-authorized `MaterializedAnalysisView` content and cannot resolve asset IDs or scan the workspace.
 - A generated program receives the same authorized materializations through a narrow JSON/NPZ runner ABI. It proposes a bounded `SkillPayload`; the trusted parent validates measurement semantics, certifies effective coverage and artifacts, records resources, and constructs the canonical result. Source code is never itself scientific evidence.
 - The generated-program v1 runner accepts exactly `siderius.numeric-array.v1` and `siderius.timeseries-array.v1`. Its declaration is validated against those exact IDs before persistence and final planning; the task materializer may still refuse a request, which becomes a typed failed invocation rather than changing formats or aborting the workflow.

@@ -11,6 +11,7 @@ from agent.schemas.data_analysis.context import (
     PriorEvidenceRef,
     SkillPackRef,
 )
+from agent.schemas.data_analysis.generated_skill import GeneratedExperimentSkillRegistryRef
 from agent.schemas.data_analysis.resources import AnalysisResourceEnvelope
 from agent.schemas.data_analysis.source_scope import DeclaredAnalysisScope
 from agent.schemas.interpretation import InterpretationOutput
@@ -34,6 +35,7 @@ def local_analysis_input(
     storage: StorageConfig,
     caller: CallerIdentity,
     prior_evidence: tuple[PriorEvidenceRef, ...] = (),
+    generated_skill_registry: GeneratedExperimentSkillRegistryRef | None = None,
     human_advice: str | None = None,
     allow_generated_skill_promotion: bool = False,
     retain_model_outputs: bool = False,
@@ -55,6 +57,7 @@ def local_analysis_input(
         available_assets=available_assets,
         declared_scope=declared_scope,
         prior_evidence=prior_evidence,
+        generated_skill_registry=generated_skill_registry,
         access_policy=access_policy,
         resource_envelope=resource_envelope,
         allowed_skill_packs=allowed_skill_packs,

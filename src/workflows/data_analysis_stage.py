@@ -6,8 +6,11 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent.data_analysis.generated_skill_registry import load_generated_skill_registry
+from agent.data_analysis.persistence import AnalysisRunStore
 from agent.data_analysis.source_scope import apply_source_prompt
 from agent.schemas.data_analysis.common import CallerIdentity, CertifiedArtifactRef
+from agent.schemas.data_analysis.generated_skill import GeneratedExperimentSkillRegistryRef
 from agent.schemas.data_analysis.report import DataAnalysisReport
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.literature_review import LiteratureReviewOutput
@@ -17,7 +20,7 @@ from agent.schemas.protocols.interpreter_to_data_analysis import (
     MissingAnalysisBriefError,
     local_analysis_input,
 )
-from agent.schemas.storage import StorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.historical_model_inference import (
     HistoricalModelInferenceCapability,
     LocalPytorchHistoricalModelInferenceCapability,
@@ -43,6 +46,61 @@ class WorkflowAnalysisOutput:
     report_ref: CertifiedArtifactRef
 
 
+def restore_prior_generated_skill_registry(
+    *, workspace: Path, committed_iterations: tuple[int, ...]
+) -> GeneratedExperimentSkillRegistryRef | None:
+    """Restore the latest exact local toolbox from committed workflow output.
+
+    This is a process-boundary resume adapter, not a node reading another
+    node's storage as a communication channel. Only the caller-certified
+    committed iteration list is examined; the registry itself remains
+    content-addressed and confined to this chain workspace.
+    """
+
+    workspace = workspace.resolve()
+    for iteration in reversed(committed_iterations):
+        run_name = f"iter_{iteration:03d}"
+        store = AnalysisRunStore(
+            StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(
+                    workspace=str(workspace / run_name / f"iteration_{iteration:03d}"),
+                    run_name=run_name,
+                ),
+            ),
+            request_id=f"iteration-{iteration:03d}",
+        )
+        report_path = store.root / "report.json"
+        if not report_path.exists():
+            continue
+        if (
+            not report_path.is_file()
+            or not report_path.resolve().is_relative_to(workspace)
+            or any(
+                part.is_symlink()
+                for part in (report_path, *report_path.parents)
+                if part != workspace and part.is_relative_to(workspace)
+            )
+        ):
+            raise ValueError("prior Data Analysis report is not a regular file")
+        report = DataAnalysisReport.model_validate_json(report_path.read_bytes())
+        if report.report_id != f"iteration-{iteration:03d}.report":
+            raise ValueError("prior Data Analysis report has the wrong iteration identity")
+        ref = report.provenance.generated_skill_registry
+        if ref is None:
+            continue
+        expected_root = store.generated_skill_registry_root
+        if (
+            expected_root.is_symlink()
+            or not expected_root.resolve().is_relative_to(workspace)
+            or Path(ref.registry_root).resolve() != expected_root.resolve()
+        ):
+            raise ValueError("prior generated skill registry escapes its committed iteration")
+        load_generated_skill_registry(ref)
+        return ref
+    return None
+
+
 def run_optional_data_analysis(
     interpretation: InterpretationOutput,
     *,
@@ -61,6 +119,7 @@ def run_optional_data_analysis(
     task_composition_fingerprint: str | None = None,
     chain_workspace: str | None = None,
     literature_output: LiteratureReviewOutput | None = None,
+    generated_skill_registry: GeneratedExperimentSkillRegistryRef | None = None,
 ) -> WorkflowAnalysisOutput | None:
     """Run the independent capability only when the composition enables its edge.
 
@@ -119,6 +178,7 @@ def run_optional_data_analysis(
             ),
             human_advice=human_advice,
             allow_generated_skill_promotion=binding.allow_generated_skill_promotion,
+            generated_skill_registry=generated_skill_registry,
             retain_model_outputs=retain_model_outputs,
         )
     except MissingAnalysisBriefError:

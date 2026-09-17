@@ -132,6 +132,9 @@ For historical-model predictions, bind the trained-model asset with operation="i
 only to a declared predictions slot. Its requested_information must be exactly
 [{"information_class":"prediction","fields":[]}], with one explicit inference_inputs
 binding for the authorized raw model input and the model's declared input format/information.
+HistoricalInferenceConfiguration with determinism="deterministic" must omit seed or set it to
+null; a numeric seed is valid only for determinism="stochastic_seeded". Do not add seed=0 to a
+deterministic model just because other analysis actions use a sampling seed.
 This also applies to generated programs and generated experiment skills: trusted inference
 produces a certified prediction view before untrusted analysis code runs. Generated code must
 not load or execute the model itself. At most one inference binding is supported per generated
@@ -216,6 +219,10 @@ schema. Source must define exactly:
     def analyze(inputs, parameters, output_directory): ...
 
 `inputs` maps final-plan binding IDs to read-only objects with `descriptor` and `arrays` mappings.
+These mappings are read-only Mapping objects, not necessarily built-in dicts. Use mapping
+operations (`obj["descriptor"]`, `descriptor["slot_id"]`, `arrays.get(...)`) or
+`isinstance(value, collections.abc.Mapping)`; never use `isinstance(value, dict)` to decide
+whether an authorized binding, descriptor, or array exists.
 Binding IDs are chosen after source generation and need not equal declared slot IDs. Never
 hard-code a binding ID or look up `inputs[slot_id]`; locate inputs by the certified
 `descriptor["slot_id"]`, and support the declared slot cardinality. `arrays`
@@ -342,7 +349,12 @@ def render_generated_skill_promotion_prompt(
     """Ask for an explicit reuse decision; promotion never changes code."""
 
     system = """Decide whether any successfully executed one-off generated analysis program is
-likely to be reused later in this same experiment. Promotion only adds a discoverable SkillCard;
+a generic scientific operation plausibly reusable across unrelated datasets and later iterations.
+One-off analysis may be task-specific; promotion must not disguise task-specific source with a
+generic SkillCard. Inspect the supplied exact declaration and source. Do not promote source that
+hard-codes a task name, dataset/file index, sampling rate, frequency range, or supposed correct
+signal value in place of a certified input property or validated parameter. If the source cannot
+be judged reusable, return no promotion. Promotion only adds a discoverable SkillCard;
 it does not change source, parameters, inputs, outputs, authority, or trust. Do not promote every
 program automatically. Promote only when the same scientific operation is plausibly useful for a
 later question or iteration. Return strict JSON. Each promotion must reference an exact supplied
@@ -375,7 +387,9 @@ schema. Preserve every recoverable semantic decision, identifier, ordering, para
 Correct representation/schema conformance only. Do not replan, add reasoning, expand scope, change
 priorities, or select different skills. For RequestedInformation, deleting `fields` from a
 non-metadata information class is representation repair; changing information_class or any metadata
-field name is not. Return only the repaired JSON object."""
+field name is not. For deterministic historical inference, deleting a forbidden numeric `seed`
+or replacing it with null is representation repair; changing determinism, model, input binding,
+batch size, or device is not. Return only the repaired JSON object."""
     user = f"""Authoritative output JSON schema:
 {_json(output_schema)}
 

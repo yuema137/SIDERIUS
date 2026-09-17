@@ -1,20 +1,155 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from agent.data_analysis.generated_skill_registry import promote_generated_program
 from agent.data_analysis.source_scope import apply_source_prompt
-from agent.schemas.data_analysis.common import CallerIdentity, canonical_sha256
+from agent.schemas.data_analysis.common import (
+    CallerIdentity,
+    CertifiedArtifactRef,
+    canonical_json_bytes,
+    canonical_sha256,
+)
+from agent.schemas.data_analysis.generated_skill import GeneratedExperimentSkillRegistryRef
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.protocols.interpreter_to_data_analysis import local_analysis_input
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from nodes.data_analysis_agent import DataAnalysisAgent
+from tests.unit.agent.data_analysis.test_generated_skill_registry import (
+    _persist_program,
+    _promotion_draft,
+)
 from tests.unit.nodes.test_data_analysis_agent import _Bridge, _Capability, _input
 from workflows.data_analysis_composition import ResolvedWorkflowDataAnalysis
 from workflows.data_analysis_stage import (
     attach_analysis_to_proposer,
+    restore_prior_generated_skill_registry,
     run_optional_data_analysis,
 )
+from workflows.model_exploration import (
+    _carry_composed_generated_skill_registry,
+    _restore_composed_generated_skill_registry,
+)
+
+
+@pytest.mark.allow_real_subprocess
+def test_committed_prior_registry_restores_as_typed_workflow_input(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Cross-process reuse must read only a committed prior report and exact registry."""
+
+    prior_workspace = tmp_path / "iter_001" / "iteration_001"
+    prior_input = _input(prior_workspace).model_copy(
+        update={
+            "request_id": "iteration-001",
+            "storage": StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(workspace=str(prior_workspace), run_name="iter_001"),
+            ),
+        }
+    )
+    report = DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **kwargs: _Bridge(analysis_input=prior_input, **kwargs),
+        provider="test",
+        model_id="fake",
+    ).run(prior_input)
+    registry_root = prior_workspace / "data_analysis" / "iter_001" / "generated_skill_registry"
+    ref = GeneratedExperimentSkillRegistryRef(
+        registry_id="chain-generated-skills",
+        registry_root=str(registry_root),
+        manifest_ref=CertifiedArtifactRef(
+            logical_ref="registries/manifest.json",
+            sha256="7" * 64,
+            media_type="application/json",
+        ),
+        registry_sha256="8" * 64,
+    )
+    report = report.model_copy(
+        update={
+            "provenance": report.provenance.model_copy(update={"generated_skill_registry": ref})
+        }
+    )
+    report_path = prior_workspace / "data_analysis" / "iter_001" / "iteration-001" / "report.json"
+    report_path.write_bytes(canonical_json_bytes(report))
+    seen = []
+    monkeypatch.setattr(
+        "workflows.data_analysis_stage.load_generated_skill_registry",
+        lambda value: seen.append(value),
+    )
+
+    assert (
+        restore_prior_generated_skill_registry(workspace=tmp_path, committed_iterations=()) is None
+    )
+    assert (
+        restore_prior_generated_skill_registry(workspace=tmp_path, committed_iterations=(1,)) == ref
+    )
+    assert seen == [ref]
+
+    wrong = ref.model_copy(update={"registry_root": str(tmp_path / "other")})
+    report_path.write_bytes(
+        canonical_json_bytes(
+            report.model_copy(
+                update={
+                    "provenance": report.provenance.model_copy(
+                        update={"generated_skill_registry": wrong}
+                    )
+                }
+            )
+        )
+    )
+    with pytest.raises(ValueError, match="escapes its committed iteration"):
+        restore_prior_generated_skill_registry(workspace=tmp_path, committed_iterations=(1,))
+
+
+def test_workflow_carries_exact_registry_across_iterations(monkeypatch, tmp_path: Path) -> None:
+    """The fixed workflow must transport the prior ref, not rediscover skills."""
+
+    seen = []
+    ref = GeneratedExperimentSkillRegistryRef(
+        registry_id="local-skills",
+        registry_root=str(tmp_path / "prior"),
+        manifest_ref=CertifiedArtifactRef(
+            logical_ref="registries/manifest.json",
+            sha256="7" * 64,
+            media_type="application/json",
+        ),
+        registry_sha256="8" * 64,
+    )
+    monkeypatch.setattr(
+        "workflows.data_analysis_stage.restore_prior_generated_skill_registry",
+        lambda **kwargs: seen.append(kwargs) or ref,
+    )
+    restored = SimpleNamespace(committed_iters=[1, 2])
+    assert _restore_composed_generated_skill_registry(None, restored, str(tmp_path)) is None
+    assert seen == []
+    assert _restore_composed_generated_skill_registry(object(), restored, str(tmp_path)) == ref
+    assert seen == [{"workspace": tmp_path, "committed_iterations": (1, 2)}]
+    assert _carry_composed_generated_skill_registry(ref, None) == ref
+    assert (
+        _carry_composed_generated_skill_registry(
+            ref,
+            SimpleNamespace(
+                report=SimpleNamespace(provenance=SimpleNamespace(generated_skill_registry=None))
+            ),
+        )
+        == ref
+    )
+    updated = ref.model_copy(update={"registry_sha256": "9" * 64})
+    assert (
+        _carry_composed_generated_skill_registry(
+            ref,
+            SimpleNamespace(
+                report=SimpleNamespace(provenance=SimpleNamespace(generated_skill_registry=updated))
+            ),
+        )
+        == updated
+    )
 
 
 def _interpretation(brief) -> InterpretationOutput:
@@ -50,6 +185,18 @@ def test_workflow_stage_uses_typed_adapters_and_persisted_report_identity(
         config_path=str(tmp_path / "analysis-policy.json"),
         allow_generated_skill_promotion=True,
     )
+    program, identity = _persist_program(tmp_path / "prior-program")
+    _registry, registry_ref = promote_generated_program(
+        source_root=tmp_path / "prior-program",
+        registry_root=tmp_path / "prior-run" / "generated_skill_registry",
+        registry_id="prior-run-generated-skills",
+        existing=None,
+        program=program,
+        program_identity=identity,
+        draft=_promotion_draft(),
+        originating_request_id="prior-request",
+        originating_result_id="prior-result",
+    )
     expected_input = local_analysis_input(
         interpretation,
         request_id="iteration-001",
@@ -66,6 +213,7 @@ def test_workflow_stage_uses_typed_adapters_and_persisted_report_identity(
             request_source="iteration:1",
         ),
         human_advice="Measure before interpreting.",
+        generated_skill_registry=registry_ref,
         allow_generated_skill_promotion=True,
     )
     historical_inference_capability = object()
@@ -92,6 +240,7 @@ def test_workflow_stage_uses_typed_adapters_and_persisted_report_identity(
         llm_kwargs={"provider": "test", "model_id": "fake"},
         bridge_factory=lambda **kwargs: _Bridge(analysis_input=expected_input, **kwargs),
         historical_model_inference_capability=historical_inference_capability,
+        generated_skill_registry=registry_ref,
     )
 
     assert output is not None
@@ -104,6 +253,7 @@ def test_workflow_stage_uses_typed_adapters_and_persisted_report_identity(
     assert projected.data_analysis_evidence.findings[0].statement.endswith("mean 2.5.")
     assert seen["historical_model_inference_capability"] is historical_inference_capability
     assert expected_input.allow_generated_skill_promotion is True
+    assert output.report.provenance.generated_skill_registry == registry_ref
 
 
 def test_missing_brief_stops_at_typed_edge_without_invoking_agent(tmp_path) -> None:
