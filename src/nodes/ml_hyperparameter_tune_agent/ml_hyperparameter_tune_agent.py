@@ -1039,7 +1039,7 @@ class HyperparamTuningAgent:
             copied = _copy_seed_plugin(agent_input.seed_plugin_path, sandbox.plugin_dir)
             print(f"[Tuner] Seed plugin staged: {os.path.basename(copied)} -> {sandbox.plugin_dir}")
 
-        brain_kwargs = dict(
+        brain_kwargs: dict[str, Any] = dict(
             provider=agent_input.llm_provider,
             model_id=agent_input.llm_model_id,
             reflect_provider=agent_input.reflect_provider,

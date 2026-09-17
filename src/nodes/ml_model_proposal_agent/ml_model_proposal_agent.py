@@ -1505,7 +1505,7 @@ class MLModelProposalAgent:
         # (comparison_provider, reasoning_model_id, etc.) — these are for
         # future per-stage bridge routing, currently unused.
         self._bridge_factory = bridge_factory or LLMBridge
-        bridge_kwargs = dict(
+        bridge_kwargs: dict[str, Any] = dict(
             provider=provider,
             model_id=model_id,
             max_retries=max_retries,

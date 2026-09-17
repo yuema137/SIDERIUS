@@ -407,6 +407,20 @@ class LLMBridge:
     where the singleton check does not run.
     """
 
+    @staticmethod
+    def _create_completion(
+        client: OpenAI, *, reasoning_effort: str | None, **kwargs: Any
+    ) -> Any:
+        """Apply one optional SDK argument at the shared Chat Completions edge.
+
+        The SDK overloads are not compatible with a dynamic ``**`` spread;
+        only this call edge is cast, while request-shape tests inspect all
+        three public request paths.
+        """
+        if reasoning_effort is not None:
+            kwargs["reasoning_effort"] = reasoning_effort
+        return cast(Any, client.chat.completions.create)(**kwargs)
+
     def __init__(
         self,
         provider: str = "gemini",
@@ -1737,20 +1751,20 @@ class LLMBridge:
         effort = (
             self.reflect_reasoning_effort if label == "tuner.reflector" else self.reasoning_effort
         )
-        effort_kwargs: dict[str, Any] = {"reasoning_effort": effort} if effort else {}
         last_text = ""
         last_err_label = ""
         wait = self._CONTENT_RETRY_INITIAL_WAIT
         for attempt in range(self._CONTENT_RETRY_BUDGET + 1):
             response = self._call_with_retry(
-                lambda: client.chat.completions.create(
+                lambda: self._create_completion(
+                    client,
+                    reasoning_effort=effort,
                     model=model_name,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
                     response_format={"type": "json_object"},
-                    **effort_kwargs,
                 ),
                 label="_chat_json",
             )
@@ -1924,13 +1938,14 @@ class LLMBridge:
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("generate_text")
         response = self._call_with_retry(
-            lambda: self.client.chat.completions.create(
+            lambda: self._create_completion(
+                self.client,
+                reasoning_effort=self.reasoning_effort,
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                **({"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else {}),
             ),
             label="generate_text",
         )
@@ -1989,7 +2004,9 @@ class LLMBridge:
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("tool_call")
         response = self._call_with_retry(
-            lambda: self.client.chat.completions.create(
+            lambda: self._create_completion(
+                self.client,
+                reasoning_effort=self.reasoning_effort,
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -2001,7 +2018,6 @@ class LLMBridge:
                 # pure type-system shim — no runtime change.
                 tools=cast(Any, tools),
                 tool_choice="auto",
-                **({"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else {}),
             ),
             label="tool_call",
         )

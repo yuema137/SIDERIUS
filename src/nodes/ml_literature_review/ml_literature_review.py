@@ -312,7 +312,7 @@ class MLLiteratureReviewAgent:
             }
         )
         started_at = _utc_now()
-        main_kwargs = {"provider": inp.llm_provider, "model_id": inp.llm_model_id}
+        main_kwargs: dict[str, Any] = {"provider": inp.llm_provider, "model_id": inp.llm_model_id}
         if inp.llm_reasoning_effort is not None:
             main_kwargs["reasoning_effort"] = inp.llm_reasoning_effort
         self.bridge = self._bridge_factory(**main_kwargs)
@@ -320,7 +320,7 @@ class MLLiteratureReviewAgent:
         # run on a cheaper model (e.g. deepseek-v4) while compression + synthesis
         # stay on the main model. Falls back to the main bridge when unconfigured.
         if inp.search_llm_provider or inp.search_llm_model_id or inp.search_llm_reasoning_effort:
-            search_kwargs = {
+            search_kwargs: dict[str, Any] = {
                 "provider": inp.search_llm_provider or inp.llm_provider,
                 "model_id": inp.search_llm_model_id or inp.llm_model_id,
             }
