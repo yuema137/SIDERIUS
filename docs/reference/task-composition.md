@@ -462,7 +462,15 @@ Notes:
   The validated canonical rule set is part of the workspace run identity, so
   changing it requires a fresh workspace. This is deterministic enforcement,
   not prompt advice: `exact` controls the executed value; `range`, `allowed`,
-  and `predicate` reject a non-conforming proposal.
+  and `predicate` reject a non-conforming proposal. In a composed workflow,
+  the same typed rules now reach the Proposer before its baseline resource
+  preflight: an `exact` value becomes part of its persisted effective
+  `baseline_config` before `ProposalOutput` validation, including when that
+  leaf was omitted or differently authored by the LLM. Other
+  rules validate baseline fields the Proposer supplied; an omitted non-exact
+  field remains agent-controlled and is checked on the tuner's final plan.
+  No task-specific default is invented, and an unconstrained caller keeps the
+  previous behavior.
 - `dynamic_observables` / `static_observables` are the two **observable**
   families (`R-OBS-1`, `D-BUD-16`). The split is a **type**, not a naming
   convention: an implementation subclasses either

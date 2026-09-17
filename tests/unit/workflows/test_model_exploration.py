@@ -56,6 +56,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.literature_review import LiteratureReviewOutput
+from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import AgentCard, ExpertContextItem, ProposalOutput
 from agent.schemas.validator import ValidatorOutput
 from core.resume import RestoredState
@@ -556,6 +557,25 @@ class TestRunWorkflowSingleIteration:
         workflow_env["tune"].return_value.run.assert_called_once()
         interpretation_input = workflow_env["interp"].return_value.run.call_args.args[0]
         assert interpretation_input.analysis_brief_requested is False
+
+    def test_workflow_parameter_rule_reaches_proposer_and_tuner(self, workflow_env):
+        """A workflow exact value must reach preflight, not only later tuning."""
+        rules = ParameterRules.model_validate({"model_config.segmentation_size": {"exact": 40_000}})
+        run_workflow(
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                workflow_parameter_rules=rules,
+            ),
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+        )
+
+        proposal_input = workflow_env["propose"].return_value.run.call_args.args[0]
+        tune_input = workflow_env["tune"].return_value.run.call_args.args[0]
+        assert proposal_input.workflow_parameter_rules == rules
+        assert tune_input.workflow_parameter_rules == rules
 
     def test_analysis_enabled_traverses_typed_stage_and_proposer_edge(self, workflow_env):
         analysis_binding = object()

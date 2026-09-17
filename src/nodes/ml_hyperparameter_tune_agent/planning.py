@@ -29,6 +29,7 @@ from agent.schemas.parameter_rules import (
     ParameterRuleError,
     ParameterRules,
     apply_parameter_rules,
+    validate_parameter_rule_ownership,
 )
 from execute_tools.health_checks.candidate_eligibility import (
     is_valid_candidate,
@@ -116,20 +117,11 @@ def _apply_effective_parameter_rules(
     authorities.
     """
     task_rules = composition_ref.parameter_rules if composition_ref is not None else None
-    declared_rules = tuple(rules for rules in (task_rules, workflow_rules) if rules is not None)
-    if (
-        composition_ref is not None
-        and composition_ref.objective is not None
-        and any(
-            path == "loss_config" or path.startswith("loss_config.")
-            for rules in declared_rules
-            for path in rules.rules
-        )
-    ):
-        raise ParameterRuleError(
-            "parameter_rules must not constrain loss_config when the task declares "
-            "an authoritative objective; the objective is the sole owner of loss semantics"
-        )
+    validate_parameter_rule_ownership(
+        objective_declared=composition_ref is not None and composition_ref.objective is not None,
+        task_rules=task_rules,
+        workflow_rules=workflow_rules,
+    )
 
     effective = apply_parameter_rules(
         plan,
