@@ -162,6 +162,37 @@ def test_one_rule_kind_is_required() -> None:
         ParameterRules.model_validate({"train_config.batch_size": {"exact": 1, "allowed": [1, 2]}})
 
 
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {"exact": 40_000},
+        {"exact": None},
+        {"range": {"min": 1}},
+        {"allowed": [20_000, 40_000]},
+        {"predicate": "even_integer"},
+    ],
+)
+def test_parameter_rule_survives_parent_model_dump_revalidation(rule: dict) -> None:
+    """Catches inactive null fields breaking a typed fan-in's full-model revalidation."""
+    rules = ParameterRules.model_validate({"model_config.segmentation_size": rule})
+
+    assert set(rules.model_dump()["rules"]["model_config.segmentation_size"]) == set(rule)
+    assert ParameterRules.model_validate(rules.model_dump()) == rules
+    assert ParameterRules.model_validate_json(rules.model_dump_json()) == rules
+
+
+def test_multiple_or_empty_rule_kind_declarations_remain_invalid() -> None:
+    """Serialization repair must not weaken strict authored-rule validation."""
+    with pytest.raises(ValueError, match="exactly one"):
+        ParameterRules.model_validate(
+            {"model_config.segmentation_size": {"exact": 40_000, "allowed": [40_000]}}
+        )
+    with pytest.raises(ValueError, match="exactly one"):
+        ParameterRules.model_validate(
+            {"model_config.segmentation_size": {"range": None, "allowed": None}}
+        )
+
+
 def test_planning_boundary_applies_the_composed_exact_lock() -> None:
     """Catches planning bypassing the validated composition-owned rule set."""
     rules = ParameterRules.model_validate({"train_config.batch_size": {"exact": 1}})

@@ -17,7 +17,14 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 ParameterPredicate = Callable[[Any], bool]
 
@@ -110,6 +117,19 @@ class ParameterRule(BaseModel):
         if self.predicate is not None:
             return "predicate"
         return "exact"
+
+    @model_serializer(mode="wrap")
+    def serialize_active_kind(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Keep the one-of declaration intact through parent model dump/revalidation.
+
+        The default Pydantic dump includes three inactive null fields.  Those
+        fields are not part of the authored rule and make a later strict
+        validation fail, especially at typed Proposer evidence fan-in edges.
+        The active kind alone is the canonical wire representation; this also
+        preserves the distinct valid ``{"exact": null}`` declaration.
+        """
+        serialized = handler(self)
+        return {self.kind: serialized[self.kind]}
 
 
 class ParameterRules(BaseModel):
