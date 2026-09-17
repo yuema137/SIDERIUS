@@ -2,7 +2,7 @@
 
 Replaces Step-05c's scientific-filename filesystem oracles. The two REAL
 cleanup sites intentionally differ: watchdog cleanup is attempt-qualified;
-tuner cleanup spans one experiment. Only expensive execution is stubbed.
+the tuner retires only an exact attempt's declared outputs. Only expensive execution is stubbed.
 Both deleted and surviving file sets are asserted against explicit literals.
 """
 
@@ -15,6 +15,7 @@ import pytest
 import core.sandbox_executor as sandbox_module
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.deliverable_spec import DeliverableNaming
+from execute_tools.task_data_path import EvaluationReadRequest, TaskOutputArtifactInventory
 
 execution = importlib.import_module("nodes.ml_hyperparameter_tune_agent.execution")
 
@@ -36,9 +37,12 @@ def _seed(root: Path) -> None:
         (root / name).write_bytes(b"retained evidence")
 
 
-def _assert_cleanup(root: Path, deleted: set[str]) -> None:
+def _assert_cleanup(root: Path, deleted: set[str], *, receipts: bool = False) -> None:
     survivors = {p.name for p in root.iterdir() if p.is_file()}
-    assert survivors == ALL_FILES - deleted
+    expected = ALL_FILES - deleted
+    if receipts:
+        expected = expected | {"model_output_retention_receipts.jsonl"}
+    assert survivors == expected
     assert ALL_FILES - survivors == deleted
 
 
@@ -76,24 +80,41 @@ class _InferenceFailure(RuntimeError):
     pass
 
 
+class _TaskOutputInventory:
+    def enumerate_output_artifacts(
+        self, request: EvaluationReadRequest
+    ) -> TaskOutputArtifactInventory:
+        return TaskOutputArtifactInventory(
+            run_name=request.run_name,
+            exp_id=request.exp_id,
+            model_type=request.model_type,
+            relative_paths=tuple(sorted(ATTEMPT_FILES)),
+        )
+
+
 @pytest.mark.parametrize(
-    "enabled,naming,deleted",
-    [(True, NAMING, ATTEMPT_FILES | SAME_EXPERIMENT), (False, NAMING, set()), (True, None, set())],
-    ids=["experiment-qualified", "disabled", "task-owned-lifecycle"],
+    "retain,naming,task,deleted",
+    [
+        (False, NAMING, None, ATTEMPT_FILES),
+        (True, NAMING, None, set()),
+        (False, None, _TaskOutputInventory(), ATTEMPT_FILES),
+    ],
+    ids=["legacy-attempt", "retained", "task-owned-attempt"],
 )
 def test_tuner_finally_cleanup_preserves_other_experiments(
-    tmp_path, monkeypatch, enabled, naming, deleted
+    tmp_path, monkeypatch, retain, naming, task, deleted
 ):
     _seed(tmp_path)
     # Only fields read before inference are needed: the deliberate failure
     # happens at the first skill call. The actual production finally runs.
     bindings = SimpleNamespace(
-        agent_input=SimpleNamespace(cleanup_denoised=enabled),
+        agent_input=SimpleNamespace(retain_model_outputs=retain),
         anchor_map_data=None,
         expert_advice_str="",
         file_index=0,
         reference_scores=None,
         run_deliverable_naming=naming,
+        run_task_data_path=task,
         run_metric=None,
         run_secondary_metrics=(),
         run_name="run",
@@ -124,4 +145,4 @@ def test_tuner_finally_cleanup_preserves_other_experiments(
             train_time=0,
             training_results={},
         )
-    _assert_cleanup(tmp_path, deleted)
+    _assert_cleanup(tmp_path, deleted, receipts=True)

@@ -53,6 +53,7 @@ from execute_tools.task_data_path import (
     EvalMaterializationParams,
     EvaluationReadRequest,
     ScopeBuildRequest,
+    TaskOutputArtifactInventory,
     ValidationScopeError,
     deserialize_rows_scope,
 )
@@ -458,6 +459,23 @@ class QuickstartTaskDataPath:
                 f"object; got {type(decoded).__name__}."
             )
         return {str(key): int(value) for key, value in decoded.items()}
+
+    def enumerate_output_artifacts(
+        self, request: EvaluationReadRequest
+    ) -> TaskOutputArtifactInventory:
+        """List this attempt's exact JSON output, including partial writes."""
+        name = self.deliverable_name(
+            model_type=request.model_type,
+            run_name=request.run_name,
+            exp_id=request.exp_id,
+        )
+        path = Path(request.deliverable_dir) / name
+        return TaskOutputArtifactInventory(
+            run_name=request.run_name,
+            exp_id=request.exp_id,
+            model_type=request.model_type,
+            relative_paths=(name,) if path.exists() or path.is_symlink() else (),
+        )
 
     # -- optional TaskScopeCapability sibling -------------------------------
 

@@ -169,6 +169,8 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     "analysis_source_prompt": None,
     # Explicit workflow treatment; None preserves composition behavior.
     "data_analysis_enabled": None,
+    # Per-sample output lifetime is caller transit, not a second DA switch.
+    "retain_model_outputs": False,
     # PR-C — workflow-owned ordering of two independent evidence capabilities.
     "scientific_evidence_order": "analysis_then_literature",
 }

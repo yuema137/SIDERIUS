@@ -207,7 +207,9 @@ class WorkflowLaunchConfig:
         """
         from core.chain_state import ChainState
 
-        if self.cleanup_denoised and self.retain_model_outputs:
+        if getattr(self, "cleanup_denoised", False) and getattr(
+            self, "retain_model_outputs", False
+        ):
             raise ValueError(
                 "cleanup_denoised and retain_model_outputs request contradictory output lifetimes"
             )

@@ -867,6 +867,37 @@ class RunHealthMaterialization:
     dataset_partition_count: int | None = None
 
 
+def _materialize_run_health_config(
+    *,
+    enabled: bool,
+    config_path: str | None,
+    monitored_files: list[int] | None,
+    workspace: str,
+    resolved_scope: list[int],
+    inputs: RunHealthMaterialization | None,
+) -> tuple[str | None, str | None]:
+    """Own the optional Health-config side effect before the lock is built."""
+    if not enabled:
+        return None, None
+    # Keep this import deferred: lock-only callers do not need Health code.
+    from execute_tools.health_checks.config import materialize_effective_config
+
+    health_inputs = inputs or RunHealthMaterialization()
+    health_kwargs = (
+        {}
+        if health_inputs.task_health_binding is None
+        else {"task_health_binding": health_inputs.task_health_binding}
+    )
+    return materialize_effective_config(
+        config_path,
+        monitored_files,
+        workspace,
+        resolved_scope=resolved_scope,
+        dataset_partition_count=health_inputs.dataset_partition_count,
+        **health_kwargs,
+    )
+
+
 def build_run_invariants(
     resolved_data_scope: list[int],
     health_gate_enabled: bool,
@@ -937,37 +968,17 @@ def build_run_invariants(
         ``(invariants, effective_config_path)`` — the path is ``None`` when
         gates are disabled (no effective config exists for disabled runs).
     """
-    # Imported here, not at module top: keeps this generic module importable
-    # without the health-check package for consumers that only need the
-    # lock primitives (and avoids widening core→execute_tools coupling to
-    # every importer of the lock).
     _launch_identity = (
         launch_identity if launch_identity is not None else UNLABELLED_LAUNCH_IDENTITY
     )
-    from execute_tools.health_checks.config import materialize_effective_config
-
-    if health_gate_enabled:
-        # Step 10 / P1: the composed task Health binding is PASSED THROUGH to
-        # 08b's existing keyword. Omitting it (the un-composed default) is
-        # what resolves `LEGACY_OMITTED`, so a legacy run materializes the
-        # byte-identical effective config it always did — the call shape is
-        # the branch, and there is no task name on either side of it.
-        health_inputs = health_materialization or RunHealthMaterialization()
-        health_kwargs = (
-            {}
-            if health_inputs.task_health_binding is None
-            else {"task_health_binding": health_inputs.task_health_binding}
-        )
-        effective_path, sha = materialize_effective_config(
-            health_checks_config,
-            health_gate_files,
-            workspace,
-            resolved_scope=resolved_data_scope,
-            dataset_partition_count=health_inputs.dataset_partition_count,
-            **health_kwargs,
-        )
-    else:
-        effective_path, sha = None, None
+    effective_path, sha = _materialize_run_health_config(
+        enabled=health_gate_enabled,
+        config_path=health_checks_config,
+        monitored_files=health_gate_files,
+        workspace=workspace,
+        resolved_scope=resolved_data_scope,
+        inputs=health_materialization,
+    )
     # F-SCANH-1 — pin the task-config FILE an un-composed run reads. The
     # deferred function-scope import matches the module's convention above
     # (the lock primitives stay importable without the workflows package).

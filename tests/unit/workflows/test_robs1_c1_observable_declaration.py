@@ -277,13 +277,13 @@ class TestFingerprintAdditivity:
 
         Hardcoded, never read back from the composition: the claim is that
         this framework-owned example's identity did not move because of an
-        unconditional observable key. The current receipt also includes later,
-        independent semantic declarations: its framework-provided objective
-        and explicit fixed-shape probe applicability.
+        unconditional observable key. The current receipt includes later,
+        independent semantic declarations and the Quickstart task plugin's
+        output-artifact inventory, which legitimately changes plugin identity.
         """
         path = os.path.join(REPO_ROOT, "configs", "task_composition", "quickstart.yaml")
         assert compose_run_task_bindings(path).semantic_fingerprint == (
-            "d828fd2a843a5098951292d88ae4102376659e321b7fa940598d72907a1655bb"
+            "5afaff5876223154c1214d2d4b2b7ce90c603f729ac963c8c3907d8f48c6b21d"
         )
 
     def test_the_fingerprint_key_is_absent_for_none_and_for_an_empty_list(self):
