@@ -179,11 +179,11 @@ IS_PSEUDO_TRAINING=0
 # halts the *chain* when the most recent N committed iters all carry
 # manifest.status='failed'. Default 3 matches the Python argparse default.
 MAX_FAILED_ITERATIONS=3
-# Default 1 preserves historical chain behavior: exploratory runs remove
-# large per-attempt denoised files. A caller that needs those deliverables
-# for later result composition can pass --no-cleanup_denoised; the child argv
-# then carries no cleanup flag.
+# Default retirement is now the Python run's policy too. The old negative
+# cleanup spelling remains a compatibility alias for the positive retention
+# switch, so existing campaigns keep their explicitly requested outputs.
 CLEANUP_DENOISED=1
+OUTPUT_RETENTION_REQUEST=""
 # --- Shell entry condition ---------------------------------------------------
 # "Initialise every consumed shell variable" is an ENTRY CONDITION of this
 # reused library, not a cleanup step performed by each
@@ -418,8 +418,16 @@ parse_chain_args() {
         # Stage 4 / Commit 4.6 — consecutive-iter failure brake
         --max_failed_iterations)     MAX_FAILED_ITERATIONS="$2"; shift 2 ;;
         # R-RETENTION-1 — formal-deliverable retention (campaign entrypoint).
-        --cleanup_denoised)          CLEANUP_DENOISED=1; shift ;;
-        --no-cleanup_denoised)       CLEANUP_DENOISED=0; shift ;;
+        --cleanup_denoised)
+          if [ "$OUTPUT_RETENTION_REQUEST" = "retain" ]; then
+              echo "ERROR: --cleanup_denoised conflicts with output retention" >&2; return 2
+          fi
+          OUTPUT_RETENTION_REQUEST="retire"; CLEANUP_DENOISED=1; shift ;;
+        --no-cleanup_denoised|--retain_model_outputs)
+          if [ "$OUTPUT_RETENTION_REQUEST" = "retire" ]; then
+              echo "ERROR: output retention conflicts with --cleanup_denoised" >&2; return 2
+          fi
+          OUTPUT_RETENTION_REQUEST="retain"; CLEANUP_DENOISED=0; shift ;;
         # Slurm-only flags — silently accepted on lilab too (ignored)
         --partition)              PARTITION="$2"; shift 2 ;;
         --time)                   TIME="$2"; shift 2 ;;
@@ -501,15 +509,12 @@ build_app_args() {
         --formal_train_portion "$FORMAL_TRAIN_PORTION"
         --formal_round_strategy "$FORMAL_ROUND_STRATEGY"
     )
-    # Default-ON for chain runs: per-experiment denoised .h5 files
-    # accumulate at ~76 GB / attempt and can fill the data drive within
-    # 3-4 iterations of a 20-iter chain (mirrors what
-    # submit_one_iteration.slurm hardcodes for SDSC mode). The campaign
-    # entrypoint passes --no-cleanup_denoised (R-RETENTION-1): official
-    # FORMAL execution retains deliverables, so the token is then OMITTED
-    # and run_one_iteration.py's store_true default (False) governs.
+    # One effective policy reaches the child. The legacy negative cleanup
+    # spelling is translated into --retain_model_outputs, not dropped.
     if [ "$CLEANUP_DENOISED" -eq 1 ]; then
         APP_ARGS+=(--cleanup_denoised)
+    else
+        APP_ARGS+=(--retain_model_outputs)
     fi
     # Emit --seed_paths only when seeds are actually supplied. Omitting the flag
     # (empty SEED_PATHS) is a valid cold start; a bare --seed_paths with zero

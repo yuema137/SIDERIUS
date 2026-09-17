@@ -237,7 +237,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cleanup_denoised",
         action="store_true",
-        help="Delete denoised HDF5 files after scoring each round to save disk space.",
+        help="Legacy cleanup request; incompatible with --retain_model_outputs.",
+    )
+    parser.add_argument(
+        "--retain_model_outputs",
+        action="store_true",
+        help="Keep per-sample model outputs after scoring and Health (default: retire them).",
     )
 
     # Trial and Formal own independent budgets and authority selections.
@@ -636,6 +641,7 @@ def build_agent_input(
         },
         "progress_bar": args.progress_bar,
         "cleanup_denoised": args.cleanup_denoised,
+        "retain_model_outputs": getattr(args, "retain_model_outputs", False),
         "is_trial": args.is_trial,
         # V19 PR 1 — consumption-only coupling switch (default OFF).
         "enable_chain_incumbent_formal_gates": args.enable_chain_incumbent_formal_gates,

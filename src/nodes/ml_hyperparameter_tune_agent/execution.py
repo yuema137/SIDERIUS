@@ -25,7 +25,6 @@ exactly as before. That is also why
 on the raising path the handler still has to know which phase was executing.
 """
 
-import os
 import time
 from collections.abc import Mapping
 from importlib import import_module as _import_module
@@ -67,6 +66,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     RunBindings,
     TrainingOutcome,
 )
+from nodes.ml_hyperparameter_tune_agent.output_retention import finalize_attempt_outputs
 from nodes.ml_hyperparameter_tune_agent.policy import (
     ScoringRoute,
     _apply_degeneracy_reaction,
@@ -1599,32 +1599,18 @@ def run_inference_scoring_health(
             )
 
     finally:
-        # Cleanup denoised files — fires on success, on
-        # ``continue`` from the inference/scoring error handlers
-        # above, AND on any uncaught exception. Glob is keyed to
-        # this attempt's ``exp_id`` so other attempts' files
-        # (e.g. from a not-yet-cleaned prior leak) are untouched.
-        # Step 12 / PR-12d seam E (F-A4-1): `run_deliverable_naming` is `None`
-        # when the run's task names its own artifacts. Sweeping with TIDMAD's
-        # template there matched nothing while reporting a cleanup — so the
-        # honest action is to skip, and leave the artifact lifecycle with the
-        # task that owns it.
-        if agent_input.cleanup_denoised and run_deliverable_naming is not None:
-            import glob as _glob
-
-            pattern = os.path.join(
-                sandbox.base_dir,
-                run_deliverable_naming.experiment_glob(exp_id=exp_id),
-            )
-            denoised_files = _glob.glob(pattern)
-            if denoised_files:
-                total_bytes = sum(os.path.getsize(f) for f in denoised_files)
-                for f in denoised_files:
-                    os.remove(f)
-                print(
-                    f"  Cleaned up {len(denoised_files)} denoised files "
-                    f"({total_bytes / (1024**3):.1f} GB freed)"
-                )
+        # This runs after inference, scoring, and every reached Health check.
+        # The task names exact outputs; a missing inventory fails closed.
+        finalize_attempt_outputs(
+            task_data_path=bindings.run_task_data_path,
+            legacy_naming=run_deliverable_naming,
+            deliverable_dir=sandbox.base_dir,
+            workspace=workspace,
+            run_name=run_name,
+            exp_id=str(exp_id),
+            model_type=str(model_type),
+            retain_model_outputs=agent_input.retain_model_outputs,
+        )
 
     return AttemptExecution(
         failure_reason=failure_reason,

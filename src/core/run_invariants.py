@@ -201,6 +201,7 @@ class RunInvariants(BaseModel):
     # stamps it; nothing reads its VALUE to decide anything.
     lit_review_enabled: bool = False
     data_analysis_enabled: bool | None = None
+    retain_model_outputs: bool = False
     lit_review_config_sha256: str | None = None
     scientific_evidence_order: Literal["analysis_then_literature", "literature_then_analysis"] = (
         "analysis_then_literature"
@@ -383,6 +384,7 @@ class RunInvariants(BaseModel):
         # arXiv U1 — topology + arm are compared, never interpreted.
         "lit_review_enabled",
         "data_analysis_enabled",
+        "retain_model_outputs",
         "lit_review_config_sha256",
         "scientific_evidence_order",
         "experiment_arm",
@@ -640,6 +642,8 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
         payload.pop("lit_review_enabled", None)
     if payload.get("data_analysis_enabled") is None:
         payload.pop("data_analysis_enabled", None)
+    if payload.get("retain_model_outputs") is False:
+        payload.pop("retain_model_outputs", None)
     if payload.get("lit_review_config_sha256") is None:
         payload.pop("lit_review_config_sha256", None)
     if payload.get("scientific_evidence_order") == "analysis_then_literature":
@@ -825,6 +829,7 @@ class LockLaunchIdentity(BaseModel):
 
     lit_review_enabled: bool = False
     data_analysis_enabled: bool | None = None
+    retain_model_outputs: bool = False
     lit_review_config_sha256: str | None = None
     scientific_evidence_order: Literal["analysis_then_literature", "literature_then_analysis"] = (
         "analysis_then_literature"
@@ -1003,6 +1008,7 @@ def build_run_invariants(
             # the generic unlabelled, literature-review-disabled posture.
             lit_review_enabled=_launch_identity.lit_review_enabled,
             data_analysis_enabled=_launch_identity.data_analysis_enabled,
+            retain_model_outputs=_launch_identity.retain_model_outputs,
             lit_review_config_sha256=_launch_identity.lit_review_config_sha256,
             scientific_evidence_order=_launch_identity.scientific_evidence_order,
             experiment_arm=_launch_identity.experiment_arm,

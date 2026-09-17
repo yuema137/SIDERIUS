@@ -103,7 +103,7 @@ def test_runtime_verification_window_reaches_each_iteration() -> None:
     assert "--runtime_verification_max_wall_seconds" not in defaults
 
 
-def test_retention_suppresses_cleanup_without_leaking_a_chain_only_flag() -> None:
+def test_legacy_retention_alias_reaches_child_as_one_positive_policy() -> None:
     tokens = _build(
         "--workspace",
         "/tmp/workspace",
@@ -113,3 +113,18 @@ def test_retention_suppresses_cleanup_without_leaking_a_chain_only_flag() -> Non
     )
     assert "--cleanup_denoised" not in tokens
     assert "--no-cleanup_denoised" not in tokens
+    assert "--retain_model_outputs" in tokens
+
+
+def test_retention_switch_reaches_child_and_conflict_refuses() -> None:
+    base = ("--workspace", "/tmp/workspace", "--run_name", "test")
+    assert "--retain_model_outputs" in _build(*base, "--retain_model_outputs")
+    assert "--retain_model_outputs" not in _build(*base)
+    command = (
+        f"source '{CHAIN_COMMON}'; "
+        "parse_chain_args --workspace /tmp/workspace --run_name test "
+        "--retain_model_outputs --cleanup_denoised"
+    )
+    failed = subprocess.run(["bash", "-c", command], cwd=REPO_ROOT, text=True, capture_output=True)
+    assert failed.returncode != 0
+    assert "conflicts" in failed.stderr

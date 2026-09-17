@@ -501,6 +501,40 @@ def test_bounded_worker_reconstructs_exact_model_and_executor_certifies_predicti
         )
 
 
+def test_historical_prediction_retirement_prevents_stale_resume_reuse(tmp_path: Path) -> None:
+    capability, request, runtime_inputs, _resolver = _fixture(tmp_path)
+    completed = capability.run_historical_inference(request, runtime_inputs)
+    assert completed.receipt.status == "completed"
+    assert completed.receipt.prediction_artifact_ref is not None
+
+    retirement = capability.apply_prediction_retention(
+        completed.receipt, retain_model_outputs=False
+    )
+
+    assert retirement.status == "retired"
+    assert retirement.prediction_artifact_ref == completed.receipt.prediction_artifact_ref
+    prediction = (
+        tmp_path / "capability-workspace" / completed.receipt.prediction_artifact_ref.logical_ref
+    )
+    assert not prediction.exists()
+    assert prediction.parent.joinpath("receipt.json").is_file()
+    replay = capability.run_historical_inference(request, runtime_inputs)
+    assert replay.receipt.status == "refused"
+    assert replay.receipt.failure_code == "inference_prediction_retired"
+
+
+def test_explicit_historical_prediction_retention_preserves_verified_cache(tmp_path: Path) -> None:
+    capability, request, runtime_inputs, _resolver = _fixture(tmp_path)
+    completed = capability.run_historical_inference(request, runtime_inputs)
+
+    retention = capability.apply_prediction_retention(completed.receipt, retain_model_outputs=True)
+
+    assert retention.status == "retained"
+    assert (
+        capability.run_historical_inference(request, runtime_inputs).receipt.status == "completed"
+    )
+
+
 def test_exact_inference_request_reuses_verified_prediction_without_rerunning_plugin(
     tmp_path: Path,
 ) -> None:

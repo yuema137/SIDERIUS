@@ -9,7 +9,10 @@ from agent.schemas.data_analysis.assets import AnalysisAsset, MaterializedAnalys
 from agent.schemas.data_analysis.source_scope import AnalysisSourceScope
 from agent.schemas.data_analysis.trained_model import ModelInferenceReceipt
 from execute_tools.analysis_materialization import TaskAnalysisCapability
-from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
+from execute_tools.historical_model_inference import (
+    HistoricalModelInferenceCapability,
+    HistoricalPredictionRetentionCapability,
+)
 
 from .historical_inference import HistoricalInferenceError, run_historical_inference_binding
 from .materialization import (
@@ -48,6 +51,13 @@ def prepare_invocation_materializations(
     if inference_bindings and inference_capability is None:
         raise HistoricalInferenceError(
             "historical inference was planned but no caller capability was supplied",
+            refused=True,
+        )
+    if inference_bindings and not isinstance(
+        inference_capability, HistoricalPredictionRetentionCapability
+    ):
+        raise HistoricalInferenceError(
+            "historical inference capability cannot certify prediction retention",
             refused=True,
         )
     requests = authorize_invocation_bindings(
@@ -90,20 +100,34 @@ def prepare_invocation_materializations(
                 "generated-program invocations cannot request historical inference"
             )
         binding_id = binding.plan_binding.binding_id
-        view, path = run_historical_inference_binding(
-            capability=inference_capability,
-            task_capability=task_capability,
-            invocation=invocation,
-            resolved=binding,
-            output_requests=requests,
-            available_assets=available_assets,
-            access_policy=access_policy,
-            source_scope=source_scope,
-            input_directory=destination_root / f"{binding_id}-inputs",
-            output_directory=destination_root / f"{binding_id}-output",
-            resource_envelope=resource_envelope,
-            deadline_monotonic_s=deadline_monotonic_s,
-        )
+        try:
+            view, path = run_historical_inference_binding(
+                capability=inference_capability,
+                task_capability=task_capability,
+                invocation=invocation,
+                resolved=binding,
+                output_requests=requests,
+                available_assets=available_assets,
+                access_policy=access_policy,
+                source_scope=source_scope,
+                input_directory=destination_root / f"{binding_id}-inputs",
+                output_directory=destination_root / f"{binding_id}-output",
+                resource_envelope=resource_envelope,
+                deadline_monotonic_s=deadline_monotonic_s,
+            )
+        except HistoricalInferenceError as exc:
+            raise HistoricalInferenceError(
+                str(exc),
+                receipt=exc.receipt,
+                completed_receipts=(*receipts, *exc.completed_receipts),
+                refused=exc.refused,
+            ) from exc
+        except Exception as exc:
+            if receipts:
+                raise HistoricalInferenceError(
+                    str(exc), completed_receipts=tuple(receipts)
+                ) from exc
+            raise
         inferred_views.append(view)
         inspected_asset_ids.add(view.asset_id)
         inspected_asset_ids.update(item.asset.asset_id for item in binding.inference_inputs)
@@ -113,11 +137,15 @@ def prepare_invocation_materializations(
 
     views = ordinary_views + tuple(inferred_views)
     if not views:
-        raise HistoricalInferenceError("invocation produced no materialized skill inputs")
+        raise HistoricalInferenceError(
+            "invocation produced no materialized skill inputs",
+            completed_receipts=tuple(receipts),
+        )
     selections = {view.selection_identity.selection_sha256 for view in views}
     if len(selections) != 1:
         raise HistoricalInferenceError(
-            "ordinary and inferred skill inputs do not share one selection identity"
+            "ordinary and inferred skill inputs do not share one selection identity",
+            completed_receipts=tuple(receipts),
         )
     return InvocationMaterializationBundle(
         views=views,

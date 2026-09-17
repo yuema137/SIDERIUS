@@ -204,7 +204,8 @@ _default_if_absent --trial_portion "${TRIAL_PORTION}"
 _default_if_absent --train_portion "${TRAIN_PORTION}"
 _default_if_absent --eval_portion "${EVAL_PORTION}"
 
-if ! _has_flag --cleanup_denoised "${FORWARD_ARGS[@]}"; then
+if ! _has_flag --cleanup_denoised "${FORWARD_ARGS[@]}" && \
+   ! _has_flag --retain_model_outputs "${FORWARD_ARGS[@]}"; then
     FORWARD_ARGS+=(--cleanup_denoised)
 fi
 # Trial posture: only default it in if the caller expressed neither

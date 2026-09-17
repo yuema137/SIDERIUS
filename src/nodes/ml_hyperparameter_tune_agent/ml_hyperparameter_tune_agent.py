@@ -106,6 +106,7 @@ from nodes.ml_hyperparameter_tune_agent.feedback import (
 from nodes.ml_hyperparameter_tune_agent.loss_inventory import (
     resolve_run_custom_loss_inventory,
 )
+from nodes.ml_hyperparameter_tune_agent.output_retention import OutputRetentionError
 from nodes.ml_hyperparameter_tune_agent.planning import prepare_attempt
 
 # --- Node-local submodules (Step 07 PR 07b, C7) ------------------------------
@@ -570,6 +571,7 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
         experiment_arm=agent_input.experiment_arm,
         lit_review_enabled=agent_input.lit_review_enabled,
         data_analysis_enabled=agent_input.data_analysis_enabled,
+        retain_model_outputs=agent_input.retain_model_outputs,
         lit_review_config_sha256=agent_input.lit_review_config_sha256,
         scientific_evidence_order=agent_input.scientific_evidence_order,
         baseline_isolation=agent_input.baseline_isolation,
@@ -1640,6 +1642,12 @@ class HyperparamTuningAgent:
                     from core.local_code.failure import raise_if_code_package_failure
 
                     raise_if_code_package_failure(e)
+                    if isinstance(e, OutputRetentionError):
+                        # Post-consumer output lifecycle is infrastructure,
+                        # never evidence about this candidate. Its typed
+                        # receipt was persisted before the exception.
+                        _evidence_channel_failure = str(e)
+                        break
                     if isinstance(e, RuntimeEvidenceChannelError):
                         # C9c: infrastructure class — the machinery that
                         # produces runtime evidence is broken, so no further

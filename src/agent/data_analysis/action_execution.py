@@ -24,7 +24,11 @@ from execute_tools.analysis_materialization import (
     AnalysisAuthorizationError,
     TaskAnalysisCapability,
 )
-from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
+from execute_tools.historical_model_inference import (
+    HistoricalModelInferenceCapability,
+    HistoricalPredictionRetentionCapability,
+    HistoricalPredictionRetentionReceipt,
+)
 
 from .analysis_code_sandbox import (
     AnalysisCodeSandbox,
@@ -51,6 +55,71 @@ class AnalysisActionExecutionOutcome:
     result: SkillResult
     inference_receipts: tuple[ModelInferenceReceipt, ...]
     inspected_asset_ids: tuple[str, ...]
+
+
+def _apply_prediction_retention(
+    *,
+    capability: HistoricalModelInferenceCapability | None,
+    inference_receipts: tuple[ModelInferenceReceipt, ...],
+    retain_model_outputs: bool,
+    store: AnalysisRunStore,
+) -> tuple[HistoricalPredictionRetentionReceipt, ...]:
+    """Retire completed predictions after their consuming action returns."""
+
+    recorded: list[HistoricalPredictionRetentionReceipt] = []
+    for inference in inference_receipts:
+        ref = inference.prediction_artifact_ref
+        if inference.status != "completed" or ref is None:
+            continue
+        try:
+            if not isinstance(capability, HistoricalPredictionRetentionCapability):
+                raise ValueError("historical inference has no retention capability")
+            receipt = capability.apply_prediction_retention(
+                inference, retain_model_outputs=retain_model_outputs
+            )
+            if (
+                receipt.inference_id != inference.inference_id
+                or receipt.prediction_artifact_ref != ref
+                or receipt.retain_model_outputs != retain_model_outputs
+            ):
+                raise ValueError("prediction retention receipt disagrees with exact inference")
+            if receipt.status not in {
+                "failed",
+                "retained" if retain_model_outputs else "retired",
+            }:
+                raise ValueError("prediction retention disposition contradicts the run policy")
+        except Exception as exc:
+            receipt = HistoricalPredictionRetentionReceipt(
+                inference_id=inference.inference_id,
+                prediction_artifact_ref=ref,
+                retain_model_outputs=retain_model_outputs,
+                status="failed",
+                failure_code="prediction_retention_failed",
+                failure_message=str(exc) or type(exc).__name__,
+            )
+        store.append_prediction_retention_receipt(receipt)
+        recorded.append(receipt)
+    return tuple(recorded)
+
+
+def _with_retention_failure(result: SkillResult) -> SkillResult:
+    """Do not expose a completed scientific finding after output cleanup failed."""
+
+    if result.status != "completed":
+        return result
+    payload = result.model_dump(mode="python")
+    payload.update(
+        status="failed",
+        summary="Analysis executed, but prediction retention could not be certified.",
+        quantitative_results=(),
+        artifact_refs=(),
+        failure=SkillFailure(
+            failure_type="prediction_retention_failed",
+            message="The temporary prediction output could not be safely retired or certified.",
+            materialization_occurred=True,
+        ),
+    )
+    return SkillResult.model_validate(payload)
 
 
 def _pre_execution_result(
@@ -201,8 +270,18 @@ def execute_resolved_action(
             inspected_asset_ids=(),
         )
     except HistoricalInferenceError as exc:
-        store.cleanup_materializations(materialization_directory)
-        receipts = (exc.receipt,) if exc.receipt is not None else ()
+        try:
+            _apply_prediction_retention(
+                capability=inference_capability,
+                inference_receipts=exc.completed_receipts,
+                retain_model_outputs=inp.retain_model_outputs,
+                store=store,
+            )
+        finally:
+            store.cleanup_materializations(materialization_directory)
+        receipts = exc.completed_receipts
+        if exc.receipt is not None and exc.receipt not in receipts:
+            receipts = (*receipts, exc.receipt)
         return AnalysisActionExecutionOutcome(
             result=_pre_execution_result(
                 inp=inp,
@@ -244,6 +323,7 @@ def execute_resolved_action(
         )
 
     staging = store.staging_directory(item.invocation.invocation_id)
+    retention_receipts: tuple[HistoricalPredictionRetentionReceipt, ...] = ()
     try:
         if isinstance(item, ResolvedPlannedInvocation):
             skill_input = SkillInput(
@@ -334,8 +414,19 @@ def execute_resolved_action(
                     ),
                 )
     finally:
-        store.cleanup_staging(staging)
-        store.cleanup_materializations(materialization_directory)
+        try:
+            retention_receipts = _apply_prediction_retention(
+                capability=inference_capability,
+                inference_receipts=bundle.inference_receipts,
+                retain_model_outputs=inp.retain_model_outputs,
+                store=store,
+            )
+        finally:
+            store.cleanup_staging(staging)
+            store.cleanup_materializations(materialization_directory)
+
+    if any(receipt.status == "failed" for receipt in retention_receipts):
+        result = _with_retention_failure(result)
 
     return AnalysisActionExecutionOutcome(
         result=result,

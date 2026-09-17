@@ -95,6 +95,12 @@ class TestEnsureFirstWriterWins:
 
 
 class TestViolationMatrix:
+    def test_model_output_retention_flip_is_canonical(self, tmp_path):
+        write_run_invariants(str(tmp_path), PARTIAL)
+        retained = PARTIAL.model_copy(update={"retain_model_outputs": True})
+        with pytest.raises(RunInvariantsViolation, match="retain_model_outputs"):
+            validate_run_invariants(str(tmp_path), retained)
+
     def test_validate_without_lock_raises(self, tmp_path):
         with pytest.raises(RunInvariantsViolation, match=r"no .*lock"):
             validate_run_invariants(str(tmp_path), PARTIAL)

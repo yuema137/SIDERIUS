@@ -17,6 +17,7 @@ from agent.schemas.data_analysis.trained_model import ModelInferenceReceipt
 from agent.schemas.storage import StorageConfig
 from core.campaign_identity import validate_path_component
 from core.durable_io import append_line_durably, publish_bytes_write_once
+from execute_tools.historical_model_inference import HistoricalPredictionRetentionReceipt
 
 from .discovery import DiscoverySnapshot
 
@@ -46,6 +47,10 @@ class AnalysisRunStore:
     @property
     def inference_receipts_path(self) -> Path:
         return self.root / "inference_receipts.jsonl"
+
+    @property
+    def prediction_retention_receipts_path(self) -> Path:
+        return self.root / "prediction_retention_receipts.jsonl"
 
     @property
     def structured_output_receipts_path(self) -> Path:
@@ -110,6 +115,14 @@ class AnalysisRunStore:
             sha256=hashlib.sha256(payload).hexdigest(),
             media_type="application/json",
             byte_size=len(payload),
+        )
+
+    def append_prediction_retention_receipt(
+        self, value: HistoricalPredictionRetentionReceipt
+    ) -> None:
+        append_line_durably(
+            str(self.prediction_retention_receipts_path),
+            canonical_json_bytes(value).decode("utf-8"),
         )
 
     def append_structured_output_receipt(self, value: BaseModel) -> CertifiedArtifactRef:

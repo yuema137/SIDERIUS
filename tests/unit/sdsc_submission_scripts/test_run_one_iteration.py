@@ -175,6 +175,18 @@ class TestArgparseSurface:
             *extra,
         ]
 
+    def test_model_output_retention_is_one_resolved_launch_policy(self):
+        bare = runner.build_parser().parse_args(self._minimal_argv())
+        retained = runner.build_parser().parse_args(self._minimal_argv("--retain_model_outputs"))
+        conflicting = runner.build_parser().parse_args(
+            self._minimal_argv("--retain_model_outputs", "--cleanup_denoised")
+        )
+
+        assert runner.resolve_launch_identity(bare).retain_model_outputs is False
+        assert runner.resolve_launch_identity(retained).retain_model_outputs is True
+        with pytest.raises(ValueError, match="conflicts"):
+            runner.resolve_launch_identity(conflicting)
+
     def test_start_iteration_canonical_path(self):
         args = runner.build_parser().parse_args(self._minimal_argv("--start_iteration", "3"))
         normalized = runner.normalize_args(args)
