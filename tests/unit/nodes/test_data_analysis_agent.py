@@ -20,6 +20,7 @@ from agent.schemas.data_analysis.assets import (
     ArtifactIntrinsicScope,
     AssetProvenance,
     MaterializedAnalysisView,
+    TaskOpaqueScopeRef,
     WorkspaceArtifactLocation,
 )
 from agent.schemas.data_analysis.common import CertifiedArtifactRef, canonical_sha256
@@ -85,6 +86,16 @@ class _Capability:
     def export_analysis_materialization(self, content_ref, destination: Path) -> None:
         assert content_ref.logical_ref.startswith("opaque://")
         destination.write_bytes(self.payload)
+
+
+class _RecordingCapability(_Capability):
+    def __init__(self) -> None:
+        super().__init__()
+        self.requested_scopes = []
+
+    def materialize_analysis_view(self, authorized) -> MaterializedAnalysisView:
+        self.requested_scopes.append(authorized.request.requested_scope)
+        return super().materialize_analysis_view(authorized)
 
 
 class _Bridge:
@@ -661,6 +672,9 @@ def test_standalone_agent_runs_typed_pipeline_and_persists_bounded_report(tmp_pa
     assert (root / "skill_results.jsonl").is_file()
     assert (root / "report.json").is_file()
     assert (root / "report.md").is_file()
+    rendered_report = (root / "report.md").read_text()
+    assert "## Certified measurements" in rendered_report
+    assert "mean: 2.5" in rendered_report
     assert not (root / "staging" / "summary-invocation").exists()
     assert not (root / "materializations" / "summary-invocation").exists()
 
@@ -693,6 +707,46 @@ def test_standalone_agent_runs_typed_pipeline_and_persists_bounded_report(tmp_pa
 
     with pytest.raises(AnalysisPersistenceError, match="different canonical input"):
         agent.run(analysis_input.model_copy(update={"human_advice": "Changed request semantics"}))
+
+
+@pytest.mark.allow_real_subprocess
+def test_certified_scope_reference_reaches_authorization_as_exact_opaque_scope(
+    tmp_path: Path,
+) -> None:
+    class ScopeRefBridge(_Bridge):
+        def generate(self, system, user, *, label):
+            payload = super().generate(system, user, label=label)
+            if label == "data_analysis.plan":
+                payload["invocations"][0]["sampling_plan"]["requested_scope"] = {
+                    "kind": "certified_asset_scope",
+                    "asset_id": "dataset",
+                }
+            return payload
+
+    serialized_scope = '{"scientific_selection":"validation-two"}'
+    opaque = TaskOpaqueScopeRef(
+        task_data_path_id="synthetic-task",
+        serialized_scope=serialized_scope,
+        sha256=hashlib.sha256(serialized_scope.encode()).hexdigest(),
+    )
+    original = _input(tmp_path)
+    inp = original.model_copy(
+        update={
+            "available_assets": (
+                original.available_assets[0].model_copy(update={"authorized_scope": opaque}),
+            )
+        }
+    )
+    capability = _RecordingCapability()
+    report = DataAnalysisAgent(
+        task_analysis_capability=capability,
+        bridge_factory=lambda **kwargs: ScopeRefBridge(analysis_input=inp, **kwargs),
+        provider="test",
+        model_id="fake",
+    ).run(inp)
+    assert capability.requested_scopes == [opaque]
+    assert report.analysis_scope == (opaque,)
+    assert report.findings[0].scope == opaque
 
 
 @pytest.mark.allow_real_subprocess

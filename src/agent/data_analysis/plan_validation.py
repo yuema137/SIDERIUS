@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent.schemas.data_analysis.access import InformationRequirement
-from agent.schemas.data_analysis.assets import AnalysisAsset, TrainedModelArtifactLocation
+from agent.schemas.data_analysis.assets import (
+    AnalysisAsset,
+    AnalysisScopeDescriptor,
+    TrainedModelArtifactLocation,
+)
 from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.data_analysis.context import DataAnalysisInput
 from agent.schemas.data_analysis.generated_program import (
@@ -17,6 +21,7 @@ from agent.schemas.data_analysis.generated_program import (
 )
 from agent.schemas.data_analysis.plan import (
     AnalysisPlan,
+    CertifiedAssetScopeRef,
     PlannedAssetBinding,
     PlannedGeneratedExperimentSkillInvocation,
     PlannedGeneratedProgramInvocation,
@@ -56,6 +61,7 @@ class ResolvedInferenceInputBinding:
 @dataclass(frozen=True)
 class ResolvedPlannedInvocation:
     invocation: PlannedSkillInvocation
+    resolved_scope: AnalysisScopeDescriptor
     skill: DiscoveredSkill
     bindings: tuple[ResolvedAssetBinding, ...]
     validated_parameters: ValidatedParameters
@@ -64,6 +70,7 @@ class ResolvedPlannedInvocation:
 @dataclass(frozen=True)
 class ResolvedGeneratedProgramInvocation:
     invocation: PlannedGeneratedProgramInvocation
+    resolved_scope: AnalysisScopeDescriptor
     program: GeneratedAnalysisProgram
     source_path: Path
     bindings: tuple[ResolvedAssetBinding, ...]
@@ -73,6 +80,7 @@ class ResolvedGeneratedProgramInvocation:
 @dataclass(frozen=True)
 class ResolvedGeneratedExperimentSkillInvocation:
     invocation: PlannedGeneratedExperimentSkillInvocation
+    resolved_scope: AnalysisScopeDescriptor
     skill: DiscoveredGeneratedExperimentSkill
     program: GeneratedAnalysisProgram
     source_path: Path
@@ -85,6 +93,31 @@ ResolvedAnalysisInvocation = (
     | ResolvedGeneratedProgramInvocation
     | ResolvedGeneratedExperimentSkillInvocation
 )
+
+
+def _resolve_invocation_scope(
+    invocation: PlannedSkillInvocation
+    | PlannedGeneratedProgramInvocation
+    | PlannedGeneratedExperimentSkillInvocation,
+    bindings: tuple[ResolvedAssetBinding, ...],
+) -> AnalysisScopeDescriptor:
+    """Resolve an explicit certified-scope reference without granting a new scope."""
+
+    requested = invocation.sampling_plan.requested_scope
+    if not isinstance(requested, CertifiedAssetScopeRef):
+        return requested
+    bound_assets = [binding.asset for binding in bindings]
+    bound_assets.extend(nested.asset for binding in bindings for nested in binding.inference_inputs)
+    anchor = next((asset for asset in bound_assets if asset.asset_id == requested.asset_id), None)
+    if anchor is None:
+        raise AnalysisPlanResolutionError(
+            "certified scope reference must name an asset bound by the same invocation"
+        )
+    if any(asset.authorized_scope != anchor.authorized_scope for asset in bound_assets):
+        raise AnalysisPlanResolutionError(
+            "certified scope reference requires every invocation asset to share the exact scope"
+        )
+    return anchor.authorized_scope
 
 
 def _validate_source_scope(
@@ -462,6 +495,7 @@ def resolve_analysis_plan(
             resolved.append(
                 ResolvedGeneratedProgramInvocation(
                     invocation=invocation,
+                    resolved_scope=_resolve_invocation_scope(invocation, bindings),
                     program=program,
                     source_path=source_path,
                     bindings=bindings,
@@ -524,6 +558,7 @@ def resolve_analysis_plan(
             resolved.append(
                 ResolvedGeneratedExperimentSkillInvocation(
                     invocation=invocation,
+                    resolved_scope=_resolve_invocation_scope(invocation, bindings),
                     skill=skill,
                     program=program,
                     source_path=source_path,
@@ -587,6 +622,7 @@ def resolve_analysis_plan(
         resolved.append(
             ResolvedPlannedInvocation(
                 invocation=invocation,
+                resolved_scope=_resolve_invocation_scope(invocation, bindings),
                 skill=skill,
                 bindings=bindings,
                 validated_parameters=validated,

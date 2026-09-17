@@ -76,7 +76,7 @@ def authorize_invocation_bindings(
             slot_id=binding.slot_id,
             asset=resolved.asset,
             split_id=invocation.invocation.sampling_plan.split_id,
-            requested_scope=invocation.invocation.sampling_plan.requested_scope,
+            requested_scope=invocation.resolved_scope,
             requested_information=binding.requested_information,
             requested_format_id=binding.requested_format_id,
             time_precision_requirement=(
@@ -116,7 +116,7 @@ def authorize_inference_input_bindings(
             slot_id=f"{resolved.plan_binding.slot_id}.inference_input",
             asset=item.asset,
             split_id=invocation.invocation.sampling_plan.split_id,
-            requested_scope=invocation.invocation.sampling_plan.requested_scope,
+            requested_scope=invocation.resolved_scope,
             requested_information=binding.requested_information,
             requested_format_id=binding.requested_format_id,
             time_precision_requirement=(
