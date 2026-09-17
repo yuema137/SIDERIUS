@@ -173,6 +173,16 @@ deserializing. `ScopeBuildRequest` carries only framework vocabulary —
 (`seg_size` travels there: it is the planner's per-attempt model choice, not
 framework vocabulary).
 
+An external task may additionally implement the optional frozen-training-pool
+capability (`execute_tools.training_pool`). When present, the task constructs
+one content-pinned parent scope per selected partition set. A Formal round
+uses that parent exactly; its configured `formal_portion` must equal the
+parent's declared source fraction. A Trial round interprets the planner's
+`trial_portion` relative to that parent. The task proves child containment
+before training starts. Evaluation scope construction is unchanged and may
+still cover the full validation population. Without this optional capability,
+the existing independent per-round scope builders remain authoritative.
+
 Related: `DatasetProfile` now separates **generic identity**
 (`partition_count`, `anchor_selection_files`, `health_peek_files`) from an
 **opaque `topology`** dict the framework carries and never interprets

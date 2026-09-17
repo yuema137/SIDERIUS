@@ -43,6 +43,10 @@ from execute_tools.task_data_path import (
     require_bound_task_data_path,
     resolve_task_scope_capability,
 )
+from execute_tools.training_pool import (
+    resolve_frozen_training_pool_capability,
+    select_training_scope,
+)
 
 
 class TaskTopologyUnavailableError(RuntimeError):
@@ -250,16 +254,24 @@ def acquire_attempt_scopes(
         ) from exc
     capability = resolve_task_scope_capability(bound)
 
-    training = capability.build_training_scope(
-        _request_for(
-            round_kind=mode,
-            strategy=trial_strategy,
-            portion=trial_portion,
-            seed=train_sampling_seed,
-            subset_ref=subset_ref,
-            target_partitions=partitions,
-            max_samples=None,
-            task_parameters=task_parameters,
+    training_request = _request_for(
+        round_kind=mode,
+        strategy=trial_strategy,
+        portion=trial_portion,
+        seed=train_sampling_seed,
+        subset_ref=subset_ref,
+        target_partitions=partitions,
+        max_samples=None,
+        task_parameters=task_parameters,
+    )
+    pool_capability = resolve_frozen_training_pool_capability(bound)
+    training = (
+        capability.build_training_scope(training_request)
+        if pool_capability is None
+        else select_training_scope(
+            pool_capability,
+            training_request,
+            serialize_scope=capability.serialize_scope,
         )
     )
     evaluation = capability.build_eval_scope(
