@@ -288,7 +288,12 @@ class ScopeBuildRequest(BaseModel):
     portion: float = Field(
         gt=0.0,
         le=1.0,
-        description="Fraction of each selected partition's index space to sample.",
+        description=(
+            "Fraction of each selected partition's index space to sample. "
+            "For a task declaring a frozen training pool, Trial training "
+            "interprets this fraction relative to its parent pool; Formal "
+            "training uses the complete parent. Evaluation remains independent."
+        ),
     )
     seed: int | None = Field(
         default=None,

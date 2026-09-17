@@ -148,6 +148,13 @@ then gives `value` to the task metric while the scoreability contract inspects
 every named artifact. This is an explicit carrier, not a filename or
 payload-shape heuristic; single-artifact tasks remain unchanged.
 
+For a shared, immutable training parent, a task may also implement the
+three-method `TaskFrozenTrainingPoolCapability` in `training_pool.py`.
+It owns the parent selection, relative Trial draw, and task-specific
+containment proof. The framework never decodes the scope and does not enable
+this capability for tasks that have not explicitly implemented all three
+methods.
+
 Declared from a manifest via `file:` — never by editing this package.
 
 ## Related tests
