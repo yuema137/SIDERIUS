@@ -224,6 +224,10 @@ schema. Source must define exactly:
 
     def analyze(inputs, parameters, output_directory): ...
 
+`source_code` is Python, not JSON. Inside source_code use Python literals `None`, `True`,
+and `False`; never use JSON literals `null`, `true`, or `false`. JSON `null` remains valid in
+the surrounding generated-program declaration where the declared schema permits it.
+
 `inputs` maps final-plan binding IDs to read-only objects with `descriptor` and `arrays` mappings.
 These mappings are read-only Mapping objects, not necessarily built-in dicts. Use mapping
 operations (`obj["descriptor"]`, `descriptor["slot_id"]`, `arrays.get(...)`) or
@@ -247,7 +251,11 @@ access credentials or network, install packages, alter data, or perform modeling
 only concrete input information and view formats. A predictions input slot may consume certified
 transient output from the trusted historical-inference capability; generated source never loads a
 model or reads its raw inference inputs. Do not require metadata fields that the supplied access
-policy does not authorize on the analysis split. Generated parameter declarations obey this
+policy does not authorize on the analysis split. Prefer a generic measurement based on certified
+input properties and validated parameters when that keeps the operation clear. Do not embed a task
+name, file number, fixed sample rate, or supposed signal answer where the same scientific question
+can be expressed generically. A one-off program may remain task-local; only a genuinely reusable
+operation should later be promoted. Generated parameter declarations obey this
 conditional rule: `required=true` means the caller must supply the value and therefore `default`
 must be null; a parameter with a usable default must set `required=false`. Do not redundantly mark
 a parameter required while also assigning its value. The source and declaration will be persisted
