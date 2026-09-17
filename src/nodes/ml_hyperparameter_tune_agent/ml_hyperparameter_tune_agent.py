@@ -1039,13 +1039,18 @@ class HyperparamTuningAgent:
             copied = _copy_seed_plugin(agent_input.seed_plugin_path, sandbox.plugin_dir)
             print(f"[Tuner] Seed plugin staged: {os.path.basename(copied)} -> {sandbox.plugin_dir}")
 
-        brain = self._bridge_factory(
+        brain_kwargs = dict(
             provider=agent_input.llm_provider,
             model_id=agent_input.llm_model_id,
             reflect_provider=agent_input.reflect_provider,
             reflect_model_id=agent_input.reflect_model_id,
             max_retries=agent_input.max_retries,
         )
+        if agent_input.reasoning_effort is not None:
+            brain_kwargs["reasoning_effort"] = agent_input.reasoning_effort
+        if agent_input.reflect_reasoning_effort is not None:
+            brain_kwargs["reflect_reasoning_effort"] = agent_input.reflect_reasoning_effort
+        brain = self._bridge_factory(**brain_kwargs)
 
         # Apply deposited run-context (workflow → set_run_context → here).
         # Guarded by hasattr so RecordingLLMBridge / other test doubles that

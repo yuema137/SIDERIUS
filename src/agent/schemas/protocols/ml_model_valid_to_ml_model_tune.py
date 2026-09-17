@@ -65,8 +65,10 @@ def local_validated_model(
     file_index: int = 6,
     llm_provider: Literal["gemini", "openai", "deepseek"] = "gemini",
     llm_model_id: str = "gemini-3.1-flash-lite-preview",
+    reasoning_effort: str | None = None,
     reflect_provider: Literal["gemini", "openai", "deepseek"] | None = None,
     reflect_model_id: str | None = None,
+    reflect_reasoning_effort: str | None = None,
     # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
     # DS7 — trial_strategy / target_files / eval_strategy params deleted
     # alongside the dead HyperparamTuningInput fields they fed.
@@ -334,8 +336,10 @@ def local_validated_model(
         expert_advice=expert_advice,
         llm_provider=llm_provider,
         llm_model_id=llm_model_id,
+        reasoning_effort=reasoning_effort,
         reflect_provider=reflect_provider,
         reflect_model_id=reflect_model_id,
+        reflect_reasoning_effort=reflect_reasoning_effort,
         storage=storage,
         is_trial=is_trial,
         trial_portion=trial_portion,

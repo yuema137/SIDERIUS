@@ -26,7 +26,9 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 
 
 class NodeLLMConfig(BaseModel):
@@ -55,6 +57,10 @@ class NodeLLMConfig(BaseModel):
         default="gemini-3.1-flash-lite-preview",
         description="Specific model ID passed to the provider.",
     )
+    reasoning_effort: ReasoningEffort | None = Field(
+        default=None,
+        description="Explicit OpenAI reasoning effort; omitted for other providers.",
+    )
     max_retries: int | None = Field(
         default=None,
         description=(
@@ -64,6 +70,12 @@ class NodeLLMConfig(BaseModel):
             "use (e.g. 6 for ~77s, 20 for ~15min)."
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_reasoning_effort(self) -> NodeLLMConfig:
+        if self.reasoning_effort is not None and self.provider != "openai":
+            raise ValueError("reasoning_effort requires provider='openai'")
+        return self
 
 
 class TunerLLMConfig(BaseModel):
@@ -331,10 +343,13 @@ class WorkflowLLMConfig(BaseModel):
         if node_name == "lit_review" and config is None:
             if self.interpret is None:
                 return {}
-            return {
+            result = {
                 "llm_provider": self.interpret.provider,
                 "llm_model_id": self.interpret.model_id,
             }
+            if self.interpret.reasoning_effort is not None:
+                result["llm_reasoning_effort"] = self.interpret.reasoning_effort
+            return result
         if node_name == "data_analysis" and config is None:
             config = self.interpret
 
@@ -356,6 +371,10 @@ class WorkflowLLMConfig(BaseModel):
             # The tuner creates one LLMBridge — use the planner's retry config.
             if config.planner.max_retries is not None:
                 result["max_retries"] = config.planner.max_retries
+            if config.planner.reasoning_effort is not None:
+                result["reasoning_effort"] = config.planner.reasoning_effort
+            if config.reflector.reasoning_effort is not None:
+                result["reflect_reasoning_effort"] = config.reflector.reasoning_effort
             return result
         if isinstance(config, ProposalLLMConfig):
             # Flatten the nested ProposalLLMConfig into per-stage kwargs.
@@ -376,6 +395,17 @@ class WorkflowLLMConfig(BaseModel):
             }
             if config.reasoning.max_retries is not None:
                 result["max_retries"] = config.reasoning.max_retries
+            efforts = {
+                stage.reasoning_effort
+                for stage in (config.comparison, config.reasoning, config.proposing)
+            }
+            if len(efforts) > 1:
+                raise ValueError(
+                    "proposal stages share one bridge; reasoning_effort must agree "
+                    "across comparison, reasoning and proposing"
+                )
+            if config.reasoning.reasoning_effort is not None:
+                result["reasoning_effort"] = config.reasoning.reasoning_effort
             return result
         if isinstance(config, LitReviewLLMConfig):
             # Flatten the nested LitReviewLLMConfig into the 4-field shape
@@ -384,16 +414,23 @@ class WorkflowLLMConfig(BaseModel):
             # a search field is None at runtime, so emitting both pairs is
             # safe and matches Design Decision 3's operator-visible source-
             # of-truth principle.
-            return {
+            result = {
                 "llm_provider": config.main.provider,
                 "llm_model_id": config.main.model_id,
                 "search_llm_provider": config.search.provider,
                 "search_llm_model_id": config.search.model_id,
             }
+            if config.main.reasoning_effort is not None:
+                result["llm_reasoning_effort"] = config.main.reasoning_effort
+            if config.search.reasoning_effort is not None:
+                result["search_llm_reasoning_effort"] = config.search.reasoning_effort
+            return result
         # Plain NodeLLMConfig — single-sub-call agent
         result = {"provider": config.provider, "model_id": config.model_id}
         if config.max_retries is not None:
             result["max_retries"] = config.max_retries
+        if config.reasoning_effort is not None:
+            result["reasoning_effort"] = config.reasoning_effort
         return result
 
     @classmethod

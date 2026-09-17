@@ -3311,8 +3311,10 @@ def run_workflow(
             file_index=launch.file_index,
             llm_provider=tune_llm.get("provider", "gemini"),
             llm_model_id=tune_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
+            reasoning_effort=tune_llm.get("reasoning_effort"),
             reflect_provider=tune_llm.get("reflect_provider"),
             reflect_model_id=tune_llm.get("reflect_model_id"),
+            reflect_reasoning_effort=tune_llm.get("reflect_reasoning_effort"),
             is_trial=launch.is_trial,
             # Lane F2 — TRANSIT-ONLY fields (no tuner consumer); a bare
             # launch restores the input-schema default so input bytes are

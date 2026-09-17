@@ -2859,6 +2859,9 @@ class HyperparamTuningInput(BaseModel):
             "reflector when not overridden)."
         ),
     )
+    reasoning_effort: str | None = Field(
+        default=None, description="Explicit OpenAI planner reasoning effort."
+    )
 
     # --- LLM (reflector — optional sub-agent override) ---
     # The tuner makes two distinct LLM calls per round: a reasoning-heavy
@@ -2884,6 +2887,9 @@ class HyperparamTuningInput(BaseModel):
             "cheaper / higher-quota model (e.g. 'gemini-2.5-flash') to free "
             "the main provider's quota for the reasoning-heavy planner."
         ),
+    )
+    reflect_reasoning_effort: str | None = Field(
+        default=None, description="Explicit OpenAI reflector reasoning effort."
     )
     max_retries: int | None = Field(
         default=None,

@@ -134,6 +134,7 @@ class DataAnalysisAgent:
         provider: str = "gemini",
         model_id: str | None = None,
         max_retries: int | None = None,
+        reasoning_effort: str | None = None,
         bridge_factory: Callable[..., object] | None = None,
         historical_model_inference_capability: HistoricalModelInferenceCapability | None = None,
     ) -> None:
@@ -141,6 +142,7 @@ class DataAnalysisAgent:
         self._provider = provider
         self._model_id = model_id
         self._max_retries = max_retries
+        self._reasoning_effort = reasoning_effort
         self._bridge_factory = bridge_factory or LLMBridge
         self._historical_inference_capability = historical_model_inference_capability
 
@@ -148,6 +150,8 @@ class DataAnalysisAgent:
         kwargs = {"provider": self._provider, "model_id": self._model_id}
         if self._max_retries is not None:
             kwargs["max_retries"] = self._max_retries
+        if self._reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self._reasoning_effort
         return self._bridge_factory(**kwargs)
 
     @staticmethod

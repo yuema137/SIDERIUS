@@ -1496,6 +1496,7 @@ class MLModelProposalAgent:
         provider: str = "gemini",
         model_id: str = "gemini-3.1-flash-lite-preview",
         max_retries: int | None = None,
+        reasoning_effort: str | None = None,
         bridge_factory=None,
         capability_index_path: str | None = None,
         **kwargs,
@@ -1504,11 +1505,14 @@ class MLModelProposalAgent:
         # (comparison_provider, reasoning_model_id, etc.) — these are for
         # future per-stage bridge routing, currently unused.
         self._bridge_factory = bridge_factory or LLMBridge
-        self.bridge = self._bridge_factory(
+        bridge_kwargs = dict(
             provider=provider,
             model_id=model_id,
             max_retries=max_retries,
         )
+        if reasoning_effort is not None:
+            bridge_kwargs["reasoning_effort"] = reasoning_effort
+        self.bridge = self._bridge_factory(**bridge_kwargs)
         # L5b — registry handle for loss-awareness rendering in the proposer
         # prompt. Mirrors the L4b implementor DI pattern. Tests pass
         # ``capability_index_path=str(tmp_path / "_capability_index.json")``

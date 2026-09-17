@@ -505,6 +505,9 @@ class LiteratureReviewInput(BaseModel):
     run_name: str = Field(description="Run identifier shared with the workflow.")
     llm_provider: str = Field(description="LLMBridge provider name (e.g. 'openai').")
     llm_model_id: str = Field(description="LLMBridge model id (e.g. 'gpt-4o-mini').")
+    llm_reasoning_effort: str | None = Field(
+        default=None, description="Explicit OpenAI main-bridge reasoning effort."
+    )
     search_llm_provider: str | None = Field(
         default=None,
         description="Optional separate LLMBridge provider for the dynamic-search "
@@ -517,6 +520,9 @@ class LiteratureReviewInput(BaseModel):
         default=None,
         description="Optional separate model id for the search-decision call "
         "(e.g. 'deepseek-v4-pro'). When None, llm_model_id is used.",
+    )
+    search_llm_reasoning_effort: str | None = Field(
+        default=None, description="Explicit OpenAI search-bridge reasoning effort."
     )
     confidence_rubric: ConfidenceRubric = Field(
         default_factory=ConfidenceRubric,

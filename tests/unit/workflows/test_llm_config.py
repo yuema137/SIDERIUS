@@ -22,6 +22,14 @@ from workflows.llm_config import NodeLLMConfig, TunerLLMConfig, WorkflowLLMConfi
 
 
 class TestNodeLLMConfig:
+    def test_openai_effort_is_explicit_and_other_providers_refuse_it(self):
+        configured = NodeLLMConfig(
+            provider="openai", model_id="gpt-5.6-sol", reasoning_effort="medium"
+        )
+        assert configured.reasoning_effort == "medium"
+        with pytest.raises(ValidationError, match="requires provider='openai'"):
+            NodeLLMConfig(provider="gemini", reasoning_effort="medium")
+
     def test_defaults(self):
         """No args → falls back to gemini / flash-lite-preview defaults."""
         c = NodeLLMConfig()
@@ -452,3 +460,35 @@ class TestShippedJsonConfigsParse:
                 "search_llm_provider",
                 "search_llm_model_id",
             }, f"{path.name}: .get('lit_review') missing one or more keys"
+
+
+def test_explicit_effort_reaches_every_configured_role():
+    from workflows.llm_config import LitReviewLLMConfig, ProposalLLMConfig
+
+    leaf = NodeLLMConfig(provider="openai", model_id="gpt-5.6-sol", reasoning_effort="medium")
+    config = WorkflowLLMConfig(
+        interpret=leaf,
+        data_analysis=leaf,
+        propose=ProposalLLMConfig(comparison=leaf, reasoning=leaf, proposing=leaf),
+        implement=leaf,
+        validate=leaf,
+        tune=TunerLLMConfig(planner=leaf, reflector=leaf),
+        lit_review=LitReviewLLMConfig(main=leaf, search=leaf),
+    )
+    for role in ("interpret", "data_analysis", "propose", "implement", "validate", "tune"):
+        assert config.get(role)["reasoning_effort"] == "medium"
+    assert config.get("tune")["reflect_reasoning_effort"] == "medium"
+    assert config.get("lit_review")["llm_reasoning_effort"] == "medium"
+    assert config.get("lit_review")["search_llm_reasoning_effort"] == "medium"
+
+
+def test_proposer_refuses_conflicting_effort_when_it_has_one_bridge():
+    from workflows.llm_config import ProposalLLMConfig
+
+    medium = NodeLLMConfig(provider="openai", model_id="gpt-5.6-sol", reasoning_effort="medium")
+    high = NodeLLMConfig(provider="openai", model_id="gpt-5.6-sol", reasoning_effort="high")
+    config = WorkflowLLMConfig(
+        propose=ProposalLLMConfig(comparison=medium, reasoning=high, proposing=medium)
+    )
+    with pytest.raises(ValueError, match="share one bridge"):
+        config.get("propose")
