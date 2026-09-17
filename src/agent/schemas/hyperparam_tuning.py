@@ -1989,6 +1989,13 @@ class HyperparamTuningInput(BaseModel):
             "has no lit-review behaviour of its own."
         ),
     )
+    data_analysis_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Workflow Data Analysis treatment pass-through. Locked and stamped only; "
+            "the tuner does not consume analysis evidence through this field."
+        ),
+    )
     lit_review_config_sha256: str | None = Field(
         default=None,
         description=(

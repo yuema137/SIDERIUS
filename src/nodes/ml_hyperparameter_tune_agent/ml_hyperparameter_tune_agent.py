@@ -569,6 +569,7 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
     return LockLaunchIdentity(
         experiment_arm=agent_input.experiment_arm,
         lit_review_enabled=agent_input.lit_review_enabled,
+        data_analysis_enabled=agent_input.data_analysis_enabled,
         lit_review_config_sha256=agent_input.lit_review_config_sha256,
         scientific_evidence_order=agent_input.scientific_evidence_order,
         baseline_isolation=agent_input.baseline_isolation,

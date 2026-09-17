@@ -50,6 +50,11 @@ invariants lock and effective health config (written via `core` /
   carry bounded evidence to the second capability, and Proposal receives
   Literature Review and Data Analysis through distinct fields. The order is
   canonical run identity and changing it refuses resume into the same workspace.
+- **Data Analysis treatment transport**: `data_analysis_enabled=None` retains the
+  task composition's legacy behavior. Explicit `True` requires its existing
+  analysis binding; explicit `False` suppresses both AnalysisBrief generation
+  and the analysis stage. The launch value is canonical resume identity and
+  does not create asset authority or a second experiment treatment schema.
 - **Manifest resolution**: the typed composition schema owns section names and
   requiredness; an unknown key is *refused, not ignored*; `file:` plugin refs
   resolve against the manifest's own directory and their content sha joins the

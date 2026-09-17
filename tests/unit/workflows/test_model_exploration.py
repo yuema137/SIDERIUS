@@ -584,6 +584,7 @@ class TestRunWorkflowSingleIteration:
                     model_types=["punet"],
                     source_run_name="v1",
                     human_advice_analysis="Inspect the authorized high-noise slice.",
+                    data_analysis_enabled=True,
                 ),
                 workspace=workflow_env["workspace"],
                 run_name="test_run",
@@ -603,6 +604,43 @@ class TestRunWorkflowSingleIteration:
             is historical_inference_capability
         )
         assert attach_analysis.call_args.args[1] is analysis_output
+        tune_input = workflow_env["tune"].return_value.run.call_args.args[0]
+        assert tune_input.data_analysis_enabled is True
+
+    def test_explicit_analysis_off_suppresses_brief_and_stage(self, workflow_env):
+        composition = replace(workflow_env["composition"], data_analysis=object())
+        with patch("workflows.data_analysis_stage.run_optional_data_analysis") as run_analysis:
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=workflow_env["data_dir"],
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    data_analysis_enabled=False,
+                ),
+                workspace=workflow_env["workspace"],
+                run_name="test_run",
+                task_composition=composition,
+            )
+        interpretation_input = workflow_env["interp"].return_value.run.call_args.args[0]
+        assert interpretation_input.analysis_brief_requested is False
+        run_analysis.assert_not_called()
+        tune_input = workflow_env["tune"].return_value.run.call_args.args[0]
+        assert tune_input.data_analysis_enabled is False
+
+    def test_explicit_analysis_on_refuses_missing_binding(self, workflow_env):
+        with pytest.raises(ValueError, match="requires a task-composed data_analysis binding"):
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=workflow_env["data_dir"],
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    data_analysis_enabled=True,
+                ),
+                workspace=workflow_env["workspace"],
+                run_name="test_run",
+                task_composition=workflow_env["composition"],
+            )
+        workflow_env["interp"].return_value.run.assert_not_called()
 
     @pytest.mark.parametrize(
         ("order", "expected_trace"),

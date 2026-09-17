@@ -167,6 +167,8 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     # One optional inline source directive. Its exact content is pinned by
     # _workflow_lock_identity; None/auto do not perturb the legacy lock.
     "analysis_source_prompt": None,
+    # Explicit workflow treatment; None preserves composition behavior.
+    "data_analysis_enabled": None,
     # PR-C — workflow-owned ordering of two independent evidence capabilities.
     "scientific_evidence_order": "analysis_then_literature",
 }

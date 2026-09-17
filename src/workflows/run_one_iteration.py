@@ -816,6 +816,7 @@ class LaunchIdentity:
     lit_review_enabled: bool
     lit_review_config_path: str | None
     lit_review_config_sha256: str | None
+    data_analysis_enabled: bool | None = None
     scientific_evidence_order: EvidenceStageOrder = "analysis_then_literature"
     baseline_isolation: bool = False
     advice_path: str | None = None
@@ -1084,6 +1085,8 @@ def write_manifest(
             manifest["experiment_arm"] = launch_identity.experiment_arm
         if launch_identity.lit_review_enabled:
             manifest["lit_review_enabled"] = True
+        if launch_identity.data_analysis_enabled is not None:
+            manifest["data_analysis_enabled"] = launch_identity.data_analysis_enabled
         if launch_identity.lit_review_config_sha256 is not None:
             manifest["lit_review_config_sha256"] = launch_identity.lit_review_config_sha256
         if launch_identity.scientific_evidence_order != "analysis_then_literature":
@@ -2200,6 +2203,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--data_analysis_enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable or disable task-composed Data Analysis. Unset preserves "
+            "the composition's legacy behavior; enabled requires a binding."
+        ),
+    )
+    parser.add_argument(
         "--scientific_evidence_order",
         choices=("analysis_then_literature", "literature_then_analysis"),
         default="analysis_then_literature",
@@ -2364,6 +2376,7 @@ def resolve_launch_identity(args: argparse.Namespace) -> LaunchIdentity:
     return LaunchIdentity(
         experiment_arm=args.experiment_arm,
         lit_review_enabled=enabled,
+        data_analysis_enabled=args.data_analysis_enabled,
         lit_review_config_path=args.ml_lit_review_config,
         lit_review_config_sha256=lit_review_config_sha256(
             args.ml_lit_review_config, enabled=enabled
@@ -2598,6 +2611,7 @@ def compute_expected_invariants(
         # arXiv U1 — the identity the workflow's pre-flight will lock too.
         launch_identity=LockLaunchIdentity(
             lit_review_enabled=identity.lit_review_enabled,
+            data_analysis_enabled=identity.data_analysis_enabled,
             lit_review_config_sha256=identity.lit_review_config_sha256,
             scientific_evidence_order=identity.scientific_evidence_order,
             experiment_arm=identity.experiment_arm,
@@ -2806,6 +2820,7 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
         "start_iteration": args.start_iteration,
         "experiment_arm": identity.experiment_arm,
         "lit_review_enabled": identity.lit_review_enabled,
+        "data_analysis_enabled": identity.data_analysis_enabled,
         "lit_review_config_path": (
             resolve_lit_review_config_path(identity.lit_review_config_path)
             if identity.lit_review_config_path is not None
@@ -3198,6 +3213,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
             else ""
         )
     )
+    print(f"  Data Analysis    : {launch_identity.data_analysis_enabled!r} (None=composition)")
     print(f"  Evidence order   : {launch_identity.scientific_evidence_order}")
 
     # Step 1 — back-compat resolution of @manifest: indirection in the seed
@@ -3489,6 +3505,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
                     human_advice_interpret=args.human_advice_interpret,
                     human_advice_analysis=args.human_advice_analysis,
                     analysis_source_prompt=args.analysis_source_prompt,
+                    data_analysis_enabled=launch_identity.data_analysis_enabled,
                     human_advice_propose=args.human_advice_propose,
                     human_advice_implement=args.human_advice_implement,
                     human_advice_validate=args.human_advice_validate,

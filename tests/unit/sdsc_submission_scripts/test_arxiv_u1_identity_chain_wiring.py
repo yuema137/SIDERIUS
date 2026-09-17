@@ -153,6 +153,16 @@ class TestChainCli:
 
 
 class TestLaunchIdentityResolution:
+    def test_data_analysis_treatment_is_explicit_and_identity_bearing(self, tmp_path):
+        absent = roi.resolve_launch_identity(_args())
+        enabled = roi.resolve_launch_identity(_args(["--data_analysis_enabled"]))
+        disabled = roi.resolve_launch_identity(_args(["--no-data_analysis_enabled"]))
+        assert (
+            absent.data_analysis_enabled,
+            enabled.data_analysis_enabled,
+            disabled.data_analysis_enabled,
+        ) == (None, True, False)
+
     def _yaml(self, tmp_path, enabled: bool) -> Path:
         p = tmp_path / "lit_review_config.yaml"
         p.write_text(f"enabled: {'true' if enabled else 'false'}\nroot_papers: []\n")
@@ -203,7 +213,15 @@ class TestLaunchIdentityResolution:
         )
 
         cfg = self._yaml(tmp_path, enabled=True)
-        args = _args(["--experiment_arm", "with-prior-art", "--ml_lit_review_config", str(cfg)])
+        args = _args(
+            [
+                "--experiment_arm",
+                "with-prior-art",
+                "--ml_lit_review_config",
+                str(cfg),
+                "--data_analysis_enabled",
+            ]
+        )
         args.workspace = str(tmp_path)
         args.health_gate_enabled = False  # avoid materializing gate config
         args.health_gate_files = None
@@ -217,10 +235,23 @@ class TestLaunchIdentityResolution:
             implicit = roi.compute_expected_invariants(args, run_composition=composition)
         assert explicit.experiment_arm == "with-prior-art"
         assert explicit.lit_review_enabled is True
+        assert explicit.data_analysis_enabled is True
         assert explicit.lit_review_config_sha256 == hashlib.sha256(cfg.read_bytes()).hexdigest()
         # A caller that predates the parameter resolves the SAME identity
         # through the same function — the two cannot diverge.
         assert implicit.canonical() == explicit.canonical()
+
+    def test_data_analysis_on_off_changes_resume_identity(self, tmp_path):
+        from workflows.model_exploration import _workflow_lock_identity
+        from workflows.run_config import WorkflowLaunchConfig
+
+        on = _workflow_lock_identity(WorkflowLaunchConfig(data_analysis_enabled=True))
+        off = _workflow_lock_identity(WorkflowLaunchConfig(data_analysis_enabled=False))
+        legacy = _workflow_lock_identity(WorkflowLaunchConfig())
+        assert on.data_analysis_enabled is True
+        assert off.data_analysis_enabled is False
+        assert legacy.data_analysis_enabled is None
+        assert len({on.model_dump_json(), off.model_dump_json(), legacy.model_dump_json()}) == 3
 
 
 def _identity(**overrides):

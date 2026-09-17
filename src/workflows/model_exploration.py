@@ -1819,6 +1819,21 @@ def _run_composed_data_analysis(
     return output
 
 
+def _resolve_analysis_binding(task_composition, enabled: bool | None):
+    """Resolve the workflow treatment against the task-owned binding.
+
+    A launch flag transports an experiment's treatment; it never constructs
+    missing task authority or changes the standalone agent contract.
+    """
+
+    binding = getattr(task_composition, "data_analysis", None)
+    if enabled is True and binding is None:
+        raise ValueError(
+            "data_analysis_enabled=True requires a task-composed data_analysis binding"
+        )
+    return None if enabled is False else binding
+
+
 def _attach_composed_analysis(proposal_input, analysis_output):
     """Apply the optional typed edge without branching in ``run_workflow``."""
 
@@ -1886,6 +1901,7 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
 
     return LockLaunchIdentity(
         lit_review_enabled=launch.lit_review_enabled,
+        data_analysis_enabled=launch.data_analysis_enabled,
         lit_review_config_sha256=lit_review_config_sha256(
             launch.lit_review_config_path, enabled=launch.lit_review_enabled
         ),
@@ -2254,7 +2270,7 @@ def run_workflow(
         raise ValueError(
             "Must provide either source_paths OR (data_dir + model_types + source_run_name)."
         )
-    _analysis_binding = getattr(task_composition, "data_analysis", None)
+    _analysis_binding = _resolve_analysis_binding(task_composition, launch.data_analysis_enabled)
     historical_sources = _initial_historical_sources_for_analysis(
         _analysis_binding, tuning_outputs, launch.source_paths
     )
@@ -2678,9 +2694,7 @@ def run_workflow(
                 else DescriptionSourcePolicy.LEGACY
             ),
             human_advice=launch.human_advice_interpret,
-            analysis_brief_requested=(
-                getattr(bindings.task_composition, "data_analysis", None) is not None
-            ),
+            analysis_brief_requested=_analysis_binding is not None,
             runtime_vocab=state.current_runtime_vocab,
             previous_proposal=state.previous_proposal_data,
             storage=interp_storage,
@@ -2742,7 +2756,7 @@ def run_workflow(
         ):
             return _run_composed_data_analysis(
                 _interpretation,
-                binding=getattr(bindings.task_composition, "data_analysis", None),
+                binding=_analysis_binding,
                 iteration=_iteration,
                 run_name=bindings.run_name,
                 storage=_storage,
@@ -3396,6 +3410,7 @@ def run_workflow(
             # chances to diverge.
             experiment_arm=_run_invariants.experiment_arm,
             lit_review_enabled=_run_invariants.lit_review_enabled,
+            data_analysis_enabled=_run_invariants.data_analysis_enabled,
             lit_review_config_sha256=_run_invariants.lit_review_config_sha256,
             scientific_evidence_order=_run_invariants.scientific_evidence_order,
             baseline_isolation=_run_invariants.baseline_isolation,
@@ -3810,6 +3825,12 @@ def main():
         help="Inline source directive: auto or lock: raw=<asset IDs|all>; models=<all|none|last:N|ids:IDs>.",
     )
     parser.add_argument(
+        "--data_analysis_enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable/disable composed Data Analysis; unset preserves composition behavior.",
+    )
+    parser.add_argument(
         "--advice_propose",
         type=str,
         default=None,
@@ -3875,6 +3896,7 @@ def main():
                 human_advice_interpret=args.advice_interpret,
                 human_advice_analysis=args.advice_analysis,
                 analysis_source_prompt=args.analysis_source_prompt,
+                data_analysis_enabled=args.data_analysis_enabled,
                 human_advice_propose=args.advice_propose,
                 human_advice_implement=args.advice_implement,
                 human_advice_validate=args.advice_validate,

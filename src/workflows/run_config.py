@@ -82,6 +82,9 @@ class WorkflowLaunchConfig:
     human_advice_interpret: str | None = None
     human_advice_analysis: str | None = None
     analysis_source_prompt: str | None = None
+    # None preserves task-composition behavior; an explicit treatment value
+    # narrows or requires the composed Data Analysis capability.
+    data_analysis_enabled: bool | None = None
     human_advice_propose: str | None = None
     human_advice_implement: str | None = None
     human_advice_validate: str | None = None

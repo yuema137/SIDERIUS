@@ -131,6 +131,7 @@ def local_validated_model(
     # match what the workflow locked for this workspace.
     experiment_arm: str | None = None,
     lit_review_enabled: bool = False,
+    data_analysis_enabled: bool | None = None,
     lit_review_config_sha256: str | None = None,
     scientific_evidence_order: Literal[
         "analysis_then_literature", "literature_then_analysis"
@@ -365,6 +366,7 @@ def local_validated_model(
         ),
         experiment_arm=experiment_arm,
         lit_review_enabled=lit_review_enabled,
+        data_analysis_enabled=data_analysis_enabled,
         lit_review_config_sha256=lit_review_config_sha256,
         scientific_evidence_order=scientific_evidence_order,
         baseline_isolation=baseline_isolation,
