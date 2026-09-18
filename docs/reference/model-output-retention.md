@@ -46,6 +46,16 @@ candidate/model failure. The task declaration is trusted plugin code, not a
 security sandbox. Containment checks protect against mistakes in its path
 inventory, but cannot independently prove the task's ownership claim.
 
+The framework's atomic ABRA HDF5 writer also owns `.h5.complete` markers and
+hidden `.h5.<token>.tmp` / `.h5.complete.<token>.tmp` files. When the run has an
+indexed deliverable naming contract, retention adds only that exact attempt's
+writer-owned auxiliary files to the task inventory. This catches a large
+temporary file left by a killed writer even when no finished `.h5` exists.
+The task still names its published deliverables; non-HDF5 indexed outputs are
+unaffected, and this does not infer an unknown task's output names or inspect
+another attempt. The same receipt records each auxiliary file's digest, size
+and disposition.
+
 An uncomposed indexed legacy run uses its existing deliverable-naming
 authority's *attempt-scoped* pattern as a compatibility inventory. The former
 experiment-wide cleanup glob could match another model under the same
