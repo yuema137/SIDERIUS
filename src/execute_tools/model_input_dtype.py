@@ -198,6 +198,19 @@ def resolve_input_dtype(
     return RUNTIME_SUPPORTED_DTYPES[site_preference]
 
 
+def resolve_inference_input_dtype(
+    model_type: str, task_contract: ModelIOContract | None
+) -> torch.dtype | None:
+    """Resolve task-data-path inference; absent contract preserves task storage.
+
+    Used by the real inference child and its pre-training input check. Legacy
+    indexed inference retains its separate historical site preference.
+    """
+    if task_contract is None:
+        return None
+    return resolve_input_dtype(model_type, task_contract, site_preference=INFERENCE_SITE_DTYPE)
+
+
 class ContractCardinalityConflictError(RuntimeError):
     """A model config declares a class count the contract contradicts.
 

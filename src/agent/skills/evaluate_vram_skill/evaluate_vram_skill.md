@@ -78,6 +78,21 @@ there is one measurement authority rather than two.
 
 ## Interface
 
+For a composed attempt with an evaluation scope, `TaskProbeDataSpec` also
+carries `evaluation_scope_payload`. Before training measurement, the isolated
+worker materializes one real validation sample and executes an evaluation-mode
+forward under the existing `single_probe_seconds` timeout and worker memory
+limit. This uses the same `forward_inference_batch` boundary and
+`resolve_inference_input_dtype` authority as production task-data-path inference.
+The dataset's storage dtype is converted to the contract-selected representation;
+neither integer dtype nor task identity is hardcoded. A `TypeError` reports the
+phase, model class, storage/resolved/actual dtypes, shape and device, without
+printing sample values. Runtime allocation errors retain their existing types.
+The check restores the model's training mode and writes no deliverable or score.
+Legacy callers without evaluation-scope transport skip this additional check;
+an explicit empty or invalid evaluation scope fails closed. Passing one sample
+checks an interface; it does not certify whole-scope inference, scoring or Health.
+
 Invoked through `_run_skill("evaluate_vram_skill", sandbox, ...)`, and in
 production through `run_production_preflight`
 (`preflight_adapter.py`), which routes to the isolated worker.

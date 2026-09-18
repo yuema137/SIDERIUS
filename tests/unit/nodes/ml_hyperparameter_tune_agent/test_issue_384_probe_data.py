@@ -30,7 +30,7 @@ def test_composed_training_scope_becomes_a_typed_worker_reference(monkeypatch):
         task_composition_ref=SimpleNamespace(
             semantic_fingerprint="abc123", segmentation_applicability="not_applicable"
         ),
-        task_scopes=SimpleNamespace(training={"networks": ["a"]}),
+        task_scopes=SimpleNamespace(training={"networks": ["a"]}, evaluation={"networks": ["a"]}),
         data_dir="/task/data",
         epoch_seed=17,
         train_portion=0.25,
@@ -41,6 +41,7 @@ def test_composed_training_scope_becomes_a_typed_worker_reference(monkeypatch):
     assert result.manifest_path == "/task/composition.yaml"
     assert result.semantic_fingerprint == "abc123"
     assert result.training_scope_payload == '{"kind":"synthetic","networks":["a"]}'
+    assert result.evaluation_scope_payload == '{"kind":"synthetic","networks":["a"]}'
     assert result.max_inference_batch_size == 1
     assert result.segmentation_applicability == "not_applicable"
     assert result.sampling.model_dump() == {

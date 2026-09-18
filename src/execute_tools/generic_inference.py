@@ -42,10 +42,10 @@ source- or supervision-associated values, the task uses the supplied physical
 data root to invoke its same ``validation_dataset`` method and checks the
 declared sample count before pairing.
 
-**TIDMAD does not come through here.** Its SampleSet loop, ``validation_file_name``,
-HDF5 channel reads and PSD slicing survive unchanged in ``inference_single.py``
-as the TIDMAD adapter's implementation. They are not generic child semantics
-and this module deliberately cannot express them.
+Every composed task carrying an evaluation scope uses this route, including
+external scientific tasks. The legacy indexed loop in ``inference_single.py``
+is a separate compatibility route. A transported Model-I/O contract must reach
+this iterator's input conversion; task storage dtype is not a model contract.
 """
 
 from __future__ import annotations
@@ -57,6 +57,7 @@ import torch
 from pydantic import BaseModel, ConfigDict, Field
 from torch.utils.data import DataLoader
 
+from execute_tools.inference_forward import forward_inference_batch
 from execute_tools.task_data_path import (
     DeliverableSourceContext,
     DeliverableWriteRequest,
@@ -141,11 +142,9 @@ def run_generic_inference(
             # inference consumes the input and ignores the target, which is
             # present because ONE method serves both the R3 pass and this one.
             inputs = batch[0] if isinstance(batch, (list, tuple)) else batch
-            inputs = inputs.to(device)
-            if input_dtype is not None:
-                inputs = inputs.to(input_dtype)
-            with torch.no_grad():
-                predictions = model(inputs)
+            predictions = forward_inference_batch(
+                model, inputs, device=device, input_dtype=input_dtype, stage="task inference"
+            )
             batches += 1
             for prediction in predictions:
                 produced += 1

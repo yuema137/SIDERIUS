@@ -57,6 +57,11 @@ def build_task_probe_data(
         manifest_path=manifest_path,
         semantic_fingerprint=task_composition_ref.semantic_fingerprint,
         training_scope_payload=capability.serialize_scope(training_scope),
+        evaluation_scope_payload=(
+            capability.serialize_scope(task_scopes.evaluation)
+            if getattr(task_scopes, "evaluation", None) is not None
+            else None
+        ),
         sampling=EpochSamplingParams(
             data_dir=data_dir,
             epoch_seed=epoch_seed,
