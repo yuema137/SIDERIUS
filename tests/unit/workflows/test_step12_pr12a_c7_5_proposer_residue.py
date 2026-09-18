@@ -97,8 +97,7 @@ def test_declared_task_prose_is_embedded_in_framework_owned_json_punctuation():
 def test_every_declared_template_token_is_substituted():
     rendered = _render_commit_system_prompt(_classification_contract(), ProposalTaskBlocks())
     for token in (
-        "{CLASSIFIER_OUTPUT_SHAPE}",
-        "{REGRESSOR_EMITS}",
+        "{OUTPUT_TYPE_GUIDANCE}",
         "{REGRESSOR_OUTPUT_FORM}",
         "{INPUT_SEMANTICS}",
         "{CLASS_AXIS_NOTE}",

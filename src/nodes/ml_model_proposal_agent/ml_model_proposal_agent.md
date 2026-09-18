@@ -261,3 +261,13 @@ The constructor accepts `bridge_factory` (test injection — defaults to `LLMBri
 - **External services**: none directly. Depends on the upstream interpretation file (in CLI mode) or on the upstream protocol (in workflow mode). The pre-flight time-gate uses `execute_tools.dataset_config.TIDMAD` for shape priors and optionally `core.hardware_context` for live GPU manifest.
 
 - **`[RECENT TRIAL VALIDITY]` block (V20 PR D, D-C6).** Rendered by `_format_recent_trial_validity_block()` when `recent_trial_validity` is non-empty, and delivered on **BOTH** execution modes — spliced into `_build_reasoning_prompt` in legacy 2-call mode, and through the `recent_trial_validity_block` template variable into `proposing_stage.md` in the 3-stage pipeline. Both are required: Gate 1 caught a wiring that reached only the pipeline while the real call took the legacy branch, so the evidence never reached the model — the mirror image of the P3-V1 defect above. The block transports FACTS the gate system already recorded (record identities, which blocking gates failed, reasons, measured metrics, and what could not be established) and prescribes NO remedy: what a metric implies is the planner's judgement, and task-specific advice here would be wrong for the next task. It keeps distinct what a generic 'trial failed' string would collapse — execution failure (evidence ABSENT), gate invalidity (evidence NEGATIVE), validity unknown (the gates could not judge), and a formal round skipped for no valid winner versus skipped on the ordinary budget. Empty list renders NOTHING, so a healthy chain's prompt is byte-identical to pre-PR-D.
+
+## Continuous contracts in the legacy commit prompt
+
+The legacy reasoning/commit route derives available output forms from the same
+Model-I/O authority used by candidate probes. A continuous contract without a
+class alphabet renders regressor guidance; it does not attempt to construct a
+classifier shape or invent a class count. Categorical contracts keep their
+classifier/regressor guidance. An actual classifier candidate against a
+continuous contract remains invalid. This changes prompt preparation only;
+provider selection, call count, schemas and proposal validation are unchanged.

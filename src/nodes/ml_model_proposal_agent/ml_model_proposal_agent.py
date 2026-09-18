@@ -50,7 +50,7 @@ from agent.schemas.proposer_evidence import (
     build_proposer_evidence,
 )
 from agent.schemas.task_config import ForwardContract
-from agent.skills.model_io_probe_skill import declared_output_tensor
+from agent.skills.model_io_probe_skill import ProbeConstructionError, declared_output_tensor
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
 from core.capability_registry import CapabilityRegistry
@@ -423,6 +423,9 @@ Think step by step. Be specific. Reference actual scores, model names{EVIDENCE_C
 produce JSON — that is the next step."""
 
 
+COMMIT_OUTPUT_TYPE_GUIDANCE = '"classifier" or "regressor" — REQUIRED. The output representation this model commits to. "classifier" emits {CLASSIFIER_OUTPUT_SHAPE} per-timestep class logits and admits loss_type ce/focal/focal_cw; "regressor" emits {REGRESSOR_EMITS} and admits loss_type smooth_l1. This is an INDEPENDENT design decision: do NOT pick a loss first and let the output follow, and do NOT infer one from the other. An inconsistent pair is rejected before training."'
+
+
 PROPOSAL_COMMIT_PROMPT = """\
 You are a senior ML architect. You have just completed a detailed reasoning step
 about a new architecture proposal. Now commit to a specific design.
@@ -431,7 +434,7 @@ Output a JSON object with exactly these fields:
 
 {
   "model_name": "short_snake_case_key",
-  "output_type": "classifier" or "regressor" — REQUIRED. The output representation this model commits to. "classifier" emits {CLASSIFIER_OUTPUT_SHAPE} per-timestep class logits and admits loss_type ce/focal/focal_cw; "regressor" emits {REGRESSOR_EMITS} and admits loss_type smooth_l1. This is an INDEPENDENT design decision: do NOT pick a loss first and let the output follow, and do NOT infer one from the other. An inconsistent pair is rejected before training.",
+  "output_type": {OUTPUT_TYPE_GUIDANCE},
   "model_description": "One paragraph plain-English description of the architecture and why it is expected to improve on the current best.",
   "mathematical_definition": "Must open with a three-sentence 'Golden Paragraph' that cites: (1) the forward contract for the output_type you chose — for 'classifier': 'Input: {INPUT_SHAPE}{INPUT_SEMANTICS}. Output: {OUTPUT_SHAPE} ({OUTPUT_DESCRIPTION})'; for 'regressor': 'Input: {INPUT_SHAPE}{INPUT_SEMANTICS}. Output: {REGRESSOR_OUTPUT_FORM}'; (2) the segmentation semantics — state whether the body is segment-local (no cross-segment state) or segment-cross (e.g. global attention within a segment), and whether causal masking is required; (3) the output dimension — for 'classifier', '{CLASS_AXIS_NOTE}'; for 'regressor', 'the head emits one continuous value per time step'. After the Golden Paragraph, describe the architectural framework abstractly: key computational stages, mathematical operations, data flow. Do NOT include concrete layer dimensions, kernel sizes, or channel counts — those belong in baseline_config.",
   "motivation": "Why this specific architecture addresses the bottlenecks from the interpretation. Must reference the take-home message directly and name at least one specific bottleneck.",
@@ -1394,6 +1397,31 @@ def _attach_custom_loss_contract(
     return output.model_copy(update={"custom_loss_spec": spec})
 
 
+def _render_commit_output_type_guidance(
+    fc: ForwardContract, blocks: Any, allowed_output_types: tuple[str, ...] | None
+) -> str:
+    """Describe only forms supported by the existing Model-I/O authority.
+
+    A continuous contract cannot supply a classifier shape. That makes the
+    classifier option unavailable, not the entire regression prompt invalid.
+    Keep the candidate/probe guard strict; no class alphabet is fabricated.
+    """
+    try:
+        classifier_shape = render_classifier_output_shape(fc)
+    except ProbeConstructionError:
+        if allowed_output_types and "regressor" not in allowed_output_types:
+            raise
+        return (
+            '"regressor" — REQUIRED. The task declares no classifier output form. '
+            '"regressor" emits '
+            + render_regressor_output_form(fc, blocks, with_dtype=False)
+            + ' and admits loss_type smooth_l1. An inconsistent pair is rejected before training."'
+        )
+    return COMMIT_OUTPUT_TYPE_GUIDANCE.replace(
+        "{CLASSIFIER_OUTPUT_SHAPE}", classifier_shape
+    ).replace("{REGRESSOR_EMITS}", render_regressor_output_form(fc, blocks, with_dtype=False))
+
+
 def _render_commit_system_prompt(
     fc: ForwardContract,
     blocks: Any = None,
@@ -1454,8 +1482,10 @@ def _render_commit_system_prompt(
         # docstring deferred to "a later step". Shapes derived from the
         # declaration, prose from the task, and an undeclared task gets the
         # shape rather than TIDMAD's noun for it.
-        .replace("{CLASSIFIER_OUTPUT_SHAPE}", render_classifier_output_shape(fc))
-        .replace("{REGRESSOR_EMITS}", render_regressor_output_form(fc, blocks, with_dtype=False))
+        .replace(
+            "{OUTPUT_TYPE_GUIDANCE}",
+            _render_commit_output_type_guidance(fc, blocks, allowed_output_types),
+        )
         .replace(
             "{REGRESSOR_OUTPUT_FORM}", render_regressor_output_form(fc, blocks, with_dtype=True)
         )
