@@ -848,3 +848,27 @@ class TestDatabaseValidatedModel:
     def test_raises_not_implemented(self, validator_output, storage):
         with pytest.raises(NotImplementedError):
             database_validated_model(validator_output, storage)
+
+
+def test_cooperative_budget_reaches_validated_tuner(validator_output, proposal_output, storage):
+    result = local_validated_model(
+        validator_output,
+        proposal_output,
+        storage,
+        training_budget_reserve_fraction=0.2,
+        trial_max_epochs=100,
+        formal_max_epochs=80,
+        trial_time_budget_minutes=30,
+        formal_time_budget_minutes=120,
+    )
+    assert result.training_budget_reserve_fraction == 0.2
+    assert result.resolve_epoch_cap(is_trial=True).cap == 100
+    assert result.resolve_epoch_cap(is_trial=False).cap == 80
+    with pytest.raises(ValueError, match="both role time budgets"):
+        local_validated_model(
+            validator_output,
+            proposal_output,
+            storage,
+            training_budget_reserve_fraction=0.2,
+            max_epochs=100,
+        )

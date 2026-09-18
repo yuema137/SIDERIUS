@@ -82,7 +82,7 @@ def report_training_budget(
     session: RuntimeVerificationSession | None, *, stage: str, epochs: int
 ) -> None:
     """Emit early evidence into the existing attempt log, without new policy."""
-    if session is None:
+    if session is None or session.policy.training_budget is not None:
         return
     observation = session.observation
     component = observation.components.get("training")

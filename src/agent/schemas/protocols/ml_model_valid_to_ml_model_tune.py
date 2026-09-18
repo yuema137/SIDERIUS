@@ -85,6 +85,7 @@ def local_validated_model(
     max_epochs: int | None = None,
     # D-BUD-6 — per-mode epoch ceilings (trial/formal split). None = the
     # mode-agnostic max_epochs governs that role (legacy behavior).
+    training_budget_reserve_fraction: float | None = None,
     trial_max_epochs: int | None = None,
     formal_max_epochs: int | None = None,
     # VALIDATION POSTURE ONLY (FU-D-12) — hard ceiling on the resolved
@@ -359,6 +360,7 @@ def local_validated_model(
         retain_training_checkpoints=retain_training_checkpoints,
         max_epochs=max_epochs,
         # D-BUD-6 — carried through unchanged, including `None`.
+        training_budget_reserve_fraction=training_budget_reserve_fraction,
         trial_max_epochs=trial_max_epochs,
         formal_max_epochs=formal_max_epochs,
         validation_max_portion=validation_max_portion,

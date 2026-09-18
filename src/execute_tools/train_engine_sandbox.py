@@ -1350,6 +1350,23 @@ def run_experiment_streaming(
     # than trusting its input. A violation terminates — an ordering that does
     # not cover the scope would silently change selection, which no retry
     # would fix.
+    from execute_tools.training_budget_execution import TrainingBudgetExecution
+
+    budget_execution = (
+        TrainingBudgetExecution(
+            runtime_session.policy.training_budget, proposed_epochs=train_cfg.epochs
+        )
+        if runtime_session is not None and runtime_session.policy.training_budget is not None
+        else None
+    )
+    epoch_limit = budget_execution.envelope.max_epochs if budget_execution else train_cfg.epochs
+    # The first measured epoch is the initial admission workload; later
+    # allocations use observed full-epoch costs, never a fictitious fixed cap.
+    prediction_epochs = 1 if budget_execution else train_cfg.epochs
+    if budget_execution and budget_execution.decide().action == "stop":
+        raise ValueError(
+            "Training budget exhausted before setup; no room before downstream reserve"
+        )
     validate_ordering_against_scope(order_strategy, file_order, sample_set)
     # One resolved profile for the whole run: the epoch datasets, the
     # storage provenance and the scoped-byte estimate must not be able to
@@ -1482,10 +1499,10 @@ def run_experiment_streaming(
                 ResolvedPhaseWorkload(
                     phase="validation",
                     unit="validation_sample",
-                    unit_count=validation_requested_rows * train_cfg.epochs,
+                    unit_count=validation_requested_rows * prediction_epochs,
                     detail={
                         "rows_per_pass": validation_requested_rows,
-                        "passes": train_cfg.epochs,
+                        "passes": prediction_epochs,
                         "batch_size": train_cfg.batch_size,
                         "derivation": "one forward-only pass over the eval SampleSet per epoch",
                     },
@@ -1541,7 +1558,7 @@ def run_experiment_streaming(
             "training",
             verifier,
             source="real_training_verification",
-            extra_predicted_seconds=(train_cfg.epochs - 1) * epoch0_dataset_seconds,
+            extra_predicted_seconds=(prediction_epochs - 1) * epoch0_dataset_seconds,
             extra_detail={"epoch0_dataset_seconds": epoch0_dataset_seconds},
         )
         report_training_budget(
@@ -1554,7 +1571,9 @@ def run_experiment_streaming(
                 return True
         return False
 
-    for ep in range(train_cfg.epochs):
+    for ep in range(epoch_limit):
+        if budget_execution:
+            budget_execution.start_epoch()
         model.train()
 
         # Build a fresh dataset each epoch — subsamples train_portion from the
@@ -1639,11 +1658,11 @@ def run_experiment_streaming(
                 training_workload=ResolvedPhaseWorkload(
                     phase="training",
                     unit="optimizer_step",
-                    unit_count=steps_per_epoch * train_cfg.epochs,
+                    unit_count=steps_per_epoch * prediction_epochs,
                     detail={
                         "source": "materialized_epoch0_loader",
                         "steps_per_epoch": steps_per_epoch,
-                        "epochs": train_cfg.epochs,
+                        "epochs": prediction_epochs,
                         "epoch0_samples": len(cast("Sized", dataset)),
                         "batch_size": train_cfg.batch_size,
                         "train_portion": train_portion,
@@ -1709,6 +1728,12 @@ def run_experiment_streaming(
                 prior_expected_unit_ms=runtime_session.lookup_phase_prior("training"),
             )
 
+        if budget_execution and not budget_execution.admit_materialized_epoch(
+            optimizer_steps=len(loader)
+        ):
+            del dataset, loader
+            gc.collect()
+            break
         batch_losses = []
         rejected_mid_epoch = False
         batch_iterator = iter(loader)
@@ -1819,6 +1844,18 @@ def run_experiment_streaming(
                 _finish_validation_verification()
             print(f"Epoch {ep} | Validation Loss: {r3:.6f} ({n_val} ML segments)")
 
+        if budget_execution:
+            decision = budget_execution.finish_epoch(optimizer_steps=len(batch_losses))
+            if decision.action == "stop":
+                break
+
+    if runtime_session is not None and budget_execution is not None:
+        budget_execution.reconcile(
+            runtime_session,
+            validation_rows=validation_requested_rows,
+            epoch0_dataset_seconds=epoch0_dataset_seconds,
+        )
+
     if runtime_session is not None and t_train_start is not None:
         # The training ACTUAL spans admission → last optimizer step. It
         # includes epoch ≥ 1 dataset reconstructions — they are part of
@@ -1886,7 +1923,7 @@ def run_experiment_streaming(
         "model_params": sum(p.numel() for p in model.parameters() if p.requires_grad),
         TRAINING_HISTORY_KEY: _build_training_history(
             loss_cfg=loss_cfg,
-            epochs_planned=train_cfg.epochs,
+            epochs_planned=len(history) if budget_execution else train_cfg.epochs,
             train_objective=history,
             validation_objective=validation_history,
             validation_requested_samples=validation_requested_rows,
@@ -1902,6 +1939,8 @@ def run_experiment_streaming(
     # emitted before this family — the `secondary_metrics` record precedent,
     # one layer up, expressed as an update rather than an `if`.
     summary.update(observation.static_summary(STATIC_OBSERVATIONS_KEY))
+    if budget_execution is not None:
+        summary["training_budget"] = budget_execution.receipt()
 
     save_path = str(training_checkpoint_path(sandbox_dirs["models"], model_cfg.model_type, exp_id))
     _save_with_sentinel(model.state_dict(), save_path, exp_id)

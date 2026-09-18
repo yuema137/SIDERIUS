@@ -767,3 +767,73 @@ def test_training_verification_includes_loader_wait(two_family, tmp_path, monkey
     logged = capsys.readouterr().out
     assert '"stage":"before_optimizer"' in logged
     assert '"stage":"post_training_verification"' in logged
+
+
+@pytest.mark.parametrize(
+    "cap,budget,step_limit,reason",
+    [(100, 12, None, "time_budget"), (3, 120, None, "epoch_cap"), (100, 120, 40, "step_limit")],
+)
+def test_cooperative_epochs_use_budget_and_keep_last_weights(
+    two_family, tmp_path, monkeypatch, cap, budget, step_limit, reason
+):
+    """A two-epoch proposal expands; budget stop keeps exact last trained state.
+
+    This exercises the actual optimizer/validation/checkpoint path, not a
+    mirrored policy calculation. Completed workloads must describe all epochs.
+    """
+    from types import SimpleNamespace
+
+    import execute_tools.training_budget_execution as budget_module
+    from core.runtime_control.session import RuntimeControlPolicy
+    from core.runtime_control.training_budget import TrainingBudgetEnvelope
+
+    clock = [0.0]
+    monkeypatch.setattr(budget_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    original_validation = tes._validation_pass
+
+    def timed_validation(**kwargs):
+        result = original_validation(**kwargs)
+        clock[0] += 3.0
+        return result
+
+    monkeypatch.setattr(tes, "_validation_pass", timed_validation)
+    policy = RuntimeControlPolicy(
+        training_budget=TrainingBudgetEnvelope(
+            budget_seconds=budget,
+            reserve_fraction=0.2,
+            max_epochs=cap,
+            max_optimizer_steps=step_limit,
+            started_monotonic_seconds=0,
+        )
+    )
+    session = RuntimeVerificationSession(
+        str(tmp_path / "budget-runtime.json"), attempt_id="cooperative", policy=policy
+    )
+    adaptive = _run(
+        two_family,
+        tmp_path,
+        name="cooperative",
+        eval_sample_set=two_family.full_sample_set(),
+        epochs=2,
+        runtime_session=session,
+    )
+    fixed = _run(
+        two_family,
+        tmp_path,
+        name="fixed_reference",
+        eval_sample_set=two_family.full_sample_set(),
+        epochs=3,
+    )
+    assert adaptive["loss_history"] == fixed["loss_history"]
+    assert _states_equal(
+        _saved_state(tmp_path, "cooperative"), _saved_state(tmp_path, "fixed_reference")
+    )
+    receipt = adaptive["training_budget"]
+    assert receipt["completed_epochs"] == 3 and receipt["proposed_epochs"] == 2
+    assert receipt["stop"]["reason"] == reason
+    assert receipt["checkpoint_selection"] == "last_completed_epoch"
+    history = TrainingHistory.model_validate(adaptive["training_history"])
+    assert history.epochs_planned == history.epochs_completed == 3
+    assert session.observation.components["training"].workload.unit_count == 36
+    assert session.observation.components["validation"].workload.unit_count == 72
+    interpret_training_results(adaptive, expected_validation=True)

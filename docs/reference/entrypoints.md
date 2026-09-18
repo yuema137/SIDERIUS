@@ -289,3 +289,12 @@ different one fails at startup.
 - [Operating a run](../guides/operating-a-run.md) — resume, budgets, failure modes
 - [Task composition reference](task-composition.md)
 - [Configuration map](configuration-map.md)
+
+### Cooperative epoch allocation
+
+Chain, iteration and tuner entrypoints accept
+`--training_budget_reserve_fraction FLOAT` (default omitted/`None`). This
+explicit opt-in reserves part of each resolved role time budget for downstream
+work and enables time/cap-based epoch allocation. Both role budgets and
+explicit epoch caps in `1..100` are required. It does not enable scientific
+early stopping or a watchdog. See [cooperative training](cooperative-training-budget.md).

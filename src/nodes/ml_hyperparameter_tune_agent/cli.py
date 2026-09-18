@@ -432,6 +432,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--training_budget_reserve_fraction",
+        type=float,
+        default=None,
+        help="Cooperative training reserve fraction; omit for fixed epochs.",
+    )
+    parser.add_argument(
         "--trial_max_epochs",
         type=int,
         default=None,
@@ -713,6 +719,8 @@ def build_agent_input(
     # D-BUD-6 — forwarded only when set, so an unset per-mode cap leaves the
     # input on its schema default (None = the mode-agnostic max_epochs
     # governs that role) and legacy invocations are byte-identical.
+    if args.training_budget_reserve_fraction is not None:
+        input_dict["training_budget_reserve_fraction"] = args.training_budget_reserve_fraction
     if args.trial_max_epochs is not None:
         input_dict["trial_max_epochs"] = args.trial_max_epochs
     if args.formal_max_epochs is not None:

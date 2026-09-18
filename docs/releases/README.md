@@ -1,5 +1,8 @@
 # Releases
 
+- [v0.2.1](v0.2.1.md) — bounded HDF5 reads, loader-inclusive timing and
+  explicit cooperative training allocation.
+
 - [v0.2.0-rc.6](v0.2.0-rc.6.md) — prerelease metadata for the coordinated
   post-provenance-fix qualification pair.
 - [v0.2.0-rc.4](v0.2.0-rc.4.md) — prerelease metadata for the final

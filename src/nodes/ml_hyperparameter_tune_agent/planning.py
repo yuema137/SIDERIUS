@@ -402,9 +402,16 @@ def prepare_attempt(
     # D-BUD-6 — mode-aware ceiling disclosure (see the helper's docstring).
     disclosed_epoch_caps = _disclosed_epoch_caps(agent_input)
 
+    allocation_kwargs = {}
+    if agent_input.training_budget_reserve_fraction is not None:
+        allocation_kwargs["training_budget_reserve_fraction"] = (
+            agent_input.training_budget_reserve_fraction
+        )
+
     # B. THINK: Plan next experiment
     decision = brain.plan(
         memory_history,
+        **allocation_kwargs,
         expert_advice=expert_advice_str,
         force_model=model_type_setting,
         config_manual=config_manual_data,
