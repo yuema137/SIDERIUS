@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "siderius"
-version = "0.2.0rc6"
+version = "0.2.0"
 description = "Closed-loop research framework for supervised scientific machine learning: LLM agents propose, implement and interpret models; deterministic infrastructure trains, scores and guards them"
 readme = "README.md"
 authors = [{ name = "SIDERIUS developers" }]
