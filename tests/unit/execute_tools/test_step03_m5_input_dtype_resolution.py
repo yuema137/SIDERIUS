@@ -87,21 +87,25 @@ TIDMAD = _contract("int64", "int32")
 class TestComposedRuntimeDtype:
     def test_training_and_inference_use_one_declared_representation(self):
         assert resolve_contract_input_dtype(TIDMAD.input.dtype) is torch.int64
-        assert resolve_input_dtype(
-            "generated_model", TIDMAD, site_preference=TRAINING_SITE_DTYPE
-        ) is torch.int64
-        assert resolve_input_dtype(
-            "generated_model", TIDMAD, site_preference=INFERENCE_SITE_DTYPE
-        ) is torch.int64
+        assert (
+            resolve_input_dtype("generated_model", TIDMAD, site_preference=TRAINING_SITE_DTYPE)
+            is torch.int64
+        )
+        assert (
+            resolve_input_dtype("generated_model", TIDMAD, site_preference=INFERENCE_SITE_DTYPE)
+            is torch.int64
+        )
 
     def test_another_task_can_declare_a_different_canonical_dtype(self):
         contract = _contract("int32", "int64")
-        assert resolve_input_dtype(
-            "generated_model", contract, site_preference=TRAINING_SITE_DTYPE
-        ) is torch.int32
-        assert resolve_input_dtype(
-            "generated_model", contract, site_preference=INFERENCE_SITE_DTYPE
-        ) is torch.int32
+        assert (
+            resolve_input_dtype("generated_model", contract, site_preference=TRAINING_SITE_DTYPE)
+            is torch.int32
+        )
+        assert (
+            resolve_input_dtype("generated_model", contract, site_preference=INFERENCE_SITE_DTYPE)
+            is torch.int32
+        )
 
     @pytest.mark.parametrize(
         ("admissible", "expected"),

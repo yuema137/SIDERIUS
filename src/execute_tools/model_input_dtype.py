@@ -188,9 +188,7 @@ def resolve_input_dtype(
     forbids.
     """
     if task_contract is not None:
-        return resolve_contract_input_dtype(
-            model_input_admissibility(model_type, task_contract)
-        )
+        return resolve_contract_input_dtype(model_input_admissibility(model_type, task_contract))
 
     from ml_models.models_sandbox import BUILTIN_INPUT_DTYPES
 
