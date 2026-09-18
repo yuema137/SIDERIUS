@@ -108,6 +108,7 @@ def finalize_attempt_checkpoint(
     retain_training_checkpoints: bool,
     scored: bool,
     certified_ref: dict[str, object] | None,
+    record_persisted: bool = True,
 ) -> CheckpointRetentionReceipt:
     """Retire only this attempt's original after scoring and certification.
 
@@ -174,6 +175,10 @@ def finalize_attempt_checkpoint(
                 raise
         if retain_training_checkpoints:
             return record("retained", "explicit retention request", digest, size, certified_digest)
+        if not record_persisted:
+            return record(
+                "retained", "attempt record missing from run output", digest, size, certified_digest
+            )
         if scored and certified_digest is None:
             return record("retained", "scored attempt has no certified model", digest, size)
 
@@ -197,7 +202,10 @@ def finalize_attempt_checkpoint(
 
 
 def finalize_run_checkpoints(
-    attempts: list[CompletedTrainingAttempt], *, retain_training_checkpoints: bool
+    attempts: list[CompletedTrainingAttempt],
+    *,
+    retain_training_checkpoints: bool,
+    recorded_exp_ids: set[str],
 ) -> list[CheckpointRetentionReceipt]:
     """Retire originals after the whole tuner iteration and its output finish.
 
@@ -216,6 +224,7 @@ def finalize_run_checkpoints(
             retain_training_checkpoints=retain_training_checkpoints,
             scored=attempt.scored,
             certified_ref=attempt.certified_ref,
+            record_persisted=attempt.exp_id in recorded_exp_ids,
         )
         for attempt in attempts
     ]

@@ -1824,6 +1824,7 @@ class HyperparamTuningAgent:
         finalize_run_checkpoints(
             completed_training_attempts,
             retain_training_checkpoints=agent_input.retain_training_checkpoints,
+            recorded_exp_ids={record.exp_id for record in output.all_records},
         )
         return output
 

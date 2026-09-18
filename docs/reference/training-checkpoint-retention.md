@@ -16,7 +16,8 @@ changed on resume. This switch is independent of `--retain_model_outputs`.
 
 A scored attempt without a certified model keeps its original for inspection.
 An attempt that never produced a score can retire its original after its
-failure is recorded. The tuner checks the original's digest and size against
+failure is recorded in the completed run output. If that record is missing,
+the original stays for investigation. The tuner checks the original's digest and size against
 the certified artifact and verifies the blob before deleting anything. A
 missing or invalid certificate refuses cleanup and stops the run as an infra
 failure, rather than treating the candidate as scientifically invalid.

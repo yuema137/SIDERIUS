@@ -370,7 +370,11 @@ def test_two_real_training_iterations_retire_originals_and_keep_records(tmp_path
             )
             for exp_id in ("trial", "failed")
         ]
-        receipts = finalize_run_checkpoints(attempts, retain_training_checkpoints=False)
+        receipts = finalize_run_checkpoints(
+            attempts,
+            retain_training_checkpoints=False,
+            recorded_exp_ids={record["exp_id"] for record in sandbox.get_summary()},
+        )
         assert [receipt.status for receipt in receipts] == ["retired", "retired"]
         assert not original.exists() and not failed_original.exists()
         assert certified_blob.is_file() and len(sandbox.get_summary()) == 2

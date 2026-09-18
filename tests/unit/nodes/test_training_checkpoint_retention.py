@@ -124,7 +124,9 @@ def test_iteration_finalization_retires_failed_originals_after_records_are_writt
         for item in attempts
     )
     assert (
-        finalize_run_checkpoints([attempts[0]], retain_training_checkpoints=False)[0].status
+        finalize_run_checkpoints(
+            [attempts[0]], retain_training_checkpoints=False, recorded_exp_ids={"failed-a"}
+        )[0].status
         == "retired"
     )
     assert not training_checkpoint_path(
@@ -134,3 +136,27 @@ def test_iteration_finalization_retires_failed_originals_after_records_are_writt
         Path(attempts[1].workspace) / "cached_models", attempts[1].model_type, attempts[1].exp_id
     ).is_file()
     assert (workspaces[0] / "failure_record.json").read_text() == ('{"status":"error_training"}')
+
+
+def test_missing_attempt_record_keeps_original_with_receipt(tmp_path: Path) -> None:
+    models = tmp_path / "cached_models"
+    models.mkdir()
+    source = training_checkpoint_path(models, "model-a", "failed-a")
+    source.write_bytes(b"partial")
+    attempt = CompletedTrainingAttempt(
+        workspace=str(tmp_path),
+        run_name="run-a",
+        exp_id="failed-a",
+        model_type="model-a",
+        is_trial=True,
+        scored=False,
+        certified_ref=None,
+    )
+
+    receipt = finalize_run_checkpoints(
+        [attempt], retain_training_checkpoints=False, recorded_exp_ids=set()
+    )[0]
+
+    assert receipt.status == "retained"
+    assert receipt.reason == "attempt record missing from run output"
+    assert source.read_bytes() == b"partial"
