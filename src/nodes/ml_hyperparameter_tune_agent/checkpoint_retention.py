@@ -42,6 +42,8 @@ class CompletedTrainingAttempt:
     exp_id: str
     model_type: str
     is_trial: bool
+    # A recorded scalar exists, even if a later gate invalidated the round.
+    # Running the scorer with no usable scalar does not require model replay.
     scored: bool
     certified_ref: dict[str, object] | None
 

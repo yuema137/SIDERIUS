@@ -79,6 +79,25 @@ def create_abra_file(
         print(f"HDF5 file '{indexed_file_name}' created successfully.")
 
 
+def atomic_abra_auxiliary_patterns(final_pattern: str) -> tuple[str, ...]:
+    """Name this writer's marker and interrupted-write files for exact outputs.
+
+    ``final_pattern`` comes from the run's attempt-scoped deliverable naming
+    authority. The caller enumerates these only after the inference process
+    has exited, so an unfinished temporary file no longer has a writer.
+    """
+
+    if "/" in final_pattern or "\\" in final_pattern:
+        raise ValueError("ABRA output pattern must be a basename")
+    if not final_pattern.endswith(".h5"):
+        return ()
+    return (
+        f"{final_pattern}.complete",
+        f".{final_pattern}.*.tmp",
+        f"{final_pattern}.complete.*.tmp",
+    )
+
+
 def _write_abra_file_atomic(
     destination: str,
     input_values,

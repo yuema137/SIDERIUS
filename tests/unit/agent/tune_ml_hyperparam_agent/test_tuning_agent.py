@@ -36,6 +36,7 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningOutput,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from core.sandbox_layout import training_checkpoint_path
 from nodes.ml_hyperparameter_tune_agent import (
     HyperparamTuningAgent,
     _copy_seed_plugin,
@@ -315,6 +316,36 @@ class TestHyperparamTuningAgentRun:
         receipts = [json.loads(line) for line in receipts_path.read_text().splitlines()]
         assert len(receipts) == 1
         assert receipts[0]["status"] == "absent"  # Mock training writes no checkpoint.
+
+    def test_recorded_null_score_retires_failed_attempt_original(self, agent_and_mocks, tmp_path):
+        """A completed scorer without a usable scalar must not pin failed weights."""
+
+        models = tmp_path / "cached_models"
+        models.mkdir()
+        original = training_checkpoint_path(models, "punet", "punet_test_run_001")
+        original.write_bytes(b"failed candidate weights")
+
+        def no_scalar_score(skill_folder, sandbox, **params):
+            if skill_folder == "denoising_score_skill":
+                return {"status": "success", "results": {"denoising_score": None}}
+            return _mock_run_skill(skill_folder, sandbox, **params)
+
+        agent, _, _ = agent_and_mocks
+        with patch(
+            "nodes.ml_hyperparameter_tune_agent.runtime._run_skill",
+            side_effect=no_scalar_score,
+        ):
+            agent.run(_make_input(tmp_path))
+
+        assert not original.exists()
+        receipts = [
+            json.loads(line)
+            for line in (tmp_path / "training_checkpoint_retention_receipts.jsonl")
+            .read_text()
+            .splitlines()
+        ]
+        assert [item["status"] for item in receipts[:2]] == ["retirement_planned", "retired"]
+        assert receipts[1]["reason"] == "attempt produced no score"
 
     def test_run_config_file_written(self, agent_and_mocks, tmp_path):
         agent, _, _ = agent_and_mocks
