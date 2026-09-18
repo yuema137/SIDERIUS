@@ -1541,8 +1541,12 @@ class HyperparamTuningAgent:
                         continue
                     if executed.signal is AttemptSignal.END_ROUND:
                         break
-                    scored = True
                     score_results = executed.score_results
+                    # A completed scorer can still produce no usable scalar
+                    # (for example, a Health-invalid collapsed candidate).
+                    # Such an attempt has a failure record, not scored model
+                    # evidence that requires keeping an uncertified original.
+                    scored = score_results.get("denoising_score") is not None
                     score_table = executed.score_table
                     train_results = executed.train_results
 
