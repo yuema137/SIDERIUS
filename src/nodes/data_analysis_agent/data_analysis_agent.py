@@ -25,7 +25,7 @@ from agent.data_analysis.generated_skill_registry import (
     promote_generated_program,
 )
 from agent.data_analysis.persistence import AnalysisRunStore
-from agent.data_analysis.plan_validation import resolve_analysis_plan
+from agent.data_analysis.plan_validation import AnalysisPlanResolutionError, resolve_analysis_plan
 from agent.data_analysis.rendering import render_report_markdown
 from agent.data_analysis.structured_output import generate_validated
 from agent.llm_bridge import LLMBridge
@@ -334,36 +334,53 @@ class DataAnalysisAgent:
             interfaces,
             generated_programs=generated_programs,
         )
-        plan = generate_validated(
-            bridge,
-            store=store,
-            model_type=AnalysisPlan,
-            system=plan_system,
-            user=plan_user,
-            label="data_analysis.plan",
-            semantic_projection=self._plan_semantics,
-        )
-        planned_generated_identities = {
-            canonical_sha256(item.program_identity)
-            for item in plan.invocations
-            if isinstance(item, PlannedGeneratedProgramInvocation)
-        }
         prepared_generated_identities = {
             canonical_sha256(identity) for _program, identity in generated_programs
         }
-        if planned_generated_identities != prepared_generated_identities:
-            raise ValueError(
-                "final AnalysisPlan must reference exactly the generated programs prepared "
-                "during its two-stage lifecycle"
+        for attempt in range(2):
+            plan = generate_validated(
+                bridge,
+                store=store,
+                model_type=AnalysisPlan,
+                system=plan_system,
+                user=plan_user,
+                label=(
+                    "data_analysis.plan" if attempt == 0 else "data_analysis.plan.resolution_retry"
+                ),
+                semantic_projection=self._plan_semantics,
             )
-        resolved = resolve_analysis_plan(
-            plan,
-            analysis_input=inp,
-            discovery=discovery,
-            resolved_interfaces=interfaces,
-            control_root=control_root,
-            generated_program_root=store.root,
-        )
+            try:
+                planned_generated_identities = {
+                    canonical_sha256(item.program_identity)
+                    for item in plan.invocations
+                    if isinstance(item, PlannedGeneratedProgramInvocation)
+                }
+                if planned_generated_identities != prepared_generated_identities:
+                    raise AnalysisPlanResolutionError(
+                        "final AnalysisPlan must reference exactly the generated programs "
+                        "prepared during its two-stage lifecycle"
+                    )
+                resolved = resolve_analysis_plan(
+                    plan,
+                    analysis_input=inp,
+                    discovery=discovery,
+                    resolved_interfaces=interfaces,
+                    control_root=control_root,
+                    generated_program_root=store.root,
+                )
+            except AnalysisPlanResolutionError as exc:
+                if attempt:
+                    raise
+                plan_user += (
+                    "\nThe previous AnalysisPlan passed schema validation but was rejected "
+                    f"before execution: {exc}.\nPrevious plan:\n"
+                    f"{plan.model_dump_json(indent=2)}\n"
+                    "Generate one corrected complete plan using "
+                    "the same immutable contracts and authorized assets. Do not widen "
+                    "any binding or generated program declaration.\n"
+                )
+            else:
+                break
         plan_ref = store.write_plan(plan)
         deadline = time.monotonic() + inp.resource_envelope.wall_time_budget_s
         results: list[SkillResult] = []

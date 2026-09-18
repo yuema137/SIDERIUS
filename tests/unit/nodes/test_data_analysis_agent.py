@@ -12,6 +12,7 @@ import pytest
 from agent.data_analysis.analysis_code_sandbox import AnalysisCodeSandbox
 from agent.data_analysis.discovery import discover_skills
 from agent.data_analysis.persistence import AnalysisPersistenceError
+from agent.data_analysis.plan_validation import AnalysisPlanResolutionError
 from agent.data_analysis.reference_packs import builtin_pack_refs
 from agent.data_analysis.structured_output import DataAnalysisStructuredOutputError
 from agent.prompt_templates.proposal import render_data_analysis_evidence
@@ -344,7 +345,7 @@ class _GeneratedProgramBridge(_Bridge):
                 "seed": 11,
                 "rationale": "This bounded statistic is absent from the configured toolbox.",
             }
-        if label == "data_analysis.plan":
+        if label in {"data_analysis.plan", "data_analysis.plan.resolution_retry"}:
             identity = self._generated_identity(user)
             scope = self.inp.available_assets[0].authorized_scope.model_dump(mode="json")
             return {
@@ -812,6 +813,92 @@ def test_generated_program_is_persisted_before_plan_and_certified_as_evidence(
         "data_analysis.plan",
         "data_analysis.synthesis",
     ]
+
+
+@pytest.mark.allow_real_subprocess
+def test_plan_resolution_retries_generated_question_mismatch_without_widening(
+    tmp_path: Path,
+) -> None:
+    probe = AnalysisCodeSandbox().probe()
+    if not probe.available:
+        pytest.skip(f"host cannot enforce sandbox: {probe.reason}")
+
+    class ResolutionRetryBridge(_GeneratedProgramBridge):
+        def generate(self, system, user, *, label):
+            payload = super().generate(system, user, label=label)
+            if label in {"data_analysis.plan", "data_analysis.plan.resolution_retry"}:
+                payload["questions"].append("q-extra")
+            if label == "data_analysis.plan":
+                payload["invocations"][0]["question_ids"].append("q-extra")
+            if label == "data_analysis.plan.resolution_retry":
+                assert "generated invocation questions exceed its persisted declaration" in user
+            if label == "data_analysis.synthesis":
+                payload["question_outcomes"].append(
+                    {
+                        "question_id": "q-extra",
+                        "status": "unresolved",
+                        "summary": "This question was not measured.",
+                        "finding_ids": [],
+                    }
+                )
+            return payload
+
+    base = _input(tmp_path)
+    input_payload = base.model_dump(mode="python")
+    input_payload["analysis_brief"]["questions"] = [
+        *input_payload["analysis_brief"]["questions"],
+        {"question_id": "q-extra", "question": "Describe another possible analysis."},
+    ]
+    analysis_input = DataAnalysisInput.model_validate(input_payload)
+    bridge = ResolutionRetryBridge(analysis_input=analysis_input)
+    capability = _RecordingCapability()
+    report = DataAnalysisAgent(
+        task_analysis_capability=capability,
+        bridge_factory=lambda **_kwargs: bridge,
+        provider="test",
+        model_id="fake",
+    ).run(analysis_input)
+
+    root = tmp_path / "data_analysis" / "standalone" / "request"
+    plan = json.loads((root / "plan.json").read_text())
+    assert plan["invocations"][0]["question_ids"] == ["q-summary"]
+    assert report.skill_result_summaries[0].status == "completed"
+    assert len(capability.requested_scopes) == 1
+    assert bridge.calls.count("data_analysis.plan.resolution_retry") == 1
+    receipts = [
+        json.loads(line)
+        for line in (root / "structured_output_receipts.jsonl").read_text().splitlines()
+    ]
+    assert [r["stage"] for r in receipts if r["stage"].startswith("data_analysis.plan")] == [
+        "data_analysis.plan",
+        "data_analysis.plan.resolution_retry",
+    ]
+
+
+@pytest.mark.allow_real_subprocess
+def test_plan_resolution_retry_still_rejects_invalid_second_plan(tmp_path: Path) -> None:
+    class AlwaysInvalidPlanBridge(_Bridge):
+        def generate(self, system, user, *, label):
+            if label in {"data_analysis.plan", "data_analysis.plan.resolution_retry"}:
+                payload = super().generate(system, user, label="data_analysis.plan")
+                payload["questions"].append("q-extra")
+                return payload
+            return super().generate(system, user, label=label)
+
+    analysis_input = _input(tmp_path)
+    agent = DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **kwargs: AlwaysInvalidPlanBridge(
+            analysis_input=analysis_input, **kwargs
+        ),
+        provider="test",
+        model_id="fake",
+    )
+    with pytest.raises(AnalysisPlanResolutionError, match="exactly match the analysis brief"):
+        agent.run(analysis_input)
+    root = tmp_path / "data_analysis" / "standalone" / "request"
+    assert not (root / "plan.json").exists()
+    assert not (root / "skill_results.jsonl").exists()
 
 
 @pytest.mark.allow_real_subprocess
