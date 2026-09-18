@@ -1728,10 +1728,12 @@ def run_experiment_streaming(
                 prior_expected_unit_ms=runtime_session.lookup_phase_prior("training"),
             )
 
-        if budget_execution and ep == 0 and budget_execution.decide().action == "stop":
-            raise ValueError(
-                "Training setup consumed the available allocation before optimizer work"
-            )
+        if budget_execution and not budget_execution.admit_materialized_epoch(
+            optimizer_steps=len(loader)
+        ):
+            del dataset, loader
+            gc.collect()
+            break
         batch_losses = []
         rejected_mid_epoch = False
         batch_iterator = iter(loader)

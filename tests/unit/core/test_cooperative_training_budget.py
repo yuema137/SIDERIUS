@@ -138,3 +138,44 @@ def test_completed_workload_reprices_verified_rate_without_losing_initial_foreca
     assert component.prediction.formal_execution_eligible
     assert component.workload.detail["initial_prediction"]["predicted_seconds"] == 2
     assert component.prediction.detail["scope_resolution"] == "post_execution_reprojection"
+
+
+def test_existing_step_guard_and_explicit_override_reach_executor(tmp_path):
+    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+    from core.runtime_control.session import RuntimeControlPolicy
+    from nodes.ml_hyperparameter_tune_agent import _build_runtime_policy
+
+    for override in (False, True):
+        inputs = HyperparamTuningInput.model_construct(
+            training_budget_reserve_fraction=0.2,
+            max_epochs=100,
+            max_steps_per_attempt=150000,
+            allow_extreme_steps=override,
+        )
+        policy = RuntimeControlPolicy.model_validate(
+            _build_runtime_policy(
+                inputs,
+                chosen_time_budget=30,
+                admission_source="forecast",
+                is_trial=True,
+                base_dir=str(tmp_path),
+            )
+        )
+        assert policy.training_budget.max_optimizer_steps == (None if override else 150000)
+
+
+def test_materialized_epoch_step_guard_refuses_before_first_optimizer():
+    import time
+
+    import pytest
+
+    from execute_tools.training_budget_execution import TrainingBudgetExecution
+
+    executor = TrainingBudgetExecution(
+        envelope(max_optimizer_steps=10, started_monotonic_seconds=time.monotonic()),
+        proposed_epochs=1,
+    )
+    executor.start_epoch()
+    with pytest.raises(ValueError, match="reason=step_limit, next_optimizer_steps=11"):
+        executor.admit_materialized_epoch(optimizer_steps=11)
+    assert executor.optimizer_steps == 0

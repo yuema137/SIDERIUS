@@ -769,9 +769,12 @@ def test_training_verification_includes_loader_wait(two_family, tmp_path, monkey
     assert '"stage":"post_training_verification"' in logged
 
 
-@pytest.mark.parametrize("cap,budget,reason", [(100, 12, "time_budget"), (3, 120, "epoch_cap")])
+@pytest.mark.parametrize(
+    "cap,budget,step_limit,reason",
+    [(100, 12, None, "time_budget"), (3, 120, None, "epoch_cap"), (100, 120, 40, "step_limit")],
+)
 def test_cooperative_epochs_use_budget_and_keep_last_weights(
-    two_family, tmp_path, monkeypatch, cap, budget, reason
+    two_family, tmp_path, monkeypatch, cap, budget, step_limit, reason
 ):
     """A two-epoch proposal expands; budget stop keeps exact last trained state.
 
@@ -799,6 +802,7 @@ def test_cooperative_epochs_use_budget_and_keep_last_weights(
             budget_seconds=budget,
             reserve_fraction=0.2,
             max_epochs=cap,
+            max_optimizer_steps=step_limit,
             started_monotonic_seconds=0,
         )
     )

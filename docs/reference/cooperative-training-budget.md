@@ -32,7 +32,12 @@ uses the slowest complete epoch observed so far to decide whether another
 fits after the explicit downstream reserve. The reserve is an operator
 allowance for final inference, scoring and saving, not a measured prediction.
 
-Training stops at the time boundary or explicit epoch cap. It does not stop
+Training stops at the time boundary or explicit epoch cap. The existing
+`max_steps_per_attempt` safety guard also bounds adaptive expansion: before
+each epoch the actual loader size plus completed steps must fit. A normal
+`step_limit` stop saves the last completed weights; inability to fit even
+one epoch fails before optimizer work. The existing `allow_extreme_steps`
+operator override still disables this guard. It does not stop
 on loss plateaus, restore a best checkpoint, alter validation cadence or
 increase batch/model size to fill VRAM. The last completed weights are saved.
 A fast model can reach the epoch cap with budget remaining; that is reported

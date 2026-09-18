@@ -26,16 +26,33 @@ class TrainingBudgetExecution:
         self._epoch_started: float | None = None
         self.last_decision: TrainingBudgetDecision | None = None
 
-    def decide(self) -> TrainingBudgetDecision:
+    def decide(self, *, next_optimizer_steps: int | None = None) -> TrainingBudgetDecision:
         decision = decide_training_budget(
             self.envelope,
             elapsed_seconds=time.monotonic() - self.envelope.started_monotonic_seconds,
             completed_epochs=len(self.costs),
             observed_epoch_seconds=self.costs,
+            completed_optimizer_steps=self.optimizer_steps,
+            next_optimizer_steps=next_optimizer_steps,
         )
         self.last_decision = decision
         print(f"[training_budget_decision] {decision.model_dump_json()}", flush=True)
         return decision
+
+    def admit_materialized_epoch(self, *, optimizer_steps: int) -> bool:
+        """Recheck actual loader size and setup cost before any optimizer work."""
+        decision = self.decide(next_optimizer_steps=optimizer_steps)
+        if decision.action != "stop":
+            return True
+        if not self.costs:
+            raise ValueError(
+                "Training allocation cannot fit the first materialized epoch before optimizer "
+                f"work: reason={decision.reason}, next_optimizer_steps={optimizer_steps}, "
+                f"max_optimizer_steps={self.envelope.max_optimizer_steps}, "
+                f"remaining_seconds={decision.remaining_seconds}"
+            )
+        self._epoch_started = None
+        return False
 
     def start_epoch(self) -> None:
         self._epoch_started = time.monotonic()

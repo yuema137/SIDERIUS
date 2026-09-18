@@ -1320,6 +1320,9 @@ def _build_runtime_policy(
             budget_seconds=chosen_time_budget * 60.0,
             reserve_fraction=reserve,
             max_epochs=cap,
+            max_optimizer_steps=(
+                None if agent_input.allow_extreme_steps else agent_input.max_steps_per_attempt
+            ),
             started_monotonic_seconds=time.monotonic(),
         )
     policy: dict[str, Any] = {
