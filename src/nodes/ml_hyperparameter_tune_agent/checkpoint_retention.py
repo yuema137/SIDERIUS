@@ -18,6 +18,7 @@ from agent.schemas.data_analysis.trained_model import (
     TrainedModelArtifact,
     TrainedModelArtifactRef,
 )
+from agent.schemas.hyperparam_tuning import ExperimentRecord
 from core.campaign_identity import validate_path_component
 from core.durable_io import append_line_durably
 from core.sandbox_executor import sandbox_models_dir
@@ -43,6 +44,12 @@ class CompletedTrainingAttempt:
     is_trial: bool
     scored: bool
     certified_ref: dict[str, object] | None
+
+
+def recorded_experiment_ids(records: list[ExperimentRecord]) -> set[str]:
+    """Identify attempts with records in the completed tuner output."""
+
+    return {record.exp_id for record in records}
 
 
 class CheckpointRetentionReceipt(BaseModel):

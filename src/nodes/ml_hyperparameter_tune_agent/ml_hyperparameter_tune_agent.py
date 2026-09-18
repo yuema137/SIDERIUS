@@ -79,6 +79,7 @@ from execute_tools.trial_anchor_map import load_anchor_map
 from nodes.ml_hyperparameter_tune_agent.checkpoint_retention import (
     CompletedTrainingAttempt,
     finalize_run_checkpoints,
+    recorded_experiment_ids,
 )
 from nodes.ml_hyperparameter_tune_agent.cli import (
     PARTIAL_CAMPAIGN_EXIT_CODE,
@@ -1824,7 +1825,7 @@ class HyperparamTuningAgent:
         finalize_run_checkpoints(
             completed_training_attempts,
             retain_training_checkpoints=agent_input.retain_training_checkpoints,
-            recorded_exp_ids={record.exp_id for record in output.all_records},
+            recorded_exp_ids=recorded_experiment_ids(output.all_records),
         )
         return output
 
