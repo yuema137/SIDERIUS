@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import inspect
 import textwrap
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -51,6 +52,7 @@ from execute_tools.model_input_dtype import (
     TRAINING_SITE_DTYPE,
     UnsupportedModelInputDtypeError,
     model_input_admissibility,
+    resolve_contract_input_dtype,
     resolve_input_dtype,
     resolve_model_input_dtype,
 )
@@ -80,6 +82,51 @@ def _contract(*admissible: str) -> ModelIOContract:
 
 
 TIDMAD = _contract("int64", "int32")
+
+
+class TestComposedRuntimeDtype:
+    def test_training_and_inference_use_one_declared_representation(self):
+        assert resolve_contract_input_dtype(TIDMAD.input.dtype) is torch.int64
+        assert (
+            resolve_input_dtype("generated_model", TIDMAD, site_preference=TRAINING_SITE_DTYPE)
+            is torch.int64
+        )
+        assert (
+            resolve_input_dtype("generated_model", TIDMAD, site_preference=INFERENCE_SITE_DTYPE)
+            is torch.int64
+        )
+
+    def test_another_task_can_declare_a_different_canonical_dtype(self):
+        contract = _contract("int32", "int64")
+        assert (
+            resolve_input_dtype("generated_model", contract, site_preference=TRAINING_SITE_DTYPE)
+            is torch.int32
+        )
+        assert (
+            resolve_input_dtype("generated_model", contract, site_preference=INFERENCE_SITE_DTYPE)
+            is torch.int32
+        )
+
+    @pytest.mark.parametrize(
+        ("admissible", "expected"),
+        [(("int64", "int32"), torch.int64), (("int32", "int64"), torch.int32)],
+    )
+    def test_generated_and_live_probes_match_training_boundary(self, admissible, expected):
+        from agent.skills.model_io_probe_skill import build_model_input
+        from nodes.ml_model_implementor.ml_model_implementor import _render_test_input_expr
+
+        contract = _contract(*admissible)
+        training_dtype = resolve_input_dtype(
+            "generated_model", contract, site_preference=TRAINING_SITE_DTYPE
+        )
+        live_probe = build_model_input(contract, batch=2, symbolic=8)
+        rendered_probe = eval(
+            _render_test_input_expr(contract, index_extent=16, batch_literal=2),
+            {"torch": torch, "config": SimpleNamespace(segmentation_size=8)},
+        )
+        assert training_dtype is expected
+        assert live_probe.dtype is expected
+        assert rendered_probe.dtype is expected
 
 
 class TestRung3BDtypeRequirement:
