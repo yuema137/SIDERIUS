@@ -159,6 +159,9 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     # workflow-to-tuner transport; the runtime policy owns enforcement.
     "trial_time_admission_source": "measured",
     "formal_time_admission_source": "measured",
+    # PR #520 — caller-owned Formal training scope choice is transit to the
+    # tuner; "operator" preserves the existing Formal training defaults.
+    "formal_training_scope_source": "operator",
     # Caller-configurable measurement window; None retains runtime defaults.
     "runtime_verification_max_wall_seconds": None,
     # Data Analysis workflow integration (2026-09-15). Advice is transit-only
