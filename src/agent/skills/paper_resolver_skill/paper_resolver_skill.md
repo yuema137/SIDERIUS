@@ -41,6 +41,15 @@ Remote calls may use Semantic Scholar, arXiv, or an open-access PDF URL.
 Full-text extraction tries arXiv source first and pdfplumber fallback where
 applicable. Local resolution reads an allowed checkout-relative path. A
 process-local request cache and throttle are module-level and not thread-safe.
+The HTTP wrapper retries 429/5xx up to six times after the first request,
+using `Retry-After` when supplied and otherwise capped exponential backoff.
+For workers sharing one `S2_API_KEY` across hosts, set both
+`S2_SHARED_KEY_WORKERS` and each worker's distinct zero-based
+`S2_SHARED_KEY_SLOT`. The wrapper schedules those workers in separate UTC
+slots 1.5 seconds apart. All hosts must have synchronized clocks and every
+user of that key must be included in the worker count; otherwise 429 retries
+remain the fallback, not a global rate guarantee. Invalid or partial slot
+configuration returns an error envelope before an HTTP request.
 
 ## Callers and evidence
 

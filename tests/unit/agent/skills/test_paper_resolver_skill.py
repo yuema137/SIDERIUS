@@ -723,6 +723,35 @@ class TestAuthHeader:
 
 
 class TestRateLimiting:
+    def test_four_shared_key_slots_are_spaced_across_hosts(self, monkeypatch):
+        monkeypatch.setenv("S2_SHARED_KEY_WORKERS", "4")
+        scheduled = []
+        for slot in range(4):
+            monkeypatch.setenv("S2_SHARED_KEY_SLOT", str(slot))
+            assert wrapper._shared_key_slot() == (4, slot)
+            scheduled.append(100.0 + wrapper._shared_slot_wait_seconds(100.0, workers=4, slot=slot))
+        assert sorted(scheduled) == [100.5, 102.0, 103.5, 105.0]
+
+    def test_shared_key_slot_config_must_be_complete(self, monkeypatch):
+        monkeypatch.setenv("S2_SHARED_KEY_WORKERS", "4")
+        monkeypatch.delenv("S2_SHARED_KEY_SLOT", raising=False)
+        with patch.object(wrapper.requests, "get") as mock_get:
+            data, error = wrapper._s2_get("https://example.invalid")
+        assert data is None
+        assert "rate-limit configuration error" in error
+        mock_get.assert_not_called()
+
+    def test_shared_slot_paces_one_worker_without_cross_host_lock(self, monkeypatch):
+        monkeypatch.setenv("S2_SHARED_KEY_WORKERS", "4")
+        monkeypatch.setenv("S2_SHARED_KEY_SLOT", "3")
+        wrapper._LAST_S2_REQUEST_TS = 0.0
+        with (
+            patch.object(wrapper.time, "time", return_value=100.0),
+            patch.object(wrapper.time, "sleep") as mock_sleep,
+        ):
+            wrapper._throttle_s2()
+        mock_sleep.assert_called_once_with(0.5)
+
     def test_throttle_sleeps_when_called_too_soon(self):
         # A prior request "just happened" → throttle must sleep the remainder.
         wrapper._LAST_S2_REQUEST_TS = wrapper.time.monotonic()
@@ -758,16 +787,28 @@ class TestRateLimiting:
     @patch.object(wrapper.requests, "get")
     def test_429_exhausts_retries_then_errors(self, mock_get):
         mock_get.return_value = _http_status_response(429, "rate limited")
-        out = wrapper.run_skill(
-            None,
-            mode="resolve",
-            source_type="doi",
-            identifier="10.9999/zz",
-            verbosity=0,
-        )
+        with (
+            patch.object(wrapper, "_throttle_s2"),
+            patch.object(wrapper.time, "sleep") as mock_sleep,
+        ):
+            out = wrapper.run_skill(
+                None,
+                mode="resolve",
+                source_type="doi",
+                identifier="10.9999/zz",
+                verbosity=0,
+            )
         assert out["status"] == "error"
         assert "HTTP 429" in out["message"]
         assert mock_get.call_count == wrapper.S2_MAX_RETRIES + 1
+        assert [call.args[0] for call in mock_sleep.call_args_list] == [
+            1.0,
+            2.0,
+            4.0,
+            8.0,
+            16.0,
+            32.0,
+        ]
 
     @patch.object(wrapper.requests, "get")
     def test_retry_after_header_is_honoured(self, mock_get):
@@ -785,6 +826,12 @@ class TestRateLimiting:
         assert out["status"] == "ok"
         # Backoff used the Retry-After value (2s), not the exp-backoff default.
         assert any(call.args and call.args[0] == 2.0 for call in mock_sleep.call_args_list)
+
+    @pytest.mark.parametrize("header", ["-1", "nan", "infinity", "not-a-delay"])
+    def test_invalid_retry_after_uses_exponential_delay(self, header):
+        response = _http_status_response(429, "slow down")
+        response.headers = {"Retry-After": header}
+        assert wrapper._retry_after_seconds(response) is None
 
 
 # ---------------------------------------------------------------------------

@@ -29,6 +29,7 @@ one lit-review run skip the network. Cleared by re-import only.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 from typing import Any
@@ -52,8 +53,9 @@ S2_SEARCH_LIMIT_CAP = 50
 
 # Rate-limit controls for the Semantic Scholar API (1 req/s ceiling).
 S2_MIN_REQUEST_INTERVAL_S = 1.1  # slight margin over 1.0s for clock skew
-S2_MAX_RETRIES = 3  # retry attempts beyond the first
+S2_MAX_RETRIES = 6  # retry attempts beyond the first
 S2_RETRY_BACKOFF_BASE_S = 1.0  # exp-backoff base when no Retry-After header
+S2_SHARED_SLOT_INTERVAL_S = 1.5  # 1 RPS key limit plus clock/scheduling margin
 
 # Repo root, resolved relative to this file. ``local`` source paths are
 # resolved against this; absolute paths and ``..`` segments are rejected
@@ -101,7 +103,38 @@ def _throttle_s2() -> None:
     wait = S2_MIN_REQUEST_INTERVAL_S - elapsed
     if wait > 0:
         time.sleep(wait)
+    shared_slot = _shared_key_slot()
+    if shared_slot is not None:
+        workers, slot = shared_slot
+        wait = _shared_slot_wait_seconds(time.time(), workers=workers, slot=slot)
+        if wait > 0:
+            time.sleep(wait)
     _LAST_S2_REQUEST_TS = time.monotonic()
+
+
+def _shared_key_slot() -> tuple[int, int] | None:
+    """Read the optional common-key schedule shared by independent workers."""
+
+    raw_workers = os.environ.get("S2_SHARED_KEY_WORKERS")
+    raw_slot = os.environ.get("S2_SHARED_KEY_SLOT")
+    if raw_workers is None and raw_slot is None:
+        return None
+    try:
+        workers = int(raw_workers) if raw_workers is not None else 0
+        slot = int(raw_slot) if raw_slot is not None else -1
+    except ValueError as exc:
+        raise ValueError("S2 shared-key workers and slot must be integers") from exc
+    if workers < 2 or not 0 <= slot < workers:
+        raise ValueError("S2 shared-key slot must be in [0, workers); workers must be >= 2")
+    return workers, slot
+
+
+def _shared_slot_wait_seconds(now: float, *, workers: int, slot: int) -> float:
+    """Place one worker's requests in its own recurring UTC time slot."""
+
+    cycle = workers * S2_SHARED_SLOT_INTERVAL_S
+    phase = slot * S2_SHARED_SLOT_INTERVAL_S
+    return (phase - now) % cycle
 
 
 def _retry_after_seconds(resp: requests.Response) -> float | None:
@@ -114,9 +147,10 @@ def _retry_after_seconds(resp: requests.Response) -> float | None:
     if not raw:
         return None
     try:
-        return float(raw)
+        seconds = float(raw)
     except (TypeError, ValueError):
         return None
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
 
 
 def _s2_get(
@@ -136,7 +170,10 @@ def _s2_get(
     """
     last_err: str | None = None
     for attempt in range(S2_MAX_RETRIES + 1):
-        _throttle_s2()
+        try:
+            _throttle_s2()
+        except ValueError as exc:
+            return None, f"S2 rate-limit configuration error: {exc}"
         try:
             resp = requests.get(
                 url,
@@ -161,7 +198,7 @@ def _s2_get(
                 backoff = (
                     retry_after
                     if retry_after is not None
-                    else S2_RETRY_BACKOFF_BASE_S * (2**attempt)
+                    else min(60.0, S2_RETRY_BACKOFF_BASE_S * (2**attempt))
                 )
                 time.sleep(backoff)
                 continue
