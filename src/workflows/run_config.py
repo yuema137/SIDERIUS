@@ -115,6 +115,7 @@ class WorkflowLaunchConfig:
     train_base_seed: int | None = None
     cleanup_denoised: bool = False
     retain_model_outputs: bool = False
+    retain_training_checkpoints: bool = False
     max_epochs: int | None = None
     # D-BUD-6 — per-mode epoch ceilings (trial/formal split). None = the
     # mode-agnostic max_epochs governs that role, byte-identical to the

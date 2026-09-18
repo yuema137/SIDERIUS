@@ -250,6 +250,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Keep per-sample model outputs after scoring and Health (default: retire them).",
     )
+    parser.add_argument(
+        "--retain_training_checkpoints",
+        action="store_true",
+        help="Keep training checkpoint originals (default: retire after their consumers finish).",
+    )
 
     # Trial and Formal own independent budgets and authority selections.
     parser.add_argument(
@@ -648,6 +653,7 @@ def build_agent_input(
         "progress_bar": args.progress_bar,
         "cleanup_denoised": args.cleanup_denoised,
         "retain_model_outputs": getattr(args, "retain_model_outputs", False),
+        "retain_training_checkpoints": getattr(args, "retain_training_checkpoints", False),
         "is_trial": args.is_trial,
         # V19 PR 1 — consumption-only coupling switch (default OFF).
         "enable_chain_incumbent_formal_gates": args.enable_chain_incumbent_formal_gates,

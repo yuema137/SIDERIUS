@@ -311,6 +311,10 @@ class TestHyperparamTuningAgentRun:
         assert output_path.exists()
         data = json.loads(output_path.read_text())
         assert data["status"] == "completed"
+        receipts_path = tmp_path / "training_checkpoint_retention_receipts.jsonl"
+        receipts = [json.loads(line) for line in receipts_path.read_text().splitlines()]
+        assert len(receipts) == 1
+        assert receipts[0]["status"] == "absent"  # Mock training writes no checkpoint.
 
     def test_run_config_file_written(self, agent_and_mocks, tmp_path):
         agent, _, _ = agent_and_mocks

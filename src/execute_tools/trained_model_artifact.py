@@ -308,6 +308,21 @@ def read_certified_artifact(root: Path, ref: CertifiedArtifactRef) -> bytes:
     return payload
 
 
+def verify_certified_artifact_file(root: Path, ref: CertifiedArtifactRef) -> Path:
+    """Verify a large artifact by streaming it, without loading weights into RAM."""
+
+    source = _certified_artifact_source(root, ref)
+    digest = hashlib.sha256()
+    size = 0
+    with source.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+    if digest.hexdigest() != ref.sha256 or (ref.byte_size is not None and size != ref.byte_size):
+        raise ValueError("certified trained-model artifact file differs from its ref")
+    return source
+
+
 def copy_certified_artifact(root: Path, ref: CertifiedArtifactRef, destination: Path) -> None:
     """Stream a certified artifact without loading a checkpoint into memory."""
 

@@ -50,6 +50,12 @@ from execute_tools.trained_model_artifact import copy_certified_artifact
 from ml_models.loss_models_sandbox import register_loss_in_memory
 from ml_models.plugin_loader import register_model_in_memory
 from nodes.data_analysis_agent import DataAnalysisAgent
+from nodes.ml_hyperparameter_tune_agent.checkpoint_retention import (
+    CheckpointRetentionError,
+    CompletedTrainingAttempt,
+    finalize_attempt_checkpoint,
+    finalize_run_checkpoints,
+)
 from nodes.ml_hyperparameter_tune_agent.contracts import TrainingOutcome
 from nodes.ml_hyperparameter_tune_agent.records import _trained_model_artifact_ref
 from workflows.task_composition import (
@@ -252,6 +258,132 @@ class _ModelDiagnosticBridge:
 
 
 @pytest.mark.allow_real_subprocess
+def test_two_real_training_iterations_retire_originals_and_keep_records(tmp_path: Path) -> None:
+    """Iteration two can train after iteration one's Trial and failed originals retire."""
+
+    checkout = Path(__file__).resolve().parents[4]
+    manifest = checkout / "configs/task_composition/synthetic_masked_regression.yaml"
+    model_plugin = checkout / "examples/synthetic_masked_regression/plugins/masked_reference_mlp.py"
+    loss_plugin = checkout / "examples/synthetic_masked_regression/plugins/masked_mse_loss.py"
+    register_model_in_memory(str(model_plugin))
+    register_loss_in_memory(str(loss_plugin))
+    composition = compose_run_task_bindings(str(manifest))
+    composition_ref = build_task_composition_ref(composition)
+    assert composition_ref is not None
+    task = composition.task_data_path
+    bundle = sys.modules[type(task).__module__].materialize_run_bundle(tmp_path / "synthetic-data")
+    scope_capability = resolve_task_scope_capability(task)
+    scope_request = ScopeBuildRequest(
+        round_kind="trial", selection_strategy="snapshot", portion=1.0
+    )
+    scopes = SimpleNamespace(
+        training=scope_capability.build_training_scope(scope_request),
+        evaluation=scope_capability.build_eval_scope(scope_request),
+    )
+    certified_blobs: list[Path] = []
+
+    for iteration in (1, 2):
+        workspace = tmp_path / f"iter_{iteration:03d}"
+        run_name = f"iter_{iteration:03d}"
+        with bind_run_task_composition(composition, physical_data_root=bundle["data_dir"]):
+            sandbox = TidmadSandbox(
+                workspace=str(workspace), run_name=run_name, file_index=0, progress_bar=False
+            )
+            trained = sandbox.execute_training(
+                "trial",
+                run_name,
+                "masked_reference_mlp",
+                {"model_type": "masked_reference_mlp", "segmentation_size": 3, "hidden_dim": 8},
+                {
+                    "lr": 1e-3,
+                    "epochs": 1,
+                    "batch_size": 48,
+                    "optimizer_type": "adam",
+                    "device": "cpu",
+                },
+                {"loss_type": "custom", "loss_name": "synthetic_masked_mse"},
+                train_base_seed=17 + iteration,
+                execution_bindings=TrainingExecutionBindings(task_scopes=scopes),
+            )
+            assert trained["status"] == "success"
+            ref = _trained_model_artifact_ref(
+                SimpleNamespace(
+                    run_model_io=composition.forward_contract.model_io,
+                    agent_input=SimpleNamespace(
+                        task_composition_ref=composition_ref,
+                        candidate_id=f"candidate-{iteration}",
+                    ),
+                    run_task_data_path=task,
+                    run_forward_contract=composition.forward_contract,
+                    workspace=str(workspace),
+                    run_name=run_name,
+                    run_profile=composition.dataset_profile,
+                ),
+                SimpleNamespace(exp_id="trial"),
+                TrainingOutcome(train_status=trained),
+            )
+            assert ref is not None
+            sandbox.save_record(
+                ExperimentRecord(
+                    exp_id="trial",
+                    status="success",
+                    model_type="masked_reference_mlp",
+                    timestamp="2026-09-17T00:00:00+00:00",
+                    file_index=0,
+                    params={"model_config": {"model_type": "masked_reference_mlp"}},
+                    trained_model_artifact_ref=ref,
+                ).model_dump(mode="json")
+            )
+            sandbox.save_record(
+                ExperimentRecord(
+                    exp_id="failed",
+                    status="error_training",
+                    model_type="masked_reference_mlp",
+                    timestamp="2026-09-17T00:00:00+00:00",
+                    file_index=0,
+                    params={},
+                ).model_dump(mode="json")
+            )
+
+        original = Path(trained["trained_model_candidate"]["checkpoint_path"])
+        failed_original = (
+            Path(sandbox.dirs["models"]) / "model_masked_reference_mlp_failed_agent.pth"
+        )
+        failed_original.write_bytes(b"interrupted training checkpoint")
+        certified_blob = (
+            workspace
+            / "trained_model_artifacts"
+            / "blobs"
+            / f"{trained['trained_model_candidate']['checkpoint_sha256']}.pt"
+        )
+        assert original.is_file() and failed_original.is_file() and certified_blob.is_file()
+        assert len(sandbox.get_summary()) == 2
+        attempts = [
+            CompletedTrainingAttempt(
+                workspace=str(workspace),
+                run_name=run_name,
+                exp_id=exp_id,
+                model_type="masked_reference_mlp",
+                is_trial=True,
+                scored=exp_id == "trial",
+                certified_ref=ref.model_dump(mode="json") if exp_id == "trial" else None,
+            )
+            for exp_id in ("trial", "failed")
+        ]
+        receipts = finalize_run_checkpoints(
+            attempts,
+            retain_training_checkpoints=False,
+            recorded_exp_ids={record["exp_id"] for record in sandbox.get_summary()},
+        )
+        assert [receipt.status for receipt in receipts] == ["retired", "retired"]
+        assert not original.exists() and not failed_original.exists()
+        assert certified_blob.is_file() and len(sandbox.get_summary()) == 2
+        certified_blobs.append(certified_blob)
+
+    assert all(blob.is_file() for blob in certified_blobs)
+
+
+@pytest.mark.allow_real_subprocess
 def test_new_training_record_refuses_target_dependent_analysis(tmp_path: Path) -> None:
     """A completed model never turns separately scored truth into an analysis source."""
 
@@ -326,6 +458,48 @@ def test_new_training_record_refuses_target_dependent_analysis(tmp_path: Path) -
         sandbox.save_record(record.model_dump(mode="json"))
         restored = ExperimentRecord.model_validate(sandbox.get_summary()[0])
         assert restored.trained_model_artifact_ref == ref
+
+    original = Path(trained["trained_model_candidate"]["checkpoint_path"])
+    certified_blob = (
+        tmp_path
+        / "trained_model_artifacts"
+        / "blobs"
+        / (trained["trained_model_candidate"]["checkpoint_sha256"] + ".pt")
+    )
+    certified_bytes = certified_blob.read_bytes()
+    certified_blob.write_bytes(b"corrupt")
+    with pytest.raises(CheckpointRetentionError, match="artifact file differs"):
+        finalize_attempt_checkpoint(
+            workspace=str(tmp_path),
+            models_dir=sandbox.dirs["models"],
+            run_name="reachability",
+            exp_id="tiny",
+            model_type="masked_reference_mlp",
+            is_trial=False,
+            retain_training_checkpoints=False,
+            scored=True,
+            certified_ref=ref.model_dump(mode="json"),
+        )
+    assert original.is_file()
+    assert (
+        '"status":"failed"'
+        in (tmp_path / "training_checkpoint_retention_receipts.jsonl").read_text()
+    )
+    certified_blob.write_bytes(certified_bytes)
+    receipt = finalize_attempt_checkpoint(
+        workspace=str(tmp_path),
+        models_dir=sandbox.dirs["models"],
+        run_name="reachability",
+        exp_id="tiny",
+        model_type="masked_reference_mlp",
+        is_trial=False,
+        retain_training_checkpoints=False,
+        scored=True,
+        certified_ref=ref.model_dump(mode="json"),
+    )
+    assert receipt.status == "retired"
+    assert not original.exists()
+    assert certified_blob.read_bytes() == certified_bytes
 
     artifact_path = tmp_path / ref.artifact_ref.logical_ref
     artifact = TrainedModelArtifact.model_validate_json(artifact_path.read_bytes())

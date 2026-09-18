@@ -128,3 +128,9 @@ def test_retention_switch_reaches_child_and_conflict_refuses() -> None:
     failed = subprocess.run(["bash", "-c", command], cwd=REPO_ROOT, text=True, capture_output=True)
     assert failed.returncode != 0
     assert "conflicts" in failed.stderr
+
+
+def test_training_checkpoint_retention_reaches_child_only_when_requested() -> None:
+    base = ("--workspace", "/tmp/workspace", "--run_name", "test")
+    assert "--retain_training_checkpoints" not in _build(*base)
+    assert "--retain_training_checkpoints" in _build(*base, "--retain_training_checkpoints")

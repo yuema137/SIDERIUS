@@ -45,6 +45,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.sandbox_layout import training_checkpoint_path
 from execute_tools.health_checks import (
     GateAction,
     HealthCheckContext,
@@ -254,7 +255,7 @@ def evaluate_round_health(
         else get_gates_for_position(round_index)
     )
     checkpoint_path = (
-        os.path.join(models_dir, f"model_{model_name}_{exp_id}_agent.pth")
+        str(training_checkpoint_path(models_dir, model_name, exp_id))
         if gate_ids and models_dir
         else None
     )
