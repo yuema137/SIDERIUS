@@ -21,6 +21,7 @@ from agent.schemas.protocols.interpreter_to_data_analysis import (
     local_analysis_input,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from core.campaign_identity import validate_path_component
 from execute_tools.historical_model_inference import (
     HistoricalModelInferenceCapability,
     LocalPytorchHistoricalModelInferenceCapability,
@@ -156,7 +157,17 @@ def run_optional_data_analysis(
                 ),
                 plugin_resolver=RunBoundHistoricalModelPluginResolver(
                     declared_plugins=active_run_model_plugins(),
-                    generated_plugin_dir=Path(get_plugin_dir(chain_workspace, run_name)),
+                    generated_plugin_dirs=tuple(
+                        Path(
+                            get_plugin_dir(
+                                chain_workspace,
+                                validate_path_component(
+                                    source.output.run_name, kind="historical model run"
+                                ),
+                            )
+                        )
+                        for source in historical_sources
+                    ),
                 ),
             )
     request_id = f"iteration-{iteration:03d}"

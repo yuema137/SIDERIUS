@@ -449,7 +449,7 @@ def test_historical_exporter_and_plugin_resolver_use_only_run_bound_sources(tmp_
     )
     resolver = RunBoundHistoricalModelPluginResolver(
         declared_plugins=declared,
-        generated_plugin_dir=tmp_path / "generated",
+        generated_plugin_dirs=(tmp_path / "generated",),
     )
     assert resolver.resolve_model_plugin(identity) == plugin
     with pytest.raises(ValueError, match="not in the run-approved"):
@@ -469,6 +469,42 @@ def test_historical_exporter_and_plugin_resolver_use_only_run_bound_sources(tmp_
     with pytest.raises(ValueError, match="digest mismatch"):
         exporter.export_artifact(model.model_config_ref, refused_destination)
     assert not refused_destination.exists()
+
+
+def test_run_scoped_historical_plugin_resolves_from_matching_prior_run(tmp_path: Path) -> None:
+    """A later iteration must reach an earlier generated model, even after a rename."""
+
+    request, _binding, _source, _deriver = _setup(tmp_path)
+    first = tmp_path / "plugins" / "iter_001"
+    second = tmp_path / "plugins" / "iter_002"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    member = request.model_artifact.model_plugin_identity.member
+    earlier = first / member
+    later = second / member
+    earlier.write_text("certified earlier model", encoding="utf-8")
+    later.write_text("different later model", encoding="utf-8")
+    identity = request.model_artifact.model_plugin_identity.model_copy(
+        update={
+            "configured_ref": "run-scoped-model-plugin",
+            "content_sha256": hashlib.sha256(earlier.read_bytes()).hexdigest(),
+        }
+    )
+    resolver = RunBoundHistoricalModelPluginResolver(
+        declared_plugins=None,
+        generated_plugin_dirs=(second, first),
+    )
+    assert resolver.resolve_model_plugin(identity) == earlier
+    earlier.write_text("tampered earlier model", encoding="utf-8")
+    with pytest.raises(ValueError, match="absent or changed"):
+        resolver.resolve_model_plugin(identity)
+    alias = tmp_path / "plugins" / "iter_alias"
+    alias.symlink_to(first, target_is_directory=True)
+    with pytest.raises(ValueError, match="not a regular file"):
+        RunBoundHistoricalModelPluginResolver(
+            declared_plugins=None,
+            generated_plugin_dirs=(alias,),
+        ).resolve_model_plugin(identity)
 
 
 def test_production_analysis_stage_receives_prior_model_assets_and_inference_capability(
@@ -582,3 +618,6 @@ def test_production_analysis_stage_receives_prior_model_assets_and_inference_cap
     )
     assert len(seen["assets"]) == 3
     assert isinstance(seen["inference_capability"], LocalPytorchHistoricalModelInferenceCapability)
+    assert seen["inference_capability"]._plugin_resolver.generated_plugin_dirs == (
+        tmp_path / "plugins" / "synthetic-run",
+    )

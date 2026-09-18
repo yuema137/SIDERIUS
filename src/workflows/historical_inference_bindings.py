@@ -29,10 +29,10 @@ class RunBoundHistoricalArtifactExporter:
 
 @dataclass(frozen=True, slots=True)
 class RunBoundHistoricalModelPluginResolver:
-    """Resolve a model implementation from run declarations or its exact local stage."""
+    """Resolve a model implementation from run declarations or certified prior runs."""
 
     declared_plugins: RunModelPluginBinding | None
-    generated_plugin_dir: Path
+    generated_plugin_dirs: tuple[Path, ...]
 
     def resolve_model_plugin(self, identity: ModelPluginIdentity) -> Path:
         member = validate_path_component(identity.member, kind="historical model plugin")
@@ -61,7 +61,19 @@ class RunBoundHistoricalModelPluginResolver:
                 raise ValueError(
                     "run-scoped generated model cannot claim package local-code identity"
                 )
-            candidate = self.generated_plugin_dir / member
+            for plugin_dir in self.generated_plugin_dirs:
+                candidate = plugin_dir / member
+                if (
+                    plugin_dir.parent.is_symlink()
+                    or plugin_dir.is_symlink()
+                    or candidate.is_symlink()
+                ):
+                    raise ValueError("approved historical model plugin is not a regular file")
+                if candidate.is_file() and (
+                    hashlib.sha256(candidate.read_bytes()).hexdigest() == identity.content_sha256
+                ):
+                    return candidate
+            raise ValueError("approved historical model plugin is absent or changed")
         else:
             raise ValueError("historical model plugin is not in the run-approved plugin set")
         if candidate.is_symlink() or not candidate.is_file():
