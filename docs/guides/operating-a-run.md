@@ -92,6 +92,16 @@ with semantic batches or variable-shaped inputs must provide them through its
 declared task-data path so the probe measures executable data rather than a
 shape-only surrogate.
 
+Composed attempts also transport their evaluation scope to the isolated
+preflight worker. Before training measurement, one real validation input runs
+through the production inference input adapter and an evaluation-mode forward.
+The Model-I/O contract selects the model dtype; dataset storage dtype may differ.
+Input rejection reports both dtypes, the resolved dtype, shape, device and phase.
+The check uses the existing single-probe timeout and worker memory bound.
+Callers without an evaluation scope cannot receive this check. A successful
+single-sample check does not establish full deliverable writing, scoring or
+Health: qualify those paths with a bounded real candidate before a long run.
+
 Hardware-derived watchdog profiles are caller-owned, content-pinned inputs.
 When a run requires one, provide the complete profile binding through the
 supported CLI. A missing or mismatched required profile must refuse before

@@ -82,7 +82,12 @@ from agent.skills.training_skill.estimator import (
 )
 from core.hardware_context import HardwareContext, discover
 from core.local_code.failure import raise_if_code_package_failure
-from execute_tools.model_input_dtype import TRAINING_SITE_DTYPE, resolve_input_dtype
+from execute_tools.inference_forward import forward_inference_batch
+from execute_tools.model_input_dtype import (
+    TRAINING_SITE_DTYPE,
+    resolve_inference_input_dtype,
+    resolve_input_dtype,
+)
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import (
     LossConfig,
@@ -122,6 +127,40 @@ _FORWARD_PASS_TIMEOUT_S: int = 60
 #: Per-operation budgets. One number can no longer bound four different
 #: operations — see probe_budgets for why that mattered.
 _BUDGETS = ProbeBudgets()
+
+
+def _check_task_inference_input(
+    model: torch.nn.Module,
+    inputs: torch.Tensor,
+    *,
+    model_type: str,
+    contract: ModelIOContract | None,
+    device: torch.device,
+    timeout_seconds: float,
+) -> None:
+    """Exercise the production inference boundary on one real validation sample.
+
+    Runs inside the existing isolated, memory-bounded worker before training
+    probes. This is an interface check, not a score or a quality measurement.
+    """
+    dtype = resolve_inference_input_dtype(model_type, contract)
+    training = model.training
+    try:
+        with _forward_pass_timeout(timeout_seconds, "inference_probe"):
+            model.to(device).eval()
+            forward_inference_batch(
+                model,
+                inputs,
+                device=device,
+                input_dtype=dtype,
+                stage="pre-training inference check",
+            )
+        print(
+            f"    [Inference input] storage={inputs.dtype}, model={dtype}, "
+            f"shape={tuple(inputs.shape)}: forward passed before training"
+        )
+    finally:
+        model.train(training)
 
 
 class ForwardPassTimeoutError(Exception):
@@ -911,6 +950,17 @@ def run_skill(sandbox, **kwargs):
             )
         num_params = sum(p.numel() for p in model_for_train.parameters())
         print(f"    Parameters : {num_params:,}")
+
+        inference_probe_input = kwargs.get("inference_probe_input")
+        if inference_probe_input is not None:
+            _check_task_inference_input(
+                model_for_train,
+                inference_probe_input,
+                model_type=model_type,
+                contract=model_io_contract,
+                device=torch.device("cuda" if hardware_context.device_available else "cpu"),
+                timeout_seconds=probe_budgets.single_probe_seconds,
+            )
 
         # CPU-only host: probing is still possible but the cap is 0. Honour
         # the device_available flag and short-circuit with a no-constraint

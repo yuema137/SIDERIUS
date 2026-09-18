@@ -249,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[worker] pre-flight for {spec['model_type']}", flush=True)
         probe_input_sample = None
         probe_target_sample = None
+        inference_probe_input = None
         if spec.get("task_probe_data") is not None and (
             hardware is None or hardware.device_available
         ):
@@ -256,6 +257,10 @@ def main(argv: list[str] | None = None) -> int:
                 spec["task_probe_data"],
                 int((spec.get("train_config") or {}).get("batch_size", 1)),
             )
+        if (spec.get("task_probe_data") or {}).get("evaluation_scope_payload") is not None:
+            from execute_tools.task_probe_batch import load_task_inference_probe_input
+
+            inference_probe_input = load_task_inference_probe_input(spec["task_probe_data"])
         outcome = run_skill(
             None,
             model_type=spec["model_type"],
@@ -279,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
             hardware_context=cast("Any", hardware),
             probe_input_sample=probe_input_sample,
             probe_target_sample=probe_target_sample,
+            inference_probe_input=inference_probe_input,
             max_inference_batch_size=(
                 (spec.get("task_probe_data") or {}).get("max_inference_batch_size")
             ),

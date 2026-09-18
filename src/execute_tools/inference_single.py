@@ -39,6 +39,7 @@ from execute_tools.hdf5_deliverable import is_complete_hdf5_deliverable
 from execute_tools.model_input_dtype import (
     INFERENCE_SITE_DTYPE,
     apply_contract_cardinality,
+    resolve_inference_input_dtype,
     resolve_input_dtype,
 )
 from execute_tools.scope_artifact import load_transported_scope
@@ -448,6 +449,7 @@ def _emit_generic_inference(args, data_path, model, task_eval_scope) -> None:
         device=DEVICE,
         data_dir=args.data_dir,
         batch_size=args.inference_batch_size,
+        input_dtype=resolve_inference_input_dtype(args.denoising_model, args._model_io),
         write_request=DeliverableWriteRequest(
             output_dir=args.output_dir if args.output_dir else args.data_dir,
             exp_id=args.exp_id,

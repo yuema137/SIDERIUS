@@ -213,6 +213,7 @@ class TaskProbeDataSpec(BaseModel):
     manifest_path: str = Field(min_length=1)
     semantic_fingerprint: str = Field(min_length=1)
     training_scope_payload: str = Field(min_length=1)
+    evaluation_scope_payload: str | None = Field(default=None, min_length=1)
     sampling: EpochSamplingParams
     max_inference_batch_size: int | None = Field(default=None, ge=1)
     #: Whether this task-owned probe has temporal segmentation geometry. This
