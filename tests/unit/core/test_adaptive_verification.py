@@ -297,3 +297,32 @@ class TestPredictionShape:
         assert m.steady_state_reached is True
         assert m.n_stabilization_units >= 1  # the trimmed transient
         assert m.n_measured_units + m.n_stabilization_units == len(m.raw_timings_ms)
+
+
+def test_normalized_batch_rate_does_not_shrink_observed_wall_time():
+    """Incident 2026-09-18: dividing validation timings by batch size hid evidence."""
+    verifier = AdaptiveUnitVerification(
+        "validation_sample", _config(min_timed_ms=500, max_wall_ms=10000)
+    )
+    for _ in range(30):
+        verifier.feed(1.0, elapsed_ms=100.0)
+        if verifier.is_terminal:
+            break
+    assert verifier.state == "verified"
+    measurement = verifier.measurement()
+    assert measurement is not None
+    assert measurement.unit_time_ms_median == 1.0
+    assert measurement.total_measurement_seconds >= 0.5
+    workload = ResolvedPhaseWorkload(phase="validation", unit="validation_sample", unit_count=1000)
+    prediction = verifier.prediction(workload, "real_validation_verification")
+    assert prediction is not None
+    assert prediction.predicted_seconds == 1.0
+
+
+def test_normalized_rate_cannot_bypass_measurement_wall_cap():
+    verifier = AdaptiveUnitVerification(
+        "validation_sample", _config(min_timed_ms=500, max_wall_ms=50)
+    )
+    verifier.feed(0.1, elapsed_ms=60)
+    assert verifier.is_terminal
+    assert verifier.verification_seconds == pytest.approx(0.06)

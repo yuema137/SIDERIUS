@@ -31,6 +31,7 @@ measurement; per-host overrides land with §5 guardrail wiring (RT5).
 
 from __future__ import annotations
 
+import math
 import statistics
 from typing import Literal
 
@@ -175,6 +176,7 @@ class AdaptiveUnitVerification:
         self.prior_expected_unit_ms = prior_expected_unit_ms
         self._detector = SteadyStateDetector(self.config.steady)
         self._all_times_ms: list[float] = []
+        self._elapsed_times_ms: list[float] = []
         self._state: VerificationState = "stabilizing"
         self._failure_reason: str | None = None
         self._prior_agreement: PriorAgreement | None = None
@@ -192,7 +194,7 @@ class AdaptiveUnitVerification:
     @property
     def verification_seconds(self) -> float:
         """Cumulative measured verification time (§2.12 overhead term)."""
-        return sum(self._all_times_ms) / 1000.0
+        return sum(self._elapsed_times_ms) / 1000.0
 
     def _required_steady_steps(self) -> int:
         base = self.config.min_timed_steps
@@ -202,8 +204,13 @@ class AdaptiveUnitVerification:
 
     # ── Driving ──────────────────────────────────────────────────────────
 
-    def feed(self, unit_ms: float) -> VerificationState:
-        """Consume one production unit duration; return the new state.
+    def feed(self, unit_ms: float, *, elapsed_ms: float | None = None) -> VerificationState:
+        """Consume a normalized unit rate and its actual observation duration.
+
+        ``elapsed_ms`` is the complete batch wall time when ``unit_ms`` has
+        been divided by batch size. Stability and prediction use the unit
+        rate; evidence minimums and wall caps use actual elapsed time. Omit
+        it for one-unit observations to preserve their existing semantics.
 
         Raises:
             RuntimeError: fed after a terminal state (a loop bug — the
@@ -212,10 +219,14 @@ class AdaptiveUnitVerification:
         """
         if self.is_terminal:
             raise RuntimeError(f"verification already terminal ({self._state}); stop feeding.")
-        if unit_ms <= 0:
+        if not math.isfinite(unit_ms) or unit_ms <= 0:
             raise ValueError(f"unit_ms must be positive; got {unit_ms!r}.")
 
+        elapsed = unit_ms if elapsed_ms is None else elapsed_ms
+        if not math.isfinite(elapsed) or elapsed <= 0:
+            raise ValueError(f"elapsed_ms must be finite and positive; got {elapsed!r}.")
         self._all_times_ms.append(unit_ms)
+        self._elapsed_times_ms.append(elapsed)
         self._detector.observe(unit_ms)
 
         if self._detector.detected:
@@ -243,7 +254,7 @@ class AdaptiveUnitVerification:
             self._compare_prior(steady_median)
             if (
                 len(steady) >= self._required_steady_steps()
-                and sum(steady) >= self.config.min_timed_ms
+                and self._steady_elapsed_ms() >= self.config.min_timed_ms
             ):
                 self._state = "verified"
                 return self._state
@@ -254,10 +265,15 @@ class AdaptiveUnitVerification:
         # Hard caps (§2.12) — only reachable while not verified.
         if (
             len(self._all_times_ms) >= self.config.max_steps
-            or sum(self._all_times_ms) >= self.config.max_wall_ms
+            or sum(self._elapsed_times_ms) >= self.config.max_wall_ms
         ):
             self._fail_insufficient()
         return self._state
+
+    def _steady_elapsed_ms(self) -> float:
+        """Wall time of the detector's current, possibly re-armed suffix."""
+        count = len(self._detector.steady_times_ms())
+        return sum(self._elapsed_times_ms[-count:]) if count else 0.0
 
     def finalize(self) -> VerificationState:
         """Resolve the outcome when the production loop ran out of units.
@@ -286,7 +302,7 @@ class AdaptiveUnitVerification:
             # the wrong subsystem, which is exactly what it did. Both are now
             # reported with their actual values, and the unmet one is named.
             steady = self._detector.steady_times_ms()
-            steady_ms = sum(steady)
+            steady_ms = self._steady_elapsed_ms()
             unmet = []
             if len(steady) < self._required_steady_steps():
                 unmet.append("steady_count")
@@ -365,6 +381,7 @@ class AdaptiveUnitVerification:
             raw_timings_ms=list(self._all_times_ms),
             detail={
                 "state": self._state,
+                "observation_elapsed_ms": list(self._elapsed_times_ms),
                 "failure_reason": self._failure_reason,
                 "prior_agreement": self._prior_agreement,
                 "prior_expected_unit_ms": self.prior_expected_unit_ms,

@@ -450,6 +450,7 @@ def _emit_generic_inference(args, data_path, model, task_eval_scope) -> None:
         data_dir=args.data_dir,
         batch_size=args.inference_batch_size,
         input_dtype=resolve_inference_input_dtype(args.denoising_model, args._model_io),
+        runtime_session=_resume_runtime_session(args, task_eval_scope),
         write_request=DeliverableWriteRequest(
             output_dir=args.output_dir if args.output_dir else args.data_dir,
             exp_id=args.exp_id,

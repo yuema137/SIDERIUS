@@ -23,6 +23,7 @@ from agent.schemas.model_io_contract import ModelIOContract, load_model_io_contr
 from agent.schemas.model_io_resolution import resolve_model_io_contract
 from core.capability_registry import CapabilityContractSnapshot
 from core.durable_io import publish_json_atomically
+from core.runtime_control.budget_diagnostics import report_training_budget
 from core.runtime_control.provenance import capture_storage_provenance
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.workload import ResolvedPhaseWorkload
@@ -873,15 +874,18 @@ def _validation_pass(
             )
             target_dtype = get_target_torch_dtype(loss_cfg)
             use_cuda_sync = device.type == "cuda"
-            for input_batch, target_batch in val_loader:
-                # 07c C5: time the batch the SAME way the training verifier
-                # does — sync before the clock starts and again before it
-                # stops, so an async CUDA queue cannot attribute this batch's
-                # cost to the next one.
+            val_iterator = iter(val_loader)
+            while True:
+                # Include DataLoader.next(): compressed reads and collation are
+                # part of this production batch's wall cost, not free setup.
                 if verifier is not None:
                     if use_cuda_sync:
                         torch.cuda.synchronize()
                     t_batch = time.perf_counter()
+                try:
+                    input_batch, target_batch = next(val_iterator)
+                except StopIteration:
+                    break
 
                 input_seq = input_batch.to(device).to(input_dtype)
                 target_seq = target_batch.to(device).to(dtype=target_dtype)
@@ -903,7 +907,7 @@ def _validation_pass(
                     # The unit is one validation SAMPLE, so a partial final
                     # batch cannot bias the rate.
                     elapsed_ms = max((time.perf_counter() - t_batch) * 1000.0, 1e-6)
-                    verifier.feed(elapsed_ms / max(n_batch, 1))
+                    verifier.feed(elapsed_ms / max(n_batch, 1), elapsed_ms=elapsed_ms)
                     if verifier.is_terminal:
                         # PERSIST NOW, not when the pass ends. The deadline the
                         # watchdog is enforcing right now was built without a
@@ -1540,6 +1544,9 @@ def run_experiment_streaming(
             extra_predicted_seconds=(train_cfg.epochs - 1) * epoch0_dataset_seconds,
             extra_detail={"epoch0_dataset_seconds": epoch0_dataset_seconds},
         )
+        report_training_budget(
+            runtime_session, stage="post_training_verification", epochs=train_cfg.epochs
+        )
         if decide_admission:
             adm = runtime_session.decide_admission(stage="post_training_verification")
             if adm.decision == "rejected":
@@ -1649,6 +1656,9 @@ def run_experiment_streaming(
                 ),
                 detail={"dataset_construction_seconds": epoch0_dataset_seconds},
             )
+            report_training_budget(
+                runtime_session, stage="before_optimizer", epochs=train_cfg.epochs
+            )
             # §6a calibration-key inputs — recorded by the engine that
             # knows them. runtime_flags are literal facts of THIS loop
             # (no workers / pinning / accumulation / compile); flipping
@@ -1701,16 +1711,14 @@ def run_experiment_streaming(
 
         batch_losses = []
         rejected_mid_epoch = False
-        for input_batch, target_batch in tqdm(
-            loader,
-            desc=f"Epoch {ep}",
-            file=sys.stdout,
-        ):
+        batch_iterator = iter(loader)
+        for _ in tqdm(range(len(loader)), desc=f"Epoch {ep}", file=sys.stdout):
             if verifier is not None:
                 if use_cuda_sync:
                     torch.cuda.synchronize()
                 t_step = time.perf_counter()
 
+            input_batch, target_batch = next(batch_iterator)
             input_seq = input_batch.to(device)
             target_seq = target_batch.to(device)
 
@@ -1741,6 +1749,7 @@ def run_experiment_streaming(
                     if rejected_mid_epoch:
                         break
 
+        del batch_iterator
         if verifier is not None:
             # Epoch-0 loader exhausted before a verdict: resolve from the
             # evidence collected. With a single epoch the training work is

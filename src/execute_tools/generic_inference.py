@@ -57,7 +57,9 @@ import torch
 from pydantic import BaseModel, ConfigDict, Field
 from torch.utils.data import DataLoader
 
+from core.runtime_control.session import RuntimeVerificationSession
 from execute_tools.inference_forward import forward_inference_batch
+from execute_tools.inference_runtime import InferenceRuntimeEvidence
 from execute_tools.task_data_path import (
     DeliverableSourceContext,
     DeliverableWriteRequest,
@@ -89,6 +91,7 @@ def run_generic_inference(
     batch_size: int,
     write_request: DeliverableWriteRequest,
     input_dtype: torch.dtype | None = None,
+    runtime_session: RuntimeVerificationSession | None = None,
 ) -> GenericInferenceOutcome:
     """Iterate a task's own evaluation scope and persist its own deliverable.
 
@@ -131,13 +134,26 @@ def run_generic_inference(
     # tail would silently mis-pair every sample with somebody else's identity.
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=False)
 
+    evidence = (
+        InferenceRuntimeEvidence(
+            runtime_session, samples=dataset_size, device=device, started=started
+        )
+        if runtime_session is not None
+        else None
+    )
     produced = 0
     batches = 0
 
     def _prediction_stream():
         """Yield detached predictions without retaining the complete scope."""
         nonlocal batches, produced
-        for batch in loader:
+        iterator = iter(loader)
+        while True:
+            batch_started = evidence.start_batch() if evidence is not None else 0.0
+            try:
+                batch = next(iterator)
+            except StopIteration:
+                break
             # `validation_dataset` yields (model_input, supervision_target);
             # inference consumes the input and ignores the target, which is
             # present because ONE method serves both the R3 pass and this one.
@@ -149,6 +165,8 @@ def run_generic_inference(
             for prediction in predictions:
                 produced += 1
                 yield prediction.detach().cpu()
+            if evidence is not None:
+                evidence.finish_batch(batch_started, len(predictions))
 
     request = write_request.model_copy(
         update={
@@ -165,6 +183,8 @@ def run_generic_inference(
             f"task deliverable writer consumed {produced} predictions, "
             f"but the evaluation scope materialized {dataset_size} samples"
         )
+    if evidence is not None:
+        evidence.finish()
     return GenericInferenceOutcome(
         samples=produced,
         batches=batches,

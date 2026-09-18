@@ -90,6 +90,7 @@ def test_child_converts_storage_input_using_transported_contract(
         "--task_eval_scope_ref", str(scope),
         "--task_eval_scope_digest", hashlib.sha256(raw).hexdigest(),
         "--inference_batch_size", "2",
+        "--runtime_observation_out", str(tmp_path / "runtime.json"),
     ]  # fmt: skip
     if admissible is not None:
         # Use the framework synthetic pack's valid contract, changing only
@@ -119,3 +120,11 @@ def test_child_converts_storage_input_using_transported_contract(
     assert json.loads((output / "pred_strict_input_fixture_run_exp_000.json").read_text()) == {
         "samples": 3
     }
+
+    # The composed route must persist evidence even when a short scope cannot
+    # establish steady state. Previously it returned before session creation.
+    observation = json.loads((tmp_path / "runtime.json").read_text())
+    component = observation["components"]["inference"]
+    assert component["actual_seconds"] > 0
+    assert component["workload"]["unit_count"] == 3
+    assert component["measurement"] is not None

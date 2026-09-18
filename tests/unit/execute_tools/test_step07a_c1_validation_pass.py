@@ -722,3 +722,48 @@ class TestComparabilityStampedByTrainer:
         )
         assert h.objective_reduction == "sum"
         assert h.validation_objective is not None and len(h.validation_objective) == 1
+
+
+def test_training_verification_includes_loader_wait(two_family, tmp_path, monkeypatch, capsys):
+    """2026-09-18: training's batch timer also started after DataLoader.next()."""
+    from types import SimpleNamespace
+
+    from torch.utils.data import Dataset
+
+    clock = [0.0]
+    monkeypatch.setattr(tes, "time", SimpleNamespace(perf_counter=lambda: clock[0]))
+    original = TwoFamilyDataPath.training_dataset
+
+    def slow_dataset(self, scope, params):
+        inner = original(self, scope, params)
+
+        class SlowRows(Dataset):
+            def __len__(self):
+                return len(inner)
+
+            def __getitem__(self, index):
+                clock[0] += 0.1
+                return inner[index]
+
+        return SlowRows()
+
+    monkeypatch.setattr(TwoFamilyDataPath, "training_dataset", slow_dataset)
+    session = RuntimeVerificationSession(str(tmp_path / "runtime.json"), attempt_id="loader")
+    _run(
+        two_family,
+        tmp_path,
+        name="loader",
+        eval_sample_set=None,
+        epochs=1,
+        batch_size=2,
+        runtime_session=session,
+    )
+    training = session.observation.components["training"]
+    assert training.measurement is not None
+    assert training.measurement.raw_timings_ms
+    assert all(value == pytest.approx(200) for value in training.measurement.raw_timings_ms)
+    assert training.prediction is not None
+    assert training.prediction.predicted_seconds == pytest.approx(2.4)
+    logged = capsys.readouterr().out
+    assert '"stage":"before_optimizer"' in logged
+    assert '"stage":"post_training_verification"' in logged
