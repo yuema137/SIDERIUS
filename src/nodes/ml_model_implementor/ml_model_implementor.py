@@ -1595,14 +1595,14 @@ def _render_test_input_expr(
     ``model_io`` task (``mat1 and mat2 must have the same dtype, but got
     Long and Float``), while the validator's direct probe was already
     contract-aware. The dtype comes from the SAME Step-03 authority the
-    probe skill uses; ``int64`` renders without an explicit ``dtype=`` so
-    the shipped TIDMAD rendering stays byte-identical (the §15.1 row-1 and
-    C0 byte-baseline tests pin that parity).
+    probe skill uses. ``int64`` renders without an explicit ``dtype=`` so
+    the TIDMAD generated test retains its established form (the §15.1 row-1
+    and C0 byte-baseline tests pin that rendering).
     """
-    from execute_tools.model_input_dtype import resolve_model_input_dtype
+    from execute_tools.model_input_dtype import resolve_contract_input_dtype
 
     shape = _render_shape_tuple(_render_axis_extents(model_io_contract.input, batch_literal))
-    dtype = resolve_model_input_dtype(model_io_contract.input.dtype, site_preference="int64")
+    dtype = resolve_contract_input_dtype(model_io_contract.input.dtype)
     name = str(dtype).removeprefix("torch.")
     if name.startswith("int"):
         if name == "int64":

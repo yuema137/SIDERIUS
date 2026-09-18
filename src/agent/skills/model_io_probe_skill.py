@@ -95,13 +95,6 @@ PROBE_SYMBOLIC_EXTENT: int = 64
 #: :func:`input_index_extent` for why there is nothing better to derive.
 _UNIVERSAL_INDEX_EXTENT: int = 1
 
-#: The concrete dtype this probe site has always fed, preserved so the
-#: shipped TIDMAD behaviour is byte-identical. A site preference is never
-#: model semantics (Step-03 §4a.1), so it lives here at the site and is
-#: honoured only when the contract admits it.
-_PROBE_SITE_DTYPE: str = "int64"
-
-
 # ---------------------------------------------------------------------------
 # The config-construction recipe — C12-P / F-12e-G1
 # ---------------------------------------------------------------------------
@@ -455,11 +448,11 @@ def build_model_input(
     """Construct one probe input satisfying the contract's input declaration.
 
     Shape, rank and axis order come from :func:`realize_shape`; the concrete
-    dtype is resolved through the EXISTING Step-03 authority
-    (``execute_tools.model_input_dtype.resolve_model_input_dtype``) rather
-    than a second mapping, with this site's historical ``int64`` preference
-    honoured whenever the contract admits it — which is what keeps the
-    shipped TIDMAD probe byte-identical.
+    dtype is resolved through the EXISTING Step-03 contract-bound authority
+    (``execute_tools.model_input_dtype.resolve_contract_input_dtype``), so
+    implementor and validator probe the same representation as training and
+    inference. For the shipped TIDMAD declaration that representation is
+    ``int64``.
 
     Args:
         contract: the declared Model-I/O contract to realize a probe for.
@@ -482,12 +475,12 @@ def build_model_input(
 
     from execute_tools.model_input_dtype import (
         UnsupportedModelInputDtypeError,
-        resolve_model_input_dtype,
+        resolve_contract_input_dtype,
     )
 
     shape = realize_shape(contract.input, batch=batch, symbolic=symbolic)
     try:
-        dtype = resolve_model_input_dtype(contract.input.dtype, site_preference=_PROBE_SITE_DTYPE)
+        dtype = resolve_contract_input_dtype(contract.input.dtype)
     except UnsupportedModelInputDtypeError as exc:
         raise ProbeConstructionError(
             f"cannot build a probe input for this contract: {exc}"

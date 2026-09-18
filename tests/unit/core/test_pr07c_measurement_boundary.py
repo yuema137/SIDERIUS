@@ -12,7 +12,9 @@ promoted out of ``agent/skills/training_skill/estimator.py`` to sit beside the
 registry it reads.
 
 The load-bearing claim is dtype precedence for each builtin, with and without
-a transported contract. Synthetic declarations cover integer preference,
+a transported contract. A composed run now uses one canonical dtype across
+training and inference; the no-contract path retains historical compatibility.
+Synthetic declarations cover integer preference,
 float-only inputs at multiple ranks, and unsupported dtype refusal. The old
 phase parameter never reached the resolver and merely duplicated each call;
 execution-phase wiring belongs to the worker integration tests.
@@ -50,6 +52,10 @@ PRE_CHANGE_DTYPE: dict[str, torch.dtype] = {
     "rnn": torch.int32,
     "gated_fno": torch.int32,
 }
+COMPOSED_DTYPE = {
+    model_type: torch.float32 if model_type == "fcnet" else torch.int64
+    for model_type in PRE_CHANGE_DTYPE
+}
 
 
 def _contract(dtypes=("int64", "int32"), rank=2):
@@ -77,8 +83,8 @@ def integer_contract():
     return _contract()
 
 
-class TestTheDtypeMatrixIsUnchanged:
-    """Keep the historical builtin precedence matrix with explicit input."""
+class TestTheDtypeMatrix:
+    """Keep legacy behavior and use canonical dtype in composed runs."""
 
     @pytest.mark.parametrize("model_type", sorted(PRE_CHANGE_DTYPE))
     @pytest.mark.parametrize("with_contract", [False, True])
@@ -86,7 +92,7 @@ class TestTheDtypeMatrixIsUnchanged:
         contract = _contract() if with_contract else None
         assert (
             resolve_input_dtype(model_type, contract, site_preference=SITE_PREFERENCE)
-            == PRE_CHANGE_DTYPE[model_type]
+            == (COMPOSED_DTYPE if with_contract else PRE_CHANGE_DTYPE)[model_type]
         )
 
 
@@ -102,10 +108,10 @@ class TestDeclaredDtypeResolution:
             == torch.float32
         )
 
-    def test_admissible_site_preference_wins_over_declared_order(self):
+    def test_composed_contract_order_wins_over_site_preference(self):
         assert (
             resolve_input_dtype("synthetic_model", _contract(), site_preference=SITE_PREFERENCE)
-            == torch.int32
+            == torch.int64
         )
 
     def test_unsupported_admissibility_refuses_instead_of_coercing(self):

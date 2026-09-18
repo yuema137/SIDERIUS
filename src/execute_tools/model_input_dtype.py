@@ -25,12 +25,12 @@ model-admissible  ∩  runtime-supported   ->  deterministic concrete dtype
 ```
 
 **A site preference is compatibility behaviour, never model semantics.**
-Each execution site names the concrete dtype it has always fed. When that
-preference is admissible it wins — which is exactly what keeps the shipped
-TIDMAD matrix byte-exact. When it is NOT admissible, resolution does **not**
-fail: it selects another concrete dtype that is both admissible and
-supported (§24.9 Q7). Failing there would elevate a legacy site preference
-into a semantic constraint, which §4a.1 explicitly forbids.
+Legacy callers without a task composition retain the historical int32
+training and int64 inference preferences. A composed run instead selects one
+concrete dtype from the model's declaration for every execution site. For a
+declaration admitting int64 and int32 in that order, both sites use int64.
+This prevents a model from passing inference checks yet failing when the
+training runtime supplies a different, still-admissible dtype.
 
 **Expressiveness exceeds validated support.** A contract may declare
 ``float16``, ``bfloat16``, ``complex64`` and so on — the schema has no
@@ -63,14 +63,8 @@ RUNTIME_SUPPORTED_DTYPES: dict[str, torch.dtype] = {
     "float32": torch.float32,
 }
 
-#: What the TRAINING engines have always fed the embedding arm (A6: int32 at
-#: both the epoch and streaming boundaries). A site preference, not model
-#: semantics — it lives here, at the site, and never on the contract (§4a.1).
+#: Legacy site preferences are retained for callers without a task contract.
 TRAINING_SITE_DTYPE = "int32"
-
-#: What inference has always fed the embedding arm (A6: int64). It differs
-#: from training, and that divergence is the finding (F-1) this whole design
-#: amendment exists to represent honestly rather than unify by accident.
 INFERENCE_SITE_DTYPE = "int64"
 
 
@@ -126,6 +120,18 @@ def resolve_model_input_dtype(
     return RUNTIME_SUPPORTED_DTYPES[supported[0]]
 
 
+def resolve_contract_input_dtype(admissibility: DtypeAdmissibility) -> torch.dtype:
+    """Choose one declared, supported model input dtype for a composed run.
+
+    The declaration's first supported entry is canonical. Unlike a site's
+    legacy preference, it cannot differ between training and inference.
+    """
+    return resolve_model_input_dtype(
+        admissibility,
+        site_preference=admissibility.admissible[0],
+    )
+
+
 def model_input_admissibility(
     model_type: str,
     task_contract: ModelIOContract,
@@ -169,6 +175,10 @@ def resolve_input_dtype(
     the same sense that ``get_target_torch_dtype`` keys a loss name into
     ``LOSS_TARGET_DTYPE_REGISTRY``.
 
+    A bound task contract selects one canonical supported representation for
+    every site. The site preference is used only for the pre-contract
+    compatibility path below.
+
     ``task_contract is None`` is the **Regime-A adapter** for a caller that
     predates the contract — a direct ``run_experiment`` call in a test, or an
     argv without ``--model_io_json``. It resolves the model's OWN declaration
@@ -178,9 +188,8 @@ def resolve_input_dtype(
     forbids.
     """
     if task_contract is not None:
-        return resolve_model_input_dtype(
-            model_input_admissibility(model_type, task_contract),
-            site_preference=site_preference,
+        return resolve_contract_input_dtype(
+            model_input_admissibility(model_type, task_contract)
         )
 
     from ml_models.models_sandbox import BUILTIN_INPUT_DTYPES
