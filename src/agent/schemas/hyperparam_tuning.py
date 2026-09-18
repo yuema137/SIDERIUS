@@ -40,6 +40,7 @@ from agent.schemas.training_diagnosis import TrainingDiagnosis
 # core.hardware_context.
 from core.runtime_control.admission import AdmissionEnforcement
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
+from core.runtime_control.validation_limits import validate_phase_deadline
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
@@ -2717,12 +2718,9 @@ class HyperparamTuningInput(BaseModel):
         with the watchdog off would let a Gate command record a wall-clock
         limit, run past it, and still report the run as bounded.
         """
-        if self.validation_max_phase_seconds is not None and not self.runtime_watchdog_enabled:
-            raise ValueError(
-                "validation_max_phase_seconds requires runtime_watchdog_enabled=True: "
-                "the watchdog is what enforces the deadline, so without it the "
-                "ceiling would be recorded and never applied."
-            )
+        validate_phase_deadline(
+            self.validation_max_phase_seconds, watchdog_enabled=self.runtime_watchdog_enabled
+        )
         return self
 
     @model_validator(mode="after")

@@ -439,3 +439,33 @@ class TestRequiredProfileDeclaration:
         assert resolved.safety_factor is None
         assert resolved.floor_seconds == 60.0
         assert resolved.provenance.startswith("uncalibrated")
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_phase_deadline_validated_at_launch_before_agent_calls(monkeypatch, enabled):
+    """A smoke must not spend LLM calls discovering an unenforced time limit."""
+    monkeypatch.setattr(
+        roi,
+        "resolve_watchdog_launch_settings",
+        lambda **kwargs: ResolvedWatchdogSettings(
+            enabled=enabled, safety_factor=None, floor_seconds=60.0, provenance="test"
+        ),
+    )
+    args = _parse("--validation_max_phase_seconds", "180")
+    if enabled:
+        assert roi.resolve_watchdog_policy(args).enabled
+    else:
+        with pytest.raises(SystemExit, match=r"before agent calls.*requires runtime_watchdog"):
+            roi.resolve_watchdog_policy(args)
+        assert getattr(args, "runtime_watchdog_policy", None) is None
+
+
+def test_disabled_watchdog_without_phase_deadline_remains_allowed(monkeypatch):
+    monkeypatch.setattr(
+        roi,
+        "resolve_watchdog_launch_settings",
+        lambda **kwargs: ResolvedWatchdogSettings(
+            enabled=False, safety_factor=None, floor_seconds=60.0, provenance="cli"
+        ),
+    )
+    assert roi.resolve_watchdog_policy(_parse("--no-runtime_watchdog")).enabled is False
