@@ -160,7 +160,7 @@ The required `root_cache_dir` constructor argument controls where per-paper extr
   - **Synthesis** — exactly one call per run. System prompt: `synthesis_system.md`. Label: `"lit_review.synthesis"`. Uses `llm_provider` / `llm_model_id`.
 - **GPU**: not required.
 - **External services**:
-  - **Semantic Scholar API** (`S2_API_KEY` env var; silent-degrade to unauthenticated pool if absent) — paper resolution + dynamic-search hits.
+  - **Semantic Scholar API** (`S2_API_KEY` env var; silent-degrade to unauthenticated pool if absent) — paper resolution + dynamic-search hits. When several hosts share one key, configure distinct `S2_SHARED_KEY_SLOT` values and a common `S2_SHARED_KEY_WORKERS` count on those hosts; the [paper resolver contract](../../agent/skills/paper_resolver_skill/paper_resolver_skill.md) defines the pacing and retry behavior.
   - **arxiv.org/src/ HTTP** (no auth) — Tier-1 source download for arXiv-id papers.
   - **Publisher PDF URLs** (S2's `openAccessPdf` or arXiv fallback) — Tier-2 PDF download for `pdfplumber` extraction.
 
