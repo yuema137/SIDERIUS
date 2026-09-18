@@ -164,6 +164,13 @@ The runtime watchdog is a separate last-resort safety mechanism. Selecting
 either admission authority does not disable it or turn it into a second
 admission decision.
 
+Use `--no-runtime_watchdog` to explicitly disable phase deadline termination.
+The diagnostic `--validation_max_phase_seconds` limit requires the resolved
+watchdog to be enabled. An incompatible pair is refused at workflow launch,
+before agent calls, using the same validation rule as direct tuner inputs.
+To keep the watchdog off, omit that diagnostic phase limit. An external run
+supervisor's total deadline remains independent of this setting.
+
 ## Failures and refusals
 
 Interpret terminal evidence by responsibility:

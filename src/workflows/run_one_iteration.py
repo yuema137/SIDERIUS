@@ -89,6 +89,7 @@ from core.run_invariants import (
     RunInvariantsViolation,
     build_run_invariants,
 )
+from core.runtime_control.validation_limits import validate_phase_deadline
 from core.runtime_control.watchdog_profile import (
     ExecutionRegime,
     RequiredProfileBinding,
@@ -2542,6 +2543,12 @@ def resolve_watchdog_policy(args: argparse.Namespace) -> ResolvedWatchdogSetting
         # loudly, naming the flag that declared it — a REQUIRED binding never
         # falls back to the shipped or uncalibrated profile.
         raise SystemExit(f"--required_runtime_profile: {exc}") from exc
+    try:
+        validate_phase_deadline(
+            args.validation_max_phase_seconds, watchdog_enabled=resolved.enabled
+        )
+    except ValueError as exc:
+        raise SystemExit(f"workflow launch refused before agent calls: {exc}") from exc
     args.runtime_watchdog = resolved.enabled
     args.runtime_watchdog_safety_factor = resolved.safety_factor
     args.runtime_watchdog_floor_seconds = resolved.floor_seconds
