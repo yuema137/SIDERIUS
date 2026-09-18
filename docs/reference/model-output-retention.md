@@ -23,7 +23,7 @@ cleanup, but cleanup is already the default; using both flags is refused.
 The chain wrapper's old `--no-cleanup_denoised` spelling is an explicit
 retention request and is translated into `--retain_model_outputs` on the
 child argv. The Slurm wrapper does not inject cleanup over that request.
-Neither flag controls checkpoint or TrainedModelArtifact retention. Neither
+Neither flag controls training-original checkpoint or TrainedModelArtifact retention. Neither
 grants Data Analysis access to ground truth or previously saved outputs.
 
 ## Ordinary task outputs

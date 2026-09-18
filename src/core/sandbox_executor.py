@@ -52,6 +52,7 @@ from core.runtime_control.session import RuntimeControlPolicy
 from core.runtime_control.watchdog_deadline import (
     watchdog_deadline_provider as _build_watchdog_deadline_provider,
 )
+from core.sandbox_layout import training_checkpoint_path
 from core.training_execution_bindings import TrainingExecutionBindings
 from execute_tools.data_paths import resolve_physical_data_root
 from execute_tools.dataset_config import (
@@ -1822,8 +1823,8 @@ class TidmadSandbox:
             json.dump(validated_m, f)
         with open(l_path, "w") as f:
             json.dump(validated_l, f)
-        model_path = os.path.abspath(
-            os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth")
+        model_path = str(
+            training_checkpoint_path(self.dirs["models"], model_type, exp_id).resolve()
         )
         inf_bs = str(
             inference_batch if inference_batch is not None else inference_batch_for(model_type)

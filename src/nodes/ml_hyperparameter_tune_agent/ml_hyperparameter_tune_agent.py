@@ -76,6 +76,9 @@ from execute_tools.task_data_path import (
     resolve_bound_task_data_path,
 )
 from execute_tools.trial_anchor_map import load_anchor_map
+from nodes.ml_hyperparameter_tune_agent.checkpoint_retention import (
+    finalize_attempt_checkpoint,
+)
 from nodes.ml_hyperparameter_tune_agent.cli import (
     PARTIAL_CAMPAIGN_EXIT_CODE,
     build_agent_input,
@@ -572,6 +575,7 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
         lit_review_enabled=agent_input.lit_review_enabled,
         data_analysis_enabled=agent_input.data_analysis_enabled,
         retain_model_outputs=agent_input.retain_model_outputs,
+        retain_training_checkpoints=agent_input.retain_training_checkpoints,
         lit_review_config_sha256=agent_input.lit_review_config_sha256,
         scientific_evidence_order=agent_input.scientific_evidence_order,
         baseline_isolation=agent_input.baseline_isolation,
@@ -1457,6 +1461,9 @@ class HyperparamTuningAgent:
                 model_type = model_type_setting
                 record_params: dict[str, Any] = {}
                 hypothesis = "Attempt failed before a validated hypothesis was available."
+                training_started = False
+                scored = False
+                certified_ref = None
                 try:
                     prepared = prepare_attempt(
                         run_bindings,
@@ -1502,6 +1509,7 @@ class HyperparamTuningAgent:
                         continue
                     if admission.signal is AttemptSignal.END_ROUND:
                         break
+                    training_started = True
                     trained = run_training(
                         run_bindings,
                         prepared,
@@ -1530,6 +1538,7 @@ class HyperparamTuningAgent:
                         continue
                     if executed.signal is AttemptSignal.END_ROUND:
                         break
+                    scored = True
                     score_results = executed.score_results
                     score_table = executed.score_table
                     train_results = executed.train_results
@@ -1606,6 +1615,7 @@ class HyperparamTuningAgent:
                     )
 
                     _emit_attempt_record(sandbox, final_record, agent_input)
+                    certified_ref = final_record.get("trained_model_artifact_ref")
                     _append_runtime_observation(
                         sandbox, run_name, final_record["runtime_verification"]
                     )
@@ -1730,6 +1740,20 @@ class HyperparamTuningAgent:
                     except Exception as persist_error:
                         print(f"  [ERROR] Could not persist attempt failure: {persist_error}")
                     time.sleep(5)
+
+                finally:
+                    if training_started:
+                        finalize_attempt_checkpoint(
+                            workspace=run_bindings.workspace,
+                            models_dir=sandbox.dirs["models"],
+                            run_name=run_name,
+                            exp_id=exp_id,
+                            model_type=model_type,
+                            is_trial=prepared.plan.is_trial,
+                            retain_training_checkpoints=agent_input.retain_training_checkpoints,
+                            scored=scored,
+                            certified_ref=certified_ref,
+                        )
 
             # DataScope DS5 — a scope violation is deterministic on retry:
             # terminate the run immediately, before any retry/fail-round

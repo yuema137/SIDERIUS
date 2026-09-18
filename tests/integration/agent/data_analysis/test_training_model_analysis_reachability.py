@@ -50,6 +50,10 @@ from execute_tools.trained_model_artifact import copy_certified_artifact
 from ml_models.loss_models_sandbox import register_loss_in_memory
 from ml_models.plugin_loader import register_model_in_memory
 from nodes.data_analysis_agent import DataAnalysisAgent
+from nodes.ml_hyperparameter_tune_agent.checkpoint_retention import (
+    CheckpointRetentionError,
+    finalize_attempt_checkpoint,
+)
 from nodes.ml_hyperparameter_tune_agent.contracts import TrainingOutcome
 from nodes.ml_hyperparameter_tune_agent.records import _trained_model_artifact_ref
 from workflows.task_composition import (
@@ -326,6 +330,48 @@ def test_new_training_record_refuses_target_dependent_analysis(tmp_path: Path) -
         sandbox.save_record(record.model_dump(mode="json"))
         restored = ExperimentRecord.model_validate(sandbox.get_summary()[0])
         assert restored.trained_model_artifact_ref == ref
+
+    original = Path(trained["trained_model_candidate"]["checkpoint_path"])
+    certified_blob = (
+        tmp_path
+        / "trained_model_artifacts"
+        / "blobs"
+        / (trained["trained_model_candidate"]["checkpoint_sha256"] + ".pt")
+    )
+    certified_bytes = certified_blob.read_bytes()
+    certified_blob.write_bytes(b"corrupt")
+    with pytest.raises(CheckpointRetentionError, match="artifact file differs"):
+        finalize_attempt_checkpoint(
+            workspace=str(tmp_path),
+            models_dir=sandbox.dirs["models"],
+            run_name="reachability",
+            exp_id="tiny",
+            model_type="masked_reference_mlp",
+            is_trial=False,
+            retain_training_checkpoints=False,
+            scored=True,
+            certified_ref=ref.model_dump(mode="json"),
+        )
+    assert original.is_file()
+    assert (
+        '"status":"failed"'
+        in (tmp_path / "training_checkpoint_retention_receipts.jsonl").read_text()
+    )
+    certified_blob.write_bytes(certified_bytes)
+    receipt = finalize_attempt_checkpoint(
+        workspace=str(tmp_path),
+        models_dir=sandbox.dirs["models"],
+        run_name="reachability",
+        exp_id="tiny",
+        model_type="masked_reference_mlp",
+        is_trial=False,
+        retain_training_checkpoints=False,
+        scored=True,
+        certified_ref=ref.model_dump(mode="json"),
+    )
+    assert receipt.status == "retired"
+    assert not original.exists()
+    assert certified_blob.read_bytes() == certified_bytes
 
     artifact_path = tmp_path / ref.artifact_ref.logical_ref
     artifact = TrainedModelArtifact.model_validate_json(artifact_path.read_bytes())

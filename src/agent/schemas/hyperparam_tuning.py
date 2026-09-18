@@ -2936,6 +2936,13 @@ class HyperparamTuningInput(BaseModel):
             "output artifacts; model checkpoints and scientific receipts remain."
         ),
     )
+    retain_training_checkpoints: StrictBool = Field(
+        default=False,
+        description=(
+            "Keep attempt-owned training checkpoint originals after inference, scoring, "
+            "Health, and model certification. Certified model artifacts are always kept."
+        ),
+    )
     progress_bar: bool = Field(
         default=False,
         description="Stream live tqdm progress bars from training/inference subprocesses.",

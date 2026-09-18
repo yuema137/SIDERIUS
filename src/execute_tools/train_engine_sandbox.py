@@ -26,6 +26,7 @@ from core.durable_io import publish_json_atomically
 from core.runtime_control.provenance import capture_storage_provenance
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.workload import ResolvedPhaseWorkload
+from core.sandbox_layout import training_checkpoint_path
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 from execute_tools.dataset_config import (
     DatasetProfile,
@@ -117,9 +118,7 @@ def _write_training_artifact_candidate(
             "standard historical inference requires model/config classes from one approved "
             "single-file registered-model plugin"
         )
-    checkpoint_path = os.path.join(
-        sandbox_dirs["models"], f"model_{model_type}_{args.exp_id}_agent.pth"
-    )
+    checkpoint_path = str(training_checkpoint_path(sandbox_dirs["models"], model_type, args.exp_id))
     checkpoint_sha, checkpoint_size = certified_file_identity(checkpoint_path)
     config_sha, config_size = certified_file_identity(args.model_cfg)
     plugin_sha, _ = certified_file_identity(model_source)
@@ -1143,9 +1142,7 @@ def run_experiment(
     }
 
     # --- KEY FIX: Save to TIDMAD_Sandbox/cached_models ---
-    save_path = os.path.join(
-        sandbox_dirs["models"], f"model_{model_cfg.model_type}_{exp_id}_agent.pth"
-    )
+    save_path = str(training_checkpoint_path(sandbox_dirs["models"], model_cfg.model_type, exp_id))
     _save_with_sentinel(model.state_dict(), save_path, exp_id)
     print(f"Model saved to: {save_path}")
 
@@ -1897,9 +1894,7 @@ def run_experiment_streaming(
     # one layer up, expressed as an update rather than an `if`.
     summary.update(observation.static_summary(STATIC_OBSERVATIONS_KEY))
 
-    save_path = os.path.join(
-        sandbox_dirs["models"], f"model_{model_cfg.model_type}_{exp_id}_agent.pth"
-    )
+    save_path = str(training_checkpoint_path(sandbox_dirs["models"], model_cfg.model_type, exp_id))
     _save_with_sentinel(model.state_dict(), save_path, exp_id)
     print(f"Model saved to: {save_path}")
 

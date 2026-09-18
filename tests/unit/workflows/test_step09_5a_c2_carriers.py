@@ -174,6 +174,10 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     "data_analysis_enabled": None,
     # Per-sample output lifetime is caller transit, not a second DA switch.
     "retain_model_outputs": False,
+    # Raw training checkpoint lifetime is independent of certified models.
+    "retain_training_checkpoints": False,
+    # The chain's explicit Formal data-scope authority, added after C3.
+    "formal_training_scope_source": "operator",
     # PR-C — workflow-owned ordering of two independent evidence capabilities.
     "scientific_evidence_order": "analysis_then_literature",
 }

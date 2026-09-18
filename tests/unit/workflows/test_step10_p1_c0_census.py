@@ -699,6 +699,7 @@ class TestCensusDLegacyLockKeySet:
             "data_analysis_enabled",
             # Output lifetime is part of run/resume identity.
             "retain_model_outputs",
+            "retain_training_checkpoints",
             "lit_review_config_sha256",
             # PR-C — workflow-selected capability order changes evidence flow.
             "scientific_evidence_order",

@@ -185,6 +185,7 @@ MAX_FAILED_ITERATIONS=3
 # switch, so existing campaigns keep their explicitly requested outputs.
 CLEANUP_DENOISED=1
 OUTPUT_RETENTION_REQUEST=""
+RETAIN_TRAINING_CHECKPOINTS=0
 # --- Shell entry condition ---------------------------------------------------
 # "Initialise every consumed shell variable" is an ENTRY CONDITION of this
 # reused library, not a cleanup step performed by each
@@ -435,6 +436,8 @@ parse_chain_args() {
               echo "ERROR: output retention conflicts with --cleanup_denoised" >&2; return 2
           fi
           OUTPUT_RETENTION_REQUEST="retain"; CLEANUP_DENOISED=0; shift ;;
+        --retain_training_checkpoints)
+          RETAIN_TRAINING_CHECKPOINTS=1; shift ;;
         # Slurm-only flags — silently accepted on lilab too (ignored)
         --partition)              PARTITION="$2"; shift 2 ;;
         --time)                   TIME="$2"; shift 2 ;;
@@ -523,6 +526,9 @@ build_app_args() {
         APP_ARGS+=(--cleanup_denoised)
     else
         APP_ARGS+=(--retain_model_outputs)
+    fi
+    if [ "$RETAIN_TRAINING_CHECKPOINTS" -eq 1 ]; then
+        APP_ARGS+=(--retain_training_checkpoints)
     fi
     # Emit --seed_paths only when seeds are actually supplied. Omitting the flag
     # (empty SEED_PATHS) is a valid cold start; a bare --seed_paths with zero

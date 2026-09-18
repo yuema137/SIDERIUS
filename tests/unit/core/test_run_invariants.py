@@ -95,6 +95,12 @@ class TestEnsureFirstWriterWins:
 
 
 class TestViolationMatrix:
+    def test_training_checkpoint_retention_flip_is_canonical(self, tmp_path):
+        write_run_invariants(str(tmp_path), PARTIAL)
+        retained = PARTIAL.model_copy(update={"retain_training_checkpoints": True})
+        with pytest.raises(RunInvariantsViolation, match="retain_training_checkpoints"):
+            validate_run_invariants(str(tmp_path), retained)
+
     def test_model_output_retention_flip_is_canonical(self, tmp_path):
         write_run_invariants(str(tmp_path), PARTIAL)
         retained = PARTIAL.model_copy(update={"retain_model_outputs": True})

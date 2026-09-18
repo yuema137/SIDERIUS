@@ -1956,6 +1956,7 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
         advice_path=launch.advice_path,
         analysis_source_prompt_sha256=source_prompt_identity(launch.analysis_source_prompt),
         retain_model_outputs=launch.retain_model_outputs,
+        retain_training_checkpoints=launch.retain_training_checkpoints,
         # F-SCANF-1 — the formal round's evaluation FRACTION, from the SAME
         # launch config the tuner child receives it from, so the chain lock
         # and the tuner sub-workspace lock cannot disagree.
@@ -3378,6 +3379,7 @@ def run_workflow(
             train_base_seed=launch.train_base_seed,
             cleanup_denoised=launch.cleanup_denoised,
             retain_model_outputs=launch.retain_model_outputs,
+            retain_training_checkpoints=launch.retain_training_checkpoints,
             max_epochs=launch.max_epochs,
             # D-BUD-6 — per-mode epoch ceilings, carried through unchanged
             # including `None` (None = mode-agnostic max_epochs governs).
