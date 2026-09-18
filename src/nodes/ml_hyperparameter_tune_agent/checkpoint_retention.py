@@ -7,6 +7,8 @@ durable certified model keeps its original checkpoint for investigation.
 from __future__ import annotations
 
 import hashlib
+import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -18,6 +20,7 @@ from agent.schemas.data_analysis.trained_model import (
 )
 from core.campaign_identity import validate_path_component
 from core.durable_io import append_line_durably
+from core.sandbox_executor import sandbox_models_dir
 from core.sandbox_layout import training_checkpoint_path
 from execute_tools.trained_model_artifact import (
     read_certified_artifact,
@@ -27,6 +30,19 @@ from execute_tools.trained_model_artifact import (
 
 class CheckpointRetentionError(RuntimeError):
     """The checkpoint lifetime could not be certified or durably recorded."""
+
+
+@dataclass(frozen=True)
+class CompletedTrainingAttempt:
+    """One attempt whose last live checkpoint consumer has returned."""
+
+    workspace: str
+    run_name: str
+    exp_id: str
+    model_type: str
+    is_trial: bool
+    scored: bool
+    certified_ref: dict[str, object] | None
 
 
 class CheckpointRetentionReceipt(BaseModel):
@@ -106,8 +122,8 @@ def finalize_attempt_checkpoint(
         models = Path(models_dir)
         if (
             models.is_symlink()
-            or not models.is_dir()
-            or models.resolve() != root.resolve() / "cached_models"
+            or (models.exists() and not models.is_dir())
+            or models.resolve() != Path(sandbox_models_dir(str(root.resolve())))
         ):
             raise ValueError("checkpoint directory is not this tuner workspace's cached_models")
         source = training_checkpoint_path(models, model_type, exp_id)
@@ -165,11 +181,41 @@ def finalize_attempt_checkpoint(
         record("retirement_planned", reason, digest, size, certified_digest)
         try:
             source.unlink()
+            directory_fd = os.open(models, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         except OSError as exc:
-            record("failed", f"checkpoint unlink failed: {exc}", digest, size, certified_digest)
+            record("failed", f"checkpoint retirement failed: {exc}", digest, size, certified_digest)
             raise
         return record("retired", reason, digest, size, certified_digest)
     except (OSError, ValueError) as exc:
         raise CheckpointRetentionError(
             f"attempt {exp_id} checkpoint retention failed: {exc}"
         ) from exc
+
+
+def finalize_run_checkpoints(
+    attempts: list[CompletedTrainingAttempt], *, retain_training_checkpoints: bool
+) -> list[CheckpointRetentionReceipt]:
+    """Retire originals after the whole tuner iteration and its output finish.
+
+    The caller collects exact attempts as they finish. No directory scan can
+    confuse another iteration's checkpoint with this run's failed attempts.
+    """
+
+    return [
+        finalize_attempt_checkpoint(
+            workspace=attempt.workspace,
+            models_dir=sandbox_models_dir(attempt.workspace),
+            run_name=attempt.run_name,
+            exp_id=attempt.exp_id,
+            model_type=attempt.model_type,
+            is_trial=attempt.is_trial,
+            retain_training_checkpoints=retain_training_checkpoints,
+            scored=attempt.scored,
+            certified_ref=attempt.certified_ref,
+        )
+        for attempt in attempts
+    ]

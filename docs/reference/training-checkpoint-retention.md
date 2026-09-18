@@ -7,8 +7,10 @@ records a `TrainedModelArtifactRef` on the scored attempt. Historical model
 inference uses that certified blob. This policy never deletes certified blobs
 or their artifact documents, whether the attempt is Trial or Formal.
 
-By default, the tuner retires only its current attempt's original `.pth` after
-the last consumer has finished. `--retain_training_checkpoints` keeps these
+By default, the tuner collects each attempt's exact original `.pth` and retires
+it after the whole tuner iteration and its run output have completed. The
+next outer iteration starts only after this finalization returns.
+`--retain_training_checkpoints` keeps these
 originals as well. The resolved switch is part of the run lock; it cannot be
 changed on resume. This switch is independent of `--retain_model_outputs`.
 

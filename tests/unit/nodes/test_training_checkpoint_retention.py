@@ -10,7 +10,9 @@ import pytest
 from core.sandbox_layout import training_checkpoint_path
 from nodes.ml_hyperparameter_tune_agent.checkpoint_retention import (
     CheckpointRetentionError,
+    CompletedTrainingAttempt,
     finalize_attempt_checkpoint,
+    finalize_run_checkpoints,
 )
 
 
@@ -89,3 +91,46 @@ def test_symlink_checkpoint_refuses_without_touching_target(tmp_path: Path) -> N
         _finalize(tmp_path)
 
     assert target.read_bytes() == b"other"
+
+
+def test_iteration_finalization_retires_failed_originals_after_records_are_written(
+    tmp_path: Path,
+) -> None:
+    """A failed attempt remains inspectable until the completed run is persisted."""
+
+    workspaces = [tmp_path / "iter_001", tmp_path / "iter_002"]
+    attempts = []
+    for workspace in workspaces:
+        models = workspace / "cached_models"
+        models.mkdir(parents=True)
+        training_checkpoint_path(models, "model-a", "failed-a").write_bytes(b"partial")
+        (workspace / "failure_record.json").write_text('{"status":"error_training"}')
+        attempts.append(
+            CompletedTrainingAttempt(
+                workspace=str(workspace),
+                run_name="run-a",
+                exp_id="failed-a",
+                model_type="model-a",
+                is_trial=True,
+                scored=False,
+                certified_ref=None,
+            )
+        )
+
+    assert all(
+        training_checkpoint_path(
+            Path(item.workspace) / "cached_models", item.model_type, item.exp_id
+        ).is_file()
+        for item in attempts
+    )
+    assert (
+        finalize_run_checkpoints([attempts[0]], retain_training_checkpoints=False)[0].status
+        == "retired"
+    )
+    assert not training_checkpoint_path(
+        Path(attempts[0].workspace) / "cached_models", attempts[0].model_type, attempts[0].exp_id
+    ).exists()
+    assert training_checkpoint_path(
+        Path(attempts[1].workspace) / "cached_models", attempts[1].model_type, attempts[1].exp_id
+    ).is_file()
+    assert (workspaces[0] / "failure_record.json").read_text() == ('{"status":"error_training"}')

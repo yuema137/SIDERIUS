@@ -77,7 +77,8 @@ from execute_tools.task_data_path import (
 )
 from execute_tools.trial_anchor_map import load_anchor_map
 from nodes.ml_hyperparameter_tune_agent.checkpoint_retention import (
-    finalize_attempt_checkpoint,
+    CompletedTrainingAttempt,
+    finalize_run_checkpoints,
 )
 from nodes.ml_hyperparameter_tune_agent.cli import (
     PARTIAL_CAMPAIGN_EXIT_CODE,
@@ -1382,6 +1383,7 @@ class HyperparamTuningAgent:
             health_config_sha256=health_config_sha256,
         )
 
+        completed_training_attempts: list[CompletedTrainingAttempt] = []
         while completed_rounds < max_rounds and consecutive_fails < max_fail_rounds_setting:
             round_index = completed_rounds + 1
             is_formal_round = completed_rounds == max_rounds - 1
@@ -1743,16 +1745,16 @@ class HyperparamTuningAgent:
 
                 finally:
                     if training_started:
-                        finalize_attempt_checkpoint(
-                            workspace=run_bindings.workspace,
-                            models_dir=sandbox.dirs["models"],
-                            run_name=run_name,
-                            exp_id=exp_id,
-                            model_type=model_type,
-                            is_trial=prepared.plan.is_trial,
-                            retain_training_checkpoints=agent_input.retain_training_checkpoints,
-                            scored=scored,
-                            certified_ref=certified_ref,
+                        completed_training_attempts.append(
+                            CompletedTrainingAttempt(
+                                workspace=run_bindings.workspace,
+                                run_name=run_name,
+                                exp_id=exp_id,
+                                model_type=model_type,
+                                is_trial=prepared.plan.is_trial,
+                                scored=scored,
+                                certified_ref=certified_ref,
+                            )
                         )
 
             # DataScope DS5 — a scope violation is deterministic on retry:
@@ -1806,7 +1808,7 @@ class HyperparamTuningAgent:
             gc.collect()
 
         # --- Build, validate, and save the run output ---
-        return finalize_run_output(
+        output = finalize_run_output(
             run_bindings,
             RunExitSnapshot(
                 completed_rounds=completed_rounds,
@@ -1819,6 +1821,11 @@ class HyperparamTuningAgent:
                 last_plan=plan,
             ),
         )
+        finalize_run_checkpoints(
+            completed_training_attempts,
+            retain_training_checkpoints=agent_input.retain_training_checkpoints,
+        )
+        return output
 
 
 # ---------------------------------------------------------------------------
