@@ -158,7 +158,7 @@ class _ModelDiagnosticBridge:
                 "skill_ids": ["prediction_target_distribution"],
                 "rationale": "Use the generic prediction/target diagnostic.",
             }
-        if label == "data_analysis.plan":
+        if label in {"data_analysis.plan", "data_analysis.plan.resolution_retry"}:
             return {
                 "plan_id": "model-diagnostic-plan",
                 "input_digest": canonical_sha256(self.inp),
