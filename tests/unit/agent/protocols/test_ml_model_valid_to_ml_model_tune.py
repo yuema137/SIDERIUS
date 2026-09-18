@@ -91,6 +91,16 @@ def proposal_output():
 
 
 class TestLocalValidatedModel:
+    def test_training_checkpoint_retention_is_explicit_transport(
+        self, validator_output, proposal_output, storage
+    ):
+        default = local_validated_model(validator_output, proposal_output, storage)
+        retained = local_validated_model(
+            validator_output, proposal_output, storage, retain_training_checkpoints=True
+        )
+        assert default.retain_training_checkpoints is False
+        assert retained.retain_training_checkpoints is True
+
     def test_model_output_retention_is_transport_not_inferred(
         self, validator_output, proposal_output, storage
     ):

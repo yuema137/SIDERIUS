@@ -81,6 +81,7 @@ def local_validated_model(
     train_base_seed: int | None = None,
     cleanup_denoised: bool = False,
     retain_model_outputs: bool = False,
+    retain_training_checkpoints: bool = False,
     max_epochs: int | None = None,
     # D-BUD-6 — per-mode epoch ceilings (trial/formal split). None = the
     # mode-agnostic max_epochs governs that role (legacy behavior).
@@ -355,6 +356,7 @@ def local_validated_model(
         train_base_seed=train_base_seed,
         cleanup_denoised=cleanup_denoised,
         retain_model_outputs=retain_model_outputs,
+        retain_training_checkpoints=retain_training_checkpoints,
         max_epochs=max_epochs,
         # D-BUD-6 — carried through unchanged, including `None`.
         trial_max_epochs=trial_max_epochs,
