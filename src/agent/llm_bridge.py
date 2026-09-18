@@ -1006,6 +1006,7 @@ class LLMBridge:
         # D-BUD-6 — per-mode EFFECTIVE epoch ceilings for prompt disclosure
         # (already resolved by HyperparamTuningInput.resolve_epoch_cap;
         # None/None = no per-mode cap configured, legacy rendering).
+        training_budget_reserve_fraction: float | None = None,
         trial_max_epochs: int | None = None,
         formal_max_epochs: int | None = None,
         resolved_data_scope: list[int] | None = None,
@@ -1247,6 +1248,18 @@ class LLMBridge:
         # Internal call site: label is fixed (§1.5), wired in Commit 1 so
         # the V12 baseline run is meaningfully labeled and chain_log is
         # clean of "unlabeled" warnings from inside the bridge itself.
+        if training_budget_reserve_fraction is not None:
+            final_user_prompt += (
+                "\n[OPERATOR TRAINING ALLOCATION]\n"
+                "Cooperative training is enabled. Your proposed epochs are an initial "
+                "proposal, not the execution horizon. The executor may continue up to "
+                "the disclosed role epoch cap while complete training/validation epochs "
+                "fit the role time budget. It reserves "
+                f"{training_budget_reserve_fraction:.1%} for final inference/scoring/save. "
+                "There is no loss-based early stopping; the last completed weights are "
+                "returned. Formal uses its own allocation even when cloning Trial settings. "
+                "Do not infer convergence or GPU utilization from a budget/cap stop.\n"
+            )
         return self.generate(system_prompt, final_user_prompt, label="tuner.planner")
 
     def reflect(

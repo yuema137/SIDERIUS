@@ -3383,6 +3383,7 @@ def run_workflow(
             max_epochs=launch.max_epochs,
             # D-BUD-6 — per-mode epoch ceilings, carried through unchanged
             # including `None` (None = mode-agnostic max_epochs governs).
+            training_budget_reserve_fraction=launch.training_budget_reserve_fraction,
             trial_max_epochs=launch.trial_max_epochs,
             formal_max_epochs=launch.formal_max_epochs,
             validation_max_portion=launch.validation_max_portion,

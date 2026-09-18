@@ -2372,6 +2372,12 @@ class HyperparamTuningInput(BaseModel):
             "for a role with no per-mode ceiling."
         ),
     )
+    training_budget_reserve_fraction: float | None = Field(
+        default=None,
+        gt=0,
+        lt=1,
+        description="Opt in to cooperative epoch allocation; reserve this fraction of the role budget for inference/scoring/save. Requires an explicit role epoch cap <=100. No scientific early stopping; retain last weights.",
+    )
     trial_max_epochs: int | None = Field(
         default=None,
         ge=1,
@@ -2401,6 +2407,22 @@ class HyperparamTuningInput(BaseModel):
             "leaves formal rounds on the mode-agnostic max_epochs."
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_training_allocation(self):
+        """Reject an incomplete opt-in policy before tuner work begins."""
+        if self.training_budget_reserve_fraction is not None:
+            for is_trial, budget in (
+                (True, self.trial_time_budget_minutes),
+                (False, self.formal_time_budget_minutes),
+            ):
+                cap = self.resolve_epoch_cap(is_trial=is_trial).cap
+                if budget is None or cap is None or cap > 100:
+                    raise ValueError(
+                        "Cooperative training requires both role time budgets and "
+                        "explicit epoch caps in 1..100; no implicit unbounded training"
+                    )
+        return self
 
     def resolve_epoch_cap(self, *, is_trial: bool) -> EpochCapResolution:
         """THE resolution rule for a round's epoch ceiling (D-BUD-6).

@@ -1339,6 +1339,12 @@ def build_parser() -> argparse.ArgumentParser:
         "precedence for their round role (D-BUD-6).",
     )
     parser.add_argument(
+        "--training_budget_reserve_fraction",
+        type=float,
+        default=None,
+        help="Opt in to cooperative training allocation; reserve a fraction (0,1) of the attempt budget for downstream work. Uses the role epoch ceiling, no loss-based early stopping.",
+    )
+    parser.add_argument(
         "--trial_max_epochs",
         type=_positive_int,
         default=None,
@@ -3509,6 +3515,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
                     max_epochs=args.max_epochs,
                     # D-BUD-6 — per-mode epoch ceilings, forwarded including
                     # `None` (None = mode-agnostic max_epochs governs).
+                    training_budget_reserve_fraction=args.training_budget_reserve_fraction,
                     trial_max_epochs=args.trial_max_epochs,
                     formal_max_epochs=args.formal_max_epochs,
                     validation_max_portion=args.validation_max_portion,

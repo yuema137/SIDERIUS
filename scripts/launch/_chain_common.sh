@@ -113,6 +113,7 @@ WORKFLOW_PARAMETER_RULES=""          # JSON ParameterRules; empty = workflow unc
 # has no task, machine, environment-variable, or repository fallback; Python
 # startup refuses an omitted or unreadable root before any expensive work.
 DATA_DIR=""
+TRAINING_BUDGET_RESERVE_FRACTION="" # opt in; omitted preserves fixed epochs
 TRIAL_TIME_BUDGET_MINUTES=""        # §3.2: empty == omit == Python None
 FORMAL_TIME_BUDGET_MINUTES=""       # §3.2: empty == omit == Python None
 TRIAL_TIME_ADMISSION_SOURCE="measured"
@@ -302,6 +303,7 @@ parse_chain_args() {
           ;;
         --max_rounds)             MAX_ROUNDS="$2"; shift 2 ;;
         --max_epochs)             MAX_EPOCHS="$2"; shift 2 ;;
+        --training_budget_reserve_fraction) TRAINING_BUDGET_RESERVE_FRACTION="$2"; shift 2 ;;
         --trial_max_epochs)       TRIAL_MAX_EPOCHS="$2"; shift 2 ;;
         --formal_max_epochs)      FORMAL_MAX_EPOCHS="$2"; shift 2 ;;
         --healthgate_mode)                    HEALTHGATE_MODE="$2"; shift 2 ;;
@@ -493,6 +495,7 @@ build_app_args() {
         # D-BUD-6 — forwarded only when TYPED (empty == omit == the
         # Python default None == the mode-agnostic MAX_EPOCHS governs
         # that role), so an unset pair reproduces the legacy child argv.
+        ${TRAINING_BUDGET_RESERVE_FRACTION:+--training_budget_reserve_fraction "$TRAINING_BUDGET_RESERVE_FRACTION"}
         ${TRIAL_MAX_EPOCHS:+--trial_max_epochs "$TRIAL_MAX_EPOCHS"}
         ${FORMAL_MAX_EPOCHS:+--formal_max_epochs "$FORMAL_MAX_EPOCHS"}
         --healthgate_mode "$HEALTHGATE_MODE"

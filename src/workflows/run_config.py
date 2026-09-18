@@ -120,6 +120,7 @@ class WorkflowLaunchConfig:
     # D-BUD-6 — per-mode epoch ceilings (trial/formal split). None = the
     # mode-agnostic max_epochs governs that role, byte-identical to the
     # pre-split behavior. Validated ge=1 by HyperparamTuningInput.
+    training_budget_reserve_fraction: float | None = None
     trial_max_epochs: int | None = None
     formal_max_epochs: int | None = None
     skip_formal_min_delta: float = -1.0

@@ -1304,6 +1304,24 @@ def _build_runtime_policy(
     effective_safety = (
         phase_specific if phase_specific is not None else agent_input.runtime_safety_factor
     )
+    import time
+
+    from core.runtime_control.training_budget import TrainingBudgetEnvelope
+
+    allocation = None
+    reserve = getattr(agent_input, "training_budget_reserve_fraction", None)
+    if reserve is not None:
+        cap = agent_input.resolve_epoch_cap(is_trial=is_trial).cap
+        if chosen_time_budget is None or cap is None:
+            raise ValueError(
+                "Cooperative training requires an explicit time budget and role epoch cap"
+            )
+        allocation = TrainingBudgetEnvelope(
+            budget_seconds=chosen_time_budget * 60.0,
+            reserve_fraction=reserve,
+            max_epochs=cap,
+            started_monotonic_seconds=time.monotonic(),
+        )
     policy: dict[str, Any] = {
         "operator_budget_seconds": (
             chosen_time_budget * 60.0
@@ -1341,6 +1359,8 @@ def _build_runtime_policy(
             "max_phase_seconds": agent_input.validation_max_phase_seconds,
         },
     }
+    if allocation is not None:
+        policy["training_budget"] = allocation.model_dump()
     verification_window_seconds = getattr(
         agent_input, "runtime_verification_max_wall_seconds", None
     )

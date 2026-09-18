@@ -65,6 +65,7 @@ from core.runtime_control.total_assembly import (
     TotalAssessment,
     assemble_total,
 )
+from core.runtime_control.training_budget import TrainingBudgetEnvelope
 from core.runtime_control.workload import ResolvedPhaseWorkload
 
 ADMISSION_STAGE_POST_SETUP = "post_setup_runtime_verification"
@@ -151,6 +152,10 @@ class RuntimeControlPolicy(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True)
+
+    training_budget: TrainingBudgetEnvelope | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     operator_budget_seconds: float | None = Field(
         default=None,
@@ -477,6 +482,49 @@ class RuntimeVerificationSession:
         """
         existing = self._components.get(phase, PhaseComponentRecord())
         self._components[phase] = existing.model_copy(update={"workload": workload})
+        self._write_sidecar()
+
+    def record_executed_workload(
+        self, workload: ResolvedPhaseWorkload, *, extra_predicted_seconds: float = 0.0
+    ) -> None:
+        """Replace adaptive calibration scope with actual executed work.
+
+        Preserve initial prediction provenance and reproject a verified rate
+        to the executed count. This is labelled post-execution repricing, never
+        evidence that the complete horizon was known/admitted in advance.
+        Missing verification stays missing, not manufactured from actual time.
+        """
+        phase = workload.phase
+        existing = self._components.get(phase, PhaseComponentRecord())
+        detail = dict(workload.detail)
+        detail["initial_workload"] = (
+            existing.workload.model_dump() if existing.workload is not None else None
+        )
+        detail["initial_prediction"] = (
+            existing.prediction.model_dump() if existing.prediction is not None else None
+        )
+        resolved = ResolvedPhaseWorkload.model_validate({**workload.model_dump(), "detail": detail})
+        prediction = None
+        original = existing.prediction
+        if original is not None and original.ms_per_unit is not None:
+            prediction = RuntimePrediction.model_validate(
+                {
+                    **original.model_dump(),
+                    "predicted_seconds": original.ms_per_unit * workload.unit_count / 1000.0
+                    + extra_predicted_seconds,
+                    "unit_count": workload.unit_count,
+                    "prior_expected_seconds": None,
+                    "prior_agreement_ratio": None,
+                    "detail": {
+                        **original.detail,
+                        "scope_resolution": "post_execution_reprojection",
+                        "extra_predicted_seconds": extra_predicted_seconds,
+                    },
+                }
+            )
+        self._components[phase] = existing.model_copy(
+            update={"workload": resolved, "prediction": prediction, "prediction_error": None}
+        )
         self._write_sidecar()
 
     def lookup_phase_prior(self, phase: RuntimePhase) -> float | None:

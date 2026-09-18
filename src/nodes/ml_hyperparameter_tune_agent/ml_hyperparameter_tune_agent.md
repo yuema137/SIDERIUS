@@ -1862,3 +1862,16 @@ reachability claims about the run loop.
   `refine_inference_time_estimator` design existed to eliminate.
 
 Design: `docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07b_tuner_policy.md` §14.9 - §14.9.5.
+
+### Cooperative training allocation (opt in)
+
+`training_budget_reserve_fraction: float | None = None` is forwarded from
+`--training_budget_reserve_fraction`. When supplied, it must be in `(0,1)`;
+both role time budgets and explicit effective epoch caps in `1..100` are
+required. Initial proposed epochs no longer fix the executed horizon. The
+trainer adds complete epochs while the role allowance, downstream reserve
+and epoch cap permit. Formal retains its independent allowance under
+`full_clone`. No scientific early stopping or best-checkpoint restoration is
+performed; final completed weights are retained. Forecast versus measured
+admission authority and watchdog policy remain independent. See
+[execution/accounting contract](../../../docs/reference/cooperative-training-budget.md).
