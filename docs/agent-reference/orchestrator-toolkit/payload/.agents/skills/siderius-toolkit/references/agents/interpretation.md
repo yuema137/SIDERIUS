@@ -17,7 +17,7 @@ Use cold_start=True only when there is no prior experimental evidence. Otherwise
 ## Existing entrypoints and parameters
 
 Python import: `nodes.result_interpretation_agent.result_interpretation_agent.ResultInterpretationAgent`.
-Native constructor at reference revision `2df46e22`:
+Native constructor at reference revision `1c68bc81`:
 
 ```text
 ResultInterpretationAgent(provider: str='gemini', model_id: str='gemini-3.1-flash-lite-preview', max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, **kwargs)

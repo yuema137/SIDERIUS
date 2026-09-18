@@ -14,10 +14,15 @@ task contract, not an example or fallback, supplies scientific semantics.
 
 Required inputs are model_name, model_description, mathematical_definition and baseline_config. Use the proposal protocol, then supply forward_contract (including its model_io), task context, permitted reference code and recovery feedback as applicable. Set explicit run-owned model/loss/test destinations using the native fields.
 
+Before invoking, check the [actual serialized request](../invocation.md#check-the-request-you-will-actually-send),
+including the run's applicable scope and the source of any advice fields.
+Save the check and started status before the call; update its outcome before
+preparing another operation.
+
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_model_implementor.ml_model_implementor.MLModelImplementor`.
-Native constructor at reference revision `2df46e22`:
+Native constructor at reference revision `1c68bc81`:
 
 ```text
 MLModelImplementor(provider: str='gemini', model_id: str='gemini-3.1-pro-preview', max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, capability_index_path: str | None=None, **kwargs)
@@ -67,6 +72,27 @@ For typed transfer to another capability, read [handoffs](../handoffs.md).
 ## Files, repeated calls and concurrency
 
 Writes generated code and tests, may run probes and repair attempts, and persists implementor output. Candidate generation uses the bound generated library; overlapping candidates need disjoint paths and coordinated registry publication. It is an effectful code-generation call.
+
+### Generated test import paths
+
+At the reference revision, the test-generation prompt contains a sibling
+`../models` import-path example. Supplying an arbitrary `plugin_dir` such as
+`attempt/plugin` can still produce tests that import from `attempt/models`.
+One compatible caller-owned layout, when the run leaves paths open, is:
+
+```text
+attempt/
+  models/    plugin_dir
+  tests/     test_dir
+  losses/    loss_dir, if needed
+```
+
+Verify the returned test's import path against the actual model artifact. This
+layout addresses an existing prompt assumption; it is not a guarantee that
+all generated tests pass. Preserve failed results and send actual diagnostics
+to the existing repair input when another call is authorized. After any local
+artifact change, prior validation does not certify the changed bytes; separate
+any local test result from the native validation verdict.
 
 ## Errors and recovery
 

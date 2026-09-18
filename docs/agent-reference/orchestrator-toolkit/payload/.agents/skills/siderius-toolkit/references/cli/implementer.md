@@ -1,6 +1,6 @@
 # implementer: existing standalone CLI arguments
 
-Source inventory at SIDERIUS `2df46e2298c017d9df850a85f870a55fbd40723d`. Argument expressions below are
+Source inventory at SIDERIUS `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`. Argument expressions below are
 copied from the existing parser declarations; evaluate dynamic defaults with
 the selected executable’s `--help`. These are not an orchestrator launch recipe.
 Read the [capability guide](../agents/implementer.md) for Python/CLI differences.

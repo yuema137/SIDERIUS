@@ -17,7 +17,7 @@ Supply request identity, assets, access policy, analysis envelope, questions and
 ## Existing entrypoints and parameters
 
 Python import: `nodes.data_analysis_agent.data_analysis_agent.DataAnalysisAgent`.
-Native constructor at reference revision `2df46e22`:
+Native constructor at reference revision `1c68bc81`:
 
 ```text
 DataAnalysisAgent(*, task_analysis_capability: TaskAnalysisCapability, provider: str='gemini', model_id: str | None=None, max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory: Callable[..., object] | None=None, historical_model_inference_capability: HistoricalModelInferenceCapability | None=None)

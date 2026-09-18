@@ -14,5 +14,8 @@ constraints. This generic toolkit defines no dataset, experiment arm, training
 fraction, metric direction, retrieval policy or model routing. It can be added
 to an existing task package without changing that package's files.
 
-See [verification](VERIFICATION.md) for evidence and its limits. Native interface
-reference revision: `2df46e2298c017d9df850a85f870a55fbd40723d`.
+See the [initial verification](VERIFICATION.md) and subsequent
+[discovery qualification](QUALIFICATION.md), plus the
+[multi-task checks](MULTITASK-QUALIFICATION.md) and
+[evidence integrity checks](INTEGRITY-QUALIFICATION.md), for evidence and its limits. Native interface
+reference revision: `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`.

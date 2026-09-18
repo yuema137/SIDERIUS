@@ -3,7 +3,11 @@
 These are existing functions in `agent.schemas.protocols`. The table maps
 compatible evidence, not a prescribed execution sequence. A caller may hold
 several outputs, select applicable evidence or invoke a capability repeatedly.
-The target's full input contract still applies after a projection.
+The target's full input contract still applies after a projection. When a listed
+protocol covers a transfer, use it before caller-owned adjustments; do not
+manually recreate its field mapping. This also applies to recovery from saved
+native output. Direct input construction remains appropriate for supplied
+candidates with no native upstream output or fields the protocol does not carry.
 
 | Module and function | Input → result | Caller responsibility |
 | --- | --- | --- |
@@ -54,6 +58,36 @@ scientific output contract. Read the target field inventory for exact names.
 Recovery can load the caller's persisted native output and apply the same
 projection. Peers do not scan another node's storage to choose a latest result.
 The `database_*` alternatives are unimplemented placeholders at this revision.
+
+### Restored implementation artifacts
+
+A saved `ImplementorOutput` still uses the implementation-to-validation protocol.
+Path relocation does not require a replacement mapping. Verify restored files
+against the supplied artifact identities first; retain the original output as
+provenance. Then project its validated native object and revalidate only the
+authorized path changes:
+
+```python
+from pathlib import Path
+from agent.schemas.implementor import ImplementorOutput
+from agent.schemas.validator import ValidatorInput
+from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
+
+
+def restored_validation_request(output_path, storage, verified_paths, provider, model_id):
+    allowed = {"model_file_path", "test_file_path", "description_file_path"}
+    if set(verified_paths) - allowed:
+        raise ValueError("Unexpected restoration field")
+    output = ImplementorOutput.model_validate_json(Path(output_path).read_text())
+    projected = local_all_fields(output, storage, llm_provider=provider,
+                                 llm_model_id=model_id)
+    return ValidatorInput.model_validate(projected.model_dump() | verified_paths)
+```
+
+`verified_paths` is caller-supplied restoration context, not a new schema or an
+automatic integrity check. It must not conceal changed artifact contents. A
+restored request is not a new validation verdict; old results remain associated
+with the artifacts and context actually checked.
 
 Fan-in does not establish comparable metrics or valid lineage. Preserve native
 score specifications, Health eligibility and statuses; use task-owned metric

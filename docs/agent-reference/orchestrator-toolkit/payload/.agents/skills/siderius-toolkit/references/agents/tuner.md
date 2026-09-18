@@ -17,7 +17,7 @@ model_type is the schema-required field, but a runnable task needs the correct i
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent.HyperparamTuningAgent`.
-Native constructor at reference revision `2df46e22`:
+Native constructor at reference revision `1c68bc81`:
 
 ```text
 HyperparamTuningAgent(bridge_factory=None, sandbox_factory=None, capability_index_path: str | None=None)

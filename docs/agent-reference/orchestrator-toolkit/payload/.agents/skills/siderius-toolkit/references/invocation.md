@@ -7,6 +7,25 @@ treatment. Do not borrow a different checkout's Python or add its source through
 `PYTHONPATH`. Package availability does not give a research agent read access to
 evaluator-only data, scorer internals, credentials or other runs.
 
+## Finding installed source
+
+The Python names below are import paths, not paths relative to a checkout root.
+In the source checkout, `agent`, `nodes` and `workflows` live under `src/`.
+For an installed package, import the documented class using the declared Python
+and inspect its source with `inspect.getfile(TheImportedClass)`, after binding
+the generated library as required. Some node packages expose compatibility
+aliases, so `find_spec` on a dotted node module can fail even when the documented
+class import works. Inspect that installation; a missing root-level `agent/`
+directory does not mean the API is absent.
+
+Preserve the infra installation/source and the complete frozen task package,
+including their configuration and dependency files. Put generated libraries,
+caller scripts, reports, temporary files and caches outside these protected
+roots. Other scratch locations are not restricted by this toolkit; follow any
+existing task/environment requirements. Redirect helper caches when their
+default would write into a protected root. A request check does not require
+running the framework test suite.
+
 ## Native Python boundary
 
 The interfaces in this skill are existing Python classes with `run(input)`.
@@ -31,6 +50,32 @@ run. Before execution compare the actual input with the common task and frozen
 run descriptor. Do not use `model_construct` to bypass validation. If modifying
 an already validated input, reconstruct through `model_validate`; unvalidated
 `model_copy(update=...)` is not a substitute for that boundary.
+
+### Check the request you will actually send
+
+Use the validated, serialized input for this check, not the prose you intended
+to send. Record the checked values and their source paths beside that request:
+
+| Check | What to compare |
+| --- | --- |
+| Task contract | The recipient's actual I/O contract and task fields against the frozen declarations. |
+| Restricted data scope, when the recipient has it | Resolve its actual `DataScope` using the declared partition count and compare with the authorized indices. A null field is the whole dataset even when `constraints` names a subset. See [scope and handoffs](#structured-scope-and-handoffs). |
+| Advice provenance | For each nonempty advice field, identify the exact authorized upstream artifact or human-advice source. Your own implementation instructions stay in caller context. See [context provenance](treatment.md#preserve-context-provenance-when-building-requests). |
+
+Resolve a mismatch in caller-owned request construction, preserving the frozen
+package. Do not launch the mismatched request and defer correction until tuning.
+If a recipient lacks a field, report that boundary instead of inventing it or
+relabelling context as advice.
+
+Persist a `started` record immediately before the call. As soon as it returns or
+is interrupted, save the actual output/error/interruption and update the run's
+readiness before planning another call. A successfully written initial readiness
+file is not an up-to-date record. If interruption prevents a final update, the
+started record must remain distinguishable from success or never attempted.
+When the run requests both machine-readable status and a human-readable report,
+create compact initial versions once the task and writable paths are known, then
+update them after meaningful preparation or execution outcomes; do not defer one entirely
+to a final turn that may be interrupted.
 
 Each capability page includes a function showing a **single native invocation**
 with its dependencies passed explicitly. These functions are documentation
@@ -57,7 +102,7 @@ from workflows.task_composition import (
 
 def in_task_context(manifest_path, authorized_data_root, invoke):
     composition = compose_run_task_bindings(manifest_path)
-    with bind_run_task_composition(composition, physical_data_root=authorized_data_root):
+    with bind_run_task_composition(composition, physical_data_root=str(authorized_data_root)):
         return invoke(composition, build_task_composition_ref(composition))
 ```
 
@@ -69,6 +114,53 @@ agent-visible sanitized task view is not necessarily executable by itself.
 Do not recover missing private files by exposing the evaluator tree to the
 research agent. An authorized executor must supply the existing operation; if
 none is provisioned, report that capability unavailable in this environment.
+
+### Standalone operations with a public dataset profile
+
+Some standalone preparation operations need the dataset profile without needing
+a scorer or a complete composed execution context. If the frozen manifest
+references a public resolved profile, use its exact file through the existing
+API; resolve the path relative to that manifest, not to the caller's cwd:
+
+```python
+from execute_tools.dataset_config import load_dataset_profile, bind_dataset_profile
+
+
+def with_declared_profile(resolved_profile_path, invoke):
+    profile = load_dataset_profile(str(resolved_profile_path))
+    with bind_dataset_profile(profile):
+        return invoke()
+```
+
+This establishes only the profile dependency. It does not bind scoring, data
+access, Health, metrics or the full task composition. Keep the context around
+input construction and the call that needs it; bind explicitly in each worker
+rather than assuming context crosses subprocess boundaries. Supply the node's
+other declared inputs from the frozen task. Never replace a missing profile
+with a shipped example or create a reduced manifest to bypass missing plugins.
+If a later required binding is unavailable, save the native error and report
+that prerequisite; successful profile loading is not proof the call can finish.
+
+### Structured scope and handoffs
+
+Read the permitted partition scope from the frozen task and run declaration.
+Where a native input or protocol accepts `DataScope`, carry that scope explicitly
+and inspect the persisted request. `file_indices=None` means the complete
+dataset, not a textual band, the files currently mounted, or the last call's
+scope. Resolve against the declared profile's partition count; do not hardcode
+a dataset size or infer access from a directory listing.
+
+Use the run declaration's resolved scope and cited task authority together.
+Do not reinterpret a selected band as all partitions merely because the profile
+lists the whole dataset. If the label-to-index mapping is unavailable, record
+that missing binding; a null default is not a substitute for resolving it.
+
+A native protocol maps its documented fields, not every restriction in the run.
+After each handoff or restored output, retain the original run scope and supply
+it again where the recipient requires it. Do not invent `data_scope` fields on
+schemas that do not have one. An upstream proposal is not a grant of broader
+access. If task and run declarations conflict or omit a required restriction,
+record the ambiguity before data execution; do not amend the frozen package.
 
 ## Task prose and forward contract
 
@@ -93,7 +185,9 @@ ImplementorOutput carries the realized `model_io_contract` to ValidatorInput.
 Do not guess that similarly named schemas accept the same field names.
 `bind_run_task_composition` requires a real physical data root, even for a
 composed call whose immediate reasoning stage does not train. Passing `None`
-is refused. Prepare the authorized task's data through its existing route.
+is refused. Pass the existing directory as a string; this helper does not accept
+a `Path` object for `physical_data_root`. Prepare the authorized task's data
+through its existing route.
 
 ## Configuration and observations
 
@@ -105,7 +199,31 @@ Python API supports. Read its limitations before substituting it.
 Use native token and run-context recording where provided. Most reasoning
 nodes expose their existing `bridge.set_run_context(...)`; the tuner has
 `set_run_context(...)` before its lazy bridge is created. Literature and Data
-Analysis construct bridges during execution. Do not claim complete token
+Analysis construct bridges during execution. For a node exposing `bridge`, the
+existing recording call has exactly these keyword arguments:
+
+```python
+from pathlib import Path
+
+# record_workspace is outside the protected infra and task roots.
+# The bridge binds an existing directory; it does not create this directory.
+record_path = Path(record_workspace)
+record_path.mkdir(parents=True, exist_ok=True)
+node.bridge.set_run_context(
+    workspace=record_path,
+    iter=iteration,
+    run_name=run_name,
+    run_id=run_id,
+)
+```
+
+For the tuner, call `node.set_run_context(...)` with those same four keywords.
+The bridge requires an existing writable directory, a non-negative `iter`, and
+an unchanged `run_id` once bound. On that bridge, later `iter` values cannot go
+backwards. These are recording preconditions, not new scientific run budgets.
+Neither method accepts `node_name`; do not infer arguments from a method name
+or from `hasattr`. Recording context configures accounting, not task binding.
+Do not claim complete token
 accounting from merely calling `run`; preserve actual CLI/provider receipts and
 report missing observations. These documents add no new instrumentation.
 

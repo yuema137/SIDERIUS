@@ -1,6 +1,6 @@
 # data-analysis: native schema field inventory
 
-Reference snapshot: SIDERIUS `2df46e2298c017d9df850a85f870a55fbd40723d`. Derived from the actual
+Reference snapshot: SIDERIUS `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`. Derived from the actual
 Pydantic `model_fields`; the installed classes remain the execution authority.
 Defaults below describe the generic API, not permission to override the
 frozen task, information treatment, budget, or candidate-selection contract.
