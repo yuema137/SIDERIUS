@@ -317,9 +317,7 @@ class TestHyperparamTuningAgentRun:
         assert len(receipts) == 1
         assert receipts[0]["status"] == "absent"  # Mock training writes no checkpoint.
 
-    def test_recorded_null_score_retires_failed_attempt_original(
-        self, agent_and_mocks, tmp_path
-    ):
+    def test_recorded_null_score_retires_failed_attempt_original(self, agent_and_mocks, tmp_path):
         """A completed scorer without a usable scalar must not pin failed weights."""
 
         models = tmp_path / "cached_models"
