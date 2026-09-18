@@ -801,6 +801,17 @@ def run_skill(sandbox, **kwargs):
         raise ValueError("probe_input_sample and probe_target_sample must be supplied together")
     if max_inference_batch_size is not None and max_inference_batch_size < 1:
         raise ValueError("max_inference_batch_size must be positive")
+    if probe_input_sample is not None and model_io_contract is not None:
+        # The task-owned probe may retain the HDF5 storage dtype (for example
+        # int16). Every model forward below, including inference batch search,
+        # must receive the same contract-selected model-boundary dtype.
+        probe_input_sample = probe_input_sample.to(
+            resolve_input_dtype(
+                model_type,
+                model_io_contract,
+                site_preference=TRAINING_SITE_DTYPE,
+            )
+        )
 
     loss_type = loss_cfg.get("loss_type", "ce")
     # I14 — loss_name plumbs through to _build_probe_tensors so the helper

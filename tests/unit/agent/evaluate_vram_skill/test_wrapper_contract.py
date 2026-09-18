@@ -46,6 +46,7 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
     ProbeResult,
 )
 from core.hardware_context import HardwareContext
+from tests.helpers.step04a_fixtures import regressor_model_io
 
 # ── Hardware fixtures ───────────────────────────────────────────────────────
 
@@ -284,6 +285,31 @@ def test_task_owned_probe_pair_reaches_the_training_loss_without_zero_substituti
     assert out["memory_killer"] is None
     # `scoring` is a passthrough slot left for Phase 6.7, so this is `>=`.
     assert set(out["phase_breakdown"].keys()) >= {"training", "inference"}
+
+
+def test_composed_probe_converts_storage_dtype_for_training_and_inference():
+    """A task-owned int16 sample must reach every model forward as int64."""
+    task_input = torch.zeros((1, 128), dtype=torch.int16)
+    task_target = torch.zeros((1, 128), dtype=torch.float32)
+    with _Patches() as patches:
+        out = wrapper.run_skill(
+            sandbox=None,
+            hardware_context=_gpu_ctx(),
+            probe_input_sample=task_input,
+            probe_target_sample=task_target,
+            model_io_contract=regressor_model_io(),
+            **_run_kwargs(
+                model_type="strict_int64_plugin",
+                model_config={"segmentation_size": 128},
+                loss_config={"loss_type": "smooth_l1"},
+            ),
+        )
+
+    assert out["status"] == "success"
+    assert task_input.dtype == torch.int16
+    assert patches.probe.call_args_list[0].kwargs["input_sample"].dtype == torch.int64
+    assert patches.resolve.call_args.kwargs["supplied_probe"].dtype == torch.int64
+    assert patches.probe.call_args_list[1].kwargs["input_sample"].dtype == torch.int64
 
 
 def test_fixed_task_probe_does_not_acquire_an_invented_temporal_dimension(monkeypatch):
