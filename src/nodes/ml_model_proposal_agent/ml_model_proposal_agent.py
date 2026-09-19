@@ -78,6 +78,10 @@ from nodes.ml_model_proposal_agent.parameter_rules import (
     render_proposal_parameter_rules,
     resolve_proposal_baseline_config,
 )
+from nodes.ml_model_proposal_agent.prediction_reference import (
+    ground_prediction,
+    observed_prediction_reference,
+)
 from nodes.proposal_helpers import evidence_order
 from workflows.task_config import (
     get_task_description,
@@ -724,7 +728,9 @@ def _render_cold_start_block(cold_start: bool) -> str:
         "improvement over previous results — there are none. Propose the first "
         "experiment grounded in the task contract, the available model and loss "
         "registries (listed below as available options, not past results), the "
-        "advice, and the resource constraints."
+        "advice, and the resource constraints. Set falsifiable_prediction.current_value "
+        "to null: no observed baseline exists. You may propose an absolute numerical "
+        "outcome, but relative boldness and improvement cannot yet be measured."
     )
 
 
@@ -1602,6 +1608,13 @@ class MLModelProposalAgent:
         # a parser whitelist, the system's mint overwrites it — the id is
         # never LLM-generated and never derived from model_name.
         output.candidate_id = f"cand_{uuid.uuid4().hex}"
+        prediction = output.falsifiable_prediction
+        reference = observed_prediction_reference(inp, prediction.metric) if prediction else None
+        # Unconditional overwrite: this provenance is framework-owned, like
+        # candidate_id, and cannot be supplied by the model's JSON.
+        output.observed_prediction_reference = reference
+        if prediction is not None:
+            output.falsifiable_prediction = ground_prediction(prediction, reference)
 
         # --- Persist ---
         if inp.storage.backend == "local" and inp.storage.local:
@@ -2033,7 +2046,9 @@ class MLModelProposalAgent:
             if pred_raw and isinstance(pred_raw, dict):
                 try:
                     pred = FalsifiablePrediction.model_validate(pred_raw)
-                    if pred.boldness < policy.minimum_boldness:
+                    reference = observed_prediction_reference(inp, pred.metric)
+                    pred = ground_prediction(pred, reference)
+                    if pred.boldness is not None and pred.boldness < policy.minimum_boldness:
                         print(
                             f"   Boldness check: boldness={pred.boldness:.4f} < "
                             f"minimum_boldness={policy.minimum_boldness} — "
@@ -2128,12 +2143,17 @@ class MLModelProposalAgent:
             try:
                 # Same extraction expressions as the proposing-stage assembly
                 # below — the two must agree on what gets validated.
-                CausalStageOwnedContent.model_validate(
+                causal_content = CausalStageOwnedContent.model_validate(
                     {
                         "inherited_components": causal_dict.get("inherited_components", []),
                         "falsifiable_prediction": causal_dict.get("falsifiable_prediction"),
                     }
                 )
+                if causal_content.falsifiable_prediction is not None:
+                    prediction = causal_content.falsifiable_prediction
+                    reference = observed_prediction_reference(inp, prediction.metric)
+                    grounded = ground_prediction(prediction, reference)
+                    causal_dict["falsifiable_prediction"] = grounded.model_dump()
                 break
             except ValidationError as exc:
                 error_summary = "; ".join(

@@ -249,10 +249,8 @@ def generate_discoveries(
                           a timing discovery is emitted. Default 1800s (30 min).
         overall_best_score: The best score across ALL models seen this iteration
                             (new + cached). Used as the SOTA baseline for the
-                            score comparison discovery. Falls back to
-                            prediction_eval["current_value"] (the SOTA at
-                            proposal time) when not provided, but that value
-                            may be stale if a newer model has since surpassed it.
+                            score comparison discovery. No authored prediction
+                            supplies a missing observed comparison reference.
         order: the run's ``MetricOrder`` (Step 09a C3, keyword-only, REQUIRED).
                             Discovery 2 picks the strictest SOTA and compares
                             against it — both are direction questions.
@@ -316,19 +314,9 @@ def generate_discoveries(
 
     # Discovery 2: score comparison to SOTA
     if best_score is not None:
-        # Use the strictest available SOTA: overall_best_score (current-iteration max across
-        # all models) takes precedence over prediction_eval["current_sota"] (the SOTA at
-        # proposal time, which may be stale if a newer model has since surpassed it).
-        sota_from_prediction = prediction_eval.get("current_sota") if prediction_eval else None
-        if overall_best_score is not None and sota_from_prediction is not None:
-            # "strictest" = the BETTER of the two on the metric's own axis.
-            sota_score = order.best(
-                [sota_from_prediction, overall_best_score], key=lambda value: value
-            )
-        else:
-            sota_score = (
-                sota_from_prediction if sota_from_prediction is not None else overall_best_score
-            )
+        # This is an observed score comparison, independent of whether an
+        # authored prediction could be evaluated or named the primary metric.
+        sota_score = overall_best_score
         if sota_score is not None:
             # Step 09a C3. The relative band used to scale the reference by
             # (1 - margin) and compare directly — degenerate for a NEGATIVE

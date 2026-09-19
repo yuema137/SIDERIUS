@@ -93,6 +93,8 @@ def _make_pipeline_input(tmp_path, policy: ResearchPolicy | None = None) -> Prop
                 "model_types": ["wavenet"],
                 "total_experiments": 5,
                 "best_denoising_score": 5.5,
+                "best_valid_denoising_score": 5.5,
+                "metric_identity": {"metric_id": "denoising_score", "direction": "higher"},
                 "worst_denoising_score": 1.0,
                 "key_findings": ["wavenet wins"],
                 "bottlenecks": ["low-freq gap"],

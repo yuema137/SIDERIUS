@@ -65,6 +65,7 @@ def _evaluate(actual, sota, *, order, metric=None, per_sample=None, predicted=No
     return evaluate_prediction(
         prediction,
         results,
+        current_sota=sota,
         partial_margin=margin,
         order=order,
         bound_metric_id=BOUND_ID,
