@@ -956,7 +956,9 @@ class TestRestoreWiring:
                 ]
             )
 
-        assert code == 1, "runner should exit non-zero on corrupt prior"
+        assert code == 3, "corrupt prior must stop the chain, not another candidate"
+        marker = json.loads((tmp_path / ".chain_halted").read_text())
+        assert marker["reason"] == "run_contract_failure"
         # run_workflow must not have been invoked.
         mock_wf.assert_not_called()
         out = capsys.readouterr().out

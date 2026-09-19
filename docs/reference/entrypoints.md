@@ -286,6 +286,21 @@ different one fails at startup.
 
 ## Next
 
+### Permanent run-contract failures
+
+The iteration runner preserves a failed manifest, writes `.chain_halted` and
+exits **3** when prior-state restoration refuses the run or metric/interpretation
+declarations conflict. The foreground chain propagates this permanent halt;
+queued iterations refuse before starting work. Ordinary candidate exceptions
+retain the existing failure policy. An external supervisor must preserve the
+permanent status and suppress service-level retries; stopping only the inner
+chain does not control an outer service manager.
+
+For persisted external metrics, reconciliation compares the complete serialized
+declaration rather than the Python scoreability subclass. A data-only restored
+contract can match its active declaration without acquiring execution authority.
+Changed aggregation, transforms, references or contract parameters still refuse.
+
 - [Operating a run](../guides/operating-a-run.md) — resume, budgets, failure modes
 - [Task composition reference](task-composition.md)
 - [Configuration map](configuration-map.md)

@@ -1044,7 +1044,15 @@ def _reconcile_declarations(
         if reference is None:
             reference, reference_label = entry.spec, entry.label
             continue
-        if entry.spec != reference:
+        # Persisted external contracts are deliberately data-only subclasses.
+        # Compare the complete declaration, not executable Python class identity;
+        # this never promotes a restored contract to executable task authority.
+        compatible = (
+            entry.spec.model_dump(mode="json") == reference.model_dump(mode="json")
+            if isinstance(entry.spec, MetricSpec) and isinstance(reference, MetricSpec)
+            else entry.spec == reference
+        )
+        if not compatible:
             raise MetricIdentityConflictError(
                 "cannot reconcile the run MetricSpec: "
                 f"{reference_label!r} declares "
