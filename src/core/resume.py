@@ -28,7 +28,11 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent.schemas.health_feedback import CollapseFingerprintHistoryEntry, TrialValidityFeedback
+from agent.schemas.health_feedback import (
+    CollapseFingerprintHistoryEntry,
+    FormalValidityFeedback,
+    TrialValidityFeedback,
+)
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
     HyperparamTuningOutput,
@@ -241,6 +245,7 @@ class RestoredState:
     accumulated_negative_feedback: list[
         tuple[GateExhaustionInfo | None, TrialValidityFeedback | None]
     ] = field(default_factory=list)
+    accumulated_formal_feedback: list[FormalValidityFeedback] = field(default_factory=list)
     previous_proposal_data: dict | None = None
     model_knowledge_cache: dict[str, dict] = field(default_factory=dict)
     collapse_fingerprint_history: dict[str, list[CollapseFingerprintHistoryEntry]] = field(
@@ -299,7 +304,10 @@ def _restore_no_records_feedback(
     """Validate and restore the bounded evidence from a no-records iteration."""
     if not isinstance(raw_feedback, dict):
         raise ResumeError(f"iter {iter_idx:03d}: no_records negative_feedback must be an object")
-    unknown = sorted(set(raw_feedback) - {"gate_exhaustion", "trial_validity_feedback"})
+    unknown = sorted(
+        set(raw_feedback)
+        - {"gate_exhaustion", "trial_validity_feedback", "formal_validity_feedback"}
+    )
     if unknown:
         raise ResumeError(
             f"iter {iter_idx:03d}: no_records negative_feedback has unknown field(s): {unknown}"
@@ -322,6 +330,12 @@ def _restore_no_records_feedback(
     if gate_exhaustion is not None:
         state.accumulated_gate_exhaustions.append(gate_exhaustion)
     _append_negative_feedback(state, gate_exhaustion, trial_feedback)
+    if raw_feedback.get("formal_validity_feedback") is not None:
+        try:
+            formal = FormalValidityFeedback.model_validate(raw_feedback["formal_validity_feedback"])
+        except ValueError as exc:
+            raise ResumeError(f"iter {iter_idx:03d}: invalid Formal feedback: {exc}") from exc
+        state.accumulated_formal_feedback.append(formal)
 
 
 def _trim_negative_feedback(state: RestoredState) -> None:
@@ -1651,6 +1665,8 @@ def restore_prior_state(
         if parsed.gate_exhaustion is not None:
             state.accumulated_gate_exhaustions.append(parsed.gate_exhaustion)
         _append_negative_feedback(state, parsed.gate_exhaustion, parsed.trial_validity_feedback)
+        if parsed.formal_validity_feedback is not None:
+            state.accumulated_formal_feedback.append(parsed.formal_validity_feedback)
 
         # V19 PR 1 §3.3 — chain-incumbent fold, commit-time validity only.
         # FORMAL: committed-fields fast path (with summary-vs-source
@@ -1722,6 +1738,7 @@ def restore_prior_state(
             -_MAX_ACCUMULATED_GATE_EXHAUSTIONS:
         ]
     _trim_negative_feedback(state)
+    state.accumulated_formal_feedback = state.accumulated_formal_feedback[-3:]
 
     # Cross-iter knowledge carry-over. Without this, every chain iter's
     # interp node sees only the static seed (empirically: 5 iters × 21

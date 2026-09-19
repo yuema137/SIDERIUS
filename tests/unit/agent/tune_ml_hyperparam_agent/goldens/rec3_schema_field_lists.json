@@ -43,6 +43,7 @@
     "formal_score_table",
     "all_records",
     "gate_exhaustion",
+    "formal_validity_feedback",
     "trial_validity_feedback",
     "physical_rejections",
     "attempts_per_round",

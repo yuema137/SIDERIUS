@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
-from agent.schemas.health_feedback import TrialValidityFeedback
+from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
     ExpertAdviceInput,
@@ -1095,6 +1095,11 @@ class ProposalInput(BaseModel):
             "single-slot prior_iteration_gate_exhaustion. See "
             "docs/resource_estimator_implement.md §10.13 + §14.N."
         ),
+    )
+    recent_formal_validity: list[FormalValidityFeedback] = Field(
+        default_factory=list,
+        max_length=3,
+        exclude_if=lambda value: not value,
     )
     recent_trial_validity: list[TrialValidityFeedback] = Field(
         default_factory=list,

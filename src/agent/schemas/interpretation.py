@@ -29,6 +29,7 @@ from agent.schemas.data_analysis.resources import AnalysisResourceEnvelope
 from agent.schemas.health_feedback import (
     CollapseFingerprint,
     CollapseFingerprintHistoryEntry,
+    FormalValidityFeedback,
     HealthFeedbackRetentionPolicy,
     RoundHealth,
 )
@@ -665,6 +666,11 @@ class InterpretationInput(BaseModel):
         default=None,
         description="Optional human-provided guidance (highest priority — overrides expert_advice). "
         "When present, injected into the LLM prompt as high-priority context.",
+    )
+    recent_formal_validity: list[FormalValidityFeedback] = Field(
+        default_factory=list,
+        max_length=3,
+        exclude_if=lambda value: not value,
     )
     analysis_brief_requested: bool = Field(
         default=False,

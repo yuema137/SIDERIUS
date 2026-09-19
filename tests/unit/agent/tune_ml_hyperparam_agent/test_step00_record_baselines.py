@@ -39,6 +39,9 @@ from tests.helpers.step00_pseudo_iteration import (
     run_bounded_pseudo_iteration,
 )
 
+# PR #548 declares one additive output field: formal_validity_feedback before
+# trial_validity_feedback. Its independent ordered golden is updated surgically;
+# no recorded scientific values or other schema fields were re-captured.
 GOLDENS = Path(__file__).parent / "goldens"
 
 _PRESENT = "<present>"

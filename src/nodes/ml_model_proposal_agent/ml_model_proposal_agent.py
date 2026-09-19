@@ -32,6 +32,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
+from agent.prompt_templates.formal_failure import render_formal_failure_feedback
 from agent.prompt_templates.proposal import (
     live_loss_metadata,
     render_data_analysis_evidence,
@@ -1259,7 +1260,9 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     # defect recorded below, where a legacy-only splice never reached
     # pipeline mode — both paths must carry it or the evidence is silently
     # dropped for whichever branch happens to run.
-    trial_validity_block = _format_recent_trial_validity_block(inp.recent_trial_validity)
+    trial_validity_block = _format_recent_trial_validity_block(
+        inp.recent_trial_validity
+    ) + render_formal_failure_feedback(inp.recent_formal_validity)
     if trial_validity_block:
         lines += [trial_validity_block, ""]
 
@@ -1869,7 +1872,8 @@ class MLModelProposalAgent:
             # window. Empty list collapses to "".
             "recent_trial_validity_block": _format_recent_trial_validity_block(
                 inp.recent_trial_validity
-            ),
+            )
+            + render_formal_failure_feedback(inp.recent_formal_validity),
             # V19 PR 3 (§3.7) — structured HealthGate evidence for the
             # PRODUCTION pipeline path (P3-V1 reopen fix: the legacy-mode
             # splice in _build_reasoning_prompt never reached pipeline

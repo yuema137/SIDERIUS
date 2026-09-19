@@ -23,6 +23,7 @@ database_full_context   DB-backed transfer: interp agent writes the interpretati
 
 from collections.abc import Sequence
 
+from agent.schemas.health_feedback import FormalValidityFeedback
 from agent.schemas.hyperparam_tuning import (
     ExpertAdviceInput,
     HyperparamTuningOutput,
@@ -68,6 +69,7 @@ def local_full_context(
     workflow_parameter_rules: ParameterRules | None = None,
     # --- Cross-iteration feedback (Phase K.7 → Phase N — see §10.13, §14.N) ---
     recent_tune_outputs: Sequence[HyperparamTuningOutput] = (),
+    recent_formal_validity: Sequence[FormalValidityFeedback] = (),
     # --- Structured HealthGate feedback flag (V19 PR 3 §3.7/§3.9) ---
     enable_structured_health_feedback: bool = False,
 ) -> ProposalInput:
@@ -241,6 +243,11 @@ def local_full_context(
         result["task_composition_ref"] = task_composition_ref
     if workflow_parameter_rules is not None:
         result["workflow_parameter_rules"] = workflow_parameter_rules
+
+    if recent_formal_validity:
+        result["recent_formal_validity"] = [item.model_dump() for item in recent_formal_validity][
+            -3:
+        ]
 
     # Phase N (§14.N) — aggregate gate-exhaustion reports across up to K
     # recent iterations. Oldest-first order is preserved from the caller;

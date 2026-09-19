@@ -1875,3 +1875,7 @@ and epoch cap permit. Formal retains its independent allowance under
 performed; final completed weights are retained. Forecast versus measured
 admission authority and watchdog policy remain independent. See
 [execution/accounting contract](../../../docs/reference/cooperative-training-budget.md).
+
+### Failed Formal evidence across iterations
+
+When Formal attempts exist but no Health-valid Formal candidate exists, the tuner emits `formal_validity_feedback`: model identity, counts distinguishing execution failure from negative/unknown Health evidence, and the last eight factual outcomes. The classifier is shared with Trial feedback; Formal records are never relabeled Trial. The no-records manifest and typed resume path retain this summary without restoring the model, weights, plugin, score or incumbent. The workflow forwards the most recent three summaries to interpretation and both proposer paths. A cold start with failed Formal evidence means no valid incumbent, not no previous experiment. Existing healthy runs and manifests without this optional field remain supported. No task-specific remedy is inserted.

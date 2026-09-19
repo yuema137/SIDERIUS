@@ -87,7 +87,7 @@ from agent.prompt_templates.interpretation.task_blocks import load_interpretatio
 from agent.prompt_templates.proposal.task_blocks import load_proposal_task_blocks
 from agent.schemas.data_analysis.generated_skill import GeneratedExperimentSkillRegistryRef
 from agent.schemas.external_agents import ExternalAgentOutput
-from agent.schemas.health_feedback import TrialValidityFeedback
+from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
     HyperparamTuningInput,
@@ -539,6 +539,18 @@ def _synthetic_prior_iter_tune_output(
         started_at=now,
         finished_at=now,
     )
+
+
+def _recent_formal_feedback(
+    state: ChainState, restored: RestoredState | None
+) -> list[FormalValidityFeedback]:
+    entries = list(restored.accumulated_formal_feedback) if restored is not None else []
+    entries.extend(
+        out.formal_validity_feedback
+        for out in state.recent_tune_outputs
+        if out.formal_validity_feedback is not None
+    )
+    return entries[-3:]
 
 
 def _restored_negative_feedback(
@@ -2748,6 +2760,7 @@ def run_workflow(
             ),
             human_advice=launch.human_advice_interpret,
             analysis_brief_requested=_analysis_binding is not None,
+            recent_formal_validity=_recent_formal_feedback(state, restored_state),
             analysis_access_policy=(
                 _analysis_binding.access_policy if _analysis_binding is not None else None
             ),
@@ -3032,6 +3045,7 @@ def run_workflow(
                     task_composition_ref=build_task_composition_ref(bindings.task_composition),
                     workflow_parameter_rules=launch.workflow_parameter_rules,
                     recent_tune_outputs=list(state.recent_tune_outputs),
+                    recent_formal_validity=_recent_formal_feedback(state, restored_state),
                     # V19 PR 3 — proposer prompt flag (evidence itself
                     # travels inside the interpretation dump regardless).
                     enable_structured_health_feedback=(bindings.enable_structured_health_feedback),

@@ -83,6 +83,19 @@ because the response schema permits more questions."""
             "bottlenecks": interpretation.bottlenecks,
             "take_home_message": interpretation.take_home_message,
         }
+    if inp.recent_formal_validity:
+        evidence["failed_formal_attempts"] = [
+            item.model_dump(mode="json") for item in inp.recent_formal_validity
+        ]
+        if interpretation.cold_start:
+            evidence["statement"] = (
+                "No valid incumbent exists; failed Formal attempts are evidence."
+            )
+        system += (
+            " Explicit failed Formal attempts are real negative evidence even without a valid "
+            "incumbent. Use their recorded facts, not invented outcomes; access policy still "
+            "limits what follow-up analysis can inspect."
+        )
     user = json.dumps(
         {
             "task_description": inp.task_description,

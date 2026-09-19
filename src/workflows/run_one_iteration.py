@@ -1027,7 +1027,7 @@ def write_manifest(
     if manifest["status"] == "no_records" and tune_output is not None:
         negative_feedback = {
             field: value.model_dump(mode="json")
-            for field in ("gate_exhaustion", "trial_validity_feedback")
+            for field in ("gate_exhaustion", "trial_validity_feedback", "formal_validity_feedback")
             if (value := getattr(tune_output, field, None)) is not None
         }
         if negative_feedback:
