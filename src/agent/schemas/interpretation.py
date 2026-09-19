@@ -405,6 +405,11 @@ class ModelRunSummary(BaseModel):
         description="Denoising score per round in chronological order. "
         "None entries indicate OOM-skipped or failed rounds.",
     )
+    round_is_trial: list[bool] = Field(
+        default_factory=list,
+        description="Persisted ExperimentRecord.is_trial in round_scores order. "
+        "Empty on legacy summaries; absence does not identify a Trial or Formal role.",
+    )
     round_conclusions: list[str] = Field(
         default_factory=list,
         description="One-line conclusion from each round's LLM reflection. "
