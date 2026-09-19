@@ -17,6 +17,7 @@ from agent.schemas.data_analysis.trained_model import ModelInferenceReceipt
 from agent.schemas.storage import StorageConfig
 from core.campaign_identity import validate_path_component
 from core.durable_io import append_line_durably, publish_bytes_write_once
+from core.execution_deadline import ExecutionBudgetReceipt
 from execute_tools.historical_model_inference import HistoricalPredictionRetentionReceipt
 
 from .discovery import DiscoverySnapshot
@@ -91,6 +92,9 @@ class AnalysisRunStore:
         raise AnalysisPersistenceError(
             "analysis attempt is incomplete; v0.1 refuses implicit partial replay"
         )
+
+    def write_budget_receipt(self, value: ExecutionBudgetReceipt) -> CertifiedArtifactRef:
+        return self._write_model_once("budget_receipt.json", value)
 
     def write_discovery(self, value: DiscoverySnapshot) -> CertifiedArtifactRef:
         return self._write_model_once("discovery.json", value)

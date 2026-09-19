@@ -88,14 +88,15 @@ PRIMARY_CASES = (
 
 
 _BUDGETS: dict[BudgetName, tuple[float, float]] = {
-    # Interface resolution is deliberately outside the scientific execution
-    # deadline.  The subprocess must tolerate a fully loaded CI shard; the
-    # plan's equal minimum-remaining-time threshold still proves no skill
-    # starts in the exhausted case.
-    "exhausted": (10.0, 10.0),
-    "low": (8.0, 8.0),
-    "medium": (16.0, 10.0),
-    "high": (30.0, 10.0),
+    # This matrix owns advice/trajectory behavior, not clock-boundary enforcement.
+    # Whole-node accounting now includes interface/parameter worker startup.
+    # Leave loaded-CI headroom; precise deadline regressions use synthetic clocks.
+    # The exhausted case still requests the entire allocation as its minimum
+    # remaining threshold, so it starts no scientific invocation.
+    "exhausted": (60.0, 10.0),
+    "low": (60.0, 10.0),
+    "medium": (120.0, 10.0),
+    "high": (240.0, 10.0),
 }
 
 

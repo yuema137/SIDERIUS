@@ -170,6 +170,19 @@ directly.
 - **GPU**: optional. An enabled skill or caller-injected historical-inference capability may use one only within the caller's resource envelope.
 - **External services**: none beyond the configured LLM provider; task data remain behind `TaskAnalysisCapability`.
 
+### Continuing analysis allocation
+
+`resource_envelope.wall_time_budget_s` starts before discovery/planning and is
+shared by selection, generated code, plan repair, worker execution, optional
+promotion and synthesis. Gateway request timeouts and retry waits consume its
+remaining time; entering the skill loop does not reset it. An exhausted allocation
+fails with a named boundary and cannot publish a late report. `budget_receipt.json`
+records total wall time and completion/failure/exhaustion independently of the
+report's skill-only compute totals. Completed report reuse does not start a new
+allocation. Enforcement is cooperative request/worker timeout propagation, not
+a process-killing watchdog; a non-cooperative blocking capability may return late
+and its result is then rejected. Whole-process deadlines remain caller-owned.
+
 ### Generated artifact paths
 
 The generated function receives `output_directory`, the artifact certification

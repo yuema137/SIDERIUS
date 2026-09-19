@@ -55,6 +55,11 @@ from agent.schemas.data_analysis.report import (
     SkillResultSummary,
 )
 from agent.schemas.data_analysis.skills import SkillResult
+from core.execution_deadline import (
+    ExecutionDeadline,
+    ExecutionDeadlineExceeded,
+    execution_deadline,
+)
 from execute_tools.analysis_materialization import TaskAnalysisCapability
 from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
 
@@ -262,6 +267,23 @@ class DataAnalysisAgent:
         if resumed is not None:
             return resumed
         store.write_input(inp)
+        with execution_deadline(inp.resource_envelope.wall_time_budget_s) as budget:
+            status: Literal["completed", "failed", "deadline_exceeded"] = "failed"
+            try:
+                report = self._run_active(inp, store, budget)
+                budget.remaining("report publication")
+                store.write_report(report, markdown=render_report_markdown(report))
+                status = "completed"
+                return report
+            except ExecutionDeadlineExceeded:
+                status = "deadline_exceeded"
+                raise
+            finally:
+                store.write_budget_receipt(budget.receipt(status))
+
+    def _run_active(
+        self, inp: DataAnalysisInput, store: AnalysisRunStore, budget: ExecutionDeadline
+    ) -> DataAnalysisReport:
         discovery = discover_skills(
             inp.allowed_skill_packs,
             generated_skill_registry=inp.generated_skill_registry,
@@ -382,7 +404,7 @@ class DataAnalysisAgent:
             else:
                 break
         plan_ref = store.write_plan(plan)
-        deadline = time.monotonic() + inp.resource_envelope.wall_time_budget_s
+        deadline = budget.expires_at
         results: list[SkillResult] = []
         result_refs: list[CertifiedResultRef] = []
         invocation_by_result = {}
@@ -431,7 +453,6 @@ class DataAnalysisAgent:
             store=store,
             generated_skill_registry=generated_skill_registry,
         )
-        store.write_report(report, markdown=render_report_markdown(report))
         return report
 
     @staticmethod

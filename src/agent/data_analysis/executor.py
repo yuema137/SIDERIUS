@@ -23,6 +23,7 @@ from agent.schemas.data_analysis.skills import (
     SkillResult,
 )
 from core.durable_io import publish_bytes_write_once
+from core.execution_deadline import bounded_timeout
 from core.runtime_control.process_group import process_group_alive, signal_group, tree_rss_bytes
 from core.subprocess_env import subprocess_env
 
@@ -123,6 +124,7 @@ def _run_worker(
     timeout_s: float,
     max_host_memory_gb: float | None,
 ) -> WorkerObservation:
+    timeout_s = bounded_timeout(timeout_s, "analysis.worker")
     control_directory.mkdir(parents=True, exist_ok=False)
     request_path = control_directory / "request.json"
     response_path = control_directory / "response.json"

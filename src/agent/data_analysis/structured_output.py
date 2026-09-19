@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, ValidationError
 from agent.data_analysis.persistence import AnalysisRunStore
 from agent.prompt_templates.data_analysis import render_structured_output_repair_prompt
 from agent.schemas.data_analysis.common import FrozenModel, NonEmptyStr, canonical_sha256
+from core.execution_deadline import remaining_seconds
 
 
 class DataAnalysisStructuredOutputError(RuntimeError):
@@ -56,7 +57,9 @@ def generate_validated[ValidatedModelT: BaseModel](
 ) -> ValidatedModelT:
     """Validate once, then permit one schema-only repair with semantic anchors."""
 
+    remaining_seconds(label)
     raw = bridge.generate(system, user, label=label)
+    remaining_seconds(label)
     initial_digest = canonical_sha256(raw)
     try:
         value = model_type.model_validate(raw)
@@ -83,7 +86,9 @@ def generate_validated[ValidatedModelT: BaseModel](
             original_output=raw,
             validation_errors=[issue.model_dump(mode="json") for issue in issues],
         )
+        remaining_seconds(f"{label}.repair")
         repaired = bridge.generate(repair_system, repair_user, label=f"{label}.repair")
+        remaining_seconds(f"{label}.repair")
         repaired_digest = canonical_sha256(repaired)
         try:
             value = model_type.model_validate(repaired)

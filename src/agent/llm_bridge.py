@@ -31,7 +31,6 @@ import json
 import os
 import sys
 import threading
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -63,6 +62,7 @@ from agent.schemas.telemetry import (
     TokenUsageChars,
     TokenUsageRow,
 )
+from core.execution_deadline import deadline_sleep, remaining_seconds
 from execute_tools.evaluation_metric import MetricSpec
 
 # Fallback markdown injected at the {SCORE_COMPARISON_TABLE} token when no
@@ -417,6 +417,22 @@ class LLMBridge:
         """
         if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort
+        remaining = remaining_seconds("llm.request")
+        if remaining is not None:
+            from httpx import Timeout
+
+            configured = getattr(client, "timeout", None)
+            if isinstance(configured, Timeout):
+                kwargs["timeout"] = Timeout(
+                    **{
+                        part: min(remaining, getattr(configured, part) or remaining)
+                        for part in ("connect", "read", "write", "pool")
+                    }
+                )
+            elif isinstance(configured, (int, float)):
+                kwargs["timeout"] = min(remaining, configured)
+            else:
+                kwargs["timeout"] = remaining
         return cast(Any, client.chat.completions.create)(**kwargs)
 
     def __init__(
@@ -1429,7 +1445,10 @@ class LLMBridge:
         while True:
             timed_out = False
             try:
-                return fn()
+                remaining_seconds(label)
+                result = fn()
+                remaining_seconds(label)
+                return result
             except (APIConnectionError, APITimeoutError) as e:
                 last_exc = e
                 timed_out = True
@@ -1475,7 +1494,7 @@ class LLMBridge:
                 f"retrying in {wait}s...",
                 flush=True,
             )
-            time.sleep(wait)
+            deadline_sleep(wait, "llm.retry")
             wait = min(wait * 2, self._RETRY_MAX_WAIT)
 
     @staticmethod
@@ -1858,7 +1877,7 @@ class LLMBridge:
                     f"sleeping {wait}s.",
                     flush=True,
                 )
-                time.sleep(wait)
+                deadline_sleep(wait, "llm.retry")
                 wait = min(wait * 2, self._CONTENT_RETRY_MAX_WAIT)
 
         # Budget exhausted — raise the same ValueError shape callers expect.
