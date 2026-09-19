@@ -629,9 +629,9 @@ class TestOneProbeConstructionAuthority:
         seen: list[type] = []
         real = _val.probe_config_kwargs
 
-        def _spy(config_cls):
+        def _spy(config_cls, contract=None):
             seen.append(config_cls)
-            return real(config_cls)
+            return real(config_cls, contract)
 
         monkeypatch.setattr(_val, "probe_config_kwargs", _spy)
 

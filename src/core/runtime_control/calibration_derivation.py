@@ -60,6 +60,7 @@ from core.runtime_control.registry_schemas import (
 SUPPORTED_UNITS: dict[str, RuntimePhase] = {
     "optimizer_step": "training",
     "inference_batch": "inference",
+    "inference_sample": "inference",
     "segment": "inference",
 }
 
@@ -201,6 +202,14 @@ def derive_duration_calibration_record(
     if expected_phase is None:
         return QuarantinedDerivation(
             reason=f"unit {unit!r} has no explicit phase mapping; refusing to guess",
+            missing_identity_fields=("measurement_unit",),
+            observation_payload={"unit": unit, "phase": phase},
+            source_reference=_source_reference(obs, phase),
+        )
+
+    if expected_phase != phase:
+        return QuarantinedDerivation(
+            reason=f"unit {unit!r} describes {expected_phase}, not {phase}",
             missing_identity_fields=("measurement_unit",),
             observation_payload={"unit": unit, "phase": phase},
             source_reference=_source_reference(obs, phase),

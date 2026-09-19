@@ -640,3 +640,14 @@ scored history exists. The deterministic cold-start output preserves its identit
 and direction for downstream agents. This does not fabricate scores or prior
 evidence. Historical metric stamps must agree with the bound composition through
 the shared reconciliation authority; an absent declaration stays absent.
+
+
+### Health evidence labels
+
+Condensed gate outcomes preserve `configured_action` and `gate_role` alongside
+`resolved_action` and `would_invalidate_under_production_policy`. Diagnostic
+rendering uses the configured action, never a historical `_blocking` or
+`_recording` name suffix. Failed checks are shown with their effective action
+and round validity; a failed recording diagnostic does not itself invalidate a
+candidate. Missing legacy actions remain unknown. This changes feedback labels,
+not Health thresholds, candidate eligibility, or scientific aggregation.

@@ -386,6 +386,7 @@ class TestTheHealthSummaryBestRoundInverts:
                 gate_outcomes=[
                     GateOutcome(
                         gate_name="pearson_recording",
+                        configured_action="continue",
                         execution_status="passed",
                         check_passed=True,
                         key_metrics={"pearson": metric_value},
@@ -675,3 +676,42 @@ class TestTheDirectionCensus:
             "def f(rows, order):\n    return order.best(rows, key=lambda r: r.denoising_score)\n"
         )
         assert _offending_comparisons(clean, "clean") == []
+
+
+def test_health_feedback_uses_persisted_action_not_historical_gate_suffix():
+    """2026-09-19: a recording diagnostic named *_blocking misled the agent.
+
+    Exercise persistence projection plus prompt rendering. Losing the action
+    at either boundary hides the diagnostic or implies that it invalidated
+    the candidate; the opposite suffix must not grant recording authority.
+    """
+    from agent.schemas.health_feedback import build_gate_outcomes
+
+    summary = TestTheHealthSummaryBestRoundInverts()._summary_with_rounds()
+    summary.round_health[0].gate_outcomes = build_gate_outcomes(
+        [
+            {
+                "gate_name": "output_std_blocking",
+                "execution_status": "passed",
+                "check_passed": False,
+                "would_invalidate_under_production_policy": False,
+                "resolved_action": "continue",
+                "configured_action": "continue",
+                "gate_role": "observational",
+                "threshold": {"metric": "output_std_mv", "operator": ">=", "unit": "mV"},
+                "metrics": {"output_std_mv": 0.15},
+            },
+            {
+                "gate_name": "misleading_recording",
+                "execution_status": "passed",
+                "check_passed": True,
+                "configured_action": "invalidate_round",
+                "metrics": {"pearson_mean": 99.0},
+            },
+        ]
+    )
+    text = "\n".join(_render_health_summary_section(summary, order=HIGHER))
+    assert "configured_action=continue; resolved_action=continue; would_invalidate=False" in text
+    assert "round_validity=valid" in text
+    assert "output_std_mv=0.15" in text
+    assert "pearson_mean=99.0" not in text

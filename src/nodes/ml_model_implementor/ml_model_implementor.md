@@ -184,3 +184,15 @@ Explicit generated-code directories remain supported for orchestrators. The refe
   - **Repair** — up to `inp.max_retries` (default 2) `bridge.generate(IMPLEMENTOR_REPAIR_PROMPT, ...)` calls when validation fails.
 - **GPU**: not required. The `_smoke_test_plugin` forward pass runs on CPU with a tiny probe input; no GPU needed even when the eventual training will use one. `hardware_context` is read only to render the prompt's capacity bullet, never to select a device.
 - **External services**: none. Depends on the upstream proposal file (in CLI mode) or upstream protocol (in workflow mode). No network calls outside `LLMBridge`. Filesystem dependencies: writes plugin + description + test under `agent_generated/`, writes the output record JSON under the workspace; reads the upstream proposal JSON when running standalone.
+
+
+### Candidate probe geometry
+
+The shared `model_io_probe_skill` constructs both nodes' probes. Temporal
+candidates are checked at their validated `segmentation_size`; required lengths
+use the fixed input contract when one exists. A fixed contract/config conflict
+is reported explicitly before the model forward pass. The synthetic length 64
+is only a fallback when no length is declared, never a requirement that every
+model support length 64. Config, input and expected output use the same extent.
+Non-temporal contracts retain their own geometry. The check does not change
+training configuration or certify model quality.

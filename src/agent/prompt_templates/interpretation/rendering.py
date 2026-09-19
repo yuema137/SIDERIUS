@@ -200,6 +200,17 @@ def _render_health_summary_section(summary: ModelRunSummary, *, order: MetricOrd
         f"Round validity: {counts['valid']} valid, {counts['invalid']} invalid, "
         f"{counts['unknown']} unknown (of {len(summary.round_health)})"
     ]
+    for index, health in enumerate(summary.round_health, start=1):
+        for outcome in health.gate_outcomes:
+            if outcome.check_passed is False:
+                lines.append(
+                    f"  Round {index} check {outcome.gate_name}: failed; "
+                    f"configured_action={outcome.configured_action or 'unknown'}; "
+                    f"resolved_action={outcome.resolved_action or 'unknown'}; "
+                    f"would_invalidate={outcome.would_invalidate_under_production_policy}; "
+                    f"round_validity={health.health_validity}. "
+                    "A failed diagnostic is not by itself candidate invalidity."
+                )
     if fingerprint_rounds:
         lines.append(
             "Distinct collapse fingerprints (deterministic, from persisted gate evidence):"
@@ -224,7 +235,7 @@ def _render_health_summary_section(summary: ModelRunSummary, *, order: MetricOrd
         recording = {
             k: v
             for outcome in summary.round_health[best_idx].gate_outcomes
-            if outcome.gate_name.endswith("_recording")
+            if outcome.configured_action == "continue"
             for k, v in outcome.key_metrics.items()
         }
         if recording:

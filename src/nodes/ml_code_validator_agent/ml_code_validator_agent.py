@@ -62,6 +62,7 @@ from agent.skills.forbidden_pattern_skill import check_source as _check_forbidde
 from agent.skills.model_io_probe_skill import (
     ProbeConstructionError,
     build_model_input,
+    candidate_probe_extent,
     declared_output_tensor,
     expected_output_shape,
     probe_config_kwargs,
@@ -519,7 +520,10 @@ def _check_instantiation_and_gradient(
     # recreate the implementor/validator divergence that recipe module exists
     # to prevent.
     try:
-        config = module.PLUGIN_CONFIG_CLASS(**probe_config_kwargs(module.PLUGIN_CONFIG_CLASS))
+        config = module.PLUGIN_CONFIG_CLASS(
+            **probe_config_kwargs(module.PLUGIN_CONFIG_CLASS, model_io_contract)
+        )
+        probe_extent = candidate_probe_extent(config, model_io_contract)
         model = module.PLUGIN_MODEL_CLASS(config)
         model.train()
     except Exception as e:
@@ -570,18 +574,19 @@ def _check_instantiation_and_gradient(
     # channel as every other rejection, so an operator sees WHY the candidate
     # could not be probed.
     if model_io_contract is None:
+        extent = probe_extent if probe_extent is not None else _LEGACY_PROBE_TIME_STEPS
         expected_shape: tuple[int, ...] = (
-            (1, _LEGACY_CLASSIFIER_PROBE_CLASSES, _LEGACY_PROBE_TIME_STEPS)
+            (1, _LEGACY_CLASSIFIER_PROBE_CLASSES, extent)
             if declared_type == "classifier"
-            else (1, _LEGACY_PROBE_TIME_STEPS)
+            else (1, extent)
         )
-        probe_input = torch.randint(
-            0, _LEGACY_CLASSIFIER_PROBE_CLASSES, (1, _LEGACY_PROBE_TIME_STEPS)
-        )
+        probe_input = torch.randint(0, _LEGACY_CLASSIFIER_PROBE_CLASSES, (1, extent))
     else:
         try:
-            expected_shape = expected_output_shape(model_io_contract, declared_type)
-            probe_input = build_model_input(model_io_contract)
+            expected_shape = expected_output_shape(
+                model_io_contract, declared_type, symbolic=probe_extent
+            )
+            probe_input = build_model_input(model_io_contract, symbolic=probe_extent)
         except ProbeConstructionError as e:
             return (
                 False,

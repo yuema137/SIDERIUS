@@ -270,13 +270,15 @@ class HealthFeedbackRetentionPolicy(BaseModel):
 
 
 class GateOutcome(BaseModel):
-    """One gate's condensed verdict for one round (§3.2)."""
+    """One gate's condensed verdict; names never determine enforcement."""
 
     gate_name: str = Field(min_length=1)
     execution_status: GateExecutionStatus
     check_passed: bool | None = None
     would_invalidate_under_production_policy: bool | None = None
     resolved_action: GateAction | None = None
+    gate_role: str | None = None
+    configured_action: GateAction | None = None
     failure_reason: str | None = None
     key_metrics: dict[str, float | int | str] = Field(default_factory=dict)
 
@@ -552,6 +554,8 @@ def build_gate_outcomes(gate_results: list[Any]) -> list[GateOutcome]:
                     "would_invalidate_under_production_policy"
                 ),
                 resolved_action=d.get("resolved_action"),
+                gate_role=d.get("gate_role"),
+                configured_action=d.get("configured_action"),
                 failure_reason=d.get("failure_reason") or None,
                 key_metrics=key_metrics,
             )

@@ -17,9 +17,9 @@ Contract-owned facts — class cardinality, rank, ordered axis roles, fixed
 extents, dtype admissibility, output semantic — are read from the contract
 and never restated. Validation-convenience choices — the concrete
 realization of a *symbolic* extent, the probe batch size — are declared
-here, as recipes. Pushing them into task config to make literals disappear
-is explicitly wrong (parent §10), because a probe size is not something a
-task knows about itself.
+here as fallbacks. A candidate probe uses its validated temporal length
+when declared; a fixed task extent remains authoritative. A symbolic
+alignment is not a promise that every candidate accepts the fallback length.
 
 **One recipe module, two consumers.** The validator's in-process shape probe
 and the implementor's self-check + loss probe all build instances of the
@@ -63,6 +63,7 @@ __all__ = [
     "ProbeConstructionError",
     "build_loss_probe_pair",
     "build_model_input",
+    "candidate_probe_extent",
     "declared_output_tensor",
     "expected_output_shape",
     "input_index_extent",
@@ -83,10 +84,9 @@ __all__ = [
 PROBE_BATCH: int = 1
 
 #: Extent used to realize a symbolic or dynamic non-batch axis — the ``T = 64``
-#: the design keeps as a recipe. A symbolic dimension declares ALIGNMENT
-#: ("input T and output T are the same extent"), not a magnitude, so any
-#: value satisfies it equally and the choice is pure validation convenience.
-#: That is also why varying it is not a semantic contrast (design §6.1).
+#: fallback when neither the contract nor candidate states a concrete length.
+#: Symbolic alignment alone does not make this fallback legal for a model
+#: with a declared workload length; candidate_probe_extent supplies that length.
 PROBE_SYMBOLIC_EXTENT: int = 64
 
 #: Index extent used when the contract declares NO class alphabet but the
@@ -116,7 +116,10 @@ PROBE_REQUIRED_FIELD_VALUES: Mapping[str, int] = MappingProxyType(
 )
 
 
-def probe_config_kwargs(config_cls: Any) -> dict[str, int]:
+def probe_config_kwargs(
+    config_cls: Any,
+    contract: ModelIOContract | None = None,
+) -> dict[str, int]:
     """Kwargs a PROBE must pass to construct *config_cls*.
 
     The ONE answer to "how do I build one minimal config instance in order to
@@ -144,6 +147,10 @@ def probe_config_kwargs(config_cls: Any) -> dict[str, int]:
             so a malformed plugin still fails at ITS OWN construction with its
             own error rather than here.
 
+    With an explicit fixed temporal contract, a required segmentation field
+    receives that fixed extent instead of the fallback. Declared defaults are
+    never rewritten; candidate_probe_extent diagnoses any conflict.
+
     Returns:
         The keyword arguments to splat into ``config_cls(...)``.
     """
@@ -152,7 +159,8 @@ def probe_config_kwargs(config_cls: Any) -> dict[str, int]:
     for name, value in PROBE_REQUIRED_FIELD_VALUES.items():
         declared = fields.get(name)
         if declared is not None and declared.is_required():
-            supplied[name] = value
+            fixed = _fixed_temporal_extent(contract)
+            supplied[name] = fixed if fixed is not None else value
     return supplied
 
 
@@ -176,6 +184,46 @@ class ProbeConstructionError(ValueError):
     passes an explicit extent; omitting them is still the legacy path and
     still never raises.
     """
+
+
+def _fixed_temporal_extent(contract: ModelIOContract | None) -> int | None:
+    """Read a unique declared temporal length; never infer one from a task name."""
+    if contract is None:
+        return None
+    axes = [axis for axis in contract.input.axes if axis.role is AxisRole.TEMPORAL]
+    if len(axes) > 1:
+        raise ProbeConstructionError("Probe requires an unambiguous temporal axis")
+    return axes[0].dimension.fixed if axes else None
+
+
+def candidate_probe_extent(config: Any, contract: ModelIOContract | None) -> int | None:
+    """Bind a temporal smoke input to the validated candidate configuration.
+
+    A symbolic alignment does not promise that a model supports every length.
+    Preserve non-temporal contracts' geometry. For temporal candidates, use
+    their instantiated length, including required-field probe values, rather
+    than running a differently sized input through the model. Fixed contract
+    extents outrank defaults; disagreement is a probe contract error, not an
+    instruction to redesign the candidate for a smaller synthetic input.
+    """
+    if contract is not None and not any(
+        axis.role is AxisRole.TEMPORAL for axis in contract.input.axes
+    ):
+        return None
+    fixed = _fixed_temporal_extent(contract)
+    configured = getattr(config, "segmentation_size", None)
+    if configured is not None:
+        if isinstance(configured, bool) or not isinstance(configured, int) or configured <= 0:
+            raise ProbeConstructionError(
+                f"Candidate probe segmentation_size must be a positive integer, got {configured!r}"
+            )
+        if fixed is not None and fixed != configured:
+            raise ProbeConstructionError(
+                f"Probe contract conflict: input temporal extent={fixed}, "
+                f"candidate segmentation_size={configured}; align configuration and "
+                "contract before testing model code"
+            )
+    return fixed if fixed is not None else configured
 
 
 # ---------------------------------------------------------------------------
@@ -400,9 +448,11 @@ def output_without_class_axis(contract: ModelIOContract) -> TensorContract:
 def expected_output_shape(
     contract: ModelIOContract,
     declared_output_type: str,
+    *,
+    symbolic: int | None = None,
 ) -> tuple[int, ...]:
     """The concrete probe shape for :func:`declared_output_tensor`."""
-    return realize_shape(declared_output_tensor(contract, declared_output_type))
+    return realize_shape(declared_output_tensor(contract, declared_output_type), symbolic=symbolic)
 
 
 # ---------------------------------------------------------------------------
