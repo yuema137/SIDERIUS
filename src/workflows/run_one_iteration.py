@@ -54,7 +54,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast, get_args
+from typing import NoReturn, cast, get_args
 
 # A direct one-iteration launch does not pass through run_chain.sh.  Establish
 # the same read-only-checkout policy before importing any SIDERIUS module, and
@@ -322,6 +322,21 @@ def _check_halt_marker(workspace: str) -> bool:
     are created.
     """
     return os.path.exists(os.path.join(workspace, ".chain_halted"))
+
+
+def _halt_contract_failure(workspace: str, iteration: int, error: Exception) -> NoReturn:
+    """A new candidate cannot repair contradictory or unreadable run history."""
+    _write_halt_marker(
+        workspace,
+        {
+            "halted_at": datetime.now(UTC).isoformat(),
+            "workspace": os.path.abspath(workspace),
+            "reason": "run_contract_failure",
+            "iteration": iteration,
+            "detail": f"{type(error).__name__}: {error}",
+        },
+    )
+    sys.exit(3)
 
 
 def _check_consecutive_failure_brake(
@@ -3389,7 +3404,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
             launch_identity=launch_identity,
             replacement=manifest_replacement,
         )
-        sys.exit(1)
+        _halt_contract_failure(args.workspace, args.start_iteration, e)
 
     if state.committed_iters:
         print(
@@ -3655,6 +3670,11 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
             from core.local_code.failure import raise_if_code_package_failure
 
             raise_if_code_package_failure(e)
+        from execute_tools.evaluation_metric import MetricIdentityConflictError
+        from nodes.result_interpretation_agent import InterpretationContractError
+
+        if isinstance(e, (MetricIdentityConflictError, InterpretationContractError)):
+            _halt_contract_failure(args.workspace, args.start_iteration, e)
         sys.exit(1)
 
     manifest = write_manifest(
