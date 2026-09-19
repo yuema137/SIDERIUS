@@ -190,3 +190,13 @@ probe failures and existing CPU/GPU applicability remain unchanged. See
 - `docs/design/v20_priorities/pr_b_gpu_aggregation_attribution.md` —
   the measurement/attribution design and the cross-hardware section.
 - [`docs/getting-started/installation.md`](../../../../docs/getting-started/installation.md) — new-machine bring-up.
+
+### Inference search admission
+
+Before any input allocation or structural forward, inference batch resolution
+filters candidates using the existing compute-intensity cap when temporal
+geometry is declared. Rejected candidates cannot consume CPU probing time.
+If no candidate passes, the diagnostic reports only the intensity refusal;
+VRAM remains unmeasured. Tasks without temporal geometry retain probe-based
+selection without an invented intensity constraint. Completed slow measurements
+remain usable; neither the capacity threshold nor timeout policy is changed.
