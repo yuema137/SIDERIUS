@@ -655,3 +655,15 @@ not Health thresholds, candidate eligibility, or scientific aggregation.
 ### Failed Formal evidence across iterations
 
 When Formal attempts exist but no Health-valid Formal candidate exists, the tuner emits `formal_validity_feedback`: model identity, counts distinguishing execution failure from negative/unknown Health evidence, and the last eight factual outcomes. The classifier is shared with Trial feedback; Formal records are never relabeled Trial. The no-records manifest and typed resume path retain this summary without restoring the model, weights, plugin, score or incumbent. The workflow forwards the most recent three summaries to interpretation and both proposer paths. A cold start with failed Formal evidence means no valid incumbent, not no previous experiment. Existing healthy runs and manifests without this optional field remain supported. No task-specific remedy is inserted.
+## Optional analysis brief: accessible evidence
+
+`InterpretationInput.analysis_access_policy` carries the caller's typed
+`AnalysisAccessPolicy` into the separate AnalysisBrief generation prompt.
+The fixed workflow supplies its resolved analysis policy. Target descriptions
+in task semantics do not authorize inspecting targets: questions should be
+answerable from the declared visible evidence. The interpreter still does not
+choose assets, skills, sampling, or model changes. This field is omitted when
+unset, preserving disabled-path serialization. Changed policy changes the brief
+prompt digest, so resuming a brief under different permissions is refused.
+
+`analysis_resource_envelope` carries the same caller-bound whole-node budget and resource limits to question prioritization. It does not authorize execution or ask the interpreter to select skills. Unset context is omitted; changed resources participate in brief prompt/resume identity.

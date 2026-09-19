@@ -116,3 +116,24 @@ def test_formal_failure_reaches_pipeline_proposing_call(tmp_path):
     text = " ".join(str(item) for item in last_call.args) + str(last_call.kwargs)
     assert "RECENT FORMAL VALIDITY" in text
     assert "formal-candidate" in text and "dominant_fraction" in text
+
+
+def test_analysis_brief_receives_failed_formal_facts_in_cold_start(tmp_path):
+    """DA question generation must not erase failed evidence when no incumbent exists."""
+    from tests.unit.agent.result_interpretation_agent.test_analysis_brief_generation import (
+        _BriefBridge,
+        _cold_input,
+    )
+
+    feedback = _feedback()
+    assert feedback is not None
+    inp = _cold_input(tmp_path, requested=True).model_copy(
+        update={"recent_formal_validity": [feedback]}
+    )
+    bridge = _BriefBridge(
+        {"questions": [{"question": "What authorized input scales were observed?", "priority": 1}]}
+    )
+    ResultInterpretationAgent(bridge_factory=lambda **kwargs: bridge).run(inp)
+    evidence = json.loads(bridge.calls[0][2])["interpretation_evidence"]
+    assert evidence["failed_formal_attempts"][0]["invalid_count"] == 1
+    assert "No prior experimental evidence exists" not in evidence["statement"]

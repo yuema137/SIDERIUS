@@ -24,6 +24,7 @@ from agent.data_analysis.generated_skill_registry import (
     load_generated_skill_registry,
     promote_generated_program,
 )
+from agent.data_analysis.non_execution import build_non_execution_report
 from agent.data_analysis.persistence import AnalysisRunStore
 from agent.data_analysis.plan_validation import AnalysisPlanResolutionError, resolve_analysis_plan
 from agent.data_analysis.rendering import render_report_markdown
@@ -68,6 +69,7 @@ class _SkillSelection(FrozenModel):
     skill_ids: tuple[NonEmptyStr, ...] = ()
     generated_program_question_ids: tuple[NonEmptyStr, ...] = ()
     rationale: NonEmptyStr
+    non_execution_reason: NonEmptyStr | None = None
 
     @model_validator(mode="after")
     def validate_ids(self):
@@ -77,8 +79,11 @@ class _SkillSelection(FrozenModel):
             self.generated_program_question_ids
         ):
             raise ValueError("generated-program question IDs must be unique")
-        if not self.skill_ids and not self.generated_program_question_ids:
-            raise ValueError("selection requires a skill or generated program")
+        has_work = bool(self.skill_ids or self.generated_program_question_ids)
+        if not has_work and self.non_execution_reason is None:
+            raise ValueError("empty selection requires an explicit non-execution reason")
+        if has_work and self.non_execution_reason is not None:
+            raise ValueError("non-executing selection cannot request skills or generated programs")
         return self
 
 
@@ -174,8 +179,12 @@ class DataAnalysisAgent:
             or not isinstance(generated_question_ids, list)
             or not all(isinstance(item, str) and item.strip() for item in generated_question_ids)
             or len(set(generated_question_ids)) != len(generated_question_ids)
-            or (not skill_ids and not generated_question_ids)
         ):
+            return None
+        reason = value.get("non_execution_reason")
+        if not skill_ids and not generated_question_ids:
+            return ((), (), reason) if isinstance(reason, str) and reason.strip() else None
+        if reason is not None:
             return None
         return (tuple(skill_ids), tuple(generated_question_ids))
 
@@ -306,6 +315,13 @@ class DataAnalysisAgent:
             semantic_projection=self._selection_semantics,
         )
         candidate_by_id = {item.card.skill_id: item for item in candidates}
+        if selection.non_execution_reason is not None:
+            return build_non_execution_report(
+                inp=inp,
+                store=store,
+                discovery_digest=discovery.snapshot_digest,
+                reason=selection.non_execution_reason,
+            )
         try:
             selected = tuple(candidate_by_id[skill_id] for skill_id in selection.skill_ids)
         except KeyError as exc:

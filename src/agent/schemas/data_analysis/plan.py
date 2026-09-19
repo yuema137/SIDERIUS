@@ -197,6 +197,9 @@ class AnalysisPlan(FrozenModel):
     invocations: tuple[PlannedAnalysisInvocation, ...]
     stop_policy: StopPolicy
     rationale: NonEmptyStr
+    non_execution_reason: NonEmptyStr | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -219,8 +222,12 @@ class AnalysisPlan(FrozenModel):
         if not self.questions or len(set(self.questions)) != len(self.questions):
             raise ValueError("plan question IDs must be non-empty and unique")
         invocation_ids = [item.invocation_id for item in self.invocations]
-        if not invocation_ids:
-            raise ValueError("analysis plan requires at least one invocation")
+        if not invocation_ids and self.non_execution_reason is None:
+            raise ValueError(
+                "analysis plan requires an invocation or explicit non-execution reason"
+            )
+        if invocation_ids and self.non_execution_reason is not None:
+            raise ValueError("non-executing analysis plan cannot contain invocations")
         if len(set(invocation_ids)) != len(invocation_ids):
             raise ValueError("analysis invocation IDs must be unique")
         if len(self.invocations) > self.stop_policy.max_invocations:

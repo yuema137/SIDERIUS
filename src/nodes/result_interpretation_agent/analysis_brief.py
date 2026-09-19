@@ -61,7 +61,16 @@ Return strict JSON matching the supplied schema. Identify WHAT scientific questi
 investigating; do not choose assets, fields, skills, parameters, sampling, preprocessing, model
 architectures, training changes, or downstream decisions. For a cold start, formulate bounded
 data-characterization questions from task semantics only and never invent prior experiments,
-residuals, failures, regressions, or observations."""
+residuals, failures, regressions, or observations. When an analysis access policy is supplied,
+ask questions answerable from its permitted evidence classes. Task semantics may describe
+targets without making them accessible: do not request target, prediction, residual, or
+metadata evidence that the policy withholds. Do not infer clean-signal properties from raw
+inputs alone. Questions and advice never override the policy; unknown availability is not
+permission. Keep questions at the scientific level rather than selecting assets or skills.
+When an analysis resource envelope is supplied, prioritize a small, useful set of questions
+whose breadth is proportionate to it. Planning, code generation, execution, and synthesis
+share that wall-time budget; do not request an exhaustive catalogue of diagnostics merely
+because the response schema permits more questions."""
     if interpretation.cold_start:
         evidence = {
             "cold_start": True,
@@ -74,6 +83,19 @@ residuals, failures, regressions, or observations."""
             "bottlenecks": interpretation.bottlenecks,
             "take_home_message": interpretation.take_home_message,
         }
+    if inp.recent_formal_validity:
+        evidence["failed_formal_attempts"] = [
+            item.model_dump(mode="json") for item in inp.recent_formal_validity
+        ]
+        if interpretation.cold_start:
+            evidence["statement"] = (
+                "No valid incumbent exists; failed Formal attempts are evidence."
+            )
+        system += (
+            " Explicit failed Formal attempts are real negative evidence even without a valid "
+            "incumbent. Use their recorded facts, not invented outcomes; access policy still "
+            "limits what follow-up analysis can inspect."
+        )
     user = json.dumps(
         {
             "task_description": inp.task_description,
@@ -83,6 +105,16 @@ residuals, failures, regressions, or observations."""
             "interpretation_evidence": evidence,
             "expert_advice": serialize_expert_advice(inp.expert_advice),
             "human_advice": inp.human_advice,
+            "analysis_access_policy": (
+                None
+                if inp.analysis_access_policy is None
+                else inp.analysis_access_policy.model_dump(mode="json")
+            ),
+            "analysis_resource_envelope": (
+                None
+                if inp.analysis_resource_envelope is None
+                else inp.analysis_resource_envelope.model_dump(mode="json")
+            ),
             "response_schema": _AnalysisBriefDraft.model_json_schema(),
         },
         sort_keys=True,
