@@ -169,3 +169,12 @@ directly.
 - **LLM**: three bounded schema-validated stages in a skill-only run: candidate selection, executable planning, and report synthesis. A generated-program run adds one bounded schema-validated source/declaration stage before executable planning. When promotion is explicitly enabled and a generated program completed, one bounded promotion decision is added; reuse does not regenerate source.
 - **GPU**: optional. An enabled skill or caller-injected historical-inference capability may use one only within the caller's resource envelope.
 - **External services**: none beyond the configured LLM provider; task data remain behind `TaskAnalysisCapability`.
+
+### Generated artifact paths
+
+The generated function receives `output_directory`, the artifact certification
+root. `ProducedArtifact.relative_path` must name exactly the file written relative
+to that directory: writing `output_directory / "measurement.json"` declares
+`measurement.json`, not `artifacts/measurement.json`. Subdirectories are allowed
+only when actually created; symlinks and escaping paths remain rejected. Missing
+files report the declared relative path without disclosing a private host path.
