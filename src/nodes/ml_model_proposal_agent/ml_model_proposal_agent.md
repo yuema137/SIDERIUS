@@ -275,3 +275,14 @@ provider selection, call count, schemas and proposal validation are unchanged.
 ### Failed Formal evidence across iterations
 
 When Formal attempts exist but no Health-valid Formal candidate exists, the tuner emits `formal_validity_feedback`: model identity, counts distinguishing execution failure from negative/unknown Health evidence, and the last eight factual outcomes. The classifier is shared with Trial feedback; Formal records are never relabeled Trial. The no-records manifest and typed resume path retain this summary without restoring the model, weights, plugin, score or incumbent. The workflow forwards the most recent three summaries to interpretation and both proposer paths. A cold start with failed Formal evidence means no valid incumbent, not no previous experiment. Existing healthy runs and manifests without this optional field remain supported. No task-specific remedy is inserted.
+
+### Observed prediction references
+
+The framework stamps `observed_prediction_reference` after either proposal
+route, before returning or saving the proposal. It comes only from the typed
+interpretation's best valid score and matching primary metric identity. An LLM
+cannot author this reference. Cold starts, missing valid observations, and
+unrecognized prediction metrics have no reference: `current_value` and
+relative `boldness` are null, and relative-boldness enforcement is skipped.
+Absolute predictions remain permitted. Grounded predictions are revalidated;
+a no-change prediction is corrected by the causal stage's existing retry.

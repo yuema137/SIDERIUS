@@ -134,7 +134,7 @@ _Source code unavailable._
     "causal_hypothesis": "Fixture hypothesis.",
     "falsifiable_prediction": {
       "metric": "mean(file_vector[0:3])",
-      "current_value": 0.5,
+      "current_value": null,
       "predicted_value": 1.5,
       "threshold_for_refutation": 0.7,
       "rationale": "Fixture."

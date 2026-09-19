@@ -23,6 +23,7 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.output_types import OutputTypeName as OutputTypeName
 from agent.schemas.parameter_rules import ParameterRules
+from agent.schemas.prediction_reference import ObservedPredictionReference
 from agent.schemas.proposer_data_analysis_evidence import ProposerDataAnalysisEvidence
 from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
 from agent.schemas.proposer_literature_evidence import ProposerLiteratureReviewEvidence
@@ -63,7 +64,11 @@ class FalsifiablePrediction(BaseModel):
         "evaluates the prediction by computing the metric from the actual "
         "results."
     )
-    current_value: float = Field(description="The SOTA's current value for this metric.")
+    current_value: float | None = Field(
+        default=None,
+        description="Observed current value, or null when no baseline has been measured. "
+        "Never invent a numerical reference for a cold start.",
+    )
     predicted_value: float = Field(description="What the new model should achieve.")
     threshold_for_refutation: float = Field(
         description="The value on the REFUTED side of ``current_value`` for "
@@ -80,13 +85,15 @@ class FalsifiablePrediction(BaseModel):
     rationale: str = Field(description="One sentence: why this specific predicted value.")
 
     @property
-    def boldness(self) -> float:
+    def boldness(self) -> float | None:
         """Relative magnitude of the prediction vs current.
 
         ``abs(predicted - current) / max(abs(current), 1e-6)``.
         The pipeline runner compares this against ``policy.minimum_boldness``.
         The reflector uses it to compute information gain.
         """
+        if self.current_value is None:
+            return None
         return abs(self.predicted_value - self.current_value) / max(abs(self.current_value), 1e-6)
 
     @model_validator(mode="after")
@@ -1248,6 +1255,12 @@ class ProposalOutput(BaseModel):
         "Evaluated by the interpretation agent after tuning to "
         "determine if the hypothesis was confirmed or refuted. "
         "None in legacy mode (no pipeline).",
+    )
+    observed_prediction_reference: ObservedPredictionReference | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Framework-owned proposal-time observed baseline from typed interpretation "
+        "evidence. Overwritten after LLM parsing; absent for cold starts and unsupported metrics.",
     )
     proposed_vocab_links: list[ProposedVocabLink] = Field(
         default_factory=list,

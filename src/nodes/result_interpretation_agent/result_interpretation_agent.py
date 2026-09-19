@@ -77,6 +77,7 @@ from nodes.result_interpretation_agent.prediction import (
     accumulate_prediction_outcomes,
     evaluate_prediction,
     prediction_pool_sizes,
+    read_observed_prediction_reference,
 )
 
 if TYPE_CHECKING:
@@ -893,10 +894,12 @@ class ResultInterpretationAgent:
                         "best_denoising_score": prev_best,
                         "best_file_vector": prev_fv,
                     }
-                    # current_sota = SOTA at proposal time (FalsifiablePrediction.current_value).
-                    # The workflow may pass a fresher value via overall_best_score if needed,
-                    # but the proposal-time baseline is the fairest comparison for evaluation.
-                    sota_at_proposal = prev_prediction.get("current_value")
+                    identity = _require_metric_identity("evaluating the previous prediction")
+                    sota_at_proposal = read_observed_prediction_reference(
+                        inp.previous_proposal,
+                        metric_id=identity.metric_id,
+                        direction=identity.direction,
+                    )
                     prediction_evaluation = evaluate_prediction(
                         prev_prediction,
                         actual_results,

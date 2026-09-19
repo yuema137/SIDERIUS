@@ -46,6 +46,7 @@ from agent.schemas.validator import ValidatorInput, ValidatorOutput
 #: The five hop schemas of the candidate_id transport (E2) — plus the two
 #: measurement surfaces (E3). Transcribed by hand from source.
 PROPOSAL_OUTPUT_KEYS = {
+    "observed_prediction_reference",  # PR552: framework-owned measured baseline.
     "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
     "baseline_config",
     "custom_loss_spec",

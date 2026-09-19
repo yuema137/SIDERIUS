@@ -130,7 +130,9 @@ A JSON object with these fields:
    unsupported.
 
 2. **Falsifiable**: your `falsifiable_prediction` must commit to a SPECIFIC
-   NUMERICAL OUTCOME. The boldness (abs(predicted - current) / abs(current))
+   NUMERICAL OUTCOME. If no observed baseline exists, set current_value to null
+   and state an absolute prediction; do not invent a SOTA or relative gain.
+   With an observed baseline, the boldness (abs(predicted - current) / abs(current))
    must be at least {minimum_boldness}. Timid predictions (boldness < {minimum_boldness})
    are rejected as uninformative. Be ambitious — a confirmed bold prediction
    is worth more than 10 confirmed timid ones.

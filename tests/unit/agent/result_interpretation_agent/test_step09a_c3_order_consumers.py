@@ -453,13 +453,13 @@ class TestTheDiscoveryComparisonIsDirectionCorrectAndSignSafe:
     retune its width.
     """
 
-    def test_the_strictest_sota_is_the_better_of_the_two_under_each_direction(self):
-        # sota_at_proposal = -2.5, overall best = -2.0.
-        # `higher`: the stricter bar is -2.0; `lower`: it is -2.5.
+    def test_observed_sota_is_not_replaced_by_an_authored_reference(self):
+        # The authored -2.5 is not measured evidence in either direction.
+        # The observed overall best remains -2.0.
         assert "SOTA (-2.0000)" in _score_discovery(
             -9.0, order=HIGHER, sota_from_prediction=-2.5, overall_best_score=-2.0
         )
-        assert "SOTA (-2.5000)" in _score_discovery(
+        assert "SOTA (-2.0000)" in _score_discovery(
             9.0, order=LOWER, sota_from_prediction=-2.5, overall_best_score=-2.0
         )
 
