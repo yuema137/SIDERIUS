@@ -6,7 +6,7 @@ import os
 import random
 import sys
 import time
-from collections.abc import Mapping, Sequence, Sized
+from collections.abc import Callable, Mapping, Sequence, Sized
 from typing import Any, cast
 
 import h5py
@@ -71,6 +71,11 @@ from execute_tools.task_data_path import (
 from execute_tools.trained_model_artifact import (
     TrainingArtifactCandidate,
     certified_file_identity,
+)
+from execute_tools.training_budget_execution import (
+    TrainingAllocationRejected,
+    enforce_training_allocation,
+    return_on_allocation_rejection,
 )
 from execute_tools.training_history import (
     STATIC_OBSERVATIONS_KEY,
@@ -789,6 +794,7 @@ def _validation_pass(
     verifier: Any = None,
     on_verified: Any = None,
     observables: Any = None,
+    check_allocation: Callable[[], None] | None = None,
 ) -> tuple[float, int, float]:
     """One R3 observation: the run-resolved objective on the validation scope.
 
@@ -876,6 +882,8 @@ def _validation_pass(
             use_cuda_sync = device.type == "cuda"
             val_iterator = iter(val_loader)
             while True:
+                if check_allocation is not None:
+                    check_allocation()
                 # Include DataLoader.next(): compressed reads and collation are
                 # part of this production batch's wall cost, not free setup.
                 if verifier is not None:
@@ -1217,6 +1225,7 @@ def _setup_storage_provenance(
     return capture_storage_provenance(data_dir, file_paths, scoped_bytes=scoped_on_disk_bytes)
 
 
+@return_on_allocation_rejection
 def run_experiment_streaming(
     model_cfg,
     train_cfg: TrainConfig,
@@ -1538,12 +1547,18 @@ def run_experiment_streaming(
         nonlocal validation_verifier
         if runtime_session is None or validation_verifier is None:
             return
-        runtime_session.complete_phase_verification(
+        prediction = runtime_session.complete_phase_verification(
             "validation",
             validation_verifier,
             source="real_validation_verification",
         )
         validation_verifier = None
+        enforce_training_allocation(runtime_session, phase="validation", prediction=prediction)
+        if (
+            runtime_session.decide_admission(stage="post_validation_verification").decision
+            == "rejected"
+        ):
+            raise TrainingAllocationRejected("validation calibration refused by runtime admission")
 
     def _finish_training_verification(decide_admission: bool) -> bool:
         """Record the training verification; optionally decide admission.
@@ -1738,6 +1753,7 @@ def run_experiment_streaming(
         rejected_mid_epoch = False
         batch_iterator = iter(loader)
         for _ in tqdm(range(len(loader)), desc=f"Epoch {ep}", file=sys.stdout):
+            enforce_training_allocation(runtime_session, phase="training")
             if verifier is not None:
                 if use_cuda_sync:
                     torch.cuda.synchronize()
@@ -1830,6 +1846,9 @@ def run_experiment_streaming(
                 verifier=validation_verifier,
                 on_verified=_finish_validation_verification,
                 observables=observation,
+                check_allocation=lambda: enforce_training_allocation(
+                    runtime_session, phase="validation"
+                ),
             )
             observation.finish_epoch()
             validation_history.append(float(r3))

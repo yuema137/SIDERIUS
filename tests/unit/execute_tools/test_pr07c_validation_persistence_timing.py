@@ -64,7 +64,7 @@ class _ObserverConfig(BaseModel):
     segmentation_size: int = 1000
 
 
-def _make_observer(sidecar_path: Path):
+def _make_observer(sidecar_path: Path, clock=None):
     """A real model whose forward reads the REAL sidecar during validation.
 
     Registered into the live MODEL_REGISTRY, so the trainer builds and runs it
@@ -87,6 +87,8 @@ def _make_observer(sidecar_path: Path):
                 # EVERY validation batch, so the assertion can be about the
                 # ORDER of events rather than about a hard-coded batch index —
                 # which would be an assumption about this machine's speed.
+                if clock is not None:
+                    clock[0] += 1.0
                 self.eval_calls += 1
                 observations.append(
                     {"batch": self.eval_calls, **_read_validation_component(sidecar_path)}
@@ -115,7 +117,7 @@ def _read_validation_component(sidecar_path: Path) -> dict:
 
 
 @pytest.fixture
-def observed_run(tmp_path):
+def observed_run(tmp_path, request, monkeypatch):
     """One in-process streaming run whose model watches the live sidecar."""
     random.seed(7)
     np.random.seed(7)
@@ -126,7 +128,11 @@ def observed_run(tmp_path):
     sidecar = tmp_path / "rv.json"
     # batch_size 1 over the 24-row scope gives 24 validation batches, so there
     # is ample headroom between the verifier's verdict and the end of the pass.
-    model_cls, observations = _make_observer(sidecar)
+    budgeted = getattr(request, "param", False)
+    clock = [0.0] if budgeted else None
+    if clock is not None:
+        monkeypatch.setattr("time.monotonic", lambda: clock[0])
+    model_cls, observations = _make_observer(sidecar, clock)
     for sub in ("m", "r"):
         (tmp_path / sub).mkdir(parents=True, exist_ok=True)
 
@@ -135,7 +141,17 @@ def observed_run(tmp_path):
     session = RuntimeVerificationSession(
         str(sidecar),
         attempt_id="pr07c_timing",
-        policy=RuntimeControlPolicy(verification=_FAST_VERIFICATION),
+        policy=RuntimeControlPolicy(
+            verification=_FAST_VERIFICATION,
+            training_budget={
+                "budget_seconds": 8,
+                "reserve_fraction": 0.25,
+                "max_epochs": 1,
+                "started_monotonic_seconds": 0,
+            }
+            if budgeted
+            else None,
+        ),
     )
     try:
         data_path = TwoFamilyDataPath(fx)
@@ -159,7 +175,8 @@ def observed_run(tmp_path):
     finally:
         MODEL_REGISTRY.pop(MODEL_TYPE, None)
         PLUGIN_CONFIG_REGISTRY.pop(MODEL_TYPE, None)
-    assert summary is not None
+    if not budgeted:
+        assert summary is not None
     return summary, observations, sidecar, session
 
 
@@ -239,3 +256,16 @@ class TestThePredictionIsPersistedDuringThePass:
         # 4. Q-07c-6 = B: no admission verdict moved.
         admission = block.get("admission")
         assert admission is None or admission["decision"] == "admitted"
+
+
+@pytest.mark.parametrize("observed_run", [True], indirect=True)
+def test_first_validation_stops_at_allocation_before_full_pass(observed_run, tmp_path):
+    """Reachability: the real loop must check the continuing allowance, not after the epoch."""
+    summary, observations, sidecar, _session = observed_run
+    assert summary is None
+    assert 0 < len(observations) < 24
+    receipt = json.loads(sidecar.read_text())
+    assert receipt["admission"]["decision"] == "rejected"
+    assert receipt["admission"]["stage"] == "training_allocation.validation"
+    assert "reserved_seconds=2" in receipt["admission"]["reason"]
+    assert not list((tmp_path / "m").glob("*.pth"))

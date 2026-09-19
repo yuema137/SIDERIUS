@@ -756,6 +756,21 @@ class RuntimeVerificationSession:
         self._write_sidecar()
         return self._admission
 
+    def reject_training_allocation(self, *, phase: RuntimePhase, reason: str) -> None:
+        """Persist an execution-allocation refusal without inventing a measurement."""
+        if self.policy.training_budget is None:
+            raise RuntimeError("training allocation refusal requires an explicit allowance")
+        self._admission = AdmissionRecord(
+            decision="rejected",
+            failure_class="candidate",
+            stage=f"training_allocation.{phase}",
+            reason=reason,
+            setup_cost_seconds=self._setup_seconds or 0.0,
+            verification_cost_seconds=self._verification_seconds,
+        )
+        self._final_status = "rejected"
+        self._write_sidecar()
+
     def assess_total(self, required_phases: tuple[RuntimePhase, ...]) -> TotalAssessment:
         """Assemble the derived total under the contribution policy (RT2-E).
 
