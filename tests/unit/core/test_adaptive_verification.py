@@ -132,7 +132,9 @@ class TestDriftAndFailure:
         for t in [10.0] * 20:
             v.feed(t)
         assert v.state == "measuring"
-        assert v.feed(200.0) == "failed_pathological_unit"  # > 10x median
+        for _ in range(cfg.steady.stable_windows - 1):
+            assert not v.feed(200.0).startswith("failed")
+        assert v.feed(200.0) == "failed_pathological_unit"  # sustained > 10x median
         assert v.failure_reason is not None and "pathological" in v.failure_reason
 
     def test_pathological_absolute_threshold(self):
@@ -326,3 +328,52 @@ def test_normalized_rate_cannot_bypass_measurement_wall_cap():
     verifier.feed(0.1, elapsed_ms=60)
     assert verifier.is_terminal
     assert verifier.verification_seconds == pytest.approx(0.06)
+
+
+@pytest.mark.parametrize("unit_ms,batch", [(0.25, 1), (2.0, 1), (0.02, 16), (40.0, 1)])
+def test_fast_stable_phases_collect_the_same_evidence_time(unit_ms, batch):
+    """A fast device/batch must not fail only because 200 observations are too short."""
+    verifier = AdaptiveUnitVerification("sample", AdaptiveVerificationConfig())
+    for _ in range(5000):
+        if verifier.feed(unit_ms, elapsed_ms=unit_ms * batch) == "verified":
+            break
+        assert not verifier.is_terminal
+    assert verifier.state == "verified"
+    assert verifier.measurement().total_measurement_seconds >= 0.5
+
+
+@pytest.mark.parametrize("unit_ms", [0.05, 2.0, 80.0])
+def test_isolated_relative_delay_is_recorded_without_failure(unit_ms):
+    """A single scheduling/I/O spike cannot establish persistent pathological speed."""
+    cfg = _config(min_timed_ms=unit_ms * 200, max_wall_ms=unit_ms * 1000)
+    verifier = AdaptiveUnitVerification("sample", cfg)
+    for _ in range(20):
+        verifier.feed(unit_ms)
+    assert verifier.feed(unit_ms * 20) != "failed_pathological_unit"
+    for _ in range(400):
+        if verifier.is_terminal:
+            break
+        verifier.feed(unit_ms)
+    assert verifier.state == "verified"
+    assert verifier.measurement().detail["relative_slow_observation_indices"] == [20]
+
+
+def test_fast_phase_extension_still_obeys_time_cap():
+    """Stable extension must not turn an impossible time floor into unbounded sampling."""
+    cfg = _config(max_steps=30, min_timed_ms=500, max_wall_ms=100)
+    verifier = AdaptiveUnitVerification("sample", cfg)
+    state = _feed_until_terminal(verifier, [1.0] * 600)
+    assert state == "failed_no_steady_state"
+    assert len(verifier.measurement().raw_timings_ms) <= 100
+
+
+def test_fast_extension_stops_on_local_wall_time(monkeypatch):
+    """Verifier CPU overhead also bounds tiny-unit traces, not just reported GPU time."""
+    now = [0.0]
+    monkeypatch.setattr("core.runtime_control.adaptive.time.monotonic", lambda: now[0])
+    cfg = _config(max_steps=30, min_timed_ms=500, max_wall_ms=1000)
+    verifier = AdaptiveUnitVerification("sample", cfg)
+    for _ in range(40):
+        assert not verifier.feed(0.1).startswith("failed")
+    now[0] = 1.1
+    assert verifier.feed(0.1) == "failed_no_steady_state"

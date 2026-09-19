@@ -19,3 +19,16 @@ measure bounded resource use, but the calibration derivation quarantines it
 from temporal throughput evidence. No caller may replace the absent dimension
 with a framework default. `TaskProbeDataSpec` carries this typed fact
 explicitly; merely supplying task probe data does not decide applicability.
+
+### Fast-phase calibration
+
+`AdaptiveVerificationConfig.max_steps` bounds acquisition of stability and the
+minimum observation count. A stable trace that only lacks `min_timed_ms` may
+continue under `max_wall_ms`; elapsed batch time, not normalized per-sample rate,
+counts toward evidence. The wall bound also includes local verifier processing.
+Exhausted or unstable traces never become verified by relaxing evidence floors.
+Relative slow observations are recorded in measurement details. A consecutive
+streak of `steady.stable_windows` above `pathological_factor` times the prior
+plateau fails verification; an isolated spike does not. Explicit `max_unit_ms`
+still fails immediately after stabilization. These rules do not change data
+selection, model size, resource budgets or prediction-watchdog enablement.

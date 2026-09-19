@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import math
 import statistics
+import time
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -88,7 +89,10 @@ class AdaptiveVerificationConfig(BaseModel):
     max_steps: int = Field(
         default=200,
         ge=4,
-        description="Hard cap on total observed units (stabilization + measurement).",
+        description=(
+            "Observation cap for establishing stability and count evidence. Once those "
+            "are satisfied, fast units may continue to the time floor within max_wall_ms."
+        ),
     )
     max_wall_ms: float = Field(
         default=60_000.0,
@@ -104,8 +108,9 @@ class AdaptiveVerificationConfig(BaseModel):
         gt=1.0,
         description=(
             "A unit measured AFTER steady-state declaration exceeding "
-            "factor × steady median terminates verification as "
-            "pathological (§2.5). Never applied to warm-up transients."
+            "factor × steady median records a slow observation. A sustained streak "
+            "of steady.stable_windows such observations terminates verification. "
+            "Never applied to warm-up transients."
         ),
     )
     max_unit_ms: float | None = Field(
@@ -180,6 +185,10 @@ class AdaptiveUnitVerification:
         self._state: VerificationState = "stabilizing"
         self._failure_reason: str | None = None
         self._prior_agreement: PriorAgreement | None = None
+        self._slow_reference_ms: float | None = None
+        self._slow_streak = 0
+        self._slow_observations: list[int] = []
+        self._started_at: float | None = None
 
     # ── State ────────────────────────────────────────────────────────────
 
@@ -225,23 +234,38 @@ class AdaptiveUnitVerification:
         elapsed = unit_ms if elapsed_ms is None else elapsed_ms
         if not math.isfinite(elapsed) or elapsed <= 0:
             raise ValueError(f"elapsed_ms must be finite and positive; got {elapsed!r}.")
+        if self._started_at is None:
+            self._started_at = time.monotonic()
         self._all_times_ms.append(unit_ms)
         self._elapsed_times_ms.append(elapsed)
+        # Compare with the pre-observation plateau. An isolated I/O/scheduler
+        # delay is evidence, not a conclusive persistent slowdown; repeated
+        # slow observations still fail before a new plateau can hide the drift.
+        prior_steady = self._detector.steady_times_ms()
+        reference = self._slow_reference_ms
+        if reference is None and self._detector.detected and prior_steady:
+            reference = statistics.median(prior_steady)
+        if reference is not None:
+            if unit_ms > self.config.pathological_factor * reference:
+                self._slow_reference_ms = reference
+                self._slow_streak += 1
+                self._slow_observations.append(len(self._all_times_ms) - 1)
+                if self._slow_streak >= self.config.steady.stable_windows:
+                    self._failure_reason = (
+                        f"pathological sustained slowdown: {self._slow_streak} consecutive "
+                        f"units > {self.config.pathological_factor}x steady median "
+                        f"{reference:.3g} ms; latest {unit_ms:.3g} ms"
+                    )
+                    self._state = "failed_pathological_unit"
+                    return self._state
+            else:
+                self._slow_reference_ms = None
+                self._slow_streak = 0
         self._detector.observe(unit_ms)
 
         if self._detector.detected:
             steady = self._detector.steady_times_ms()
             steady_median = statistics.median(steady)
-
-            # Pathological checks apply ONLY after declaration — warm-up
-            # transients are B1's business (measured on H100: step 0 at 82x).
-            if unit_ms > self.config.pathological_factor * steady_median:
-                self._failure_reason = (
-                    f"pathological unit: {unit_ms:.1f} ms > "
-                    f"{self.config.pathological_factor}x steady median {steady_median:.1f} ms"
-                )
-                self._state = "failed_pathological_unit"
-                return self._state
             if self.config.max_unit_ms is not None and unit_ms > self.config.max_unit_ms:
                 self._failure_reason = (
                     f"pathological unit: {unit_ms:.1f} ms > absolute threshold "
@@ -249,11 +273,11 @@ class AdaptiveUnitVerification:
                 )
                 self._state = "failed_pathological_unit"
                 return self._state
-
             self._state = "measuring"
             self._compare_prior(steady_median)
             if (
-                len(steady) >= self._required_steady_steps()
+                self._slow_streak == 0
+                and len(steady) >= self._required_steady_steps()
                 and self._steady_elapsed_ms() >= self.config.min_timed_ms
             ):
                 self._state = "verified"
@@ -262,11 +286,18 @@ class AdaptiveUnitVerification:
             # Not (or no longer — re-arm) detected.
             self._state = "stabilizing"
 
-        # Hard caps (§2.12) — only reachable while not verified.
+        # A fast, already stable phase can need more observations to accumulate
+        # the same evidence time. Never extend an unstable/count-deficient trace.
+        extend_for_time = (
+            self._detector.detected
+            and self._slow_streak == 0
+            and len(self._detector.steady_times_ms()) >= self._required_steady_steps()
+            and self._steady_elapsed_ms() < self.config.min_timed_ms
+        )
+        wall_ms = max(sum(self._elapsed_times_ms), (time.monotonic() - self._started_at) * 1000.0)
         if (
-            len(self._all_times_ms) >= self.config.max_steps
-            or sum(self._elapsed_times_ms) >= self.config.max_wall_ms
-        ):
+            len(self._all_times_ms) >= self.config.max_steps and not extend_for_time
+        ) or wall_ms >= self.config.max_wall_ms:
             self._fail_insufficient()
         return self._state
 
@@ -386,6 +417,8 @@ class AdaptiveUnitVerification:
                 "prior_agreement": self._prior_agreement,
                 "prior_expected_unit_ms": self.prior_expected_unit_ms,
                 "rolling_medians_ms": self._detector.result().rolling_medians_ms,
+                "relative_slow_observation_indices": list(self._slow_observations),
+                "observation_cap_extended": len(self._all_times_ms) > self.config.max_steps,
             },
         )
 
