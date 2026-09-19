@@ -9,16 +9,27 @@ models, and reflect on results with deterministic infrastructure that owns
 training, inference, scoring, validity checks, and provenance. Agents provide
 validated plans; they do not redefine execution rules or task-declared science.
 
+## Architecture at a glance
+
+[![Callers, orchestration policy, resources, and typed research capabilities](docs/assets/paper/fig_composition.png)](docs/assets/paper/fig_composition.pdf)
+
+The caller chooses which capability to invoke and supplies its typed inputs,
+task context, and resource budget. The reference workflow provides a fixed
+sequence; custom callers use the same validated node boundaries. The figure
+illustrates the composition model, including possible orchestration policies.
+See [architecture](docs/architecture.md) and the
+[custom workflow boundary](docs/guides/custom-workflow.md) for supported interfaces.
+
 ## The reference workflow
 
 [![The shipped SIDERIUS reference workflow](docs/assets/paper/fig_loop.png)](docs/assets/paper/fig_loop.pdf)
 
 *The shipped reference workflow: interpret → propose → implement → validate →
-train and tune, with optional literature review. This original Paper figure is
-reused unchanged; its source and conversion record are in
-[`docs/assets/paper/README.md`](docs/assets/paper/README.md).*
+train and tune, with optional literature review. One lap is one research
+iteration; training epochs and tuning rounds happen inside that lap.*
 
-One iteration follows a fixed, deterministic path over six typed nodes. Tuning
+The diagram shows the core loop and its literature-review advisor; optional
+Data Analysis is configured separately. Tuning
 contains training, inference, scoring, and round-level Health checks; its
 records provide evidence for the next iteration. Nodes may also be called by a
 caller-owned workflow when complete validated inputs and task context are
@@ -112,6 +123,8 @@ checkout or promise model quality.
 
 ## Quality and validity are different questions
 
+[![Task-declared training, validation, selection, secondary evidence, and validity checks](docs/assets/paper/fig_evaluation.png)](docs/assets/paper/fig_evaluation.pdf)
+
 | Evaluation role | Meaning |
 | --- | --- |
 | Training objective | Quantity used to fit model parameters |
@@ -125,6 +138,21 @@ invalidate a round. Passing Health is not scientific success.
 
 See [objectives and metrics](docs/concepts/objectives-and-metrics.md) and
 [Health gates](docs/concepts/health-gates.md).
+
+## Human participation
+
+[![Human participation through advice, supplied proposals, and standalone node calls](docs/assets/paper/fig_human.png)](docs/assets/paper/fig_human.pdf)
+
+Provide [human advice](docs/guides/advice.md), supply a proposal through a
+[typed handoff](docs/guides/custom-workflow.md), or invoke an individual
+[node](docs/agent-reference/index.md#nodes) with complete validated inputs.
+The caller supplies the task context and owns execution and workspace setup.
+The figure illustrates these interaction patterns; replacing a node's input
+is a caller-controlled operation.
+
+All four illustrations are reused from SIDERIUS-Paper. Click an image for its
+vector PDF; [asset provenance](docs/assets/paper/README.md) records the source
+revision and checksums.
 
 ## Extend and navigate
 
