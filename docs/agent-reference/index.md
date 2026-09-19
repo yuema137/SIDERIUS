@@ -75,8 +75,8 @@ Each node owns one stage. Its `.md` is the contract.
 | [`data_analysis_agent`](../../src/nodes/data_analysis_agent/data_analysis_agent.md) | execute authorized scientific-analysis skills and synthesize a bounded report | ✅ | Python capability API only |
 | [`ml_literature_review`](../../src/nodes/ml_literature_review/ml_literature_review.md) | surface papers as soft priors (optional stage) | ✅ | `src/nodes/ml_literature_review/ml_literature_review.py:1153` (standalone CLI; the workflow supplies typed evidence) |
 | [`ml_model_proposal_agent`](../../src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) | propose an architecture and an explicit prediction | ✅ | `src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py:2477` |
-| [`ml_model_implementor`](../../src/nodes/ml_model_implementor/ml_model_implementor.md) | write the model plugin (and optional loss plugin) | ✅ | `src/nodes/ml_model_implementor/ml_model_implementor.py:2325` |
-| [`ml_code_validator_agent`](../../src/nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ | `src/nodes/ml_code_validator_agent/ml_code_validator_agent.py:940` |
+| [`ml_model_implementor`](../../src/nodes/ml_model_implementor/ml_model_implementor.md) | write the model plugin (and optional loss plugin) | ✅ | `src/nodes/ml_model_implementor/ml_model_implementor.py:2329` |
+| [`ml_code_validator_agent`](../../src/nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ | `src/nodes/ml_code_validator_agent/ml_code_validator_agent.py:945` |
 | [`ml_hyperparameter_tune_agent`](../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1842` (parser and input builder in `cli.py`) |
 
 Six nodes currently have a CLI entry: each exposes an `argparse` `main()`
