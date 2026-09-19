@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
 from agent.schemas.data_analysis.access import AnalysisAccessPolicy
 from agent.schemas.data_analysis.context import AnalysisBrief
+from agent.schemas.data_analysis.resources import AnalysisResourceEnvelope
 from agent.schemas.health_feedback import (
     CollapseFingerprint,
     CollapseFingerprintHistoryEntry,
@@ -681,6 +682,11 @@ class InterpretationInput(BaseModel):
             "Caller-bound evidence permissions for optional AnalysisBrief questions. "
             "This is reasoning context, not a grant of access or an executable plan."
         ),
+    )
+    analysis_resource_envelope: AnalysisResourceEnvelope | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Caller-bound analysis resources for prioritizing optional brief questions.",
     )
     # --- Vocabulary feedback (Phase C) ---
     runtime_vocab: list[VocabEntry] = Field(

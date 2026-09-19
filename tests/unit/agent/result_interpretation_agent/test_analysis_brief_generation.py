@@ -285,13 +285,20 @@ def test_brief_receives_bound_access_policy_and_resume_rejects_changed_permissio
         split_rules=(SplitAccessRule(split_id="validation", targets_visible=False),),
     )
     inp = _cold_input(tmp_path, requested=True).model_copy(
-        update={"analysis_access_policy": policy}
+        update={
+            "analysis_access_policy": policy,
+            "analysis_resource_envelope": AnalysisResourceEnvelope(
+                wall_time_budget_s=300, per_skill_timeout_s=12
+            ),
+        }
     )
     bridge = _BriefBridge({"questions": [{"question": "How variable are the observed inputs?"}]})
     agent = ResultInterpretationAgent(bridge_factory=lambda **_kwargs: bridge)
     agent.run(inp)
     prompt = json.loads(bridge.calls[0][2])
     assert prompt["analysis_access_policy"] == policy.model_dump(mode="json")
+    assert prompt["analysis_resource_envelope"]["wall_time_budget_s"] == 300
+    assert "Planning, code generation, execution, and synthesis" in bridge.calls[0][1]
     assert "targets without making them accessible" in bridge.calls[0][1]
     assert "analysis_access_policy" not in _cold_input(tmp_path, requested=False).model_dump()
     changed = policy.model_copy(
@@ -299,4 +306,14 @@ def test_brief_receives_bound_access_policy_and_resume_rejects_changed_permissio
     )
     with pytest.raises(AnalysisBriefResumeMismatchError):
         agent.run(inp.model_copy(update={"analysis_access_policy": changed}))
+    with pytest.raises(AnalysisBriefResumeMismatchError):
+        agent.run(
+            inp.model_copy(
+                update={
+                    "analysis_resource_envelope": AnalysisResourceEnvelope(
+                        wall_time_budget_s=600, per_skill_timeout_s=12
+                    )
+                }
+            )
+        )
     assert len(bridge.calls) == 1

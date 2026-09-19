@@ -66,7 +66,11 @@ ask questions answerable from its permitted evidence classes. Task semantics may
 targets without making them accessible: do not request target, prediction, residual, or
 metadata evidence that the policy withholds. Do not infer clean-signal properties from raw
 inputs alone. Questions and advice never override the policy; unknown availability is not
-permission. Keep questions at the scientific level rather than selecting assets or skills."""
+permission. Keep questions at the scientific level rather than selecting assets or skills.
+When an analysis resource envelope is supplied, prioritize a small, useful set of questions
+whose breadth is proportionate to it. Planning, code generation, execution, and synthesis
+share that wall-time budget; do not request an exhaustive catalogue of diagnostics merely
+because the response schema permits more questions."""
     if interpretation.cold_start:
         evidence = {
             "cold_start": True,
@@ -92,6 +96,11 @@ permission. Keep questions at the scientific level rather than selecting assets 
                 None
                 if inp.analysis_access_policy is None
                 else inp.analysis_access_policy.model_dump(mode="json")
+            ),
+            "analysis_resource_envelope": (
+                None
+                if inp.analysis_resource_envelope is None
+                else inp.analysis_resource_envelope.model_dump(mode="json")
             ),
             "response_schema": _AnalysisBriefDraft.model_json_schema(),
         },

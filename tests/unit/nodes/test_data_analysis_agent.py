@@ -1332,3 +1332,27 @@ def test_no_applicable_analysis_is_persisted_without_data_access_or_fake_finding
         )
     with pytest.raises(ValueError, match="requires an invocation"):
         AnalysisPlan.model_validate({**plan.model_dump(), "non_execution_reason": None})
+
+
+def test_no_work_report_preserves_previously_certified_skill_registry(tmp_path):
+    from agent.data_analysis.non_execution import build_non_execution_report
+    from agent.data_analysis.persistence import AnalysisRunStore
+    from agent.schemas.data_analysis.generated_skill import GeneratedExperimentSkillRegistryRef
+
+    registry = GeneratedExperimentSkillRegistryRef(
+        registry_id="prior-registry",
+        registry_root=str(tmp_path / "prior-registry"),
+        manifest_ref=CertifiedArtifactRef(
+            logical_ref="registry.json", sha256="3" * 64, media_type="application/json"
+        ),
+        registry_sha256="4" * 64,
+    )
+    inp = _input(tmp_path).model_copy(update={"generated_skill_registry": registry})
+    report = build_non_execution_report(
+        inp=inp,
+        store=AnalysisRunStore(inp.storage, request_id=inp.request_id),
+        discovery_digest="5" * 64,
+        reason="No additional applicable work",
+    )
+    assert report.provenance.generated_skill_registry == registry
+    assert not report.findings and not report.assets_inspected

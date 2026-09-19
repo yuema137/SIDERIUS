@@ -80,5 +80,6 @@ def build_non_execution_report(
             discovery_snapshot_digest=discovery_digest,
             skill_result_set_digest=canonical_sha256([]),
             generated_at=utc_now(),
+            generated_skill_registry=inp.generated_skill_registry,
         ),
     )
