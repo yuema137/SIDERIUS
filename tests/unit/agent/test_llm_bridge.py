@@ -258,7 +258,7 @@ class TestGenerate:
     def test_malformed_json_raises_value_error(self):
         """_chat_json retries on unparseable JSON and surfaces ValueError after
         the bounded budget is exhausted (does not silently return {})."""
-        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, patch("agent.llm_bridge.time.sleep"):
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, patch("core.execution_deadline.time.sleep"):
             mock_create = MockOpenAI.return_value.chat.completions.create
             mock_create.return_value = _chat_response("not valid json {{")
             bridge = LLMBridge(provider="gemini", model_id="test-model")
@@ -295,7 +295,7 @@ class TestGenerate:
         violates the caller contract (which expects a dict/list). The bridge
         retries the bounded budget and then surfaces ValueError so downstream
         code never receives a primitive."""
-        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, patch("agent.llm_bridge.time.sleep"):
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, patch("core.execution_deadline.time.sleep"):
             mock_create = MockOpenAI.return_value.chat.completions.create
             mock_create.return_value = _chat_response('"just a string"')
             bridge = LLMBridge(provider="openai", model_id="gpt-4o")
@@ -307,7 +307,7 @@ class TestGenerate:
         """Reproduces the deepseek-v4-pro failure mode: HTTP 200 with empty
         content body. The bridge must retry and eventually surface the valid
         response on a later attempt rather than crash the whole chain."""
-        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, patch("agent.llm_bridge.time.sleep"):
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, patch("core.execution_deadline.time.sleep"):
             mock_create = MockOpenAI.return_value.chat.completions.create
             # First two calls return empty, third returns valid JSON.
             mock_create.side_effect = [
@@ -322,7 +322,7 @@ class TestGenerate:
 
     def test_malformed_then_valid_succeeds(self):
         """Transient JSON-decode failure on the first call recovers via retry."""
-        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, patch("agent.llm_bridge.time.sleep"):
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, patch("core.execution_deadline.time.sleep"):
             mock_create = MockOpenAI.return_value.chat.completions.create
             mock_create.side_effect = [
                 _chat_response("garbage {{"),
@@ -859,7 +859,7 @@ class TestCallWithRetryDelay:
                 raise exc
             return _chat_response(VALID_JSON_STR)
 
-        with patch("agent.llm_bridge.time.sleep") as mock_sleep:
+        with patch("core.execution_deadline.time.sleep") as mock_sleep:
             bridge._call_with_retry(fn, label="test")
         mock_sleep.assert_called_once_with(300.0)
 
@@ -876,7 +876,7 @@ class TestCallWithRetryDelay:
                 raise exc
             return _chat_response(VALID_JSON_STR)
 
-        with patch("agent.llm_bridge.time.sleep") as mock_sleep:
+        with patch("core.execution_deadline.time.sleep") as mock_sleep:
             bridge._call_with_retry(fn, label="test")
         mock_sleep.assert_called_once_with(2.5)
 

@@ -148,3 +148,20 @@ class TestQuotaRetryStaysUnbounded:
 
         with pytest.raises(APIStatusError):
             bridge._call_with_retry(unauthorized, label="test")
+
+
+def test_scoped_deadline_bounds_otherwise_unlimited_rate_limit_retry(monkeypatch):
+    """A DA allocation must not wait indefinitely on429 despite unbounded campaign retries."""
+    from core.execution_deadline import ExecutionDeadlineExceeded, execution_deadline
+
+    monkeypatch.setattr("core.execution_deadline.time.monotonic", lambda: 0.0)
+    bridge = _bridge(max_retries=None)
+    calls = []
+
+    def limited():
+        calls.append(True)
+        raise _status_error(429)
+
+    with execution_deadline(1), pytest.raises(ExecutionDeadlineExceeded, match="retry wait"):
+        bridge._call_with_retry(limited, label="test")
+    assert len(calls) == 1

@@ -198,7 +198,7 @@ def test_chat_json_writes_one_row_per_attempt(tmp_path, monkeypatch):
     ]
 
     # Stub out time.sleep so the test is fast.
-    monkeypatch.setattr("agent.llm_bridge.time.sleep", lambda _: None)
+    monkeypatch.setattr("core.execution_deadline.time.sleep", lambda _: None)
 
     out = bridge.generate("s", "u", label="proposer.proposing")
     assert out == {"ok": True}
@@ -222,7 +222,7 @@ def test_chat_json_writes_row_for_empty_content(tmp_path, monkeypatch):
         _chat_response("", usage=_usage(5, 0, 5)),
         _chat_response('{"ok": 1}', usage=_usage(6, 1, 7)),
     ]
-    monkeypatch.setattr("agent.llm_bridge.time.sleep", lambda _: None)
+    monkeypatch.setattr("core.execution_deadline.time.sleep", lambda _: None)
 
     out = bridge.generate("s", "u", label="proposer.proposing")
     assert out == {"ok": 1}

@@ -1247,3 +1247,37 @@ def test_output_retention_changes_standalone_identity_not_data_authority(tmp_pat
     assert canonical_sha256(default) != canonical_sha256(retained)
     assert retained.declared_scope == default.declared_scope
     assert retained.access_policy == default.access_policy
+
+
+@pytest.mark.allow_real_subprocess
+@pytest.mark.parametrize("late_stage", ["data_analysis.skill_selection", "data_analysis.synthesis"])
+def test_analysis_deadline_includes_llm_stages_and_refuses_late_report(
+    tmp_path: Path, monkeypatch, late_stage: str
+) -> None:
+    """The skill budget used to reset after planning and omit final synthesis."""
+    from core.execution_deadline import ExecutionDeadlineExceeded
+
+    now = [0.0]
+    monkeypatch.setattr("core.execution_deadline.time.monotonic", lambda: now[0])
+    inp = _input(tmp_path)
+
+    class SlowBridge(_Bridge):
+        def generate(self, system, user, *, label):
+            result = super().generate(system, user, label=label)
+            now[0] += 16 if label == late_stage else 3
+            return result
+
+    agent = DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        provider="test",
+        model_id="fake",
+        bridge_factory=lambda **kw: SlowBridge(analysis_input=inp, **kw),
+    )
+    with pytest.raises(ExecutionDeadlineExceeded, match=late_stage):
+        agent.run(inp)
+    root = tmp_path / "data_analysis/standalone/request"
+    assert not (root / "report.json").exists()
+    receipt = json.loads((root / "budget_receipt.json").read_text())
+    assert receipt["status"] == "deadline_exceeded"
+    assert receipt["last_boundary"] == late_stage
+    assert receipt["elapsed_seconds"] > receipt["budget_seconds"]
