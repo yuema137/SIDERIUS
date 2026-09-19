@@ -594,3 +594,41 @@ class TestAffectedBucketPromotion:
         assert outcome.n_observations == 2, (
             "an ineligible observation was averaged into the promoted rate"
         )
+
+
+def test_inference_sample_duration_is_preserved_without_batch_rescaling():
+    """2026-09-19: real producer units were quarantined by the converter.
+
+    A 0.25 ms/sample observation must stay 0.25 ms/sample, not become a
+    batch duration or be rejected despite complete identity.
+    """
+    payload = _raw()
+    measurement = payload["components"]["inference"]["measurement"]
+    measurement["unit"] = "inference_sample"
+    measurement["unit_time_ms_median"] = 0.25
+    measurement["n_measured_units"] = 37
+    payload["calibration_context"]["batch_size"] = 8
+    result = derive_duration_calibration_record(
+        RuntimeObservation.model_validate(payload),
+        "inference",
+        identity=CONTEXT,
+    )
+    assert isinstance(result, DerivedDurationRecord)
+    assert (result.measurement_unit, result.measured_value_ms, result.n_measured_units) == (
+        "inference_sample",
+        0.25,
+        37,
+    )
+
+
+def test_known_unit_for_wrong_phase_is_not_accepted():
+    """A recognized name must not smuggle inference throughput into training."""
+    payload = _raw()
+    payload["components"]["training"]["measurement"]["unit"] = "inference_sample"
+    result = derive_duration_calibration_record(
+        RuntimeObservation.model_validate(payload),
+        "training",
+        identity=CONTEXT,
+    )
+    assert isinstance(result, QuarantinedDerivation)
+    assert "not training" in result.reason

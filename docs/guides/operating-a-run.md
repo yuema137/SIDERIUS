@@ -207,3 +207,18 @@ parallelism, literature-review arms, frozen advice, monitoring, stop controls,
 and later-stage authorization, but they must call these same framework entry
 points against an exact SIDERIUS revision. SIDERIUS itself ships no production
 campaign launcher or deployment inventory.
+
+
+### Probe and calibration diagnostics
+
+A candidate smoke test uses its declared temporal length, with a fixed contract
+extent checked against the configuration. A reported probe contract conflict
+should be resolved at that boundary, not by forcing the architecture to support
+an unrelated short input. Scientific Health validity remains separate from
+non-blocking diagnostic failures.
+
+Successful inference measurements with unit `inference_sample` can enter the
+calibration registry unchanged as milliseconds per sample. They are not relabeled
+or numerically converted to milliseconds per batch. Unknown units and units
+incompatible with the phase remain quarantined; existing identity, eligibility
+and unit-bucket separation continue to apply.
