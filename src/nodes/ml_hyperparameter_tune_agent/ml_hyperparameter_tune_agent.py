@@ -1196,7 +1196,7 @@ class HyperparamTuningAgent:
         with open(run_config_path, "w", encoding="utf-8") as f:
             json.dump(run_config, f, indent=4)
 
-        print("=== TIDMAD Agent Activated ===")
+        print("=== SIDERIUS Agent Activated ===")
         print(f"Provider: {agent_input.llm_provider} | Model: {agent_input.llm_model_id}")
         print(f"HealthGate config: {agent_input.health_checks_config or '(shipped default)'}")
         print(
