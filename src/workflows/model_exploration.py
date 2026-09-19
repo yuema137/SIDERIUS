@@ -2317,7 +2317,9 @@ def run_workflow(
         _analysis_binding, tuning_outputs, launch.source_paths
     )
     # Step 09a C2/C3 — the seeds' own reconciled spec orders their summaries.
-    seed_metric_spec = reconcile_metric_spec(tuning_outputs)
+    seed_metric_spec = reconcile_metric_spec(
+        tuning_outputs, bound=task_composition.metric.spec if task_composition is not None else None
+    )
     seed_summaries = tuning_outputs_to_summaries(
         tuning_outputs,
         order=MetricOrder(seed_metric_spec) if seed_metric_spec is not None else None,
@@ -2701,7 +2703,12 @@ def run_workflow(
         # this refuses; nothing here derives a spec. The synthetic
         # gate-exhaustion placeholders are deliberately NOT included — they
         # never reach the interpreter.
-        run_metric_spec = reconcile_metric_spec([*tuning_outputs, *state.iteration_results])
+        run_metric_spec = reconcile_metric_spec(
+            [*tuning_outputs, *state.iteration_results],
+            bound=bindings.task_composition.metric.spec
+            if bindings.task_composition is not None
+            else None,
+        )
         interp_input = InterpretationInput(
             summaries=new_summaries,
             model_knowledge_cache=state.model_knowledge_cache,

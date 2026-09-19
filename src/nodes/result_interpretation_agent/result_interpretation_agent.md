@@ -632,3 +632,11 @@ no secondary may be an operand of a comparison, an argument to a `MetricOrder`
 method, or a sort key — with planted offenders for all three shapes) and
 behaviourally (flipping every secondary value leaves every ordering output
 identical).
+
+### Declared metric on a cold start
+
+The workflow carries the task composition’s declared metric even before any
+scored history exists. The deterministic cold-start output preserves its identity
+and direction for downstream agents. This does not fabricate scores or prior
+evidence. Historical metric stamps must agree with the bound composition through
+the shared reconciliation authority; an absent declaration stays absent.

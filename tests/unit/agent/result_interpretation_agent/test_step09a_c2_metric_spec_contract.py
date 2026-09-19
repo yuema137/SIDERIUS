@@ -419,3 +419,26 @@ class TestTheWorkflowSuppliesTheReconciledSpec:
         assert "requires the run's MetricOrder" in message
         assert "'legacy'" in message, "the refusal must name the offending run"
         assert "never assumed" in message
+
+
+@pytest.mark.parametrize("spec", [shipped_spec(), direction_only_spec()])
+def test_cold_start_preserves_bound_metric_without_inventing_history(spec):
+    """Cold starts previously dropped the declared metric before proposer evidence."""
+    from nodes.result_interpretation_agent import ResultInterpretationAgent
+
+    class NoCalls:
+        def generate(self, *args, **kwargs):
+            raise AssertionError("cold start must not invent an interpretation LLM call")
+
+    agent = ResultInterpretationAgent(bridge_factory=lambda **kwargs: NoCalls())
+    output = agent.run(
+        InterpretationInput(cold_start=True, metric_spec=reconcile_metric_spec([], bound=spec))
+    )
+    assert output.metric_identity == MetricIdentity(metric_id=spec.id, direction=spec.direction)
+    assert output.total_experiments == 0
+
+
+def test_bound_composition_cannot_hide_conflicting_history():
+    """Transporting a declared metric must still refuse incompatible persisted evidence."""
+    with pytest.raises(InterpretationContractError):
+        reconcile_metric_spec([_output(metric_spec=shipped_spec())], bound=direction_only_spec())
