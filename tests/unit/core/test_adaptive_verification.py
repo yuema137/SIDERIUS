@@ -377,3 +377,17 @@ def test_fast_extension_stops_on_local_wall_time(monkeypatch):
         assert not verifier.feed(0.1).startswith("failed")
     now[0] = 1.1
     assert verifier.feed(0.1) == "failed_no_steady_state"
+
+
+def test_final_observation_cannot_verify_after_wall_deadline(monkeypatch):
+    """Review regression: reaching evidence floors must not bypass the wall cap."""
+    now = [0.0]
+    monkeypatch.setattr("core.runtime_control.adaptive.time.monotonic", lambda: now[0])
+    verifier = AdaptiveUnitVerification("sample", _config(min_timed_ms=1000, max_wall_ms=2000))
+    while verifier._steady_elapsed_ms() < 990:
+        assert not verifier.is_terminal
+        verifier.feed(10)
+    assert not verifier.is_terminal
+    now[0] = 3.0
+    assert verifier.feed(10) == "failed_no_steady_state"
+    assert "wall-time cap exhausted" in verifier.failure_reason

@@ -262,6 +262,14 @@ class AdaptiveUnitVerification:
                 self._slow_reference_ms = None
                 self._slow_streak = 0
         self._detector.observe(unit_ms)
+        wall_ms = max(sum(self._elapsed_times_ms), (time.monotonic() - self._started_at) * 1000.0)
+        if wall_ms > self.config.max_wall_ms:
+            self._fail_insufficient()
+            self._failure_reason = (
+                f"verification wall-time cap exhausted: {wall_ms:.3g} ms > "
+                f"{self.config.max_wall_ms:.3g} ms; {self._failure_reason}"
+            )
+            return self._state
 
         if self._detector.detected:
             steady = self._detector.steady_times_ms()
