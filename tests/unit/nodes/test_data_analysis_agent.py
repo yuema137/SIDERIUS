@@ -1040,7 +1040,7 @@ def test_generated_program_cannot_claim_an_artifact_it_did_not_write(tmp_path: P
     root = tmp_path / "data_analysis" / "standalone" / "request"
     result = json.loads((root / "skill_results.jsonl").read_text())
     assert result["failure"]["failure_type"] == "generated_payload_certification"
-    assert "missing or escapes staging" in result["failure"]["message"]
+    assert "is missing relative to output_directory" in result["failure"]["message"]
 
 
 @pytest.mark.allow_real_subprocess

@@ -229,8 +229,13 @@ class AnalysisRunStore:
                     )
                 current = current.parent
             path = candidate.resolve()
-            if path == staging_root or staging_root not in path.parents or not path.is_file():
-                raise AnalysisPersistenceError("skill artifact path is missing or escapes staging")
+            if path == staging_root or staging_root not in path.parents:
+                raise AnalysisPersistenceError("skill artifact path escapes staging")
+            if not path.is_file():
+                raise AnalysisPersistenceError(
+                    f"declared artifact {declaration.relative_path!r} is missing relative to "
+                    "output_directory; declare the exact relative path that was written"
+                )
             payload = path.read_bytes()
             total_bytes += len(payload)
             if total_bytes > contract.max_total_bytes:

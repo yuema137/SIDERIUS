@@ -182,3 +182,12 @@ report's skill-only compute totals. Completed report reuse does not start a new
 allocation. Enforcement is cooperative request/worker timeout propagation, not
 a process-killing watchdog; a non-cooperative blocking capability may return late
 and its result is then rejected. Whole-process deadlines remain caller-owned.
+
+### Generated artifact paths
+
+The generated function receives `output_directory`, the artifact certification
+root. `ProducedArtifact.relative_path` must name exactly the file written relative
+to that directory: writing `output_directory / "measurement.json"` declares
+`measurement.json`, not `artifacts/measurement.json`. Subdirectories are allowed
+only when actually created; symlinks and escaping paths remain rejected. Missing
+files report the declared relative path without disclosing a private host path.

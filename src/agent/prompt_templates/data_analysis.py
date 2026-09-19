@@ -245,8 +245,9 @@ only in safe discovery descriptors and cannot be requested for split materializa
 contains validated scalar values. `output_directory` is the only
 writable artifact directory. Return a plain JSON-serializable payload matching the SkillPayload
 shape: summary, quantitative_results, produced_artifacts, analysis_usage, warnings. Write declared
-artifacts below output_directory and use paths relative to the sandbox output root (therefore
-prefix artifact paths with `artifacts/`). Do not import SIDERIUS internals, inspect the workspace,
+artifacts below output_directory and declare paths relative to that same directory. For example,
+writing `output_directory / "measurement.json"` requires `relative_path="measurement.json"`.
+Do not prepend `artifacts/` unless you actually wrote into that subdirectory. Do not import SIDERIUS internals, inspect the workspace,
 access credentials or network, install packages, alter data, or perform modeling/training. Declare
 only concrete input information and view formats. A predictions input slot may consume certified
 transient output from the trusted historical-inference capability; generated source never loads a
