@@ -133,6 +133,7 @@ from core.runtime_control.launch_guard import run_launch_self_test
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import DataScope, resolve_dataset_profile
 from execute_tools.evaluation_metric import (
+    MetricSpec,
     StampedMetricSpec,
     metric_identity_unavailable_notice,
     reconcile_metric_specs,
@@ -844,6 +845,11 @@ def _build_lit_review_input(
     if analysis_output is not None:
         payload["data_analysis_evidence"] = project_analysis_for_literature(analysis_output.report)
     return LiteratureReviewInput.model_validate(payload)
+
+
+def _declared_metric_spec(composition: RunTaskComposition | None) -> MetricSpec | None:
+    """Project a declared composition identity without deriving a metric or direction."""
+    return composition.metric.spec if composition is not None else None
 
 
 def _acquire_iteration_order(bindings, tune_output) -> MetricOrder | None:
@@ -2318,7 +2324,7 @@ def run_workflow(
     )
     # Step 09a C2/C3 — the seeds' own reconciled spec orders their summaries.
     seed_metric_spec = reconcile_metric_spec(
-        tuning_outputs, bound=task_composition.metric.spec if task_composition is not None else None
+        tuning_outputs, bound=_declared_metric_spec(task_composition)
     )
     seed_summaries = tuning_outputs_to_summaries(
         tuning_outputs,
@@ -2705,9 +2711,7 @@ def run_workflow(
         # never reach the interpreter.
         run_metric_spec = reconcile_metric_spec(
             [*tuning_outputs, *state.iteration_results],
-            bound=bindings.task_composition.metric.spec
-            if bindings.task_composition is not None
-            else None,
+            bound=_declared_metric_spec(bindings.task_composition),
         )
         interp_input = InterpretationInput(
             summaries=new_summaries,
