@@ -33,7 +33,6 @@ from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.data_analysis import (
     render_analysis_plan_prompt,
     render_generated_skill_promotion_prompt,
-    render_report_synthesis_prompt,
     render_skill_selection_prompt,
 )
 from agent.schemas.data_analysis.common import FrozenModel, NonEmptyStr, canonical_sha256, utc_now
@@ -64,6 +63,13 @@ from core.execution_deadline import (
 from execute_tools.analysis_materialization import TaskAnalysisCapability
 from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
 
+from .report_synthesis import generate_grounded_synthesis
+
+__all__ = [
+    "DataAnalysisAgent",
+]
+_COMPATIBILITY_REEXPORTS: tuple[str, ...] = ()
+
 
 class _SkillSelection(FrozenModel):
     skill_ids: tuple[NonEmptyStr, ...] = ()
@@ -85,40 +91,6 @@ class _SkillSelection(FrozenModel):
         if has_work and self.non_execution_reason is not None:
             raise ValueError("non-executing selection cannot request skills or generated programs")
         return self
-
-
-class _FindingDraft(FrozenModel):
-    finding_id: NonEmptyStr
-    result_id: NonEmptyStr
-    statement: NonEmptyStr
-    quantitative_result_ids: tuple[NonEmptyStr, ...] = ()
-    confidence_level: Literal["low", "medium", "high"]
-    confidence_rationale: NonEmptyStr
-    confidence_limitations: tuple[NonEmptyStr, ...] = ()
-    modeling_relevance: NonEmptyStr
-
-
-class _QuestionOutcomeDraft(FrozenModel):
-    question_id: NonEmptyStr
-    status: Literal["addressed", "partially_addressed", "unresolved", "refused"]
-    summary: NonEmptyStr
-    finding_ids: tuple[NonEmptyStr, ...] = ()
-    limitation_ids: tuple[NonEmptyStr, ...] = ()
-
-
-class _LimitationDraft(FrozenModel):
-    limitation_id: NonEmptyStr
-    statement: NonEmptyStr
-    affected_question_ids: tuple[NonEmptyStr, ...] = ()
-
-
-class _ReportSynthesis(FrozenModel):
-    executive_summary: NonEmptyStr
-    findings: tuple[_FindingDraft, ...] = ()
-    question_outcomes: tuple[_QuestionOutcomeDraft, ...]
-    limitations: tuple[_LimitationDraft, ...] = ()
-    unresolved_questions: tuple[NonEmptyStr, ...] = ()
-    modeling_relevance: tuple[NonEmptyStr, ...] = ()
 
 
 class _GeneratedSkillPromotionDecision(FrozenModel):
@@ -486,30 +458,19 @@ class DataAnalysisAgent:
         store,
         generated_skill_registry,
     ) -> DataAnalysisReport:
-        system, user = render_report_synthesis_prompt(
-            inp,
-            results,
-            output_schema=_ReportSynthesis.model_json_schema(),
-        )
-        draft = generate_validated(
+        draft = generate_grounded_synthesis(
             bridge,
+            inp=inp,
+            results=results,
             store=store,
-            model_type=_ReportSynthesis,
-            system=system,
-            user=user,
-            label="data_analysis.synthesis",
             semantic_projection=DataAnalysisAgent._synthesis_semantics,
         )
         result_by_id = {item.result_id: item for item in results}
         ref_by_id = {item.result_id: item for item in result_refs}
         findings = []
         for item in draft.findings:
-            result = result_by_id.get(item.result_id)
-            if result is None or result.status != "completed" or result.coverage is None:
-                raise ValueError("finding references a non-completed or unknown SkillResult")
-            quantitative_ids = {value.result_key for value in result.quantitative_results}
-            if not set(item.quantitative_result_ids).issubset(quantitative_ids):
-                raise ValueError("finding cites unknown quantitative result IDs")
+            result = result_by_id[item.result_id]
+            assert result.coverage is not None  # Established by synthesis grounding.
             invocation = invocation_by_result[item.result_id]
             findings.append(
                 DataFinding(
@@ -542,10 +503,6 @@ class DataAnalysisAgent:
                     modeling_relevance=item.modeling_relevance,
                 )
             )
-        question_ids = {question.question_id for question in inp.analysis_brief.questions}
-        if {item.question_id for item in draft.question_outcomes} != question_ids:
-            raise ValueError("report synthesis must address every AnalysisBrief question exactly")
-        finding_ids = {item.finding_id for item in findings}
         outcomes = tuple(
             QuestionOutcome(
                 question_id=item.question_id,
@@ -556,8 +513,6 @@ class DataAnalysisAgent:
             )
             for item in draft.question_outcomes
         )
-        if any(not set(item.finding_ids).issubset(finding_ids) for item in outcomes):
-            raise ValueError("question outcome cites an unknown finding")
         limitations = tuple(
             ReportLimitation(
                 limitation_id=item.limitation_id,

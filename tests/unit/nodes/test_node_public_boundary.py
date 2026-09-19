@@ -266,7 +266,18 @@ def test_a_decomposed_main_module_separates_public_api_from_compatibility_reexpo
         f"{node.name}: the node's public class(es) must appear in __all__ — "
         f"otherwise the declared surface omits the thing callers actually use: {missing}"
     )
-    assert "main" in names, f"{node.name}: the CLI entrypoint belongs in __all__"
+    # Library-only nodes have no CLI entrypoint. Decomposition must not invent
+    # one merely to satisfy this guard; existing entrypoints stay public.
+    has_main = any(
+        (isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == "main")
+        or (
+            isinstance(item, ast.ImportFrom)
+            and any((alias.asname or alias.name) == "main" for alias in item.names)
+        )
+        for item in tree.body
+    )
+    if has_main:
+        assert "main" in names, f"{node.name}: the CLI entrypoint belongs in __all__"
 
     private = [n for n in names if n.startswith("_")]
     assert private == [], (
