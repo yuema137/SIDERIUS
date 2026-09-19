@@ -243,6 +243,13 @@ class ResultInterpretationAgent:
                 # unchanged for every pre-P5 caller, whose input is always `{}`.
                 vocab_link_confirmations=dict(inp.vocab_link_confirmations),
                 cold_start=True,
+                metric_identity=(
+                    MetricIdentity(
+                        metric_id=inp.metric_spec.id, direction=inp.metric_spec.direction
+                    )
+                    if inp.metric_spec is not None
+                    else None
+                ),
                 # V19 PR 3 — the deterministic merge runs on every path
                 # (a cold start has no summaries, so this is retention
                 # applied to the carried history — normally empty).

@@ -64,6 +64,8 @@ class InterpretationContractError(ValueError):
 
 def reconcile_metric_spec(
     outputs: Sequence[HyperparamTuningOutput],
+    *,
+    bound: MetricSpec | None = None,
 ) -> MetricSpec | None:
     """The ONE run ``MetricSpec`` behind a set of tuning outputs.
 
@@ -79,8 +81,8 @@ def reconcile_metric_spec(
     outputs to labelled identity sources — and its own error type. There is
     exactly one reconciliation implementation, and it is not this function.
 
-    Returns the common spec; ``None`` when no output carries one (a legacy set,
-    or a cold start), which is a NAMED absence the input contract then judges.
+    Returns the common spec, including the explicitly bound task metric on a
+    cold start; ``None`` when neither outputs nor composition carry one, which is a NAMED absence the input contract then judges.
 
     Raises:
         InterpretationContractError: if two outputs carry different specs, or
@@ -97,7 +99,7 @@ def reconcile_metric_spec(
         for o in outputs
     ]
     try:
-        return reconcile_metric_specs(stamped)
+        return reconcile_metric_specs(stamped, bound=bound)
     except MetricIdentityConflictError as exc:
         # The node keeps its own public error type: `InterpretationContractError`
         # is what the interpreter's callers catch, and the promotion must not
