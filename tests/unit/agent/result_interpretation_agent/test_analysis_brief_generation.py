@@ -272,3 +272,31 @@ def test_malformed_brief_is_persisted_as_failure_and_adapter_does_not_guess(tmp_
 
     with pytest.raises(MissingAnalysisBriefError, match="no validated AnalysisBrief"):
         local_analysis_input(output, **_adapter_kwargs(tmp_path))
+
+
+def test_brief_receives_bound_access_policy_and_resume_rejects_changed_permissions(tmp_path):
+    from agent.schemas.data_analysis.access import AnalysisAccessPolicy, SplitAccessRule
+    from nodes.result_interpretation_agent.analysis_brief import AnalysisBriefResumeMismatchError
+
+    policy = AnalysisAccessPolicy(
+        policy_id="synthetic-input-only",
+        policy_version=1,
+        purpose="Bounded characterization",
+        split_rules=(SplitAccessRule(split_id="validation", targets_visible=False),),
+    )
+    inp = _cold_input(tmp_path, requested=True).model_copy(
+        update={"analysis_access_policy": policy}
+    )
+    bridge = _BriefBridge({"questions": [{"question": "How variable are the observed inputs?"}]})
+    agent = ResultInterpretationAgent(bridge_factory=lambda **_kwargs: bridge)
+    agent.run(inp)
+    prompt = json.loads(bridge.calls[0][2])
+    assert prompt["analysis_access_policy"] == policy.model_dump(mode="json")
+    assert "targets without making them accessible" in bridge.calls[0][1]
+    assert "analysis_access_policy" not in _cold_input(tmp_path, requested=False).model_dump()
+    changed = policy.model_copy(
+        update={"split_rules": (SplitAccessRule(split_id="validation", targets_visible=True),)}
+    )
+    with pytest.raises(AnalysisBriefResumeMismatchError):
+        agent.run(inp.model_copy(update={"analysis_access_policy": changed}))
+    assert len(bridge.calls) == 1

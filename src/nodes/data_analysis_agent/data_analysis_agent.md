@@ -191,3 +191,17 @@ to that directory: writing `output_directory / "measurement.json"` declares
 `measurement.json`, not `artifacts/measurement.json`. Subdirectories are allowed
 only when actually created; symlinks and escaping paths remain rejected. Missing
 files report the declared relative path without disclosing a private host path.
+
+## No applicable authorized analysis
+
+An empty skill/program selection is valid only with an explicit
+`non_execution_reason`; an unexplained empty selection or a reason combined
+with requested work is rejected. This is the planner's limitation, not a
+scientific measurement or permission grant. The node persists an `AnalysisPlan`
+with zero invocations and the reason, then a deterministic report with every
+question unresolved, no inspected assets, no findings, and zero skill compute.
+No task materialization, generated program, interface execution or synthesis
+call occurs. The normal whole-node budget receipt includes discovery/planning
+latency, and exact-input resume reuses the report. An executable plan cannot
+also carry a non-execution reason. Downstream consumers receive the explicit
+limitation; this must not be described as successful empirical analysis.

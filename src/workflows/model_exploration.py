@@ -2748,6 +2748,9 @@ def run_workflow(
             ),
             human_advice=launch.human_advice_interpret,
             analysis_brief_requested=_analysis_binding is not None,
+            analysis_access_policy=(
+                _analysis_binding.access_policy if _analysis_binding is not None else None
+            ),
             runtime_vocab=state.current_runtime_vocab,
             previous_proposal=state.previous_proposal_data,
             storage=interp_storage,

@@ -23,6 +23,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
+from agent.schemas.data_analysis.access import AnalysisAccessPolicy
 from agent.schemas.data_analysis.context import AnalysisBrief
 from agent.schemas.health_feedback import (
     CollapseFingerprint,
@@ -671,6 +672,14 @@ class InterpretationInput(BaseModel):
             "Whether this invocation should run the optional separate AnalysisBrief "
             "generation stage after legacy interpretation. False preserves the legacy "
             "prompt, response contract, call count and serialized input identity."
+        ),
+    )
+    analysis_access_policy: AnalysisAccessPolicy | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Caller-bound evidence permissions for optional AnalysisBrief questions. "
+            "This is reasoning context, not a grant of access or an executable plan."
         ),
     )
     # --- Vocabulary feedback (Phase C) ---

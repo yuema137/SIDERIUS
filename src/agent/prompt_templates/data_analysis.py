@@ -81,7 +81,11 @@ def render_skill_selection_prompt(
 safe asset descriptors. Prefer a validated skill whenever it cleanly answers the question. If and
 only if the toolbox is insufficient or materially awkward, list the exact question IDs requiring
 one bounded experiment-local generated program. Generated code grants no additional data access.
-You cannot inspect data, invent fields, or use a skill outside the cards. Return strict JSON."""
+You cannot inspect data, invent fields, or use a skill outside the cards. If no requested
+question can be addressed legally and meaningfully, return empty skill/program selections
+with an explicit non_execution_reason; this reports no evidence and does not grant access.
+Otherwise non_execution_reason must be null. Never select irrelevant work just to avoid an
+empty selection. Return strict JSON."""
     user = f"""Analysis brief:
 {_json(analysis_input.analysis_brief)}
 

@@ -26,6 +26,7 @@ from agent.schemas.data_analysis.assets import (
 )
 from agent.schemas.data_analysis.common import CertifiedArtifactRef, canonical_sha256
 from agent.schemas.data_analysis.context import DataAnalysisInput
+from agent.schemas.data_analysis.plan import AnalysisPlan
 from agent.schemas.proposal import ProposalInput
 from agent.schemas.proposer_data_analysis_evidence import (
     build_proposer_data_analysis_evidence,
@@ -1281,3 +1282,53 @@ def test_analysis_deadline_includes_llm_stages_and_refuses_late_report(
     assert receipt["status"] == "deadline_exceeded"
     assert receipt["last_boundary"] == late_stage
     assert receipt["elapsed_seconds"] > receipt["budget_seconds"]
+
+
+def test_no_applicable_analysis_is_persisted_without_data_access_or_fake_findings(tmp_path):
+    class NoReadCapability:
+        def materialize_analysis_view(self, _request):
+            raise AssertionError("non-execution must not materialize data")
+
+        def export_analysis_materialization(self, *_args):
+            raise AssertionError("non-execution must not export data")
+
+    class DecliningBridge:
+        calls = 0
+
+        def generate(self, _system, _user, *, label):
+            self.calls += 1
+            assert label == "data_analysis.skill_selection"
+            return {
+                "skill_ids": [],
+                "generated_program_question_ids": [],
+                "rationale": "Questions require inaccessible evidence.",
+                "non_execution_reason": "Targets are not available under this policy.",
+            }
+
+    bridge = DecliningBridge()
+    inp = _input(tmp_path)
+    agent = DataAnalysisAgent(
+        task_analysis_capability=NoReadCapability(),
+        bridge_factory=lambda **_kwargs: bridge,
+    )
+    report = agent.run(inp)
+    assert report.findings == report.assets_inspected == report.skill_result_refs == ()
+    assert report.resource_usage.attempted_invocations == 0
+    assert all(q.status == "unresolved" for q in report.question_outcomes)
+    assert report.limitations and report.unresolved_questions
+    root = tmp_path / "data_analysis/standalone/request"
+    plan = AnalysisPlan.model_validate_json((root / "plan.json").read_bytes())
+    assert not plan.invocations and plan.non_execution_reason
+    assert (root / "budget_receipt.json").is_file()
+    assert agent.run(inp) == report
+    assert bridge.calls == 1
+    with pytest.raises(ValueError, match="explicit non-execution"):
+        _SkillSelection(skill_ids=(), rationale="Empty without explanation")
+    with pytest.raises(ValueError, match="cannot request"):
+        _SkillSelection(
+            skill_ids=("summary_statistics",),
+            rationale="Contradiction",
+            non_execution_reason="No work",
+        )
+    with pytest.raises(ValueError, match="requires an invocation"):
+        AnalysisPlan.model_validate({**plan.model_dump(), "non_execution_reason": None})

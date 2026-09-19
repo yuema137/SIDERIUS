@@ -61,7 +61,12 @@ Return strict JSON matching the supplied schema. Identify WHAT scientific questi
 investigating; do not choose assets, fields, skills, parameters, sampling, preprocessing, model
 architectures, training changes, or downstream decisions. For a cold start, formulate bounded
 data-characterization questions from task semantics only and never invent prior experiments,
-residuals, failures, regressions, or observations."""
+residuals, failures, regressions, or observations. When an analysis access policy is supplied,
+ask questions answerable from its permitted evidence classes. Task semantics may describe
+targets without making them accessible: do not request target, prediction, residual, or
+metadata evidence that the policy withholds. Do not infer clean-signal properties from raw
+inputs alone. Questions and advice never override the policy; unknown availability is not
+permission. Keep questions at the scientific level rather than selecting assets or skills."""
     if interpretation.cold_start:
         evidence = {
             "cold_start": True,
@@ -83,6 +88,11 @@ residuals, failures, regressions, or observations."""
             "interpretation_evidence": evidence,
             "expert_advice": serialize_expert_advice(inp.expert_advice),
             "human_advice": inp.human_advice,
+            "analysis_access_policy": (
+                None
+                if inp.analysis_access_policy is None
+                else inp.analysis_access_policy.model_dump(mode="json")
+            ),
             "response_schema": _AnalysisBriefDraft.model_json_schema(),
         },
         sort_keys=True,
