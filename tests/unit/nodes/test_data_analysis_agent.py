@@ -680,6 +680,13 @@ def test_standalone_agent_runs_typed_pipeline_and_persists_bounded_report(tmp_pa
     assert not (root / "staging" / "summary-invocation").exists()
     assert not (root / "materializations" / "summary-invocation").exists()
 
+    # CPU-only skill execution does not measure VRAM. Preserve unknown in both
+    # the typed report and its persisted form rather than inventing measured zero.
+    assert report.resource_usage.maximum_peak_vram_bytes is None
+    assert (
+        json.loads((root / "report.json").read_text())["resource_usage"]["maximum_peak_vram_bytes"]
+        is None
+    )
     report_bytes = (root / "report.json").read_bytes()
     assert "generated_skill_registry" not in json.loads(report_bytes)["provenance"]
     evidence = build_proposer_data_analysis_evidence(
@@ -1326,6 +1333,8 @@ def test_no_applicable_analysis_is_persisted_without_data_access_or_fake_finding
     report = agent.run(inp)
     assert report.findings == report.assets_inspected == report.skill_result_refs == ()
     assert report.resource_usage.attempted_invocations == 0
+    assert report.resource_usage.maximum_peak_rss_bytes is None
+    assert report.resource_usage.maximum_peak_vram_bytes is None
     assert all(q.status == "unresolved" for q in report.question_outcomes)
     assert report.limitations and report.unresolved_questions
     root = tmp_path / "data_analysis/standalone/request"

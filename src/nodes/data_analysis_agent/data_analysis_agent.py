@@ -554,10 +554,20 @@ class DataAnalysisAgent:
             completed_invocations=sum(item.status == "completed" for item in results),
             total_wall_time_s=sum(item.resource_usage.wall_time_s for item in results),
             maximum_peak_rss_bytes=max(
-                (item.resource_usage.peak_rss_bytes or 0 for item in results), default=0
+                (
+                    item.resource_usage.peak_rss_bytes
+                    for item in results
+                    if item.resource_usage.peak_rss_bytes is not None
+                ),
+                default=None,
             ),
             maximum_peak_vram_bytes=max(
-                (item.resource_usage.peak_vram_bytes or 0 for item in results), default=0
+                (
+                    item.resource_usage.peak_vram_bytes
+                    for item in results
+                    if item.resource_usage.peak_vram_bytes is not None
+                ),
+                default=None,
             ),
             measurement_limitations=tuple(
                 sorted(
