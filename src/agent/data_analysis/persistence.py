@@ -142,6 +142,13 @@ class AnalysisRunStore:
             byte_size=len(payload),
         )
 
+    def append_synthesis_grounding_receipt(self, value: BaseModel) -> None:
+        """Retain drafts and reference errors separately from schema-repair receipts."""
+        append_line_durably(
+            str(self.root / "synthesis_grounding_receipts.jsonl"),
+            canonical_json_bytes(value).decode("utf-8"),
+        )
+
     def read_skill_results(self) -> tuple[SkillResult, ...]:
         try:
             lines = self.skill_results_path.read_text(encoding="utf-8").splitlines()
