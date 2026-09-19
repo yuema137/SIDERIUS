@@ -180,6 +180,25 @@ def resolve_inference_batch(
     if not candidate_batches:
         raise ValueError("candidate_batches must be non-empty.")
 
+    # Apply the existing deterministic cap before constructing inputs or
+    # tracing a model. An ineligible batch cannot become usable through a
+    # costly footprint measurement, and must not consume the search budget.
+    if segmentation_size is not None:
+        eligible = tuple(
+            batch
+            for batch in candidate_batches
+            if compute_intensity.passes(batch, segmentation_size)
+        )
+        if not eligible:
+            raise ValueError(
+                f"No candidate batch in {list(candidate_batches)} satisfies both caps "
+                f"at segmentation_size={segmentation_size}. "
+                "Binding cap(s): compute_intensity. "
+                "VRAM footprint not measured; no candidate passed the intensity cap. "
+                "Remediation: reduce segmentation_size or batch_size."
+            )
+        candidate_batches = eligible
+
     last_peak: int = 0
     last_vram_ok: bool = False
     last_intensity_ok: bool = False
