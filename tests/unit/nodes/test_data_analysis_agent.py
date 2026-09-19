@@ -1251,7 +1251,14 @@ def test_output_retention_changes_standalone_identity_not_data_authority(tmp_pat
 
 
 @pytest.mark.allow_real_subprocess
-@pytest.mark.parametrize("late_stage", ["data_analysis.skill_selection", "data_analysis.synthesis"])
+@pytest.mark.parametrize(
+    "late_stage",
+    [
+        "data_analysis.skill_selection",
+        "data_analysis.synthesis",
+        "data_analysis.synthesis.grounding_retry",
+    ],
+)
 def test_analysis_deadline_includes_llm_stages_and_refuses_late_report(
     tmp_path: Path, monkeypatch, late_stage: str
 ) -> None:
@@ -1264,7 +1271,12 @@ def test_analysis_deadline_includes_llm_stages_and_refuses_late_report(
 
     class SlowBridge(_Bridge):
         def generate(self, system, user, *, label):
-            result = super().generate(system, user, label=label)
+            source_label = (
+                "data_analysis.synthesis" if label.endswith(".grounding_retry") else label
+            )
+            result = super().generate(system, user, label=source_label)
+            if late_stage.endswith(".grounding_retry") and label == "data_analysis.synthesis":
+                result["findings"][0]["quantitative_result_ids"] = ["unknown"]
             now[0] += 16 if label == late_stage else 3
             return result
 
@@ -1356,3 +1368,52 @@ def test_no_work_report_preserves_previously_certified_skill_registry(tmp_path):
     )
     assert report.provenance.generated_skill_registry == registry
     assert not report.findings and not report.assets_inspected
+
+
+@pytest.mark.allow_real_subprocess
+@pytest.mark.parametrize("retry_valid", [True, False])
+def test_synthesis_grounding_retries_once_without_rerunning_skills(tmp_path, retry_valid):
+    """Unknown measured keys must never publish; one corrected draft uses the same evidence."""
+    analysis_input = _input(tmp_path)
+
+    class GroundingBridge(_Bridge):
+        def __init__(self):
+            super().__init__(analysis_input=analysis_input)
+            self.calls = []
+
+        def generate(self, system, user, *, label):
+            self.calls.append(label)
+            if label in ("data_analysis.synthesis", "data_analysis.synthesis.grounding_retry"):
+                draft = super().generate(system, user, label="data_analysis.synthesis")
+                if label == "data_analysis.synthesis" or not retry_valid:
+                    draft["findings"][0]["quantitative_result_ids"] = ["invented_mean"]
+                else:
+                    assert "invented_mean" in user and "allowed keys" in user
+                return draft
+            return super().generate(system, user, label=label)
+
+    bridge = GroundingBridge()
+    agent = DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **kwargs: bridge,
+        provider="test",
+    )
+    root = tmp_path / "data_analysis" / "standalone" / "request"
+    if retry_valid:
+        report = agent.run(analysis_input)
+        assert report.findings[0].evidence[0].quantitative_result_ids == ("mean", "finite_count")
+    else:
+        with pytest.raises(ValueError, match="evidence validation after one retry"):
+            agent.run(analysis_input)
+        assert not (root / "report.json").exists()
+    assert bridge.calls.count("data_analysis.plan") == 1
+    assert bridge.calls.count("data_analysis.synthesis.grounding_retry") == 1
+    assert len((root / "skill_results.jsonl").read_text().splitlines()) == 1
+    receipts = [
+        json.loads(line)
+        for line in (root / "synthesis_grounding_receipts.jsonl").read_text().splitlines()
+    ]
+    assert len(receipts) == 2
+    assert "invented_mean" in receipts[0]["errors"][0]
+    assert bool(receipts[1]["errors"]) is (not retry_valid)
+    assert receipts[0]["draft"]["findings"][0]["quantitative_result_ids"] == ["invented_mean"]
