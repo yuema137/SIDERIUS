@@ -253,9 +253,10 @@ class TestThePredictionIsPersistedDuringThePass:
         # 3. 07a parity: the training ACTUAL stays validation-exclusive.
         assert training["actual_seconds"] > 0
 
-        # 4. Q-07c-6 = B: no admission verdict moved.
+        # 4. Validation calibration now reaches admission; this record-only run stays admitted.
         admission = block.get("admission")
-        assert admission is None or admission["decision"] == "admitted"
+        assert admission["decision"] == "admitted"
+        assert admission["stage"] == "post_validation_verification"
 
 
 @pytest.mark.parametrize("observed_run", [True], indirect=True)

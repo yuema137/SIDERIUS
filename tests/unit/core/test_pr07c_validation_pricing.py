@@ -552,97 +552,43 @@ class TestColdStartTemporalUpdate:
         assert "TOTAL ELAPSED SINCE SUBPROCESS START" in doc
 
 
-class TestAdmissionIsUnchangedByConstruction:
-    """Q-07c-6 = B. A changed admission verdict is a DEFECT of this commit, not
-    an improvement, so the parity is asserted rather than assumed."""
+class TestValidationAdmissionAfterCalibration:
+    """The old Q-07c-6 deferral is superseded by first-pass allocation enforcement.
 
-    def test_no_admission_decision_can_follow_a_validation_prediction(self):
-        """The structural argument, checked against source.
+    Preserve the measurement-before-decision ordering. Previously this class
+    prohibited using validation evidence at all; the 5090 incident showed why
+    that deferred capability must now be reachable. Real streaming reachability
+    is also covered in test_pr07c_validation_persistence_timing.
+    """
 
-        `decide_admission` is reachable from the trainer only through
-        `_finish_training_verification`, which is guarded by
-        `if verifier is not None` at BOTH call sites and sets `verifier = None`
-        immediately afterwards. `verifier` is assigned exactly once, before the
-        epoch loop. So at most one admission decision is taken per run, and it
-        happens inside or at the end of epoch 0's batch loop — strictly before
-        the first `_validation_pass`, which runs after that loop.
-
-        Therefore no admission decision ever sees a validation prediction, and
-        `known_cost` at every admission stage is what it was before 07c.
-        """
+    def test_validation_completion_precedes_its_admission_decision(self):
         import ast
 
         source = (
             Path(__file__).resolve().parents[3] / "src/execute_tools" / "train_engine_sandbox.py"
         ).read_text(encoding="utf-8")
         tree = ast.parse(source)
-
-        # 1. `decide_admission` is reachable from exactly two places, and
-        #    neither statement mentions validation.
-        admission_calls = [
-            n
-            for n in ast.walk(tree)
-            if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "decide_admission"
-        ]
-        assert len(admission_calls) == 2, (
-            f"the trainer now takes {len(admission_calls)} admission decisions; "
-            "re-derive the ordering argument before trusting this test — a new "
-            "call site could run after a validation prediction exists"
+        callback = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_finish_validation_verification"
         )
-
-        # 2. The training verifier is STARTED exactly once, which is what makes
-        #    `_finish_training_verification` at-most-once and therefore places
-        #    every admission decision inside epoch 0.
-        training_starts = [
-            n
-            for n in ast.walk(tree)
-            if isinstance(n, ast.Call)
-            and getattr(n.func, "attr", None) == "start_phase_verification"
-            and n.args
-            and isinstance(n.args[0], ast.Constant)
-            and n.args[0].value == "training"
-        ]
-        assert len(training_starts) == 1
-
-        # 3. Every `_finish_training_verification` call is GUARDED by the
-        #    verifier being live, and both call sites clear it — so the guard,
-        #    not the loop structure, is what bounds it.
-        finish_calls = [
-            n
-            for n in ast.walk(tree)
-            if isinstance(n, ast.Call)
-            and getattr(n.func, "id", None) == "_finish_training_verification"
-        ]
-        assert len(finish_calls) == 2, (
-            "a new _finish_training_verification call site appeared; it may now "
-            "run after a validation prediction exists, which would change the "
-            "admission verdict"
+        calls = [node for node in ast.walk(callback) if isinstance(node, ast.Call)]
+        completion = next(
+            node
+            for node in calls
+            if getattr(node.func, "attr", None) == "complete_phase_verification"
         )
-        guards = [
-            n
-            for n in ast.walk(tree)
-            if isinstance(n, ast.If)
-            and "verifier" in ast.dump(n.test)
-            and "_finish_training_verification" in ast.dump(n)
-        ]
-        assert len(guards) >= 1
-
-    def test_the_validation_verification_never_decides_admission(self):
-        """`complete_phase_verification` records evidence; only
-        `decide_admission` judges. The validation completion must not be
-        followed by an admission call in the same statement block."""
-        import ast
-
-        source = (
-            Path(__file__).resolve().parents[3] / "src/execute_tools" / "train_engine_sandbox.py"
-        ).read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.If):
-                continue
-            body = ast.dump(node)
-            if '"validation"' in body and "complete_phase_verification" in body:
-                assert "decide_admission" not in body
+        admission = next(
+            node for node in calls if getattr(node.func, "attr", None) == "decide_admission"
+        )
+        assert completion.lineno < admission.lineno
+        assert any(
+            keyword.arg == "stage"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value == "post_validation_verification"
+            for keyword in admission.keywords
+        )
 
 
 def _wavenet_cfg(seg_size: int) -> dict:
