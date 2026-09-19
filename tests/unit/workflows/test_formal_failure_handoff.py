@@ -22,14 +22,17 @@ from tests.unit.sdsc_submission_scripts.test_run_one_iteration import _StubResul
 from workflows.run_one_iteration import write_manifest
 
 
-def _feedback(*, passed=False):
+def _feedback(*, passed=False, explicit_role=True):
     record = _trial(
         "formal-candidate",
         status="failed_mode_collapse",
         passed=passed,
         metrics={"dominant_fraction": 0.99},
     )
-    record["is_trial"] = False
+    if explicit_role:
+        record["is_trial"] = False
+    else:
+        record.pop("is_trial", None)
     if passed:
         record["status"] = "success"
     return _build_formal_validity_feedback(
@@ -40,9 +43,12 @@ def _feedback(*, passed=False):
     )
 
 
-def test_failed_formal_manifest_to_next_interpreter_and_proposer(tmp_path):
+@pytest.mark.parametrize("explicit_role", [False, True], ids=["stored-omission", "explicit-false"])
+def test_failed_formal_manifest_to_next_interpreter_and_proposer(tmp_path, explicit_role):
     """Fails on the observed no_records loss, cold-start lie or missing prompt edge."""
-    feedback = _feedback()
+    # 2026-09-19 diagnostic E: the production writer omits is_trial for Formal.
+    # Testing only already-normalized output records hid the lost feedback.
+    feedback = _feedback(explicit_role=explicit_role)
     assert feedback is not None
     assert feedback.invalid_count == 1 and feedback.execution_failure_count == 0
     output = _StubResult("synthetic_model", score=None, all_records=[])
