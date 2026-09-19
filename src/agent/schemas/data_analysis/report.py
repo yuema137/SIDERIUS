@@ -102,6 +102,12 @@ class SkillResultSummary(FrozenModel):
 
 
 class AnalysisResourceSummary(FrozenModel):
+    """Peaks are maxima of observed invocation measurements, not concurrent totals.
+
+    Missing measurements are excluded; no observations yields None. A measured
+    zero remains zero. Per-invocation measurement limitations remain authoritative.
+    """
+
     attempted_invocations: int = Field(ge=0)
     completed_invocations: int = Field(ge=0)
     total_wall_time_s: float = Field(ge=0.0)
