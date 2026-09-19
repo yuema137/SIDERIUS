@@ -179,3 +179,46 @@ def test_materialized_epoch_step_guard_refuses_before_first_optimizer():
     with pytest.raises(ValueError, match="reason=step_limit, next_optimizer_steps=11"):
         executor.admit_materialized_epoch(optimizer_steps=11)
     assert executor.optimizer_steps == 0
+
+
+def test_verified_validation_must_fit_remaining_time_plus_reserve(tmp_path, monkeypatch):
+    """A first-pass prediction must be used while validation still has work left."""
+    import json
+
+    import pytest
+
+    from core.runtime_control.records import RuntimePrediction
+    from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
+    from execute_tools.training_budget_execution import (
+        TrainingAllocationRejected,
+        enforce_training_allocation,
+    )
+
+    monkeypatch.setattr("time.monotonic", lambda: 50.0)
+    path = tmp_path / "runtime.json"
+    session = RuntimeVerificationSession(
+        str(path), attempt_id="remaining", policy=RuntimeControlPolicy(training_budget=envelope())
+    )
+    # 120 - 50 elapsed - 24 reserve = 46 available, despite a 120-second nominal budget.
+    prediction = RuntimePrediction(
+        predicted_seconds=60,
+        source="real_validation_verification",
+        formal_execution_eligible=True,
+        steady_state=True,
+        verification="passed",
+        confidence="high",
+        ms_per_unit=10,
+        n_steady_units=10,
+        unit_count=6000,
+        safety_factor=1,
+    )
+    # Unverified forecasts are not an authority to refuse execution.
+    enforce_training_allocation(
+        session,
+        phase="validation",
+        prediction=prediction.model_copy(update={"formal_execution_eligible": False}),
+    )
+    with pytest.raises(TrainingAllocationRejected, match="verified_full_phase_seconds=60"):
+        enforce_training_allocation(session, phase="validation", prediction=prediction)
+    assert json.loads(path.read_text())["admission"]["decision"] == "rejected"
+    assert json.loads(path.read_text())["admission"]["stage"] == "training_allocation.validation"

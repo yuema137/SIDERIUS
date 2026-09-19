@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from functools import wraps
 
 from core.runtime_control.phases import RuntimePhase
+from core.runtime_control.records import RuntimePrediction
 from core.runtime_control.session import RuntimeVerificationSession
 from core.runtime_control.training_budget import (
     TrainingBudgetDecision,
@@ -103,3 +106,57 @@ class TrainingBudgetExecution:
                 if phase == "training"
                 else 0.0,
             )
+
+
+class TrainingAllocationRejected(RuntimeError):
+    """A partial train/validation pass cannot be published as a completed candidate."""
+
+
+def enforce_training_allocation(
+    session: RuntimeVerificationSession | None,
+    *,
+    phase: RuntimePhase,
+    prediction: RuntimePrediction | None = None,
+) -> None:
+    """Cooperate at batch boundaries; reserve downstream time without killing a process.
+
+    After calibration, use the verified full-phase cost conservatively as the
+    remaining requirement. Unknown cost stays unknown; elapsed allowance still
+    bounds further batch dispatch. One already-running batch may finish late.
+    """
+    if session is None or session.policy.training_budget is None:
+        return
+    envelope = session.policy.training_budget
+    elapsed = time.monotonic() - envelope.started_monotonic_seconds
+    available = envelope.budget_seconds - envelope.reserved_seconds - elapsed
+    needed = (
+        prediction.predicted_seconds
+        if prediction is not None and prediction.formal_execution_eligible
+        else None
+    )
+    if available > 0 and (needed is None or needed <= available):
+        return
+    reason = (
+        f"training allocation cannot fit {phase}: elapsed_seconds={elapsed:.6g}, "
+        f"remaining_before_reserve_seconds={envelope.budget_seconds - elapsed:.6g}, "
+        f"reserved_seconds={envelope.reserved_seconds:.6g}, "
+        f"verified_full_phase_seconds={needed}; incomplete epoch is not scoreable"
+    )
+    session.reject_training_allocation(phase=phase, reason=reason)
+    raise TrainingAllocationRejected(reason)
+
+
+def return_on_allocation_rejection[**P, R](
+    execute: Callable[P, R],
+) -> Callable[P, R | None]:
+    """Unwind model/loader ownership on cooperative refusal, preserving the sidecar."""
+
+    @wraps(execute)
+    def run(*args: P.args, **kwargs: P.kwargs) -> R | None:
+        try:
+            return execute(*args, **kwargs)
+        except TrainingAllocationRejected as exc:
+            print(f"[training_budget] REJECTED: {exc}", flush=True)
+            return None
+
+    return run
