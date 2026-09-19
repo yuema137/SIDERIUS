@@ -651,3 +651,16 @@ rendering uses the configured action, never a historical `_blocking` or
 and round validity; a failed recording diagnostic does not itself invalidate a
 candidate. Missing legacy actions remain unknown. This changes feedback labels,
 not Health thresholds, candidate eligibility, or scientific aggregation.
+
+## Optional analysis brief: accessible evidence
+
+`InterpretationInput.analysis_access_policy` carries the caller's typed
+`AnalysisAccessPolicy` into the separate AnalysisBrief generation prompt.
+The fixed workflow supplies its resolved analysis policy. Target descriptions
+in task semantics do not authorize inspecting targets: questions should be
+answerable from the declared visible evidence. The interpreter still does not
+choose assets, skills, sampling, or model changes. This field is omitted when
+unset, preserving disabled-path serialization. Changed policy changes the brief
+prompt digest, so resuming a brief under different permissions is refused.
+
+`analysis_resource_envelope` carries the same caller-bound whole-node budget and resource limits to question prioritization. It does not authorize execution or ask the interpreter to select skills. Unset context is omitted; changed resources participate in brief prompt/resume identity.

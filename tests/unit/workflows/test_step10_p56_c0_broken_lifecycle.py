@@ -204,7 +204,9 @@ class TestWorkflowHalfIsMissing:
         # description source authority) -> 23 for the optional, caller-owned
         # Data Analysis brief request. This census fires when a workflow
         # field is added without being named here, as designed.
-        assert len(keywords) == 23
+        assert {"analysis_access_policy", "analysis_resource_envelope"} <= keywords
+        # PR #546 adds two caller-bound analysis context carriers, no new phase.
+        assert len(keywords) == 25
 
     def test_exactly_two_write_sites_exist_for_the_carrier(self):
         """The §10 rule-4 single-writer contract, for THIS value specifically.

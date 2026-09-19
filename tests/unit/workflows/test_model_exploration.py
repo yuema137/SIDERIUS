@@ -42,11 +42,14 @@ import json
 import os
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from agent.schemas.data_analysis.access import AnalysisAccessPolicy, SplitAccessRule
 from agent.schemas.data_analysis.common import CertifiedArtifactRef
+from agent.schemas.data_analysis.resources import AnalysisResourceEnvelope
 from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
     GateExhaustionInfo,
@@ -578,7 +581,18 @@ class TestRunWorkflowSingleIteration:
         assert tune_input.workflow_parameter_rules == rules
 
     def test_analysis_enabled_traverses_typed_stage_and_proposer_edge(self, workflow_env):
-        analysis_binding = object()
+        analysis_binding = SimpleNamespace(
+            access_policy=AnalysisAccessPolicy(
+                policy_id="raw-only",
+                policy_version=1,
+                purpose="diagnostic",
+                split_rules=(SplitAccessRule(split_id="validation"),),
+            ),
+            resource_envelope=AnalysisResourceEnvelope(
+                wall_time_budget_s=60,
+                per_skill_timeout_s=10,
+            ),
+        )
         historical_inference_capability = object()
         composition = replace(
             workflow_env["composition"],
@@ -614,6 +628,8 @@ class TestRunWorkflowSingleIteration:
 
         interpretation_input = workflow_env["interp"].return_value.run.call_args.args[0]
         assert interpretation_input.analysis_brief_requested is True
+        assert interpretation_input.analysis_access_policy is analysis_binding.access_policy
+        assert interpretation_input.analysis_resource_envelope is analysis_binding.resource_envelope
         assert run_analysis.call_args.kwargs["binding"] is analysis_binding
         assert (
             run_analysis.call_args.kwargs["human_advice"]
@@ -705,7 +721,18 @@ class TestRunWorkflowSingleIteration:
             ),
         )
         literature_output = _make_literature_output()
-        analysis_binding = object()
+        analysis_binding = SimpleNamespace(
+            access_policy=AnalysisAccessPolicy(
+                policy_id="raw-only",
+                policy_version=1,
+                purpose="diagnostic",
+                split_rules=(SplitAccessRule(split_id="validation"),),
+            ),
+            resource_envelope=AnalysisResourceEnvelope(
+                wall_time_budget_s=60,
+                per_skill_timeout_s=10,
+            ),
+        )
         composition = replace(workflow_env["composition"], data_analysis=analysis_binding)
         trace: list[str] = []
         analysis_predecessors: list[object | None] = []
