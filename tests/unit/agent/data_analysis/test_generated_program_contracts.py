@@ -475,6 +475,8 @@ def test_generated_program_prompt_names_the_exact_supported_view_abis() -> None:
     assert "siderius.time-series-array.v1" not in system
     assert "collections.abc.Mapping" in system
     assert "never use `isinstance(value, dict)`" in system
+    assert 'relative_path="measurement.json"' in system
+    assert "Do not prepend `artifacts/` unless" in system
 
 
 def test_deterministic_seed_is_rejected_at_draft_boundary_before_persistence() -> None:
@@ -710,3 +712,41 @@ def test_generated_artifact_certification_rejects_symbolic_link_aliases(tmp_path
                 allowed_media_types=("text/csv",),
             ),
         )
+
+
+def test_artifact_path_is_relative_to_actual_output_directory(tmp_path: Path) -> None:
+    """Regression: prompt-prefixed paths hid an otherwise valid generated artifact."""
+    store = AnalysisRunStore(
+        StorageConfig(
+            backend="local", local=LocalStorageConfig(workspace=str(tmp_path), run_name="run")
+        ),
+        request_id="request",
+    )
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "measurement.json").write_text('{"value": 1}')
+    declaration = ProducedArtifact(
+        artifact_type="table",
+        logical_name="measurement",
+        description="A generated measurement",
+        media_type="application/json",
+        relative_path="artifacts/measurement.json",
+    )
+    with pytest.raises(AnalysisPersistenceError, match="missing relative to output_directory"):
+        store.certify_artifacts(
+            staging_directory=staging,
+            declarations=(declaration,),
+            contract=ArtifactOutputContract(
+                output_directory_ref="staging", allowed_media_types=("application/json",)
+            ),
+        )
+    corrected = declaration.model_copy(update={"relative_path": "measurement.json"})
+    refs = store.certify_artifacts(
+        staging_directory=staging,
+        declarations=(corrected,),
+        contract=ArtifactOutputContract(
+            output_directory_ref="staging", allowed_media_types=("application/json",)
+        ),
+    )
+    assert len(refs) == 1
+    assert (store.root / refs[0].logical_ref).read_bytes() == b'{"value": 1}'
