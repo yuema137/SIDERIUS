@@ -879,7 +879,11 @@ def reconcile_metric_specs(
     identity-less members BEFORE calling this, so the exclusion is a visible
     act rather than a side effect of reconciliation.
 
-    Whole specs are compared, not ids: the same id with an opposite direction
+    Whole serialized declarations are compared, not Python plugin types or
+    just ids: persisted task contracts are intentionally data-only, while the
+    active composition owns their executable implementation. Reconciliation
+    never imports or executes a plugin to compare those declarations.
+    The same id with an opposite direction
     is the most dangerous disagreement there is, because nothing about the
     identity looks wrong while the ranking inverts.
 
@@ -1013,6 +1017,18 @@ def _as_identity(value: MetricDeclaration | None) -> MetricIdentityKey | None:
     return MetricIdentityKey(id=value.id, direction=value.direction)
 
 
+def _declaration_content(value: MetricDeclaration) -> dict[str, Any]:
+    """Project the full persisted declaration, preserving task-owned fields.
+
+    JSON mode normalizes tuple/list transport differences. The restored
+    scoreability carrier deliberately has a different Python class from the
+    executable task contract; class equality is not declaration equality.
+    """
+    if isinstance(value, MetricSpec):
+        return value.model_dump(mode="json")
+    return dict(value._asdict())
+
+
 def _reconcile_declarations(
     stamped: Sequence[StampedMetricSpec],
     *,
@@ -1044,21 +1060,23 @@ def _reconcile_declarations(
         if reference is None:
             reference, reference_label = entry.spec, entry.label
             continue
-        # Persisted external contracts are deliberately data-only subclasses.
-        # Compare the complete declaration, not executable Python class identity;
-        # this never promotes a restored contract to executable task authority.
-        compatible = (
-            entry.spec.model_dump(mode="json") == reference.model_dump(mode="json")
-            if isinstance(entry.spec, MetricSpec) and isinstance(reference, MetricSpec)
-            else entry.spec == reference
-        )
-        if not compatible:
+        reference_content = _declaration_content(reference)
+        entry_content = _declaration_content(entry.spec)
+        if entry_content != reference_content:
+            differing_fields = sorted(
+                key
+                for key in reference_content.keys() | entry_content.keys()
+                if key not in reference_content
+                or key not in entry_content
+                or reference_content[key] != entry_content[key]
+            )
             raise MetricIdentityConflictError(
                 "cannot reconcile the run MetricSpec: "
                 f"{reference_label!r} declares "
                 f"id={reference.id!r} direction={reference.direction!r}, but "
                 f"{entry.label!r} declares "
                 f"id={entry.spec.id!r} direction={entry.spec.direction!r}. "
+                f"differing fields: {', '.join(differing_fields)}. "
                 "One comparison covers one metric binding; a changed binding is a "
                 "different run."
             )

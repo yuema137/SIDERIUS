@@ -667,3 +667,13 @@ unset, preserving disabled-path serialization. Changed policy changes the brief
 prompt digest, so resuming a brief under different permissions is refused.
 
 `analysis_resource_envelope` carries the same caller-bound whole-node budget and resource limits to question prioritization. It does not authorize execution or ask the interpreter to select skills. Unset context is omitted; changed resources participate in brief prompt/resume identity.
+
+### Prediction reference provenance
+
+Proposal-time comparisons consume only the framework-stamped
+`observed_prediction_reference`, with matching metric id and direction.
+Authored `falsifiable_prediction.current_value` is not observational evidence.
+Legacy proposals without the stamp retain an unknown reference and cannot be
+retrospectively assigned one from their authored numbers. Such predictions
+remain unevaluated under the existing SOTA comparison rule. Score discoveries
+use the separately observed overall best score, never a prediction's reference.

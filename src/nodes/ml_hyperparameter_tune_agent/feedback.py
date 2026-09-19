@@ -330,7 +330,9 @@ def _build_formal_validity_feedback(
     required_gate_ids: frozenset[str] | None = None,
 ) -> FormalValidityFeedback | None:
     """Never label Formal evidence as Trial evidence or make it an incumbent."""
-    formal = [record for record in records if record.get("is_trial") is False]
+    # Match the persisted role contract used by BestTracks: Formal writers
+    # omit is_trial; schema-normalized outputs carry explicit False.
+    formal = [record for record in records if not record.get("is_trial", False)]
     if not formal or any(
         is_valid_candidate(r, required_gate_ids=required_gate_ids) for r in formal
     ):

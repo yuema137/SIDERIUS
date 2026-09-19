@@ -65,7 +65,22 @@ from agent.schemas.interpretation import (
     PREDICTION_SEMANTICS_LEGACY_V1,
     PREDICTION_SEMANTICS_SIGNSAFE_V2,
 )
+from agent.schemas.prediction_reference import ObservedPredictionReference
 from execute_tools.metric_order import MetricOrder
+
+
+def read_observed_prediction_reference(
+    proposal: dict[str, Any], *, metric_id: str, direction: str
+) -> float | None:
+    """Read framework-stamped reference; legacy authored values prove nothing."""
+    raw = proposal.get("observed_prediction_reference")
+    if raw is None:
+        return None
+    reference = ObservedPredictionReference.model_validate(raw)
+    if reference.metric_id != metric_id or reference.direction != direction:
+        raise ValueError("observed prediction reference differs from the bound metric identity")
+    return reference.value
+
 
 #: LEGACY metric aliases, read-only.
 #:
@@ -129,7 +144,8 @@ def evaluate_prediction(
             framework.
         actual_results: ``{best_denoising_score, best_file_vector}`` — the
             D1-frozen names, unchanged.
-        current_sota: overrides ``prediction["current_value"]`` when given.
+        current_sota: Explicit observed baseline supplied by the caller. None
+            means unobserved; authored prediction values never supply a fallback.
         partial_margin: the band's width as a fraction of ``abs(sota)``.
         order: the run's ``MetricOrder``. Keyword-only and REQUIRED: this is
             the whole point of the correction, and a default would make the
@@ -145,7 +161,7 @@ def evaluate_prediction(
     """
     metric = prediction.get("metric") or bound_metric_id
     predicted = prediction.get("predicted_value")
-    sota = current_sota if current_sota is not None else prediction.get("current_value")
+    sota = current_sota
     actual, resolution = _compute_metric(metric, actual_results, bound_metric_id=bound_metric_id)
 
     boldness = (

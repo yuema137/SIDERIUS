@@ -388,7 +388,7 @@ def render_legacy_interpretation_section(
 #: removing the type trap.
 _PREDICTION_EXAMPLE_WITHOUT_IDENTITY = """  "falsifiable_prediction": {
     "metric": "What to measure, e.g. 'file_vector[17]'",
-    "current_value": "REPLACE WITH A NUMBER (not a string): the SOTA's current value",
+    "current_value": "Use an observed baseline number, or null if unavailable; never invent SOTA",
     "predicted_value": "REPLACE WITH A NUMBER (not a string): what the new model should achieve. This run declares no metric direction, so do not assume which way is better — state the direction you intend in `rationale`",
     "threshold_for_refutation": "REPLACE WITH A NUMBER (not a string): the value on the REFUTED side of current_value",
     "rationale": "Why this specific predicted value, and in which direction."

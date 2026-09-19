@@ -73,6 +73,20 @@ class TestLegacyRenderIsByteIdentical:
             text = load_prompt(name)
             for key, value in LEGACY_EXAMPLE_LITERALS.items():
                 text = text.replace("{" + key + "}", value)
+            if name == "causal_reasoning_stage.md":
+                # PR552 deliberately adds missing-baseline guidance. Keep the
+                # historical byte oracle for EVERYTHING ELSE, and pin the
+                # exact declared delta rather than recapturing the whole file.
+                current = (
+                    "   NUMERICAL OUTCOME. If no observed baseline exists, set current_value to null\n"
+                    "   and state an absolute prediction; do not invent a SOTA or relative gain.\n"
+                    "   With an observed baseline, the boldness (abs(predicted - current) / abs(current))"
+                )
+                previous = (
+                    "   NUMERICAL OUTCOME. The boldness (abs(predicted - current) / abs(current))"
+                )
+                assert text.count(current) == 1
+                text = text.replace(current, previous)
             assert hashlib.sha256(text.encode("utf-8")).hexdigest() == sha, (
                 f"{name}: the non-isolated render no longer reproduces the pre-U3 bytes"
             )

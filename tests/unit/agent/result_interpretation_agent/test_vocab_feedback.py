@@ -70,6 +70,7 @@ class TestEvaluatePrediction:
         result = evaluate_prediction(
             self._pred(current_value=5.0),
             {"best_denoising_score": 5.5},
+            current_sota=5.0,  # Explicit observed reference supplied by the caller.
             order=_STEP09A_ORDER,
             bound_metric_id=_BOUND_METRIC_ID,
         )
@@ -86,6 +87,7 @@ class TestEvaluatePrediction:
         result = evaluate_prediction(
             self._pred(current_value=5.0),
             {"best_denoising_score": 4.8},
+            current_sota=5.0,  # Explicit observed reference supplied by the caller.
             order=_STEP09A_ORDER,
             bound_metric_id=_BOUND_METRIC_ID,
         )
@@ -99,6 +101,7 @@ class TestEvaluatePrediction:
         result = evaluate_prediction(
             self._pred(current_value=5.0),
             {"best_denoising_score": 4.0},
+            current_sota=5.0,  # Explicit observed reference supplied by the caller.
             order=_STEP09A_ORDER,
             bound_metric_id=_BOUND_METRIC_ID,
         )
@@ -111,6 +114,7 @@ class TestEvaluatePrediction:
         result = evaluate_prediction(
             self._pred(current_value=5.0),
             {"best_denoising_score": 5.0},
+            current_sota=5.0,  # Explicit observed reference supplied by the caller.
             order=_STEP09A_ORDER,
             bound_metric_id=_BOUND_METRIC_ID,
         )
@@ -134,15 +138,16 @@ class TestEvaluatePrediction:
         assert result["current_sota"] == 6.0
         assert abs(result["delta_from_sota"] - 0.5) < 1e-6
 
-    def test_missing_current_sota_falls_back_to_current_value(self):
-        """Without override, current_value from prediction is used."""
+    def test_missing_observed_reference_does_not_trust_authored_current_value(self):
+        """An authored prediction is not evidence of an observed baseline."""
         result = evaluate_prediction(
             self._pred(current_value=5.0),
             {"best_denoising_score": 6.0},
             order=_STEP09A_ORDER,
             bound_metric_id=_BOUND_METRIC_ID,
         )
-        assert result["current_sota"] == 5.0
+        assert result["current_sota"] is None
+        assert result["outcome"] == "unevaluated"
 
     def test_partial_margin_custom(self):
         """Custom partial_margin=0.10 widens the partial band."""
@@ -151,6 +156,7 @@ class TestEvaluatePrediction:
             self._pred(current_value=5.0),
             {"best_denoising_score": 4.6},
             partial_margin=0.10,
+            current_sota=5.0,  # Explicit observed reference supplied by the caller.
             order=_STEP09A_ORDER,
             bound_metric_id=_BOUND_METRIC_ID,
         )
@@ -325,6 +331,7 @@ class TestGenerateDiscoveries:
             best_score=6.5,
             inherited_components=[],
             proposed_vocab_links=[],
+            overall_best_score=5.5,
             order=_STEP09A_ORDER,
         )
         score_discoveries = [d for d in discoveries if "score" in d.name]
