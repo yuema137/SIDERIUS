@@ -39,12 +39,13 @@ Standalone CLI reads proposal JSON and exposes only minimal configuration. It om
 
 ## Single native call
 
-The caller supplies an already assembled request JSON from authorized artifacts.
-This function validates it, performs one actual call and saves the typed return.
+The caller supplies an already validated native request from authorized artifacts.
+For persisted composed requests, first apply [composition recovery](../invocation.md#restore-persisted-composition-references-before-execution).
+This function preserves that native object, performs one actual call and saves the typed return.
 It does not synthesize task context, provision dependencies or choose a workflow.
 Use the run's Python with generated-library and task binding as described in
 [invocation](../invocation.md), before importing nodes that inspect registries.
-The request JSON fields and their origins are described above and in the field
+The request fields and their origins are described above and in the field
 inventory. Use a distinct result_path in caller-owned storage.
 
 ```python
@@ -53,8 +54,9 @@ from agent.schemas.implementor import ImplementorInput, ImplementorOutput
 from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
 
 
-def invoke(request_path, result_path, *, provider, model_id, reasoning_effort=None):
-    request = ImplementorInput.model_validate_json(Path(request_path).read_text())
+def invoke(request: ImplementorInput, result_path, *, provider, model_id, reasoning_effort=None):
+    if not isinstance(request, ImplementorInput):
+        raise TypeError("Assemble or restore the native request before invocation")
     node = MLModelImplementor(provider=provider, model_id=model_id,
         reasoning_effort=reasoning_effort)
     result = node.run(request)

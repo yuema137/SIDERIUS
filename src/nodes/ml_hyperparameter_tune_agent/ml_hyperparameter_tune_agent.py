@@ -223,6 +223,7 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
     project_attempt_topology_facts,
 )
+from nodes.ml_hyperparameter_tune_agent.seed_plugin import stage_seed_model
 from workflows.task_config import load_task_config, run_bound_model_io_contract
 
 
@@ -1053,13 +1054,12 @@ class HyperparamTuningAgent:
             deliverable_naming=run_deliverable_naming,
         )
 
-        # Seed plugin copy — docs/run_scoped_plugins.md (Phase 3). Validation
-        # (file exists + PLUGIN_MODEL_TYPE matches model_type) already ran in
-        # HyperparamTuningInput; here we just stage the file in the run's
-        # plugin dir so the training subprocess picks it up via
-        # SIDERIUS_PLUGIN_DIRS.
+        # Parent planning and subprocess training need the same explicit seed.
+        # A fresh standalone caller has no earlier validator registration.
         if agent_input.seed_plugin_path:
-            copied = _copy_seed_plugin(agent_input.seed_plugin_path, sandbox.plugin_dir)
+            copied = stage_seed_model(
+                agent_input.seed_plugin_path, sandbox.plugin_dir, agent_input.model_type
+            )
             print(f"[Tuner] Seed plugin staged: {os.path.basename(copied)} -> {sandbox.plugin_dir}")
 
         brain = self._bridge_factory(**_bridge_kwargs_from_input(agent_input))
