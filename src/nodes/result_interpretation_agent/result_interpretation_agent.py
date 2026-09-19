@@ -23,6 +23,7 @@ from pydantic import ValidationError
 
 from agent.cache_consolidator import consolidate
 from agent.llm_bridge import LLMBridge
+from agent.prompt_templates.formal_failure import render_formal_failure_feedback
 from agent.prompt_templates.interpretation.rendering import (
     DEDUP_SYSTEM_PROMPT,
     _build_dedup_prompt,
@@ -220,12 +221,18 @@ class ResultInterpretationAgent:
                 model_types=[],
                 model_descriptions={},
                 total_experiments=0,
-                key_findings=[
-                    "Cold start: no prior experimental runs or score history exist yet.",
-                ],
+                key_findings=(
+                    [render_formal_failure_feedback(inp.recent_formal_validity)]
+                    if inp.recent_formal_validity
+                    else ["Cold start: no prior experimental runs or score history exist yet."]
+                ),
                 bottlenecks=[],
                 take_home_message=(
-                    "This is a cold start — there is no prior experimental evidence. "
+                    "No valid incumbent exists. Failed Formal evidence is provided in key_findings; "
+                    "use it to avoid repeating unsupported configurations. Do not claim improvement "
+                    "over an invalid result."
+                    if inp.recent_formal_validity
+                    else "This is a cold start — there is no prior experimental evidence. "
                     "Propose the first experiment from the task description, the "
                     "available model/loss registries (as options, not results), "
                     "advice, and resource constraints. Do not claim improvement "

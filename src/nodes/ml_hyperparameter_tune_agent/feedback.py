@@ -16,6 +16,8 @@ module produces the typed evidence that travels TO those surfaces.
 from typing import Literal
 
 from agent.schemas.health_feedback import (
+    FormalValidityFeedback,
+    InvalidCandidateOutcome,
     InvalidTrialOutcome,
     TrialValidityFeedback,
 )
@@ -232,11 +234,31 @@ def _build_trial_validity_feedback(
     if any(is_valid_candidate(r, required_gate_ids=required_gate_ids) for r in trials):
         return None  # a valid winner exists; nothing to report
 
-    outcomes: list[InvalidTrialOutcome] = []
+    outcomes, invalid, unknown, execution_failures, evidence_absent = _collect_invalid_outcomes(
+        trials, required_gate_ids=required_gate_ids
+    )
+
+    return TrialValidityFeedback(
+        trial_records_considered=len(trials),
+        invalid_count=invalid,
+        unknown_validity_count=unknown,
+        execution_failure_count=execution_failures,
+        outcomes=[InvalidTrialOutcome.model_validate(item.model_dump()) for item in outcomes],
+        formal_skipped_for_no_valid_winner=formal_skipped_for_no_valid_winner,
+        healthgate_mode=healthgate_mode,
+        evidence_absent=evidence_absent,
+    )
+
+
+def _collect_invalid_outcomes(
+    records: list, *, required_gate_ids: frozenset[str] | None
+) -> tuple[list[InvalidCandidateOutcome], int, int, int, list[str]]:
+    """One owner for factual failure classification in both execution stages."""
+    outcomes: list[InvalidCandidateOutcome] = []
     invalid = unknown = execution_failures = 0
     evidence_absent: list[str] = []
 
-    for record in trials:
+    for record in records:
         exp_id = record.get("exp_id")
         status = str(record.get("status", "unknown"))
         validity = classify_candidate_health(record, required_gate_ids=required_gate_ids)
@@ -287,7 +309,7 @@ def _build_trial_validity_feedback(
                     metrics[f"{r.get('gate_name')}.{key}"] = value
 
         outcomes.append(
-            InvalidTrialOutcome(
+            InvalidCandidateOutcome(
                 exp_id=exp_id,
                 status=status,
                 health_validity=validity,
@@ -297,15 +319,34 @@ def _build_trial_validity_feedback(
             )
         )
 
-    return TrialValidityFeedback(
-        trial_records_considered=len(trials),
+    return outcomes, invalid, unknown, execution_failures, evidence_absent
+
+
+def _build_formal_validity_feedback(
+    records: list,
+    *,
+    model_type: str,
+    healthgate_mode: str | None,
+    required_gate_ids: frozenset[str] | None = None,
+) -> FormalValidityFeedback | None:
+    """Never label Formal evidence as Trial evidence or make it an incumbent."""
+    formal = [record for record in records if record.get("is_trial") is False]
+    if not formal or any(
+        is_valid_candidate(r, required_gate_ids=required_gate_ids) for r in formal
+    ):
+        return None
+    outcomes, invalid, unknown, failures, absent = _collect_invalid_outcomes(
+        formal, required_gate_ids=required_gate_ids
+    )
+    return FormalValidityFeedback(
+        model_type=model_type,
+        formal_records_considered=len(formal),
         invalid_count=invalid,
         unknown_validity_count=unknown,
-        execution_failure_count=execution_failures,
-        outcomes=outcomes,
-        formal_skipped_for_no_valid_winner=formal_skipped_for_no_valid_winner,
+        execution_failure_count=failures,
+        outcomes=outcomes[-8:],
         healthgate_mode=healthgate_mode,
-        evidence_absent=evidence_absent,
+        evidence_absent=absent[-8:],
     )
 
 

@@ -71,6 +71,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     TrainingOutcome,
 )
 from nodes.ml_hyperparameter_tune_agent.feedback import (
+    _build_formal_validity_feedback,
     _build_gate_exhaustion,
     _build_trial_validity_feedback,
     _render_gate_exhaustion_log_line,
@@ -1249,6 +1250,12 @@ def finalize_run_output(
         "finished_at": finished_at,
         "gate_exhaustion": gate_exhaustion,
         "trial_validity_feedback": trial_validity_feedback,
+        "formal_validity_feedback": _build_formal_validity_feedback(
+            all_records,
+            model_type=agent_input.model_type,
+            healthgate_mode=agent_input.healthgate_mode,
+            required_gate_ids=bindings.run_scientific_gate_ids,
+        ),
         # Phase 6.6 WS-B B.3 — flush per-attempt VRAM-gate rejections.
         # Empty list when every attempt was feasible. Orchestrator
         # aggregates (worst-offender per architecture) before rendering

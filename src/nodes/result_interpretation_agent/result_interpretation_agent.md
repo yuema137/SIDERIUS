@@ -651,3 +651,7 @@ rendering uses the configured action, never a historical `_blocking` or
 and round validity; a failed recording diagnostic does not itself invalidate a
 candidate. Missing legacy actions remain unknown. This changes feedback labels,
 not Health thresholds, candidate eligibility, or scientific aggregation.
+
+### Failed Formal evidence across iterations
+
+When Formal attempts exist but no Health-valid Formal candidate exists, the tuner emits `formal_validity_feedback`: model identity, counts distinguishing execution failure from negative/unknown Health evidence, and the last eight factual outcomes. The classifier is shared with Trial feedback; Formal records are never relabeled Trial. The no-records manifest and typed resume path retain this summary without restoring the model, weights, plugin, score or incumbent. The workflow forwards the most recent three summaries to interpretation and both proposer paths. A cold start with failed Formal evidence means no valid incumbent, not no previous experiment. Existing healthy runs and manifests without this optional field remain supported. No task-specific remedy is inserted.

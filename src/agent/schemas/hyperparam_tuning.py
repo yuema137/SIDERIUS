@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, 
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
 from agent.schemas.custom_loss_contract import CustomLossApplicability, TaskOwnedCustomLoss
 from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
-from agent.schemas.health_feedback import TrialValidityFeedback
+from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
 from agent.schemas.model_io_contract import TensorContract
 from agent.schemas.ordering import (
     OrderingValidationError,
@@ -3633,6 +3633,11 @@ class HyperparamTuningOutput(BaseModel):
             "iteration's proposer via "
             "ProposalInput.prior_iteration_gate_exhaustion."
         ),
+    )
+    formal_validity_feedback: FormalValidityFeedback | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Failed Formal evidence, never a valid candidate or incumbent.",
     )
     trial_validity_feedback: TrialValidityFeedback | None = Field(
         default=None,

@@ -103,7 +103,8 @@ class TestResumeHalfIsMissing:
         assert FIELD in names
         # 15 at C0 -> 16 at C1; issue #396 adds the typed no-records feedback
         # carrier without changing this confirmation field's ownership.
-        assert len(names) == 17
+        assert "accumulated_formal_feedback" in names
+        assert len(names) == 18
 
     def test_a_fifth_projection_now_produces_the_value(self):
         """WAS: exactly four projections, none for this key."""
@@ -204,7 +205,8 @@ class TestWorkflowHalfIsMissing:
         # description source authority) -> 23 for the optional, caller-owned
         # Data Analysis brief request. This census fires when a workflow
         # field is added without being named here, as designed.
-        assert len(keywords) == 23
+        assert "recent_formal_validity" in keywords
+        assert len(keywords) == 24
 
     def test_exactly_two_write_sites_exist_for_the_carrier(self):
         """The §10 rule-4 single-writer contract, for THIS value specifically.

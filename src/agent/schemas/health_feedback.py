@@ -657,8 +657,8 @@ def merge_fingerprint_history(
 # ---------------------------------------------------------------------------
 
 
-class InvalidTrialOutcome(BaseModel):
-    """Why ONE trial record failed to become a valid candidate.
+class InvalidCandidateOutcome(BaseModel):
+    """Why one candidate record failed to become a valid candidate.
 
     Facts only. The workflow layer transports these; interpreting what a
     particular gate's metrics imply for a particular task is the planner's
@@ -695,6 +695,28 @@ class InvalidTrialOutcome(BaseModel):
             "workflow layer does not decide which number matters."
         ),
     )
+
+
+class InvalidTrialOutcome(InvalidCandidateOutcome):
+    """Compatibility name for the existing Trial-only public carrier."""
+
+
+class FormalValidityFeedback(BaseModel):
+    """Bounded facts from Formal attempts when no valid Formal candidate exists.
+
+    This contains failure evidence only, never a candidate or an incumbent.
+    The last eight outcomes are retained; counts describe all Formal records.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    model_type: str
+    formal_records_considered: int = Field(ge=1)
+    invalid_count: int = Field(ge=0)
+    unknown_validity_count: int = Field(ge=0)
+    execution_failure_count: int = Field(ge=0)
+    outcomes: list[InvalidCandidateOutcome] = Field(max_length=8)
+    healthgate_mode: str | None = None
+    evidence_absent: list[str] = Field(default_factory=list, max_length=8)
 
 
 class TrialValidityFeedback(BaseModel):
