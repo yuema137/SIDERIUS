@@ -232,7 +232,7 @@ class DataAnalysisInput(FrozenModel):
         return self.source_scope or AnalysisSourceScope.automatic(self.declared_scope)
 
     def planning_assets(self) -> tuple[AnalysisAsset, ...]:
-        """Keep descriptors outside the locked source set out of LLM prompts."""
+        """Keep selected identities and only source-authorized derived metadata."""
 
         scope = self.effective_source_scope()
         visible = set(scope.raw_input_asset_ids) | set(scope.historical_model_asset_ids)
@@ -243,12 +243,18 @@ class DataAnalysisInput(FrozenModel):
             names = {
                 name
                 for name, source in asset.metadata_sources.items()
-                if source.split_id is not None
-                and scope.permits(
-                    asset_id=asset.asset_id,
-                    information_class=source.information_class,
-                    operation="infer" if asset.asset_type == "trained_model" else "materialize",
-                    fields=source.source_fields,
+                # Identity descriptors have no split by contract. They are
+                # already access-policy validated and belong to this selected
+                # asset; source read permissions constrain derived values only.
+                if source.information_class == "identity"
+                or (
+                    source.split_id is not None
+                    and scope.permits(
+                        asset_id=asset.asset_id,
+                        information_class=source.information_class,
+                        operation="infer" if asset.asset_type == "trained_model" else "materialize",
+                        fields=source.source_fields,
+                    )
                 )
             }
             scoped.append(

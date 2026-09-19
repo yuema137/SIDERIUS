@@ -19,6 +19,7 @@ from agent.data_analysis.source_scope import (
 )
 from agent.prompt_templates.data_analysis import (
     render_analysis_plan_prompt,
+    render_generated_program_prompt,
     render_skill_selection_prompt,
 )
 from agent.schemas.data_analysis.access import RequestedInformation
@@ -92,6 +93,34 @@ def test_out_of_scope_asset_descriptor_is_not_shown_to_planner(tmp_path) -> None
     _, prompt = render_skill_selection_prompt(with_hidden, (), output_schema={})
     assert "hidden-target" not in prompt
     assert "Secret target descriptor" not in prompt
+
+
+def test_planning_preserves_selected_identity_metadata_without_exposing_targets(tmp_path) -> None:
+    """2026-09-19: source projection dropped declared cadence before code generation."""
+    raw = _input(tmp_path).model_dump(mode="json")
+    asset = raw["available_assets"][0]
+    asset["metadata"] = {"sample_rate_hz": 1234.5, "target_mean": 9876.5}
+    asset["metadata_sources"] = {
+        "sample_rate_hz": {"information_class": "identity"},
+        "target_mean": {"information_class": "target", "split_id": "validation"},
+    }
+    # The broader access policy allows target descriptors, but the raw-input
+    # source ceiling must still remove them from planning.
+    raw["access_policy"]["split_rules"][0]["targets_visible"] = True
+    hidden = {**asset, "asset_id": "unselected", "description": "hidden identity"}
+    raw["available_assets"].append(hidden)
+    inp = type(_input(tmp_path)).model_validate(raw)
+    projected = inp.planning_assets()
+    assert len(projected) == 1
+    assert projected[0].metadata == {"sample_rate_hz": 1234.5}
+    for prompt in (
+        render_skill_selection_prompt(inp, (), output_schema={})[1],
+        render_generated_program_prompt(inp, question_ids=("q-summary",), output_schema={})[1],
+    ):
+        assert '"sample_rate_hz": 1234.5' in prompt
+        assert "target_mean" not in prompt
+        assert "unselected" not in prompt
+        assert "hidden identity" not in prompt
 
 
 def test_locked_prompt_hides_unselected_declared_source_ids(tmp_path) -> None:
