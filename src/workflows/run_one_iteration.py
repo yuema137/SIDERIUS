@@ -3671,7 +3671,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
 
             raise_if_code_package_failure(e)
         from execute_tools.evaluation_metric import MetricIdentityConflictError
-        from nodes.result_interpretation_agent.evidence import InterpretationContractError
+        from nodes.result_interpretation_agent import InterpretationContractError
 
         if isinstance(e, (MetricIdentityConflictError, InterpretationContractError)):
             _halt_contract_failure(args.workspace, args.start_iteration, e)
