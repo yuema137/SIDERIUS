@@ -115,6 +115,49 @@ Do not recover missing private files by exposing the evaluator tree to the
 research agent. An authorized executor must supply the existing operation; if
 none is provisioned, report that capability unavailable in this environment.
 
+### Restore persisted composition references before execution
+
+A JSON round trip does not restore every runtime type in `TaskCompositionRef`.
+Some dependency-neutral fields are typed `Any`: for example, the Health absence
+state becomes the string `explicit_none`, and an objective can become a plain
+mapping. `model_validate_json` alone does not rebuild these objects. The native
+Health consumer expects the absence enum and otherwise treats a string as a
+configuration path. Schema acceptance is therefore not execution readiness.
+
+For a persisted node request, rebuild the reference from the same authorized,
+frozen manifest through the existing composition helper, compare the entire
+serialized projection with the saved one, then supply the native reference
+**before** validating and executing the recipient input:
+
+```python
+import json
+from pathlib import Path
+from agent.schemas.hyperparam_tuning import HyperparamTuningInput, TaskCompositionRef
+from workflows.task_composition import build_task_composition_ref
+
+
+def restore_tuner_request(request_path, composition):
+    payload = json.loads(Path(request_path).read_text())
+    native_ref = build_task_composition_ref(composition)
+    if native_ref is None or payload.get("task_composition_ref") is None:
+        raise ValueError("Expected the persisted composed-task identity")
+    saved_ref = TaskCompositionRef.model_validate(payload["task_composition_ref"])
+    if saved_ref.model_dump(mode="json") != native_ref.model_dump(mode="json"):
+        raise ValueError("Persisted task composition differs from the frozen binding")
+    payload["task_composition_ref"] = native_ref
+    return HyperparamTuningInput.model_validate(payload)
+```
+
+Call this inside the declared task context above. The same reconstruction rule
+applies to other recipient inputs carrying this reference; use their own native
+input class. Preserve the reconstructed request object through `node.run()`;
+serializing it for provenance does not mean passing the serialization back into
+execution. A changed projection is a recovery error, not permission to overwrite
+its fingerprint or alter the task. Do not create a file named `explicit_none`,
+change Health settings, or expose private modules to make a failed restore run.
+If the authorized composition cannot be loaded in this executor, report that
+missing deployment prerequisite.
+
 ### Standalone operations with a public dataset profile
 
 Some standalone preparation operations need the dataset profile without needing
