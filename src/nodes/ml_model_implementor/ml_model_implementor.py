@@ -43,6 +43,7 @@ from agent.skills.model_io_probe_skill import (
     PROBE_REQUIRED_FIELD_VALUES,
     ProbeConstructionError,
     build_model_input,
+    candidate_probe_extent,
     declared_output_tensor,
     expected_output_shape,
     input_index_extent,
@@ -196,7 +197,10 @@ def _smoke_test_plugin(
         # must reach the same answer. Two copies diverge silently — that is
         # exactly how this node started emitting candidates the validator
         # then rejected.
-        config = mod.PLUGIN_CONFIG_CLASS(**probe_config_kwargs(mod.PLUGIN_CONFIG_CLASS))
+        config = mod.PLUGIN_CONFIG_CLASS(
+            **probe_config_kwargs(mod.PLUGIN_CONFIG_CLASS, model_io_contract)
+        )
+        probe_extent = candidate_probe_extent(config, model_io_contract)
         model = mod.PLUGIN_MODEL_CLASS(config)
         model.eval()
 
@@ -209,13 +213,13 @@ def _smoke_test_plugin(
         # Forward pass. Step 04a: derived when a contract is supplied, the
         # shipped geometry otherwise.
         if model_io_contract is None:
-            T = _LEGACY_SELF_CHECK_TIME_STEPS
+            T = probe_extent if probe_extent is not None else _LEGACY_SELF_CHECK_TIME_STEPS
             x = torch.randint(0, _LEGACY_SELF_CHECK_CLASSES, (1, T))
             expected = (1, _LEGACY_SELF_CHECK_CLASSES, T) if declared == "classifier" else (1, T)
         else:
             try:
-                expected = expected_output_shape(model_io_contract, declared)
-                x = build_model_input(model_io_contract)
+                expected = expected_output_shape(model_io_contract, declared, symbolic=probe_extent)
+                x = build_model_input(model_io_contract, symbolic=probe_extent)
             except ProbeConstructionError as exc:
                 return f"Self-check could not be constructed from the task contract: {exc}"
 

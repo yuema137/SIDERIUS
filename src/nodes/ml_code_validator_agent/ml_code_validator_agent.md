@@ -182,3 +182,15 @@ a failure diagnostic. Pytest retains its ordinary filesystem side effects.
   - **Code review** — one `bridge.generate(VALIDATOR_REVIEW_SYSTEM_PROMPT, ...)` call per run. System prompt is the module-level `VALIDATOR_REVIEW_SYSTEM_PROMPT` constant. Uses `inp.llm_provider` / `inp.llm_model_id` (note: the constructor's `provider` / `model_id` set up `self.bridge`, which is what actually fires — keep input fields aligned with the constructor args).
 - **GPU**: not required. The in-process instantiation + gradient check (#6 + #7) run on CPU with a tiny `[1, 64]` dummy input.
 - **External services**: none. The pytest subprocess in check #2 is a local subprocess, not an external service. Filesystem dependencies: reads the plugin/test/description file paths it was handed, reads `agent/schemas/vocab_seed.json` for the inheritance check, writes `validation_{run_name}.json` under the workspace.
+
+
+### Candidate probe geometry
+
+The shared `model_io_probe_skill` constructs both nodes' probes. Temporal
+candidates are checked at their validated `segmentation_size`; required lengths
+use the fixed input contract when one exists. A fixed contract/config conflict
+is reported explicitly before the model forward pass. The synthetic length 64
+is only a fallback when no length is declared, never a requirement that every
+model support length 64. Config, input and expected output use the same extent.
+Non-temporal contracts retain their own geometry. The check does not change
+training configuration or certify model quality.
