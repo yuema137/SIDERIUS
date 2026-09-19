@@ -239,17 +239,20 @@ def test_raises_intensity_binding_when_only_intensity_fails(monkeypatch):
     assert label == "compute_intensity", f"Expected intensity-only binding, got {label!r}"
 
 
-def test_raises_both_bindings_when_both_caps_fail_at_b1(monkeypatch):
-    """Huge params (VRAM fails at every B) AND huge T (intensity fails at
-    every B, including B=1). Diagnostic must surface both."""
-    _install_probe(monkeypatch, lambda B: (100 * 1024**3, 0))
+def test_intensity_only_refusal_does_not_invent_unmeasured_vram_verdict(monkeypatch):
+    """All batches are ineligible; do not run or claim a memory measurement."""
+
+    def forbidden_probe(batch):
+        pytest.fail("an intensity-ineligible batch must never be probed")
+
+    _install_probe(monkeypatch, forbidden_probe)
     cap = 1 * 1024**3
 
     with pytest.raises(ValueError) as exc_info:
         resolve_inference_batch(_NoOp(), segmentation_size=_MAX_BATCH_TIMESTEPS + 1, cap_bytes=cap)
 
     label = _binding_label(str(exc_info.value))
-    assert label == "vram+compute_intensity", f"Expected both caps binding, got {label!r}"
+    assert label == "compute_intensity", f"Only intensity was measured, got {label!r}"
 
 
 def test_error_message_surfaces_cap_and_peak_numbers(monkeypatch):
@@ -324,3 +327,17 @@ def test_default_candidate_batches_matches_spec():
 
 
 # ── Principle 2 module-source spot-check ──────────────────────────────────
+
+
+def test_known_ineligible_batches_never_execute_a_probe(monkeypatch):
+    """2026-09-19: CPU probes at 64/32 consumed 668s before eligible batch16."""
+    measured = []
+
+    def curve(batch):
+        measured.append(batch)
+        assert batch <= 16, "known intensity refusal must precede expensive forward"
+        return 0, 0
+
+    _install_probe(monkeypatch, curve)
+    assert resolve_inference_batch(_NoOp(), segmentation_size=40000, cap_bytes=10 * 1024**3) == 16
+    assert measured == [16]
