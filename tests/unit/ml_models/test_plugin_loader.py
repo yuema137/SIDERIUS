@@ -515,3 +515,34 @@ class TestNoBareModuleIdentity:
             f"stderr:\n{result.stderr}"
         )
         assert "OK" in result.stdout, f"missing OK marker; stdout={result.stdout!r}"
+
+
+@pytest.mark.parametrize("registration", ["scan", "single_file"])
+def test_registered_source_is_declaration_not_imported_class_file(
+    tmp_path, monkeypatch, registration
+):
+    """Inspection points at a dependency; replay must select the declaration file."""
+    from ml_models import models_sandbox, plugin_loader
+    from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+
+    monkeypatch.setattr(plugin_loader, "_PLUGIN_MODEL_ORIGINS", {})
+    monkeypatch.setattr(models_sandbox, "MODEL_REGISTRY", {})
+    monkeypatch.setattr(plugin_loader, "PLUGIN_OUTPUT_TYPE_REGISTRY", {})
+    monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, str(tmp_path))
+    # A builtin class is a legitimate imported export, and its source file
+    # contains no plugin declaration under this newly registered name.
+    path = tmp_path / "declaration.py"
+    path.write_text(
+        'from ml_models.models_sandbox import AE\nfrom ml_models.models_format_sandbox import AEConfig\nPLUGIN_MODEL_TYPE="origin_fixture"\nPLUGIN_MODEL_CLASS=AE\nPLUGIN_CONFIG_CLASS=AEConfig\nPLUGIN_OUTPUT_TYPE="classifier"\n'
+    )
+    if registration == "scan":
+        extend_registries(models_sandbox.MODEL_REGISTRY, {})
+    else:
+        # Preserve unrelated test/process configuration entries.
+        monkeypatch.setitem(PLUGIN_CONFIG_REGISTRY, "origin_fixture", None)
+        assert plugin_loader.register_model_in_memory(str(path)) == "origin_fixture"
+    selected = models_sandbox.MODEL_REGISTRY["origin_fixture"]
+    assert selected is models_sandbox.AE
+    assert plugin_loader.registered_model_plugin_path("origin_fixture", selected) == str(path)
+    assert plugin_loader.registered_model_plugin_path("origin_fixture", object) is None
+    assert plugin_loader.registered_model_plugin_path("missing", selected) is None

@@ -58,6 +58,24 @@ _MODULE_NAME_PREFIX = "siderius_plugin_"
 # Maps plugin model_type → "classifier" or "regressor".
 PLUGIN_OUTPUT_TYPE_REGISTRY: dict[str, str] = {}
 
+# The declaration file can differ from the file defining an imported class.
+# Record origin at registration, never infer it later through inspect.getfile.
+_PLUGIN_MODEL_ORIGINS: dict[str, tuple[type, str]] = {}
+
+
+def registered_model_plugin_path(model_type: str, model_class: type) -> str | None:
+    """Return the native registration's plugin file for this exact class.
+
+    None means no matching registration evidence, not a builtin-model claim.
+    This observes loader selection only: callers must capture/pin file contents
+    and dependencies separately before relying on them for later execution.
+    No source is imported, loaded or selected by this query.
+    """
+    origin = _PLUGIN_MODEL_ORIGINS.get(model_type)
+    if origin is None or origin[0] is not model_class:
+        return None
+    return origin[1]
+
 
 # --- Output-contract vocabulary: ONE authority, two derived sets -------------
 # Step 12 / PR-12a C4, closing issue #234.
@@ -341,6 +359,7 @@ def extend_registries(model_registry: dict, config_registry: dict) -> list:
             model_registry[model_type] = plugin["model_class"]
             config_registry[model_type] = plugin["config_class"]
             PLUGIN_OUTPUT_TYPE_REGISTRY[model_type] = plugin["output_type"]
+            _PLUGIN_MODEL_ORIGINS[model_type] = (plugin["model_class"], os.path.abspath(path))
             loaded.append(model_type)
             print(f"[PluginLoader] Loaded plugin: '{model_type}' from {fname}")
 
@@ -476,6 +495,7 @@ def register_model_in_memory(plugin_path: str) -> str | None:
     MODEL_REGISTRY[model_type] = new_cls
     PLUGIN_CONFIG_REGISTRY[model_type] = plugin["config_class"]
     PLUGIN_OUTPUT_TYPE_REGISTRY[model_type] = plugin["output_type"]
+    _PLUGIN_MODEL_ORIGINS[model_type] = (new_cls, os.path.abspath(plugin_path))
     return model_type
 
 

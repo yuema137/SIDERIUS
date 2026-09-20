@@ -174,3 +174,17 @@ plugins next to a scanned directory without them being picked up implicitly.
 
 - [Composition](composition.md) · [Execution](execution.md) · [Health gates](health-gates.md)
 - [Define a task](../../guides/define-a-task.md)
+
+### Observe the selected model plugin source
+
+`ml_models.plugin_loader.registered_model_plugin_path(model_type, model_class)`
+returns the declaration file recorded by the native directory scan or explicit
+`register_model_in_memory` call for that exact model class. It returns `None`
+when there is no matching registration evidence. `None` does not identify a
+builtin; check the installed registry separately.
+
+Use this read-only observation when a deployment needs to capture the selected
+plugin. Do not infer the declaration file from `inspect.getfile(model_class)`:
+a valid plugin can export a class imported from a helper or installed module.
+The query does not change registration or scanning behavior and does not pin
+bytes, dependencies, caller identity or training provenance.
