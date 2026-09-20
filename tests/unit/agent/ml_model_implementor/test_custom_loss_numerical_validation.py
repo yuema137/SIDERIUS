@@ -224,3 +224,40 @@ def test_provider_exception_is_named_before_plugin_import(tmp_path):
     assert error is not None and "provider refused" in error
     assert "RuntimeError: synthetic fixture unavailable" in error
     assert not marker.exists()
+
+
+def test_concrete_parameters_are_used_instead_of_defaults():
+    source = (
+        _mse_loss_source()
+        .replace(
+            "class Config(BaseModel):\n    pass",
+            "class Config(BaseModel):\n    denominator: float = 1.0",
+        )
+        .replace("super().__init__()", "super().__init__(); self.denominator = config.denominator")
+        .replace(
+            "((prediction - target) ** 2).mean()",
+            "((prediction - target) ** 2).mean() / self.denominator",
+        )
+    )
+    def pair():
+        return torch.zeros(2, 1), torch.ones(2, 1)
+
+    assert validate_custom_loss_plugin(source, "mse", pair_provider=pair) is None
+    error = validate_custom_loss_plugin(
+        source, "mse", pair_provider=pair, loss_parameters={"denominator": 0.0}
+    )
+    assert error is not None and "non-finite scalar" in error
+
+
+def test_invalid_concrete_parameters_do_not_fall_back_to_defaults():
+    source = _mse_loss_source().replace(
+        "class Config(BaseModel):\n    pass",
+        "class Config(BaseModel):\n    denominator: float = 1.0",
+    )
+    error = validate_custom_loss_plugin(
+        source,
+        "mse",
+        pair_provider=lambda: (torch.zeros(2, 1), torch.ones(2, 1)),
+        loss_parameters={"denominator": "not-a-number"},
+    )
+    assert error is not None and "supplied parameters" in error
