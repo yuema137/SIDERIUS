@@ -239,6 +239,7 @@ def test_concrete_parameters_are_used_instead_of_defaults():
             "((prediction - target) ** 2).mean() / self.denominator",
         )
     )
+
     def pair():
         return torch.zeros(2, 1), torch.ones(2, 1)
 
