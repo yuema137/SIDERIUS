@@ -313,3 +313,13 @@ explicit opt-in reserves part of each resolved role time budget for downstream
 work and enables time/cap-based epoch allocation. Both role budgets and
 explicit epoch caps in `1..100` are required. It does not enable scientific
 early stopping or a watchdog. See [cooperative training](cooperative-training-budget.md).
+
+### Optional optimizer-step guard
+
+The chain shell, iteration CLI and tuner CLI default `--max_steps_per_attempt`
+to `0` (disabled); they no longer inject a 150,000-step ceiling. Configure time
+budgets for runtime admission/allocation. The explicit positive option remains
+available for bounded harnesses and is recorded in provenance. It is not a
+hardware-independent estimate of runtime. See
+[cooperative training budget](cooperative-training-budget.md) for execution
+limits and Formal resource recovery.

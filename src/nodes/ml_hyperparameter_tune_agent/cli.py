@@ -464,17 +464,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     # --- RT6: runtime-control operator surface (design §4/§5) ---
-    # The step ceiling remains an operational default.  The Formal-only batch
+    # The step ceiling is opt-in, not a hardware-independent runtime proxy.  The Formal-only batch
     # floor is opt-in: Trial success is executable evidence, so a generic
     # launcher must not silently reject the same batch size in Formal.
     # Pass 0 to disable a numeric guardrail.
     parser.add_argument(
         "--max_steps_per_attempt",
         type=int,
-        default=150_000,
+        default=0,
         help="§5 guardrail: skip plans whose resolved optimizer-step count "
-        "exceeds this (planner-visible record). 0 disables. Default 150000 "
-        "(provisional §5 value).",
+        "exceeds this (planner-visible record). 0 disables. Default 0 "
+        "(disabled); time budgets govern runtime.",
     )
     parser.add_argument(
         "--min_formal_batch_size",

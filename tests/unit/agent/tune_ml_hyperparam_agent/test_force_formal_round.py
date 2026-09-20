@@ -18,6 +18,8 @@ Three surfaces to verify:
 
 from __future__ import annotations
 
+import pytest
+
 from agent.prompts import get_planner_user_prompt
 from agent.schemas.hyperparam_tuning import (
     ExperimentPlan,
@@ -1106,3 +1108,122 @@ class TestRegistryShape:
 #   - tests/unit/agent/tune_ml_hyperparam_agent/test_gate_integration.py
 #   - tests/unit/agent/tune_ml_hyperparam_agent/test_degeneracy_handling.py
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("reason", ["guardrail", "time_budget", "runtime_verification"])
+def test_full_clone_resource_retry_preserves_execution_adjustment(reason, capsys):
+    """2026-09-20: cloning batch 4 again erased a batch-8 recovery 15 times.
+
+    Fail if the effective batch/epochs are restored, or if a resource retry
+    silently changes the scientific architecture/loss/lr instead.
+    """
+    from nodes.ml_hyperparameter_tune_agent.runtime import _evaluate_step_guardrails
+
+    winner = _make_trial_record(
+        "trial_best",
+        score=1.0,
+        model_config={"width": 32},
+        loss_type="mse",
+        lr=3e-4,
+        epochs=40,
+        batch_size=4,
+    )
+    memory = {"round_index": 3, "time_mode": "formal"}
+    refused = {"status": "skipped_time_risk", "memory": memory}
+    if reason == "time_budget":
+        memory["rejection_kind"] = reason
+    elif reason == "guardrail":
+        memory["verification_stage"] = reason
+    else:
+        refused["runtime_verification"] = {
+            "admission": {"failure_class": "candidate", "reason_code": "budget_exceeded"}
+        }
+    history = [winner, refused]
+    for _ in range(2):
+        plan = _make_plan()
+        plan.model_cfg = {"width": 16}
+        plan.loss_cfg = {"loss_type": "different"}
+        plan.train_cfg = {"epochs": 20, "batch_size": 8, "lr": 1e-2}
+        _override(
+            plan,
+            trial_allowed=True,
+            is_formal_round=True,
+            force_formal_round=True,
+            memory_history=history,
+            current_round=3,
+        )
+        assert plan.train_cfg == {"epochs": 20, "batch_size": 8, "lr": 3e-4}
+        assert plan.model_cfg == {"width": 32}
+        assert plan.loss_cfg["loss_type"] == "mse"
+        assert not _evaluate_step_guardrails(
+            n_steps=20 * (20_000 // plan.train_cfg["batch_size"]),
+            batch_size=plan.train_cfg["batch_size"],
+            is_formal=True,
+            max_steps_per_attempt=150_000,
+            min_formal_batch_size=None,
+            allow_extreme_steps=False,
+        )
+        history.append(refused)
+    assert "[FORMAL RECOVERY]" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "boundary", ["trial", "old_round", "evidence", "infrastructure", "verification_failed"]
+)
+def test_full_clone_does_not_misclassify_other_failures_as_resource_recovery(boundary):
+    """Missing evidence and unrelated rounds cannot unlock Formal inheritance."""
+    winner = _make_trial_record(
+        "winner",
+        score=1.0,
+        model_config={"width": 32},
+        epochs=40,
+        batch_size=4,
+    )
+    memory = {"round_index": 3, "time_mode": "formal", "rejection_kind": "time_budget"}
+    refused = {"status": "skipped_time_risk", "memory": memory}
+    if boundary == "trial":
+        refused["is_trial"] = True
+    elif boundary == "old_round":
+        memory["round_index"] = 2
+    else:
+        memory["rejection_kind"] = "evidence"
+        if boundary == "infrastructure":
+            refused["runtime_verification"] = {
+                "admission": {
+                    "failure_class": "infrastructure",
+                    "reason_code": "evidence_channel_failure",
+                }
+            }
+        elif boundary == "verification_failed":
+            refused["runtime_verification"] = {
+                "admission": {
+                    "failure_class": "candidate",
+                    "reason_code": "verification_failed",
+                }
+            }
+    plan = _make_plan()
+    plan.train_cfg = {"epochs": 20, "batch_size": 8}
+    _override(
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
+        memory_history=[winner, refused],
+        current_round=3,
+    )
+    assert plan.train_cfg["batch_size"] == 4
+    assert plan.train_cfg["epochs"] == 40
+
+
+def test_time_refusal_memory_distinguishes_budget_from_missing_evidence():
+    """A missing probe must not trigger candidate resource adaptation."""
+    from nodes.ml_hyperparameter_tune_agent.runtime import _time_skip_memory_extra
+
+    plan = _make_plan(is_trial=False)
+    assert _time_skip_memory_extra({}, plan)["rejection_kind"] == "time_budget"
+    assert (
+        _time_skip_memory_extra({"breakdown": {"probe_resolution_enforced": True}}, plan)[
+            "rejection_kind"
+        ]
+        == "evidence"
+    )

@@ -130,7 +130,7 @@ VRAM_PREFLIGHT_HOST_MEMORY_LIMIT_GB="" # optional complete isolated process-tree
 # §3.2 — Runtime-control operator surface (RT6, runtime design §4/§5).
 # Defaults synced to run_one_iteration.py (§5 provisional operational
 # values); 0 disables a numeric guardrail; booleans forwarded when 1.
-MAX_STEPS_PER_ATTEMPT=150000        # §3.2: matches Python default
+MAX_STEPS_PER_ATTEMPT=0             # Disabled: time budgets govern runtime
 MIN_FORMAL_BATCH_SIZE=0              # §3.2: matches disabled Python default
 ALLOW_EXTREME_STEPS=0
 RUNTIME_WATCHDOG=""                 # arXiv #261 tri-state: empty == omit == the (device, execution regime) runtime profile decides; 1 forwards --runtime_watchdog; 0 forwards --no-runtime_watchdog

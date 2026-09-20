@@ -677,6 +677,7 @@ class RuntimeVerificationSession:
             # still relies on the channel to record anything at all.
             self._admission = AdmissionRecord(
                 decision="rejected",
+                reason_code="evidence_channel_failure",
                 failure_class="infrastructure",
                 stage=stage,
                 avoided_predicted_runtime_seconds=adjusted or None,
@@ -692,6 +693,7 @@ class RuntimeVerificationSession:
         if budget is None:
             self._admission = AdmissionRecord(
                 decision="admitted",
+                reason_code="record_only",
                 # Explicit: an admitted record carries no failure class. Also
                 # keeps `**cost_fields` (float values) from being checked
                 # against this Literal parameter under strict pyright.
@@ -715,6 +717,7 @@ class RuntimeVerificationSession:
             )
             self._admission = AdmissionRecord(
                 decision="rejected",
+                reason_code="verification_failed",
                 # The verifier WORKED and reported that the candidate did
                 # not stabilize — candidate-class (C9c). A verifier that
                 # itself fails reports through
@@ -729,6 +732,7 @@ class RuntimeVerificationSession:
         elif adjusted > budget:
             self._admission = AdmissionRecord(
                 decision="rejected",
+                reason_code="budget_exceeded",
                 failure_class="candidate",  # measured over budget (C9c)
                 stage=stage,
                 avoided_predicted_runtime_seconds=adjusted,
@@ -743,6 +747,7 @@ class RuntimeVerificationSession:
         else:
             self._admission = AdmissionRecord(
                 decision="admitted",
+                reason_code="within_budget",
                 failure_class=None,
                 stage=stage,
                 reason=(
@@ -762,6 +767,7 @@ class RuntimeVerificationSession:
             raise RuntimeError("training allocation refusal requires an explicit allowance")
         self._admission = AdmissionRecord(
             decision="rejected",
+            reason_code="training_allocation_exceeded",
             failure_class="candidate",
             stage=f"training_allocation.{phase}",
             reason=reason,

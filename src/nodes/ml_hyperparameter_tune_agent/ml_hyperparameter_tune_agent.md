@@ -1076,13 +1076,12 @@ smaller candidates an `"interpolation"` label no probe ever earned.
 
 ### `--max_steps_per_attempt` now applies to a composed run too (C12-P / B7)
 
-**No CLI argument, type or default changed.** `--max_steps_per_attempt` is
-still `type=int, default=150_000` and `0 disables` (`cli.py:383-390`;
-`input_dict["max_steps_per_attempt"] = args.max_steps_per_attempt or None`,
-`cli.py:633`), and the schema field is still `int | None`, `default=None`,
-`gt=0`. `--min_formal_batch_size` (`default=4`) and `--allow_extreme_steps`
-are untouched — the batch floor reads `batch_size`, which is always present,
-and was never part of this defect.
+`--max_steps_per_attempt` applies to composed and legacy data scopes when
+explicitly enabled. Its current CLI default is `0` (disabled), mapped to
+schema `None`; a supplied positive limit remains an opt-in harness guard.
+`--min_formal_batch_size` also defaults to `0` (disabled).
+The former provisional 150,000-step default has been removed: step counts
+alone do not establish runtime across models, tasks or hardware.
 
 What changed is **where the bound can be evaluated**. The §5 step count came
 only from the legacy TIDMAD `SampleSet`, and `_resolve_guardrail_steps`
@@ -1901,3 +1900,22 @@ composition executable.
 The complete evaluator owns prediction-output retention; the tuner does not
 request a local inference-output inventory for that route. Local evaluation's
 inventory and cleanup remain unchanged.
+
+### Formal resource retry inheritance
+
+`full_clone` inherits the Trial winner on the first Formal attempt. Following
+a same-round time or explicitly enabled step guardrail refusal, the next
+planner's batch size and proposed epochs survive inheritance; model, loss and
+learning rate remain the winner's. Existing OOM recovery also permits capacity
+adjustment. A missing probe, infrastructure verification failure, Trial failure
+or previous-round failure does not trigger this resource recovery. The current
+round is supplied by the planning caller, not inferred from the winner.
+
+Preflight memory's optional `rejection_kind` distinguishes `time_budget` from
+`evidence`. Existing configuration-resolution receipts and `[FORMAL RECOVERY]`
+logs show which proposed execution adjustments survived. The Formal time/VRAM
+allowances, cooperative training policy, epoch cap and scientific checks remain
+authoritative. In-process admission uses `AdmissionRecord.reason_code`; only
+`budget_exceeded` and `training_allocation_exceeded` enable this recovery, so a
+generic candidate verification failure cannot be mistaken for a time refusal.
+See [cooperative budget](../../../docs/reference/cooperative-training-budget.md).

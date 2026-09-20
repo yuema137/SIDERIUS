@@ -822,6 +822,42 @@ _FORMAL_STRATEGY_REGISTRY: dict[str, Callable[[ExperimentPlan, dict], list[str]]
 }
 
 
+def _formal_recovery_kind(memory_history: list | None, *, current_round: int | None) -> str | None:
+    """Classify a same-round resource retry without treating missing evidence as cost.
+
+    Legacy OOM records lack role metadata; their existing recovery is retained.
+    Other failures need an explicit Formal role and structured resource evidence.
+    The caller supplies the current round so a previous round cannot unlock it.
+    """
+    if not memory_history:
+        return None
+    latest = memory_history[-1]
+    if not isinstance(latest, dict):
+        return None
+    memory = latest.get("memory") or {}
+    prior_round = memory.get("round_index")
+    if prior_round is None or (current_round is not None and prior_round != current_round):
+        return None
+    if current_round is None and prior_round != max(
+        ((r.get("memory") or {}).get("round_index", 0) for r in memory_history), default=0
+    ):
+        return None
+    if latest.get("is_trial") is True or memory.get("time_mode") == "trial":
+        return None
+    if latest.get("status") == "error_training_oom":
+        return "oom"
+    if memory.get("time_mode") != "formal" or latest.get("status") != "skipped_time_risk":
+        return None
+    if memory.get("rejection_kind") == "time_budget":
+        return "time_budget"
+    if memory.get("verification_stage") == "guardrail":
+        return "guardrail"
+    admission = (latest.get("runtime_verification") or {}).get("admission") or {}
+    if admission.get("reason_code") in {"budget_exceeded", "training_allocation_exceeded"}:
+        return "runtime_verification"
+    return None
+
+
 def _apply_mode_override_chain(
     plan: ExperimentPlan,
     *,
@@ -831,6 +867,7 @@ def _apply_mode_override_chain(
     formal_round_strategy: str = "full_clone",
     memory_history: list | None = None,
     trial_winner: dict | None,
+    current_round: int | None = None,
 ) -> ExperimentPlan:
     """Apply the run-level + last-round overrides to ``plan``.
 
@@ -894,9 +931,9 @@ def _apply_mode_override_chain(
     the gates and inheritance silently diverges the two.
 
     ``memory_history`` is still required, and is NOT redundant: the
-    full-clone OOM-recovery branch inspects the LATEST record and the
-    maximum ``round_index`` across the whole history, which a winner alone
-    cannot answer.
+    full-clone resource-recovery branch inspects the LATEST record and its
+    round identity, which a winner alone cannot answer. Production supplies
+    ``current_round`` explicitly; legacy callers retain the historical fallback.
 
     Mutates ``plan`` in place and returns it for caller-chaining.
     """
@@ -940,32 +977,27 @@ def _apply_mode_override_chain(
             )
         return plan
 
-    latest_record = (memory_history or [])[-1] if memory_history else None
-    recovering_from_formal_oom = (
-        canonical == "full_clone"
-        and isinstance(latest_record, dict)
-        and latest_record.get("status") == "error_training_oom"
-        and (latest_record.get("memory") or {}).get("round_index")
-        == (
-            max(
-                (
-                    (record.get("memory") or {}).get("round_index", 0)
-                    for record in (memory_history or [])
-                ),
-                default=0,
-            )
-        )
+    recovery = (
+        _formal_recovery_kind(memory_history, current_round=current_round)
+        if canonical == "full_clone"
+        else None
     )
-    if recovering_from_formal_oom:
-        # A full clone is the right first formal attempt, but repeatedly
-        # restoring the winning architecture and batch size makes the
-        # planner's OOM recovery proposal impossible to execute. Preserve
-        # the validated loss surface and learning rate while allowing the
-        # planner to reduce model capacity and/or batch size on retries.
+    if recovery == "oom":
         inherited = _strategy_hybrid_params(plan, winner)
+        print("  [FORMAL RECOVERY] reason=oom — preserving planner model_cfg/batch_size/epochs")
+    elif recovery is not None:
+        # A resource retry keeps the winning scientific configuration while
+        # allowing execution adjustments. Do not re-clone the rejected batch
+        # and horizon; do not silently replace the winning architecture either.
+        execution_changes = {
+            key: plan.train_cfg[key] for key in ("batch_size", "epochs") if key in plan.train_cfg
+        }
+        inherited = _strategy_full_clone(plan, winner)
+        plan.train_cfg.update(execution_changes)
+        inherited = [key for key in inherited if key not in execution_changes]
         print(
-            "  [FORMAL RECOVERY] prior formal attempt OOMed — "
-            "preserving planner model_cfg/batch_size/epochs"
+            f"  [FORMAL RECOVERY] reason={recovery} — preserving planner "
+            f"execution adjustments={execution_changes}; model/loss/lr remain inherited"
         )
     else:
         inherited = handler(plan, winner)

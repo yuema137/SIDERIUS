@@ -507,6 +507,7 @@ def prepare_attempt(
         # judged, resolved once at the formal-round
         # boundary above — not re-derived here.
         trial_winner=formal_trial_winner,
+        current_round=iteration,
     )
     resolution.record(plan, "round_mode_override_chain")
 
