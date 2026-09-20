@@ -15,7 +15,7 @@ used together. Neither grants private-data access or authenticates a caller.
 
 Implement `evaluate(CandidateEvaluationRequest) -> CandidateEvaluationResult`.
 The request contains the run/attempt/model identity, public workspace and model
-location, validated model/training configuration, requested task scope, metric
+location, validated model/training/loss configuration, model I/O contract, requested task scope, metric
 specification, declared secondary metrics and Trial/Formal role.
 
 The deployment client owns trained-candidate reconstruction/export, transport,

@@ -13,6 +13,7 @@ from typing import Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictBool, model_validator
 
+from agent.schemas.model_io_contract import ModelIOContract
 from execute_tools.evaluation_metric import (
     MetricResult,
     MetricSpec,
@@ -33,6 +34,8 @@ class CandidateEvaluationRequest(BaseModel):
     models_dir: str
     model_configuration: dict[str, JsonValue]
     training_configuration: dict[str, JsonValue]
+    loss_configuration: dict[str, JsonValue] | None = None
+    model_io: ModelIOContract | None = None
     requested_scope: dict[str, JsonValue]
     metric: MetricSpec
     secondary_metrics: tuple[MetricSpec, ...] = ()

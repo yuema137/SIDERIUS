@@ -34,6 +34,8 @@ def run_external_evaluation(
         models_dir=bindings.sandbox.dirs["models"],
         model_configuration=prepared.active_params["model_config"],
         training_configuration=prepared.active_params["train_config"],
+        loss_configuration=prepared.active_params["loss_config"],
+        model_io=bindings.run_model_io,
         requested_scope=(
             scope.model_dump(mode="json")
             if scope is not None

@@ -82,6 +82,7 @@ def attempt(tmp_path, monkeypatch):
         sandbox=SimpleNamespace(base_dir=str(tmp_path), dirs={"models": str(tmp_path / "models")}),
         workspace=str(tmp_path),
         run_task_data_path=None,
+        run_model_io=None,
         run_metric=metric,
         run_secondary_metrics=(),
     )
@@ -94,7 +95,11 @@ def attempt(tmp_path, monkeypatch):
         plan=SimpleNamespace(is_trial=False),
         task_scopes=SimpleNamespace(evaluation=None),
         eval_sample_set={0: [1]},
-        active_params={"model_config": {"width": 2}, "train_config": {"epochs": 2}},
+        active_params={
+            "model_config": {"width": 2},
+            "train_config": {"epochs": 2},
+            "loss_config": {"loss_type": "smooth_l1"},
+        },
     )
     events = []
     monkeypatch.setattr(
@@ -129,6 +134,7 @@ def test_native_caller_preserves_evaluator_scope_health_and_diagnosis(attempt, e
     with bind_candidate_evaluation(evaluator):
         result = run()
     assert len(evaluator.requests) == 1
+    assert evaluator.requests[0].loss_configuration == {"loss_type": "smooth_l1"}
     assert result.external_evaluation.evaluated_scope == {
         "split": "validation",
         "all_samples": True,
