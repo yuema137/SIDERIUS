@@ -106,7 +106,9 @@ def _time_skip_memory_extra(time_check: dict, plan) -> dict:
     same soft-fallback flag; the time wrapper's is the natural source.
     """
     extra: dict[str, Any] = {
-        "rejection_kind": "evidence" if is_evidence_refusal(time_check) else "time_budget",
+        "verification_stage": (
+            "preflight_evidence" if is_evidence_refusal(time_check) else "preflight_time_budget"
+        ),
         "time_estimate_minutes": time_check.get("estimated_minutes"),
         "time_budget_minutes": time_check.get("limit_minutes"),
         "time_mode": "trial" if plan.is_trial else "formal",

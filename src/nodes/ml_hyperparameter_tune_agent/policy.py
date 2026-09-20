@@ -848,7 +848,7 @@ def _formal_recovery_kind(memory_history: list | None, *, current_round: int | N
         return "oom"
     if memory.get("time_mode") != "formal" or latest.get("status") != "skipped_time_risk":
         return None
-    if memory.get("rejection_kind") == "time_budget":
+    if memory.get("verification_stage") == "preflight_time_budget":
         return "time_budget"
     if memory.get("verification_stage") == "guardrail":
         return "guardrail"

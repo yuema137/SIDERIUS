@@ -217,15 +217,6 @@ class ExperimentMemory(BaseModel):
         description="Which budget was active for this round — 'trial' or 'formal'.",
     )
 
-    rejection_kind: Literal["time_budget", "evidence"] | None = Field(
-        default=None,
-        description=(
-            "Structured preflight refusal cause. Missing probe evidence must not "
-            "be interpreted as a slow candidate or unlock Formal resource recovery. "
-            "None on legacy records without a classification."
-        ),
-    )
-
     # Phase K — pre-flight VRAM-budget context surfaced to the planner via the
     # next round's experiment_history. Populated only when the VRAM gate ran
     # with a budget set; absent on records where the gate was disabled. Mirrors

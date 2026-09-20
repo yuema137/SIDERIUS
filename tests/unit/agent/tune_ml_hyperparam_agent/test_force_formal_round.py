@@ -1131,7 +1131,7 @@ def test_full_clone_resource_retry_preserves_execution_adjustment(reason, capsys
     memory = {"round_index": 3, "time_mode": "formal"}
     refused = {"status": "skipped_time_risk", "memory": memory}
     if reason == "time_budget":
-        memory["rejection_kind"] = reason
+        memory["verification_stage"] = "preflight_time_budget"
     elif reason == "guardrail":
         memory["verification_stage"] = reason
     else:
@@ -1179,14 +1179,18 @@ def test_full_clone_does_not_misclassify_other_failures_as_resource_recovery(bou
         epochs=40,
         batch_size=4,
     )
-    memory = {"round_index": 3, "time_mode": "formal", "rejection_kind": "time_budget"}
+    memory = {
+        "round_index": 3,
+        "time_mode": "formal",
+        "verification_stage": "preflight_time_budget",
+    }
     refused = {"status": "skipped_time_risk", "memory": memory}
     if boundary == "trial":
         refused["is_trial"] = True
     elif boundary == "old_round":
         memory["round_index"] = 2
     else:
-        memory["rejection_kind"] = "evidence"
+        memory["verification_stage"] = "preflight_evidence"
         if boundary == "infrastructure":
             refused["runtime_verification"] = {
                 "admission": {
@@ -1220,10 +1224,10 @@ def test_time_refusal_memory_distinguishes_budget_from_missing_evidence():
     from nodes.ml_hyperparameter_tune_agent.runtime import _time_skip_memory_extra
 
     plan = _make_plan(is_trial=False)
-    assert _time_skip_memory_extra({}, plan)["rejection_kind"] == "time_budget"
+    assert _time_skip_memory_extra({}, plan)["verification_stage"] == "preflight_time_budget"
     assert (
         _time_skip_memory_extra({"breakdown": {"probe_resolution_enforced": True}}, plan)[
-            "rejection_kind"
+            "verification_stage"
         ]
-        == "evidence"
+        == "preflight_evidence"
     )

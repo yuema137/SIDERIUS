@@ -81,8 +81,9 @@ this path. Unclassified legacy refusals are not guessed to be time failures.
 
 The existing plan-resolution trace records proposed and resolved configurations.
 `[FORMAL RECOVERY]` additionally identifies the reason and preserved execution
-adjustments. Preflight refusal memory records `rejection_kind=time_budget` or
-`evidence`, preserving the distinction through typed record serialization.
+adjustments. Preflight refusal memory records `verification_stage` as
+`preflight_time_budget` or `preflight_evidence`, extending the existing
+structured stage convention used by guardrail and in-process refusals.
 In-process admission records likewise use `reason_code`; only
 `budget_exceeded` and `training_allocation_exceeded` enable this recovery.
 Verification and infrastructure failures retain their own causes and do not.

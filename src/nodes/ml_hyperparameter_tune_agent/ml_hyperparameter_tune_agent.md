@@ -1911,9 +1911,10 @@ adjustment. A missing probe, infrastructure verification failure, Trial failure
 or previous-round failure does not trigger this resource recovery. The current
 round is supplied by the planning caller, not inferred from the winner.
 
-Preflight memory's optional `rejection_kind` distinguishes `time_budget` from
-`evidence`. Existing configuration-resolution receipts and `[FORMAL RECOVERY]`
-logs show which proposed execution adjustments survived. The Formal time/VRAM
+Preflight memory's `verification_stage` distinguishes `preflight_time_budget`
+from `preflight_evidence`, extending the existing structured stage convention.
+Existing configuration-resolution receipts and `[FORMAL RECOVERY]` logs show
+which proposed execution adjustments survived. The Formal time/VRAM
 allowances, cooperative training policy, epoch cap and scientific checks remain
 authoritative. In-process admission uses `AdmissionRecord.reason_code`; only
 `budget_exceeded` and `training_allocation_exceeded` enable this recovery, so a
