@@ -1,8 +1,9 @@
 # Private validation execution: current mechanism and integration contract
 
-Status: RNG state transport and synthetic process parity are implemented.
-There is **no installed remote validation executor** in this change. The normal
-training engine still executes its local `_validation_pass` unchanged.
+Status: RNG transport, native observation and an explicit training execution
+binding are implemented. There is **no installed private validation service**
+in this change. Without a deployment binding, training still uses its local
+`_validation_pass` and original observation lifecycle.
 
 The supported coordinator entry is
 `execute_tools.train_engine_sandbox.observe_validation`, an alias of that same
@@ -13,6 +14,59 @@ research (`long` or `float`). The existing `get_target_torch_dtype` remains the
 sole interpreter: built-ins reject an override and a conflicting loaded custom
 declaration is refused. Omission preserves the ordinary local route. No plugin
 registry mutation or candidate loss import is needed for this transport.
+
+## Bind an explicit deployment client
+
+`execute_tools.validation_execution.ValidationDeployment` declares an importable
+research-side client factory (`module:function`) and JSON settings. The factory
+validates its settings and returns an executor implementing `declared_rows(scope)`
+and `observe(request, callbacks)`. It must not load a privileged scorer or worker
+in research. The declaration belongs to deployment configuration, separate from
+the frozen task manifest. Settings must contain no credentials or private data:
+they cross the child argv and may appear in ordinary execution records.
+
+Wrap the native parent invocation in `bind_validation_deployment(declaration)`.
+The production sandbox transports this explicit declaration to the training
+child using `--validation_executor_json`; the child reconstructs the same client.
+There is no environment-variable discovery. A missing/broken supplied factory
+or settings fails instead of selecting local execution. An in-process-only
+`bind_validation_executor(executor)` is available to callers that do not spawn;
+attempting a native child launch without its deployment declaration refuses.
+Bindings unwind on exceptions and preserve the enclosing binding.
+
+The executor handles both ends of validation:
+
+- Parent row declaration calls `declared_rows` instead of materializing private
+  validation data in the parent. The service must authorize the task scope and
+  return a positive integer. Serialization or deserialization is not authorization.
+- Each completed training epoch sends a validated `ValidationExecutionRequest`
+  with live model/objective objects, task scope, model I/O contract (when present),
+  loss configuration, device, batch size and independently declared row count.
+  This object is research-local and must never be pickled into a privileged
+  coordinator. The client is responsible for safe staged module transport.
+- `ValidationCallbacks` retains the original verifier, verification-completion
+  callback and allocation callback. The client must feed them **during** the pass,
+  before further batches run; reporting only after the final receipt is insufficient.
+- A validated `ValidationExecutionResult` carries R3, materialized rows and
+  aggregate observable outcomes. Row mismatch refuses before history append.
+  The existing observation owner checks complete declared outcomes, finite
+  observable values and the persistent failure latch without calling private
+  observable implementations in research. Nonfinite R3 remains numerical evidence.
+- The engine measures the entire bound call, including snapshot preparation,
+  transport and callbacks, as validation time. The default local path retains
+  the existing native timing definition.
+
+The binding does not authenticate requests, enforce treatment, grant data access
+or supply an endpoint. Those remain deployment/service responsibilities. Native
+inference and scoring require their own connected execution routes; binding
+training validation does not implicitly redirect them.
+
+The synthetic transport test launches the actual training child through the
+production sandbox for two epochs, verifies client execution in that child and
+checks R3 against independent model replay. Its synthetic client deliberately
+uses local fixture data: this proves the parent-to-child binding and absence of
+parent validation materialization, not private-data isolation. A separate
+three-epoch test compares R2, R3 and final model tensors with the default route.
 
 ## Preserve the existing transaction
 

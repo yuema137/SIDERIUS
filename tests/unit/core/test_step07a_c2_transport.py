@@ -25,6 +25,7 @@ Each family names the defect only it catches:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -54,6 +55,7 @@ from execute_tools.dataset_config import DataScope, bind_dataset_profile
 from execute_tools.scoring_utils import validate_sample_set
 from execute_tools.task_data_path import EvalMaterializationParams
 from execute_tools.training_history import TrainingHistory, interpret_training_results
+from execute_tools.validation_execution import ValidationDeployment, bind_validation_deployment
 from ml_models.loss_models_sandbox import get_criterion
 from ml_models.models_format_sandbox import LossConfig
 from ml_models.models_sandbox import MODEL_REGISTRY
@@ -515,7 +517,10 @@ class TestRungB07a2ValidationScopeAxis:
         assert detail["train_portion"] == 0.5
         assert detail["epoch0_samples"] == 12
 
-    def test_real_trainer_emits_r2_and_r3_over_the_validation_family(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("deployed", [False, True])
+    def test_real_trainer_emits_r2_and_r3_over_the_validation_family(
+        self, tmp_path, monkeypatch, deployed
+    ):
         (tmp_path / "data").mkdir()
         fx = write_two_family_fixture(tmp_path / "data")
         real_launch = sandbox_module._run_observed_subprocess
@@ -528,7 +533,25 @@ class TestRungB07a2ValidationScopeAxis:
         monkeypatch.setattr(sandbox_module, "_run_observed_subprocess", record_launch)
         train_ss = {0: [0, 1, 2, 3], 1: [0, 1, 2, 3], 2: [0, 1, 2, 3]}
         eval_ss = {0: [0, 1], 2: [1, 3]}  # a DISTINCT validation scope: 4 PSD × 2 = 8 rows
-        with bound_trainer_task(tmp_path, fx) as adapter:
+        marker = tmp_path / "validation-client-pids.txt"
+        with contextlib.ExitStack() as stack:
+            adapter = stack.enter_context(bound_trainer_task(tmp_path, fx))
+            if deployed:
+                stack.enter_context(
+                    bind_validation_deployment(
+                        ValidationDeployment(
+                            factory=f"{type(adapter).__module__}:create_native",
+                            settings={"rows": 8, "data_dir": fx.data_dir, "marker": str(marker)},
+                        )
+                    )
+                )
+            original_materialize = adapter.validation_dataset
+            if deployed:
+
+                def forbidden(*args):
+                    raise AssertionError("parent read private validation data for row declaration")
+
+                monkeypatch.setattr(adapter, "validation_dataset", forbidden)
             sb = TidmadSandbox(run_name="rung", workspace=str(tmp_path / "ws"), progress_bar=False)
             out = sb.execute_training(
                 "b07a2",
@@ -548,9 +571,15 @@ class TestRungB07a2ValidationScopeAxis:
                 ),
                 train_base_seed=5,
             )
+            monkeypatch.setattr(adapter, "validation_dataset", original_materialize)
         assert out["status"] == "success", out.get("message")
         assert launched and "--task_eval_scope_ref" in launched[0]
         assert "--task_manifest" in launched[0]
+        assert ("--validation_executor_json" in launched[0]) == deployed
+        if deployed:
+            pids = marker.read_text().splitlines()
+            assert len(pids) == 2 and len(set(pids)) == 1
+            assert int(pids[0]) != os.getpid()
         assert launched[0][launched[0].index("--data_dir") + 1] == fx.data_dir
 
         results = out["results"]
