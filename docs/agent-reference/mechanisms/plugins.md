@@ -203,3 +203,9 @@ Omitting `plugin_path` preserves the assembled single-file check. Both routes
 use the same task-owned synthetic pair, scalar/finite checks and gradient checks.
 This interface performs candidate execution; deployment callers must establish
 their execution boundary before invoking it.
+
+Loss loader results also include `plugin_path`: the selected declaration file,
+including when it re-exports a class from another module. This is an observation
+of native selection, not permission to read the path in a privileged caller.
+Deployment code must match it against its own captured source set. Both explicit
+file loading and name lookup provide it; selection precedence is unchanged.
