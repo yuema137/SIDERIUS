@@ -107,8 +107,13 @@ def load_training_candidate(
 ) -> dict[str, object] | None:
     """Resolve the one executor sidecar name owned by the artifact boundary."""
 
-    path = Path(records_directory) / run_name / f"trained_model_candidate_{experiment_id}.json"
+    path = training_artifact_candidate_path(Path(records_directory) / run_name, experiment_id)
     return load_training_artifact_candidate(str(path.resolve()))
+
+
+def training_artifact_candidate_path(result_directory: str | Path, experiment_id: str) -> Path:
+    """One sidecar naming authority for the training writer and deployment adapters."""
+    return Path(result_directory) / f"trained_model_candidate_{experiment_id}.json"
 
 
 def _verified_bytes(path: str, expected_sha256: str, expected_size: int | None = None) -> bytes:

@@ -71,6 +71,7 @@ from execute_tools.task_data_path import (
 from execute_tools.trained_model_artifact import (
     TrainingArtifactCandidate,
     certified_file_identity,
+    training_artifact_candidate_path,
 )
 from execute_tools.training_budget_execution import (
     TrainingAllocationRejected,
@@ -148,7 +149,7 @@ def _write_training_artifact_candidate(
         training_scope_path=args.task_scope_ref,
         training_scope_sha256=args.task_scope_digest,
     )
-    sidecar = os.path.join(result_directory, f"trained_model_candidate_{args.exp_id}.json")
+    sidecar = str(training_artifact_candidate_path(result_directory, args.exp_id))
     publish_json_atomically(sidecar, candidate.model_dump(mode="json"))
 
 
