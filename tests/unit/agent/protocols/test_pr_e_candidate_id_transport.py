@@ -385,8 +385,8 @@ class TestRecordStamp:
         assert saved[1]["candidate_id"] is None
 
     def test_every_emit_record_call_site_passes_the_id(self):
-        """AST, not substring (§E.3d.9): each of the 12 production call sites
-        must pass candidate_id explicitly. A new site that forgets it fails
+        """AST, not substring (§E.3d.9): each production emission must pass
+        candidate_id explicitly or use its owner. A new site that forgets it fails
         here rather than silently producing unjoinable records."""
         # The node, not one file: emission call sites are spread across the
         # node's private modules since C7, and `_emit_record` is now reached
@@ -399,6 +399,8 @@ class TestRecordStamp:
         # call the helper (compliant by construction). Same property, two
         # spellings: 6 direct + 8 helper = the same 12-then-14 emission
         # surface, counted exactly so a lost site is still visible.
+        # External candidate evaluation adds one refusal-record helper call;
+        # it passes bindings.agent_input through the same identity owner.
         tree = ast.parse(tuner_node_source())
         sites = []
         helper_calls = 0
@@ -412,7 +414,7 @@ class TestRecordStamp:
             elif name == "_emit_attempt_record":
                 helper_calls += 1
         assert len(sites) == 6, f"expected 6 direct call sites, found {len(sites)}"
-        assert helper_calls == 8, f"expected 8 helper call sites, found {helper_calls}"
+        assert helper_calls == 9, f"expected 9 helper call sites, found {helper_calls}"
         missing = [ln for ln, ok in sites if not ok]
         assert not missing, f"_emit_record call sites missing candidate_id=: {missing}"
 

@@ -142,6 +142,10 @@ DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
     "tests/unit/nodes/ml_hyperparameter_tune_agent/test_issue_384_probe_data.py": (
         "src/nodes/ml_hyperparameter_tune_agent/probe_data.py",
     ),
+    # Dynamic import avoids the tuner's package rebind; declare its dependency.
+    "tests/unit/nodes/test_evaluation_phase_control.py": (
+        "src/nodes/ml_hyperparameter_tune_agent/execution.py",
+    ),
 }
 
 # ---------------------------------------------------------------------------
