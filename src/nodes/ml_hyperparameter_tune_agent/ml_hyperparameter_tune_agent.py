@@ -461,6 +461,13 @@ def _load_trial_anchor_map(*, composed: bool, data_root: str) -> dict | None:
             the pre-existing behaviour, now naming whichever artifact the task
             actually declared.
     """
+    from execute_tools.evaluation_execution import candidate_evaluation_executor
+
+    if candidate_evaluation_executor() is not None:
+        # This preload feeds only the local scoring route. Scope construction
+        # owns its sampling requirements; the complete evaluator owns scoring
+        # references and must not require publishing them to the researcher.
+        return None
     anchoring = None
     if composed:
         try:

@@ -96,3 +96,9 @@ inference preflight. The complete evaluator owns inference and its data access.
 This does not grant access to private validation data or estimate the evaluator's
 resource use. Candidate export and the actual evaluator must qualify the model's
 inference interface. Unbound local evaluation retains its original input probe.
+
+The native run also omits its local scoring-reference preload when a complete
+evaluator is bound. Task scope construction still owns sampling requirements;
+this does not fabricate or substitute sampling metadata. The complete evaluator
+owns its scoring references. Local evaluation keeps its original declared
+reference-file requirement.
