@@ -101,6 +101,7 @@ class TestAdmissionClassification:
         record = _with_training(_session(tmp_path), 3700.0).decide_admission()
         assert record.decision == "rejected"
         assert record.failure_class == "candidate"
+        assert record.reason_code == "budget_exceeded"
         # numeric parity preserved: 3700 × 2.0
         assert record.avoided_predicted_runtime_seconds == pytest.approx(7400.0, abs=0.5)
 
@@ -110,6 +111,7 @@ class TestAdmissionClassification:
         record = session.decide_admission()
         assert record.decision == "rejected"
         assert record.failure_class == "candidate"
+        assert record.reason_code == "verification_failed"
 
     def test_evidence_channel_failure_is_infrastructure_class(self, tmp_path):
         session = _with_training(_session(tmp_path), 100.0)
@@ -117,6 +119,7 @@ class TestAdmissionClassification:
         record = session.decide_admission()
         assert record.decision == "rejected"
         assert record.failure_class == "infrastructure"
+        assert record.reason_code == "evidence_channel_failure"
         assert "calibration registry corrupt" in (record.reason or "")
 
     def test_infrastructure_outranks_a_within_budget_admission(self, tmp_path):
@@ -139,6 +142,7 @@ class TestAdmissionClassification:
         session.decide_admission()
         payload = json.loads((tmp_path / "rv.json").read_text())
         assert payload["admission"]["failure_class"] == "infrastructure"
+        assert payload["admission"]["reason_code"] == "evidence_channel_failure"
         RuntimeObservation.model_validate(payload)
 
 

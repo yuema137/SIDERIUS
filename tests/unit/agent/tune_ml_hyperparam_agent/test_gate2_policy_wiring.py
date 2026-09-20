@@ -75,6 +75,8 @@ SCENARIO_A_ARGV = [
     "24",
     "--formal_vram_budget_gb",
     "24",
+    "--max_steps_per_attempt",
+    "150000",
     "--min_formal_batch_size",
     "4",
     "--runtime_watchdog",
@@ -96,7 +98,7 @@ class TestScenarioACommandResolution:
         assert a.runtime_safety_factor == 1.5
         assert a.runtime_watchdog_floor_seconds == 120.0
         assert a.runtime_watchdog is True
-        # Production guardrails via chain-runner operational defaults.
+        # Historical explicit guardrails, no longer production defaults.
         assert a.max_steps_per_attempt == 150_000
         assert a.min_formal_batch_size == 4
         assert a.allow_extreme_steps is False

@@ -222,3 +222,72 @@ def test_verified_validation_must_fit_remaining_time_plus_reserve(tmp_path, monk
         enforce_training_allocation(session, phase="validation", prediction=prediction)
     assert json.loads(path.read_text())["admission"]["decision"] == "rejected"
     assert json.loads(path.read_text())["admission"]["stage"] == "training_allocation.validation"
+
+
+def test_default_launch_allows_more_than_old_step_ceiling_but_stops_on_time(tmp_path):
+    """Production CLI must not inject 150k into admission or adaptive training.
+
+    Removing only the preflight default can leave a hidden execution cap;
+    follow parser -> input -> runtime policy -> scheduling to catch both.
+    """
+    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+    from core.runtime_control.session import RuntimeControlPolicy
+    from nodes.ml_hyperparameter_tune_agent import _build_runtime_policy
+    from nodes.ml_hyperparameter_tune_agent.runtime import _evaluate_step_guardrails
+    from workflows.run_one_iteration import build_parser
+
+    args = build_parser().parse_args(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--run_name",
+            "synthetic",
+            "--task_composition",
+            str(tmp_path / "task.yaml"),
+            "--data_dir",
+            str(tmp_path),
+        ]
+    )
+    inputs = HyperparamTuningInput.model_construct(
+        max_steps_per_attempt=args.max_steps_per_attempt or None,
+        training_budget_reserve_fraction=0.2,
+        max_epochs=100,
+    )
+    assert not _evaluate_step_guardrails(
+        n_steps=200_000,
+        batch_size=4,
+        is_formal=True,
+        max_steps_per_attempt=inputs.max_steps_per_attempt,
+        min_formal_batch_size=None,
+        allow_extreme_steps=False,
+    )
+    policy = RuntimeControlPolicy.model_validate(
+        _build_runtime_policy(
+            inputs,
+            chosen_time_budget=2,
+            admission_source="forecast",
+            is_trial=False,
+            base_dir=str(tmp_path),
+        )
+    )
+    allocation = policy.training_budget
+    assert allocation is not None
+    assert allocation.max_optimizer_steps is None
+    decision = decide_training_budget(
+        allocation,
+        elapsed_seconds=30,
+        completed_epochs=2,
+        observed_epoch_seconds=[10, 10],
+        completed_optimizer_steps=200_000,
+        next_optimizer_steps=100_000,
+    )
+    assert decision.action == "continue"
+    decision = decide_training_budget(
+        allocation,
+        elapsed_seconds=90,
+        completed_epochs=2,
+        observed_epoch_seconds=[10, 10],
+        completed_optimizer_steps=200_000,
+        next_optimizer_steps=100_000,
+    )
+    assert decision.action == "stop" and decision.reason == "time_budget"

@@ -154,7 +154,7 @@ class TestTheRefusalSurvivesTheDownstreamGates:
         assert is_evidence_refusal({"feasible": False, "breakdown": {}}) is False
         assert is_evidence_refusal({"feasible": False}) is False
 
-    def test_both_production_call_sites_use_the_shared_predicate(self):
+    def test_all_production_call_sites_use_the_shared_predicate(self):
         # Reachability. The first version of this test re-implemented the
         # condition inline and passed while the production guard was
         # deleted. Parsed as call nodes, not grepped as a substring.
@@ -168,8 +168,8 @@ class TestTheRefusalSurvivesTheDownstreamGates:
             and isinstance(n.func, ast.Name)
             and n.func.id == "is_evidence_refusal"
         ]
-        assert len(calls) == 2, (
-            f"expected the bypass guard and the record builder to call "
+        assert len(calls) == 3, (
+            f"expected the bypass guard, record builder and structured cause stamp to call "
             f"is_evidence_refusal, found {len(calls)} call sites"
         )
 

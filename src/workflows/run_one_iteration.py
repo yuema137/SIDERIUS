@@ -1932,9 +1932,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max_steps_per_attempt",
         type=int,
-        default=150_000,
+        default=0,
         help="§5 guardrail: skip plans above this resolved optimizer-step "
-        "count. 0 disables. Default 150000 (provisional §5 value).",
+        "count. 0 disables. Default 0 (disabled); time budgets govern runtime.",
     )
     parser.add_argument(
         "--min_formal_batch_size",

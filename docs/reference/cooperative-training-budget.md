@@ -32,8 +32,12 @@ uses the slowest complete epoch observed so far to decide whether another
 fits after the explicit downstream reserve. The reserve is an operator
 allowance for final inference, scoring and saving, not a measured prediction.
 
-Training stops at the time boundary or explicit epoch cap. The existing
-`max_steps_per_attempt` safety guard also bounds adaptive expansion: before
+Training stops at the time boundary or explicit epoch cap. There is no
+default optimizer-step ceiling: the chain, iteration and tuner CLIs all
+default `--max_steps_per_attempt` to `0` (disabled). A fast model is not
+refused merely for exceeding 150,000 optimizer steps. The legacy explicit
+`--max_steps_per_attempt N` option remains available for bounded harnesses;
+when deliberately enabled, it also bounds adaptive expansion: before
 each epoch the actual loader size plus completed steps must fit. A normal
 `step_limit` stop saves the last completed weights; inability to fit even
 one epoch fails before optimizer work. The existing `allow_extreme_steps`
@@ -62,3 +66,24 @@ unit rate is reprojected to the executed workload, explicitly labelled as
 post-execution repricing, not a claim that the whole horizon was admitted in
 advance. Missing verification remains missing. Actual duration and measured
 rates remain available for subsequent calibration.
+
+## Formal recovery
+
+The first `full_clone` Formal attempt inherits the winning Trial configuration.
+A same-round time refusal or explicit guardrail refusal allows the next validated
+planner's `batch_size` and `epochs` to survive inheritance; architecture, loss
+and learning rate remain inherited. The cooperative policy still decides the
+executed horizon from the independent Formal allowance and epoch cap, not the
+initial epoch proposal. Existing OOM recovery can also adjust model capacity.
+Resource recovery never raises time/VRAM limits or bypasses admission. Trial
+failures, previous-round failures and missing-evidence refusals cannot unlock
+this path. Unclassified legacy refusals are not guessed to be time failures.
+
+The existing plan-resolution trace records proposed and resolved configurations.
+`[FORMAL RECOVERY]` additionally identifies the reason and preserved execution
+adjustments. Preflight refusal memory records `verification_stage` as
+`preflight_time_budget` or `preflight_evidence`, extending the existing
+structured stage convention used by guardrail and in-process refusals.
+In-process admission records likewise use `reason_code`; only
+`budget_exceeded` and `training_allocation_exceeded` enable this recovery.
+Verification and infrastructure failures retain their own causes and do not.

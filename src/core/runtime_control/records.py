@@ -434,6 +434,23 @@ class AdmissionRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     decision: Literal["admitted", "rejected"]
+    reason_code: (
+        Literal[
+            "record_only",
+            "within_budget",
+            "budget_exceeded",
+            "verification_failed",
+            "evidence_channel_failure",
+            "training_allocation_exceeded",
+        ]
+        | None
+    ) = Field(
+        default=None,
+        description=(
+            "Machine-readable admission cause. None preserves compatibility "
+            "with records written before cause codes existed."
+        ),
+    )
     failure_class: Literal["candidate", "infrastructure"] | None = Field(
         default=None,
         description=(
