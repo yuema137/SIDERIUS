@@ -677,3 +677,14 @@ Legacy proposals without the stamp retain an unknown reference and cannot be
 retrospectively assigned one from their authored numbers. Such predictions
 remain unevaluated under the existing SOTA comparison rule. Score discoveries
 use the separately observed overall best score, never a prediction's reference.
+
+### Persisted experiment roles in summaries
+
+`ModelRunSummary.round_is_trial` preserves `ExperimentRecord.is_trial` in the
+same order as `round_scores`. Per-model prompts state the record-role counts
+and label each known role. Cached summaries predating this field retain an
+empty list and render roles as unavailable; scores or portions never supply
+missing role evidence. Overall-best and Formal aggregates may identify the
+same record. Their equality does not establish a Trial/Formal comparison or
+independent replication. These additions do not change candidate eligibility,
+metric ordering, or training behavior.

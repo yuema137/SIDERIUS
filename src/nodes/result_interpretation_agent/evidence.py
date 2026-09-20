@@ -489,6 +489,7 @@ def tuning_output_to_model_run_summary(
         best_config=output.best_config,
         best_valid_config=(valid_best_rec.params if valid_best_rec else None),
         round_scores=round_scores,
+        round_is_trial=[record.is_trial for record in records],
         round_conclusions=round_conclusions,
         round_ordering=round_ordering,
         round_health=round_health,
