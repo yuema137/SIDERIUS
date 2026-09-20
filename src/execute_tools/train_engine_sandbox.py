@@ -7,7 +7,7 @@ import random
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence, Sized
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import h5py
 import numpy as np
@@ -83,6 +83,10 @@ from execute_tools.training_history import (
     TrainingHistory,
     objective_config_fingerprint,
     stamp_comparability,
+)
+from execute_tools.validation_execution import (
+    child_validation_executor_binding,
+    execute_validation_epoch,
 )
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_class
@@ -795,6 +799,7 @@ def _validation_pass(
     on_verified: Any = None,
     observables: Any = None,
     check_allocation: Callable[[], None] | None = None,
+    resolved_custom_target_dtype: Literal["long", "float"] | None = None,
 ) -> tuple[float, int, float]:
     """One R3 observation: the run-resolved objective on the validation scope.
 
@@ -810,6 +815,10 @@ def _validation_pass(
     (``EPOCH_STATISTIC``), exact under an unequal last batch.
 
     Args:
+        resolved_custom_target_dtype: Already-resolved loss metadata for an
+            isolated coordinator using numeric module proxies. The existing
+            loss dtype authority validates/interprets it; no candidate plugin
+            import is needed. Omitted on the ordinary local training route.
         verifier: optional ``AdaptiveUnitVerification`` for the ``validation``
             phase (Step 07 / PR 07c C5). When supplied, each COMPLETED
             validation batch's wall time is fed to it until it reaches a
@@ -878,7 +887,13 @@ def _validation_pass(
             input_dtype = resolve_input_dtype(
                 model_cfg.model_type, model_io, site_preference=TRAINING_SITE_DTYPE
             )
-            target_dtype = get_target_torch_dtype(loss_cfg)
+            target_dtype = (
+                get_target_torch_dtype(loss_cfg)
+                if resolved_custom_target_dtype is None
+                else get_target_torch_dtype(
+                    loss_cfg, resolved_custom_dtype=resolved_custom_target_dtype
+                )
+            )
             use_cuda_sync = device.type == "cuda"
             val_iterator = iter(val_loader)
             while True:
@@ -938,6 +953,12 @@ def _validation_pass(
     gc.collect()
     r3 = weighted_sum / n_total  # n_total == requested_rows > 0 by the materialization contract
     return r3, n_total, time.perf_counter() - t0
+
+
+# Public caller entry for isolated validation coordinators. This is an alias to
+# the single native estimator/transaction, not a second validation algorithm.
+# The legacy private spelling remains for existing engine callers and tests.
+observe_validation = _validation_pass
 
 
 def _build_training_history(
@@ -1831,8 +1852,9 @@ def run_experiment_streaming(
         if task_eval_scope is not None:
             assert validation_history is not None and validation_seconds is not None
             assert validation_requested_rows is not None
-            observation.start_epoch()
-            r3, n_val, val_secs = _validation_pass(
+            r3, n_val, val_secs = execute_validation_epoch(
+                _validation_pass,
+                expected_rows=validation_requested_rows,
                 model=model,
                 criterion=criterion,
                 model_cfg=model_cfg,
@@ -1850,7 +1872,6 @@ def run_experiment_streaming(
                     runtime_session, phase="validation"
                 ),
             )
-            observation.finish_epoch()
             validation_history.append(float(r3))
             validation_seconds.append(float(val_secs))
             validation_seconds_total += val_secs
@@ -2160,6 +2181,11 @@ def main():
         ),
     )
     parser.add_argument(
+        "--validation_executor_json",
+        default=None,
+        help="Explicit deployment client/settings JSON; absent preserves native local validation.",
+    )
+    parser.add_argument(
         "--validation_requested_rows",
         type=int,
         default=None,
@@ -2382,7 +2408,11 @@ def main():
             raise TaskDataPathResolutionError(
                 "Training requires --task_data_path_id from an explicit task composition."
             )
-        with binding_cm, child_observables_binding(args.task_manifest):
+        with (
+            binding_cm,
+            child_observables_binding(args.task_manifest),
+            child_validation_executor_binding(args.validation_executor_json),
+        ):
             # Step 12 / PR-12bc B6 — the child side of the SCOPE transport, and
             # the close of the pairing gap. Before this the binding crossed and
             # the scope did not, so the engine fell into its regime-A branch and
@@ -2426,6 +2456,8 @@ def main():
             return
     else:
         # Legacy single-file mode: pre-load entire file into TIDMADDataset
+        if args.validation_executor_json is not None:
+            raise ValueError("A validation deployment requires task-owned streaming scopes")
         dataset = TIDMADDataset(
             args.data_dir,
             [tidmad_topology(dataset_profile).dataset.training_file_name(args.file_index)],

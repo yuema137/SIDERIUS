@@ -6,8 +6,10 @@ measurement and persistence remain the real framework implementation.
 
 from __future__ import annotations
 
+import os
 import random
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Literal
 
 import h5py
@@ -21,6 +23,7 @@ from execute_tools.task_data_path import (
     EvalMaterializationParams,
     ValidationScopeError,
 )
+from execute_tools.validation_execution import ValidationExecutionResult
 
 if TYPE_CHECKING:
     from tests.helpers.two_family_profile import TwoFamilyFixture
@@ -117,3 +120,46 @@ class TwoFamilyDataPath:
 
     def read_evaluation_payload(self, request):
         raise NotImplementedError("This trainer-only witness does not score artifacts")
+
+
+class NativeSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    rows: int
+    data_dir: str
+    marker: Path
+
+
+class NativeClient:
+    """Trusted synthetic oracle for the trainer child; does not create isolation."""
+
+    def __init__(self, settings):
+        self.settings = NativeSettings.model_validate(settings)
+
+    def declared_rows(self, scope):
+        return self.settings.rows
+
+    def observe(self, request, callbacks):
+        from execute_tools.train_engine_sandbox import observe_validation
+
+        value, rows, _ = observe_validation(
+            model=request.model,
+            criterion=request.criterion,
+            model_cfg=SimpleNamespace(model_type=request.model_type),
+            loss_cfg=request.loss,
+            model_io=request.model_io,
+            device=request.device,
+            data_path=TwoFamilyDataPath(),
+            task_eval_scope=request.scope,
+            data_dir=self.settings.data_dir,
+            batch_size=request.batch_size,
+            verifier=callbacks.verifier,
+            on_verified=callbacks.on_verified,
+            check_allocation=callbacks.check_allocation,
+        )
+        with self.settings.marker.open("a") as handle:
+            handle.write(f"{os.getpid()}\n")
+        return ValidationExecutionResult(r3=value, rows=rows)
+
+
+def create_native(settings):
+    return NativeClient(settings)
