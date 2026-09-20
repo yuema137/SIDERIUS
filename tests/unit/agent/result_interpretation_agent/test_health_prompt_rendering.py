@@ -67,7 +67,9 @@ class TestTrajectoryLabels:
     def test_invalidated_round_labeled_with_action_and_signature(self):
         summary = tuning_output_to_model_run_summary(_collapse_output(), order=_STEP09A_ORDER)
         prompt = _render(summary)
-        assert f"Round 1: score=invalidated [role=Formal] [GATE invalidate_round — {SIG}] —" in prompt
+        assert (
+            f"Round 1: score=invalidated [role=Formal] [GATE invalidate_round — {SIG}] —" in prompt
+        )
         # Role provenance is present for healthy rounds as well.
         assert "Round 2: score=1.2500 [role=Formal] —" in prompt
 
