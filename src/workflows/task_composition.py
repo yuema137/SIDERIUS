@@ -92,7 +92,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.task_config import ForwardContract
     from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
     from execute_tools.dataset_config import DatasetProfile
-    from execute_tools.evaluation_metric import EvaluationMetric, ScoreabilityContract
+    from execute_tools.evaluation_metric import EvaluationMetric, RunMetric, ScoreabilityContract
     from execute_tools.health_checks._composition import TaskHealthBinding
     from execute_tools.task_data_path import TaskDataPath
 
@@ -220,7 +220,7 @@ class RunTaskComposition:
 
     task_data_path: TaskDataPath
     dataset_profile: DatasetProfile
-    metric: EvaluationMetric
+    metric: RunMetric
     task_health_binding: TaskHealthBinding
     interpretation_blocks: InterpretationTaskBlocks | None
     task_description: str
@@ -1013,7 +1013,7 @@ def _looks_like_instance(candidate: Any) -> bool:
 
 def _compose_metric(
     section: dict[str, Any], manifest_dir: str, where: str = "metric"
-) -> tuple[EvaluationMetric, dict[str, Any], tuple[ResolvedPluginRef, ...]]:
+) -> tuple[RunMetric, dict[str, Any], tuple[ResolvedPluginRef, ...]]:
     """Declaration JSON → ``MetricSpec`` → the declared implementation.
 
     The spec comes from ``metric_spec_from_declaration`` — the ONE
@@ -1028,7 +1028,11 @@ def _compose_metric(
     parameter is the whole reason P2b needs no second copy of the five
     fail-closed branches below (Step 10 / P2b §3.1: reuse or STOP).
     """
-    from execute_tools.evaluation_metric import EvaluationMetric, metric_spec_from_declaration
+    from execute_tools.evaluation_metric import (
+        CandidateEvaluationMetric,
+        EvaluationMetric,
+        metric_spec_from_declaration,
+    )
 
     declaration_ref = _require(section, "declaration", where)
     declaration_path = _resolve_path(declaration_ref, manifest_dir)
@@ -1065,10 +1069,10 @@ def _compose_metric(
             f"{where}.implementation could not be instantiated with the "
             f"declared spec: {type(exc).__name__}: {exc}"
         ) from exc
-    if not isinstance(metric, EvaluationMetric):
+    if not isinstance(metric, (EvaluationMetric, CandidateEvaluationMetric)):
         raise TaskCompositionError(
             f"{where}.implementation resolved to {type(metric).__name__}, "
-            "which is not an EvaluationMetric. The metric handle is the ONE "
+            "which is not an EvaluationMetric or CandidateEvaluationMetric. The metric handle is the ONE "
             "scoring contract (Step 06); a composition may choose which "
             "instance, never a different contract."
         )
@@ -1101,6 +1105,8 @@ def _compose_metric(
             "disagree with it, silently."
         )
     plugins = (() if plugin_ref is None else (plugin_ref,)) + scoreability_plugins
+    if isinstance(metric, CandidateEvaluationMetric):
+        payload = {**payload, "execution": "complete_candidate_evaluation"}
     return metric, payload, plugins
 
 
@@ -1225,6 +1231,12 @@ def _compose_secondary_metrics(
                 f"'implementation'; got {type(entry).__name__}."
             )
         metric, declaration, metric_plugins = _compose_metric(entry, manifest_dir, where)
+        from execute_tools.evaluation_metric import EvaluationMetric
+
+        if not isinstance(metric, EvaluationMetric):
+            raise TaskCompositionError(
+                f"{where}: candidate execution belongs to the primary metric"
+            )
         metric_id = metric.spec.id
         if metric_id == primary_id:
             raise TaskCompositionError(
@@ -2288,6 +2300,12 @@ def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
     with composition_package(raw.get("code_package"), os.path.dirname(resolved_manifest)):
         metric, _declaration, _plugin = _compose_metric(
             _section(raw, "metric", resolved_manifest), os.path.dirname(resolved_manifest)
+        )
+    from execute_tools.evaluation_metric import EvaluationMetric
+
+    if not isinstance(metric, EvaluationMetric):
+        raise TaskCompositionError(
+            "this metric requires complete candidate evaluation, not the local scoring child"
         )
     return metric
 

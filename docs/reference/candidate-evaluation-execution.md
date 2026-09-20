@@ -4,7 +4,36 @@ A deployment may expose inference, scoring and Health through a protected
 candidate evaluator. Bind its public client with
 `execute_tools.evaluation_execution.bind_candidate_evaluation(executor)` in the
 same process that invokes the native tuner. Without that explicit binding, the
-original local inference, scoring and round Health path remains active.
+original local inference, scoring and round Health path remains active for a
+local `EvaluationMetric`. A candidate-only composition requires this binding
+before the tuner starts.
+
+## Public composition without private metric source
+
+Keep the original metric declaration and public scoreability contracts. In the
+deployment's additional composition manifest, select:
+
+```yaml
+metric:
+  declaration: /public/task/metric_spec.json
+  implementation:
+    module: execute_tools.evaluation_metric
+    symbol: CandidateEvaluationMetric
+```
+
+Retain any task-declared `scoreability_contracts` alongside these fields. The
+deployment manifest may reference a frozen public task package without editing
+it. Resolve relative task references against their original manifest before
+writing an overlay elsewhere.
+
+This metric handle exposes the declared `MetricSpec` without importing private
+arithmetic. Complete evaluation execution is part of the composition identity;
+the scientific declaration stays unchanged. Composition loading itself needs no
+executor, so proposal and implementation can use the task declaration. Native
+tuner metric resolution requires an explicit executor and fails before training
+if it is absent. Local scoring-child entrypoints refuse this handle. Secondary
+metric declarations retain their local implementation contract; the complete
+evaluator must still account for every requested secondary metric.
 
 This differs from [per-epoch validation](private-validation-execution.md):
 validation returns training-objective observations; complete candidate evaluation

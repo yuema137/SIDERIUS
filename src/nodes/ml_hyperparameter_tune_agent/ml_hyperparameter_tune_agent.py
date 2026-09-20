@@ -56,7 +56,7 @@ from execute_tools.deliverable_spec import (
     indexed_cleanup_naming,
 )
 from execute_tools.evaluation_metric import (
-    EvaluationMetric,
+    RunMetric,
     resolve_bound_run_secondary_metrics,
     resolve_run_metric,
 )
@@ -795,7 +795,7 @@ class HyperparamTuningAgent:
         # A composed run supplies the metric its declaration named, resolved
         # once at the composition edge. An uncomposed run refuses here rather
         # than selecting a scientific metric on the framework's authority.
-        run_metric: EvaluationMetric = resolve_run_metric()
+        run_metric: RunMetric = resolve_run_metric()
 
         # --- The run's DECLARED observational secondaries (Step 10 / P2b) ---
         # Acquired at the SAME site as the primary, from the same composition,
