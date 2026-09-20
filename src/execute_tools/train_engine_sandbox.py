@@ -7,7 +7,7 @@ import random
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence, Sized
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import h5py
 import numpy as np
@@ -795,6 +795,7 @@ def _validation_pass(
     on_verified: Any = None,
     observables: Any = None,
     check_allocation: Callable[[], None] | None = None,
+    resolved_custom_target_dtype: Literal["long", "float"] | None = None,
 ) -> tuple[float, int, float]:
     """One R3 observation: the run-resolved objective on the validation scope.
 
@@ -810,6 +811,10 @@ def _validation_pass(
     (``EPOCH_STATISTIC``), exact under an unequal last batch.
 
     Args:
+        resolved_custom_target_dtype: Already-resolved loss metadata for an
+            isolated coordinator using numeric module proxies. The existing
+            loss dtype authority validates/interprets it; no candidate plugin
+            import is needed. Omitted on the ordinary local training route.
         verifier: optional ``AdaptiveUnitVerification`` for the ``validation``
             phase (Step 07 / PR 07c C5). When supplied, each COMPLETED
             validation batch's wall time is fed to it until it reaches a
@@ -878,7 +883,13 @@ def _validation_pass(
             input_dtype = resolve_input_dtype(
                 model_cfg.model_type, model_io, site_preference=TRAINING_SITE_DTYPE
             )
-            target_dtype = get_target_torch_dtype(loss_cfg)
+            target_dtype = (
+                get_target_torch_dtype(loss_cfg)
+                if resolved_custom_target_dtype is None
+                else get_target_torch_dtype(
+                    loss_cfg, resolved_custom_dtype=resolved_custom_target_dtype
+                )
+            )
             use_cuda_sync = device.type == "cuda"
             val_iterator = iter(val_loader)
             while True:
@@ -938,6 +949,12 @@ def _validation_pass(
     gc.collect()
     r3 = weighted_sum / n_total  # n_total == requested_rows > 0 by the materialization contract
     return r3, n_total, time.perf_counter() - t0
+
+
+# Public caller entry for isolated validation coordinators. This is an alias to
+# the single native estimator/transaction, not a second validation algorithm.
+# The legacy private spelling remains for existing engine callers and tests.
+observe_validation = _validation_pass
 
 
 def _build_training_history(

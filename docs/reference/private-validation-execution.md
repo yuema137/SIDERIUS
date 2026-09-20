@@ -4,6 +4,16 @@ Status: RNG state transport and synthetic process parity are implemented.
 There is **no installed remote validation executor** in this change. The normal
 training engine still executes its local `_validation_pass` unchanged.
 
+The supported coordinator entry is
+`execute_tools.train_engine_sandbox.observe_validation`, an alias of that same
+implementation. It accepts numeric `nn.Module` proxies without reconstructing
+candidate classes in the coordinator. Its optional
+`resolved_custom_target_dtype` carries the loss declaration already resolved in
+research (`long` or `float`). The existing `get_target_torch_dtype` remains the
+sole interpreter: built-ins reject an override and a conflicting loaded custom
+declaration is refused. Omission preserves the ordinary local route. No plugin
+registry mutation or candidate loss import is needed for this transport.
+
 ## Preserve the existing transaction
 
 A deployment that withholds validation data from research must run candidate
