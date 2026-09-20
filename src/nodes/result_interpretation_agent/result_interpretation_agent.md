@@ -677,3 +677,32 @@ Legacy proposals without the stamp retain an unknown reference and cannot be
 retrospectively assigned one from their authored numbers. Such predictions
 remain unevaluated under the existing SOTA comparison rule. Score discoveries
 use the separately observed overall best score, never a prediction's reference.
+
+### Persisted experiment roles in summaries
+
+### Measured execution context
+
+`execution_evidence` carries identified best/formal records, deduplicated by
+`exp_id`, through the typed summary and knowledge cache. Per-model prompts
+include measured subprocess phase times, the trainer's validated budget receipt,
+materialized validation row count, and the runtime calibration parameter dtype
+when present. Validation time is part of training subprocess time; subtracting
+it does not isolate pure optimizer compute. Parameter dtype does not establish
+autocast/operator precision. Missing observations remain unknown; architecture
+descriptions and proposed epochs are not measured execution facts.
+
+Opaque task scopes do not imply a physical-segment count. Without an explicit
+legacy SampleSet, composed attempts report that count as unknown rather than
+substituting a whole-file profile. Validation dataset rows and physical parent
+segments are different units and must not be compared as the same count.
+
+### Role projection
+
+`ModelRunSummary.round_is_trial` preserves `ExperimentRecord.is_trial` in the
+same order as `round_scores`. Per-model prompts state the record-role counts
+and label each known role. Cached summaries predating this field retain an
+empty list and render roles as unavailable; scores or portions never supply
+missing role evidence. Overall-best and Formal aggregates may identify the
+same record. Their equality does not establish a Trial/Formal comparison or
+independent replication. These additions do not change candidate eligibility,
+metric ordering, or training behavior.

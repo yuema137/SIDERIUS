@@ -40,6 +40,8 @@ from agent.schemas.training_diagnosis import TrainingDiagnosis
 # core.hardware_context.
 from core.runtime_control.admission import AdmissionEnforcement
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
+from core.runtime_control.records import RuntimeObservation
+from core.runtime_control.training_budget import TrainingBudgetReceipt
 from core.runtime_control.validation_limits import validate_phase_deadline
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_execution import CandidateEvaluationResult
@@ -575,6 +577,12 @@ class ExperimentRecord(BaseModel):
     )
 
     timing: ExperimentTiming | None = None
+    training_budget: TrainingBudgetReceipt | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    runtime_verification: RuntimeObservation | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
     memory: ExperimentMemory | None = None
 
     # --- Trial context (optional — absent or default in normal mode) ---

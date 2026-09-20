@@ -367,6 +367,23 @@ def test_fast_phase_extension_still_obeys_time_cap():
     assert len(verifier.measurement().raw_timings_ms) <= 100
 
 
+def test_pending_slow_observation_explains_rejection_with_satisfied_minimums():
+    """2026-09-19 V4: count/time passed, but the diagnostic reported unmet:none."""
+    cfg = _config(min_timed_ms=40, max_steps=21)
+    verifier = AdaptiveUnitVerification("sample", cfg)
+    for _ in range(20):
+        assert not verifier.is_terminal
+        verifier.feed(1.0)
+    # A single final delay supplies enough wall time but requires a recovery
+    # observation. The existing cap ends the probe before recovery is seen.
+    assert verifier.feed(30.0) == "failed_no_steady_state"
+    reason = verifier.failure_reason or ""
+    assert "unmet: pending_slow_observation;" in reason
+    assert "pending slow streak=1, sustained threshold=3" in reason
+    assert "unmet: none" not in reason
+    assert verifier.prediction(_WORKLOAD, "real_training_verification") is None
+
+
 def test_fast_extension_stops_on_local_wall_time(monkeypatch):
     """Verifier CPU overhead also bounds tiny-unit traces, not just reported GPU time."""
     now = [0.0]

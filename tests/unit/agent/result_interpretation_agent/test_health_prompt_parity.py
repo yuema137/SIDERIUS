@@ -1,19 +1,13 @@
-"""Flag OFF ⇒ interpreter prompts byte-identical to the pre-PR3 goldens.
+"""Flag-OFF prompts preserve reviewed golden bytes outside declared changes.
 
-The §3.1 parity claim (``pr3_healthgate_feedback.md``): with
-``enable_structured_health_feedback`` OFF, agent-facing prompts remain
-byte-identical to the pre-PR3 condition — even when ``round_health``
-data is present on the summary. The goldens under ``goldens/`` were
-captured from the PRE-rendering-change code at commit ``f3a0b8c``
-(clean tree), so equality here is against true pre-change output, not a
-re-derivation.
+The captures originated before the PR3 Health renderer (f3a0b8c). With
+structured Health feedback disabled, Health-only additions remain absent.
+The synthetic fixture supplies an explicit metric and gate roster.
 
-The migrated fixture supplies a synthetic gate roster and explicit metric.
-Those identities are hidden when the flag is OFF, so both historical user
-goldens remain byte-identical; no expected text is regenerated.
-
-Parity is proven by exact string equality, not by absence of diffs in
-the renderer (design §11-CB3 acceptance criteria).
+2026-09-19: persisted role labels and aggregate-overlap guidance are intentional
+additions, independent of the Health flag. The exact golden edits preserve
+all other bytes. Fixture records are Formal (is_trial=False), including the
+legacy Health record; legacy Health provenance does not mean missing role data.
 """
 
 from pathlib import Path

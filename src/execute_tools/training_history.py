@@ -56,6 +56,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from core.runtime_control.training_budget import TrainingBudgetReceipt
 from ml_models.models_format_sandbox import LossConfig
 
 #: The three legacy trainer→tuner result keys. Their presence and values are
@@ -382,6 +383,7 @@ class TrainingResults(BaseModel):
     legacy_payload: dict[str, Any]
     history: TrainingHistory | None
     history_state: Literal["present", "absent"]
+    training_budget: TrainingBudgetReceipt | None = None
     static_observations: dict[str, float] = Field(
         default_factory=dict,
         description=(
@@ -470,11 +472,20 @@ def interpret_training_results(raw: object, *, expected_validation: bool) -> Tra
             + ". This is a contract failure, never a success with validation_state='absent'."
         )
 
+    budget = None
+    if raw.get("training_budget") is not None:
+        try:
+            budget = TrainingBudgetReceipt.model_validate(raw["training_budget"])
+        except ValidationError as exc:
+            raise TrainingResultsContractError(
+                f"training_budget payload is schema-invalid: {exc}"
+            ) from exc
     return TrainingResults(
         legacy_payload=legacy_payload,
         history=history,
         history_state="present" if history is not None else "absent",
         static_observations=_read_static_observations(raw),
+        training_budget=budget,
     )
 
 

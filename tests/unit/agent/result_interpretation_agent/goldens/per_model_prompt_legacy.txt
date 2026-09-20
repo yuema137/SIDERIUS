@@ -4,6 +4,8 @@ Raw best score       : None (health=unknown)
 Best valid score     : None
 Worst denoising score: 0.7
 Formal round score   : 0.7
+Persisted record roles: Trial=0, Formal=1
+Overall-best and Formal aggregates may refer to the same record; equal values are not independent replication evidence.
 Best valid formal    : NONE — this model produced no HealthGate-valid formal result; every score above is from a trial round, a health-invalid record, or both.
 
 ### Record outcomes
@@ -20,7 +22,7 @@ A test architecture.
 none
 
 ### Score Trajectory (chronological)
-  Round 1: score=0.7000 — 
+  Round 1: score=0.7000 [role=Formal] — 
 
 ---
 ## Human Guidance (highest priority — overrides expert advice)

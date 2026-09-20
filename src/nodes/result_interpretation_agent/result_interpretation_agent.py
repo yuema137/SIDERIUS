@@ -605,6 +605,9 @@ class ResultInterpretationAgent:
                 )
 
                 new_stats = {
+                    "execution_evidence": [
+                        item.model_dump(mode="json") for item in summary.execution_evidence
+                    ],
                     "best_denoising_score": summary.best_denoising_score,
                     "best_valid_denoising_score": summary.best_valid_denoising_score,
                     "best_raw_health_validity": summary.best_raw_health_validity,

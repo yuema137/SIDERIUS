@@ -38,6 +38,15 @@ their own artifact path.
 
 ### Round / attempt budgets
 
+Completed attempts retain the trainer's typed `training_budget` receipt when
+present, including its stopping decision, completed epochs and optimizer steps.
+It travels alongside `runtime_verification` through `ExperimentRecord`; neither
+receipt changes selection, admission or training policy. Malformed budget
+receipts fail at the existing training-results validation boundary. Composed
+opaque scopes do not fall back to whole-file geometry for selected PSD counts;
+those legacy counts remain unknown unless the legacy sampling path establishes
+them. Dataset row counts are separate from physical-segment counts.
+
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `max_rounds` | `int` | No | `50` | Maximum number of **completed** experiment rounds (OOM-skipped attempts do not count). |

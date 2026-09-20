@@ -64,7 +64,7 @@ _PRESENT = "<present>"
 # detect it; the known-defect register is the guard.
 # ---------------------------------------------------------------------------
 
-EXPERIMENT_RECORD_FIELDS_65 = [
+EXPERIMENT_RECORD_FIELDS = [
     "record_type",
     "exp_id",
     "status",
@@ -109,6 +109,11 @@ EXPERIMENT_RECORD_FIELDS_65 = [
     "training_psd_segments",
     "eval_psd_segments",
     "timing",
+    # PR #560: retain the two existing execution receipt families through the
+    # typed record boundary. Both remain omitted when absent; other fields
+    # and legacy persisted values are unchanged.
+    "training_budget",
+    "runtime_verification",
     "memory",
     "is_trial",
     "trial_strategy",
@@ -223,7 +228,7 @@ def pseudo_run(tmp_path_factory):
 
 class TestREC1FieldLists:
     def test_experiment_record_ordered_fields(self):
-        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_65
+        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS
 
     def test_output_and_interpretation_field_counts_and_heads(self):
         """REC-3 schema part: HyperparamTuningOutput and

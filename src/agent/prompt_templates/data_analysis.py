@@ -326,7 +326,10 @@ plausible explanations; do not restate the same raw-data fact in multiple findin
 historical-model predictions were analyzed, report their measured behavior and any supported
 between-model contrast, naming the compared scopes and avoiding claims about unmeasured targets.
 If model-aware analysis was attempted but not completed, say so explicitly rather than implying
-the model was inspected. State limitations and sampling coverage honestly. Return JSON only."""
+the model was inspected. State limitations and sampling coverage honestly. Authorized asset
+descriptors are declared context, not new measurements or permission to read additional data.
+Use their units/acquisition metadata only for the matching measured asset; do not invent missing
+artifact contents from a reference. Return JSON only."""
     bounded_results = [
         {
             "result_id": result.result_id,
@@ -352,7 +355,13 @@ the model was inspected. State limitations and sampling coverage honestly. Retur
         }
         for result in results
     ]
-    user = f"""Questions:
+    user = f"""Task context:
+{_json(analysis_input.task_context)}
+
+Authorized asset descriptors (same scope projection used for planning):
+{_json(analysis_input.planning_assets())}
+
+Questions:
 {_json(analysis_input.analysis_brief.questions)}
 
 {_literature_context_block(analysis_input)}Certified bounded SkillResults:

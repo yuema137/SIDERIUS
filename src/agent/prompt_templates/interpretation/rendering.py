@@ -15,6 +15,7 @@ It must never import the node package (``nodes.result_interpretation_agent``)
 import json
 from typing import TYPE_CHECKING, Any
 
+from agent.prompt_templates.interpretation.execution import render_execution_evidence
 from agent.schemas.health_feedback import CollapseFingerprint
 from agent.schemas.interpretation import ModelRunSummary
 from agent.schemas.score_table import ScoreComparisonTable
@@ -49,7 +50,7 @@ assessment. The research context is:
 
 You will receive:
 - The model's architectural description (markdown + math)
-- Best and worst golden-metric scores (trial best and formal score if available)
+- Best and worst golden-metric scores across records, plus formal score if available
 - Best configuration
 - Score trajectory across rounds (with trial portions and model sizes)
 - Per-round conclusions from the tuning agent's reflections
@@ -75,6 +76,10 @@ Produce a JSON object with exactly these fields:
 }
 
 Rules:
+- Overall best may be the same Formal record shown again under formal score. Equal
+  aggregate scores do not establish a Trial/Formal comparison or independent replication.
+  Use the persisted record roles; if either role is absent or unknown, state that
+  a Trial/Formal comparison is unavailable.
 - key_findings: ranked by importance, evidence-based, reference actual values
 - bottlenecks: root causes (e.g. 'architecture capacity ceiling'), not symptoms
 - best_config_analysis: be specific about which hyperparameters mattered most
@@ -471,6 +476,25 @@ def render_failure_counts(counts: "RecordFailureCounts | None") -> list[str]:
     return lines
 
 
+def _render_record_roles(summary: ModelRunSummary) -> list[str]:
+    """Describe persisted role evidence without inferring roles from scores."""
+    lines: list[str] = []
+    if summary.round_scores and len(summary.round_is_trial) == len(summary.round_scores):
+        trial_count = sum(summary.round_is_trial)
+        lines.append(
+            f"Persisted record roles: Trial={trial_count}, "
+            f"Formal={len(summary.round_is_trial) - trial_count}"
+        )
+    else:
+        lines.append("Persisted record roles: unavailable in this summary")
+    lines.append(
+        "Overall-best and Formal aggregates may refer to the same record; "
+        "equal values are not independent replication evidence."
+    )
+
+    return lines
+
+
 def _build_per_model_prompt(
     summary: ModelRunSummary,
     description: str | None,
@@ -522,6 +546,7 @@ def _build_per_model_prompt(
     # Formal score (if available and distinct from best)
     if summary.formal_score is not None:
         lines.append(f"Formal round score   : {summary.formal_score}")
+    lines.extend(_render_record_roles(summary))
 
     # F-SCANE-4 — the ONE per-model headline that is BOTH HealthGate-valid AND
     # formal. Every other number above is mixed on one axis or the other:
@@ -545,6 +570,7 @@ def _build_per_model_prompt(
         )
 
     # Model efficiency
+    lines.extend(render_execution_evidence(summary.execution_evidence))
     if summary.best_model_params is not None:
         lines.append(f"Best model params    : {summary.best_model_params:,}")
 
@@ -640,6 +666,8 @@ def _build_per_model_prompt(
 
         score_str = f"{score:.4f}" if score is not None else "skipped"
         extras = []
+        if i < len(summary.round_is_trial):
+            extras.append("role=Trial" if summary.round_is_trial[i] else "role=Formal")
         if trial_p is not None:
             extras.append(f"portion={trial_p}")
         if params is not None:

@@ -32,6 +32,7 @@ from agent.schemas.health_feedback import (
 )
 from agent.schemas.hyperparam_tuning import ExperimentRecord
 from agent.schemas.interpretation import (
+    InterpretationExecutionEvidence,
     MetricIdentity,
     ModelRunSummary,
     RecordFailureCounts,
@@ -60,6 +61,43 @@ class InterpretationContractError(ValueError):
     interpreter would otherwise have to pick a winner between two authorities
     that disagree, and every available way of picking is wrong.
     """
+
+
+def project_execution_evidence(
+    records: Sequence[ExperimentRecord | None],
+) -> list[InterpretationExecutionEvidence]:
+    """Carry best/formal facts once per record; never infer compute dtype."""
+    evidence = {}
+    for record in records:
+        if record is None or record.exp_id in evidence:
+            continue
+        runtime = record.runtime_verification
+        dtype = runtime.calibration_context.get("precision") if runtime else None
+        if (
+            record.timing is None
+            and record.training_budget is None
+            and runtime is None
+            and record.training_history is None
+        ):
+            continue
+        evidence[record.exp_id] = InterpretationExecutionEvidence(
+            exp_id=record.exp_id,
+            is_trial=record.is_trial,
+            timing=record.timing,
+            training_budget=record.training_budget,
+            parameter_dtype=dtype if isinstance(dtype, str) else None,
+            validation_samples=(
+                record.training_history.validation_samples if record.training_history else None
+            ),
+            phase_memory={
+                phase: component.realized_memory
+                for phase, component in runtime.components.items()
+                if component.realized_memory is not None
+            }
+            if runtime
+            else {},
+        )
+    return list(evidence.values())
 
 
 def reconcile_metric_spec(
@@ -489,6 +527,7 @@ def tuning_output_to_model_run_summary(
         best_config=output.best_config,
         best_valid_config=(valid_best_rec.params if valid_best_rec else None),
         round_scores=round_scores,
+        round_is_trial=[record.is_trial for record in records],
         round_conclusions=round_conclusions,
         round_ordering=round_ordering,
         round_health=round_health,
@@ -513,6 +552,7 @@ def tuning_output_to_model_run_summary(
         # Efficiency
         best_model_params=best_rec.model_params if best_rec else None,
         # Compute cost
+        execution_evidence=project_execution_evidence((best_rec, formal_rec)),
         best_timing=best_rec.timing.model_dump() if best_rec and best_rec.timing else None,
         # Data volume
         training_psd_segments=best_rec.training_psd_segments if best_rec else None,
