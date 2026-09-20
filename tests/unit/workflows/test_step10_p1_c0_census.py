@@ -246,9 +246,9 @@ class TestCensusBTransportEmissionSites:
             ]
             if calls:
                 offenders[str(path.relative_to(REPO_ROOT))] = len(calls)
-        assert offenders == {"src/core/sandbox_executor.py": 1}, (
+        assert offenders == {"src/core/task_transport.py": 1}, (
             "transport_argv must be emitted from exactly ONE production module "
-            f"(the sandbox executor's single argv helper); found {offenders}."
+            f"(the extracted task-binding argv helper); found {offenders}."
         )
 
     def test_the_measured_binding_topology_of_the_parent_process(self):
