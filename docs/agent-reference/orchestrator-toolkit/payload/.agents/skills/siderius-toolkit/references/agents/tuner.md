@@ -14,6 +14,12 @@ task contract, not an example or fallback, supplies scientific semantics.
 
 model_type is the schema-required field, but a runnable task needs the correct installed candidate, bound task composition, data root, storage, metric/Health configuration and resource settings. Provider/model/effort and reflection routing are input fields, not constructor kwargs. Formal training ownership and Formal evaluation scope are separate controls.
 
+Check the deployment handoff described in the [implementer guide](implementer.md)
+before the first substantial training call. A selected candidate's native
+validation verdict does not certify its submission format or every device used
+by the evaluator. Use any run-provided compatibility check with the actual
+source/configuration and deployment requirements.
+
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent.HyperparamTuningAgent`.
@@ -70,6 +76,15 @@ For typed transfer to another capability, read [handoffs](../handoffs.md).
 May create sandbox processes, train, infer, score, publish records and clean artifacts. These share the run budget. Explicitly configure preservation to meet the task submission contract. Call set_run_context when native tuner telemetry is required; do not claim comprehensive accounting merely from run().
 
 ## Errors and recovery
+
+Locate the failed stage before repeating training. Preserve the native runtime
+rejection reason and any evaluation-command diagnostic. A completed checkpoint
+or exported candidate can survive a later scoring failure; inspect those
+artifacts and the task's supported resubmission route before deciding whether
+new training is needed. Retraining, implementation repair and scoring retry are
+different operations; none should be inferred solely from a generic subprocess
+exit or connection error.
+
 
 Preserve partial results, gate exhaustion, Health and termination metadata. A selected training result is not automatically an eligible final submission. For agent-owned Formal training, the validated plan supplies training strategy/portions; the task still owns evaluation. Missing executor access is not solved by exposing private evaluator assets.
 

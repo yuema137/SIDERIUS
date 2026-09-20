@@ -19,6 +19,17 @@ including the run's applicable scope and the source of any advice fields.
 Save the check and started status before the call; update its outcome before
 preparing another operation.
 
+## Deployment handoff
+
+Before connecting a generated model to substantial training, read the submission
+and execution guide named by `SIDERIUS-RUN.md`. If it supplies a format/device
+compatibility checker, use that checker on the selected model and configuration;
+the generic implementor and validator do not automatically run an external
+submission check. Generated code can train successfully yet fail serialization
+or execution on the evaluator's device. Pass the concrete compatibility error
+through the existing repair input. The deployment owns the format and devices;
+this toolkit does not choose them or prescribe a scientific model.
+
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_model_implementor.ml_model_implementor.MLModelImplementor`.
