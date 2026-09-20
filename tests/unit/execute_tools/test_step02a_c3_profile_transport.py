@@ -99,28 +99,24 @@ class TestSubprocessEntryPointResolution:
     """Exercised through ``train_engine_sandbox``'s own argparse, because the
     flag's wiring — not just the loader — is what C3 adds."""
 
-    def _parse(self, argv: list[str]):
-        import argparse
-        import contextlib
-        import io
-
-        # Reproduce main()'s parser by invoking it with --help suppressed is
-        # not possible; instead assert the flag exists and round-trips by
-        # parsing a minimal argv through a parser built the same way.
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--dataset_profile_json", type=str, default=None)
-        with contextlib.redirect_stderr(io.StringIO()):
-            known, _ = parser.parse_known_args(argv)
-        return known
-
     def test_the_engine_declares_the_flag(self):
-        """A source-level guard on the ONE thing a unit test cannot otherwise
-        reach: that ``main()`` exposes the transport flag at all. Deleting it
-        would make every parent-side write a no-op."""
+        """The actual parser accepts the profile and main consumes that argument."""
         import inspect
 
         source = inspect.getsource(tes.main)
-        assert '"--dataset_profile_json"' in source
+        args = tes.build_training_parser().parse_args(
+            [
+                "--model_cfg",
+                "model.json",
+                "--train_cfg",
+                "train.json",
+                "--loss_cfg",
+                "loss.json",
+                "--dataset_profile_json",
+                "profile.json",
+            ]
+        )
+        assert args.dataset_profile_json == "profile.json"
         assert "load_dataset_profile(args.dataset_profile_json)" in source
         assert "resolve_dataset_profile()" in source
 
@@ -136,3 +132,14 @@ class TestSubprocessEntryPointResolution:
         assert "dataset_profile_" in source, "parent must write the profile config"
         assert '"--dataset_profile_json"' in source, "parent must pass the flag"
         assert "resolve_dataset_profile()" in source
+
+
+def test_native_main_uses_shared_parser_before_any_execution(monkeypatch):
+    """A deployment parser must also be the parser reached by real main()."""
+
+    def stop():
+        raise RuntimeError("shared training parser reached")
+
+    monkeypatch.setattr(tes, "build_training_parser", stop)
+    with pytest.raises(RuntimeError, match="shared training parser reached"):
+        tes.main()

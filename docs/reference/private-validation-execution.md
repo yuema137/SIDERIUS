@@ -28,6 +28,13 @@ training/validation channel. Never treat a caller-selected prefix or client
 settings as that authority. Production use requires testing the actual launcher
 with the existing watchdog and result collection.
 
+Launchers can parse native arguments with
+`execute_tools.training_cli.build_training_parser().parse_args(argv)`, the
+same parser used by the training entrypoint. Constructing it imports no
+candidate plugins and performs no training or file reads. Parsing establishes
+argument syntax and defaults only; the deployment must still validate and
+capture referenced inputs, and the engine owns training semantics.
+
 The factory returns an executor with `declared_rows(scope)` and
 `observe(request, callbacks)`. The former provides the authorized row count
 without making the parent load private validation data. The latter receives
