@@ -15,6 +15,7 @@ It must never import the node package (``nodes.result_interpretation_agent``)
 import json
 from typing import TYPE_CHECKING, Any
 
+from agent.prompt_templates.interpretation.execution import render_execution_evidence
 from agent.schemas.health_feedback import CollapseFingerprint
 from agent.schemas.interpretation import ModelRunSummary
 from agent.schemas.score_table import ScoreComparisonTable
@@ -569,6 +570,7 @@ def _build_per_model_prompt(
         )
 
     # Model efficiency
+    lines.extend(render_execution_evidence(summary.execution_evidence))
     if summary.best_model_params is not None:
         lines.append(f"Best model params    : {summary.best_model_params:,}")
 

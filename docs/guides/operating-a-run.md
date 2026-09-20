@@ -160,6 +160,12 @@ not a Trial or Formal budget: verification observes the first production
 training steps and needs enough wall time to establish steady state before it
 can extrapolate the complete workload.
 
+A verifier refusal reports which evidence requirements remain unmet. Count
+and elapsed-time minimums can both pass while a last slow observation still
+needs a recovery observation (`pending_slow_observation`). The diagnostic
+includes the current slow streak and sustained-slowdown threshold; it does
+not classify one isolated delay as sustained slowdown or relax the caps.
+
 The runtime watchdog is a separate last-resort safety mechanism. Selecting
 either admission authority does not disable it or turn it into a second
 admission decision.

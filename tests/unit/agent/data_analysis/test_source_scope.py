@@ -20,6 +20,7 @@ from agent.data_analysis.source_scope import (
 from agent.prompt_templates.data_analysis import (
     render_analysis_plan_prompt,
     render_generated_program_prompt,
+    render_report_synthesis_prompt,
     render_skill_selection_prompt,
 )
 from agent.schemas.data_analysis.access import RequestedInformation
@@ -116,6 +117,7 @@ def test_planning_preserves_selected_identity_metadata_without_exposing_targets(
     for prompt in (
         render_skill_selection_prompt(inp, (), output_schema={})[1],
         render_generated_program_prompt(inp, question_ids=("q-summary",), output_schema={})[1],
+        render_report_synthesis_prompt(inp, (), output_schema={})[1],
     ):
         assert '"sample_rate_hz": 1234.5' in prompt
         assert "target_mean" not in prompt

@@ -347,12 +347,16 @@ class AdaptiveUnitVerification:
                 unmet.append("steady_count")
             if steady_ms < self.config.min_timed_ms:
                 unmet.append("steady_time")
+            if self._slow_streak:
+                unmet.append("pending_slow_observation")
             self._failure_reason = (
                 "insufficient_stability: steady state declared but evidence "
-                f"minimums not met within caps (unmet: {'+'.join(unmet) or 'none'}; "
+                f"requirements not met within caps (unmet: {'+'.join(unmet) or 'none'}; "
                 f"steady observations {len(steady)}, required "
                 f"{self._required_steady_steps()}; steady time {steady_ms:.1f} ms, "
                 f"required {self.config.min_timed_ms:.1f} ms; "
+                f"pending slow streak={self._slow_streak}, "
+                f"sustained threshold={self.config.steady.stable_windows}; "
                 f"{len(self._all_times_ms)} units observed within caps "
                 f"max_steps={self.config.max_steps})"
             )

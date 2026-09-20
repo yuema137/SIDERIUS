@@ -33,11 +33,13 @@ from agent.schemas.health_feedback import (
     HealthFeedbackRetentionPolicy,
     RoundHealth,
 )
-from agent.schemas.hyperparam_tuning import ExpertAdviceInput
+from agent.schemas.hyperparam_tuning import ExperimentTiming, ExpertAdviceInput
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
 from agent.schemas.vocab import VocabEntry
+from core.runtime_control.records import RealizedPhaseMemory
+from core.runtime_control.training_budget import TrainingBudgetReceipt
 from execute_tools.evaluation_metric import (
     MetricDirection,
     MetricResult,
@@ -75,6 +77,18 @@ COMPARABLE_OUTCOMES = ("confirmed", "partial", "refuted")
 
 #: The outcome recorded when the comparison could not be made at all.
 OUTCOME_UNEVALUATED = "unevaluated"
+
+
+class InterpretationExecutionEvidence(BaseModel):
+    """Observed execution of one identified record, never architecture prose."""
+
+    exp_id: str
+    is_trial: bool
+    timing: ExperimentTiming | None = None
+    training_budget: TrainingBudgetReceipt | None = None
+    parameter_dtype: str | None = None
+    validation_samples: int | None = None
+    phase_memory: dict[str, RealizedPhaseMemory] = Field(default_factory=dict)
 
 
 class PredictionMemory(BaseModel):
@@ -505,6 +519,7 @@ class ModelRunSummary(BaseModel):
     )
 
     # --- Compute cost ---
+    execution_evidence: list[InterpretationExecutionEvidence] = Field(default_factory=list)
     best_timing: dict[str, Any] | None = Field(
         default=None,
         description="Timing dict from the best experiment: "

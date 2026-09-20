@@ -95,6 +95,10 @@ example, declared units or acquisition cadence). These descriptors have no
 split by contract. Derived metadata remains constrained by the selected source
 scope, and no metadata from unselected assets is included. Preserving an
 identity descriptor does not authorize reading targets or additional data.
+Report synthesis receives task context and this same filtered asset projection,
+so declared units and acquisition metadata remain available when interpreting
+measurements. Descriptors are context, not measured findings. Artifact references
+do not expose their contents or grant additional reads.
 
 ### CLI arguments
 
