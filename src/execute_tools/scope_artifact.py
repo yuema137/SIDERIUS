@@ -392,10 +392,6 @@ def validation_rows_argv(
     or is on the regime-A declaration leg — so a legacy argv is byte-identical
     and a composed regime-A argv carries exactly ONE validation declaration
     authority.
-
-    With an explicit validation deployment, its task-owning service declares
-    the count instead. The parent does not materialize validation data on that
-    leg; a refused or invalid declaration never falls back to local I/O.
     """
     from execute_tools.task_data_path import (
         EvalMaterializationParams,
@@ -424,10 +420,5 @@ def validation_rows_argv(
             "so its row count cannot be declared by the implementation that "
             "built it."
         )
-    from execute_tools.validation_execution import bound_validation_rows
-
-    remote_rows = bound_validation_rows(evaluation)
-    if remote_rows is not None:
-        return ["--validation_requested_rows", str(remote_rows)]
     dataset = bound.validation_dataset(evaluation, EvalMaterializationParams(data_dir=data_dir))
     return ["--validation_requested_rows", str(len(dataset))]  # type: ignore[arg-type]

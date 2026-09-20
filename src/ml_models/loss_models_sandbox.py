@@ -20,7 +20,6 @@ two-config design rationale and the in-memory registry symmetry with models.
 """
 
 import os
-from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -345,9 +344,7 @@ def _load_custom_loss(
     return plugin["loss_class"](loss_cfg)
 
 
-def get_target_torch_dtype(
-    config: LossConfig, *, resolved_custom_dtype: Literal["long", "float"] | None = None
-) -> torch.dtype:
+def get_target_torch_dtype(config: LossConfig) -> torch.dtype:
     """Return the ``torch.dtype`` that ``targets`` must be cast to before
     invoking ``criterion(output, targets)`` for the given ``LossConfig``.
 
@@ -371,20 +368,11 @@ def get_target_torch_dtype(
 
     Args:
         config: A validated ``LossConfig`` instance.
-        resolved_custom_dtype: Optional already-resolved custom-loss declaration
-            transported from a research worker. Lets a private validation
-            coordinator use this same dtype authority without importing candidate
-            code. Refused for built-ins or when it conflicts with a declaration
-            already loaded in this process. Omission retains existing behavior.
 
     Returns:
         ``torch.long`` for classifier-style losses; ``torch.float32`` for
         regressor-style losses.
     """
-    if resolved_custom_dtype is not None and (
-        config.loss_type != "custom" or resolved_custom_dtype not in {"long", "float"}
-    ):
-        raise ValueError("resolved custom target dtype requires a custom long/float declaration")
     if config.loss_type == "smooth_l1":
         return torch.float32
     if config.loss_type in ("ce", "focal", "focal_cw"):
@@ -392,16 +380,9 @@ def get_target_torch_dtype(
     # config.loss_type == "custom" — read from the plugin's declaration.
     # Lazy import for the same reason ``_load_custom_loss`` uses it: keep
     # ``ml_models`` loadable without ``agent_generated/`` on the path.
-    from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY, get_loss_target_dtype
+    from ml_models.loss_plugin_loader import get_loss_target_dtype
 
-    name = config.loss_name or ""
-    if resolved_custom_dtype is not None:
-        existing = LOSS_TARGET_DTYPE_REGISTRY.get(name)
-        if existing is not None and existing != resolved_custom_dtype:
-            raise ValueError("resolved custom target dtype conflicts with the loaded declaration")
-        declared = resolved_custom_dtype
-    else:
-        declared = get_loss_target_dtype(name)
+    declared = get_loss_target_dtype(config.loss_name or "")
     return torch.long if declared == "long" else torch.float32
 
 

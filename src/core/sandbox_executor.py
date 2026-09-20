@@ -83,7 +83,6 @@ from execute_tools.training_history import (
     objective_config_fingerprint,
     stamp_comparability,
 )
-from execute_tools.validation_execution import validation_executor_argv
 from ml_models.models_format_sandbox import (
     PLUGIN_CONFIG_REGISTRY,
     ExperimentConfig,
@@ -1455,7 +1454,6 @@ class TidmadSandbox:
                 *_task_data_path_argv(),
                 *_task_manifest_argv(),
                 *_data_root_argv("--data_dir"),
-                *validation_executor_argv(),
             ]
 
             # SampleSet boundary contract — this is ONE of exactly TWO

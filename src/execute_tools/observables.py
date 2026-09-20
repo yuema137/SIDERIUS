@@ -318,28 +318,6 @@ class DynamicObservableEpoch:
         """Why each absent observable is absent. Diagnostics only."""
         return dict(self._failed)
 
-    def accept_external_epoch(
-        self, values: dict[str, float], failed_names: tuple[str, ...]
-    ) -> dict[str, float]:
-        """Validate a complete aggregate epoch without executing task code here."""
-        declared = {item.name for item in self._declared}
-        failed = set(failed_names)
-        if (
-            len(failed) != len(failed_names)
-            or set(values) & failed
-            or set(values) | failed != declared
-            or not set(self._failed) <= failed
-        ):
-            raise ObservableError(
-                "external observable outcomes contradict run declarations/history"
-            )
-        checked = {
-            name: _finite_float(value, name=name, what="dynamic") for name, value in values.items()
-        }
-        # Validate everything before changing the failure latch or history.
-        self._failed.update({name: "private observation failed" for name in failed})
-        return checked
-
 
 def compute_static_observations(
     declared: tuple[DeclaredStaticObservable, ...],
@@ -439,13 +417,6 @@ class RunObservationSession:
         whole. The hole is never filled here.
         """
         for name, value in self._epoch.finish_epoch().items():
-            self._series.setdefault(name, []).append(value)
-
-    def accept_external_epoch(
-        self, values: dict[str, float], failed_names: tuple[str, ...]
-    ) -> None:
-        """Append authorized aggregates; preserve the native failure latch."""
-        for name, value in self._epoch.accept_external_epoch(values, failed_names).items():
             self._series.setdefault(name, []).append(value)
 
     # -- after the final optimizer step -------------------------------------
