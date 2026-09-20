@@ -60,6 +60,7 @@ TUNER_LIFECYCLE = (
     ("execution", "run_admission_preflight"),
     ("execution", "run_training"),
     ("execution", "run_inference_scoring_health"),
+    ("execution", "_run_local_evaluation_phase"),
     ("records", "build_attempt_record"),
     ("records", "finalize_run_output"),
 )

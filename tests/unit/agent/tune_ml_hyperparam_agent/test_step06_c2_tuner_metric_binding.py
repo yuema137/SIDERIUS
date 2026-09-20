@@ -208,7 +208,9 @@ def test_live_subprocess_route_checks_status_before_results_and_health():
     """Reachability and order, not an isolated-helper-only assertion."""
     execution = importlib.import_module("nodes.ml_hyperparameter_tune_agent.execution")
 
-    source = inspect.getsource(execution.run_inference_scoring_health)
+    caller = inspect.getsource(execution.run_inference_scoring_health)
+    assert "evaluated = _run_local_evaluation_phase(" in caller
+    source = inspect.getsource(execution._run_local_evaluation_phase)
     run_skill = source.index('_runtime._run_skill("denoising_score_skill"')
     require_success = source.index("_require_successful_scoring_result(score_res)")
     unpack_results = source.index('_child_results = score_res.get("results"')

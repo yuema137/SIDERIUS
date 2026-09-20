@@ -35,6 +35,7 @@ from typing import Any
 
 from agent.schemas.ordering import ResolvedOrdering
 from core.capability_registry import CapabilityContractSnapshot
+from execute_tools.evaluation_metric import MetricResult, NotScoreableResult
 
 #: Names that must NEVER become ``RunBindings`` fields. Each is rebound or
 #: mutated inside the round/attempt loops, so storing it on a "stable bindings"
@@ -444,3 +445,21 @@ class AttemptExecution(_PhaseOutcome):
     scoring_time: Any = None
     train_results: Any = None
     training_diagnosis: Any = None
+
+
+@dataclass(frozen=True)
+class EvaluationPhaseEvidence:
+    """Completed inference/scoring/Health facts before common tuner interpretation.
+
+    These are existing native stage payloads, not a provider wire protocol or
+    a new scientific authority. Failures still return AttemptExecution or raise.
+    """
+
+    inf_status: dict[str, Any]
+    inference_time: float
+    scoring_time: float
+    score_res: dict[str, Any]
+    metric_payload: dict[str, Any] | None
+    secondary_results: list[MetricResult]
+    secondary_refusals: list[NotScoreableResult]
+    secondary_errors: dict[str, str]
