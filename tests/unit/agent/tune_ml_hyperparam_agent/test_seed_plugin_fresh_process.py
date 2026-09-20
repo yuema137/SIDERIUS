@@ -13,6 +13,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[4]
 
 PLUGIN = """
+import builtins
+builtins._seed_probe_imports = getattr(builtins, "_seed_probe_imports", 0) + 1
 import torch
 from pydantic import BaseModel
 PLUGIN_MODEL_TYPE = "isolated_seed_probe"
@@ -36,6 +38,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from core.generated_library import bind_generated_library_to_workspace
 workspace, checkout, expected = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+preloaded = sys.argv[4] == "preloaded"
 bind_generated_library_to_workspace(str(workspace))
 from workflows.task_composition import compose_run_task_bindings, bind_run_task_composition, build_task_composition_ref
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
@@ -51,11 +54,21 @@ except UnknownOutputContractError:
     pass
 else:
     raise AssertionError("fresh-process witness already had a model contract")
+if preloaded:
+    from ml_models.plugin_loader import register_model_in_memory
+    assert register_model_in_memory(str(workspace / "seed.py")) == name
+    original_model = MODEL_REGISTRY[name]
+    original_config = PLUGIN_CONFIG_REGISTRY[name]
 class ReachedBridge(Exception):
     pass
 calls = []
 def bridge(**kwargs):
+    import builtins
     calls.append(True)
+    assert builtins._seed_probe_imports == 1, "workflow seed imported a second time"
+    if preloaded:
+        assert MODEL_REGISTRY[name] is original_model
+        assert PLUGIN_CONFIG_REGISTRY[name] is original_config
     assert get_output_type(name) == "classifier"
     config = PLUGIN_CONFIG_REGISTRY[name]()
     import torch
@@ -88,9 +101,11 @@ print("FRESH_SEED_HANDOFF_PASS")
 
 
 @pytest.mark.parametrize(
-    "broken_import", [False, True], ids=["registered-before-plan", "import-failure-refuses"]
+    "broken_import,preloaded",
+    [(False, False), (True, False), (False, True)],
+    ids=["registered-before-plan", "import-failure-refuses", "workflow-registration-preserved"],
 )
-def test_native_run_registers_staged_seed_before_planning(tmp_path, broken_import):
+def test_native_run_registers_staged_seed_before_planning(tmp_path, broken_import, preloaded):
     """Real run() reaches the bridge with a usable contract, or refuses first."""
     (tmp_path / "data").mkdir()
     (tmp_path / "plugins").mkdir()
@@ -110,6 +125,7 @@ def test_native_run_registers_staged_seed_before_planning(tmp_path, broken_impor
             str(tmp_path),
             str(ROOT),
             "failure" if broken_import else "success",
+            "preloaded" if preloaded else "fresh",
         ],
         cwd=tmp_path,
         env=env,

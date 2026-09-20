@@ -70,6 +70,18 @@ dtype may be passed without importing candidate plugins in the coordinator.
 
 ## Evidence and limits
 
+Existing workflows do not enable this deployment implicitly. Without an explicit
+binding, training command construction emits no validation client or launcher,
+row declaration still uses the bound task's local dataset, and the original
+validation pass retains observation start/finish and history ownership. No
+environment variable opts a workflow into private execution.
+
+Compatibility checks cover the existing ordered training command, actual local
+training/history, validation aggregation and default custom-loss semantics.
+Standalone tuner seed registration fills missing parent metadata; a seed already
+registered by a workflow is copied for the child without executing its plugin
+again or replacing its parent classes.
+
 Synthetic tests exercise a real training subprocess over two epochs, binding
 transport, default behavior, failure propagation and history. They do not prove
 private-worker permissions, real GPU performance, native training provenance,
