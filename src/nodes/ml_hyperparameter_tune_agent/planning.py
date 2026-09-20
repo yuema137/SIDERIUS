@@ -234,18 +234,25 @@ def _psd_segment_counts(
     train_sample_set: dict | None,
     eval_sample_set: dict | None,
     topology_facts: AttemptTopologyFacts,
+    *,
+    has_task_scopes: bool = False,
 ) -> tuple[int | None, int | None]:
     """``(train, eval)`` PSD-segment counts for the record and the reflector.
 
-    A built SampleSet reports what it actually holds. Without one, the legacy
+    Opaque task scopes carry no framework-readable physical segment count;
+    report unknown rather than substitute whole-file topology. A built legacy
+    SampleSet reports what it actually holds. Without one, the legacy
     single-file round uses the whole file, so the count IS the run topology's
     segments-per-file — and a task that declares no such geometry reports
     ``None``. Both record fields are already ``int | None``; an invented 0
     would be persisted as a measurement.
     """
 
+    if has_task_scopes:
+        return None, None
+
     def _count(sample_set: dict | None) -> int | None:
-        if sample_set:
+        if sample_set is not None:
             return sum(len(v) for v in sample_set.values())
         if not topology_facts.declares_physical_geometry:
             return None
@@ -833,7 +840,10 @@ def prepare_attempt(
     # seam B's declared-absence case would otherwise have grown this function
     # by four branch nodes, and the accounting is its own responsibility.
     train_psd_segments, eval_psd_segments = _psd_segment_counts(
-        train_sample_set, eval_sample_set, topology_facts
+        train_sample_set,
+        eval_sample_set,
+        topology_facts,
+        has_task_scopes=task_scopes.training is not None or task_scopes.evaluation is not None,
     )
 
     # `model_type` (the force_model override) is resolved ONCE, above, before

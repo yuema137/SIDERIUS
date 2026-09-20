@@ -1714,14 +1714,25 @@ def build_attempt_record(
         if trial_config.trial_strategy == "target":
             final_record["target_files"] = trial_config.target_files
 
+    _attach_completed_execution_evidence(final_record, training_results, train_status, inf_status)
+    return final_record
+
+
+def _attach_completed_execution_evidence(
+    record: dict,
+    training_results: TrainingResults,
+    train_status: dict,
+    inf_status: dict | None,
+) -> None:
+    """Attach validated training allocation and the most complete runtime receipt."""
     # RT2-G (§7.3 additive): the attempt's runtime observation.
     # The inference-side block is the most complete (it RESUMED
     # the training subprocess's observation — RT2-D); fall back
     # to the training-side block; explicit None otherwise.
-    final_record["runtime_verification"] = (
+    record["runtime_verification"] = (
         (inf_status or {}).get("runtime_verification")
         or train_status.get("runtime_verification")
         or None
     )
-
-    return final_record
+    if training_results.training_budget is not None:
+        record["training_budget"] = training_results.training_budget.model_dump()
