@@ -517,9 +517,9 @@ class TestRungB07a2ValidationScopeAxis:
         assert detail["train_portion"] == 0.5
         assert detail["epoch0_samples"] == 12
 
-    @pytest.mark.parametrize("deployed", [False, True])
+    @pytest.mark.parametrize("deployed,wrapped", [(False, False), (True, False), (True, True)])
     def test_real_trainer_emits_r2_and_r3_over_the_validation_family(
-        self, tmp_path, monkeypatch, deployed
+        self, tmp_path, monkeypatch, deployed, wrapped
     ):
         (tmp_path / "data").mkdir()
         fx = write_two_family_fixture(tmp_path / "data")
@@ -534,6 +534,14 @@ class TestRungB07a2ValidationScopeAxis:
         train_ss = {0: [0, 1, 2, 3], 1: [0, 1, 2, 3], 2: [0, 1, 2, 3]}
         eval_ss = {0: [0, 1], 2: [1, 3]}  # a DISTINCT validation scope: 4 PSD × 2 = 8 rows
         marker = tmp_path / "validation-client-pids.txt"
+        wrapper_marker = tmp_path / "launcher-pid.txt"
+        wrapper = tmp_path / "training-launcher.py"
+        wrapper.write_text(
+            "import os,sys\n"
+            "from pathlib import Path\n"
+            f"Path({str(wrapper_marker)!r}).write_text(str(os.getpid()))\n"
+            "os.execvpe(sys.argv[1],sys.argv[1:],os.environ)\n"
+        )
         with contextlib.ExitStack() as stack:
             adapter = stack.enter_context(bound_trainer_task(tmp_path, fx))
             if deployed:
@@ -542,6 +550,7 @@ class TestRungB07a2ValidationScopeAxis:
                         ValidationDeployment(
                             factory=f"{type(adapter).__module__}:create_native",
                             settings={"rows": 8, "data_dir": fx.data_dir, "marker": str(marker)},
+                            training_launcher=(sys.executable, str(wrapper)) if wrapped else (),
                         )
                     )
                 )
@@ -580,6 +589,9 @@ class TestRungB07a2ValidationScopeAxis:
             pids = marker.read_text().splitlines()
             assert len(pids) == 2 and len(set(pids)) == 1
             assert int(pids[0]) != os.getpid()
+            if wrapped:
+                assert wrapper_marker.read_text() == pids[0]
+                assert launched[0][:2] == [sys.executable, str(wrapper)]
         assert launched[0][launched[0].index("--data_dir") + 1] == fx.data_dir
 
         results = out["results"]

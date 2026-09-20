@@ -12,6 +12,22 @@ client factory and JSON settings. Enter `bind_validation_deployment` around the
 native tuner/training invocation. The existing sandbox transports this binding
 to the training child; no environment-variable discovery is used.
 
+`training_launcher` optionally supplies an argv prefix for the native training
+command, for example an operator-installed launcher executable. No shell is
+used. The prefix is applied after construction of the complete native command,
+before the existing observed subprocess launch, in both normal and deadline
+modes. Empty means the original launch. Inference/scoring commands are not
+wrapped by this setting. The launcher must preserve plugin/environment bindings,
+stdout/exit status and process-group deadline cleanup. An `exec` handoff retains
+the child PID; a launcher that spawns children owns their cleanup as well.
+
+This is a routing hook, not a privilege grant or authentication scheme. A
+privileged deployment entrypoint must independently validate its caller and
+native invocation, select protected service configuration, and establish the
+training/validation channel. Never treat a caller-selected prefix or client
+settings as that authority. Production use requires testing the actual launcher
+with the existing watchdog and result collection.
+
 The factory returns an executor with `declared_rows(scope)` and
 `observe(request, callbacks)`. The former provides the authorized row count
 without making the parent load private validation data. The latter receives

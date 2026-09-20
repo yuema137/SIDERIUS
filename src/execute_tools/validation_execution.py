@@ -84,6 +84,7 @@ class ValidationDeployment(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     factory: str = Field(pattern=r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*:[A-Za-z_]\w*$")
     settings: dict[str, JsonValue] = Field(default_factory=dict)
+    training_launcher: tuple[Annotated[str, Field(min_length=1, pattern=r"^[^\x00]+$")], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,19 @@ def validation_executor_argv() -> list[str]:
     if binding.deployment is None:
         raise ValueError("bound validation executor has no subprocess deployment declaration")
     return ["--validation_executor_json", binding.deployment.model_dump_json()]
+
+
+def validation_training_command(command: list[str]) -> list[str]:
+    """Prefix native training with an explicit deployment launcher, without a shell.
+
+    The launcher must validate/authorize its invocation and preserve the native
+    environment, output and process-group cancellation contract. This routing
+    does not make a caller-selected prefix trusted or certify the child.
+    """
+    binding = _ACTIVE.get()
+    if binding is None or binding.deployment is None:
+        return command
+    return [*binding.deployment.training_launcher, *command]
 
 
 @contextmanager

@@ -92,7 +92,7 @@ from execute_tools.training_history import (
     objective_config_fingerprint,
     stamp_comparability,
 )
-from execute_tools.validation_execution import validation_executor_argv
+from execute_tools.validation_execution import validation_executor_argv, validation_training_command
 from ml_models.models_format_sandbox import (
     PLUGIN_CONFIG_REGISTRY,
     ExperimentConfig,
@@ -1520,6 +1520,7 @@ class TidmadSandbox:
                 return _refusal
             env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
             preexec = _limited_preexec(_subprocess_rss_gb("training"))
+            cmd = validation_training_command(cmd)
             if policy_obj is not None and policy_obj.watchdog.enabled and armed:
                 # RT4 (§4): process-group launch + deadline kill. The
                 # deadline tightens mid-flight from the live observation
