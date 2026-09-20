@@ -73,6 +73,15 @@ FULL_SUITE_TRIGGERS: tuple[str, ...] = (
 #: `Path(__file__).resolve().parents[2] / "nodes" / "ml_hyperparameter_tune_agent"`,
 #: which 31 modules / 838 cases depend on. Declared, because derivation cannot.
 DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
+    # Imports live inside a subprocess script string to prove fresh registries;
+    # the AST cannot derive these runtime dependencies from that string.
+    "tests/unit/agent/tune_ml_hyperparam_agent/test_seed_plugin_fresh_process.py": (
+        "src/nodes/ml_hyperparameter_tune_agent/",
+        "src/ml_models/",
+        "src/core/generated_library.py",
+        "src/workflows/task_composition.py",
+        "configs/task_composition/quickstart.yaml",
+    ),
     "tests/unit/agent_generated/test_stub_plugin_template_loads.py": (
         "tests/fixtures/generated_capabilities/",
     ),
