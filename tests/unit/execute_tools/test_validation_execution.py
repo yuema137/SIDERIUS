@@ -27,7 +27,7 @@ from execute_tools.validation_execution import (
     execute_validation_epoch,
     validation_executor_argv,
 )
-from ml_models.models_format_sandbox import LossConfig
+from ml_models.models_format_sandbox import AEConfig, LossConfig
 from tests.helpers import validation_execution_client
 
 
@@ -165,6 +165,9 @@ def test_bound_dispatch_keeps_callbacks_and_never_falls_back(failure):
 
     def remote(request, callbacks):
         assert request.expected_rows == 7
+        assert request.completed_training.completed_epochs == 2
+        assert request.completed_training.optimizer_steps == 3
+        assert request.configuration.segmentation_size == 1000
         assert callbacks.verifier is verifier
         callbacks.check_allocation()
         callbacks.on_verified()
@@ -182,7 +185,9 @@ def test_bound_dispatch_keeps_callbacks_and_never_falls_back(failure):
     kwargs = dict(
         model=torch.nn.Identity(),
         criterion=torch.nn.SmoothL1Loss(),
-        model_cfg=SimpleNamespace(model_type="synthetic"),
+        model_cfg=AEConfig(segmentation_size=1000, latent_dims=[10]),
+        completed_epochs=2,
+        optimizer_steps=3,
         model_io=None,
         loss_cfg=LossConfig(loss_type="smooth_l1"),
         task_eval_scope=object(),

@@ -22,6 +22,14 @@ from agent.schemas.model_io_contract import ModelIOContract
 from ml_models.models_format_sandbox import LossConfig
 
 
+class CompletedTrainingEpoch(BaseModel):
+    """Native execution facts, not a credential or proof of caller authority."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    completed_epochs: Annotated[StrictInt, Field(gt=0)]
+    optimizer_steps: Annotated[StrictInt, Field(gt=0)]
+
+
 class ValidationExecutionRequest(BaseModel):
     """Live research-side objects; never serialize this object across trust boundaries."""
 
@@ -29,6 +37,8 @@ class ValidationExecutionRequest(BaseModel):
     model: torch.nn.Module
     criterion: torch.nn.Module
     model_type: str
+    configuration: BaseModel
+    completed_training: CompletedTrainingEpoch
     model_io: ModelIOContract | None
     loss: LossConfig
     scope: object
@@ -149,7 +159,12 @@ def bound_validation_rows(scope: object) -> int | None:
 
 
 def execute_validation_epoch(
-    local: Callable[..., tuple[float, int, float]], *, expected_rows: int, **kwargs: Any
+    local: Callable[..., tuple[float, int, float]],
+    *,
+    expected_rows: int,
+    completed_epochs: int,
+    optimizer_steps: int,
+    **kwargs: Any,
 ) -> tuple[float, int, float]:
     """One dispatch point; observation/history ownership remains native."""
     observation = kwargs["observables"]
@@ -164,6 +179,10 @@ def execute_validation_epoch(
         model=kwargs["model"],
         criterion=kwargs["criterion"],
         model_type=kwargs["model_cfg"].model_type,
+        configuration=kwargs["model_cfg"],
+        completed_training=CompletedTrainingEpoch(
+            completed_epochs=completed_epochs, optimizer_steps=optimizer_steps
+        ),
         model_io=kwargs["model_io"],
         loss=kwargs["loss_cfg"],
         scope=kwargs["task_eval_scope"],

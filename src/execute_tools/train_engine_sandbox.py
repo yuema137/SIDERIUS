@@ -1855,6 +1855,8 @@ def run_experiment_streaming(
             r3, n_val, val_secs = execute_validation_epoch(
                 _validation_pass,
                 expected_rows=validation_requested_rows,
+                completed_epochs=ep + 1,
+                optimizer_steps=len(batch_losses),
                 model=model,
                 criterion=criterion,
                 model_cfg=model_cfg,

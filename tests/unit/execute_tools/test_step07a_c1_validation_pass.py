@@ -161,10 +161,13 @@ class TestDeploymentValidationExecution:
 
         def observe(request, callbacks):
             calls.append(request.expected_rows)
+            assert request.completed_training.completed_epochs == len(calls)
+            assert request.completed_training.optimizer_steps == 12
+            assert request.configuration == _tiny_model_cfg(two_family.seg_size)
             value, rows, _ = native_pass(
                 model=request.model,
                 criterion=request.criterion,
-                model_cfg=SimpleNamespace(model_type=request.model_type),
+                model_cfg=request.configuration,
                 loss_cfg=request.loss,
                 model_io=request.model_io,
                 device=request.device,

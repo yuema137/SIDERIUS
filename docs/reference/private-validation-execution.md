@@ -19,6 +19,14 @@ live model/criterion objects on the research side. These objects are not a wire
 format or proof of provenance: never deserialize them in a privileged process.
 The deployment owns native training admission and private execution.
 
+The live request includes the validated native model `configuration` and
+`completed_training`: the count of completed epochs (one-based) and optimizer
+steps actually executed in the just-finished epoch. The loop supplies these
+after its zero-step refusal and before validation. They enable the deployment
+to associate a snapshot with its supervised training invocation; they are not
+credentials, and a research-authored copy is not authorization. Do not wait for
+the final trained artifact before permitting the first epoch's validation.
+
 Return a validated `ValidationExecutionResult` with aggregate loss and exact
 row count. Existing declared observations, when enabled, must be complete or
 explicitly failed; a previous failure cannot silently disappear. This mechanism
