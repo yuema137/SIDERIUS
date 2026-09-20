@@ -90,6 +90,11 @@ literature/advice grants access. Online material is cited reasoning context,
 not implicit data or sandbox network access.
 Task-certified model-compatible input views may inherit a selected raw input
 only when they are already declared and provenance names that exact parent.
+Planning retains policy-validated `identity` metadata for selected assets (for
+example, declared units or acquisition cadence). These descriptors have no
+split by contract. Derived metadata remains constrained by the selected source
+scope, and no metadata from unselected assets is included. Preserving an
+identity descriptor does not authorize reading targets or additional data.
 
 ### CLI arguments
 
