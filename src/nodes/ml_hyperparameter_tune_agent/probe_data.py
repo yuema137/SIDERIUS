@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from execute_tools.evaluation_execution import candidate_evaluation_executor
 from execute_tools.task_data_path import (
     EpochSamplingParams,
     TaskProbeDataSpec,
@@ -60,6 +61,7 @@ def build_task_probe_data(
         evaluation_scope_payload=(
             capability.serialize_scope(task_scopes.evaluation)
             if getattr(task_scopes, "evaluation", None) is not None
+            and candidate_evaluation_executor() is None
             else None
         ),
         sampling=EpochSamplingParams(

@@ -89,3 +89,10 @@ must resolve without private scorer imports. Verify a real trained candidate,
 actual evaluator receipt, declared scope and Health, failure cleanup, deadlines,
 and immutable task/infra inputs before launch. Full-node admission/preflight and
 candidate-export compatibility also need deployed evidence.
+
+When a complete evaluator is bound, the native resource probe still materializes
+the public training batch, but does not materialize a local validation input for
+inference preflight. The complete evaluator owns inference and its data access.
+This does not grant access to private validation data or estimate the evaluator's
+resource use. Candidate export and the actual evaluator must qualify the model's
+inference interface. Unbound local evaluation retains its original input probe.
