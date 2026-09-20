@@ -110,9 +110,16 @@ def attempt(tmp_path, monkeypatch):
         pytest.fail("bound external evaluation fell back to private local execution")
 
     monkeypatch.setattr(execution, "_run_local_evaluation_phase", forbid_local)
-    monkeypatch.setattr(
-        execution, "finalize_attempt_outputs", lambda **kw: events.append("cleanup")
-    )
+    finalize = execution.finalize_attempt_outputs
+
+    def finish(**kwargs):
+        # Real cleanup must not demand an absent local output inventory after
+        # external scoring (H100 qualification 2026-09-20). A stub hid the abort.
+        assert finalize(**kwargs) is None
+        assert not (tmp_path / "model_output_retention_receipts.jsonl").exists()
+        events.append("cleanup")
+
+    monkeypatch.setattr(execution, "finalize_attempt_outputs", finish)
 
     def run():
         return execution.run_inference_scoring_health(

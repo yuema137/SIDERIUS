@@ -1889,3 +1889,6 @@ for request/result fields, actual scope, timing, failure behavior and qualificat
 requirements. Unbound calls retain native local evaluation. This binding is
 separate from per-epoch validation and does not make an unresolved public task
 composition executable.
+The complete evaluator owns prediction-output retention; the tuner does not
+request a local inference-output inventory for that route. Local evaluation's
+inventory and cleanup remain unchanged.

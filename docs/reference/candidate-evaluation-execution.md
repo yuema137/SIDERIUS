@@ -102,3 +102,10 @@ evaluator is bound. Task scope construction still owns sampling requirements;
 this does not fabricate or substitute sampling metadata. The complete evaluator
 owns its scoring references. Local evaluation keeps its original declared
 reference-file requirement.
+
+The complete evaluator also owns its prediction-output retention. Since native
+local inference did not run, tuner finalization does not require a local output
+inventory or emit a local retention receipt. This holds on successful results,
+scientific refusals and transport failures; the deployment must qualify its
+evaluator's own cleanup, including interrupted jobs. Unbound local evaluation
+still requires its exact inventory and retains its original cleanup checks.
