@@ -209,7 +209,10 @@ def test_live_subprocess_route_checks_status_before_results_and_health():
     execution = importlib.import_module("nodes.ml_hyperparameter_tune_agent.execution")
 
     caller = inspect.getsource(execution.run_inference_scoring_health)
-    assert "evaluated = _run_local_evaluation_phase(" in caller
+    assert "evaluated = _run_evaluation_phase(" in caller
+    assert "return _run_local_evaluation_phase(" in inspect.getsource(
+        execution._run_evaluation_phase
+    )
     source = inspect.getsource(execution._run_local_evaluation_phase)
     run_skill = source.index('_runtime._run_skill("denoising_score_skill"')
     require_success = source.index("_require_successful_scoring_result(score_res)")

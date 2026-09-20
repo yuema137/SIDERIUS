@@ -86,3 +86,8 @@ Synthetic tests exercise a real training subprocess over two epochs, binding
 transport, default behavior, failure propagation and history. They do not prove
 private-worker permissions, real GPU performance, native training provenance,
 or production task scoring. Those remain deployment smoke requirements.
+
+For a protected evaluator that owns complete-candidate inference, scientific
+scoring and Health, use the separate
+[complete evaluation binding](candidate-evaluation-execution.md). Per-epoch
+validation alone does not route those later stages.

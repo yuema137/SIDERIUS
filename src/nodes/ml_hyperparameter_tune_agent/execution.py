@@ -43,6 +43,10 @@ from core.layout import checkout_root
 from execute_tools.dataset_config import (
     ScopeViolationError,
 )
+from execute_tools.evaluation_execution import (
+    CandidateEvaluationRefused,
+    candidate_evaluation_executor,
+)
 from execute_tools.evaluation_metric import (
     EvaluationMetric,
     MetricResult,
@@ -67,6 +71,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     RunBindings,
     TrainingOutcome,
 )
+from nodes.ml_hyperparameter_tune_agent.external_evaluation import run_external_evaluation
 from nodes.ml_hyperparameter_tune_agent.output_retention import finalize_attempt_outputs
 from nodes.ml_hyperparameter_tune_agent.policy import (
     ScoringRoute,
@@ -1492,6 +1497,47 @@ def _run_local_evaluation_phase(
     )
 
 
+def _run_evaluation_phase(
+    bindings: RunBindings,
+    prepared: PreparedAttempt,
+    identity: AttemptIdentity,
+    stage: AttemptStage,
+    *,
+    train_time: Any,
+) -> EvaluationPhaseEvidence | AttemptExecution:
+    """Select an explicit deployment executor, otherwise the unchanged native path."""
+    executor = candidate_evaluation_executor()
+    if executor is None:
+        return _run_local_evaluation_phase(
+            bindings, prepared, identity, stage, train_time=train_time
+        )
+    started = time.perf_counter()
+    try:
+        return run_external_evaluation(executor, bindings, prepared, stage)
+    except CandidateEvaluationRefused as exc:
+        record = _build_scoring_failure_record(
+            exc,
+            exp_id=prepared.exp_id,
+            model_type=prepared.model_type,
+            file_index=bindings.file_index,
+            record_params=prepared.record_params,
+            timing={
+                "train_time_s": train_time,
+                "inference_time_s": 0.0,
+                "scoring_time_s": time.perf_counter() - started,
+            },
+            expert_advice_str=bindings.expert_advice_str,
+            hypothesis=prepared.hypothesis,
+            round_index=identity.round_index,
+            attempt_in_round=identity.attempt_in_round,
+        )
+        record["external_evaluation"] = exc.evaluation.model_dump(mode="json")
+        _emit_attempt_record(
+            bindings.sandbox, record, bindings.agent_input, ordering=prepared.ordering
+        )
+        return AttemptExecution.next_attempt()
+
+
 def run_inference_scoring_health(
     bindings: RunBindings,
     prepared: PreparedAttempt,
@@ -1519,7 +1565,7 @@ def run_inference_scoring_health(
     round_index = identity.round_index
 
     try:
-        evaluated = _run_local_evaluation_phase(
+        evaluated = _run_evaluation_phase(
             bindings, prepared, identity, stage, train_time=train_time
         )
         if isinstance(evaluated, AttemptExecution):
@@ -1678,4 +1724,5 @@ def run_inference_scoring_health(
         scoring_time=scoring_time,
         train_results=train_results,
         training_diagnosis=training_diagnosis,
+        external_evaluation=evaluated.external_evaluation,
     )

@@ -42,6 +42,7 @@ from core.runtime_control.admission import AdmissionEnforcement
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from core.runtime_control.validation_limits import validate_phase_deadline
 from execute_tools.dataset_config import NUM_FILES, DataScope
+from execute_tools.evaluation_execution import CandidateEvaluationResult
 from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 from execute_tools.training_history import TrainingHistory
@@ -538,6 +539,11 @@ class ExperimentRecord(BaseModel):
     health_gate_results: list[PersistedHealthGateResult] = Field(
         default_factory=list,
         description="Full typed results for every HealthGate configured for this experiment.",
+    )
+    external_evaluation: CandidateEvaluationResult | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Original deployment evaluation facts; absent on native local evaluations.",
     )
     scientific_authority: dict[str, Any] | None = Field(
         default=None,

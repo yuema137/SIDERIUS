@@ -35,6 +35,7 @@ from typing import Any
 
 from agent.schemas.ordering import ResolvedOrdering
 from core.capability_registry import CapabilityContractSnapshot
+from execute_tools.evaluation_execution import CandidateEvaluationResult
 from execute_tools.evaluation_metric import MetricResult, NotScoreableResult
 
 #: Names that must NEVER become ``RunBindings`` fields. Each is rebound or
@@ -445,6 +446,7 @@ class AttemptExecution(_PhaseOutcome):
     scoring_time: Any = None
     train_results: Any = None
     training_diagnosis: Any = None
+    external_evaluation: CandidateEvaluationResult | None = None
 
 
 @dataclass(frozen=True)
@@ -463,3 +465,4 @@ class EvaluationPhaseEvidence:
     secondary_results: list[MetricResult]
     secondary_refusals: list[NotScoreableResult]
     secondary_errors: dict[str, str]
+    external_evaluation: CandidateEvaluationResult | None = None
