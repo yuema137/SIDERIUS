@@ -188,3 +188,18 @@ plugin. Do not infer the declaration file from `inspect.getfile(model_class)`:
 a valid plugin can export a class imported from a helper or installed module.
 The query does not change registration or scanning behavior and does not pin
 bytes, dependencies, caller identity or training provenance.
+
+### Numerical checks for a captured loss package
+
+`agent.schemas.custom_loss_validation.validate_custom_loss_plugin` accepts an
+optional `plugin_path` for a member of the caller's active `bind_code_package`
+context. Its captured bytes must match `plugin_src`. The probe uses the native
+loss plugin loader, so declared relative dependencies (including imports inside
+`forward`) retain their captured package identity. Keep the binding active until
+the numerical check returns. Missing package selection or mismatched bytes are
+reported as validation errors; this route never falls back to the current file.
+
+Omitting `plugin_path` preserves the assembled single-file check. Both routes
+use the same task-owned synthetic pair, scalar/finite checks and gradient checks.
+This interface performs candidate execution; deployment callers must establish
+their execution boundary before invoking it.

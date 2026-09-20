@@ -116,6 +116,29 @@ def _load_loss_factory(
         return None, f"PLUGIN_LOSS_CLASS(config) failed to construct: {type(exc).__name__}: {exc}."
 
 
+def _load_bound_loss_factory(
+    plugin_src: str,
+    loss_name: str,
+    plugin_path: str,
+    parameters: dict[str, Any] | None,
+) -> tuple[Callable[[Any, Any], Any] | None, str | None]:
+    """Use captured native package loading; never silently fall back to disk."""
+    from core.local_code import selected_member
+    from ml_models.loss_plugin_loader import load_loss_plugin_from_path
+
+    try:
+        member = selected_member(plugin_path)
+        if member is None or member.source != plugin_src.encode():
+            return None, "Loss probe source differs from the selected captured package member."
+        plugin = load_loss_plugin_from_path(plugin_path)
+        if plugin is None or plugin["loss_type"] != loss_name:
+            return None, "Loss probe package declares a different or invalid loss identity."
+        config = plugin["config_class"](**(parameters or {}))
+        return plugin["loss_class"](config), None
+    except Exception as exc:
+        return None, f"Loss probe package failed to load: {type(exc).__name__}: {exc}"
+
+
 def _validate_loss_result(loss: Any, prediction: Any, *, loss_name: str) -> str | None:
     import torch
 
@@ -163,6 +186,7 @@ def validate_custom_loss_plugin(
     applicability: CustomLossApplicability | None = None,
     pair_provider: SyntheticLossPairProvider | None = None,
     loss_parameters: dict[str, Any] | None = None,
+    plugin_path: str | None = None,
 ) -> str | None:
     """Validate declarations, tiny tensors, plugin construction and gradients.
 
@@ -170,6 +194,9 @@ def validate_custom_loss_plugin(
     written or imported. No cast, reshape or broadcast is invented here.
     Omitted loss_parameters preserves default-config validation. A caller
     qualifying a concrete objective supplies its effective configuration.
+    Optional plugin_path selects a member of the caller's active finite code
+    package; its captured bytes must equal plugin_src. This preserves relative
+    dependencies through the native plugin loader instead of flattening source.
     """
 
     applicability_error = _resolve_declared_applicability(
@@ -194,7 +221,12 @@ def validate_custom_loss_plugin(
         module_path = os.path.join(tmp_dir, "loss_plugin.py")
         with open(module_path, "w", encoding="utf-8") as handle:
             handle.write(plugin_src)
-        loss_fn, load_error = _load_loss_factory(loss_name, module_path, loss_parameters)
+        if plugin_path is None:
+            loss_fn, load_error = _load_loss_factory(loss_name, module_path, loss_parameters)
+        else:
+            loss_fn, load_error = _load_bound_loss_factory(
+                plugin_src, loss_name, plugin_path, loss_parameters
+            )
         if load_error is not None:
             return load_error
         assert loss_fn is not None
