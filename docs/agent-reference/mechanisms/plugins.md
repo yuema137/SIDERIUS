@@ -174,3 +174,38 @@ plugins next to a scanned directory without them being picked up implicitly.
 
 - [Composition](composition.md) · [Execution](execution.md) · [Health gates](health-gates.md)
 - [Define a task](../../guides/define-a-task.md)
+
+### Observe the selected model plugin source
+
+`ml_models.plugin_loader.registered_model_plugin_path(model_type, model_class)`
+returns the declaration file recorded by the native directory scan or explicit
+`register_model_in_memory` call for that exact model class. It returns `None`
+when there is no matching registration evidence. `None` does not identify a
+builtin; check the installed registry separately.
+
+Use this read-only observation when a deployment needs to capture the selected
+plugin. Do not infer the declaration file from `inspect.getfile(model_class)`:
+a valid plugin can export a class imported from a helper or installed module.
+The query does not change registration or scanning behavior and does not pin
+bytes, dependencies, caller identity or training provenance.
+
+### Numerical checks for a captured loss package
+
+`agent.schemas.custom_loss_validation.validate_custom_loss_plugin` accepts an
+optional `plugin_path` for a member of the caller's active `bind_code_package`
+context. Its captured bytes must match `plugin_src`. The probe uses the native
+loss plugin loader, so declared relative dependencies (including imports inside
+`forward`) retain their captured package identity. Keep the binding active until
+the numerical check returns. Missing package selection or mismatched bytes are
+reported as validation errors; this route never falls back to the current file.
+
+Omitting `plugin_path` preserves the assembled single-file check. Both routes
+use the same task-owned synthetic pair, scalar/finite checks and gradient checks.
+This interface performs candidate execution; deployment callers must establish
+their execution boundary before invoking it.
+
+Loss loader results also include `plugin_path`: the selected declaration file,
+including when it re-exports a class from another module. This is an observation
+of native selection, not permission to read the path in a privileged caller.
+Deployment code must match it against its own captured source set. Both explicit
+file loading and name lookup provide it; selection precedence is unchanged.

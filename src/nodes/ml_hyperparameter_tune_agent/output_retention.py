@@ -15,6 +15,7 @@ from core.campaign_identity import validate_path_component
 from core.durable_io import append_line_durably
 from execute_tools.array2h5 import atomic_abra_auxiliary_patterns
 from execute_tools.deliverable_spec import DeliverableNaming
+from execute_tools.evaluation_execution import candidate_evaluation_executor
 from execute_tools.model_output_retention import OutputRetentionReceipt, apply_output_retention
 from execute_tools.task_data_path import (
     EvaluationReadRequest,
@@ -129,8 +130,14 @@ def finalize_attempt_outputs(
     exp_id: str,
     model_type: str,
     retain_model_outputs: bool,
-) -> OutputRetentionReceipt:
-    """Persist a receipt and fail closed on an uncertified output lifetime."""
+) -> OutputRetentionReceipt | None:
+    """Certify local outputs; a complete evaluator owns its external outputs."""
+
+    # No local inference writer runs under this explicit binding. Its evaluator
+    # owns output retention and the outer deployment owns interrupted-job cleanup.
+    # Do not require a local inventory or manufacture a local cleanup receipt.
+    if candidate_evaluation_executor() is not None:
+        return None
 
     task: TaskOutputArtifactCapability | None = None
     if isinstance(task_data_path, TaskOutputArtifactCapability):

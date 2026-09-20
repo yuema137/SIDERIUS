@@ -106,13 +106,20 @@ class TestCoreDoesNotReachIntoAWorkflowsPRIVATE:
         beside the existing one in `_write_model_io_config`; that is the same
         recorded edge, not a new one. A genuinely new module still reds here.
         """
-        public = [
-            module
-            for module in _import_sources(CORE / "sandbox_executor.py")
-            if module.startswith("workflows")
-        ]
-        assert sorted(set(public)) == ["workflows.task_composition", "workflows.task_config"]
-        assert _private_workflows_imports(CORE / "sandbox_executor.py") == []
+        # Task argument emission moved intact to task_transport. Keep both
+        # actual import edges explicit rather than dropping the moved edge.
+        expected = {
+            "sandbox_executor.py": ["workflows.task_config"],
+            "task_transport.py": ["workflows.task_composition"],
+        }
+        for filename, modules in expected.items():
+            public = {
+                module
+                for module in _import_sources(CORE / filename)
+                if module.startswith("workflows")
+            }
+            assert sorted(public) == modules
+            assert _private_workflows_imports(CORE / filename) == []
 
     def test_resume_uses_the_public_registration_authority(self):
         source = (CORE / "resume.py").read_text(encoding="utf-8")

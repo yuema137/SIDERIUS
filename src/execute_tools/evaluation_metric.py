@@ -52,7 +52,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Annotated, Any, ClassVar, Literal, NamedTuple, cast, get_args
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple, cast, get_args
 
 from pydantic import (
     BaseModel,
@@ -66,6 +67,14 @@ from pydantic import (
 
 from core.local_code.failure import raise_if_code_package_failure
 from execute_tools.dataset_config import ScopeViolationError
+
+if TYPE_CHECKING:
+    from execute_tools.evaluation_execution import (
+        CandidateEvaluationExecutor,
+        CandidateEvaluationRequest,
+        CandidateEvaluationResult,
+    )
+
 
 MetricDirection = Literal["higher", "lower"]
 
@@ -421,6 +430,38 @@ class EvaluationMetric(ABC):
         self, deliverables: Mapping[int, str], /, **compute_kwargs: Any
     ) -> tuple[float, list[float | None] | None, tuple[str, ...]]:
         """The instance's arithmetic. Returns ``(scalar, per_sample, references_used)``."""
+
+
+@dataclass(frozen=True)
+class CandidateEvaluationMetric:
+    """A declared scientific metric executed through complete candidate evaluation.
+
+    This is deliberately not a local EvaluationMetric: no local arithmetic or
+    prediction-file scoring is advertised. The task's full declaration remains
+    authoritative; the explicitly bound executor owns scoreability and scoring.
+    """
+
+    spec: MetricSpec
+
+    def require_executor(self) -> CandidateEvaluationExecutor:
+        from execute_tools.evaluation_execution import candidate_evaluation_executor
+
+        executor = candidate_evaluation_executor()
+        if executor is None:
+            raise NoRunMetricError(
+                "candidate-evaluation metric requires an explicitly bound complete evaluator"
+            )
+        return executor
+
+    def evaluate_candidate(self, request: CandidateEvaluationRequest) -> CandidateEvaluationResult:
+        from execute_tools.evaluation_execution import execute_candidate_evaluation
+
+        if request.metric.model_dump(mode="json") != self.spec.model_dump(mode="json"):
+            raise ValueError("candidate request differs from the composed metric declaration")
+        return execute_candidate_evaluation(self.require_executor(), request)
+
+
+type RunMetric = EvaluationMetric | CandidateEvaluationMetric
 
 
 class AccuracyMetric(EvaluationMetric):
@@ -1088,7 +1129,7 @@ def _name_specs(entries: Sequence[StampedMetricSpec]) -> str:
     return ", ".join(entry.label for entry in entries) or "<none>"
 
 
-def resolve_run_metric() -> EvaluationMetric:
+def resolve_run_metric() -> RunMetric:
     """Return the metric selected by the active task composition.
 
     A scientific metric has task-owned arithmetic, direction, scoreability,
@@ -1098,6 +1139,8 @@ def resolve_run_metric() -> EvaluationMetric:
     """
     declared = resolve_bound_run_metric()
     if declared is not None:
+        if isinstance(declared, CandidateEvaluationMetric):
+            declared.require_executor()
         return declared
     raise NoRunMetricError(
         "this run has no metric bound from a task composition; SIDERIUS cannot "
@@ -1109,13 +1152,13 @@ def resolve_run_metric() -> EvaluationMetric:
 # Run-scoped metric binding (Step 10 / P1 C2)
 # ---------------------------------------------------------------------------
 
-_ACTIVE_RUN_METRIC: ContextVar[EvaluationMetric | None] = ContextVar(
+_ACTIVE_RUN_METRIC: ContextVar[RunMetric | None] = ContextVar(
     "siderius_active_run_metric", default=None
 )
 
 
 @contextmanager
-def bind_run_metric(metric: EvaluationMetric) -> Iterator[EvaluationMetric]:
+def bind_run_metric(metric: RunMetric) -> Iterator[RunMetric]:
     """Bind the run's PRIMARY metric handle for the duration of the block.
 
     Exactly the ``bind_dataset_profile`` idiom (``dataset_config.py``): a
@@ -1137,7 +1180,7 @@ def bind_run_metric(metric: EvaluationMetric) -> Iterator[EvaluationMetric]:
         _ACTIVE_RUN_METRIC.reset(token)
 
 
-def resolve_bound_run_metric() -> EvaluationMetric | None:
+def resolve_bound_run_metric() -> RunMetric | None:
     """The run's bound primary metric, or ``None`` when nothing is bound.
 
     Deliberately returns ``None`` rather than falling back to the TIDMAD

@@ -1544,6 +1544,8 @@ def build_attempt_record(
         },
     }
     trained_model_ref = _trained_model_artifact_ref(bindings, prepared, trained)
+    if executed.external_evaluation is not None:
+        final_record["external_evaluation"] = executed.external_evaluation.model_dump(mode="json")
     if trained_model_ref is not None:
         final_record["trained_model_artifact_ref"] = trained_model_ref.model_dump(mode="json")
     # Step 10 / P2b — the observational secondaries' three outcomes, written

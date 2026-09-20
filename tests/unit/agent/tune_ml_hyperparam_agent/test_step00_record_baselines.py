@@ -103,6 +103,8 @@ EXPERIMENT_RECORD_FIELDS = [
     "failure_reason",
     "gate_action",
     "health_gate_results",
+    # Deployment receipt is additive and omitted from serialization when absent.
+    "external_evaluation",
     "scientific_authority",
     "training_psd_segments",
     "eval_psd_segments",

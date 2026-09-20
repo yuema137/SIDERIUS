@@ -246,9 +246,9 @@ class TestCensusBTransportEmissionSites:
             ]
             if calls:
                 offenders[str(path.relative_to(REPO_ROOT))] = len(calls)
-        assert offenders == {"src/core/sandbox_executor.py": 1}, (
+        assert offenders == {"src/core/task_transport.py": 1}, (
             "transport_argv must be emitted from exactly ONE production module "
-            f"(the sandbox executor's single argv helper); found {offenders}."
+            f"(the extracted task-binding argv helper); found {offenders}."
         )
 
     def test_the_measured_binding_topology_of_the_parent_process(self):
@@ -397,9 +397,23 @@ class TestCensusBTransportEmissionSites:
         stopped parsing it, C3's reachability proof would silently degrade
         into 'the parent emits into the void'."""
         from execute_tools.task_data_path import TASK_DATA_PATH_ARGV_FLAG
+        from execute_tools.train_engine_sandbox import build_training_parser
+
+        args = build_training_parser().parse_args(
+            [
+                "--model_cfg",
+                "model.json",
+                "--train_cfg",
+                "train.json",
+                "--loss_cfg",
+                "loss.json",
+                TASK_DATA_PATH_ARGV_FLAG,
+                "synthetic",
+            ]
+        )
+        assert args.task_data_path_id == "synthetic"
 
         for rel in (
-            "src/execute_tools/train_engine_sandbox.py",
             "src/execute_tools/inference_single.py",
             "src/execute_tools/denoising_score_single.py",
         ):

@@ -466,3 +466,33 @@ class TestI13StubTemplateDeclaresDtype:
             "assembled plugins would silently default to 'long' — which is the "
             "correct value today but hides intent. Restore the declaration."
         )
+
+
+def test_selected_loss_reports_declaration_path_for_reexported_class(loss_dir, monkeypatch):
+    from pydantic import BaseModel
+    from torch.nn import MSELoss
+
+    declaration = loss_dir / "reexport.py"
+    declaration.write_text(
+        "from pydantic import BaseModel\nfrom torch.nn import MSELoss\n"
+        'PLUGIN_LOSS_TYPE="reexported"\nPLUGIN_LOSS_CONFIG_CLASS=BaseModel\n'
+        'PLUGIN_LOSS_CLASS=MSELoss\nPLUGIN_LOSS_TARGET_DTYPE="float"\n'
+    )
+    monkeypatch.setattr(_loss_loader, "_resolve_loss_dirs", lambda: [str(loss_dir)])
+    result = load_loss_plugin("reexported")
+    assert result is not None
+    assert result["loss_class"] is MSELoss
+    assert result["config_class"] is BaseModel
+    assert result["plugin_path"] == str(declaration)
+    assert Path(inspect.getfile(result["loss_class"])) != declaration
+
+
+def test_captured_loss_reports_its_declared_member_path(tmp_path):
+    from core.local_code import CodePackageDeclaration, bind_code_package, capture_package
+
+    declaration = _copy_stub(tmp_path)
+    package = capture_package(CodePackageDeclaration(root=".", files=(declaration.name,)), tmp_path)
+    with bind_code_package(package):
+        result = _loss_loader.load_loss_plugin_from_path(str(declaration))
+    assert result is not None
+    assert result["plugin_path"] == str(declaration)

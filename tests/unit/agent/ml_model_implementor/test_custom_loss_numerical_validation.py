@@ -224,3 +224,95 @@ def test_provider_exception_is_named_before_plugin_import(tmp_path):
     assert error is not None and "provider refused" in error
     assert "RuntimeError: synthetic fixture unavailable" in error
     assert not marker.exists()
+
+
+def test_concrete_parameters_are_used_instead_of_defaults():
+    source = (
+        _mse_loss_source()
+        .replace(
+            "class Config(BaseModel):\n    pass",
+            "class Config(BaseModel):\n    denominator: float = 1.0",
+        )
+        .replace("super().__init__()", "super().__init__(); self.denominator = config.denominator")
+        .replace(
+            "((prediction - target) ** 2).mean()",
+            "((prediction - target) ** 2).mean() / self.denominator",
+        )
+    )
+
+    def pair():
+        return torch.zeros(2, 1), torch.ones(2, 1)
+
+    assert validate_custom_loss_plugin(source, "mse", pair_provider=pair) is None
+    error = validate_custom_loss_plugin(
+        source, "mse", pair_provider=pair, loss_parameters={"denominator": 0.0}
+    )
+    assert error is not None and "non-finite scalar" in error
+
+
+def test_invalid_concrete_parameters_do_not_fall_back_to_defaults():
+    source = _mse_loss_source().replace(
+        "class Config(BaseModel):\n    pass",
+        "class Config(BaseModel):\n    denominator: float = 1.0",
+    )
+    error = validate_custom_loss_plugin(
+        source,
+        "mse",
+        pair_provider=lambda: (torch.zeros(2, 1), torch.ones(2, 1)),
+        loss_parameters={"denominator": "not-a-number"},
+    )
+    assert error is not None and "supplied parameters" in error
+
+
+def test_captured_package_loss_keeps_relative_helper_and_lazy_import(tmp_path):
+    from core.local_code import CodePackageDeclaration, bind_code_package, capture_package
+
+    helper = tmp_path / "helper.py"
+    helper.write_text("def error(p,t):\n    return ((p-t)**2).mean()\n")
+    source = """import torch
+from pydantic import BaseModel
+class Config(BaseModel):
+    scale: float = 2.0
+class Loss(torch.nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.scale = config.scale
+    def forward(self, p, t):
+        from .helper import error
+        return error(p,t)*self.scale
+PLUGIN_LOSS_TYPE="packaged"
+PLUGIN_LOSS_CONFIG_CLASS=Config
+PLUGIN_LOSS_CLASS=Loss
+PLUGIN_LOSS_TARGET_DTYPE="float"
+"""
+    path = tmp_path / "loss.py"
+    path.write_text(source)
+    package = capture_package(
+        CodePackageDeclaration(root=".", files=("loss.py", "helper.py")), tmp_path
+    )
+    # Numerical checking must use captured dependency bytes, not current files.
+    helper.write_text("raise AssertionError('mutable helper loaded')\n")
+    with bind_code_package(package):
+        assert (
+            validate_custom_loss_plugin(
+                source,
+                "packaged",
+                pair_provider=lambda: (torch.ones(2), torch.zeros(2)),
+                plugin_path=str(path),
+            )
+            is None
+        )
+        mismatch = validate_custom_loss_plugin(
+            source + "\n# another revision",
+            "packaged",
+            pair_provider=lambda: (torch.ones(2), torch.zeros(2)),
+            plugin_path=str(path),
+        )
+        assert mismatch is not None and "differs" in mismatch
+    absent = validate_custom_loss_plugin(
+        source,
+        "packaged",
+        pair_provider=lambda: (torch.ones(2), torch.zeros(2)),
+        plugin_path=str(path),
+    )
+    assert absent is not None and "differs" in absent

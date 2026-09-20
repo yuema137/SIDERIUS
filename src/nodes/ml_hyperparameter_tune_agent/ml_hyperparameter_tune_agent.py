@@ -56,7 +56,7 @@ from execute_tools.deliverable_spec import (
     indexed_cleanup_naming,
 )
 from execute_tools.evaluation_metric import (
-    EvaluationMetric,
+    RunMetric,
     resolve_bound_run_secondary_metrics,
     resolve_run_metric,
 )
@@ -223,6 +223,7 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
     project_attempt_topology_facts,
 )
+from nodes.ml_hyperparameter_tune_agent.seed_plugin import stage_seed_model
 from workflows.task_config import load_task_config, run_bound_model_io_contract
 
 
@@ -460,6 +461,13 @@ def _load_trial_anchor_map(*, composed: bool, data_root: str) -> dict | None:
             the pre-existing behaviour, now naming whichever artifact the task
             actually declared.
     """
+    from execute_tools.evaluation_execution import candidate_evaluation_executor
+
+    if candidate_evaluation_executor() is not None:
+        # This preload feeds only the local scoring route. Scope construction
+        # owns its sampling requirements; the complete evaluator owns scoring
+        # references and must not require publishing them to the researcher.
+        return None
     anchoring = None
     if composed:
         try:
@@ -794,7 +802,7 @@ class HyperparamTuningAgent:
         # A composed run supplies the metric its declaration named, resolved
         # once at the composition edge. An uncomposed run refuses here rather
         # than selecting a scientific metric on the framework's authority.
-        run_metric: EvaluationMetric = resolve_run_metric()
+        run_metric: RunMetric = resolve_run_metric()
 
         # --- The run's DECLARED observational secondaries (Step 10 / P2b) ---
         # Acquired at the SAME site as the primary, from the same composition,
@@ -1053,13 +1061,12 @@ class HyperparamTuningAgent:
             deliverable_naming=run_deliverable_naming,
         )
 
-        # Seed plugin copy — docs/run_scoped_plugins.md (Phase 3). Validation
-        # (file exists + PLUGIN_MODEL_TYPE matches model_type) already ran in
-        # HyperparamTuningInput; here we just stage the file in the run's
-        # plugin dir so the training subprocess picks it up via
-        # SIDERIUS_PLUGIN_DIRS.
+        # Parent planning and subprocess training need the same explicit seed.
+        # A fresh standalone caller has no earlier validator registration.
         if agent_input.seed_plugin_path:
-            copied = _copy_seed_plugin(agent_input.seed_plugin_path, sandbox.plugin_dir)
+            copied = stage_seed_model(
+                agent_input.seed_plugin_path, sandbox.plugin_dir, agent_input.model_type
+            )
             print(f"[Tuner] Seed plugin staged: {os.path.basename(copied)} -> {sandbox.plugin_dir}")
 
         brain = self._bridge_factory(**_bridge_kwargs_from_input(agent_input))
@@ -1196,7 +1203,7 @@ class HyperparamTuningAgent:
         with open(run_config_path, "w", encoding="utf-8") as f:
             json.dump(run_config, f, indent=4)
 
-        print("=== TIDMAD Agent Activated ===")
+        print("=== SIDERIUS Agent Activated ===")
         print(f"Provider: {agent_input.llm_provider} | Model: {agent_input.llm_model_id}")
         print(f"HealthGate config: {agent_input.health_checks_config or '(shipped default)'}")
         print(

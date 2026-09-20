@@ -19,12 +19,18 @@ class _ScopeCapability:
         return 1
 
 
-def test_composed_training_scope_becomes_a_typed_worker_reference(monkeypatch):
+@pytest.mark.parametrize("external_evaluation", [False, True])
+def test_composed_training_scope_becomes_a_typed_worker_reference(monkeypatch, external_evaluation):
     """Dropping this projection recreates the all-zero semantic target."""
     capability = _ScopeCapability()
     monkeypatch.setattr(probe_data, "active_task_manifest_path", lambda: "/task/composition.yaml")
     monkeypatch.setattr(probe_data, "require_bound_task_data_path", lambda: capability)
     monkeypatch.setattr(probe_data, "resolve_task_scope_capability", lambda value: value)
+    monkeypatch.setattr(
+        probe_data,
+        "candidate_evaluation_executor",
+        lambda: object() if external_evaluation else None,
+    )
 
     result = probe_data.build_task_probe_data(
         task_composition_ref=SimpleNamespace(
@@ -41,7 +47,11 @@ def test_composed_training_scope_becomes_a_typed_worker_reference(monkeypatch):
     assert result.manifest_path == "/task/composition.yaml"
     assert result.semantic_fingerprint == "abc123"
     assert result.training_scope_payload == '{"kind":"synthetic","networks":["a"]}'
-    assert result.evaluation_scope_payload == '{"kind":"synthetic","networks":["a"]}'
+    # Private inference belongs to the bound complete evaluator. Transporting its
+    # scope here makes the research-side resource worker read private data.
+    assert result.evaluation_scope_payload == (
+        None if external_evaluation else '{"kind":"synthetic","networks":["a"]}'
+    )
     assert result.max_inference_batch_size == 1
     assert result.segmentation_applicability == "not_applicable"
     assert result.sampling.model_dump() == {

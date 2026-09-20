@@ -43,6 +43,10 @@ from core.layout import checkout_root
 from execute_tools.dataset_config import (
     ScopeViolationError,
 )
+from execute_tools.evaluation_execution import (
+    CandidateEvaluationRefused,
+    candidate_evaluation_executor,
+)
 from execute_tools.evaluation_metric import (
     EvaluationMetric,
     MetricResult,
@@ -62,10 +66,12 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     AttemptExecution,
     AttemptIdentity,
     AttemptStage,
+    EvaluationPhaseEvidence,
     PreparedAttempt,
     RunBindings,
     TrainingOutcome,
 )
+from nodes.ml_hyperparameter_tune_agent.external_evaluation import run_external_evaluation
 from nodes.ml_hyperparameter_tune_agent.output_retention import finalize_attempt_outputs
 from nodes.ml_hyperparameter_tune_agent.policy import (
     ScoringRoute,
@@ -1117,21 +1123,23 @@ def _evaluate_secondary_metrics(
     )
 
 
-def run_inference_scoring_health(
+def _run_local_evaluation_phase(
     bindings: RunBindings,
     prepared: PreparedAttempt,
     identity: AttemptIdentity,
     stage: AttemptStage,
     *,
     train_time: Any,
-    training_results: Any,
-) -> AttemptExecution:
-    """Phase 3 of 3. Body moved verbatim; see the module docstring."""
+) -> EvaluationPhaseEvidence | AttemptExecution:
+    """Execute the original local inference, scoring and Health path in order.
+
+    Return early attempt decisions unchanged. The caller owns output cleanup and
+    common result interpretation, including on raised failures.
+    """
     agent_input = bindings.agent_input
     anchor_map_data = bindings.anchor_map_data
     expert_advice_str = bindings.expert_advice_str
     file_index = bindings.file_index
-    reference_scores = bindings.reference_scores
     # Step 12 / PR-12d (F-12d-5): this phase now reads the run's NAMING
     # authority, which is always present, rather than reaching through the
     # OPTIONAL deliverable spec for it. The spec itself has no consumer
@@ -1148,23 +1156,42 @@ def run_inference_scoring_health(
     exp_id = prepared.exp_id
     hypothesis = prepared.hypothesis
     model_type = prepared.model_type
-    plan = prepared.plan
     record_params = prepared.record_params
     attempt_in_round = identity.attempt_in_round
     round_index = identity.round_index
 
-    try:
-        stage.name = "inference"
-        print("[Step 2/3] Inference...")
-        t0 = time.time()
-        inf_status = _runtime._run_skill("inference_skill", sandbox, **active_params)
-        inference_time = round(time.time() - t0, 1)
-        _raise_if_wall_clock_timeout(inf_status, sandbox, run_name)
-        _raise_if_evidence_channel_failure(inf_status, sandbox, run_name)
-        if _handle_admission_refusal(
+    stage.name = "inference"
+    print("[Step 2/3] Inference...")
+    t0 = time.time()
+    inf_status = _runtime._run_skill("inference_skill", sandbox, **active_params)
+    inference_time = round(time.time() - t0, 1)
+    _raise_if_wall_clock_timeout(inf_status, sandbox, run_name)
+    _raise_if_evidence_channel_failure(inf_status, sandbox, run_name)
+    if _handle_admission_refusal(
+        inf_status,
+        phase="inference",
+        sandbox=sandbox,
+        exp_id=exp_id,
+        model_type=model_type,
+        file_index=file_index,
+        record_params=record_params,
+        expert_advice_str=expert_advice_str,
+        hypothesis=hypothesis,
+        round_index=round_index,
+        attempt_in_round=attempt_in_round,
+        candidate_id=agent_input.candidate_id,
+        experiment_arm=agent_input.experiment_arm,
+    ):
+        return AttemptExecution.next_attempt()
+    # Step 11 C2 (F-11-1) — same authority as the training branch.
+    if _records.is_execution_failure(inf_status):
+        # DataScope DS5 — non-retryable: terminate the run.
+        if inf_status.get("error_type") == "scope_violation":
+            _scope_violation_reason = inf_status.get("message", "scope violation in inference")
+            return AttemptExecution.end_round(scope_violation_reason=_scope_violation_reason)
+        error_record = _build_execution_failure_record(
             inf_status,
             phase="inference",
-            sandbox=sandbox,
             exp_id=exp_id,
             model_type=model_type,
             file_index=file_index,
@@ -1173,257 +1200,210 @@ def run_inference_scoring_health(
             hypothesis=hypothesis,
             round_index=round_index,
             attempt_in_round=attempt_in_round,
-            candidate_id=agent_input.candidate_id,
-            experiment_arm=agent_input.experiment_arm,
-        ):
-            return AttemptExecution.next_attempt()
-        # Step 11 C2 (F-11-1) — same authority as the training branch.
-        if _records.is_execution_failure(inf_status):
-            # DataScope DS5 — non-retryable: terminate the run.
-            if inf_status.get("error_type") == "scope_violation":
-                _scope_violation_reason = inf_status.get("message", "scope violation in inference")
-                return AttemptExecution.end_round(scope_violation_reason=_scope_violation_reason)
-            error_record = _build_execution_failure_record(
-                inf_status,
-                phase="inference",
-                exp_id=exp_id,
-                model_type=model_type,
-                file_index=file_index,
-                record_params=record_params,
-                expert_advice_str=expert_advice_str,
-                hypothesis=hypothesis,
-                round_index=round_index,
-                attempt_in_round=attempt_in_round,
-            )
-            _emit_attempt_record(
-                sandbox, error_record, agent_input, status=inf_status, ordering=prepared.ordering
-            )
-            print(f"  Saved error record: {error_record['status']}")
-            return AttemptExecution.next_attempt()
-
-        stage.name = "scoring"
-        print("[Step 3/3] Scoring...")
-        # Fix 4 — memory probe around the scoring block. See
-        # docs/optimize_inference_and_scoring.md §3 Fix 4. The
-        # tuner's ``round_index`` is the iter axis inside the
-        # tuner scope; workflow-scope probes (different
-        # ``scope`` field) give the outer iteration index.
-        from core.memory_probe import probe_memory
-
-        probe_memory(
-            iter_idx=round_index,
-            phase="pre_score",
-            workspace=workspace,
-            scope="tuner",
         )
-        t0 = time.time()
-        metric_payload: dict[str, Any] | None = None
-        # Step 10 / P2b — empty unless the primary scores AND the run declared
-        # secondaries. Initialised here, beside `metric_payload`, so every exit
-        # from the scoring block (including the two error paths below) carries
-        # the honest empty state rather than an unbound name.
-        secondary_results: list[MetricResult] = []
-        secondary_refusals: list[NotScoreableResult] = []
-        secondary_errors: dict[str, str] = {}
-        # V8 hardening Domain 2a — wrap the entire scoring block.
-        # Pre-V8, an exception in score_vector / denoising_score_skill
-        # bubbled past the loop without writing a record, so the
-        # tuner's iteration silently lost evidence (training
-        # checkpoint preserved on disk but no entry in
-        # memory_history). Now we catch, write an error_scoring
-        # record (matches the error_training/inference pattern
-        # above), and continue. See docs/V8_Gap_Report.md Domain 2a.
-        _scoring_route = resolve_scoring_route(anchor_map_data, prepared.task_scopes)
+        _emit_attempt_record(
+            sandbox, error_record, agent_input, status=inf_status, ordering=prepared.ordering
+        )
+        print(f"  Saved error record: {error_record['status']}")
+        return AttemptExecution.next_attempt()
 
-        # F2 — these two resolvers are properties of the ROUND (its model, its
-        # deliverable naming, its physical root), not of the scoring route, and
-        # they are hoisted out of the anchor branch so the round-boundary
-        # HealthGate evaluation below can be reached on EVERY route. Neither
-        # construction performs I/O or depends on a score.
-        #
-        # B023 — default-arg locking pins the captured loop
-        # variables at definition time; without it a future
-        # refactor that defers the call would hit the last
-        # iteration's model_type / exp_id.
-        # Bug A fix (PR #101 Gate 2 forensic): return an
-        # absolute path so downstream consumers that use the
-        # string verbatim (HealthCheckContext.get_denoised_path
-        # per the peek helper's path contract in
-        # execute_tools/health_checks/_peek.py:20-24) can open
-        # the file directly. Callers that also os.path.join a
-        # data_dir (scoring_utils.process_segment) are
-        # unaffected — os.path.join discards the base when
-        # the second arg is absolute.
-        def _denoised_fn(
-            fi,
+    stage.name = "scoring"
+    print("[Step 3/3] Scoring...")
+    # Fix 4 — memory probe around the scoring block. See
+    # docs/optimize_inference_and_scoring.md §3 Fix 4. The
+    # tuner's ``round_index`` is the iter axis inside the
+    # tuner scope; workflow-scope probes (different
+    # ``scope`` field) give the outer iteration index.
+    from core.memory_probe import probe_memory
+
+    probe_memory(
+        iter_idx=round_index,
+        phase="pre_score",
+        workspace=workspace,
+        scope="tuner",
+    )
+    t0 = time.time()
+    metric_payload: dict[str, Any] | None = None
+    # Step 10 / P2b — empty unless the primary scores AND the run declared
+    # secondaries. Initialised here, beside `metric_payload`, so every exit
+    # from the scoring block (including the two error paths below) carries
+    # the honest empty state rather than an unbound name.
+    secondary_results: list[MetricResult] = []
+    secondary_refusals: list[NotScoreableResult] = []
+    secondary_errors: dict[str, str] = {}
+    # V8 hardening Domain 2a — wrap the entire scoring block.
+    # Pre-V8, an exception in score_vector / denoising_score_skill
+    # bubbled past the loop without writing a record, so the
+    # tuner's iteration silently lost evidence (training
+    # checkpoint preserved on disk but no entry in
+    # memory_history). Now we catch, write an error_scoring
+    # record (matches the error_training/inference pattern
+    # above), and continue. See docs/V8_Gap_Report.md Domain 2a.
+    _scoring_route = resolve_scoring_route(anchor_map_data, prepared.task_scopes)
+
+    # F2 — these two resolvers are properties of the ROUND (its model, its
+    # deliverable naming, its physical root), not of the scoring route, and
+    # they are hoisted out of the anchor branch so the round-boundary
+    # HealthGate evaluation below can be reached on EVERY route. Neither
+    # construction performs I/O or depends on a score.
+    #
+    # B023 — default-arg locking pins the captured loop
+    # variables at definition time; without it a future
+    # refactor that defers the call would hit the last
+    # iteration's model_type / exp_id.
+    # Bug A fix (PR #101 Gate 2 forensic): return an
+    # absolute path so downstream consumers that use the
+    # string verbatim (HealthCheckContext.get_denoised_path
+    # per the peek helper's path contract in
+    # execute_tools/health_checks/_peek.py:20-24) can open
+    # the file directly. Callers that also os.path.join a
+    # data_dir (scoring_utils.process_segment) are
+    # unaffected — os.path.join discards the base when
+    # the second arg is absolute.
+    def _denoised_fn(
+        fi,
+        model_type=model_type,
+        exp_id=exp_id,
+        base_dir=sandbox.base_dir,
+        naming=run_deliverable_naming,
+    ):
+        return _build_denoised_filename(
             model_type=model_type,
+            run_name=run_name,
             exp_id=exp_id,
-            base_dir=sandbox.base_dir,
-            naming=run_deliverable_naming,
-        ):
-            return _build_denoised_filename(
-                model_type=model_type,
-                run_name=run_name,
-                exp_id=exp_id,
-                input_identity=fi,
-                base_dir=base_dir,
-                naming=naming,
+            input_identity=fi,
+            base_dir=base_dir,
+            naming=naming,
+        )
+
+    # The RAW validation-file resolver, owned by the health boundary:
+    # nothing on the scoring paths calls it, and it resolves lazily so a
+    # run with no physical data root does not pay for a peek it never
+    # asked for. Rationale in `round_health.build_target_path_fn`.
+    _target_fn = build_target_path_fn(sandbox, run_profile)
+
+    try:
+        if _scoring_route is ScoringRoute.ANCHOR_NORMALIZED:
+            # Anchor-normalized scoring (both trial and formal modes).
+            # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
+            # Step 06 — PRODUCTION SCORING through the
+            # metric handle: scoreability first, then the
+            # frozen TIDMAD arithmetic. A refused
+            # deliverable raises NotScoreableError into the
+            # scoring `except` below, which is the
+            # round-outcome path for every scoring failure.
+            metric_result = sandbox.evaluate_metric(
+                run_metric,
+                sample_set=eval_sample_set,
+                anchor_map=anchor_map_data["anchors"],
+                s_max=anchor_map_data["s_max"],
+                denoised_filename_fn=_denoised_fn,
+            )
+            # `per_sample` is Optional on the generic result: a
+            # scalar-only metric carries NONE, and the Pets
+            # AccuracyMetric says so in as many words. The
+            # record's `file_vector` still wants a list, so the
+            # list is still built — but the STATEMENT is carried
+            # separately rather than collapsed into it (D18,
+            # Step 08b C6). Collapsing the two made a scalar-only
+            # task present per-file checks with `[]`, which reads
+            # as "no files" and PASSES: "this question does not
+            # arise here" recorded as health.
+            per_sample = metric_result.per_sample
+            file_vector, final_scalar = (
+                list(per_sample or []),
+                metric_result.scalar,
+            )
+            per_sample_evidence = PerSampleEvidence.for_per_sample(per_sample)
+            # Step 06 C4 — the record-facing payload. Kept
+            # OUT of `score_res["results"]` on purpose: that
+            # dict is json-dumped verbatim into the reflector
+            # prompt (agent/prompts.py:1343) and Step 06
+            # changes no prompt (design §8, §13). The planner's
+            # history serialization likewise drops it
+            # (`agent/prompts.py::_PLANNER_HIDDEN_RECORD_KEYS`)
+            # — persisted for Steps 07a/09, not agent-facing.
+            # Per-sample evidence is a POINTER — `file_vector`
+            # on the same record — not a second copy (§5).
+            metric_payload = metric_result.model_dump(mode="json", exclude={"per_sample"})
+
+            # Step 10 / P2b — the DECLARED observational secondaries,
+            # evaluated wherever the primary evaluates (Q-P2b-1). This
+            # block runs for BOTH trial and formal modes, so no
+            # round-type branch is added here or anywhere else. It sits
+            # after the primary result on purpose: an attempt that never
+            # produced one carries no secondary entries at all.
+            (
+                secondary_results,
+                secondary_refusals,
+                secondary_errors,
+            ) = _evaluate_secondary_metrics(
+                sandbox,
+                run_secondary_metrics,
+                sample_set=eval_sample_set,
+                anchor_map=anchor_map_data["anchors"],
+                s_max=anchor_map_data["s_max"],
+                denoised_filename_fn=_denoised_fn,
             )
 
-        # The RAW validation-file resolver, owned by the health boundary:
-        # nothing on the scoring paths calls it, and it resolves lazily so a
-        # run with no physical data root does not pay for a peek it never
-        # asked for. Rationale in `round_health.build_target_path_fn`.
-        _target_fn = build_target_path_fn(sandbox, run_profile)
-
-        try:
-            if _scoring_route is ScoringRoute.ANCHOR_NORMALIZED:
-                # Anchor-normalized scoring (both trial and formal modes).
-                # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
-                # Step 06 — PRODUCTION SCORING through the
-                # metric handle: scoreability first, then the
-                # frozen TIDMAD arithmetic. A refused
-                # deliverable raises NotScoreableError into the
-                # scoring `except` below, which is the
-                # round-outcome path for every scoring failure.
-                metric_result = sandbox.evaluate_metric(
-                    run_metric,
-                    sample_set=eval_sample_set,
-                    anchor_map=anchor_map_data["anchors"],
-                    s_max=anchor_map_data["s_max"],
-                    denoised_filename_fn=_denoised_fn,
-                )
-                # `per_sample` is Optional on the generic result: a
-                # scalar-only metric carries NONE, and the Pets
-                # AccuracyMetric says so in as many words. The
-                # record's `file_vector` still wants a list, so the
-                # list is still built — but the STATEMENT is carried
-                # separately rather than collapsed into it (D18,
-                # Step 08b C6). Collapsing the two made a scalar-only
-                # task present per-file checks with `[]`, which reads
-                # as "no files" and PASSES: "this question does not
-                # arise here" recorded as health.
-                per_sample = metric_result.per_sample
-                file_vector, final_scalar = (
-                    list(per_sample or []),
-                    metric_result.scalar,
-                )
-                per_sample_evidence = PerSampleEvidence.for_per_sample(per_sample)
-                # Step 06 C4 — the record-facing payload. Kept
-                # OUT of `score_res["results"]` on purpose: that
-                # dict is json-dumped verbatim into the reflector
-                # prompt (agent/prompts.py:1343) and Step 06
-                # changes no prompt (design §8, §13). The planner's
-                # history serialization likewise drops it
-                # (`agent/prompts.py::_PLANNER_HIDDEN_RECORD_KEYS`)
-                # — persisted for Steps 07a/09, not agent-facing.
-                # Per-sample evidence is a POINTER — `file_vector`
-                # on the same record — not a second copy (§5).
-                metric_payload = metric_result.model_dump(mode="json", exclude={"per_sample"})
-
-                # Step 10 / P2b — the DECLARED observational secondaries,
-                # evaluated wherever the primary evaluates (Q-P2b-1). This
-                # block runs for BOTH trial and formal modes, so no
-                # round-type branch is added here or anywhere else. It sits
-                # after the primary result on purpose: an attempt that never
-                # produced one carries no secondary entries at all.
-                (
-                    secondary_results,
-                    secondary_refusals,
-                    secondary_errors,
-                ) = _evaluate_secondary_metrics(
-                    sandbox,
-                    run_secondary_metrics,
-                    sample_set=eval_sample_set,
-                    anchor_map=anchor_map_data["anchors"],
-                    s_max=anchor_map_data["s_max"],
-                    denoised_filename_fn=_denoised_fn,
-                )
-
-                # F2 — the gate evaluation that used to sit HERE now runs once
-                # at the round boundary below, for every scoring route. It was
-                # never anchor-specific: it reads the round's deliverable, not
-                # the way that deliverable was scored.
-                score_res = {
-                    "status": "success",
-                    "results": {
-                        "denoising_score": final_scalar,
-                        "file_vector": file_vector,
-                    },
-                }
-            else:
-                # The scoring SUBPROCESS, serving two routes that differ only
-                # in what the child is handed:
-                #
-                # * `TASK_OWNED` — a composed task's own deliverable, scored
-                #   through its own metric against the evaluation scope
-                #   transported alongside it. Every composed contrast run
-                #   takes this route, because no contrast implementation
-                #   declares trial anchoring.
-                # * `SUBPROCESS_LEGACY` — TIDMAD without anchor normalization.
-                #   NOT "legacy single-file mode": `anchor_map_data` is only
-                #   ATTEMPTED for a trial round, so this branch is also where
-                #   every un-composed FORMAL round has always gone. The old
-                #   comment named a condition the code never tested.
-                score_res = _runtime._run_skill("denoising_score_skill", sandbox, **active_params)
-                _require_successful_scoring_result(score_res)
-                # F2 — carry the same three round facts the anchor route
-                # produces in-process, so the round-boundary gate evaluation
-                # below is genuinely route-independent rather than an anchor
-                # branch with a second entrance.
-                #
-                # `per_sample_evidence` is TRANSPORTED, never inferred. The
-                # child sets `file_vector` from `MetricResult.per_sample`,
-                # which is `None` exactly when the metric declares no
-                # per-sample concept — so D18's mapping applies verbatim. A
-                # payload that omits the key entirely has stated NOTHING, and
-                # absence must not be read as `scalar_only`: that is the
-                # distinction `PerSampleEvidence.UNDECLARED` exists to keep.
-                _child_results = score_res.get("results", {}) or {}
-                final_scalar = _child_results.get("denoising_score")
-                file_vector = list(_child_results.get("file_vector") or [])
-                per_sample_evidence = (
-                    PerSampleEvidence.for_per_sample(_child_results.get("file_vector"))
-                    if "file_vector" in _child_results
-                    else PerSampleEvidence.UNDECLARED
-                )
-        except ScopeViolationError as e:
-            # DataScope DS5 — non-retryable: terminate the run
-            # (must precede the generic handler below, which
-            # would otherwise convert this into a retried
-            # error_scoring record).
-            _scope_violation_reason = f"error_scope_violation: {e}"
-            return AttemptExecution.end_round(scope_violation_reason=_scope_violation_reason)
-        except Exception as e:
-            from core.local_code.failure import raise_if_code_package_failure
-
-            raise_if_code_package_failure(e)
-            scoring_time = round(time.time() - t0, 1)
-            probe_memory(
-                iter_idx=round_index,
-                phase="post_score",
-                workspace=workspace,
-                scope="tuner",
-            )
-            error_record = _build_scoring_failure_record(
-                e,
-                exp_id=exp_id,
-                model_type=model_type,
-                file_index=file_index,
-                record_params=record_params,
-                timing={
-                    "train_time_s": train_time,
-                    "inference_time_s": inference_time,
-                    "scoring_time_s": scoring_time,
+            # F2 — the gate evaluation that used to sit HERE now runs once
+            # at the round boundary below, for every scoring route. It was
+            # never anchor-specific: it reads the round's deliverable, not
+            # the way that deliverable was scored.
+            score_res = {
+                "status": "success",
+                "results": {
+                    "denoising_score": final_scalar,
+                    "file_vector": file_vector,
                 },
-                expert_advice_str=expert_advice_str,
-                hypothesis=hypothesis,
-                round_index=round_index,
-                attempt_in_round=attempt_in_round,
+            }
+        else:
+            # The scoring SUBPROCESS, serving two routes that differ only
+            # in what the child is handed:
+            #
+            # * `TASK_OWNED` — a composed task's own deliverable, scored
+            #   through its own metric against the evaluation scope
+            #   transported alongside it. Every composed contrast run
+            #   takes this route, because no contrast implementation
+            #   declares trial anchoring.
+            # * `SUBPROCESS_LEGACY` — TIDMAD without anchor normalization.
+            #   NOT "legacy single-file mode": `anchor_map_data` is only
+            #   ATTEMPTED for a trial round, so this branch is also where
+            #   every un-composed FORMAL round has always gone. The old
+            #   comment named a condition the code never tested.
+            score_res = _runtime._run_skill("denoising_score_skill", sandbox, **active_params)
+            _require_successful_scoring_result(score_res)
+            # F2 — carry the same three round facts the anchor route
+            # produces in-process, so the round-boundary gate evaluation
+            # below is genuinely route-independent rather than an anchor
+            # branch with a second entrance.
+            #
+            # `per_sample_evidence` is TRANSPORTED, never inferred. The
+            # child sets `file_vector` from `MetricResult.per_sample`,
+            # which is `None` exactly when the metric declares no
+            # per-sample concept — so D18's mapping applies verbatim. A
+            # payload that omits the key entirely has stated NOTHING, and
+            # absence must not be read as `scalar_only`: that is the
+            # distinction `PerSampleEvidence.UNDECLARED` exists to keep.
+            _child_results = score_res.get("results", {}) or {}
+            final_scalar = _child_results.get("denoising_score")
+            file_vector = list(_child_results.get("file_vector") or [])
+            per_sample_evidence = (
+                PerSampleEvidence.for_per_sample(_child_results.get("file_vector"))
+                if "file_vector" in _child_results
+                else PerSampleEvidence.UNDECLARED
             )
-            _emit_attempt_record(sandbox, error_record, agent_input, ordering=prepared.ordering)
-            print(f"  Saved error record: {error_record['status']}")
-            return AttemptExecution.next_attempt()
+    except ScopeViolationError as e:
+        # DataScope DS5 — non-retryable: terminate the run
+        # (must precede the generic handler below, which
+        # would otherwise convert this into a retried
+        # error_scoring record).
+        _scope_violation_reason = f"error_scope_violation: {e}"
+        return AttemptExecution.end_round(scope_violation_reason=_scope_violation_reason)
+    except Exception as e:
+        from core.local_code.failure import raise_if_code_package_failure
+
+        raise_if_code_package_failure(e)
         scoring_time = round(time.time() - t0, 1)
         probe_memory(
             iter_idx=round_index,
@@ -1431,55 +1411,173 @@ def run_inference_scoring_health(
             workspace=workspace,
             scope="tuner",
         )
-
-        # F2 — HealthGates fire at the ROUND boundary, on every scoring route.
-        #
-        # Placed after the scoring try/except on purpose: reaching this line
-        # means scoring SUCCEEDED for whichever route ran, so both routes
-        # arrive carrying the same round facts. A scoring failure still takes
-        # the `error_scoring` path above and never reaches a gate — a gate that
-        # could not be evaluated is not a gate that passed.
-        #
-        # Evaluate, merge score-validity and stamp the verdict are one
-        # responsibility and therefore one call; the boundary owns them, this
-        # function keeps sequencing. Full rationale, and the deliberately
-        # unpersisted `evaluated` residual, in `round_health`.
-        apply_round_health(
-            score_res,
-            merge_score_validity=_merge_score_validity_failure,
-            enabled=agent_input.health_gate_enabled,
-            round_index=round_index,
-            config_path=agent_input.health_checks_config,
-            production_config_path=default_health_policy_path(),
-            task_health_binding=(
-                agent_input.task_composition_ref.task_health_binding
-                if agent_input.task_composition_ref is not None
-                else None
-            ),
-            healthgate_mode=agent_input.healthgate_mode,
-            result_authority=agent_input.result_authority,
-            model_name=model_type,
-            run_name=run_name,
+        error_record = _build_scoring_failure_record(
+            e,
             exp_id=exp_id,
-            models_dir=(
-                sandbox.dirs.get("models")
-                if isinstance(getattr(sandbox, "dirs", None), dict)
-                else None
-            ),
-            denoised_filename_fn=_denoised_fn,
-            evaluation_payload_fn=build_evaluation_payload_fn(
-                task_data_path=bindings.run_task_data_path,
-                deliverable_dir=sandbox.base_dir,
-                exp_id=exp_id,
-                run_name=run_name,
-                model_type=model_type,
-            ),
-            target_path_fn=_target_fn,
-            file_vector=file_vector,
-            denoising_score=final_scalar,
-            per_sample_evidence=per_sample_evidence,
-            gate_results_to_score_meta=_gate_results_to_score_meta,
+            model_type=model_type,
+            file_index=file_index,
+            record_params=record_params,
+            timing={
+                "train_time_s": train_time,
+                "inference_time_s": inference_time,
+                "scoring_time_s": scoring_time,
+            },
+            expert_advice_str=expert_advice_str,
+            hypothesis=hypothesis,
+            round_index=round_index,
+            attempt_in_round=attempt_in_round,
         )
+        _emit_attempt_record(sandbox, error_record, agent_input, ordering=prepared.ordering)
+        print(f"  Saved error record: {error_record['status']}")
+        return AttemptExecution.next_attempt()
+    scoring_time = round(time.time() - t0, 1)
+    probe_memory(
+        iter_idx=round_index,
+        phase="post_score",
+        workspace=workspace,
+        scope="tuner",
+    )
+
+    # F2 — HealthGates fire at the ROUND boundary, on every scoring route.
+    #
+    # Placed after the scoring try/except on purpose: reaching this line
+    # means scoring SUCCEEDED for whichever route ran, so both routes
+    # arrive carrying the same round facts. A scoring failure still takes
+    # the `error_scoring` path above and never reaches a gate — a gate that
+    # could not be evaluated is not a gate that passed.
+    #
+    # Evaluate, merge score-validity and stamp the verdict are one
+    # responsibility and therefore one call; the boundary owns them, this
+    # function keeps sequencing. Full rationale, and the deliberately
+    # unpersisted `evaluated` residual, in `round_health`.
+    apply_round_health(
+        score_res,
+        merge_score_validity=_merge_score_validity_failure,
+        enabled=agent_input.health_gate_enabled,
+        round_index=round_index,
+        config_path=agent_input.health_checks_config,
+        production_config_path=default_health_policy_path(),
+        task_health_binding=(
+            agent_input.task_composition_ref.task_health_binding
+            if agent_input.task_composition_ref is not None
+            else None
+        ),
+        healthgate_mode=agent_input.healthgate_mode,
+        result_authority=agent_input.result_authority,
+        model_name=model_type,
+        run_name=run_name,
+        exp_id=exp_id,
+        models_dir=(
+            sandbox.dirs.get("models") if isinstance(getattr(sandbox, "dirs", None), dict) else None
+        ),
+        denoised_filename_fn=_denoised_fn,
+        evaluation_payload_fn=build_evaluation_payload_fn(
+            task_data_path=bindings.run_task_data_path,
+            deliverable_dir=sandbox.base_dir,
+            exp_id=exp_id,
+            run_name=run_name,
+            model_type=model_type,
+        ),
+        target_path_fn=_target_fn,
+        file_vector=file_vector,
+        denoising_score=final_scalar,
+        per_sample_evidence=per_sample_evidence,
+        gate_results_to_score_meta=_gate_results_to_score_meta,
+    )
+
+    return EvaluationPhaseEvidence(
+        inf_status=inf_status,
+        inference_time=inference_time,
+        scoring_time=scoring_time,
+        score_res=score_res,
+        metric_payload=metric_payload,
+        secondary_results=secondary_results,
+        secondary_refusals=secondary_refusals,
+        secondary_errors=secondary_errors,
+    )
+
+
+def _run_evaluation_phase(
+    bindings: RunBindings,
+    prepared: PreparedAttempt,
+    identity: AttemptIdentity,
+    stage: AttemptStage,
+    *,
+    train_time: Any,
+) -> EvaluationPhaseEvidence | AttemptExecution:
+    """Select an explicit deployment executor, otherwise the unchanged native path."""
+    executor = candidate_evaluation_executor()
+    if executor is None:
+        return _run_local_evaluation_phase(
+            bindings, prepared, identity, stage, train_time=train_time
+        )
+    started = time.perf_counter()
+    try:
+        return run_external_evaluation(executor, bindings, prepared, stage)
+    except CandidateEvaluationRefused as exc:
+        record = _build_scoring_failure_record(
+            exc,
+            exp_id=prepared.exp_id,
+            model_type=prepared.model_type,
+            file_index=bindings.file_index,
+            record_params=prepared.record_params,
+            timing={
+                "train_time_s": train_time,
+                "inference_time_s": 0.0,
+                "scoring_time_s": time.perf_counter() - started,
+            },
+            expert_advice_str=bindings.expert_advice_str,
+            hypothesis=prepared.hypothesis,
+            round_index=identity.round_index,
+            attempt_in_round=identity.attempt_in_round,
+        )
+        record["external_evaluation"] = exc.evaluation.model_dump(mode="json")
+        _emit_attempt_record(
+            bindings.sandbox, record, bindings.agent_input, ordering=prepared.ordering
+        )
+        return AttemptExecution.next_attempt()
+
+
+def run_inference_scoring_health(
+    bindings: RunBindings,
+    prepared: PreparedAttempt,
+    identity: AttemptIdentity,
+    stage: AttemptStage,
+    *,
+    train_time: Any,
+    training_results: Any,
+) -> AttemptExecution:
+    """Phase 3 of 3. Body moved verbatim; see the module docstring."""
+    agent_input = bindings.agent_input
+    reference_scores = bindings.reference_scores
+    # Step 12 / PR-12d (F-12d-5): this phase now reads the run's NAMING
+    # authority, which is always present, rather than reaching through the
+    # OPTIONAL deliverable spec for it. The spec itself has no consumer
+    # here.
+    run_deliverable_naming = bindings.run_deliverable_naming
+    run_name = bindings.run_name
+    sandbox = bindings.sandbox
+    workspace = bindings.workspace
+    exp_id = prepared.exp_id
+    model_type = prepared.model_type
+    plan = prepared.plan
+    attempt_in_round = identity.attempt_in_round
+    round_index = identity.round_index
+
+    try:
+        evaluated = _run_evaluation_phase(
+            bindings, prepared, identity, stage, train_time=train_time
+        )
+        if isinstance(evaluated, AttemptExecution):
+            return evaluated
+        inf_status = evaluated.inf_status
+        inference_time = evaluated.inference_time
+        scoring_time = evaluated.scoring_time
+        score_res = evaluated.score_res
+        metric_payload = evaluated.metric_payload
+        secondary_results = evaluated.secondary_results
+        secondary_refusals = evaluated.secondary_refusals
+        secondary_errors = evaluated.secondary_errors
 
         # Extract results from each stage. Step 07a: the LEGACY
         # payload (exactly final_loss / loss_history / model_params
@@ -1626,4 +1724,5 @@ def run_inference_scoring_health(
         scoring_time=scoring_time,
         train_results=train_results,
         training_diagnosis=training_diagnosis,
+        external_evaluation=evaluated.external_evaluation,
     )

@@ -42,6 +42,7 @@ TUNER_SUBMODULES = (
     TUNER_PACKAGE / "runtime.py",
     TUNER_PACKAGE / "feedback.py",
     TUNER_PACKAGE / "planning.py",
+    TUNER_PACKAGE / "external_evaluation.py",
     TUNER_PACKAGE / "execution.py",
     TUNER_PACKAGE / "cli.py",
 )
@@ -60,6 +61,9 @@ TUNER_LIFECYCLE = (
     ("execution", "run_admission_preflight"),
     ("execution", "run_training"),
     ("execution", "run_inference_scoring_health"),
+    ("execution", "_run_evaluation_phase"),
+    ("execution", "_run_local_evaluation_phase"),
+    ("external_evaluation", "run_external_evaluation"),
     ("records", "build_attempt_record"),
     ("records", "finalize_run_output"),
 )

@@ -34,12 +34,13 @@ The public module has an extensive standalone CLI, listed separately. The privat
 
 ## Single native call
 
-The caller supplies an already assembled request JSON from authorized artifacts.
-This function validates it, performs one actual call and saves the typed return.
+The caller supplies an already validated native request from authorized artifacts.
+For persisted composed requests, first apply [composition recovery](../invocation.md#restore-persisted-composition-references-before-execution).
+This function preserves that native object, performs one actual call and saves the typed return.
 It does not synthesize task context, provision dependencies or choose a workflow.
 Use the run's Python with generated-library and task binding as described in
 [invocation](../invocation.md), before importing nodes that inspect registries.
-The request JSON fields and their origins are described above and in the field
+The request fields and their origins are described above and in the field
 inventory. Use a distinct result_path in caller-owned storage.
 
 ```python
@@ -48,8 +49,9 @@ from agent.schemas.hyperparam_tuning import HyperparamTuningInput, HyperparamTun
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 
 
-def invoke(request_path, result_path):
-    request = HyperparamTuningInput.model_validate_json(Path(request_path).read_text())
+def invoke(request: HyperparamTuningInput, result_path):
+    if not isinstance(request, HyperparamTuningInput):
+        raise TypeError("Assemble or restore the native request before invocation")
     node = HyperparamTuningAgent()
     result = node.run(request)
     if not isinstance(result, HyperparamTuningOutput):

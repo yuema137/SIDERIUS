@@ -328,13 +328,37 @@ class TestTransport:
     """The contract crosses the real subprocess boundary (§16, no new IPC)."""
 
     def test_both_engines_accept_the_flag(self):
-        for module in (tes, inf):
-            assert "--model_io_json" in inspect.getsource(module)
+        args = tes.build_training_parser().parse_args(
+            [
+                "--model_cfg",
+                "model.json",
+                "--train_cfg",
+                "train.json",
+                "--loss_cfg",
+                "loss.json",
+                "--model_io_json",
+                "io.json",
+            ]
+        )
+        assert args.model_io_json == "io.json"
+        assert "--model_io_json" in inspect.getsource(inf)
 
     def test_the_flag_uses_the_established_config_file_mechanism(self):
         """Mirrors `--dataset_profile_json` rather than inventing a channel."""
         source = inspect.getsource(tes)
-        assert "--dataset_profile_json" in source
+        args = tes.build_training_parser().parse_args(
+            [
+                "--model_cfg",
+                "model.json",
+                "--train_cfg",
+                "train.json",
+                "--loss_cfg",
+                "loss.json",
+                "--dataset_profile_json",
+                "profile.json",
+            ]
+        )
+        assert args.dataset_profile_json == "profile.json"
         assert "load_model_io_contract(args.model_io_json)" in source
 
     def test_a_supplied_but_broken_contract_fails_closed(self, tmp_path):

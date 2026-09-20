@@ -138,6 +138,71 @@ def _states_equal(a: dict[str, torch.Tensor], b: dict[str, torch.Tensor]) -> boo
     return a.keys() == b.keys() and all(torch.equal(a[k], b[k]) for k in a)
 
 
+class TestDeploymentValidationExecution:
+    def test_three_epoch_bound_execution_preserves_native_trajectory(
+        self, two_family, tmp_path, monkeypatch
+    ):
+        """Exercise the real trainer seam; this in-process executor is not isolation evidence."""
+        from types import SimpleNamespace
+
+        from execute_tools.validation_execution import (
+            ValidationExecutionResult,
+            bind_validation_executor,
+        )
+
+        local = _run(
+            two_family,
+            tmp_path,
+            name="local_dispatch",
+            eval_sample_set=two_family.full_sample_set(),
+        )
+        native_pass = tes._validation_pass
+        calls = []
+
+        def observe(request, callbacks):
+            calls.append(request.expected_rows)
+            assert request.completed_training.completed_epochs == len(calls)
+            assert request.completed_training.optimizer_steps == 12
+            assert request.configuration == _tiny_model_cfg(two_family.seg_size)
+            value, rows, _ = native_pass(
+                model=request.model,
+                criterion=request.criterion,
+                model_cfg=request.configuration,
+                loss_cfg=request.loss,
+                model_io=request.model_io,
+                device=request.device,
+                data_path=TwoFamilyDataPath(two_family),
+                task_eval_scope=request.scope,
+                data_dir=two_family.data_dir,
+                batch_size=request.batch_size,
+                verifier=callbacks.verifier,
+                on_verified=callbacks.on_verified,
+                check_allocation=callbacks.check_allocation,
+            )
+            return ValidationExecutionResult(r3=value, rows=rows)
+
+        def forbidden(**kwargs):
+            raise AssertionError("bound trainer used the local validation path")
+
+        monkeypatch.setattr(tes, "_validation_pass", forbidden)
+        with bind_validation_executor(SimpleNamespace(observe=observe)):
+            bound = _run(
+                two_family,
+                tmp_path,
+                name="bound_dispatch",
+                eval_sample_set=two_family.full_sample_set(),
+            )
+        assert calls == [24, 24, 24]
+        assert bound["loss_history"] == local["loss_history"]
+        assert (
+            bound["training_history"]["validation_objective"]
+            == local["training_history"]["validation_objective"]
+        )
+        assert _states_equal(
+            _saved_state(tmp_path, "local_dispatch"), _saved_state(tmp_path, "bound_dispatch")
+        )
+
+
 # ---------------------------------------------------------------------------
 # (a) two-arm trajectory oracle  +  (d) legacy keys byte-identical
 # ---------------------------------------------------------------------------

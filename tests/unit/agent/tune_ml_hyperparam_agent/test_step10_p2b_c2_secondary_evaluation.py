@@ -543,9 +543,9 @@ class TestTheHiddenPayloadBoundary:
         # `_records` import).
         execution = import_module("nodes.ml_hyperparameter_tune_agent.execution")
 
-        source = inspect.getsource(execution.run_inference_scoring_health)
+        source = inspect.getsource(execution._run_local_evaluation_phase)
         results_block = source[source.index("score_res = {") :]
-        results_block = results_block[: results_block.index("            }")]
+        results_block = results_block[: results_block.index("        }")]
         assert "secondary" not in results_block, (
             "a secondary reached `score_res['results']`, which is json-dumped "
             "verbatim into the reflector prompt"

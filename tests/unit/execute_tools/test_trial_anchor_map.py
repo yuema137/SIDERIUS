@@ -100,3 +100,22 @@ def test_real_tuner_legacy_path_remains_explicit(tmp_path):
 
     _write_map(tmp_path / "segment_anchors.json")
     assert _load_trial_anchor_map(composed=False, data_root=str(tmp_path))["s_max"] == 2.0
+
+
+def test_complete_evaluator_owns_scoring_references_without_public_anchor_file(tmp_path):
+    """Missing private scoring references cannot block multi-file native startup."""
+    from execute_tools.evaluation_execution import bind_candidate_evaluation
+    from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+        _load_trial_anchor_map,
+    )
+
+    class Executor:
+        def evaluate(self, request):
+            raise AssertionError("loading the run must not invoke scoring")
+
+    with bind_task_data_path(_TaskPath()):
+        with bind_candidate_evaluation(Executor()):
+            assert _load_trial_anchor_map(composed=True, data_root=str(tmp_path)) is None
+        # The ordinary local workflow still requires its declared artifact.
+        with pytest.raises(FileNotFoundError, match=r"custom\.json"):
+            _load_trial_anchor_map(composed=True, data_root=str(tmp_path))

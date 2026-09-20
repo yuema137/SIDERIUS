@@ -1888,3 +1888,16 @@ admission authority and watchdog policy remain independent. See
 ### Failed Formal evidence across iterations
 
 When Formal attempts exist but no Health-valid Formal candidate exists, the tuner emits `formal_validity_feedback`: model identity, counts distinguishing execution failure from negative/unknown Health evidence, and the last eight factual outcomes. The classifier is shared with Trial feedback; Formal records are never relabeled Trial. The no-records manifest and typed resume path retain this summary without restoring the model, weights, plugin, score or incumbent. The workflow forwards the most recent three summaries to interpretation and both proposer paths. A cold start with failed Formal evidence means no valid incumbent, not no previous experiment. Existing healthy runs and manifests without this optional field remain supported. No task-specific remedy is inserted.
+
+### Deployment-owned complete evaluation
+
+A caller can bind a public candidate-evaluation client around the node invocation
+when private inference/scoring/Health are owned by a deployment. See the
+[complete evaluation execution contract](../../../docs/reference/candidate-evaluation-execution.md)
+for request/result fields, actual scope, timing, failure behavior and qualification
+requirements. Unbound calls retain native local evaluation. This binding is
+separate from per-epoch validation and does not make an unresolved public task
+composition executable.
+The complete evaluator owns prediction-output retention; the tuner does not
+request a local inference-output inventory for that route. Local evaluation's
+inventory and cleanup remain unchanged.

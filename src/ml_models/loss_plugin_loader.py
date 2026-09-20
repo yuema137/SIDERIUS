@@ -298,6 +298,7 @@ def _loss_attributes(module: ModuleType, path: str) -> dict[str, Any] | None:
         reduction = None
 
     return {
+        "plugin_path": path,
         "loss_type": module.PLUGIN_LOSS_TYPE,
         "config_class": module.PLUGIN_LOSS_CONFIG_CLASS,
         "loss_class": module.PLUGIN_LOSS_CLASS,

@@ -199,7 +199,24 @@ class TestAllThreeEntriesShareOneTransport:
         self, module_path, allows_uncomposed_profile
     ):
         source = (REPO_ROOT / module_path).read_text()
-        assert '"--dataset_profile_json"' in source, f"{module_path} must expose the flag"
+        if module_path == "src/execute_tools/train_engine_sandbox.py":
+            from execute_tools.train_engine_sandbox import build_training_parser
+
+            args = build_training_parser().parse_args(
+                [
+                    "--model_cfg",
+                    "model.json",
+                    "--train_cfg",
+                    "train.json",
+                    "--loss_cfg",
+                    "loss.json",
+                    "--dataset_profile_json",
+                    "profile.json",
+                ]
+            )
+            assert args.dataset_profile_json == "profile.json"
+        else:
+            assert '"--dataset_profile_json"' in source, f"{module_path} must expose the flag"
         assert "load_dataset_profile(" in source, f"{module_path} must fail closed on a bad path"
         if allows_uncomposed_profile:
             assert "resolve_dataset_profile()" in source, f"{module_path} must keep Regime-A"
