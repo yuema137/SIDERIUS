@@ -27,7 +27,9 @@ def test_composed_training_scope_becomes_a_typed_worker_reference(monkeypatch, e
     monkeypatch.setattr(probe_data, "require_bound_task_data_path", lambda: capability)
     monkeypatch.setattr(probe_data, "resolve_task_scope_capability", lambda value: value)
     monkeypatch.setattr(
-        probe_data, "candidate_evaluation_executor", lambda: object() if external_evaluation else None
+        probe_data,
+        "candidate_evaluation_executor",
+        lambda: object() if external_evaluation else None,
     )
 
     result = probe_data.build_task_probe_data(
