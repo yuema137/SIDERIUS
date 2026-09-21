@@ -16,6 +16,8 @@ What only this file catches:
   EXISTING lock comparison, naming ``experiment_arm``;
 * a labelled iteration refuses to restore an UNSTAMPED (pre-U1 / other-arm)
   output at the workflow pre-flight, before any node runs.
+* agent-owned Formal training scope survives the real iteration-2 restore
+  instead of being replaced by the operator default at the chain pre-flight.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.resume import restore_prior_state
+from core.resume import restore_prior_state as _restore_prior_state_impl
 from core.run_invariants import RUN_INVARIANTS_BASENAME, RunInvariantsViolation
 from tests.integration.workflows.test_chain_candidate_graduation import _llm_config_pseudo
 from tests.unit.workflows.test_model_exploration import (
@@ -41,6 +43,10 @@ from tests.unit.workflows.test_model_exploration import (
 )
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import (
+    bind_run_task_composition,
+    compose_run_task_bindings,
+)
 
 _REPO = Path(__file__).resolve().parents[3]
 if str(_REPO) not in sys.path:
@@ -52,15 +58,40 @@ _spec = importlib.util.spec_from_file_location(
 roi = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(roi)
 
+COMPOSITION = compose_run_task_bindings(_REPO / "configs/task_composition/quickstart.yaml")
+
 MODEL = "gated_tcn"
 WITH = "with-prior-art"
 WITHOUT = "without-prior-art"
 
 
-def _chain_args(workspace: str, iteration: int, arm: str | None):
-    argv = ["--workspace", workspace, "--start_iteration", str(iteration), "--run_name", "arm"]
+def _restore_prior_state(*args, **kwargs):
+    kwargs.setdefault("dataset_partition_count", COMPOSITION.dataset_profile.partition_count)
+    return _restore_prior_state_impl(*args, **kwargs)
+
+
+def _chain_args(
+    workspace: str,
+    iteration: int,
+    arm: str | None,
+    *,
+    formal_training_scope_source: str = "operator",
+):
+    argv = [
+        "--workspace",
+        workspace,
+        "--start_iteration",
+        str(iteration),
+        "--run_name",
+        "arm",
+        "--task_composition",
+        str(_REPO / "configs/task_composition/quickstart.yaml"),
+        "--data_dir",
+        str(_REPO),
+    ]
     if arm is not None:
         argv += ["--experiment_arm", arm]
+    argv += ["--formal_training_scope_source", formal_training_scope_source]
     # Production posture (gates ON): the pre-flight materializes the effective
     # Health config into the workspace exactly as the chain runner does, and
     # the workflow's own pre-flight recomputes the identical sha (W7).
@@ -68,7 +99,14 @@ def _chain_args(workspace: str, iteration: int, arm: str | None):
 
 
 def _run_iteration(
-    workspace: str, iteration: int, *, arm: str | None, state, tune_output, probe=None
+    workspace: str,
+    iteration: int,
+    *,
+    arm: str | None,
+    state,
+    tune_output,
+    probe=None,
+    formal_training_scope_source: str = "operator",
 ):
     """One chain iteration exactly as the runner sequences it, agents mocked.
 
@@ -95,18 +133,22 @@ def _run_iteration(
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
         MockTune.return_value.run.side_effect = _capture
         try:
-            run_workflow(
-                launch=WorkflowLaunchConfig(
-                    source_paths=state.resolved_source_paths,
-                    max_iterations=1,
-                    start_iteration=iteration,
-                    experiment_arm=arm,
-                ),
-                workspace=workspace,
-                run_name=f"iter_{iteration:03d}",
-                llm_config=_llm_config_pseudo(),
-                restored_state=state,
-            )
+            with bind_run_task_composition(COMPOSITION, physical_data_root=str(_REPO)):
+                run_workflow(
+                    launch=WorkflowLaunchConfig(
+                        data_dir=str(_REPO),
+                        source_paths=state.resolved_source_paths,
+                        max_iterations=1,
+                        start_iteration=iteration,
+                        experiment_arm=arm,
+                        formal_training_scope_source=formal_training_scope_source,
+                    ),
+                    workspace=workspace,
+                    run_name=f"iter_{iteration:03d}",
+                    llm_config=_llm_config_pseudo(),
+                    restored_state=state,
+                    task_composition=COMPOSITION,
+                )
         finally:
             if probe is not None:
                 probe["node_runs"] = MockInterp.return_value.run.call_count
@@ -128,8 +170,19 @@ def _output(iteration: int, *, arm: str | None):
     """What the REAL tuner returns for a labelled run (its stamp is proven by
     the bounded pseudo iteration in the unit tier); here the tuner is mocked,
     so the fixture carries the label the tuner would have stamped."""
-    return _make_tuning_output(model_type=MODEL, run_name=f"iter_{iteration:03d}").model_copy(
-        update={"experiment_arm": arm}
+    return _make_tuning_output(
+        model_type=MODEL,
+        run_name=f"iter_{iteration:03d}",
+        fingerprint=COMPOSITION.semantic_fingerprint,
+        metric_spec=COMPOSITION.metric.spec,
+    ).model_copy(update={"experiment_arm": arm})
+
+
+def _expected_invariants(args, *, launch_identity=None):
+    return roi.compute_expected_invariants(
+        args,
+        run_composition=COMPOSITION,
+        launch_identity=launch_identity,
     )
 
 
@@ -137,11 +190,11 @@ def _labelled_iteration_one(workspace: str, *, output_arm: str | None = WITH):
     """Iteration 1 under the WITH label; returns the lock bytes it created."""
     args1 = _chain_args(workspace, 1, WITH)
     identity = roi.resolve_launch_identity(args1)
-    state1 = restore_prior_state(
+    state1 = _restore_prior_state(
         workspace,
         current_iter=1,
         seed_paths=[],
-        expected_invariants=roi.compute_expected_invariants(args1, launch_identity=identity),
+        expected_invariants=_expected_invariants(args1, launch_identity=identity),
     )
     out1 = _output(1, arm=output_arm)
     captured = _run_iteration(workspace, 1, arm=WITH, state=state1, tune_output=out1)
@@ -163,11 +216,11 @@ def test_the_label_survives_restore_and_is_relocked_identically(tmp_path):
 
     args2 = _chain_args(ws, 2, WITH)
     identity2 = roi.resolve_launch_identity(args2)
-    state2 = restore_prior_state(
+    state2 = _restore_prior_state(
         ws,
         current_iter=2,
         seed_paths=[],
-        expected_invariants=roi.compute_expected_invariants(args2, launch_identity=identity2),
+        expected_invariants=_expected_invariants(args2, launch_identity=identity2),
     )
     assert state2.committed_iters == [1]
     captured = _run_iteration(ws, 2, arm=WITH, state=state2, tune_output=_output(2, arm=WITH))
@@ -180,6 +233,45 @@ def test_the_label_survives_restore_and_is_relocked_identically(tmp_path):
 
 
 @pytest.mark.dual_mode
+def test_agent_owned_formal_training_scope_survives_iteration_two_restore(tmp_path):
+    """Regression for #563: both lock construction sites must preserve `agent`."""
+    ws = str(tmp_path / "chain")
+    os.makedirs(ws)
+    args1 = _chain_args(ws, 1, WITH, formal_training_scope_source="agent")
+    identity1 = roi.resolve_launch_identity(args1)
+    state1 = _restore_prior_state(
+        ws,
+        current_iter=1,
+        seed_paths=[],
+        expected_invariants=_expected_invariants(args1, launch_identity=identity1),
+    )
+    out1 = _output(1, arm=WITH)
+    _run_iteration(
+        ws,
+        1,
+        arm=WITH,
+        state=state1,
+        tune_output=out1,
+        formal_training_scope_source="agent",
+    )
+    _commit_iteration(ws, 1, out1, identity1)
+    lock_path = Path(ws) / RUN_INVARIANTS_BASENAME
+    lock_after_iter_1 = lock_path.read_bytes()
+    assert json.loads(lock_after_iter_1)["formal_training_scope_source"] == "agent"
+
+    args2 = _chain_args(ws, 2, WITH, formal_training_scope_source="agent")
+    state2 = _restore_prior_state(
+        ws,
+        current_iter=2,
+        seed_paths=[],
+        expected_invariants=_expected_invariants(args2),
+    )
+    assert state2.committed_iters == [1]
+    assert _expected_invariants(args2).formal_training_scope_source == "agent"
+    assert lock_path.read_bytes() == lock_after_iter_1
+
+
+@pytest.mark.dual_mode
 @pytest.mark.parametrize("second_arm", [WITHOUT, None], ids=["other-arm", "unlabelled"])
 def test_a_different_or_missing_label_is_refused_by_the_lock(tmp_path, second_arm):
     ws = str(tmp_path / "chain")
@@ -187,11 +279,11 @@ def test_a_different_or_missing_label_is_refused_by_the_lock(tmp_path, second_ar
     _labelled_iteration_one(ws)
     args2 = _chain_args(ws, 2, second_arm)
     with pytest.raises(RunInvariantsViolation) as exc:
-        restore_prior_state(
+        _restore_prior_state(
             ws,
             current_iter=2,
             seed_paths=[],
-            expected_invariants=roi.compute_expected_invariants(args2),
+            expected_invariants=_expected_invariants(args2),
         )
     msg = str(exc.value)
     assert "experiment_arm" in msg
@@ -212,11 +304,11 @@ def test_restore_refuses_an_unstamped_output_under_a_labelled_lock(tmp_path):
     _labelled_iteration_one(ws, output_arm=None)
     args2 = _chain_args(ws, 2, WITH)
     with pytest.raises(RunInvariantsViolation, match="experiment_arm") as exc:
-        restore_prior_state(
+        _restore_prior_state(
             ws,
             current_iter=2,
             seed_paths=[],
-            expected_invariants=roi.compute_expected_invariants(args2),
+            expected_invariants=_expected_invariants(args2),
         )
     assert "LABELLED" in str(exc.value)
 
@@ -230,7 +322,7 @@ def test_the_workflow_preflight_refuses_an_unstamped_output_before_any_node_runs
     ws = str(tmp_path / "chain")
     os.makedirs(ws)
     _labelled_iteration_one(ws, output_arm=None)
-    state2 = restore_prior_state(ws, current_iter=2, seed_paths=[])
+    state2 = _restore_prior_state(ws, current_iter=2, seed_paths=[])
     probe: dict = {}
     with pytest.raises(RunInvariantsViolation, match="experiment_arm") as exc:
         _run_iteration(ws, 2, arm=WITH, state=state2, tune_output=_output(2, arm=WITH), probe=probe)

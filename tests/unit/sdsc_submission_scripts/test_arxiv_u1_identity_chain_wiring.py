@@ -137,6 +137,28 @@ class TestLockSiteCensus:
                     found.add(py.resolve())
         assert found == expected, sorted(str(p.relative_to(_REPO)) for p in found ^ expected)
 
+    def test_chain_and_workflow_construct_the_same_launch_identity_fields(self):
+        """Catch any future field silently defaulted at only one workspace lock site."""
+
+        def constructor_kwargs(path: Path) -> set[str]:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            calls = [
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "LockLaunchIdentity"
+            ]
+            assert len(calls) == 1, path
+            return {kw.arg for kw in calls[0].keywords if kw.arg is not None}
+
+        chain = constructor_kwargs(LOCK_SITES["chain"])
+        workflow = constructor_kwargs(LOCK_SITES["workflow"])
+        assert chain == workflow, {
+            "chain_only": sorted(chain - workflow),
+            "workflow_only": sorted(workflow - chain),
+        }
+
 
 class TestChainCli:
     def test_default_is_unlabelled(self):
