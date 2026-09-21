@@ -9,6 +9,8 @@ Public module: `nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent`
 
 | Argument | Type/action | Required | Default expression | Choices | Help |
 | --- | --- | --- | --- | --- | --- |
+| --training_validation_portion | float | False | None | — | Optional task-owned seeded snapshot fraction for per-epoch validation loss only; final scoring scope is unchanged. Requires a composed task with the seeded scope capability. |
+| --training_budget_reserve_fraction | float | False | None | — | Opt in to cooperative epoch allocation; requires both role time budgets and explicit role epoch caps in 1–100. |
 | --provider | str | False | 'gemini' | ['gemini', 'openai'] | 'LLM provider for the planner sub-call (default for reflector when not overridden).' |
 | --model_id | str | False | 'gemini-3.1-flash-lite-preview' | — | 'Model ID for the planner sub-call (default for reflector when not overridden).' |
 | --reflect_provider | str | False | None | ['gemini', 'openai'] | 'Optional separate provider for the reflector sub-call. When None, the reflector uses --provider.' |
@@ -59,7 +61,7 @@ Public module: `nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent`
 | --vram_preflight_host_memory_limit_gb | float | False | None | — | 'Maximum resident host memory in GiB for the complete isolated VRAM-preflight process tree. Omission preserves the deployment default, normally 24 GiB. This is not the GPU VRAM ceiling.' |
 | --trial_max_epochs | int | False | None | — | 'TRIAL-role epoch ceiling (campaign decision D-BUD-6). Precedence for a trial round: this value -> --max_epochs -> no clamp; formal rounds never read it. Wires into HyperparamTuningInput.trial_max_epochs (ge=1 — zero/negative refuse loudly at input validation). Default None = trial rounds keep the mode-agnostic --max_epochs.' |
 | --formal_max_epochs | int | False | None | — | 'FORMAL-role epoch ceiling (campaign decision D-BUD-6). Precedence for a formal round: this value -> --max_epochs -> no clamp; trial rounds never read it. Wires into HyperparamTuningInput.formal_max_epochs (ge=1 — zero/negative refuse loudly at input validation). Default None = formal rounds keep the mode-agnostic --max_epochs.' |
-| --max_steps_per_attempt | int | False | 150000 | — | '§5 guardrail: skip plans whose resolved optimizer-step count exceeds this (planner-visible record). 0 disables. Default 150000 (provisional §5 value).' |
+| --max_steps_per_attempt | int | False | 0 | — | 'Optional optimizer-step guardrail. 0 disables; default 0. Set an explicit positive task/operator ceiling when needed.' |
 | --min_formal_batch_size | int | False | 0 | — | '§5 guardrail: skip FORMAL rounds planned below this batch size (the V18 launch-overhead pathology; trial rounds exempt). 0 disables. Default 0 (disabled); set an explicit task/campaign value only when its execution contract requires one.' |
 | --allow_extreme_steps | 'store_true' | False | None (argparse default unless action changes it) | — | '§5 operator override: bypass both step/batch guardrails (recorded in run provenance).' |
 | --runtime_watchdog | 'store_true' | False | None (argparse default unless action changes it) | — | '§4 runtime watchdog: run training/inference subprocesses in their own process group under the deadline max(floor, min(budget, verified_estimate x safety)). Default off.' |

@@ -15,6 +15,9 @@ Import: `agent.schemas.interpretation.InterpretationInput`.
 
 | Field | Python type | Required / default | Constraints | Meaning |
 | --- | --- | --- | --- | --- |
+| recent_formal_validity | list[agent.schemas.health_feedback.FormalValidityFeedback] | factory: list | [MaxLen(max_length=3)] | Bounded recent failed Formal evidence; empty when none. Evidence for reasoning, not a valid candidate or incumbent. |
+| analysis_access_policy | agent.schemas.data_analysis.access.AnalysisAccessPolicy \| None | None | [] | Caller-bound evidence permissions for optional AnalysisBrief questions; reasoning context only, not an access grant or executable plan. |
+| analysis_resource_envelope | agent.schemas.data_analysis.resources.AnalysisResourceEnvelope \| None | None | [] | Caller-bound resources for prioritizing optional AnalysisBrief questions. |
 | summaries | list[agent.schemas.interpretation.ModelRunSummary] | factory: list | [] | Condensed summaries for NEW models only — models being interpreted for the first time this iteration. Models already in model_knowledge_cache do not need a summary here; Phase 1 will use the cache instead. On the first iteration, pass all seed model summaries (cache is empty). |
 | model_knowledge_cache | dict[str, Any] | factory: dict | [] | Carry-forward cache from the previous InterpretationOutput.model_knowledge_cache. Each entry is self-sufficient: Phase 1 LLM text + '_stats' with numerical facts. Agent skips Phase 1 LLM calls for models present here. Empty on the first iteration. |
 | model_types | list[str] \| None | None | [] | Explicit list of model types whose descriptions to include. When None, model types are derived from summaries. Cannot be an empty list — use None to derive from summaries. |

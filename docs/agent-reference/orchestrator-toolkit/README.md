@@ -17,5 +17,17 @@ to an existing task package without changing that package's files.
 See the [initial verification](VERIFICATION.md) and subsequent
 [discovery qualification](QUALIFICATION.md), plus the
 [multi-task checks](MULTITASK-QUALIFICATION.md) and
-[evidence integrity checks](INTEGRITY-QUALIFICATION.md), for evidence and its limits. Native interface
-reference revision: `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`.
+[evidence integrity checks](INTEGRITY-QUALIFICATION.md), for evidence and
+its limits. Original native interface inventory:
+`1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`. The payload field and CLI
+tables were reconciled against `0b44e40505b99fd752526c1ff9e9fc97c219dde2`
+(v0.2.9) for the O-Full deployment qualification; the original source labels
+remain provenance, not a runtime version requirement.
+
+Compatibility check at v0.2.9: the 14 documented input/output tables have
+exact top-level Pydantic field-name parity with the installed classes. The
+tuner CLI page lists all 65 primary long options, including the two newly
+added options, and its documented step/batch defaults match `build_parser()`.
+The other five CLI parser files did not change between the original inventory
+and v0.2.9. Nested structures and runtime cross-field rules still require
+inspection of the installed schemas before constructing a request.
