@@ -36,9 +36,17 @@ scientific stopping/checkpoint selection are unchanged.
 ### Fast-phase calibration
 
 `AdaptiveVerificationConfig.max_steps` bounds acquisition of stability and the
-minimum observation count. A stable trace that only lacks `min_timed_ms` may
-continue under `max_wall_ms`; elapsed batch time, not normalized per-sample rate,
-counts toward evidence. The wall bound also includes local verifier processing.
+minimum observation count. Existing rolling-median detection remains the primary
+path. When the measured median predicts that observations cannot reach `min_timed_ms` inside
+`max_steps`, a 100-observation suffix may establish fast-phase evidence if the
+normalized-rate medians of its first and second halves agree within the existing
+relative stability tolerance. This distribution check tolerates heterogeneous
+batch costs without treating a trend as steady. Reachability accounts for the
+observations consumed before the earliest possible steady-state declaration; at
+the defaults the fallback is unreachable around 2.7 ms and above, so those phases
+retain the existing time requirement and detector behavior. Re-arming still
+discards the old plateau's evidence. The wall bound also includes local verifier
+processing.
 Exhausted or unstable traces never become verified by relaxing evidence floors.
 Relative slow observations are recorded in measurement details. A consecutive
 streak of `steady.stable_windows` above `pathological_factor` times the prior

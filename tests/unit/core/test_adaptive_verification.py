@@ -10,6 +10,10 @@ match/drift/absence, caps, finalize paths.
 
 from __future__ import annotations
 
+import json
+import random
+from pathlib import Path
+
 import pytest
 
 from core.runtime_control.adaptive import (
@@ -238,9 +242,10 @@ class TestLifecycleContracts:
         assert v.finalize() == "failed_no_steady_state"
         reason = v.failure_reason
         assert reason is not None
-        assert "unmet: steady_time" in reason, reason
+        assert "unmet: steady_time_or_fast_count" in reason, reason
         assert "steady_count" not in reason.split("unmet:")[1].split(";")[0], reason
         assert "required 500.0 ms" in reason, reason
+        assert "stable fast-phase suffix of 100 observations" in reason, reason
 
     def test_insufficient_reason_names_the_count_when_that_is_what_failed(self):
         """The other side of the same discrimination — anti-vacuity for the
@@ -321,6 +326,107 @@ def test_normalized_batch_rate_does_not_shrink_observed_wall_time():
     assert prediction.predicted_seconds == 1.0
 
 
+@pytest.mark.parametrize(
+    ("batch_size", "median_batch_ms"),
+    [(16, 1.6), (64, 0.36), (64, 2.55), (128, 1.2)],
+)
+def test_fast_heterogeneous_batches_verify_without_500ms_wall_time(batch_size, median_batch_ms):
+    """Issue #565: faster hardware and varied batch sizes remain verifiable.
+
+    Defect caught only here: heterogeneous fast observations repeatedly re-arm
+    the relative-only detector, while 500 ms of evidence is unattainable inside
+    the observation cap. The fallback must use a stable distribution suffix and
+    retain the normalized rate at different physical scales and batch sizes.
+    """
+    rng = random.Random(batch_size + round(median_batch_ms * 100))
+    batch_times_ms = [rng.uniform(0.4, 1.6) * median_batch_ms for _ in range(200)]
+    verifier = AdaptiveUnitVerification("validation_sample", AdaptiveVerificationConfig())
+
+    for batch_ms in batch_times_ms:
+        state = verifier.feed(batch_ms / batch_size, elapsed_ms=batch_ms)
+        if verifier.is_terminal:
+            break
+
+    assert state == "verified"
+    measurement = verifier.measurement()
+    assert measurement is not None
+    assert measurement.n_measured_units >= 100
+    assert measurement.total_measurement_seconds < 0.5
+    assert measurement.detail["stability_evidence"] == "fast_distribution_suffix"
+    assert measurement.detail["fast_phase_suffix_status"] == "accepted"
+    prediction = verifier.prediction(
+        ResolvedPhaseWorkload(phase="validation", unit="validation_sample", unit_count=442),
+        "real_validation_verification",
+    )
+    assert prediction is not None
+    assert 0.4 * median_batch_ms / batch_size <= prediction.ms_per_unit
+    assert prediction.ms_per_unit <= 1.6 * median_batch_ms / batch_size
+
+
+def test_submillisecond_count_path_still_rejects_sustained_pathological_slowdown():
+    """Issue #565's permissive fast path must retain the slowdown fail-closed gate."""
+    cfg = AdaptiveVerificationConfig(fast_phase_min_observations=100)
+    verifier = AdaptiveUnitVerification("validation_sample", cfg)
+    for _ in range(30):
+        verifier.feed(0.005, elapsed_ms=0.32)
+    assert verifier.state == "measuring"
+
+    for _ in range(cfg.steady.stable_windows - 1):
+        assert verifier.feed(0.075, elapsed_ms=4.8) != "failed_pathological_unit"
+    assert verifier.feed(0.075, elapsed_ms=4.8) == "failed_pathological_unit"
+
+
+def test_fast_distribution_suffix_does_not_accept_a_monotonic_trend():
+    """The fast fallback distinguishes many noisy samples from a stable suffix.
+
+    This fails if the implementation treats count alone as evidence: the
+    observation count reaches 100, but the later-half median is materially
+    above the earlier half and must not become a prediction.
+    """
+    verifier = AdaptiveUnitVerification("sample", AdaptiveVerificationConfig())
+    for i in range(200):
+        elapsed_ms = 0.1 * (1.01**i)
+        verifier.feed(elapsed_ms, elapsed_ms=elapsed_ms)
+        if verifier.is_terminal:
+            break
+
+    if not verifier.is_terminal:
+        verifier.finalize()
+    assert verifier.state == "failed_no_steady_state"
+    assert "fast-phase suffix: distribution_drift:" in (verifier.failure_reason or "")
+    assert verifier.prediction(_WORKLOAD, "real_training_verification") is None
+
+
+@pytest.mark.parametrize(
+    "phase, expected_observations, expected_median_ms",
+    [("training", 99, 8.528033504262567), ("inference", 186, 2.722682023886591)],
+)
+def test_successful_tidmad_trace_keeps_legacy_verdict_and_measurement(
+    phase, expected_observations, expected_median_ms
+):
+    """Issue #565 must not change the accepted slow-regime TIDMAD evidence.
+
+    This replays a production H100 receipt. It fails if the fast-count path
+    activates where 500 ms still fits inside the normal 200-observation cap,
+    or if wall-time stability changes the retained normalized measurement.
+    """
+    fixture = Path(__file__).parent / "fixtures" / "runtime_observation_wave1_formal.json"
+    payload = json.loads(fixture.read_text())
+    raw = payload["components"][phase]["measurement"]["raw_timings_ms"]
+    verifier = AdaptiveUnitVerification(f"{phase}_unit", AdaptiveVerificationConfig())
+
+    for observed_ms in raw:
+        verifier.feed(observed_ms)
+        if verifier.is_terminal:
+            break
+
+    assert verifier.state == "verified"
+    measurement = verifier.measurement()
+    assert measurement is not None
+    assert len(measurement.raw_timings_ms) == expected_observations
+    assert measurement.unit_time_ms_median == pytest.approx(expected_median_ms)
+
+
 def test_normalized_rate_cannot_bypass_measurement_wall_cap():
     verifier = AdaptiveUnitVerification(
         "validation_sample", _config(min_timed_ms=500, max_wall_ms=50)
@@ -332,14 +438,16 @@ def test_normalized_rate_cannot_bypass_measurement_wall_cap():
 
 @pytest.mark.parametrize("unit_ms,batch", [(0.25, 1), (2.0, 1), (0.02, 16), (40.0, 1)])
 def test_fast_stable_phases_collect_the_same_evidence_time(unit_ms, batch):
-    """A fast device/batch must not fail only because 200 observations are too short."""
+    """Fast phases may satisfy either the wall-time or observation evidence floor."""
     verifier = AdaptiveUnitVerification("sample", AdaptiveVerificationConfig())
     for _ in range(5000):
         if verifier.feed(unit_ms, elapsed_ms=unit_ms * batch) == "verified":
             break
         assert not verifier.is_terminal
     assert verifier.state == "verified"
-    assert verifier.measurement().total_measurement_seconds >= 0.5
+    measurement = verifier.measurement()
+    assert measurement is not None
+    assert measurement.total_measurement_seconds >= 0.5 or measurement.n_measured_units >= 100
 
 
 @pytest.mark.parametrize("unit_ms", [0.05, 2.0, 80.0])
@@ -360,7 +468,7 @@ def test_isolated_relative_delay_is_recorded_without_failure(unit_ms):
 
 def test_fast_phase_extension_still_obeys_time_cap():
     """Stable extension must not turn an impossible time floor into unbounded sampling."""
-    cfg = _config(max_steps=30, min_timed_ms=500, max_wall_ms=100)
+    cfg = _config(max_steps=30, min_timed_ms=500, max_wall_ms=90)
     verifier = AdaptiveUnitVerification("sample", cfg)
     state = _feed_until_terminal(verifier, [1.0] * 600)
     assert state == "failed_no_steady_state"

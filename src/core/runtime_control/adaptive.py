@@ -15,8 +15,10 @@ the phase's `PhaseMeasurement` + `RuntimePrediction`.
 
 Stopping rule (§2.5, "lightweight adaptive stopping"): verified when
 steady state is DETECTED and the declaration has survived at least
-``min_timed_steps`` steady observations AND ``min_timed_ms`` of steady
-measurement — early exit is never granted on B1 stability alone. A
+``min_timed_steps`` steady observations plus ``min_timed_ms`` of steady
+measurement. When physical observations are too fast to reach that time floor
+inside ``max_steps``, a larger suffix may instead establish stability by its
+observation distribution. Early exit is never granted on B1 stability alone. A
 matching historical prior permits exit at exactly these minimums; a
 drifting prior extends the requirement (``drift_extra_factor``) within
 the caps. For very slow units the ``min_timed_ms`` term is satisfied by
@@ -84,6 +86,15 @@ class AdaptiveVerificationConfig(BaseModel):
             "Minimum cumulative steady measurement time. For very slow "
             "units this is reached in a few observations — the §2.5 "
             "'few observations suffice' rule falls out naturally."
+        ),
+    )
+    fast_phase_min_observations: int = Field(
+        default=100,
+        ge=2,
+        description=(
+            "Suffix length used to verify a fast phase whose median physical "
+            "observation cannot reach min_timed_ms within max_steps. The first "
+            "and second half medians must satisfy steady.rel_spread_tol."
         ),
     )
     max_steps: int = Field(
@@ -188,6 +199,8 @@ class AdaptiveUnitVerification:
         self._slow_reference_ms: float | None = None
         self._slow_streak = 0
         self._slow_observations: list[int] = []
+        self._fast_steady_from: int | None = None
+        self._fast_suffix_status: str | None = None
         self._started_at: float | None = None
 
     # ── State ────────────────────────────────────────────────────────────
@@ -210,6 +223,56 @@ class AdaptiveUnitVerification:
         if self._prior_agreement == "verified_drift":
             return max(base, round(base * self.config.drift_extra_factor))
         return base
+
+    def _steady_unit_times_ms(self) -> list[float]:
+        """Normalized rates retained by the active stability path."""
+        if self._fast_steady_from is not None:
+            return self._all_times_ms[self._fast_steady_from :]
+        return self._detector.steady_times_ms()
+
+    def _try_fast_phase_suffix(self) -> bool:
+        """Accept a distribution-stable suffix when the time floor is unreachable.
+
+        This fallback is deliberately derived from policy and measurements:
+        it is unreachable when the median physical observation predicts it can satisfy
+        ``min_timed_ms`` within ``max_steps``. Comparing two half-suffix medians
+        rejects trends while tolerating heterogeneous batch costs.
+        """
+        count = self.config.fast_phase_min_observations
+        if len(self._all_times_ms) < count:
+            self._fast_suffix_status = (
+                f"insufficient_observations:{len(self._all_times_ms)}/{count}"
+            )
+            return False
+        elapsed = self._elapsed_times_ms[-count:]
+        steady_capacity = self.config.max_steps - self.config.steady.min_steps_to_detect + 1
+        if statistics.median(elapsed) * steady_capacity >= self.config.min_timed_ms:
+            self._fast_suffix_status = "time_floor_reachable_within_observation_cap"
+            return False
+        rates = self._all_times_ms[-count:]
+        split = count // 2
+        if split == 0:
+            return False
+        first_median = statistics.median(rates[:split])
+        second_median = statistics.median(rates[split:])
+        relative_change = abs(second_median / first_median - 1.0)
+        if relative_change > self.config.steady.rel_spread_tol:
+            self._fast_suffix_status = (
+                f"distribution_drift:{relative_change:.6g}>{self.config.steady.rel_spread_tol:.6g}"
+            )
+            return False
+        self._fast_steady_from = len(self._all_times_ms) - count
+        self._fast_suffix_status = "accepted"
+        return True
+
+    def _has_sufficient_evidence(self, steady_count: int) -> bool:
+        """Whether the active, possibly re-armed plateau has enough evidence."""
+        if steady_count < self._required_steady_steps():
+            return False
+        return self._steady_elapsed_ms() >= self.config.min_timed_ms or (
+            self._fast_steady_from is not None
+            and steady_count >= self.config.fast_phase_min_observations
+        )
 
     # ── Driving ──────────────────────────────────────────────────────────
 
@@ -283,36 +346,51 @@ class AdaptiveUnitVerification:
                 return self._state
             self._state = "measuring"
             self._compare_prior(steady_median)
-            if (
-                self._slow_streak == 0
-                and len(steady) >= self._required_steady_steps()
-                and self._steady_elapsed_ms() >= self.config.min_timed_ms
-            ):
+            if self._slow_streak == 0 and self._has_sufficient_evidence(len(steady)):
                 self._state = "verified"
                 return self._state
         else:
             # Not (or no longer — re-arm) detected.
             self._state = "stabilizing"
 
+        if self._slow_streak == 0 and self._try_fast_phase_suffix():
+            steady = self._steady_unit_times_ms()
+            if self.config.max_unit_ms is not None and unit_ms > self.config.max_unit_ms:
+                self._failure_reason = (
+                    f"pathological unit: {unit_ms:.1f} ms > absolute threshold "
+                    f"{self.config.max_unit_ms:.1f} ms (environment-scoped §5)"
+                )
+                self._state = "failed_pathological_unit"
+                return self._state
+            self._state = "measuring"
+            self._compare_prior(statistics.median(steady))
+            if self._has_sufficient_evidence(len(steady)):
+                self._state = "verified"
+                return self._state
+
         # A fast, already stable phase can need more observations to accumulate
         # the same evidence time. Never extend an unstable/count-deficient trace.
-        extend_for_time = (
-            self._detector.detected
+        extend_for_evidence = (
+            (self._detector.detected or self._fast_steady_from is not None)
             and self._slow_streak == 0
-            and len(self._detector.steady_times_ms()) >= self._required_steady_steps()
-            and self._steady_elapsed_ms() < self.config.min_timed_ms
+            and len(self._steady_unit_times_ms()) >= self._required_steady_steps()
+            and not self._has_sufficient_evidence(len(self._steady_unit_times_ms()))
         )
         wall_ms = max(sum(self._elapsed_times_ms), (time.monotonic() - self._started_at) * 1000.0)
         if (
-            len(self._all_times_ms) >= self.config.max_steps and not extend_for_time
+            len(self._all_times_ms) >= self.config.max_steps and not extend_for_evidence
         ) or wall_ms >= self.config.max_wall_ms:
             self._fail_insufficient()
         return self._state
 
     def _steady_elapsed_ms(self) -> float:
         """Wall time of the detector's current, possibly re-armed suffix."""
-        count = len(self._detector.steady_times_ms())
-        return sum(self._elapsed_times_ms[-count:]) if count else 0.0
+        return sum(self._steady_elapsed_times_ms())
+
+    def _steady_elapsed_times_ms(self) -> list[float]:
+        """Observation wall times from the current detector plateau."""
+        count = len(self._steady_unit_times_ms())
+        return self._elapsed_times_ms[-count:] if count else []
 
     def finalize(self) -> VerificationState:
         """Resolve the outcome when the production loop ran out of units.
@@ -326,27 +404,29 @@ class AdaptiveUnitVerification:
         return self._state
 
     def _fail_insufficient(self) -> None:
-        if self._detector.detected:
-            # Step 09.5a Gate-2 forensics (2026-08-20). `verified` requires
-            # BOTH minimums — a steady COUNT and a steady TIME:
+        if self._detector.detected or self._fast_steady_from is not None:
+            # Step 09.5a Gate-2 forensics (2026-08-20). The primary path
+            # requires BOTH a steady COUNT and steady TIME:
             #
             #     len(steady) >= _required_steady_steps()
             #     sum(steady) >= config.min_timed_ms
             #
-            # The message used to report only the first, so a trace that
+            # Issue #565 adds a distribution-stable count alternative only
+            # when the time floor cannot fit inside the observation cap.
+            # The message used to report only the first primary condition, so a trace that
             # satisfied it read as self-contradictory — the Gate's validation
             # phase failed with "26 steady observations, required 5" while the
             # real violation was 84 ms of steady time against a 500 ms floor.
             # A diagnostic that names a satisfied condition sends the reader to
             # the wrong subsystem, which is exactly what it did. Both are now
             # reported with their actual values, and the unmet one is named.
-            steady = self._detector.steady_times_ms()
+            steady = self._steady_unit_times_ms()
             steady_ms = self._steady_elapsed_ms()
             unmet = []
             if len(steady) < self._required_steady_steps():
                 unmet.append("steady_count")
-            if steady_ms < self.config.min_timed_ms:
-                unmet.append("steady_time")
+            if steady_ms < self.config.min_timed_ms and self._fast_steady_from is None:
+                unmet.append("steady_time_or_fast_count")
             if self._slow_streak:
                 unmet.append("pending_slow_observation")
             self._failure_reason = (
@@ -354,9 +434,11 @@ class AdaptiveUnitVerification:
                 f"requirements not met within caps (unmet: {'+'.join(unmet) or 'none'}; "
                 f"steady observations {len(steady)}, required "
                 f"{self._required_steady_steps()}; steady time {steady_ms:.1f} ms, "
-                f"required {self.config.min_timed_ms:.1f} ms; "
+                f"required {self.config.min_timed_ms:.1f} ms, or a stable fast-phase "
+                f"suffix of {self.config.fast_phase_min_observations} observations; "
                 f"pending slow streak={self._slow_streak}, "
                 f"sustained threshold={self.config.steady.stable_windows}; "
+                f"fast-phase suffix: {self._fast_suffix_status or 'not_evaluated'}; "
                 f"{len(self._all_times_ms)} units observed within caps "
                 f"max_steps={self.config.max_steps})"
             )
@@ -365,7 +447,8 @@ class AdaptiveUnitVerification:
         else:
             self._failure_reason = (
                 f"no steady state within caps ({len(self._all_times_ms)} units observed, "
-                f"{self.verification_seconds:.1f}s measured)"
+                f"{self.verification_seconds:.1f}s measured; fast-phase suffix: "
+                f"{self._fast_suffix_status or 'not_evaluated'})"
             )
             self._prior_agreement = (
                 "verification_failed" if self.prior_expected_unit_ms is not None else None
@@ -406,7 +489,7 @@ class AdaptiveUnitVerification:
         """Evidence collected so far (``None`` before any observation)."""
         if not self._all_times_ms:
             return None
-        steady = self._detector.steady_times_ms()
+        steady = self._steady_unit_times_ms()
         if steady:
             median = statistics.median(steady)
             mad = statistics.median(abs(t - median) for t in steady)
@@ -429,6 +512,14 @@ class AdaptiveUnitVerification:
                 "prior_agreement": self._prior_agreement,
                 "prior_expected_unit_ms": self.prior_expected_unit_ms,
                 "rolling_medians_ms": self._detector.result().rolling_medians_ms,
+                **(
+                    {
+                        "stability_evidence": "fast_distribution_suffix",
+                        "fast_phase_suffix_status": self._fast_suffix_status,
+                    }
+                    if self._fast_steady_from is not None
+                    else {}
+                ),
                 "relative_slow_observation_indices": list(self._slow_observations),
                 "observation_cap_extended": len(self._all_times_ms) > self.config.max_steps,
             },
@@ -471,7 +562,7 @@ class AdaptiveUnitVerification:
         """
         if self._state != "verified":
             return None
-        steady = self._detector.steady_times_ms()
+        steady = self._steady_unit_times_ms()
         median = statistics.median(steady)
         predicted = workload.unit_count * median / 1000.0 + extra_predicted_seconds
         prior_ratio = None
