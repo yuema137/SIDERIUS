@@ -211,6 +211,7 @@ RETAIN_TRAINING_CHECKPOINTS=0
 VALIDATION_FIXED_CANDIDATE_PLAN=""
 VALIDATION_MAX_PORTION=""
 VALIDATION_MAX_TRAIN_SAMPLES=""
+TRAINING_VALIDATION_PORTION=""
 VALIDATION_MAX_SAMPLES=""
 VALIDATION_MAX_PHASE_SECONDS=""
 # The DECLARED environment inputs of this library: the complete list of
@@ -400,6 +401,7 @@ parse_chain_args() {
         --validation_fixed_candidate_plan) VALIDATION_FIXED_CANDIDATE_PLAN="$2"; shift 2 ;;
         --validation_max_portion)          VALIDATION_MAX_PORTION="$2"; shift 2 ;;
         --validation_max_train_samples)    VALIDATION_MAX_TRAIN_SAMPLES="$2"; shift 2 ;;
+        --training_validation_portion)     TRAINING_VALIDATION_PORTION="$2"; shift 2 ;;
         --validation_max_samples)          VALIDATION_MAX_SAMPLES="$2"; shift 2 ;;
         --validation_max_phase_seconds)    VALIDATION_MAX_PHASE_SECONDS="$2"; shift 2 ;;
         # §3.2 — Trial / formal strategy + formal-scope (13.C-bis)
@@ -547,6 +549,9 @@ build_app_args() {
     fi
     if [[ -n "${VALIDATION_MAX_TRAIN_SAMPLES:-}" ]]; then
         APP_ARGS+=(--validation_max_train_samples "$VALIDATION_MAX_TRAIN_SAMPLES")
+    fi
+    if [[ -n "${TRAINING_VALIDATION_PORTION:-}" ]]; then
+        APP_ARGS+=(--training_validation_portion "$TRAINING_VALIDATION_PORTION")
     fi
     if [[ -n "${VALIDATION_MAX_SAMPLES:-}" ]]; then
         APP_ARGS+=(--validation_max_samples "$VALIDATION_MAX_SAMPLES")

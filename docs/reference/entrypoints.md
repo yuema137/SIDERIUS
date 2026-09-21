@@ -1,5 +1,16 @@
 # Entrypoints and CLI
 
+## Independent training-validation snapshot
+
+Chain and one-iteration entrypoints accept `--training_validation_portion`
+(`0 < value <= 1`, omitted by default). A composed task selects a seeded
+snapshot once per attempt for epoch loss, reused across its epochs. Final
+inference/scoring and Health keep their original evaluation scope, including
+`--formal_eval_portion`. Omission preserves existing behavior; changing the
+setting on resume is refused. See the [tuner contract](../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md#optional-snapshot-for-training-validation)
+for selection, provenance and supported routes. This is an experimental policy,
+not the test-only `--validation_max_samples` workload ceiling.
+
 **Audience**: operators and anyone trying to find the right command.
 **Authority**: `scripts/launch/run_chain.sh`,
 `scripts/launch/_chain_common.sh`,

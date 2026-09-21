@@ -146,6 +146,10 @@ class AttemptScopes(BaseModel):
         default=None,
         description="The task's own evaluation scope object — OPAQUE to this node.",
     )
+    training_validation: Any = Field(
+        default=None,
+        description="Optional fixed snapshot for epoch loss only; never used for final scoring.",
+    )
 
     @property
     def acquired(self) -> bool:
@@ -191,6 +195,7 @@ def acquire_attempt_scopes(
     subset: DataScope | None,
     validation_max_samples: int | None,
     task_parameters: dict[str, Any],
+    training_validation_portion: float | None = None,
 ) -> AttemptScopes:
     """Build this attempt's task-owned scopes, or declare that there are none.
 
@@ -230,8 +235,16 @@ def acquire_attempt_scopes(
             Raised HERE — parent-side, while the attempt is being prepared —
             so the refusal happens at composition rather than at first spawn.
     """
+    if training_validation_portion is not None and (
+        not composed or mode not in ("trial", "formal")
+    ):
+        raise ValueError("training_validation_portion requires a composed trial/formal task scope")
     if not composed or mode not in ("trial", "formal"):
         return AttemptScopes()
+    if training_validation_portion is not None and eval_sampling_seed is None:
+        raise ValueError(
+            "snapshot training validation requires an explicit evaluation sampling seed"
+        )
 
     partitions = tuple(target_files or ())
     subset_ref = subset.to_cli() if subset is not None else None
@@ -288,4 +301,20 @@ def acquire_attempt_scopes(
             task_parameters=task_parameters,
         )
     )
-    return AttemptScopes(training=training, evaluation=evaluation)
+    training_validation = None
+    if training_validation_portion is not None:
+        training_validation = capability.build_eval_scope(
+            _request_for(
+                round_kind=mode,
+                strategy="snapshot",
+                portion=training_validation_portion,
+                seed=eval_sampling_seed,
+                subset_ref=subset_ref,
+                target_partitions=partitions,
+                max_samples=validation_max_samples,
+                task_parameters=task_parameters,
+            )
+        )
+    return AttemptScopes(
+        training=training, evaluation=evaluation, training_validation=training_validation
+    )

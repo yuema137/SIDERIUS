@@ -99,8 +99,9 @@ def test_masked_objective_declares_supported_mean_comparability(
     ) == ("established", None)
 
 
+@pytest.mark.parametrize("validation_portion, epochs", [(None, 1), (0.1, 3)])
 def test_production_training_engine_consumes_masked_supervision(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, validation_portion, epochs
 ) -> None:
     """Defect caught: the production trainer bypasses the task objective.
 
@@ -153,6 +154,18 @@ def test_production_training_engine_consumes_masked_supervision(
             scope = composition.task_data_path.build_training_scope(
                 ScopeBuildRequest(round_kind="formal", selection_strategy="snapshot", portion=1.0)
             )
+            validation_scope = (
+                composition.task_data_path.build_eval_scope(
+                    ScopeBuildRequest(
+                        round_kind="formal",
+                        selection_strategy="snapshot",
+                        portion=validation_portion,
+                        seed=22,
+                    )
+                )
+                if validation_portion is not None
+                else None
+            )
             sandbox_dirs = {
                 "models": str(tmp_path / "models"),
                 "results": str(tmp_path / "results"),
@@ -169,7 +182,7 @@ def test_production_training_engine_consumes_masked_supervision(
                     ),
                     TrainConfig(
                         lr=1e-3,
-                        epochs=1,
+                        epochs=epochs,
                         batch_size=len(scope.rows),
                         optimizer_type="adam",
                         device="cpu",
@@ -183,9 +196,15 @@ def test_production_training_engine_consumes_masked_supervision(
                     model_io=composition.forward_contract.model_io,
                     profile=composition.dataset_profile,
                     task_scope=scope,
+                    task_eval_scope=validation_scope,
+                    validation_requested_rows=2 if validation_scope is not None else None,
                 )
         assert result is not None
-        assert len(result["loss_history"]) == 1
+        assert len(result["loss_history"]) == epochs
+        if validation_scope is not None:
+            # Catches per-epoch scope expansion or loss observation on training rows.
+            assert result["training_history"]["validation_samples"] == 2
+            assert len(result["training_history"]["validation_objective"]) == 3
         assert math.isfinite(result["loss_history"][0])
         assert result["training_history"]["objective_kind"] == "custom"
         assert len(list(Path(sandbox_dirs["models"]).glob("*.pth"))) == 1

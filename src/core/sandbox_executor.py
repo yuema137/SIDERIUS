@@ -1503,7 +1503,9 @@ class TidmadSandbox:
             # parent answers the same question of the same command line it is
             # building — never a re-derivation that can drift from the
             # emission site above.
-            cmd.extend(task_scope_argv(self.dirs["configs"], exp_id, task_scopes))
+            cmd.extend(
+                task_scope_argv(self.dirs["configs"], exp_id, task_scopes, for_training=True)
+            )
             cmd.extend(
                 validation_rows_argv(
                     task_scopes,

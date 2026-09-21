@@ -74,6 +74,24 @@ cycle.
 
 from __future__ import annotations
 
+
+def training_validation_disclosure(portion: float | None) -> str:
+    """Explain an explicit epoch-loss override without changing legacy prompts."""
+    if portion is None:
+        return ""
+    return (
+        "\n\nTRAINING VALIDATION OVERRIDE: Per-epoch validation loss uses an "
+        f"operator-fixed snapshot fraction {portion:.6g} of the task's eligible "
+        "validation population within the declared data scope. The recorded "
+        "evaluation seed selects it once per attempt; all epochs reuse it. "
+        "This overrides any description of epoch loss sharing the score scope. "
+        "Your eval_portion changes Trial final inference/scoring only, not this "
+        "epoch-loss snapshot. Formal final inference/scoring retains the "
+        "operator's formal_eval_portion. Budget validation cost using the "
+        "snapshot row count and completed epochs, separately from final inference."
+    )
+
+
 #: The three facts, stated once. Consumed verbatim by the planner prompt and
 #: by the two ``timing`` field descriptions, so a surface cannot disagree with
 #: another surface about what its own numbers mean.

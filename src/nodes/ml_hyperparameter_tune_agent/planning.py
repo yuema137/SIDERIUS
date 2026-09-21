@@ -18,6 +18,7 @@ import json
 import os
 from typing import Any
 
+from agent.prompt_templates.timing_attribution import training_validation_disclosure
 from agent.schemas.hyperparam_tuning import (
     EpochCapResolution,
     ExperimentPlan,
@@ -449,6 +450,7 @@ def prepare_attempt(
         # See docs/design/enable_global_task_config.md § T4a.
         task_description=(
             agent_input.task_description
+            + training_validation_disclosure(agent_input.training_validation_portion)
             + (
                 "\n\nRUN-SPECIFIC DATA/SCORE CONTRACT: Trial training strategy and fractions "
                 "(`trial_portion`, `train_portion`) and Trial validation "
@@ -799,6 +801,7 @@ def prepare_attempt(
         eval_sampling_seed=trial_config.eval_sampling_seed,
         target_files=trial_config.target_files,
         subset=agent_input.data_scope,
+        training_validation_portion=agent_input.training_validation_portion,
         validation_max_samples=agent_input.validation_max_samples,
         # C12-P / B11. The DECLARED value travels; nothing becomes `10000`.
         # `task_parameters` is OPAQUE to the framework, and its only production

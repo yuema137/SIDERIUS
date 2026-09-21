@@ -171,6 +171,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Per-epoch subsample from training scope (default: 0.1).",
     )
 
+    parser.add_argument(
+        "--training_validation_portion",
+        type=float,
+        default=None,
+        help="Seeded task snapshot fraction for epoch loss only; final scoring remains unchanged.",
+    )
+
     # Formal-mode training levers (Phase M). Eval scope defaults to full
     # snapshot (formal_eval_portion=1.0) for production score comparability,
     # but is now operator-configurable for smoke / CI runs that need to fit
@@ -696,6 +703,7 @@ def build_agent_input(
     input_dict["formal_portion"] = args.formal_portion
     input_dict["formal_train_portion"] = args.formal_train_portion
     input_dict["formal_eval_portion"] = args.formal_eval_portion
+    input_dict["training_validation_portion"] = args.training_validation_portion
     # V19 PR 2 — ordering OVERRIDE (operator control). Forwarded only when
     # set, so an unset override leaves the agent's proposal (or the default)
     # in charge and produces exactly the pre-PR2 configuration.

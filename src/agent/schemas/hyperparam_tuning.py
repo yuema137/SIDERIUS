@@ -12,7 +12,7 @@ Both are accepted wherever ExpertAdviceInput is used.
 from __future__ import annotations
 
 import math
-from typing import Any, Literal, NamedTuple
+from typing import Annotated, Any, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
@@ -49,6 +49,9 @@ from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotSc
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 from execute_tools.training_history import TrainingHistory
 from ml_models.model_descriptions import DescriptionSourcePolicy
+
+TrainingValidationPortion = Annotated[float, Field(gt=0, le=1)]
+
 
 #: What a HealthGate verdict DOES in this run: enforce, or only record.
 #:
@@ -2541,6 +2544,15 @@ class HyperparamTuningInput(BaseModel):
             "before launch: ``min(planned_samples, ceiling) // batch_size "
             "× epochs``. ``None`` (the default) leaves every campaign "
             "unchanged. Never use it on a scientific run."
+        ),
+    )
+    training_validation_portion: TrainingValidationPortion | None = Field(
+        default=None,
+        description=(
+            "Optional task-owned snapshot fraction for per-epoch validation loss only. "
+            "Selected once per attempt with the evaluation seed and reused every epoch. "
+            "Independent of final inference/scoring scope; None preserves shared eval scope. "
+            "Requires a composed trial/formal task with a seeded scope capability."
         ),
     )
     validation_max_samples: int | None = Field(

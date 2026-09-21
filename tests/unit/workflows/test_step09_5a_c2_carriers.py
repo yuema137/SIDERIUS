@@ -132,6 +132,7 @@ POST_REFACTOR_DEFAULT_CHANGES: dict[str, object] = {
 #:   validator→tuner protocol. Default ``None`` = a qualified bypass grants
 #:   NO extension (load-bearing safety semantics).
 POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
+    "training_validation_portion": None,
     # Operator-approved cooperative training, opt-in only (2026-09-18).
     "training_budget_reserve_fraction": None,
     "bypass_formal_time_budget_minutes": None,

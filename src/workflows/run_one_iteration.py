@@ -64,9 +64,11 @@ sys.dont_write_bytecode = True
 
 import yaml
 from dotenv import load_dotenv
+from pydantic import TypeAdapter
 
 from agent.data_analysis.source_scope import source_prompt_identity
 from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
+from agent.schemas.hyperparam_tuning import TrainingValidationPortion
 from agent.schemas.ordering import ResolvedOrdering, parse_file_order_cli
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import OutputTypeName
@@ -1832,6 +1834,12 @@ def build_parser() -> argparse.ArgumentParser:
         "campaigns.",
     )
     parser.add_argument(
+        "--training_validation_portion",
+        type=TypeAdapter(TrainingValidationPortion).validate_python,
+        default=None,
+        help="Task-owned seeded snapshot fraction for epoch loss only; final scoring scope is unchanged.",
+    )
+    parser.add_argument(
         "--validation_max_samples",
         type=int,
         default=None,
@@ -2689,6 +2697,7 @@ def compute_expected_invariants(
             # SAME namespace `WorkflowLaunchConfig` receives it from, so this
             # pre-flight and `run_workflow`'s own lock for this workspace
             # cannot contradict each other.
+            training_validation_portion=args.training_validation_portion,
             formal_eval_portion=args.formal_eval_portion,
             formal_training_scope_source=args.formal_training_scope_source,
             workflow_parameter_rules=(
@@ -3536,6 +3545,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
                     formal_max_epochs=args.formal_max_epochs,
                     validation_max_portion=args.validation_max_portion,
                     validation_max_train_samples=args.validation_max_train_samples,
+                    training_validation_portion=args.training_validation_portion,
                     validation_max_samples=args.validation_max_samples,
                     validation_max_phase_seconds=args.validation_max_phase_seconds,
                     skip_formal_min_delta=args.skip_formal_min_delta,

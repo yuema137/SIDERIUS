@@ -63,7 +63,9 @@ def _composed_scopes_and_sandbox():
     )
 
 
-def _training_argv(*, sample_set, with_scopes: bool, data_root: Path) -> list[str]:
+def _training_argv(
+    *, sample_set, with_scopes: bool, data_root: Path, snapshot_portion: float | None = None
+) -> list[str]:
     """Capture the argv `execute_training` would launch, without launching.
 
     Patches ``_run_observed_subprocess`` — the symbol BOTH launch branches
@@ -99,6 +101,11 @@ def _training_argv(*, sample_set, with_scopes: bool, data_root: Path) -> list[st
             scopes = AttemptScopes(
                 training=tdp.build_training_scope(request),
                 evaluation=tdp.build_eval_scope(request),
+                training_validation=(
+                    tdp.build_eval_scope(request.model_copy(update={"portion": snapshot_portion}))
+                    if snapshot_portion is not None
+                    else None
+                ),
             )
         sandbox = se.TidmadSandbox(
             metadata_source="local",
@@ -134,6 +141,15 @@ def _training_argv(*, sample_set, with_scopes: bool, data_root: Path) -> list[st
 
 class TestComposedScopeReachesTheTrainingChildWithoutASampleSet:
     """THE regression, and the exact shape a composed contrast round has."""
+
+    def test_training_spawn_uses_snapshot_and_its_own_row_count(self, tmp_path):
+        """Catches a production caller forgetting the for_training projection."""
+        argv = _training_argv(
+            sample_set=None, with_scopes=True, data_root=tmp_path / "data", snapshot_portion=0.1
+        )
+        assert argv[argv.index("--validation_requested_rows") + 1] == "2"
+        path = argv[argv.index("--task_eval_scope_ref") + 1]
+        assert Path(path).name.startswith("task_training_validation_scope_")
 
     def test_scope_refs_are_emitted_when_sample_set_is_none(self, tmp_path):
         argv = _training_argv(sample_set=None, with_scopes=True, data_root=tmp_path / "data")

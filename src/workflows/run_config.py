@@ -171,6 +171,7 @@ class WorkflowLaunchConfig:
     validation_fixed_candidate_plan: dict | None = None
     validation_max_portion: float | None = None
     validation_max_train_samples: int | None = None
+    training_validation_portion: float | None = None
     validation_max_samples: int | None = None
     validation_max_phase_seconds: float | None = None
     enable_chain_incumbent_formal_gates: bool = False

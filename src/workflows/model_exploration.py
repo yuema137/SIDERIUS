@@ -1978,6 +1978,7 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
         # F-SCANF-1 — the formal round's evaluation FRACTION, from the SAME
         # launch config the tuner child receives it from, so the chain lock
         # and the tuner sub-workspace lock cannot disagree.
+        training_validation_portion=launch.training_validation_portion,
         formal_eval_portion=launch.formal_eval_portion,
         formal_training_scope_source=launch.formal_training_scope_source,
         workflow_parameter_rules=(
@@ -3419,6 +3420,7 @@ def run_workflow(
             formal_max_epochs=launch.formal_max_epochs,
             validation_max_portion=launch.validation_max_portion,
             validation_max_train_samples=launch.validation_max_train_samples,
+            training_validation_portion=launch.training_validation_portion,
             validation_max_samples=launch.validation_max_samples,
             validation_max_phase_seconds=launch.validation_max_phase_seconds,
             skip_formal_min_delta=launch.skip_formal_min_delta,

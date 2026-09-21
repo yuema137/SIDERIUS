@@ -4,6 +4,25 @@
 
 ## Position in the pipeline
 
+### Optional snapshot for training validation
+
+`training_validation_portion` (`None` by default, otherwise `0 < value <= 1`)
+selects a task-owned random snapshot for per-epoch validation loss in composed
+Trial/Formal attempts. It is a fraction of the task's eligible validation
+population within the run's declared scope, not a fraction of an already
+sampled final-evaluation scope. Task sampling granularity determines rounding.
+The attempt's recorded evaluation seed selects the snapshot once; every epoch
+reuses it. No task or hardware geometry is implemented by the framework.
+
+Final inference, metric scoring and Health retain the original evaluation
+scope. Omitting the setting preserves the previous shared scope and artifact
+names. The training child receives `task_training_validation_scope_<exp_id>.json`
+with its digest and exact requested row count; final evaluation retains
+`task_eval_scope_<exp_id>.json`. Training history and runtime prediction count
+the selected validation rows. Unsupported legacy/single-file routes and missing
+snapshot seeds refuse explicitly. The setting is locked across workspace
+resume, so changing it requires a new workspace.
+
 Trial anchor maps are explicit caller/task-owned JSON inputs. This framework
 reads them through `execute_tools.trial_anchor_map.load_anchor_map`; the former
 task-specific builder, checkout default, and root `reference_data/` anchor are

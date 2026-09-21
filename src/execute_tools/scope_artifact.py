@@ -58,6 +58,7 @@ TRAINING_SCOPE_STEM = "task_scope"
 #: absent, and a combined file would make "eval scope absent" and "eval scope
 #: empty" the same on-disk state.
 EVAL_SCOPE_STEM = "task_eval_scope"
+TRAINING_VALIDATION_SCOPE_STEM = "task_training_validation_scope"
 
 
 class ScopeArtifactError(RuntimeError):
@@ -249,7 +250,15 @@ def load_transported_scope(ref: str | None, digest: str | None, *, leg: str) -> 
     return capability.deserialize_scope(payload)
 
 
-def task_scope_argv(configs_dir: str, exp_id: str, task_scopes: object) -> list[str]:
+def training_validation_scope(task_scopes: object) -> object:
+    """Resolve epoch-validation identity; omitted override preserves evaluation scope."""
+    selected = getattr(task_scopes, "training_validation", None)
+    return getattr(task_scopes, "evaluation", None) if selected is None else selected
+
+
+def task_scope_argv(
+    configs_dir: str, exp_id: str, task_scopes: object, *, for_training: bool = False
+) -> list[str]:
     """The composed run's SCOPE transport — empty unless scopes were acquired.
 
     Step 12 / PR-12bc B6; RELOCATED here by PR-12d seam C. It lived in
@@ -297,10 +306,16 @@ def task_scope_argv(configs_dir: str, exp_id: str, task_scopes: object) -> list[
     # the resolver is what turns that into a named refusal.
     capability = resolve_task_scope_capability(bound)
 
+    evaluation = getattr(task_scopes, "evaluation", None)
+    eval_stem = EVAL_SCOPE_STEM
+    if for_training:
+        evaluation = training_validation_scope(task_scopes)
+        if getattr(task_scopes, "training_validation", None) is not None:
+            eval_stem = TRAINING_VALIDATION_SCOPE_STEM
     fragment: list[str] = []
     for stem, scope, flag in (
         (TRAINING_SCOPE_STEM, training, "--task_scope"),
-        (EVAL_SCOPE_STEM, getattr(task_scopes, "evaluation", None), "--task_eval_scope"),
+        (eval_stem, evaluation, "--task_eval_scope"),
     ):
         if scope is None:
             continue
@@ -402,7 +417,7 @@ def validation_rows_argv(
         active_task_data_path,
     )
 
-    evaluation = getattr(task_scopes, "evaluation", None)
+    evaluation = training_validation_scope(task_scopes)
     if evaluation is None:
         return []
     # PAIRING (F-Q4-2): mirror `task_scope_argv`'s training-scope early return.
@@ -416,6 +431,11 @@ def validation_rows_argv(
     # evaluation scope was still acquired and still crosses as scope identity;
     # it is deliberately NOT consumed for validation rows here.
     if regime_a_eval_declared:
+        if getattr(task_scopes, "training_validation", None) is not None:
+            raise ValueError(
+                "independent training validation requires task scope transport without "
+                "a legacy eval_sample_set declaration"
+            )
         return []
     bound = active_task_data_path()
     if bound is None:

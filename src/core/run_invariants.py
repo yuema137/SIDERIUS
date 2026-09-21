@@ -302,6 +302,7 @@ class RunInvariants(BaseModel):
     #
     # Omitted from the serialized lock at 1.0 (see `write_run_invariants`), so
     # every legacy and every full-eval lock file stays byte-identical.
+    training_validation_portion: float | None = None
     formal_eval_portion: float = 1.0
     formal_training_scope_source: Literal["operator", "agent"] = "operator"
     # Workflow-owned parameter rules change the effective plan and therefore
@@ -405,6 +406,7 @@ class RunInvariants(BaseModel):
         # scalars are only comparable within one evaluation scope; this is
         # `resolved_data_scope`'s sibling one axis over (see the field's
         # declaration for the five-row table and the legacy-lock consequence).
+        "training_validation_portion",
         "formal_eval_portion",
         "formal_training_scope_source",
         "workflow_parameter_rules",
@@ -691,6 +693,8 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
     # value, which is what confines the new refusal to workspaces that declare
     # a NON-DEFAULT portion (the field's declaration states the five rows and
     # the residual this accepts).
+    if payload.get("training_validation_portion") is None:
+        payload.pop("training_validation_portion", None)
     if payload.get("formal_eval_portion") == 1.0:
         payload.pop("formal_eval_portion", None)
     if payload.get("formal_training_scope_source") == "operator":
@@ -857,6 +861,7 @@ class LockLaunchIdentity(BaseModel):
     #: that participates threads it explicitly — a compared value must never
     #: arrive ambiently. The default is the framework's own full-eval value,
     #: so a caller that omits it gets a byte-identical lock.
+    training_validation_portion: float | None = None
     formal_eval_portion: float = 1.0
     formal_training_scope_source: Literal["operator", "agent"] = "operator"
     workflow_parameter_rules: dict[str, Any] | None = None
@@ -1045,6 +1050,7 @@ def build_run_invariants(
             advice_path=_launch_identity.advice_path,
             analysis_source_prompt_sha256=_launch_identity.analysis_source_prompt_sha256,
             # F-SCANF-1 — CANONICAL, threaded explicitly like the six above.
+            training_validation_portion=_launch_identity.training_validation_portion,
             formal_eval_portion=_launch_identity.formal_eval_portion,
             formal_training_scope_source=_launch_identity.formal_training_scope_source,
             workflow_parameter_rules=_launch_identity.workflow_parameter_rules,
