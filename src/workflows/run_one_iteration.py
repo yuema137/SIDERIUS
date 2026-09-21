@@ -2690,6 +2690,7 @@ def compute_expected_invariants(
             # pre-flight and `run_workflow`'s own lock for this workspace
             # cannot contradict each other.
             formal_eval_portion=args.formal_eval_portion,
+            formal_training_scope_source=args.formal_training_scope_source,
             workflow_parameter_rules=(
                 None
                 if args.workflow_parameter_rules is None
