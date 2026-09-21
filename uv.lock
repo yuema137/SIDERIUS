@@ -1799,6 +1799,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "h5py" },
+    { name = "httpx" },
     { name = "iminuit" },
     { name = "jax" },
     { name = "matplotlib" },
@@ -1832,6 +1833,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "h5py", specifier = ">=3.16.0" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "iminuit", specifier = ">=2.32.0" },
     { name = "jax", extras = ["cpu"], specifier = ">=0.9.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },

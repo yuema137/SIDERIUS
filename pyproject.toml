@@ -15,6 +15,9 @@ authors = [{ name = "SIDERIUS developers" }]
 requires-python = ">=3.12"
 dependencies = [
     "h5py>=3.16.0",
+    # llm_bridge imports httpx.Timeout directly. OpenAI SDK releases may use
+    # httpx2 instead, so this cannot be left as an SDK-transitive dependency.
+    "httpx>=0.28,<1",
     "iminuit>=2.32.0",
     "jax[cpu]>=0.9.1",
     "matplotlib>=3.10.8",
