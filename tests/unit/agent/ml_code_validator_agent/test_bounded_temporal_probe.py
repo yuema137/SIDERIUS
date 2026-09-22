@@ -42,7 +42,7 @@ def test_long_temporal_probe_passes_in_isolated_worker(tmp_path) -> None:
 def test_excessive_allocation_rejects_candidate_without_killing_parent(tmp_path) -> None:
     path = tmp_path / "huge_model.py"
     path.write_text(
-        _PLUGIN.format(allocation="torch.empty((20_000_000_000,), dtype=torch.float32)"),
+        _PLUGIN.format(allocation="torch.empty((100_000_000_000,), dtype=torch.float32)"),
         encoding="utf-8",
     )
 

@@ -52,7 +52,7 @@ def _host_memory_budget_bytes() -> int:
         raw = cgroup_limit.read_text(encoding="ascii").strip()
         if raw.isdecimal():
             total = min(total, int(raw))
-    return min(32 * 1024**3, max(2 * 1024**3, total // 4))
+    return min(96 * 1024**3, max(256 * 1024**2, total // 2))
 
 
 def _worker_address_space_limit() -> int:
