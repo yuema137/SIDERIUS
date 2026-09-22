@@ -341,7 +341,8 @@ def test_resume_reuses_primary_interpretation_when_llm_answer_changes(tmp_path) 
     )
     bridge = ChangingBridge(str(tmp_path))
     agent = ResultInterpretationAgent(
-        provider="test-provider", model_id="test-model",
+        provider="test-provider",
+        model_id="test-model",
         bridge_factory=lambda **_kwargs: bridge,
     )
     first = agent.run(inp)
