@@ -76,6 +76,7 @@ from execute_tools.trained_model_artifact import (
     certified_file_identity,
     training_artifact_candidate_path,
 )
+from execute_tools.training_batches import completed_epoch_loss
 from execute_tools.training_budget_execution import (
     TrainingAllocationRejected,
     enforce_training_allocation,
@@ -985,6 +986,7 @@ def _build_training_history(
     validation_seconds: list[float] | None,
     validation_requested_samples_before_limit: int | None = None,
     observations: dict[str, list[float]] | None = None,
+    training_samples: list[int] | None = None,
     target_standardization: TargetStandardizationReceipt | None = None,
 ) -> TrainingHistory:
     """Assemble the additive ``training_history`` payload (design §3.5).
@@ -1012,6 +1014,7 @@ def _build_training_history(
         if len(series) == epochs_completed
     }
     return TrainingHistory(
+        training_samples=training_samples,
         objective_kind=loss_cfg.loss_type,
         objective_config_fingerprint=objective_config_fingerprint(
             loss_cfg, target_standardization=target_standardization
@@ -1051,6 +1054,7 @@ def refuse_zero_optimizer_steps(
     epoch: int,
     batch_size: int,
     rows: int | None,
+    drop_last: bool = True,
 ) -> None:
     """Refuse an epoch that completed without executing a single optimizer step.
 
@@ -1072,6 +1076,11 @@ def refuse_zero_optimizer_steps(
     """
     if steps_taken > 0:
         return
+    if not drop_last:
+        raise TrainingScopeError(
+            f"epoch {epoch} executed ZERO optimizer steps with drop_last=False "
+            f"({rows} rows, batch_size {batch_size}). Check the empty training scope or loader."
+        )
     geometry = (
         f"{rows} rows // batch_size {batch_size} == 0 batches"
         if rows is not None
@@ -1097,6 +1106,8 @@ def run_experiment(
     expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
 ):
     CheckpointSelector(train_cfg.checkpoint_selection, has_validation=False)
+    if not train_cfg.drop_last and data_loader.drop_last:
+        raise ValueError("drop_last=False requires a loader that retains its final partial batch")
     if train_cfg.target_standardization != "none":
         raise ValueError("target standardization requires the task-owned scoped training engine")
     device = torch.device(train_cfg.device if torch.cuda.is_available() else "cpu")
@@ -1131,9 +1142,11 @@ def run_experiment(
     optimizer = build_training_optimizer(model, train_cfg)
 
     history = []
+    training_samples = []
     for ep in range(train_cfg.epochs):
         model.train()
         batch_losses = []
+        batch_rows = []
         for input_batch, target_batch in tqdm(data_loader, desc=f"Epoch {ep}", file=sys.stdout):
             input_seq = input_batch.to(device)
             target_seq = target_batch.to(device)
@@ -1163,14 +1176,17 @@ def run_experiment(
             loss.backward()
             optimizer.step()
             batch_losses.append(loss.item())
+            batch_rows.append(int(input_seq.shape[0]))
 
         refuse_zero_optimizer_steps(
             len(batch_losses),
             epoch=ep,
             batch_size=train_cfg.batch_size,
             rows=_declared_len(data_loader.dataset),
+            drop_last=train_cfg.drop_last,
         )
-        avg_loss = np.mean(batch_losses)
+        avg_loss = completed_epoch_loss(batch_losses, batch_rows, drop_last=train_cfg.drop_last)
+        training_samples.append(sum(batch_rows))
         history.append(float(avg_loss))
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
 
@@ -1185,6 +1201,7 @@ def run_experiment(
         TRAINING_HISTORY_KEY: _build_training_history(
             loss_cfg=loss_cfg,
             epochs_planned=train_cfg.epochs,
+            training_samples=training_samples if not train_cfg.drop_last else None,
             train_objective=history,
             validation_objective=None,
             validation_requested_samples=None,
@@ -1496,6 +1513,7 @@ def run_experiment_streaming(
     )
 
     history = []
+    training_samples = []
     t_train_start: float | None = None
     verifier = None
     epoch0_dataset_seconds = 0.0
@@ -1707,11 +1725,14 @@ def run_experiment_streaming(
                 dataset,
                 batch_size=train_cfg.batch_size,
                 sampler=epoch_indices,
-                drop_last=True,
+                drop_last=train_cfg.drop_last,
             )
         else:
             loader = DataLoader(
-                dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True
+                dataset,
+                batch_size=train_cfg.batch_size,
+                shuffle=True,
+                drop_last=train_cfg.drop_last,
             )
         print(
             f"[data_order] resolved={order_strategy} "
@@ -1817,6 +1838,7 @@ def run_experiment_streaming(
             gc.collect()
             break
         batch_losses = []
+        batch_rows = []
         rejected_mid_epoch = False
         batch_iterator = iter(loader)
         for _ in tqdm(range(len(loader)), desc=f"Epoch {ep}", file=sys.stdout):
@@ -1846,6 +1868,7 @@ def run_experiment_streaming(
             loss.backward()
             optimizer.step()
             batch_losses.append(loss.item())
+            batch_rows.append(int(input_seq.shape[0]))
 
             if verifier is not None:
                 if use_cuda_sync:
@@ -1886,8 +1909,10 @@ def run_experiment_streaming(
             epoch=ep,
             batch_size=train_cfg.batch_size,
             rows=epoch_rows,
+            drop_last=train_cfg.drop_last,
         )
-        avg_loss = np.mean(batch_losses)
+        avg_loss = completed_epoch_loss(batch_losses, batch_rows, drop_last=train_cfg.drop_last)
+        training_samples.append(sum(batch_rows))
         history.append(float(avg_loss))
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
 
@@ -2015,6 +2040,7 @@ def run_experiment_streaming(
         TRAINING_HISTORY_KEY: _build_training_history(
             loss_cfg=loss_cfg,
             epochs_planned=len(history) if budget_execution else train_cfg.epochs,
+            training_samples=training_samples if not train_cfg.drop_last else None,
             target_standardization=target_standardization,
             train_objective=history,
             validation_objective=validation_history,
@@ -2335,7 +2361,9 @@ def main():
             model_cfg.segmentation_size,
             profile=dataset_profile,
         )
-        loader = DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True)
+        loader = DataLoader(
+            dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=train_cfg.drop_last
+        )
         results = run_experiment(
             model_cfg,
             train_cfg,

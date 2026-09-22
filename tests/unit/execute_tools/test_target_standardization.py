@@ -88,7 +88,8 @@ def test_native_training_exports_fitted_transform_with_best_checkpoint(tmp_path,
             SimpleNamespace(model_type="normalization_fixture", segmentation_size=1),
             TrainConfig(
                 epochs=3,
-                batch_size=2,
+                batch_size=3,
+                drop_last=False,
                 device="cpu",
                 target_standardization="training_pool_global",
                 checkpoint_selection="best_validation_loss",
@@ -105,6 +106,7 @@ def test_native_training_exports_fitted_transform_with_best_checkpoint(tmp_path,
             validation_requested_rows=2,
         )
     assert len(summary["loss_history"]) == 3
+    assert summary["training_history"]["training_samples"] == [4, 4, 4]
     assert summary["target_standardization"]["mean"] == 13
     assert summary["target_standardization"]["training_rows"] == 4
     from execute_tools.training_history import (

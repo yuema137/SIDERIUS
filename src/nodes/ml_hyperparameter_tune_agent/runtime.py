@@ -1046,6 +1046,7 @@ def _resolve_task_scope_guardrail_steps(
     try:
         from agent.skills.training_skill.estimator import _usable, resolve_train_field
         from execute_tools.workload_resolvers import resolve_task_scope_training_workload
+        from ml_models.models_format_sandbox import resolve_training_drop_last
 
         # B1b's rule, on this leg too: resolve an ABSENT key from the
         # declaration, never substitute for one the plan states impossibly.
@@ -1065,6 +1066,7 @@ def _resolve_task_scope_guardrail_steps(
             train_portion=train_portion,
             epochs=resolve_train_field(train_cfg, "epochs", safety_margin=1),
             max_samples=max_samples,
+            drop_last=resolve_training_drop_last(train_cfg),
         ).unit_count
     except Exception as exc:
         from core.local_code.failure import raise_if_code_package_failure
@@ -1129,6 +1131,7 @@ def _resolve_guardrail_steps(
             resolve_train_field,
         )
         from execute_tools.workload_resolvers import resolve_training_workload
+        from ml_models.models_format_sandbox import resolve_training_drop_last
 
         # B1b: resolve an ABSENT key from the declaration, but never
         # substitute for one the plan states and states impossibly. B1's
@@ -1154,6 +1157,7 @@ def _resolve_guardrail_steps(
             train_portion=train_portion,
             epochs=resolve_train_field(train_cfg, "epochs", safety_margin=1),
             max_samples=max_samples,
+            drop_last=resolve_training_drop_last(train_cfg),
         ).unit_count
     except Exception as exc:
         print(f"[guardrails] step resolution failed (non-fatal): {exc}")

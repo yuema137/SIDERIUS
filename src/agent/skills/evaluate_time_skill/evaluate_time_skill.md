@@ -122,3 +122,10 @@ TIDMAD `f"{10_000_000:,}"` renders `10,000,000`, so the advisory string is
 byte-identical to the literal it replaced — pinned in both directions
 (byte-identity under TIDMAD, and the message following a contrast
 declaration).
+
+## Partial training batches
+
+`train_config.drop_last` defaults to `true`. When false, training retains
+the final partial batch and step estimates use ceiling rather than floor.
+See [training batch policy](../../../../docs/reference/training-batches.md)
+for measured row-count receipts and model compatibility requirements.

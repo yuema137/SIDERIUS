@@ -892,6 +892,13 @@ class TrainConfig(BaseModel):
     device: str = "cuda"  # or "cpu"
     checkpoint_selection: CheckpointSelection = "last_completed_epoch"
     target_standardization: TargetStandardization = "none"
+    drop_last: bool = True
+
+
+def resolve_training_drop_last(config: dict) -> bool:
+    """Validate this policy without changing legacy estimators' other inputs."""
+    supplied = {"drop_last": config["drop_last"]} if "drop_last" in config else {}
+    return TrainConfig.model_validate(supplied).drop_last
 
 
 # ==========================================

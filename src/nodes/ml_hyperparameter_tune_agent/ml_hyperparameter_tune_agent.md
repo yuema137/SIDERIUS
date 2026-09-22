@@ -1952,3 +1952,7 @@ executed interventions; trainability and specification alignment remain separate
 The optional [scoped target standardization](../../../docs/reference/target-standardization.md)
 policy fits training-only statistics, exports original-unit predictions and
 persists a reconstruction-bound transform. It defaults to `none`.
+
+The optional [training batch policy](../../../docs/reference/training-batches.md)
+keeps selected tail rows when `train_config.drop_last=false`; guardrails and
+training use matching step arithmetic. Completed-epoch row counts are recorded.

@@ -217,6 +217,7 @@ class TrainingHistory(BaseModel):
     comparability_reason: str | None = None
     epochs_planned: int = Field(ge=0)
     epochs_completed: int = Field(ge=0)
+    training_samples: list[int] | None = Field(default=None, exclude_if=lambda v: v is None)
     train_objective: list[float | None] = Field(
         description=(
             "R2 — the SAME floats as the legacy loss_history. An ELEMENT is "
@@ -296,6 +297,11 @@ class TrainingHistory(BaseModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> TrainingHistory:
+        if self.training_samples is not None and (
+            len(self.training_samples) != self.epochs_completed
+            or any(count <= 0 for count in self.training_samples)
+        ):
+            raise ValueError("training_samples requires one positive row count per completed epoch")
         n = len(self.train_objective)
         if self.epochs_completed != n:
             raise ValueError(

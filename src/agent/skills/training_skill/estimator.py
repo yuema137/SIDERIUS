@@ -45,6 +45,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 
+from ml_models.models_format_sandbox import resolve_training_drop_last
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from execute_tools.dataset_config import DatasetProfile
 
@@ -512,6 +514,8 @@ def _total_train_steps(
     train_portion: float | None,
     epochs: int,
     profile: DatasetProfile,
+    *,
+    drop_last: bool = True,
 ) -> int:
     """Total fwd+bwd step count across the whole training run.
 
@@ -531,6 +535,7 @@ def _total_train_steps(
         batch_size=batch_size,
         train_portion=train_portion,
         epochs=epochs,
+        drop_last=drop_last,
     ).unit_count
 
 
@@ -635,7 +640,13 @@ def estimate_wall_time_seconds(
     epochs = resolve_train_field(train_config, "epochs", safety_margin=1)
 
     total_steps = _total_train_steps(
-        sample_set, seg_size, batch_size, train_portion, epochs, dataset_profile
+        sample_set,
+        seg_size,
+        batch_size,
+        train_portion,
+        epochs,
+        dataset_profile,
+        drop_last=resolve_training_drop_last(train_config),
     )
 
     if ms_per_step is not None and ms_per_step > 0:
