@@ -257,12 +257,20 @@ class AnalysisCodeSandbox:
 
     def probe(self) -> SandboxCapabilityReceipt:
         if self._bubblewrap is None or self._unshare is None:
+            missing = [
+                name
+                for name, path in (
+                    ("bwrap (bubblewrap)", self._bubblewrap),
+                    ("unshare (util-linux)", self._unshare),
+                )
+                if path is None
+            ]
             return SandboxCapabilityReceipt(
                 available=False,
                 protocol_id=SANDBOX_PROTOCOL_ID,
                 bubblewrap_path=self._bubblewrap,
                 unshare_path=self._unshare,
-                reason="bubblewrap and unshare are both required",
+                reason="Missing required generated-analysis executable(s): " + ", ".join(missing),
             )
         try:
             with tempfile.TemporaryDirectory(prefix="siderius-analysis-sandbox-probe-") as temp:
