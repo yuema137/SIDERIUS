@@ -113,6 +113,7 @@ EXPERIMENT_RECORD_FIELDS = [
     # typed record boundary. Both remain omitted when absent; other fields
     # and legacy persisted values are unchanged.
     "training_budget",
+    "selected_checkpoint",
     "runtime_verification",
     "memory",
     "is_trial",

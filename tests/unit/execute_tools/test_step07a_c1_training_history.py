@@ -131,6 +131,20 @@ def _raw(history: dict | None = None, **legacy) -> dict:
 
 
 class TestInterpretTrainingResults:
+    def test_best_checkpoint_receipt_cannot_be_dropped_or_name_wrong_epoch(self):
+        raw = _raw(_history())
+        with pytest.raises(TrainingResultsContractError, match="requested selection policy"):
+            interpret_training_results(
+                raw, expected_validation=True, expected_checkpoint_selection="best_validation_loss"
+            )
+        raw["selected_checkpoint"] = {
+            "policy": "best_validation_loss",
+            "epoch": 1,
+            "validation_loss": 3.1,
+        }
+        with pytest.raises(TrainingResultsContractError, match="disagrees with validation history"):
+            interpret_training_results(raw, expected_validation=True)
+
     def test_present_history_yields_legacy_payload_exactly_and_the_typed_history(self):
         res = interpret_training_results(_raw(_history()), expected_validation=True)
         assert res.history_state == "present"

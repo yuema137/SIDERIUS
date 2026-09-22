@@ -28,6 +28,7 @@ from core.runtime_control.provenance import capture_storage_provenance
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.workload import ResolvedPhaseWorkload
 from core.sandbox_layout import training_checkpoint_path
+from execute_tools.checkpoint_selection import CheckpointSelector
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 from execute_tools.dataset_config import (
     DatasetProfile,
@@ -1082,6 +1083,7 @@ def run_experiment(
     model_io: ModelIOContract | None = None,
     expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
 ):
+    CheckpointSelector(train_cfg.checkpoint_selection, has_validation=False)
     device = torch.device(train_cfg.device if torch.cuda.is_available() else "cpu")
 
     # Model Initialization
@@ -1384,6 +1386,9 @@ def run_experiment_streaming(
     # would fix.
     from execute_tools.training_budget_execution import TrainingBudgetExecution
 
+    checkpoint_selector = CheckpointSelector(
+        train_cfg.checkpoint_selection, has_validation=task_eval_scope is not None
+    )
     budget_execution = (
         TrainingBudgetExecution(
             runtime_session.policy.training_budget, proposed_epochs=train_cfg.epochs
@@ -1888,6 +1893,8 @@ def run_experiment_streaming(
                 _finish_validation_verification()
             print(f"Epoch {ep} | Validation Loss: {r3:.6f} ({n_val} ML segments)")
 
+            checkpoint_selector.observe(model, epoch=ep + 1, validation_loss=float(r3))
+
         if budget_execution:
             decision = budget_execution.finish_epoch(optimizer_steps=len(batch_losses))
             if decision.action == "stop":
@@ -1955,6 +1962,7 @@ def run_experiment_streaming(
     # BEFORE the model is serialized, so what is observed is the model this
     # attempt actually produced. Never raises — a failed observation is an
     # absence, not a failed training attempt.
+    selected_checkpoint = checkpoint_selector.restore(model)
     observation.finalize(model)
 
     # Result summary — the three legacy keys FIRST and byte-identical to the
@@ -1984,7 +1992,11 @@ def run_experiment_streaming(
     # one layer up, expressed as an update rather than an `if`.
     summary.update(observation.static_summary(STATIC_OBSERVATIONS_KEY))
     if budget_execution is not None:
-        summary["training_budget"] = budget_execution.receipt()
+        summary["training_budget"] = budget_execution.receipt(
+            checkpoint_selection=train_cfg.checkpoint_selection
+        )
+    if selected_checkpoint is not None:
+        summary["selected_checkpoint"] = selected_checkpoint.model_dump()
 
     save_path = str(training_checkpoint_path(sandbox_dirs["models"], model_cfg.model_type, exp_id))
     _save_with_sentinel(model.state_dict(), save_path, exp_id)

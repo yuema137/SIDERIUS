@@ -32,6 +32,7 @@ from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
+from core.checkpoint_selection import SelectedCheckpoint
 
 # One vocabulary for the admission posture, shared with the policy that
 # enforces it. Two independent spellings would let a value be acceptable
@@ -581,6 +582,9 @@ class ExperimentRecord(BaseModel):
 
     timing: ExperimentTiming | None = None
     training_budget: TrainingBudgetReceipt | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    selected_checkpoint: SelectedCheckpoint | None = Field(
         default=None, exclude_if=lambda v: v is None
     )
     runtime_verification: RuntimeObservation | None = Field(

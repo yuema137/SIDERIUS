@@ -60,6 +60,7 @@ from execute_tools.scoring_helpers import (
     build_score_table,
     file_vector_to_log_space,
 )
+from ml_models.models_format_sandbox import TrainConfig
 from nodes.agent_data_stream import log_score_table
 from nodes.ml_hyperparameter_tune_agent.contracts import (
     AdmissionOutcome,
@@ -947,7 +948,11 @@ def run_training(
     # only): a contract violation is rewritten into the existing
     # error shape and recorded by the branch below.
     train_status, training_results = _interpret_training_status(
-        train_status, expected_validation=eval_sample_set is not None
+        train_status,
+        expected_validation=eval_sample_set is not None,
+        expected_checkpoint_selection=TrainConfig.model_validate(
+            active_params["train_config"]
+        ).checkpoint_selection,
     )
     # Step 11 C2 (F-11-1) — ONE authority decides what "the subprocess
     # failed" means. `oom_host_ram` used to miss this branch entirely and

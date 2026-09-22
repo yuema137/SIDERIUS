@@ -28,6 +28,7 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.ordering import ResolvedOrdering
 from agent.skills.evaluate_time_skill.wrapper import _aggregate_inference_file_timings
+from core.checkpoint_selection import CheckpointSelection
 from core.durable_io import publish_json_atomically
 from core.run_invariants import (
     RunInvariants,
@@ -348,7 +349,10 @@ def _is_cuda_oom(message: str) -> bool:
 
 
 def _interpret_training_status(
-    train_status: dict, *, expected_validation: bool
+    train_status: dict,
+    *,
+    expected_validation: bool,
+    expected_checkpoint_selection: CheckpointSelection | None = None,
 ) -> tuple[dict, TrainingResults]:
     """Step 07a — the tuner's typed training-results boundary (design §3.4a, §3.5).
 
@@ -381,7 +385,9 @@ def _interpret_training_status(
         )
     try:
         results = interpret_training_results(
-            train_status.get("results", {}), expected_validation=expected_validation
+            train_status.get("results", {}),
+            expected_validation=expected_validation,
+            expected_checkpoint_selection=expected_checkpoint_selection,
         )
     except TrainingResultsContractError as exc:
         rewritten = {
@@ -1738,3 +1744,5 @@ def _attach_completed_execution_evidence(
     )
     if training_results.training_budget is not None:
         record["training_budget"] = training_results.training_budget.model_dump()
+    if training_results.selected_checkpoint is not None:
+        record["selected_checkpoint"] = training_results.selected_checkpoint.model_dump()

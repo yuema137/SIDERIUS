@@ -56,6 +56,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from core.checkpoint_selection import CheckpointSelection, SelectedCheckpoint
 from core.runtime_control.training_budget import TrainingBudgetReceipt
 from ml_models.models_format_sandbox import LossConfig
 
@@ -384,6 +385,7 @@ class TrainingResults(BaseModel):
     history: TrainingHistory | None
     history_state: Literal["present", "absent"]
     training_budget: TrainingBudgetReceipt | None = None
+    selected_checkpoint: SelectedCheckpoint | None = None
     static_observations: dict[str, float] = Field(
         default_factory=dict,
         description=(
@@ -419,7 +421,12 @@ def _same_series(xs: Sequence[float | None], ys: object) -> bool:
     return all(_same_float(x, y) for x, y in zip(xs, ys, strict=True))
 
 
-def interpret_training_results(raw: object, *, expected_validation: bool) -> TrainingResults:
+def interpret_training_results(
+    raw: object,
+    *,
+    expected_validation: bool,
+    expected_checkpoint_selection: CheckpointSelection | None = None,
+) -> TrainingResults:
     """Validate the trainer's raw results dict at the ONE validation site.
 
     Args:
@@ -480,12 +487,42 @@ def interpret_training_results(raw: object, *, expected_validation: bool) -> Tra
             raise TrainingResultsContractError(
                 f"training_budget payload is schema-invalid: {exc}"
             ) from exc
+    selected = None
+    if raw.get("selected_checkpoint") is not None:
+        try:
+            selected = SelectedCheckpoint.model_validate(raw["selected_checkpoint"])
+        except ValidationError as exc:
+            raise TrainingResultsContractError(
+                f"selected_checkpoint is schema-invalid: {exc}"
+            ) from exc
+        curve = history.validation_objective if history is not None else None
+        if not curve or any(value is None or not math.isfinite(value) for value in curve):
+            raise TrainingResultsContractError(
+                "selected_checkpoint requires finite validation history"
+            )
+        finite_curve = [float(value) for value in curve if value is not None]
+        best_epoch = min(range(len(finite_curve)), key=lambda index: finite_curve[index]) + 1
+        if selected.epoch != best_epoch or selected.validation_loss != curve[best_epoch - 1]:
+            raise TrainingResultsContractError(
+                "selected_checkpoint disagrees with validation history"
+            )
+    if budget is not None and (budget.checkpoint_selection == "best_validation_loss") != (
+        selected is not None
+    ):
+        raise TrainingResultsContractError("training_budget and selected_checkpoint disagree")
+    if expected_checkpoint_selection is not None and (
+        expected_checkpoint_selection == "best_validation_loss"
+    ) != (selected is not None):
+        raise TrainingResultsContractError(
+            "selected_checkpoint does not match requested selection policy"
+        )
     return TrainingResults(
         legacy_payload=legacy_payload,
         history=history,
         history_state="present" if history is not None else "absent",
         static_observations=_read_static_observations(raw),
         training_budget=budget,
+        selected_checkpoint=selected,
     )
 
 

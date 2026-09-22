@@ -5,6 +5,8 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from core.checkpoint_selection import CheckpointSelection
+
 # ==========================================
 # 1. Base Model Configuration
 # ==========================================
@@ -887,6 +889,7 @@ class TrainConfig(BaseModel):
     optimizer_type: Literal["adam", "adamw", "sgd"] = "adamw"
     weight_decay: float = Field(default=1e-5, ge=0, le=1e-1)
     device: str = "cuda"  # or "cpu"
+    checkpoint_selection: CheckpointSelection = "last_completed_epoch"
 
 
 # ==========================================

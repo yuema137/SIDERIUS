@@ -31,6 +31,7 @@ from typing import Any
 
 from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
+from agent.prompt_templates.native_training import NATIVE_TRAINING_CONTRACT
 from agent.prompt_templates.proposal import live_loss_metadata
 from agent.schemas.custom_loss_contract import CustomLossApplicability
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
@@ -1197,17 +1198,21 @@ def _build_reasoning_system_prompt(inp: ImplementorInput) -> str:
     which case the placeholder collapses to ``""``.
     """
     return (
-        IMPLEMENTOR_REASONING_PROMPT.replace(
-            "{ENGINEER_ROLE}", render_engineer_role(inp.implementor_blocks)
+        (
+            IMPLEMENTOR_REASONING_PROMPT.replace(
+                "{ENGINEER_ROLE}", render_engineer_role(inp.implementor_blocks)
+            )
+            .replace(
+                "{TASK_BACKGROUND}",
+                _render_task_background(inp.task_description, inp.forward_contract),
+            )
+            .replace(
+                "{CAPACITY_BUDGET}",
+                _render_capacity_budget(inp.hardware_context, inp.vram_budget_gb),
+            )
         )
-        .replace(
-            "{TASK_BACKGROUND}",
-            _render_task_background(inp.task_description, inp.forward_contract),
-        )
-        .replace(
-            "{CAPACITY_BUDGET}",
-            _render_capacity_budget(inp.hardware_context, inp.vram_budget_gb),
-        )
+        + "\n\n"
+        + NATIVE_TRAINING_CONTRACT
     )
 
 
@@ -1220,7 +1225,11 @@ def _build_code_system_prompt(inp: ImplementorInput) -> str:
     output shape via ``load_task_config()``.
     """
     output_shape = inp.forward_contract.output_shape or "[B, C, T] float32"
-    return IMPLEMENTOR_CODE_PROMPT.replace("{OUTPUT_SHAPE}", output_shape)
+    return (
+        IMPLEMENTOR_CODE_PROMPT.replace("{OUTPUT_SHAPE}", output_shape)
+        + "\n\n"
+        + NATIVE_TRAINING_CONTRACT
+    )
 
 
 def _build_reasoning_prompt(inp: ImplementorInput) -> str:
