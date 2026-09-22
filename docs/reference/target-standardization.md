@@ -19,6 +19,9 @@ The base model predicts standardized values. The framework wraps its output as
 to both predictions and targets before calling the configured loss. Validation
 uses that same criterion. Final inference/scoring use the original task units.
 Do not also implement an inverse target transform in the generated plugin.
+Loss parameters expressed in target units, such as a Huber transition threshold,
+now refer to standardized units. This is an explicit change of objective scale,
+not merely a different checkpoint serialization.
 
 Fitting is a real extra data pass; input tensors may be read as part of the
 task dataset interface. It is included in the attempt's elapsed budget/setup,

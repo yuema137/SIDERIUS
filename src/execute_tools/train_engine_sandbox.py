@@ -1185,7 +1185,9 @@ def run_experiment(
             rows=_declared_len(data_loader.dataset),
             drop_last=train_cfg.drop_last,
         )
-        avg_loss = completed_epoch_loss(batch_losses, batch_rows, drop_last=train_cfg.drop_last)
+        avg_loss = completed_epoch_loss(
+            batch_losses, batch_rows, drop_last=train_cfg.drop_last, reduction=loss_cfg.reduction
+        )
         training_samples.append(sum(batch_rows))
         history.append(float(avg_loss))
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
@@ -1911,7 +1913,9 @@ def run_experiment_streaming(
             rows=epoch_rows,
             drop_last=train_cfg.drop_last,
         )
-        avg_loss = completed_epoch_loss(batch_losses, batch_rows, drop_last=train_cfg.drop_last)
+        avg_loss = completed_epoch_loss(
+            batch_losses, batch_rows, drop_last=train_cfg.drop_last, reduction=loss_cfg.reduction
+        )
         training_samples.append(sum(batch_rows))
         history.append(float(avg_loss))
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")

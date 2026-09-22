@@ -14,8 +14,10 @@ configurations at a one-row batch).
 
 Task-scope and legacy workload resolvers, step guardrails and time estimation
 use the same floor/ceiling rule as the actual DataLoader. A retained partial
-batch counts as an optimizer step. Epoch loss is weighted by actual batch row
-counts so a short tail is not overrepresented in the reported objective.
+batch counts as an optimizer step. With a mean-reduced criterion, epoch loss
+is weighted by actual batch row counts so a short tail is not overrepresented.
+With a sum-reduced criterion, the batch losses are summed without weighting
+them a second time. The compatibility default retains its historical reporting.
 Optimizer updates retain the configured criterion and learning rate.
 
 With tail retention enabled, `training_history.training_samples` records the
