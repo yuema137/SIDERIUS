@@ -1262,6 +1262,11 @@ class ResultInterpretationAgent:
     ) -> InterpretationOutput:
         """Run only the optional second stage; never alter primary interpretation."""
 
+        from nodes.result_interpretation_agent.analysis_brief import (
+            persist_or_resume_primary_interpretation,
+        )
+
+        output = persist_or_resume_primary_interpretation(inp, output)
         brief, receipt = generate_or_resume_analysis_brief(
             bridge=self.bridge,
             inp=inp,

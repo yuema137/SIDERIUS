@@ -317,3 +317,37 @@ def test_brief_receives_bound_access_policy_and_resume_rejects_changed_permissio
             )
         )
     assert len(bridge.calls) == 1
+
+
+def test_resume_reuses_primary_interpretation_when_llm_answer_changes(tmp_path) -> None:
+    class ChangingBridge(_HistoryBriefBridge):
+        primary_calls = 0
+
+        def generate(self, system, user, *, label, **kwargs):
+            if label == "interpretation.per_model":
+                self.primary_calls += 1
+                answer = super().generate(system, user, label=label, **kwargs)
+                if self.primary_calls == 2:
+                    answer["key_findings"] = ["A different stochastic finding."]
+                return answer
+            return super().generate(system, user, label=label, **kwargs)
+
+    inp = InterpretationInput(
+        summaries=[_SUMMARY],
+        metric_spec=shipped_spec(),
+        task_description="A synthetic regression task.",
+        analysis_brief_requested=True,
+        storage=_storage(tmp_path),
+    )
+    bridge = ChangingBridge(str(tmp_path))
+    agent = ResultInterpretationAgent(
+        provider="test-provider",
+        model_id="test-model",
+        bridge_factory=lambda **_kwargs: bridge,
+    )
+    first = agent.run(inp)
+    second = agent.run(inp)
+
+    assert bridge.primary_calls == 2
+    assert [call[0] for call in bridge.calls].count("interpretation.analysis_brief") == 1
+    assert second == first

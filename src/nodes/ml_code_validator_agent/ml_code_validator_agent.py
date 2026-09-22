@@ -14,7 +14,7 @@ Deterministic:
   5. Forbidden patterns: forward() contains no Python loops over the time
      dimension (T). Such loops cause RAM OOMs and CPU hangs at long T.
 
-In-process (no subprocess):
+Model probe (isolated for long temporal inputs):
   6. Instantiation: PLUGIN_CONFIG_CLASS(...) and PLUGIN_MODEL_CLASS(config) succeed;
      a dummy forward pass produces the shape the candidate's declared contract
      requires. Since Step 04a that shape is DERIVED from the task's normalized
@@ -429,6 +429,8 @@ _LEGACY_PROBE_TIME_STEPS: int = 64
 def _check_instantiation_and_gradient(
     model_file_path: str,
     model_io_contract: ModelIOContract | None = None,
+    *,
+    _isolated_worker: bool = False,
 ) -> tuple[bool, bool, bool, str | None, int | None, int | None]:
     """
     Load plugin, instantiate config + model, run a dummy forward + backward pass,
@@ -524,6 +526,25 @@ def _check_instantiation_and_gradient(
             **probe_config_kwargs(module.PLUGIN_CONFIG_CLASS, model_io_contract)
         )
         probe_extent = candidate_probe_extent(config, model_io_contract)
+    except Exception as e:
+        raise_if_code_package_failure(e)
+        return False, False, False, f"Model instantiation failed: {e}", None, None
+
+    # A task-declared long temporal probe can retain many full-size activation
+    # tensors during backward. Run generated code in a bounded child before
+    # constructing the model; an OOM must reject this candidate, not the chain.
+    if (
+        not _isolated_worker
+        and probe_extent is not None
+        and probe_extent >= 8192
+        and captured_plugin(model_file_path) is None
+        and os.path.isfile(model_file_path)
+    ):
+        from agent.skills.validator_probe_worker import run_bounded_probe
+
+        return run_bounded_probe(model_file_path, model_io_contract)
+
+    try:
         model = module.PLUGIN_MODEL_CLASS(config)
         model.train()
     except Exception as e:
@@ -706,7 +727,8 @@ class MLCodeValidatorAgent:
         else:
             forbid_ok, forbid_err = False, "Skipped — plugin file not found"
 
-        # 6 + 7 + (output-type). In-process instantiation + gradient + output type (only if plugin loaded)
+        # 6 + 7 + (output-type). Long temporal probes use a bounded child;
+        # small probes preserve the existing in-process path.
         if plugin_ok:
             (
                 inst_ok,
