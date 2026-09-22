@@ -1,7 +1,8 @@
 """Explicit cooperative training allocation, independent of admission authority.
 
 This policy does not monitor loss, choose checkpoints or kill processes. The
-caller observes complete train/validation epochs and retains its last weights.
+caller observes complete train/validation epochs; checkpoint selection belongs
+to the trainer and is reported separately from the stopping decision.
 """
 
 from __future__ import annotations
@@ -9,6 +10,8 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from core.checkpoint_selection import CheckpointSelection
 
 
 class TrainingBudgetEnvelope(BaseModel):
@@ -99,7 +102,7 @@ class TrainingBudgetReceipt(BaseModel):
     optimizer_steps: int = Field(ge=1)
     epoch_seconds_including_validation: list[float]
     stop: TrainingBudgetDecision
-    checkpoint_selection: Literal["last_completed_epoch"] = "last_completed_epoch"
+    checkpoint_selection: CheckpointSelection = "last_completed_epoch"
     scientific_early_stopping: Literal[False] = False
     reserve_source: Literal["operator_allowance"] = "operator_allowance"
     clock_scope: Literal["runtime_policy_resolution_through_training"] = (

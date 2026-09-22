@@ -196,3 +196,16 @@ is only a fallback when no length is declared, never a requirement that every
 model support length 64. Config, input and expected output use the same extent.
 Non-temporal contracts retain their own geometry. The check does not change
 training configuration or certify model quality.
+
+## Native training lifecycle boundary
+
+See [checkpoint selection](../../../docs/reference/checkpoint-selection.md) for
+`train_config.checkpoint_selection`, the unchanged default, fixed-validation
+requirements and exported-epoch receipts. Proposal, implementation and review
+prompts share the native training capability disclosure. It distinguishes
+uninitialized target transforms and unsupported lifecycle requests from
+executed interventions; trainability and specification alignment remain separate.
+
+The optional [scoped target standardization](../../../docs/reference/target-standardization.md)
+policy fits training-only statistics, exports original-unit predictions and
+persists a reconstruction-bound transform. It defaults to `none`.

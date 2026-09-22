@@ -105,6 +105,7 @@ def _run(
     sample_set: dict | None = None,
     runtime_session: RuntimeVerificationSession | None = None,
     seed: bool = True,
+    checkpoint_selection: str = "last_completed_epoch",
 ) -> dict:
     """One in-process streaming run on the fixture; fixed seeds by default."""
     if seed:
@@ -114,7 +115,12 @@ def _run(
         summary = tes.run_experiment_streaming(
             _tiny_model_cfg(fx.seg_size),
             TrainConfig(
-                lr=1e-3, epochs=epochs, batch_size=batch_size, optimizer_type="adam", device="cpu"
+                lr=1e-3,
+                epochs=epochs,
+                batch_size=batch_size,
+                optimizer_type="adam",
+                device="cpu",
+                checkpoint_selection=checkpoint_selection,
             ),
             loss_cfg or LossConfig(),
             sample_set=sample_set or fx.full_sample_set(),
@@ -136,6 +142,55 @@ def _saved_state(tmp_path, name: str) -> dict[str, torch.Tensor]:
 
 def _states_equal(a: dict[str, torch.Tensor], b: dict[str, torch.Tensor]) -> bool:
     return a.keys() == b.keys() and all(torch.equal(a[k], b[k]) for k in a)
+
+
+def test_best_validation_exports_earlier_weights_without_shortening_training(
+    two_family, tmp_path, monkeypatch
+):
+    from execute_tools.training_history import interpret_training_results
+
+    real_validation = tes.execute_validation_epoch
+    losses = iter([1.0, 2.0, 3.0])
+
+    def controlled_objective(*args, **kwargs):
+        _, rows, seconds = real_validation(*args, **kwargs)
+        return next(losses), rows, seconds
+
+    with monkeypatch.context() as patch:
+        patch.setattr(tes, "execute_validation_epoch", controlled_objective)
+        summary = _run(
+            two_family,
+            tmp_path,
+            name="best",
+            epochs=3,
+            eval_sample_set=two_family.full_sample_set(),
+            checkpoint_selection="best_validation_loss",
+        )
+    _run(two_family, tmp_path, name="first", epochs=1, eval_sample_set=two_family.full_sample_set())
+    assert len(summary["loss_history"]) == 3
+    assert summary["final_loss"] == summary["loss_history"][-1]
+    receipt = interpret_training_results(summary, expected_validation=True).selected_checkpoint
+    assert receipt is not None and receipt.epoch == 1 and receipt.validation_loss == 1.0
+    assert _states_equal(_saved_state(tmp_path, "best"), _saved_state(tmp_path, "first"))
+
+
+def test_best_validation_refuses_missing_scope_before_model_initialization(
+    two_family, tmp_path, monkeypatch
+):
+    def unexpected_model_lookup(*args, **kwargs):
+        raise AssertionError("must refuse before model construction")
+
+    monkeypatch.setattr(
+        tes, "MODEL_REGISTRY", type("NoModelAccess", (), {"get": unexpected_model_lookup})()
+    )
+    with pytest.raises(ValueError, match="requires an explicit fixed training-validation scope"):
+        _run(
+            two_family,
+            tmp_path,
+            name="missing",
+            eval_sample_set=None,
+            checkpoint_selection="best_validation_loss",
+        )
 
 
 class TestDeploymentValidationExecution:

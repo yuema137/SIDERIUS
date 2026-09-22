@@ -16,8 +16,8 @@ Authorities mirrored:
   (owner since D14-1; the engine re-exports the class and reaches it
   through the run-bound `TaskDataPath`)
   (per-file ``max(1, round(portion × len(scope_segments)))`` subsample)
-  + ``DataLoader(drop_last=True)`` (``total_samples // batch_size``
-  floor per epoch). This is the RT1 resolver, now colocated with the
+  + the configured DataLoader tail policy (floor per epoch by default,
+  ceiling when ``drop_last=False``). This is the RT1 resolver, colocated with the
   engine; `agent/skills/training_skill/estimator._total_train_steps`
   delegates here.
 - **Inference** — `inference_single.py` sample_set (trial) mode: per
@@ -39,6 +39,7 @@ from execute_tools.dataset_config import (
     DatasetProfile,
     tidmad_topology,
 )
+from execute_tools.training_batches import optimizer_steps_for_rows
 
 SampleSet = Mapping[str, Sequence[int]] | Mapping[int, Sequence[int]]
 
@@ -65,6 +66,7 @@ def resolve_training_workload(
     train_portion: float | None,
     epochs: int,
     max_samples: int | None = None,
+    drop_last: bool = True,
 ) -> ResolvedPhaseWorkload:
     """Optimizer-step workload, mirroring the trainer exactly (RT1).
 
@@ -72,7 +74,7 @@ def resolve_training_workload(
     when ``train_portion`` < 1.0 (else all) — the ``max(1, ·)`` floor
     means many-small-file scopes train far more than the naive global
     product. Per epoch: ``(n_psd_kept × ml_per_psd) // batch_size``
-    (``drop_last=True`` floor). ``n_keep`` is deterministic, so every
+    (default ``drop_last=True`` floor; false uses ceiling). ``n_keep`` is deterministic, so every
     epoch has the same step count.
 
     ``max_samples`` mirrors ``TIDMADEpochDataset``'s validation-posture
@@ -99,7 +101,7 @@ def resolve_training_workload(
     samples_per_epoch = n_psd_kept * ml_per_psd
     if max_samples is not None:
         samples_per_epoch = min(samples_per_epoch, max_samples)
-    steps_per_epoch = samples_per_epoch // batch_size
+    steps_per_epoch = optimizer_steps_for_rows(samples_per_epoch, batch_size, drop_last=drop_last)
     total_steps = steps_per_epoch * epochs
 
     return ResolvedPhaseWorkload(
@@ -130,6 +132,7 @@ def resolve_task_scope_training_workload(
     train_portion: float | None,
     epochs: int,
     max_samples: int | None = None,
+    drop_last: bool = True,
 ) -> ResolvedPhaseWorkload:
     """:func:`resolve_training_workload`'s TASK-NEUTRAL sibling (C12-P / B7).
 
@@ -153,7 +156,7 @@ def resolve_task_scope_training_workload(
         legacy   samples_per_epoch = n_psd_kept × ml_per_psd
         generic  samples_per_epoch = len(training_dataset(scope, params))
 
-        both     steps_per_epoch   = samples_per_epoch // batch_size
+        both     steps_per_epoch   = floor or ceil(samples_per_epoch / batch_size)
         both     total_steps       = steps_per_epoch × epochs
 
     ``train_portion`` and ``max_samples`` are NOT applied here. They travel
@@ -170,7 +173,8 @@ def resolve_task_scope_training_workload(
     Args:
         training_scope: the task's OPAQUE training scope for this attempt.
         data_dir: the run's resolved physical data root.
-        batch_size: the loader's batch size (``drop_last=True`` floor).
+        batch_size: the loader's batch size.
+        drop_last: floor if true (default), otherwise count the partial batch.
         train_portion: per-epoch subsample fraction, or ``None``.
         epochs: the epoch count the attempt will run.
         max_samples: the validation-envelope row ceiling, or ``None``.
@@ -215,7 +219,7 @@ def resolve_task_scope_training_workload(
         ),
     )
     samples_per_epoch = len(dataset)  # type: ignore[arg-type]
-    steps_per_epoch = samples_per_epoch // batch_size
+    steps_per_epoch = optimizer_steps_for_rows(samples_per_epoch, batch_size, drop_last=drop_last)
     total_steps = steps_per_epoch * epochs
 
     return ResolvedPhaseWorkload(
@@ -337,6 +341,7 @@ def resolve_formal_workloads(
     epochs: int,
     inference_batch_size: int,
     scoring_num_workers: int,
+    drop_last: bool = True,
 ) -> dict[RuntimePhase, ResolvedPhaseWorkload]:
     """Resolve the compute-phase workloads of one formal attempt.
 
@@ -353,6 +358,7 @@ def resolve_formal_workloads(
             batch_size=batch_size,
             train_portion=train_portion,
             epochs=epochs,
+            drop_last=drop_last,
         ),
         "inference": resolve_inference_workload(
             eval_sample_set,

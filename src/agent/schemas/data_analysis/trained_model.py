@@ -39,6 +39,9 @@ class ModelConstructionContract(FrozenModel):
     )
     loss_type: LossTypeName
     implementation_sha256: Sha256
+    target_standardization_implementation_sha256: Sha256 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class TaskInferenceBindingIdentity(FrozenModel):

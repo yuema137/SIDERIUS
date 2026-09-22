@@ -96,3 +96,10 @@ call shape production would reject.
 - `execute_tools/train_engine_sandbox.py` — the training subprocess
 - `skill_config.json` — the LLM-facing tool schema (legacy; the tuner
   calls `run_skill` directly rather than through tool-calling)
+
+## Partial training batches
+
+`train_config.drop_last` defaults to `true`. When false, training retains
+the final partial batch and step estimates use ceiling rather than floor.
+See [training batch policy](../../../../docs/reference/training-batches.md)
+for measured row-count receipts and model compatibility requirements.
