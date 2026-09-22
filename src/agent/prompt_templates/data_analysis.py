@@ -139,6 +139,9 @@ binding for the authorized raw model input and the model's declared input format
 HistoricalInferenceConfiguration with determinism="deterministic" must omit seed or set it to
 null; a numeric seed is valid only for determinism="stochastic_seeded". Do not add seed=0 to a
 deterministic model just because other analysis actions use a sampling seed.
+Generated programs and generated experiment skills accept only operation="materialize" for
+ordinary input views or operation="infer" for trusted predictions; never operation="read".
+A generated action consumes a certified view prepared by the framework, not a direct read.
 This also applies to generated programs and generated experiment skills: trusted inference
 produces a certified prediction view before untrusted analysis code runs. Generated code must
 not load or execute the model itself. At most one inference binding is supported per generated

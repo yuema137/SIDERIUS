@@ -227,9 +227,9 @@ class _PlanRepairingBridge(_Bridge):
     def generate(self, system, user, *, label):
         self.calls.append((label, user))
         self.system_prompts[label] = system
-        if label == "data_analysis.plan":
+        if label in {"data_analysis.plan", "data_analysis.plan.resolution_retry"}:
             return self._malformed_plan(system, user)
-        if label == "data_analysis.plan.repair":
+        if label in {"data_analysis.plan.repair", "data_analysis.plan.resolution_retry.repair"}:
             plan = self._malformed_plan(system, user)
             invocation = plan["invocations"][0]
             binding = invocation["bindings"][0]
@@ -1426,3 +1426,165 @@ def test_synthesis_grounding_retries_once_without_rerunning_skills(tmp_path, ret
     assert "invented_mean" in receipts[0]["errors"][0]
     assert bool(receipts[1]["errors"]) is (not retry_valid)
     assert receipts[0]["draft"]["findings"][0]["quantitative_result_ids"] == ["invented_mean"]
+
+
+class _GeneratedBindingRecoveryBridge(_GeneratedProgramBridge):
+    """Replay the September 22 generated read-binding failure without model calls."""
+
+    def __init__(self, *, retry_outcome="valid", **kwargs):
+        super().__init__(**kwargs)
+        self.retry_outcome = retry_outcome
+        self.last_plan = None
+        self.replan_prompts = []
+
+    def generate(self, system, user, *, label):
+        if label.endswith(".repair"):
+            self.calls.append(label)
+            plan = copy.deepcopy(self.last_plan)
+            plan["invocations"][0]["bindings"][0]["operation"] = "materialize"
+            return plan
+        payload = super().generate(system, user, label=label)
+        if label in {"data_analysis.plan", "data_analysis.plan.resolution_retry"}:
+            assert 'never operation="read"' in system
+            binding = payload["invocations"][0]["bindings"][0]
+            binding["operation"] = "materialize"
+            if label == "data_analysis.plan" or self.retry_outcome == "schema":
+                binding["operation"] = "read"
+            elif self.retry_outcome == "access":
+                binding["requested_information"] = [{"information_class": "target", "fields": []}]
+            if label == "data_analysis.plan.resolution_retry":
+                self.replan_prompts.append(user)
+                assert "generated actions require materialize or infer bindings" in user
+                assert "fresh planning attempt" in user
+            self.last_plan = copy.deepcopy(payload)
+        return payload
+
+
+@pytest.mark.allow_real_subprocess
+def test_generated_read_binding_replans_then_executes_and_resumes(tmp_path: Path) -> None:
+    """Fails if the 2026-09-22 schema-repair exception still bypasses planning recovery.
+
+    Real local sandbox execution and report reuse ensure the repaired path produces
+    usable evidence, rather than merely swallowing an exception or repeating work.
+    """
+    probe = AnalysisCodeSandbox().probe()
+    if not probe.available:
+        pytest.skip(f"host cannot enforce sandbox: {probe.reason}")
+    inp = _input(tmp_path)
+    bridge = _GeneratedBindingRecoveryBridge(analysis_input=inp)
+    capability = _RecordingCapability()
+    agent = DataAnalysisAgent(
+        task_analysis_capability=capability,
+        bridge_factory=lambda **kwargs: bridge,
+        provider="test",
+        model_id="fake",
+    )
+    report = agent.run(inp)
+    assert report.skill_result_summaries[0].status == "completed"
+    assert len(capability.requested_scopes) == 1
+    assert bridge.calls == [
+        "data_analysis.skill_selection",
+        "data_analysis.generated_program",
+        "data_analysis.plan",
+        "data_analysis.plan.repair",
+        "data_analysis.plan.resolution_retry",
+        "data_analysis.synthesis",
+    ]
+    root = tmp_path / "data_analysis" / "standalone" / "request"
+    receipts = [
+        json.loads(line)
+        for line in (root / "structured_output_receipts.jsonl").read_text().splitlines()
+    ]
+    rejected = next(r for r in receipts if r["stage"] == "data_analysis.plan")
+    assert rejected["repair_passed"] is False
+    assert rejected["initial_output"]["invocations"][0]["bindings"][0]["operation"] == "read"
+    assert (
+        rejected["repaired_output"]["invocations"][0]["bindings"][0]["operation"] == "materialize"
+    )
+    assert canonical_sha256(rejected["initial_output"]) == rejected["initial_payload_sha256"]
+    assert canonical_sha256(rejected["repaired_output"]) == rejected["repaired_payload_sha256"]
+    assert (
+        json.loads((root / "plan.json").read_text())["invocations"][0]["bindings"][0]["operation"]
+        == "materialize"
+    )
+    calls = list(bridge.calls)
+    assert agent.run(inp) == report
+    assert bridge.calls == calls
+    assert len(capability.requested_scopes) == 1
+
+
+@pytest.mark.allow_real_subprocess
+@pytest.mark.parametrize("retry_outcome", ["schema", "access"])
+def test_generated_plan_recovery_exhausts_one_shared_retry_before_access(
+    tmp_path: Path,
+    retry_outcome: str,
+) -> None:
+    """Fails if retries multiply across error classes or admit an unauthorized target.
+
+    Both repeated malformed plans and a schema-valid but unauthorized replan must
+    stop before the task materializer runs; no fabricated success report is allowed.
+    """
+    inp = _input(tmp_path)
+    bridge = _GeneratedBindingRecoveryBridge(analysis_input=inp, retry_outcome=retry_outcome)
+    capability = _RecordingCapability()
+    agent = DataAnalysisAgent(
+        task_analysis_capability=capability,
+        bridge_factory=lambda **kwargs: bridge,
+        provider="test",
+        model_id="fake",
+    )
+    expected = (
+        DataAnalysisStructuredOutputError
+        if retry_outcome == "schema"
+        else AnalysisPlanResolutionError
+    )
+    with pytest.raises(expected):
+        agent.run(inp)
+    assert bridge.calls.count("data_analysis.plan.resolution_retry") == 1
+    assert bridge.calls.count("data_analysis.plan.resolution_retry.repair") == (
+        retry_outcome == "schema"
+    )
+    assert not capability.requested_scopes
+    root = tmp_path / "data_analysis" / "standalone" / "request"
+    assert not (root / "plan.json").exists()
+    assert not (root / "report.json").exists()
+    assert json.loads((root / "budget_receipt.json").read_text())["status"] == "failed"
+
+
+@pytest.mark.allow_real_subprocess
+@pytest.mark.parametrize("failure_kind", ["deadline", "persistence", "provider"])
+def test_plan_recovery_does_not_reclassify_nonplanning_failures(tmp_path, failure_kind):
+    """Fails if a broad recovery catch retries transport/storage failures or resets a deadline."""
+    from core.execution_deadline import ExecutionDeadlineExceeded
+
+    failures = {
+        "deadline": ExecutionDeadlineExceeded("original allocation exhausted"),
+        "persistence": AnalysisPersistenceError("receipt publication failed"),
+        "provider": ConnectionError("provider connection failed"),
+    }
+    failure = failures[failure_kind]
+
+    class FailingBridge(_Bridge):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.calls = []
+
+        def generate(self, system, user, *, label):
+            self.calls.append(label)
+            if label == "data_analysis.plan":
+                raise failure
+            return super().generate(system, user, label=label)
+
+    inp = _input(tmp_path)
+    bridge = FailingBridge(analysis_input=inp)
+    capability = _RecordingCapability()
+    with pytest.raises(type(failure)) as caught:
+        DataAnalysisAgent(
+            task_analysis_capability=capability,
+            bridge_factory=lambda **kwargs: bridge,
+            provider="test",
+            model_id="fake",
+        ).run(inp)
+    assert caught.value is failure
+    assert bridge.calls == ["data_analysis.skill_selection", "data_analysis.plan"]
+    assert not capability.requested_scopes

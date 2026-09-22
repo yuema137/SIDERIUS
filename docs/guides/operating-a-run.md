@@ -228,3 +228,15 @@ calibration registry unchanged as milliseconds per sample. They are not relabele
 or numerically converted to milliseconds per batch. Unknown units and units
 incompatible with the phase remain quarantined; existing identity, eligibility
 and unit-bucket separation continue to apply.
+
+## Data Analysis planning failures
+
+Before analysis accesses data, an invalid plan gets one complete replanning
+attempt after its bounded schema repair or binding resolution fails. The attempt
+shares the original deadline and data-access policy; it does not regenerate the
+prepared analysis program or disable the configured analysis treatment. Repeated
+planning failure still stops honestly. See the
+[Data Analysis contract](../../src/nodes/data_analysis_agent/data_analysis_agent.md#key-behavioral-notes)
+for exact limits. Inspect the node's `structured_output_receipts.jsonl` for the
+initial/repaired rejected drafts, hashes, and validation errors; only `plan.json`
+is an admitted executable plan. Preserve those receipts before cleaning a failed run.

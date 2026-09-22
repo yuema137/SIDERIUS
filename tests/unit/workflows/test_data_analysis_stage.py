@@ -349,3 +349,80 @@ def test_inline_lock_reaches_same_standalone_input_contract(tmp_path) -> None:
     assert output.report.input_digest == canonical_sha256(expected)
     assert capability.seen_lock == expected.source_scope
     assert output.report.source_scope == expected.source_scope
+
+
+@pytest.mark.allow_real_subprocess
+def test_rejected_analysis_plan_recovers_through_workflow_proposer_handoff(tmp_path: Path) -> None:
+    """Catches recovery working standalone but failing the fixed-workflow evidence edge.
+
+    Two iteration-scoped stages execute real tiny CPU analysis; only the first
+    has the production read-binding error. No training or external model is used.
+    """
+    from agent.data_analysis.analysis_code_sandbox import AnalysisCodeSandbox
+    from tests.unit.nodes.test_data_analysis_agent import (
+        _GeneratedBindingRecoveryBridge,
+        _GeneratedProgramBridge,
+    )
+
+    probe = AnalysisCodeSandbox().probe()
+    if not probe.available:
+        pytest.skip(f"host cannot enforce sandbox: {probe.reason}")
+    template = _input(tmp_path)
+    interpretation = _interpretation(template.analysis_brief)
+    binding = ResolvedWorkflowDataAnalysis(
+        task_context=template.task_context,
+        available_assets=template.available_assets,
+        declared_scope=template.declared_scope,
+        access_policy=template.access_policy,
+        resource_envelope=template.resource_envelope,
+        allowed_skill_packs=template.allowed_skill_packs,
+        task_analysis_capability=_Capability(),
+        report_schema_version=1,
+        config_content_sha256="7" * 64,
+        config_path=str(tmp_path / "analysis-policy.json"),
+    )
+    report_refs = []
+    for iteration in (1, 2):
+        expected = local_analysis_input(
+            interpretation,
+            request_id=f"iteration-{iteration:03d}",
+            task_context=binding.task_context,
+            available_assets=binding.available_assets,
+            declared_scope=binding.declared_scope,
+            access_policy=binding.access_policy,
+            resource_envelope=binding.resource_envelope,
+            allowed_skill_packs=binding.allowed_skill_packs,
+            storage=template.storage,
+            caller=CallerIdentity(
+                caller_id="workflow-run",
+                caller_type="workflow",
+                request_source=f"iteration:{iteration}",
+            ),
+            human_advice=None,
+        )
+        bridge_class = (
+            _GeneratedBindingRecoveryBridge if iteration == 1 else _GeneratedProgramBridge
+        )
+        bridge = bridge_class(analysis_input=expected)
+        output = run_optional_data_analysis(
+            interpretation,
+            binding=binding,
+            iteration=iteration,
+            run_name="workflow-run",
+            storage=template.storage,
+            human_advice=None,
+            llm_kwargs={"provider": "test", "model_id": "fake"},
+            bridge_factory=lambda bridge=bridge, **kwargs: bridge,
+        )
+        assert output is not None
+        assert output.report.skill_result_summaries[0].status == "completed"
+        proposal = attach_analysis_to_proposer(
+            local_full_context(interpretation, template.storage), output
+        )
+        assert (
+            proposal.data_analysis_evidence.findings[0].statement
+            == "The mean absolute successive difference is 1.0."
+        )
+        assert bridge.calls.count("data_analysis.plan.resolution_retry") == (iteration == 1)
+        report_refs.append(output.report_ref.logical_ref)
+    assert report_refs[0] != report_refs[1]

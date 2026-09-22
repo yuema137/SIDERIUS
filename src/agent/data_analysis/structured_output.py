@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, JsonValue, ValidationError
 
 from agent.data_analysis.persistence import AnalysisRunStore
 from agent.prompt_templates.data_analysis import render_structured_output_repair_prompt
@@ -13,7 +13,11 @@ from core.execution_deadline import remaining_seconds
 
 
 class DataAnalysisStructuredOutputError(RuntimeError):
-    """One bounded representation repair could not satisfy a typed LLM boundary."""
+    """One representation repair failed; callers may explicitly replan within budget."""
+
+    def __init__(self, message: str, *, planning_feedback: str = "") -> None:
+        super().__init__(message)
+        self.planning_feedback = planning_feedback
 
 
 class _StructuredOutputValidationIssue(FrozenModel):
@@ -32,6 +36,9 @@ class _StructuredOutputReceipt(FrozenModel):
     llm_call_count: int = Field(ge=1, le=2)
     initial_payload_sha256: NonEmptyStr
     repaired_payload_sha256: NonEmptyStr | None = None
+    # Diagnostic data only: never use these unvalidated drafts for execution.
+    initial_output: JsonValue = None
+    repaired_output: JsonValue = None
 
 
 def _validation_issues(exc: ValidationError) -> tuple[_StructuredOutputValidationIssue, ...]:
@@ -66,6 +73,7 @@ def generate_validated[ValidatedModelT: BaseModel](
     except ValidationError as initial_error:
         issues = _validation_issues(initial_error)
         original_semantics = semantic_projection(raw)
+        feedback = "\n".join(f"{issue.path}: {issue.message}" for issue in issues)
         if original_semantics is None:
             store.append_structured_output_receipt(
                 _StructuredOutputReceipt(
@@ -75,10 +83,12 @@ def generate_validated[ValidatedModelT: BaseModel](
                     validation_errors=issues,
                     llm_call_count=1,
                     initial_payload_sha256=initial_digest,
+                    initial_output=raw,
                 )
             )
             raise DataAnalysisStructuredOutputError(
-                f"{label} output is invalid and its semantic decision is ambiguous"
+                f"{label} output is invalid and its semantic decision is ambiguous",
+                planning_feedback=feedback,
             ) from initial_error
 
         repair_system, repair_user = render_structured_output_repair_prompt(
@@ -104,11 +114,16 @@ def generate_validated[ValidatedModelT: BaseModel](
                     repair_validation_errors=repair_issues,
                     llm_call_count=2,
                     initial_payload_sha256=initial_digest,
+                    initial_output=raw,
                     repaired_payload_sha256=repaired_digest,
+                    repaired_output=repaired,
                 )
             )
             raise DataAnalysisStructuredOutputError(
-                f"{label} output remained invalid after one bounded repair"
+                f"{label} output remained invalid after one bounded repair",
+                planning_feedback=feedback
+                + "\n"
+                + "\n".join(f"{issue.path}: {issue.message}" for issue in repair_issues),
             ) from repair_error
 
         if semantic_projection(repaired) != original_semantics:
@@ -127,11 +142,14 @@ def generate_validated[ValidatedModelT: BaseModel](
                     repair_validation_errors=(semantic_issue,),
                     llm_call_count=2,
                     initial_payload_sha256=initial_digest,
+                    initial_output=raw,
                     repaired_payload_sha256=repaired_digest,
+                    repaired_output=repaired,
                 )
             )
             raise DataAnalysisStructuredOutputError(
-                f"{label} repair changed the recoverable semantic decision"
+                f"{label} repair changed the recoverable semantic decision",
+                planning_feedback=feedback,
             ) from None
 
         store.append_structured_output_receipt(
