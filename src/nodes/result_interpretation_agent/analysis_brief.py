@@ -48,6 +48,12 @@ class _AnalysisBriefGenerationRecord(FrozenModel):
                 raise ValueError("persisted brief digest does not match its receipt")
 
 
+class _PrimaryInterpretationRecord(FrozenModel):
+    input_sha256: str
+    output_sha256: str
+    output: InterpretationOutput
+
+
 class AnalysisBriefResumeMismatchError(ValueError):
     """A persisted brief belongs to a different semantic generation request."""
 
@@ -129,6 +135,50 @@ def _record_path(inp: InterpretationInput) -> Path | None:
     return Path(inp.storage.local.workspace) / (
         f"analysis_brief_generation_{inp.storage.local.run_name}.json"
     )
+
+
+def _primary_record_path(inp: InterpretationInput) -> Path | None:
+    if inp.storage.backend != "local" or inp.storage.local is None:
+        return None
+    return Path(inp.storage.local.workspace) / (
+        f"interpretation_primary_{inp.storage.local.run_name}.json"
+    )
+
+
+def persist_or_resume_primary_interpretation(
+    inp: InterpretationInput,
+    interpretation: InterpretationOutput,
+) -> InterpretationOutput:
+    """Reuse the exact primary interpretation behind a persisted brief.
+
+    Primary interpretation is LLM-generated and need not be byte-identical on
+    retry. Persist it before the optional brief so a process crash after brief
+    generation cannot change that brief's request fingerprint on resume.
+    """
+    path = _primary_record_path(inp)
+    if path is None:
+        return interpretation
+    input_digest = canonical_sha256(inp.model_dump(mode="json"))
+    if path.exists():
+        record = _PrimaryInterpretationRecord.model_validate_json(path.read_bytes())
+        if record.input_sha256 != input_digest:
+            raise AnalysisBriefResumeMismatchError(
+                "persisted primary interpretation belongs to a different input"
+            )
+        primary = record.output
+        if record.output_sha256 != canonical_sha256(primary):
+            raise AnalysisBriefResumeMismatchError(
+                "persisted primary interpretation digest is invalid"
+            )
+        return primary
+    record = _PrimaryInterpretationRecord(
+        input_sha256=input_digest,
+        output_sha256=canonical_sha256(interpretation),
+        output=interpretation,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    publish_bytes_write_once(str(path), canonical_json_bytes(record))
+    return interpretation
 
 
 def _load_record(path: Path) -> _AnalysisBriefGenerationRecord:

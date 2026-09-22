@@ -668,6 +668,8 @@ prompt digest, so resuming a brief under different permissions is refused.
 
 `analysis_resource_envelope` carries the same caller-bound whole-node budget and resource limits to question prioritization. It does not authorize execution or ask the interpreter to select skills. Unset context is omitted; changed resources participate in brief prompt/resume identity.
 
+Before generating an optional AnalysisBrief, the interpreter persists its primary interpretation with the input digest. A retry with the same input reuses that primary output, so a new LLM wording cannot invalidate the already persisted brief. A changed input or damaged primary receipt fails closed.
+
 ### Prediction reference provenance
 
 Proposal-time comparisons consume only the framework-stamped

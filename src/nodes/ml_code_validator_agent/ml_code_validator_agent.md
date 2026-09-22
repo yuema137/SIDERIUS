@@ -1,6 +1,6 @@
 # MLCodeValidatorAgent
 
-> 8 deterministic checks + 1 LLM code-review + 1 conditional inheritance check for agent-generated PyTorch model plugins. Combines deterministic checks (plugin loads, tests pass, description valid, scalar-only config, forbidden-pattern AST scan, in-process instantiation + gradient flow + output-type) with one LLM code-review call (spec alignment + trainability + implementation issues). Decides whether the implementor's output is ready for the downstream tuner.
+> 8 deterministic checks + 1 LLM code-review + 1 conditional inheritance check for agent-generated PyTorch model plugins. Combines deterministic checks (plugin loads, tests pass, description valid, scalar-only config, forbidden-pattern AST scan, instantiation + gradient flow + output-type) with one LLM code-review call (spec alignment + trainability + implementation issues). Long temporal probes run in a bounded child process so an excessive candidate allocation cannot terminate the workflow.
 
 ## Position in the pipeline
 
@@ -40,14 +40,14 @@
 
 | Field | Type | Description |
 |---|---|---|
-| `passed` | `bool` | **Trainability gate.** `True` only if the model will run and train: plugin loads + tests pass + description valid + config fields scalar + forbidden-patterns clean + in-process instantiation succeeds + gradient flow OK + LLM review's `passed=True`. `inheritance_check_passed` is NOT in this gate (regex checks are too brittle to block a model that otherwise trains; surfaced as a deviation note instead). |
+| `passed` | `bool` | **Trainability gate.** `True` only if the model will run and train: plugin loads + tests pass + description valid + config fields scalar + forbidden-patterns clean + instantiation succeeds + gradient flow OK + LLM review's `passed=True`. `inheritance_check_passed` is NOT in this gate (regex checks are too brittle to block a model that otherwise trains; surfaced as a deviation note instead). |
 | `model_type` | `str` | The model type key that was validated (passthrough). |
 | `plugin_registered` | `bool` | Whether the plugin file loaded and exposes `PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`. |
 | `tests_passed` | `bool` | Whether all pytest tests in the generated test file passed. |
 | `description_valid` | `bool` | Whether `description.md` exists and contains substantive content (>50 chars). |
 | `config_fields_valid` | `bool` | Whether all config fields are scalar types (`int`, `float`, `bool`). |
 | `forbidden_patterns_check_passed` | `bool` | Whether the plugin source is free of Python loops over the time dimension inside `forward(...)`. AST-based static check — runs even when the plugin failed to import. `False` blocks the trainability gate. |
-| `instantiation_passed` | `bool` | Whether the model could be instantiated in-process and the forward pass produced the shape its DECLARED contract requires. Since Step 04a that shape is derived from `ValidatorInput.model_io_contract` (`[1, 256, 64]` under the shipped TIDMAD declaration); with no contract the legacy geometry is used unchanged. |
+| `instantiation_passed` | `bool` | Whether the model could be instantiated and the forward pass produced the shape its DECLARED contract requires. Since Step 04a that shape is derived from `ValidatorInput.model_io_contract`; with no contract the legacy geometry is used unchanged. A probe with at least 8,192 temporal samples runs in a separate worker with a host-memory bound. |
 | `gradient_check_passed` | `bool` | Whether a backward pass succeeded and all trainable parameters received non-`None` gradients. |
 | `output_type_valid` | `bool` | Whether `PLUGIN_OUTPUT_TYPE` matches the actual forward output dimensions. The plugin's own declaration selects the FORM and the contract supplies the facts inside it: under the shipped declaration `"classifier"` expects `[B, 256, T]` and `"regressor"` expects `[B, T]`; under a task declaring 16 classes the classifier form becomes `[B, 16, T]`. A `"classifier"` declaration under a task with no class alphabet fails closed rather than guessing a cardinality. |
 | `llm_review_passed` | `bool` | Whether the LLM code review concluded the implementation is sound (trainability-only — spec alignment is assessed independently). |
@@ -180,7 +180,7 @@ a failure diagnostic. Pytest retains its ordinary filesystem side effects.
 
 - **LLM**: exactly one call site per run, via `LLMBridge.generate()` (returns a parsed dict; validated into `LLMCodeReview`):
   - **Code review** — one `bridge.generate(VALIDATOR_REVIEW_SYSTEM_PROMPT, ...)` call per run. System prompt is the module-level `VALIDATOR_REVIEW_SYSTEM_PROMPT` constant. Uses `inp.llm_provider` / `inp.llm_model_id` (note: the constructor's `provider` / `model_id` set up `self.bridge`, which is what actually fires — keep input fields aligned with the constructor args).
-- **GPU**: not required. The in-process instantiation + gradient check (#6 + #7) run on CPU with a tiny `[1, 64]` dummy input.
+- **GPU**: not required. Instantiation + gradient checks (#6 + #7) run on CPU. The temporal probe length follows the validated candidate configuration. Inputs of at least 8,192 samples run in a bounded child; smaller inputs use the existing in-process path. The worker receives at most 32 GiB of additional address space, or one quarter of physical host memory when lower, after importing Torch. Exceeding that bound produces a failed candidate verdict rather than killing the workflow.
 - **External services**: none. The pytest subprocess in check #2 is a local subprocess, not an external service. Filesystem dependencies: reads the plugin/test/description file paths it was handed, reads `agent/schemas/vocab_seed.json` for the inheritance check, writes `validation_{run_name}.json` under the workspace.
 
 
