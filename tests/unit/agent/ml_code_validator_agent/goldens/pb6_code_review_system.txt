@@ -71,7 +71,15 @@ naming a model or buffer after a training intervention does not implement it.
   A proposed scheduler
   or independent ensemble-member training procedure needs an actual supported
   execution path; describing one does not make it run.
-- Target statistics are not automatically injected into model buffers. If a
+- `train_config.target_standardization="training_pool_global"` enables a
+  framework affine transform for continuous regression: fit one global mean
+  and population standard deviation from the authorized training pool, compare
+  predictions and targets in standardized units, and export physical-unit
+  predictions. With this policy the base model must predict standardized values;
+  do not add a second inverse transform inside the plugin. Statistics are stored
+  in the checkpoint; final evaluation labels are never used to fit them.
+- With the default `target_standardization="none"`, target statistics are not
+  automatically injected into model buffers. If a
   proposal requires target normalization, identify where the statistics come
   from, how they are initialized from the authorized training scope, and how
   output and loss units remain consistent with the task contract. Zero/one

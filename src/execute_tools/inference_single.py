@@ -55,6 +55,7 @@ from ml_models.models_format_sandbox import LossConfig, get_config_class
 # Import your sandboxed components for Agent Mode
 from ml_models.models_sandbox import MODEL_REGISTRY
 from ml_models.plugin_loader import UnknownOutputContractError, get_output_type
+from ml_models.target_standardization import load_trained_state
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -784,7 +785,7 @@ def main():
         # `load_state_dict` keeps `strict=True`, so a mismatched or
         # malicious checkpoint fails exactly as it did before.
         state_dict = torch.load(args.model_path, map_location="cpu")
-        model.load_state_dict(state_dict)
+        model = load_trained_state(model, state_dict)
         del state_dict
 
         # The one step the pre-phase worker has no equivalent for — it

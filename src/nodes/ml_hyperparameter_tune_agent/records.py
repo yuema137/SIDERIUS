@@ -37,6 +37,7 @@ from core.run_invariants import (
 )
 from core.runtime_control.failure_attribution import may_recommend_resource_reduction
 from core.scientific_authority import ScientificAuthority
+from core.target_standardization import TargetStandardization
 from execute_tools.deliverable_spec import (
     DeliverableNaming,
     default_deliverable_naming,
@@ -353,6 +354,7 @@ def _interpret_training_status(
     *,
     expected_validation: bool,
     expected_checkpoint_selection: CheckpointSelection | None = None,
+    expected_target_standardization: TargetStandardization | None = None,
 ) -> tuple[dict, TrainingResults]:
     """Step 07a — the tuner's typed training-results boundary (design §3.4a, §3.5).
 
@@ -388,6 +390,7 @@ def _interpret_training_status(
             train_status.get("results", {}),
             expected_validation=expected_validation,
             expected_checkpoint_selection=expected_checkpoint_selection,
+            expected_target_standardization=expected_target_standardization,
         )
     except TrainingResultsContractError as exc:
         rewritten = {
@@ -1746,3 +1749,5 @@ def _attach_completed_execution_evidence(
         record["training_budget"] = training_results.training_budget.model_dump()
     if training_results.selected_checkpoint is not None:
         record["selected_checkpoint"] = training_results.selected_checkpoint.model_dump()
+    if training_results.target_standardization is not None:
+        record["target_standardization"] = training_results.target_standardization.model_dump()

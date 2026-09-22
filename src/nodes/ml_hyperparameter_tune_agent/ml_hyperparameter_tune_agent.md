@@ -1948,3 +1948,7 @@ requirements and exported-epoch receipts. Proposal, implementation and review
 prompts share the native training capability disclosure. It distinguishes
 uninitialized target transforms and unsupported lifecycle requests from
 executed interventions; trainability and specification alignment remain separate.
+
+The optional [scoped target standardization](../../../docs/reference/target-standardization.md)
+policy fits training-only statistics, exports original-unit predictions and
+persists a reconstruction-bound transform. It defaults to `none`.

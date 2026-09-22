@@ -162,6 +162,7 @@ def _artifact(
     loss_type: LossTypeName = "smooth_l1",
     construction_sha256: str | None = None,
     dataset_profile_sha256: str = "2" * 64,
+    target_standardization_sha256: str | None = None,
 ) -> TrainedModelArtifact:
     model_io = ModelIOContract(
         input=_tensor_contract(2),
@@ -185,6 +186,7 @@ def _artifact(
         implementation_sha256=(
             construction_sha256 or registered_model_construction_implementation_sha256()
         ),
+        target_standardization_implementation_sha256=target_standardization_sha256,
     )
     task_binding = TaskInferenceBindingIdentity(
         task_data_path_id="synthetic-source",
@@ -433,7 +435,7 @@ def _request(
     )
 
 
-def _fixture(tmp_path: Path, *, sleep_seconds: float = 0.0):
+def _fixture(tmp_path: Path, *, sleep_seconds: float = 0.0, standardized: bool = False):
     plugin = tmp_path / "synthetic_model.py"
     _write_plugin(plugin, sleep_seconds=sleep_seconds)
     config = tmp_path / "model_config.json"
@@ -457,10 +459,28 @@ def _fixture(tmp_path: Path, *, sleep_seconds: float = 0.0):
             information__data=np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
         )
     checkpoint_ref = _ref(checkpoint)
+    transform_sha = None
+    if standardized:
+        from ml_models.target_standardization import target_standardization_implementation_sha256
+
+        state = torch.load(checkpoint, weights_only=True)
+        state = {"base_model." + key: value for key, value in state.items()}
+        state.update(
+            {
+                "_siderius_target_standardization_version": torch.tensor(1, dtype=torch.int64),
+                "target_mean": torch.tensor(10.0, dtype=torch.float64),
+                "target_scale": torch.tensor(2.0, dtype=torch.float64),
+            }
+        )
+        torch.save(state, checkpoint)
+        checkpoint_ref = _ref(checkpoint)
+        transform_sha = target_standardization_implementation_sha256()
     config_ref = _ref(config)
     plugin_ref = _ref(plugin)
     input_ref = _ref(model_input, media_type="application/x-npz")
-    artifact = _artifact(checkpoint_ref, config_ref, plugin_ref)
+    artifact = _artifact(
+        checkpoint_ref, config_ref, plugin_ref, target_standardization_sha256=transform_sha
+    )
     artifact_document = tmp_path / "trained_model_artifact.json"
     artifact_document.write_bytes(canonical_json_bytes(artifact))
     artifact_ref = _ref(artifact_document)
@@ -476,6 +496,16 @@ def _fixture(tmp_path: Path, *, sleep_seconds: float = 0.0):
         paths=(HistoricalInferenceInputPath(binding_id="model-input", path=str(model_input)),)
     )
     return capability, request, runtime_inputs, resolver
+
+
+def test_certified_worker_restores_original_units_without_training_dataset(tmp_path):
+    capability, request, runtime_inputs, _ = _fixture(tmp_path, standardized=True)
+    result = capability.run_historical_inference(request, runtime_inputs)
+    assert result.receipt.status == "completed"
+    exported = tmp_path / "standardized_prediction.npz"
+    capability.export_historical_prediction(result.view.content_ref, exported)
+    with np.load(exported, allow_pickle=False) as archive:
+        np.testing.assert_allclose(archive["information__prediction"], [[11.0], [15.0]])
 
 
 def test_bounded_worker_reconstructs_exact_model_and_executor_certifies_predictions(

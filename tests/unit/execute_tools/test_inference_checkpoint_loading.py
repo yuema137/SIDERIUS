@@ -128,8 +128,8 @@ class TestTheCheckpointIsReadOnTheHost:
             node.lineno
             for node in ast.walk(main)
             if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "load_state_dict"
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "load_trained_state"
         )
         assert transfer < load
 
@@ -159,17 +159,10 @@ class TestStrictnessIsUnchanged:
                 )
 
     def test_load_state_dict_stays_strict(self):
-        for node in ast.walk(_main_function()):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "load_state_dict"
-            ):
-                for kw in node.keywords:
-                    assert kw.arg != "strict", (
-                        "strict=True is the default and the safety property; a "
-                        "mismatched checkpoint must keep failing"
-                    )
+        from ml_models.target_standardization import load_trained_state
+
+        with pytest.raises(RuntimeError, match="Missing key"):
+            load_trained_state(torch.nn.Linear(2, 1), {"weight": torch.zeros(1, 2)})
 
 
 def _tiny_model() -> torch.nn.Module:

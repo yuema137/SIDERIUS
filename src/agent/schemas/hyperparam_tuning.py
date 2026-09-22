@@ -44,6 +44,7 @@ from core.runtime_control.measurement_capability import ResolvedMeasurementCapab
 from core.runtime_control.records import RuntimeObservation
 from core.runtime_control.training_budget import TrainingBudgetReceipt
 from core.runtime_control.validation_limits import validate_phase_deadline
+from core.target_standardization import TargetStandardizationReceipt
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_execution import CandidateEvaluationResult
 from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
@@ -585,6 +586,9 @@ class ExperimentRecord(BaseModel):
         default=None, exclude_if=lambda v: v is None
     )
     selected_checkpoint: SelectedCheckpoint | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    target_standardization: TargetStandardizationReceipt | None = Field(
         default=None, exclude_if=lambda v: v is None
     )
     runtime_verification: RuntimeObservation | None = Field(

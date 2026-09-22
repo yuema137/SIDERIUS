@@ -59,6 +59,9 @@ class TrainingArtifactCandidate(FrozenModel):
     effective_loss_type: LossTypeName
     training_scope_path: str | None = None
     training_scope_sha256: Sha256 | None = None
+    target_standardization_implementation_sha256: Sha256 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_scope_pair(self) -> TrainingArtifactCandidate:
@@ -210,6 +213,7 @@ def emit_trained_model_artifact(
     construction = ModelConstructionContract(
         loss_type=candidate.effective_loss_type,
         implementation_sha256=registered_model_construction_implementation_sha256(),
+        target_standardization_implementation_sha256=candidate.target_standardization_implementation_sha256,
     )
     task_binding = TaskInferenceBindingIdentity(
         task_data_path_id=context.task_data_path_id,

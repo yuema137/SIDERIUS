@@ -28,6 +28,7 @@ from core.runtime_control.provenance import capture_storage_provenance
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.workload import ResolvedPhaseWorkload
 from core.sandbox_layout import training_checkpoint_path
+from core.target_standardization import TargetStandardizationReceipt
 from execute_tools.checkpoint_selection import CheckpointSelector
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 from execute_tools.dataset_config import (
@@ -47,6 +48,7 @@ from execute_tools.observables import (
     child_observables_binding,
 )
 from execute_tools.scope_artifact import load_transported_scope
+from execute_tools.target_standardization import prepare_training_target_standardization
 
 # D14-1 C2b/C3: TIDMADEpochDataset's owner is now execute_tools/tidmad_data_path.py
 # (moved verbatim) and ValidationScopeError's is execute_tools/task_data_path.py.
@@ -96,6 +98,8 @@ from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_
 
 # Import your sandboxed components
 from ml_models.models_sandbox import MODEL_REGISTRY
+from ml_models.plugin_loader import get_output_type
+from ml_models.target_standardization import target_standardization_implementation_sha256
 
 
 def _write_training_artifact_candidate(
@@ -106,6 +110,7 @@ def _write_training_artifact_candidate(
     model_io: ModelIOContract | None,
     sandbox_dirs: dict[str, str],
     result_directory: str,
+    target_standardization_enabled: bool = False,
 ) -> None:
     """Record exact reconstruction inputs when this task declares inference.
 
@@ -149,6 +154,11 @@ def _write_training_artifact_candidate(
         effective_loss_type=loss_cfg.loss_type,
         training_scope_path=args.task_scope_ref,
         training_scope_sha256=args.task_scope_digest,
+        target_standardization_implementation_sha256=(
+            target_standardization_implementation_sha256()
+            if target_standardization_enabled
+            else None
+        ),
     )
     sidecar = str(training_artifact_candidate_path(result_directory, args.exp_id))
     publish_json_atomically(sidecar, candidate.model_dump(mode="json"))
@@ -975,6 +985,7 @@ def _build_training_history(
     validation_seconds: list[float] | None,
     validation_requested_samples_before_limit: int | None = None,
     observations: dict[str, list[float]] | None = None,
+    target_standardization: TargetStandardizationReceipt | None = None,
 ) -> TrainingHistory:
     """Assemble the additive ``training_history`` payload (design §3.5).
 
@@ -1002,7 +1013,9 @@ def _build_training_history(
     }
     return TrainingHistory(
         objective_kind=loss_cfg.loss_type,
-        objective_config_fingerprint=objective_config_fingerprint(loss_cfg),
+        objective_config_fingerprint=objective_config_fingerprint(
+            loss_cfg, target_standardization=target_standardization
+        ),
         objective_reduction=loss_cfg.reduction,
         comparability=comparability,
         comparability_reason=reason,
@@ -1084,6 +1097,8 @@ def run_experiment(
     expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
 ):
     CheckpointSelector(train_cfg.checkpoint_selection, has_validation=False)
+    if train_cfg.target_standardization != "none":
+        raise ValueError("target standardization requires the task-owned scoped training engine")
     device = torch.device(train_cfg.device if torch.cuda.is_available() else "cpu")
 
     # Model Initialization
@@ -1389,6 +1404,13 @@ def run_experiment_streaming(
     checkpoint_selector = CheckpointSelector(
         train_cfg.checkpoint_selection, has_validation=task_eval_scope is not None
     )
+    if train_cfg.target_standardization != "none" and (
+        get_output_type(model_cfg.model_type) not in {"regressor", "hybrid"}
+        or not get_target_torch_dtype(loss_cfg).is_floating_point
+    ):
+        raise ValueError(
+            "target standardization requires a regressor with continuous floating targets"
+        )
     budget_execution = (
         TrainingBudgetExecution(
             runtime_session.policy.training_budget, proposed_epochs=train_cfg.epochs
@@ -1454,6 +1476,23 @@ def run_experiment_streaming(
     # complete, real training execution.
     max_train_samples = (
         runtime_session.policy.validation_max_train_samples if runtime_session is not None else None
+    )
+
+    model, criterion, target_standardization = prepare_training_target_standardization(
+        model,
+        criterion,
+        enabled=train_cfg.target_standardization != "none",
+        data_path=data_path,
+        scope=task_scope,
+        sampling=EpochSamplingParams(
+            data_dir=data_dir,
+            epoch_seed=base_seed,
+            train_portion=1.0,
+            max_samples=max_train_samples,
+        ),
+        batch_size=train_cfg.batch_size,
+        device=device,
+        check_allocation=lambda: enforce_training_allocation(runtime_session, phase="training"),
     )
 
     history = []
@@ -1976,6 +2015,7 @@ def run_experiment_streaming(
         TRAINING_HISTORY_KEY: _build_training_history(
             loss_cfg=loss_cfg,
             epochs_planned=len(history) if budget_execution else train_cfg.epochs,
+            target_standardization=target_standardization,
             train_objective=history,
             validation_objective=validation_history,
             validation_requested_samples=validation_requested_rows,
@@ -1997,6 +2037,8 @@ def run_experiment_streaming(
         )
     if selected_checkpoint is not None:
         summary["selected_checkpoint"] = selected_checkpoint.model_dump()
+    if target_standardization is not None:
+        summary["target_standardization"] = target_standardization.model_dump()
 
     save_path = str(training_checkpoint_path(sandbox_dirs["models"], model_cfg.model_type, exp_id))
     _save_with_sentinel(model.state_dict(), save_path, exp_id)
@@ -2320,6 +2362,7 @@ def main():
         model_io=model_io,
         sandbox_dirs=sandbox_dirs,
         result_directory=final_res_dir,
+        target_standardization_enabled=train_cfg.target_standardization != "none",
     )
     with open(res_path, "w") as f:
         json.dump(results, f, indent=4)

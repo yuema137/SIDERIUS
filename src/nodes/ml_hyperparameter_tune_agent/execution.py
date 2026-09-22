@@ -947,12 +947,12 @@ def run_training(
     # Step 07a — typed training-results boundary (sequencing call
     # only): a contract violation is rewritten into the existing
     # error shape and recorded by the branch below.
+    requested_training = TrainConfig.model_validate(active_params["train_config"])
     train_status, training_results = _interpret_training_status(
         train_status,
         expected_validation=eval_sample_set is not None,
-        expected_checkpoint_selection=TrainConfig.model_validate(
-            active_params["train_config"]
-        ).checkpoint_selection,
+        expected_checkpoint_selection=requested_training.checkpoint_selection,
+        expected_target_standardization=requested_training.target_standardization,
     )
     # Step 11 C2 (F-11-1) — ONE authority decides what "the subprocess
     # failed" means. `oom_host_ram` used to miss this branch entirely and

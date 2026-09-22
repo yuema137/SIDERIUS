@@ -114,6 +114,7 @@ EXPERIMENT_RECORD_FIELDS = [
     # and legacy persisted values are unchanged.
     "training_budget",
     "selected_checkpoint",
+    "target_standardization",
     "runtime_verification",
     "memory",
     "is_trial",
