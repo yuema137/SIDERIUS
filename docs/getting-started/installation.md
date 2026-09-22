@@ -70,6 +70,43 @@ the checkout remains necessary for the documented chain launcher. Installed
 synthetic CPU execution is qualified separately from real scientific tasks or
 accelerator support. See [source ownership and the installation witness](../../src/README.md).
 
+## Generated Data Analysis programs
+
+Runs that permit agent-generated analysis code require Linux user and network
+namespaces, `bwrap` (the `bubblewrap` OS package), and `unshare` (the `util-linux`
+OS package). Installing the Python environment alone does not provide them.
+On Debian/Ubuntu execution hosts, install them before qualification:
+
+```bash
+sudo apt-get update
+sudo apt-get install bubblewrap util-linux
+```
+
+The supported deployment readiness API is
+`agent.data_analysis.analysis_code_sandbox.AnalysisCodeSandbox().probe()`.
+Its `SandboxCapabilityReceipt` reports `available`, `protocol_id`, executable
+paths and a refusal `reason`. It actually launches the namespace sandbox,
+imports NumPy, tests the output mount and checks isolation; finding binaries
+on `PATH` alone is insufficient. Run this check using the execution checkout's
+`.venv/bin/python`, under the actual service user, environment and container or
+systemd restrictions. Require `available=True` before starting a campaign that
+permits generated analysis. Repeat after host/environment changes.
+
+For a short execution qualification, from this exact checkout run:
+
+```bash
+REQUIRE_ANALYSIS_SANDBOX=1 .venv/bin/python -m pytest -q \
+  tests/unit/agent/data_analysis/test_analysis_code_sandbox.py
+```
+
+This executes synthetic generated programs and tests authorized input reads,
+output artifacts, isolation and resource failures, without task data, LLM calls
+or GPU training. The flag turns sandbox-unavailable skips into failures; a
+skipped sandbox test cannot qualify a deployment. Successful reference analysis
+skills do not qualify generated code, which uses this separate execution path.
+The runtime continues to refuse generated code if isolation is unavailable;
+do not bypass it or grant generated programs broader host access.
+
 ## Machine-local configuration
 
 Declare the physical dataset root with `--data_dir` and the run-output root

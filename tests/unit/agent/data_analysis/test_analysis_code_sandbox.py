@@ -93,6 +93,8 @@ def _execute(tmp_path: Path, source: str, *, keys: tuple[str, ...]):
     sandbox = AnalysisCodeSandbox()
     capability = sandbox.probe()
     if not capability.available:
+        if os.environ.get("REQUIRE_ANALYSIS_SANDBOX") == "1":
+            pytest.fail(f"required sandbox qualification failed: {capability.reason}")
         pytest.skip(f"host cannot enforce sandbox: {capability.reason}")
     program, _identity, source_path = _persist_program(tmp_path, source, keys=keys)
     materialization = _materialization(tmp_path)
@@ -114,6 +116,31 @@ def _execute(tmp_path: Path, source: str, *, keys: tuple[str, ...]):
         timeout_s=2.0,
         max_host_memory_gb=1.0,
     )
+
+
+@pytest.mark.parametrize(
+    "missing,expected",
+    [
+        ({"bwrap"}, "bwrap (bubblewrap)"),
+        ({"unshare"}, "unshare (util-linux)"),
+        ({"bwrap", "unshare"}, "bwrap (bubblewrap), unshare (util-linux)"),
+    ],
+)
+def test_probe_names_only_missing_tools(monkeypatch, missing, expected):
+    monkeypatch.setattr(
+        "agent.data_analysis.analysis_code_sandbox.shutil.which",
+        lambda name: None if name in missing else f"/usr/bin/{name}",
+    )
+    capability = AnalysisCodeSandbox().probe()
+    assert not capability.available
+    assert capability.reason == "Missing required generated-analysis executable(s): " + expected
+
+
+def test_required_qualification_cannot_skip_unavailable_sandbox(tmp_path, monkeypatch):
+    monkeypatch.setenv("REQUIRE_ANALYSIS_SANDBOX", "1")
+    monkeypatch.setattr("agent.data_analysis.analysis_code_sandbox.shutil.which", lambda _: None)
+    with pytest.raises(pytest.fail.Exception, match="required sandbox qualification failed"):
+        _execute(tmp_path, "", keys=())
 
 
 @pytest.mark.allow_real_subprocess
@@ -250,6 +277,8 @@ def analyze(inputs, parameters, output_directory):
     sandbox = AnalysisCodeSandbox()
     capability = sandbox.probe()
     if not capability.available:
+        if os.environ.get("REQUIRE_ANALYSIS_SANDBOX") == "1":
+            pytest.fail(f"required sandbox qualification failed: {capability.reason}")
         pytest.skip(f"host cannot enforce sandbox: {capability.reason}")
     program, _identity, source_path = _persist_program(tmp_path, source, keys=("unused",))
     materialization = _materialization(tmp_path)
