@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from functools import wraps
 
+from core.checkpoint_selection import CheckpointSelection
 from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.records import RuntimePrediction
 from core.runtime_control.session import RuntimeVerificationSession
@@ -68,7 +69,9 @@ class TrainingBudgetExecution:
         self._epoch_started = None
         return self.decide()
 
-    def receipt(self) -> dict:
+    def receipt(
+        self, *, checkpoint_selection: CheckpointSelection = "last_completed_epoch"
+    ) -> dict:
         if self.last_decision is None or self.last_decision.action != "stop":
             raise RuntimeError("Training budget has no completed stop decision")
         return TrainingBudgetReceipt(
@@ -78,6 +81,7 @@ class TrainingBudgetExecution:
             optimizer_steps=self.optimizer_steps,
             epoch_seconds_including_validation=self.costs,
             stop=self.last_decision,
+            checkpoint_selection=checkpoint_selection,
         ).model_dump()
 
     def reconcile(

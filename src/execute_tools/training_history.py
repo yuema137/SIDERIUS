@@ -56,7 +56,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from core.checkpoint_selection import CheckpointSelection, SelectedCheckpoint
 from core.runtime_control.training_budget import TrainingBudgetReceipt
+from core.target_standardization import TargetStandardization, TargetStandardizationReceipt
 from ml_models.models_format_sandbox import LossConfig
 
 #: The three legacy trainer→tuner result keys. Their presence and values are
@@ -116,16 +118,24 @@ class TrainingResultsContractError(ValueError):
     """
 
 
-def objective_config_fingerprint(loss_cfg: LossConfig) -> str:
+def objective_config_fingerprint(
+    loss_cfg: LossConfig, *, target_standardization: TargetStandardizationReceipt | None = None
+) -> str:
     """Deterministic SHA-256 of the canonical serialized RESOLVED ``LossConfig``.
 
     Canonical = ``json.dumps(model_dump(), sort_keys=True, separators=(",", ":"))``
     — key order and whitespace cannot perturb it, so the value is stable
     across processes and hosts. It fingerprints the resolved CONFIGURATION
     SURFACE (loss_type, loss_name, alpha, gamma, beta, reduction,
-    use_class_weights); it is NOT a hash of plugin code.
+    use_class_weights) plus an explicitly enabled fitted target transform;
+    it is NOT a hash of plugin code. Default bytes are unchanged.
     """
-    canonical = json.dumps(loss_cfg.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    payload = loss_cfg.model_dump(mode="json")
+    if target_standardization is not None:
+        payload["target_standardization"] = target_standardization.model_dump(
+            exclude={"fit_seconds"}
+        )
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -198,7 +208,7 @@ class TrainingHistory(BaseModel):
     objective_config_fingerprint: str = Field(
         description=(
             "SHA-256 of the canonical serialized RESOLVED LossConfig — the configuration "
-            "surface only; not a hash of custom plugin code."
+            "surface and optional fitted target transform; not a hash of custom plugin code."
         )
     )
     objective_reduction: Literal["mean", "sum"]
@@ -207,6 +217,7 @@ class TrainingHistory(BaseModel):
     comparability_reason: str | None = None
     epochs_planned: int = Field(ge=0)
     epochs_completed: int = Field(ge=0)
+    training_samples: list[int] | None = Field(default=None, exclude_if=lambda v: v is None)
     train_objective: list[float | None] = Field(
         description=(
             "R2 — the SAME floats as the legacy loss_history. An ELEMENT is "
@@ -286,6 +297,11 @@ class TrainingHistory(BaseModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> TrainingHistory:
+        if self.training_samples is not None and (
+            len(self.training_samples) != self.epochs_completed
+            or any(count <= 0 for count in self.training_samples)
+        ):
+            raise ValueError("training_samples requires one positive row count per completed epoch")
         n = len(self.train_objective)
         if self.epochs_completed != n:
             raise ValueError(
@@ -384,6 +400,8 @@ class TrainingResults(BaseModel):
     history: TrainingHistory | None
     history_state: Literal["present", "absent"]
     training_budget: TrainingBudgetReceipt | None = None
+    selected_checkpoint: SelectedCheckpoint | None = None
+    target_standardization: TargetStandardizationReceipt | None = None
     static_observations: dict[str, float] = Field(
         default_factory=dict,
         description=(
@@ -419,7 +437,13 @@ def _same_series(xs: Sequence[float | None], ys: object) -> bool:
     return all(_same_float(x, y) for x, y in zip(xs, ys, strict=True))
 
 
-def interpret_training_results(raw: object, *, expected_validation: bool) -> TrainingResults:
+def interpret_training_results(
+    raw: object,
+    *,
+    expected_validation: bool,
+    expected_checkpoint_selection: CheckpointSelection | None = None,
+    expected_target_standardization: TargetStandardization | None = None,
+) -> TrainingResults:
     """Validate the trainer's raw results dict at the ONE validation site.
 
     Args:
@@ -480,12 +504,57 @@ def interpret_training_results(raw: object, *, expected_validation: bool) -> Tra
             raise TrainingResultsContractError(
                 f"training_budget payload is schema-invalid: {exc}"
             ) from exc
+    selected = None
+    if raw.get("selected_checkpoint") is not None:
+        try:
+            selected = SelectedCheckpoint.model_validate(raw["selected_checkpoint"])
+        except ValidationError as exc:
+            raise TrainingResultsContractError(
+                f"selected_checkpoint is schema-invalid: {exc}"
+            ) from exc
+        curve = history.validation_objective if history is not None else None
+        if not curve or any(value is None or not math.isfinite(value) for value in curve):
+            raise TrainingResultsContractError(
+                "selected_checkpoint requires finite validation history"
+            )
+        finite_curve = [float(value) for value in curve if value is not None]
+        best_epoch = min(range(len(finite_curve)), key=lambda index: finite_curve[index]) + 1
+        if selected.epoch != best_epoch or selected.validation_loss != curve[best_epoch - 1]:
+            raise TrainingResultsContractError(
+                "selected_checkpoint disagrees with validation history"
+            )
+    if budget is not None and (budget.checkpoint_selection == "best_validation_loss") != (
+        selected is not None
+    ):
+        raise TrainingResultsContractError("training_budget and selected_checkpoint disagree")
+    if expected_checkpoint_selection is not None and (
+        expected_checkpoint_selection == "best_validation_loss"
+    ) != (selected is not None):
+        raise TrainingResultsContractError(
+            "selected_checkpoint does not match requested selection policy"
+        )
+    target_standardization = None
+    if raw.get("target_standardization") is not None:
+        try:
+            target_standardization = TargetStandardizationReceipt.model_validate(
+                raw["target_standardization"]
+            )
+        except ValidationError as exc:
+            raise TrainingResultsContractError(
+                f"target_standardization is schema-invalid: {exc}"
+            ) from exc
+    if expected_target_standardization is not None and (
+        expected_target_standardization != "none"
+    ) != (target_standardization is not None):
+        raise TrainingResultsContractError("target_standardization does not match requested policy")
     return TrainingResults(
         legacy_payload=legacy_payload,
         history=history,
         history_state="present" if history is not None else "absent",
         static_observations=_read_static_observations(raw),
         training_budget=budget,
+        selected_checkpoint=selected,
+        target_standardization=target_standardization,
     )
 
 

@@ -5,6 +5,9 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from core.checkpoint_selection import CheckpointSelection
+from core.target_standardization import TargetStandardization
+
 # ==========================================
 # 1. Base Model Configuration
 # ==========================================
@@ -887,6 +890,15 @@ class TrainConfig(BaseModel):
     optimizer_type: Literal["adam", "adamw", "sgd"] = "adamw"
     weight_decay: float = Field(default=1e-5, ge=0, le=1e-1)
     device: str = "cuda"  # or "cpu"
+    checkpoint_selection: CheckpointSelection = "last_completed_epoch"
+    target_standardization: TargetStandardization = "none"
+    drop_last: bool = True
+
+
+def resolve_training_drop_last(config: dict) -> bool:
+    """Validate this policy without changing legacy estimators' other inputs."""
+    supplied = {"drop_last": config["drop_last"]} if "drop_last" in config else {}
+    return TrainConfig.model_validate(supplied).drop_last
 
 
 # ==========================================

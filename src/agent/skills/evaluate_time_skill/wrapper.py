@@ -515,6 +515,7 @@ def _store_reuse_decision(
 
         from core.runtime_control.observation_store import ObservationStore, calibration_key
         from execute_tools.workload_resolvers import resolve_training_workload
+        from ml_models.models_format_sandbox import resolve_training_drop_last
 
         key = calibration_key(
             "training",
@@ -543,6 +544,7 @@ def _store_reuse_decision(
             # V21 PR B1 — TrainConfig declares 10; the literal 1 made the
             # store-reuse step count 10x optimistic (design doc §0.6.4).
             epochs=_training_est.resolve_train_field(train_config, "epochs", safety_margin=1),
+            drop_last=resolve_training_drop_last(train_config),
         ).unit_count
         decision = decide_nonformal_estimation(
             is_trial_round=True,

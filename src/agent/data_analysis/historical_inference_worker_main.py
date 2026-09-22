@@ -102,7 +102,20 @@ def run_worker(request: HistoricalInferenceWorkerRequest) -> HistoricalInference
         loss_type=construction.loss_type,
     )
     state_dict = torch.load(request.checkpoint_path, map_location="cpu", weights_only=True)
-    model.load_state_dict(state_dict, strict=True)
+    from ml_models.target_standardization import (
+        load_trained_state,
+        target_standardization_implementation_sha256,
+    )
+
+    transform_identity = construction.target_standardization_implementation_sha256
+    if (
+        transform_identity is not None
+        and transform_identity != target_standardization_implementation_sha256()
+    ):
+        raise ValueError("target standardization implementation identity mismatch")
+    model = load_trained_state(
+        model, state_dict, require_standardized=transform_identity is not None
+    )
     device = torch.device("cuda" if model_request.configuration.device == "gpu" else "cpu")
     if device.type == "cuda" and not torch.cuda.is_available():
         raise ValueError("CUDA inference was requested but no CUDA device is available")

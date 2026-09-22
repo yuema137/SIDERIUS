@@ -14,6 +14,7 @@ load_stage_prompt() and render_expert_context().
 
 import os
 
+from agent.prompt_templates.native_training import NATIVE_TRAINING_CONTRACT
 from core.layout import checkout_path
 
 _PROMPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -120,7 +121,7 @@ def load_stage_prompt(
     for key, value in merged.items():
         prompt = prompt.replace(f"{{{key}}}", str(value))
 
-    return prompt
+    return prompt + "\n\n" + NATIVE_TRAINING_CONTRACT
 
 
 def render_agent_cards(cards: list) -> str:

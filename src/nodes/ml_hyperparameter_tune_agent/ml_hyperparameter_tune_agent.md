@@ -1939,3 +1939,20 @@ authoritative. In-process admission uses `AdmissionRecord.reason_code`; only
 `budget_exceeded` and `training_allocation_exceeded` enable this recovery, so a
 generic candidate verification failure cannot be mistaken for a time refusal.
 See [cooperative budget](../../../docs/reference/cooperative-training-budget.md).
+
+## Native training lifecycle boundary
+
+See [checkpoint selection](../../../docs/reference/checkpoint-selection.md) for
+`train_config.checkpoint_selection`, the unchanged default, fixed-validation
+requirements and exported-epoch receipts. Proposal, implementation and review
+prompts share the native training capability disclosure. It distinguishes
+uninitialized target transforms and unsupported lifecycle requests from
+executed interventions; trainability and specification alignment remain separate.
+
+The optional [scoped target standardization](../../../docs/reference/target-standardization.md)
+policy fits training-only statistics, exports original-unit predictions and
+persists a reconstruction-bound transform. It defaults to `none`.
+
+The optional [training batch policy](../../../docs/reference/training-batches.md)
+keeps selected tail rows when `train_config.drop_last=false`; guardrails and
+training use matching step arithmetic. Completed-epoch row counts are recorded.
