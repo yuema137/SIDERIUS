@@ -19,7 +19,7 @@ from agent.schemas.data_analysis.generated_program import GeneratedAnalysisProgr
 
 from .generated_programs import GeneratedProgramDraft, persist_generated_program
 from .persistence import AnalysisRunStore
-from .structured_output import generate_validated
+from .structured_output import DataAnalysisStructuredOutputError, generate_validated
 
 
 def _python_source_repair_anchor(
@@ -112,15 +112,36 @@ def prepare_generated_program(
         question_ids=question_ids,
         output_schema=GeneratedProgramDraft.model_json_schema(),
     )
-    draft = generate_validated(
-        bridge,
-        store=store,
-        model_type=GeneratedProgramDraft,
-        system=system,
-        user=user,
-        label="data_analysis.generated_program",
-        semantic_projection=generated_draft_semantics,
-    )
+    # Generation precedes AnalysisPlan recovery and needs its own bounded retry.
+    # A fresh draft may change decisions; a representation repair still may not.
+    for attempt in range(2):
+        try:
+            draft = generate_validated(
+                bridge,
+                store=store,
+                model_type=GeneratedProgramDraft,
+                system=system,
+                user=user,
+                label=(
+                    "data_analysis.generated_program"
+                    if attempt == 0
+                    else "data_analysis.generated_program.regeneration"
+                ),
+                semantic_projection=generated_draft_semantics,
+            )
+            break
+        except DataAnalysisStructuredOutputError as exc:
+            if attempt:
+                raise
+            user += (
+                f"\nThe previous generated program was rejected before execution: {exc}.\n"
+                f"{exc.planning_feedback}\n"
+                "This is one fresh generation attempt, not representation-only repair. "
+                "Return a complete valid declaration and Python source for the same questions "
+                "under the same access/resource contract. Do not widen access.\n"
+            )
+    else:  # pragma: no cover - each final attempt returns a draft or raises
+        raise AssertionError("bounded generated-program recovery must return or raise")
     if set(draft.question_ids) != set(question_ids):
         raise ValueError("generated program changed the selected capability-gap questions")
     resolved_model_id = requested_model_id or str(getattr(bridge, "model_name", "provider-default"))

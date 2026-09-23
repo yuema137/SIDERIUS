@@ -1095,16 +1095,16 @@ def test_schema_repair_cannot_change_recoverable_skill_selection(tmp_path: Path)
 
     analysis_input = _input(tmp_path)
     bridge = _RepairingBridge(analysis_input=analysis_input, change_decision=True)
-    with pytest.raises(DataAnalysisStructuredOutputError, match="changed the recoverable"):
-        DataAnalysisAgent(
-            task_analysis_capability=_Capability(),
-            bridge_factory=lambda **_kwargs: bridge,
-            provider="test",
-            model_id="fake",
-        ).run(analysis_input)
-
+    report = DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **_kwargs: bridge,
+        provider="test",
+        model_id="fake",
+    ).run(analysis_input)
+    assert not report.findings and not report.assets_inspected
+    assert report.limitations[0].limitation_id == "analysis-preparation-failed"
     root = tmp_path / "data_analysis" / "standalone" / "request"
-    assert not (root / "plan.json").exists()
+    assert json.loads((root / "plan.json").read_text())["invocations"] == []
     receipt = json.loads((root / "structured_output_receipts.jsonl").read_text())
     assert receipt["repair_passed"] is False
     assert receipt["repair_validation_errors"][0]["error_type"] == ("semantic_decision_changed")
@@ -1226,13 +1226,16 @@ def test_plan_repair_rejects_semantic_changes(tmp_path: Path, repair_change: str
         analysis_input=analysis_input,
         repair_change=repair_change,
     )
-    with pytest.raises(DataAnalysisStructuredOutputError, match="changed the recoverable"):
-        DataAnalysisAgent(
-            task_analysis_capability=_Capability(),
-            bridge_factory=lambda **_kwargs: bridge,
-            provider="test",
-            model_id="fake",
-        ).run(analysis_input)
+    capability = _RecordingCapability()
+    report = DataAnalysisAgent(
+        task_analysis_capability=capability,
+        bridge_factory=lambda **_kwargs: bridge,
+        provider="test",
+        model_id="fake",
+    ).run(analysis_input)
+    assert not capability.requested_scopes
+    assert not report.findings and not report.assets_inspected
+    assert report.limitations[0].limitation_id == "analysis-preparation-failed"
 
     receipt_path = (
         tmp_path / "data_analysis" / "standalone" / "request" / "structured_output_receipts.jsonl"
@@ -1533,22 +1536,23 @@ def test_generated_plan_recovery_exhausts_one_shared_retry_before_access(
         provider="test",
         model_id="fake",
     )
-    expected = (
-        DataAnalysisStructuredOutputError
-        if retry_outcome == "schema"
-        else AnalysisPlanResolutionError
-    )
-    with pytest.raises(expected):
-        agent.run(inp)
+    root = tmp_path / "data_analysis" / "standalone" / "request"
+    if retry_outcome == "access":
+        with pytest.raises(AnalysisPlanResolutionError):
+            agent.run(inp)
+        assert not (root / "plan.json").exists()
+        assert not (root / "report.json").exists()
+        assert json.loads((root / "budget_receipt.json").read_text())["status"] == "failed"
+    else:
+        report = agent.run(inp)
+        assert not report.findings and not report.assets_inspected
+        assert report.limitations[0].limitation_id == "analysis-preparation-failed"
+        assert json.loads((root / "plan.json").read_text())["invocations"] == []
     assert bridge.calls.count("data_analysis.plan.resolution_retry") == 1
     assert bridge.calls.count("data_analysis.plan.resolution_retry.repair") == (
         retry_outcome == "schema"
     )
     assert not capability.requested_scopes
-    root = tmp_path / "data_analysis" / "standalone" / "request"
-    assert not (root / "plan.json").exists()
-    assert not (root / "report.json").exists()
-    assert json.loads((root / "budget_receipt.json").read_text())["status"] == "failed"
 
 
 @pytest.mark.allow_real_subprocess

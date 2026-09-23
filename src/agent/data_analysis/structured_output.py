@@ -92,6 +92,7 @@ def generate_validated[ValidatedModelT: BaseModel](
             ) from initial_error
 
         repair_system, repair_user = render_structured_output_repair_prompt(
+            stage=label,
             output_schema=model_type.model_json_schema(),
             original_output=raw,
             validation_errors=[issue.model_dump(mode="json") for issue in issues],

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from agent.data_analysis.persistence import AnalysisRunStore
 from agent.schemas.data_analysis.common import canonical_sha256, utc_now
 from agent.schemas.data_analysis.context import DataAnalysisInput
@@ -16,7 +18,12 @@ from agent.schemas.data_analysis.report import (
 
 
 def build_non_execution_report(
-    *, inp: DataAnalysisInput, store: AnalysisRunStore, discovery_digest: str, reason: str
+    *,
+    inp: DataAnalysisInput,
+    store: AnalysisRunStore,
+    discovery_digest: str,
+    reason: str,
+    disposition: Literal["planner_declined", "preparation_failed"] = "planner_declined",
 ) -> DataAnalysisReport:
     """A planner's stated limitation is not a measured finding or access decision."""
     question_ids = tuple(question.question_id for question in inp.analysis_brief.questions)
@@ -34,7 +41,16 @@ def build_non_execution_report(
         non_execution_reason=reason,
     )
     plan_ref = store.write_plan(plan)
-    limitation_id = "no-applicable-analysis"
+    limitation_id = (
+        "analysis-preparation-failed"
+        if disposition == "preparation_failed"
+        else "no-applicable-analysis"
+    )
+    prefix = (
+        "Analysis preparation exhausted bounded structured-output recovery"
+        if disposition == "preparation_failed"
+        else "Planner reported no applicable authorized analysis"
+    )
     summary = "No analysis was executed; no empirical findings were produced."
     return DataAnalysisReport(
         report_id=f"{inp.request_id}.report",
@@ -60,7 +76,7 @@ def build_non_execution_report(
         limitations=(
             ReportLimitation(
                 limitation_id=limitation_id,
-                statement=f"Planner reported no applicable authorized analysis: {reason}",
+                statement=f"{prefix}: {reason}",
                 affected_question_ids=question_ids,
             ),
         ),

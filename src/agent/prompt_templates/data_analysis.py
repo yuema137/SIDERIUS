@@ -412,6 +412,7 @@ Authoritative output schema:
 
 def render_structured_output_repair_prompt(
     *,
+    stage: str,
     output_schema: dict,
     original_output: object,
     validation_errors: list[dict],
@@ -423,9 +424,16 @@ schema. Preserve every recoverable semantic decision, identifier, ordering, para
 Correct representation/schema conformance only. Do not replan, add reasoning, expand scope, change
 priorities, or select different skills. For RequestedInformation, deleting `fields` from a
 non-metadata information class is representation repair; changing information_class or any metadata
-field name is not. For deterministic historical inference, deleting a forbidden numeric `seed`
-or replacing it with null is representation repair; changing determinism, model, input binding,
-batch size, or device is not. Return only the repaired JSON object."""
+field name is not. Return only the repaired JSON object."""
+    if stage.startswith("data_analysis.generated_program"):
+        system += """ For generated analysis programs, deterministic execution requires an
+explicit non-negative seed. Preserve the original seed and all declaration fields. Python source
+must use None, True and False, not JSON null, true or false. Historical-model inference seed
+rules do not apply to generated program declarations."""
+    elif stage.startswith("data_analysis.plan"):
+        system += """ For deterministic historical inference configurations only, deleting a
+forbidden numeric seed or replacing it with null is representation repair. Do not change
+determinism, model, input binding, batch size, device, or generated-program identity/seed."""
     user = f"""Authoritative output JSON schema:
 {_json(output_schema)}
 

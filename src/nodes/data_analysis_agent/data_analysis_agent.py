@@ -28,7 +28,10 @@ from agent.data_analysis.non_execution import build_non_execution_report
 from agent.data_analysis.persistence import AnalysisRunStore
 from agent.data_analysis.plan_generation import generate_resolved_analysis_plan
 from agent.data_analysis.rendering import render_report_markdown
-from agent.data_analysis.structured_output import generate_validated
+from agent.data_analysis.structured_output import (
+    DataAnalysisStructuredOutputError,
+    generate_validated,
+)
 from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.data_analysis import (
     render_analysis_plan_prompt,
@@ -276,87 +279,99 @@ class DataAnalysisAgent:
             candidates,
             output_schema=_SkillSelection.model_json_schema(),
         )
-        selection = generate_validated(
-            bridge,
-            store=store,
-            model_type=_SkillSelection,
-            system=selection_system,
-            user=selection_user,
-            label="data_analysis.skill_selection",
-            semantic_projection=self._selection_semantics,
-        )
-        candidate_by_id = {item.card.skill_id: item for item in candidates}
-        if selection.non_execution_reason is not None:
+        try:
+            selection = generate_validated(
+                bridge,
+                store=store,
+                model_type=_SkillSelection,
+                system=selection_system,
+                user=selection_user,
+                label="data_analysis.skill_selection",
+                semantic_projection=self._selection_semantics,
+            )
+            candidate_by_id = {item.card.skill_id: item for item in candidates}
+            if selection.non_execution_reason is not None:
+                return build_non_execution_report(
+                    inp=inp,
+                    store=store,
+                    discovery_digest=discovery.snapshot_digest,
+                    reason=selection.non_execution_reason,
+                )
+            try:
+                selected = tuple(candidate_by_id[skill_id] for skill_id in selection.skill_ids)
+            except KeyError as exc:
+                raise ValueError(
+                    f"planner selected unavailable candidate skill {exc.args[0]!r}"
+                ) from exc
+
+            available_question_ids = {item.question_id for item in inp.analysis_brief.questions}
+            if not set(selection.generated_program_question_ids).issubset(available_question_ids):
+                raise ValueError("planner requested generated code for an unknown question")
+            generated_programs = ()
+            if selection.generated_program_question_ids:
+                generated_programs = (
+                    prepare_generated_program(
+                        bridge=bridge,
+                        store=store,
+                        analysis_input=inp,
+                        question_ids=selection.generated_program_question_ids,
+                        provider=self._provider,
+                        requested_model_id=self._model_id,
+                        llm_config={
+                            "provider": self._provider,
+                            "model_id": self._model_id,
+                            "max_retries": self._max_retries,
+                        },
+                    ),
+                )
+
+            control_root = store.root / "control"
+            control_root.mkdir(parents=True, exist_ok=True)
+            interfaces = {
+                skill.card.skill_id: (
+                    skill.resolved_interface
+                    if isinstance(skill, DiscoveredGeneratedExperimentSkill)
+                    else resolve_skill_interface(
+                        skill,
+                        control_directory=control_root / f"interface-{skill.card.skill_id}",
+                        timeout_s=inp.resource_envelope.per_skill_timeout_s,
+                        max_host_memory_gb=inp.resource_envelope.max_host_memory_gb,
+                    )
+                )
+                for skill in selected
+            }
+            plan_system, plan_user = render_analysis_plan_prompt(
+                inp,
+                discovery,
+                selected,
+                interfaces,
+                generated_programs=generated_programs,
+            )
+            plan, resolved = generate_resolved_analysis_plan(
+                bridge,
+                store=store,
+                analysis_input=inp,
+                discovery=discovery,
+                resolved_interfaces=interfaces,
+                control_root=control_root,
+                prepared_generated_identities={
+                    canonical_sha256(identity) for _program, identity in generated_programs
+                },
+                system=plan_system,
+                user=plan_user,
+                semantic_projection=self._plan_semantics,
+            )
+        except DataAnalysisStructuredOutputError as exc:
+            # Only LLM representation failures before plan publication are local.
+            # Access/resolution, provider, deadline, persistence and post-execution
+            # evidence errors retain their existing refusal/propagation behavior.
             return build_non_execution_report(
                 inp=inp,
                 store=store,
                 discovery_digest=discovery.snapshot_digest,
-                reason=selection.non_execution_reason,
+                reason=f"{exc}; {exc.planning_feedback}",
+                disposition="preparation_failed",
             )
-        try:
-            selected = tuple(candidate_by_id[skill_id] for skill_id in selection.skill_ids)
-        except KeyError as exc:
-            raise ValueError(
-                f"planner selected unavailable candidate skill {exc.args[0]!r}"
-            ) from exc
-
-        available_question_ids = {item.question_id for item in inp.analysis_brief.questions}
-        if not set(selection.generated_program_question_ids).issubset(available_question_ids):
-            raise ValueError("planner requested generated code for an unknown question")
-        generated_programs = ()
-        if selection.generated_program_question_ids:
-            generated_programs = (
-                prepare_generated_program(
-                    bridge=bridge,
-                    store=store,
-                    analysis_input=inp,
-                    question_ids=selection.generated_program_question_ids,
-                    provider=self._provider,
-                    requested_model_id=self._model_id,
-                    llm_config={
-                        "provider": self._provider,
-                        "model_id": self._model_id,
-                        "max_retries": self._max_retries,
-                    },
-                ),
-            )
-
-        control_root = store.root / "control"
-        control_root.mkdir(parents=True, exist_ok=True)
-        interfaces = {
-            skill.card.skill_id: (
-                skill.resolved_interface
-                if isinstance(skill, DiscoveredGeneratedExperimentSkill)
-                else resolve_skill_interface(
-                    skill,
-                    control_directory=control_root / f"interface-{skill.card.skill_id}",
-                    timeout_s=inp.resource_envelope.per_skill_timeout_s,
-                    max_host_memory_gb=inp.resource_envelope.max_host_memory_gb,
-                )
-            )
-            for skill in selected
-        }
-        plan_system, plan_user = render_analysis_plan_prompt(
-            inp,
-            discovery,
-            selected,
-            interfaces,
-            generated_programs=generated_programs,
-        )
-        plan, resolved = generate_resolved_analysis_plan(
-            bridge,
-            store=store,
-            analysis_input=inp,
-            discovery=discovery,
-            resolved_interfaces=interfaces,
-            control_root=control_root,
-            prepared_generated_identities={
-                canonical_sha256(identity) for _program, identity in generated_programs
-            },
-            system=plan_system,
-            user=plan_user,
-            semantic_projection=self._plan_semantics,
-        )
         plan_ref = store.write_plan(plan)
         deadline = budget.expires_at
         results: list[SkillResult] = []
