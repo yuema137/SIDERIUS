@@ -53,3 +53,17 @@ streak of `steady.stable_windows` above `pathological_factor` times the prior
 plateau fails verification; an isolated spike does not. Explicit `max_unit_ms`
 still fails immediately after stabilization. These rules do not change data
 selection, model size, resource budgets or prediction-watchdog enablement.
+
+### Calibration across separate passes
+
+Validation may need several epochs to gather enough timing evidence. Its
+verification window counts active validation intervals, including dataset
+construction, loading, transfers and computation. Training between those
+intervals does not consume the validation window. Observations and stability
+requirements survive between passes; an exception also closes the active
+interval. Continuous callers keep the original uninterrupted wall clock.
+
+Measurement receipts report `verification_active_wall_ms` and
+`verification_excluded_inactive_seconds` to distinguish a real phase stall from
+time spent elsewhere. The enclosing training allocation and campaign deadline
+continue running throughout; pausing calibration does not extend either budget.

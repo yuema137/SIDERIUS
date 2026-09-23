@@ -7,6 +7,7 @@ import random
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence, Sized
+from contextlib import nullcontext
 from typing import Any, Literal, cast
 
 import h5py
@@ -891,7 +892,11 @@ def _validation_pass(
     n_total = 0
     try:
         model.eval()
-        with torch.no_grad(), torch.random.fork_rng(devices=fork_devices):
+        with (
+            verifier.active_interval() if verifier is not None else nullcontext(),
+            torch.no_grad(),
+            torch.random.fork_rng(devices=fork_devices),
+        ):
             val_dataset = data_path.validation_dataset(
                 task_eval_scope, EvalMaterializationParams(data_dir=data_dir)
             )

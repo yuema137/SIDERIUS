@@ -36,6 +36,8 @@ from __future__ import annotations
 import math
 import statistics
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -202,6 +204,34 @@ class AdaptiveUnitVerification:
         self._fast_steady_from: int | None = None
         self._fast_suffix_status: str | None = None
         self._started_at: float | None = None
+        self._paused_at: float | None = None
+        self._excluded_seconds = 0.0
+        self._interval_open = False
+        self._last_wall_ms = 0.0
+
+    @contextmanager
+    def active_interval(self) -> Iterator[None]:
+        """Count phase work, excluding gaps between disjoint production passes.
+
+        Wrap the whole pass, including dataset/loader setup and transfers.
+        Evidence survives between intervals; unrelated training does not spend
+        validation's verification window. Callers that only feed continuously
+        retain their existing first-observation wall clock.
+        """
+        if self._interval_open:
+            raise RuntimeError("verification active intervals cannot overlap")
+        now = time.monotonic()
+        if self._started_at is None:
+            self._started_at = now
+        elif self._paused_at is not None:
+            self._excluded_seconds += now - self._paused_at
+        self._paused_at = None
+        self._interval_open = True
+        try:
+            yield
+        finally:
+            self._paused_at = time.monotonic()
+            self._interval_open = False
 
     # ── State ────────────────────────────────────────────────────────────
 
@@ -217,6 +247,13 @@ class AdaptiveUnitVerification:
     def verification_seconds(self) -> float:
         """Cumulative measured verification time (§2.12 overhead term)."""
         return sum(self._elapsed_times_ms) / 1000.0
+
+    def _verification_wall_ms(self) -> float:
+        assert self._started_at is not None
+        return max(
+            sum(self._elapsed_times_ms),
+            (time.monotonic() - self._started_at - self._excluded_seconds) * 1000.0,
+        )
 
     def _required_steady_steps(self) -> int:
         base = self.config.min_timed_steps
@@ -291,6 +328,8 @@ class AdaptiveUnitVerification:
         """
         if self.is_terminal:
             raise RuntimeError(f"verification already terminal ({self._state}); stop feeding.")
+        if self._paused_at is not None:
+            raise RuntimeError("verification is paused; enter an active interval before feeding")
         if not math.isfinite(unit_ms) or unit_ms <= 0:
             raise ValueError(f"unit_ms must be positive; got {unit_ms!r}.")
 
@@ -325,12 +364,14 @@ class AdaptiveUnitVerification:
                 self._slow_reference_ms = None
                 self._slow_streak = 0
         self._detector.observe(unit_ms)
-        wall_ms = max(sum(self._elapsed_times_ms), (time.monotonic() - self._started_at) * 1000.0)
+        wall_ms = self._last_wall_ms = self._verification_wall_ms()
         if wall_ms > self.config.max_wall_ms:
             self._fail_insufficient()
             self._failure_reason = (
                 f"verification wall-time cap exhausted: {wall_ms:.3g} ms > "
-                f"{self.config.max_wall_ms:.3g} ms; {self._failure_reason}"
+                f"{self.config.max_wall_ms:.3g} ms "
+                f"(excluded inactive time {self._excluded_seconds:.3g} s); "
+                f"{self._failure_reason}"
             )
             return self._state
 
@@ -376,7 +417,7 @@ class AdaptiveUnitVerification:
             and len(self._steady_unit_times_ms()) >= self._required_steady_steps()
             and not self._has_sufficient_evidence(len(self._steady_unit_times_ms()))
         )
-        wall_ms = max(sum(self._elapsed_times_ms), (time.monotonic() - self._started_at) * 1000.0)
+        wall_ms = self._last_wall_ms = self._verification_wall_ms()
         if (
             len(self._all_times_ms) >= self.config.max_steps and not extend_for_evidence
         ) or wall_ms >= self.config.max_wall_ms:
@@ -508,6 +549,8 @@ class AdaptiveUnitVerification:
             detail={
                 "state": self._state,
                 "observation_elapsed_ms": list(self._elapsed_times_ms),
+                "verification_active_wall_ms": self._last_wall_ms,
+                "verification_excluded_inactive_seconds": self._excluded_seconds,
                 "failure_reason": self._failure_reason,
                 "prior_agreement": self._prior_agreement,
                 "prior_expected_unit_ms": self.prior_expected_unit_ms,

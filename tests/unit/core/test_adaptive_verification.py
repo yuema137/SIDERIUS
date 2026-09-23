@@ -516,3 +516,47 @@ def test_final_observation_cannot_verify_after_wall_deadline(monkeypatch):
     now[0] = 3.0
     assert verifier.feed(10) == "failed_no_steady_state"
     assert "wall-time cap exhausted" in verifier.failure_reason
+
+
+def test_active_interval_exception_preserves_evidence_and_pauses(monkeypatch):
+    """An aborted pass must not leave its clock running during unrelated work."""
+    from types import SimpleNamespace
+
+    import core.runtime_control.adaptive as module
+
+    clock = [100.0]
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    v = AdaptiveUnitVerification("validation_sample", _config(min_timed_ms=500, max_wall_ms=60000))
+    with pytest.raises(ValueError, match="pass failed"):
+        with v.active_interval():
+            for _ in range(30):
+                clock[0] += 0.006
+                v.feed(0.75, elapsed_ms=6)
+            raise ValueError("pass failed")
+    clock[0] += 600
+    with pytest.raises(RuntimeError, match="paused"):
+        v.feed(0.75, elapsed_ms=6)
+    with v.active_interval():
+        for _ in range(70):
+            clock[0] += 0.006
+            v.feed(0.75, elapsed_ms=6)
+            if v.is_terminal:
+                break
+    assert v.state == "verified"
+    assert v.measurement().detail["verification_excluded_inactive_seconds"] == pytest.approx(600)
+
+
+def test_continuous_verification_still_counts_wall_gaps(monkeypatch):
+    """Unscoped training callers must retain protection against real stalls."""
+    from types import SimpleNamespace
+
+    import core.runtime_control.adaptive as module
+
+    clock = [100.0]
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    v = AdaptiveUnitVerification("optimizer_step", _config(max_wall_ms=60000))
+    v.feed(1)
+    clock[0] += 61
+    v.feed(1)
+    assert v.state == "failed_no_steady_state"
+    assert "wall-time cap exhausted" in v.failure_reason
