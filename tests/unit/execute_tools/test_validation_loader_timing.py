@@ -1,5 +1,6 @@
 """Slow Dataset reads must be visible to the real validation timing call site."""
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -31,6 +32,9 @@ def test_validation_times_loader_and_preserves_unequal_tail(monkeypatch):
 
     class Evidence:
         is_terminal = False
+
+        def active_interval(self):
+            return nullcontext()
 
         def __init__(self):
             self.records = []
