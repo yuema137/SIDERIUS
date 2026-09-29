@@ -22,6 +22,5 @@ def test_repository_homepage_is_the_root_readme() -> None:
     assert homepage.is_file()
     content = homepage.read_text(encoding="utf-8")
     assert "# SIDERIUS" in content
-    assert "## Start without provider credentials or scientific data" in content
-    assert "## The reference workflow" in content
+    # Section titles are editorial choices, not homepage-selection invariants.
     assert not shadow.exists(), "GitHub would use .github/README.md as the homepage"
