@@ -7,12 +7,12 @@ available below for documentation that specifically links them.
 The original PDFs are copied unchanged where available; PNG previews render them
 for Markdown. The current paper build supplies `figure1.png` and `figure2.png`
 as rendered submission figures.
-Click any preview in the root README to open the vector PDF.
+The root README embeds PNGs; it does not link those previews to vector PDFs.
 
-These are conceptual illustrations. The loop and composition figures show the
-core capabilities and literature review; they do not depict the optional Data
-Analysis extension. Current interfaces and configuration are documented in the
-framework guides linked beside each figure.
+These are conceptual illustrations. The current `figure2.png` includes Data
+Analysis and literature inputs. The older `fig_loop` and `fig_composition`
+illustrations omit Data Analysis. Use the framework guides for executable
+interfaces and configuration.
 
 ## Earlier framework illustrations: source and reproduction
 

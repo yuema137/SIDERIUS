@@ -80,10 +80,10 @@ for a worked example.
 5. **Set the run policy.** Select the enabled capabilities, LLM routing, data
    scope, Health policy, result authority, iteration/round counts, and resource
    budgets. Review these before sending any provider request.
-6. **Run a dry-run.** It resolves the manifest and prints the child commands
-   without calling providers, training, or writing scientific results. A dry-run
-   can still create the workspace files needed for resolution; it is not a
-   promise that the filesystem remains untouched.
+6. **Preview the command.** The reference chain's `--dry-run` checks launcher
+   inputs and prints child commands without running those children. It does
+   not prove that task composition, provider access or training will succeed;
+   qualify the selected task separately before a formal experiment.
 7. **Launch the real run.** Load only the required provider keys from a
    mode-600 external file or managed secret in the same process that launches
    the run.
@@ -94,11 +94,14 @@ for a worked example.
    invariants. For an intentional task or configuration change, compose a new
    run instead of editing an old workspace.
 
-For a composed run, the minimum inputs are a task composition and a caller
-owned `--data_dir`. A formal run must also state `--healthgate_mode` and
-`--result_authority` explicitly. LLM routing, scope, iteration counts, rounds,
-and resource budgets may come from the caller's documented defaults, but the
-effective values are always recorded in the launch receipt.
+For the reference chain, supply `--mode`, `--workspace`, `--run_name`,
+`--task_composition` and the external `--data_dir`. Set
+`--healthgate_mode` and `--result_authority` explicitly so the intended policy
+is visible. The shell wrapper otherwise supplies `blocking` and `scientific`;
+the direct Python iteration entrypoint requires both declarations.
+LLM routing, scope, iteration counts, rounds and budgets may have caller
+defaults. Inspect the previewed command and the resulting run records;
+experiment-specific launch receipts are owned by the caller.
 
 The short offline path is:
 
@@ -140,14 +143,14 @@ to a real composed run:
 | Control | Why it matters |
 | --- | --- |
 | `--task_composition` | Selects the task contract; it is required for composed runs |
-| `--data_dir` and optional `--data_scope` | Select the caller-owned data location and bounded subset. `--data_scope` is available only when the selected task supports it, and must cover the task's declared HealthGate files. |
+| `--data_dir` and optional `--data_scope` | Select external data and a bounded subset. Scope support is task-dependent; effective HealthGate files, including any `--health_gate_files` override, must remain inside that subset. |
 | `--llm_config` | Chooses provider/model routing for each enabled LLM capability |
-| `--healthgate_mode` | Chooses blocking or observational Health behavior; formal runs must state it |
-| `--result_authority` | Declares whether the run is diagnostic or scientific; formal runs must state it |
+| `--healthgate_mode` | `blocking` enforces validity verdicts; `observe_only` records them without enforcing them |
+| `--result_authority` | `diagnostic` or `scientific`; `observe_only` cannot be combined with `scientific` |
 | `--num_iterations` | Number of research iterations in the caller's schedule |
 | `--max_rounds` | Number of tuning rounds inside an iteration |
 | Trial/Formal time and VRAM budgets | Bound candidate execution and are passed into planning and runtime checks |
-| `--dry-run` | Resolves and previews the launch without effectful work |
+| `--dry-run` | Previews child commands; does not execute or qualify the task |
 | Resume / fresh workspace | Resume preserves identity and evidence; a fresh workspace starts a new experiment |
 
 The framework also enforces typed Pydantic boundaries, a recorded content

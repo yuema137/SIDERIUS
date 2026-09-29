@@ -24,6 +24,7 @@ framework source.
 | you need | go to |
 |---|---|
 | the rules you must follow | [`CLAUDE.md`](CLAUDE.md) |
+| README/tutorial readability and other Markdown contracts | [`Documentation audience and review`](CLAUDE.md#documentation-audience-and-review) |
 | to find the right technical doc for a task | [`docs/agent-reference/README.md`](docs/agent-reference/README.md) |
 | what a user must declare | [`docs/reference/task-composition.md`](docs/reference/task-composition.md) |
 | what is landed vs planned | [`docs/concepts/supported-tasks.md`](docs/concepts/supported-tasks.md) |
