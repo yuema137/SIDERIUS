@@ -1,7 +1,7 @@
 # Paper illustrations
 
-The root README uses the current paper's task/evaluation overview (`figure1`)
-and end-to-end research loop (`figure2`). The older framework composition,
+The root README uses the current paper's infrastructure overview (Figure 1,
+`figure1.png`) and evaluation protocol (Figure 2, `figure2.png`). The older framework composition,
 reference loop, evaluation-role, and human-participation illustrations remain
 available below for documentation that specifically links them.
 The original PDFs are copied unchanged where available; PNG previews render them
@@ -9,8 +9,8 @@ for Markdown. The current paper build supplies `figure1.png` and `figure2.png`
 as rendered submission figures.
 The root README embeds PNGs; it does not link those previews to vector PDFs.
 
-These are conceptual illustrations. The current `figure2.png` includes Data
-Analysis and literature inputs. The older `fig_loop` and `fig_composition`
+These are conceptual illustrations. The current `figure1.png` includes Data
+Analysis and literature capabilities. The older `fig_loop` and `fig_composition`
 illustrations omit Data Analysis. Use the framework guides for executable
 interfaces and configuration.
 
@@ -41,16 +41,21 @@ does not state a separate figure license, and no license is inferred.
 
 | Asset | Meaning | Source |
 | --- | --- | --- |
-| [`figure1.png`](figure1.png) | Task package declarations, evaluation roles, scoreability, and Health | `SIDERIUS-Paper/iclr/build/submission_audit/figure_1.png` |
-| [`figure2.png`](figure2.png) | Data Analysis/literature inputs and the Interpret → Propose → Implement → Validate → Train & Tune loop | `SIDERIUS-Paper/iclr/build/submission_audit/figure_2.png` |
+| [`figure1.png`](figure1.png) | Paper Figure 1: caller-owned composition and typed scientific capabilities (infra) | `SIDERIUS-Paper/iclr/build/submission_audit/figure_0.png` |
+| [`figure2.png`](figure2.png) | Paper Figure 2: task specification, evaluation roles, scoreability, Health, and offline review (eval) | `SIDERIUS-Paper/iclr/build/submission_audit/figure_1.png` |
 
 Current paper-build source checkout revision used for these two files:
 `8ef64a181e5b8e606ff6bdb88433c4ecdd7ab31f`.
-The files were copied read-only from the paper checkout on 2026-09-28.
+The files were copied read-only from the paper checkout on 2026-09-29.
+The audit export filenames are **zero-indexed**, unlike the paper's figure
+numbers. The paper's `iclr/build/main.aux` assigns `fig:overview` to Figure 1
+and `fig:evaluation` to Figure 2; their TeX sources are
+`iclr/figures/overview.tex` and `iclr/figures/evaluation.tex`. The research-loop
+export `figure_2.png` is not one of the two root README illustrations.
 
 ```text
-f39ed5c2ba1ea860434bf540902648540efe16692b6d7ecf23bb0f3d3ac5839a  figure1.png
-7cefd3de80672aaed3c422e15ddbc3b5576283a7d1e0b79a37e59b31b4e72a2f  figure2.png
+42ce1a9bc6296269e5c1b125b605054e2de5f24ad29d5c0044fd19e94737b42a  figure1.png
+f39ed5c2ba1ea860434bf540902648540efe16692b6d7ecf23bb0f3d3ac5839a  figure2.png
 ```
 
 ## SHA-256 checksums for the earlier illustrations

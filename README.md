@@ -15,21 +15,22 @@ that connect them.
 
 ## How the pieces fit together
 
-![Task package, evaluation roles, and automatic checks](docs/assets/paper/figure1.png)
+![Paper Figure 1: SIDERIUS infrastructure and typed capability contracts](docs/assets/paper/figure1.png)
 
-The first diagram shows the boundary that matters most: a task package declares
-the science, while the framework keeps the evaluation roles separate. A
-training loss is not automatically the ranking metric; validation history is
-evidence about learning; Health and scoreability decide whether an output is
-eligible to be considered.
+**Figure 1 — Infrastructure.** A human scientist, a fixed workflow, or an LLM
+orchestrator can call the same scientific capabilities through typed contracts.
+The caller chooses the calls, assembles their inputs, and owns control and
+history. Each capability owns its reasoning and tools, including executable
+Data Analysis.
 
-![The SIDERIUS research loop](docs/assets/paper/figure2.png)
+![Paper Figure 2: task specification and multilayer evaluation](docs/assets/paper/figure2.png)
 
-The second diagram shows one research loop. Data Analysis and literature review
-are optional inputs. The caller assembles the requested capabilities and their
-typed handoffs; the loop then interprets evidence, proposes a plan, implements
-model code, validates it, trains and tunes it, and records the result for the
-next iteration.
+**Figure 2 — Evaluation.** The task package separates training objectives,
+validation monitoring, scientific ranking, and supporting evidence.
+Scoreability checks whether the declared metric can be computed; Health
+records applicable model/output checks and follows their configured blocking
+or observational policy. Offline behavioral review adds evidence for scientific
+acceptance without feeding its judgments back into search.
 
 These figures are reproduced from the current SIDERIUS paper build. Their
 source and checksums are recorded in
