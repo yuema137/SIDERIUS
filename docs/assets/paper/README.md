@@ -14,10 +14,10 @@ core capabilities and literature review; they do not depict the optional Data
 Analysis extension. Current interfaces and configuration are documented in the
 framework guides linked beside each figure.
 
-## Source and reproduction
+## Earlier framework illustrations: source and reproduction
 
 - Source repository: `git@github.com:yuema137/SIDERIUS-Paper.git`
-- Source checkout revision: `1c21c64fe37b4dbd47372ea443e768b90a1ca009`
+- Legacy source checkout revision: `1c21c64fe37b4dbd47372ea443e768b90a1ca009`
 - Source directory: `shared/figures/` (read-only during this update)
 - Copy date: 2026-09-18
 - Source manifest: `shared/figures/MANIFEST.md`
@@ -37,14 +37,15 @@ The source manifest dates composition, evaluation, and loop figures to
 original visual style. Figures are reused at the operator's request; the source
 does not state a separate figure license, and no license is inferred.
 
-## Current README figures
+## Current paper-build figures
 
 | Asset | Meaning | Source |
 | --- | --- | --- |
 | [`figure1.png`](figure1.png) | Task package declarations, evaluation roles, scoreability, and Health | `SIDERIUS-Paper/iclr/build/submission_audit/figure_1.png` |
 | [`figure2.png`](figure2.png) | Data Analysis/literature inputs and the Interpret → Propose → Implement → Validate → Train & Tune loop | `SIDERIUS-Paper/iclr/build/submission_audit/figure_2.png` |
 
-Source checkout revision used for these two files: `8ef64a181e5b8e606ff6bdb88433c4ecdd7ab31f`.
+Current paper-build source checkout revision used for these two files:
+`8ef64a181e5b8e606ff6bdb88433c4ecdd7ab31f`.
 The files were copied read-only from the paper checkout on 2026-09-28.
 
 ```text
