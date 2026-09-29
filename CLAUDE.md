@@ -1,10 +1,46 @@
 # SIDERIUS Project Rules
 
-README files are human-facing landing pages: lead with purpose, the shortest
-safe route, effects, and links to deeper documentation. Detailed coding-agent
-contracts belong in non-README documents (such as `docs/agent-reference/` or
-node contract pages), so do not describe a README itself as an agent
-instruction surface.
+## Documentation audience and review
+
+This rule applies at every directory depth, including source, tests, examples,
+deployments and archived documentation. Classify Markdown by filename,
+case-insensitively:
+
+- `README.md` files and Markdown files whose names contain `tutorial` are
+  **human-facing**. Assume a technically literate reader who is new to this
+  project. Lead with purpose and prerequisites, then give ordered steps,
+  concrete commands, expected outputs and effects, and where to change inputs.
+  Explain project-specific terms when they first matter; preserve exact CLI
+  flags, filenames, schema fields and established technical terminology.
+- All other Markdown files are **agent-facing technical references**. State
+  scope, owners, interfaces, schemas, invariants, defaults, failure behavior,
+  side effects, validation evidence and unresolved limitations as applicable.
+  Use the same jargon and identifiers as the landed code. Be detailed and
+  complete enough that an agent can implement or verify the contract without
+  reconstructing missing decisions. Agent-facing does not mean opaque prose.
+
+Every new or modified human-facing page must receive a readability and logic
+review using the non-dialect parts of the
+[DongbeiGPT skillset](https://github.com/yuema137/DongbeiGPT):
+`clear-tech-explainer` for causal structure, `concrete-example` when a worked
+trace helps, and `plain-chinese` for Chinese prose. Apply the clarity principles
+to English pages without translating them or adding regional voice. Check
+whether a new reader can identify what to do, in what order, which file owns
+each choice, and how to recognize success. Simplification must preserve
+technical conditions and distinctions.
+
+For both audiences, compare behavior claims and commands against the exact
+source revision and relevant tests: paths, flags, defaults, units, shapes,
+parameter interactions, outputs and failure cases. Distinguish source review
+from commands actually executed. A plan or old session is evidence of intent,
+not proof of current behavior. Mark historical claims with their scope and
+revision. Link to the owning contract instead of duplicating rules in README
+files; keep each rule authoritative in one place.
+
+Apply this review whenever a page is created or changed; this does not require
+an unrelated repository-wide rewrite. Explicitly requested human reading
+mirrors remain reading aids for the authoritative source, not separate rule
+owners.
 
 ## Context
 - SIDERIUS is a task-generic closed-loop research framework for supervised
