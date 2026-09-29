@@ -107,7 +107,7 @@ experiment-specific launch receipts are owned by the caller.
 The short offline path is:
 
 ```bash
-git clone git@github.com:Galileo-Sandbox/SIDERIUS.git
+git clone https://github.com/yuema137/SIDERIUS.git
 cd SIDERIUS
 uv sync --group dev --frozen
 .venv/bin/python -m pytest \
@@ -172,7 +172,7 @@ pass the relevant schema.
 
 Real scientific packages and campaigns—including TIDMAD, Oxford-IIIT Pet, and
 DAVIS—belong in the external
-[`siderius-exp`](https://github.com/Galileo-Sandbox/siderius-exp) repository.
+[`siderius-exp`](https://github.com/yuema137/siderius-exp) repository.
 The framework repository intentionally does not select a scientific task by
 default.
 
