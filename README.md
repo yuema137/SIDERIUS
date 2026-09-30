@@ -13,6 +13,30 @@ The task owns the scientific meaning. The caller owns the workflow composition
 and run settings. SIDERIUS supplies the typed interfaces and execution core
 that connect them.
 
+## Try a scientific task with siderius-exp
+
+This repository provides the framework. Its companion,
+[`siderius-exp`](https://github.com/yuema137/siderius-exp), provides scientific
+task packages, experiment configurations, launch scripts, and tutorials.
+**Start with the [tutorial guide](https://github.com/yuema137/siderius-exp/blob/main/tutorials/README.md)**
+to learn the full path from editing a task to plotting score versus iteration.
+
+The guide offers four notebook demos: **TESS** (stellar rotation), **TIDMAD**
+(waveform denoising, one band), **Project8** (electron energy from time and
+frequency inputs), and **LIGO** (chirp mass from two detector channels).
+Each quick demo runs three research iterations. These are workflow demos,
+not reproductions of the paper's artifacts or scores.
+
+Follow the [installation and setup guide](https://github.com/yuema137/siderius-exp/blob/main/tutorials/paper/README.md)
+for compatible repository revisions, data, NVIDIA GPU requirements, and API
+keys. Work in your own external project directory: the copied notebook explains
+and saves your task package and experiment settings, then invokes a saved
+script to launch the run. Configurations, scripts, results, and plots stay in
+that project; keep credentials outside both source repositories. The notebooks
+show how to inspect the saved files and adjust iterations, data fractions,
+splits, and time/VRAM budgets before running again. Real runs use GPU resources
+and incur API charges.
+
 ## How the pieces fit together
 
 ![Paper Figure 1: SIDERIUS infrastructure and typed capability contracts](docs/assets/paper/figure1.png)
