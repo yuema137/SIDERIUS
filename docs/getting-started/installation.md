@@ -19,7 +19,7 @@
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-git clone git@github.com:Galileo-Sandbox/SIDERIUS.git && cd SIDERIUS
+git clone https://github.com/yuema137/SIDERIUS.git && cd SIDERIUS
 uv sync --group dev --frozen
 source .venv/bin/activate
 ```
