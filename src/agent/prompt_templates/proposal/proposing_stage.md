@@ -33,6 +33,14 @@ architectural choice must trace back to the comparisons and reasoning.
 
 ## What you produce
 
+Preserve the causal stage's validated `inherited_components` source identities.
+An `experiment` citation uses the bare `model_type`; an `external_agent`
+citation copies the supplied expert item's `source_ref`, such as
+`arxiv:2312.00752`; a `human` citation copies the supplied instruction ID,
+such as `human:instruction_20260603`. The latter two require
+`prefix:identifier`, not a bare iteration or component name. Examples show
+format only: do not invent a source or relabel it to bypass validation.
+
 A JSON object with these fields:
 
 ```json

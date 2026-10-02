@@ -121,6 +121,14 @@ A JSON object with these fields:
 
 ## Rules — the four structural teeth
 
+For `inherited_components`, copy the actual source identity. An `experiment`
+uses its bare `model_type`. An `external_agent` uses the originating expert
+item's `source_ref`, for example `arxiv:2312.00752`; a `human` source uses
+its supplied instruction ID, for example `human:instruction_20260603`.
+Both non-experiment types require `prefix:identifier`; a bare `iter_004`
+is not a valid external citation. These are format examples, not sources
+to invent: use them only when the corresponding source was supplied.
+
 1. **Evidence-backed**: every claim in `causal_hypothesis` must reference
    either (a) a specific ModelComparison from Stage 1, or (b) an
    ExpertContextItem whose contributor's `trust_level` is `strong_prior`

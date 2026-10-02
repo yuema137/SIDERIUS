@@ -240,6 +240,15 @@ These mappings are read-only Mapping objects, not necessarily built-in dicts. Us
 operations (`obj["descriptor"]`, `descriptor["slot_id"]`, `arrays.get(...)`) or
 `isinstance(value, collections.abc.Mapping)`; never use `isinstance(value, dict)` to decide
 whether an authorized binding, descriptor, or array exists.
+Each descriptor contains exactly these top-level fields: `binding_id`, `slot_id`, `asset_id`,
+`split_id`, `format_id`, `population_unit`, `total_available`, `materialized_count`,
+`certified_information`, and `selection_identity`. Safe discovery context is not an extra
+runtime descriptor field. Neither a binding/slot name nor `asset_id` certifies a source-file
+index; a view can pool samples from multiple source files. Use grouping metadata only when
+it is explicitly authorized and present in `arrays["metadata__<field>"]`. If required grouping
+is unavailable, report that limitation in `warnings` and return only supported measurements
+and declared artifacts; do not invent groups or emit a required result you could not compute.
+If the declared outputs cannot be satisfied, fail explicitly instead of fabricating evidence.
 Binding IDs are chosen after source generation and need not equal declared slot IDs. Never
 hard-code a binding ID or look up `inputs[slot_id]`; locate inputs by the certified
 `descriptor["slot_id"]`, and support the declared slot cardinality. `arrays`
@@ -278,8 +287,14 @@ per-observation `valid_mask[N,T]`; the mask is not an example-level boolean. A r
 or transpose these certified axes.
 
 SkillPayload also has validator-owned rules not fully expressed by JSON Schema: `analysis_usage`
-counts the certified `descriptor["population_unit"]` (usually examples), not channel-series or
-windows. `effective_count + dropped_count` must equal the certified selected/materialized count;
+counts the certified `descriptor["population_unit"]`. If the task declares windows as its
+population unit, count those windows; do not count extra channels or windows created internally
+as additional selected units. All input views must share the same certified `selection_identity`.
+Aligned inputs are views of one population, not populations to add together: two views of ten
+selected units still cover ten units, not twenty. With two units dropped, report effective_count=8
+and dropped_count=2. `effective_count + dropped_count` must equal
+`descriptor["selection_identity"]["selected_count"]` (also `materialized_count`), not
+`total_available` and not the sum across bindings;
 every dropped population unit has exactly one reason, drop reasons are unique, and their counts
 must sum exactly to `dropped_count`. Every emitted quantitative result must copy its declared
 `result_key`, `unit`, and `description` exactly, including description wording; only `value` is
