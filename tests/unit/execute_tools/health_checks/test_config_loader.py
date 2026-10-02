@@ -16,6 +16,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from execute_tools.health_checks import config as config_module
@@ -32,6 +33,58 @@ from execute_tools.health_checks.config import (
     materialize_effective_config,
 )
 from execute_tools.health_checks.schemas import GateAction
+
+
+@pytest.mark.parametrize("source", ["explicit", "packaged_default"])
+@pytest.mark.parametrize("bad", [None, "", "all_pas", 3, False, [], {}])
+def test_policy_aggregation_is_refused_before_it_can_become_a_health_verdict(
+    tmp_path, monkeypatch, source, bad
+):
+    """#370: neither loading route may pin an unreadable aggregation into a gate."""
+    from execute_tools.health_checks import _composition
+
+    document = yaml.safe_load(Path(_DEFAULT_CONFIG_PATH).read_text())
+    document["health_policy"]["blocking"]["check_config"]["aggregation"] = bad
+    if source == "explicit":
+        path = tmp_path / "policy.yaml"
+        path.write_text(yaml.safe_dump(document))
+
+        def load():
+            return load_health_gates_config(str(path))
+    else:
+        monkeypatch.setattr(_composition, "read_default_policy", lambda: document)
+        load = _composition.default_disposition_policy
+    with pytest.raises(ValidationError, match="aggregation"):
+        load()
+
+
+@pytest.mark.parametrize("mode", [None, "any_pass", "all_pass", "max", "min", "mean", "median"])
+def test_valid_policy_aggregation_preserves_composition_and_task_precedence(tmp_path, mode):
+    """Validation must not insert defaults, drop other keys or overwrite task choices."""
+    from execute_tools.health_checks._composition import compose_gate
+    from execute_tools.health_checks._task_health_config import HealthRosterEntry
+
+    document = yaml.safe_load(Path(_DEFAULT_CONFIG_PATH).read_text())
+    parameters = {"fixture_parameter": 7}
+    if mode is not None:
+        parameters["aggregation"] = mode
+    document["health_policy"]["blocking"]["check_config"] = parameters
+    path = tmp_path / "policy.yaml"
+    path.write_text(yaml.safe_dump(document))
+    policy = load_health_gates_config(str(path)).resolved_policy()
+    entry = HealthRosterEntry(gate_id="g", check="fixture_check", disposition="blocking")
+    assert compose_gate(entry, (), policy)["checks"][0]["config"] == parameters
+
+    override = HealthRosterEntry(
+        gate_id="g",
+        check="fixture_check",
+        disposition="blocking",
+        parameters={"aggregation": "any_pass"},
+    )
+    assert compose_gate(override, (), policy)["checks"][0]["config"] == {
+        "fixture_parameter": 7,
+        "aggregation": "any_pass",
+    }
 
 
 @pytest.fixture(autouse=True)

@@ -80,10 +80,18 @@ Severity: `invalidate_round > continue`. The retired `skip_iter` and
 | framework | packaged default via `execute_tools.health_checks.config.default_health_policy_path()` | `health_policy.{blocking,recording}`: gate role, cadence, short-circuit, `on_pass`/`on_fail`, default `aggregation` |
 | task | external task's declared Health YAML | `facts`, `value_scale`, `health_peek_files`, `roster[]` with **thresholds** in `parameters`, and `reason` prose |
 
-The task's **only** policy choice is YAML `disposition: blocking` or `recording`;
+The task selects YAML `disposition: blocking` or `recording`;
 the framework derives role, cadence, short-circuit, actions and
 severity from it, so the two cannot disagree. Framework-policy keys appearing in a
 roster entry's `parameters` are rejected.
+
+`aggregation` is the task-declarable exception: an explicit roster parameter
+overrides the framework's `health_policy.<disposition>.check_config` default.
+Both configuration surfaces use the same presence-based validator and the
+runtime's aggregation vocabulary. Omitting the key preserves existing default
+resolution; explicitly declaring a blank YAML value, an unknown mode or a
+non-string value is rejected during configuration validation, before it can
+become a runtime Health error. Other check parameters remain open mappings.
 
 The two compose deterministically into `{workspace}/health_checks_effective.yaml`,
 sha256-pinned by the run-invariants lock. **`load_health_gates_config()` returns

@@ -72,6 +72,31 @@ from execute_tools.health_checks._multi_file_peek import VALID_AGGREGATION_MODES
 from execute_tools.health_checks.schemas import TaskHealthFacts
 
 
+def validate_aggregation_config(value: dict[str, Any]) -> dict[str, Any]:
+    """Validate an explicitly supplied aggregation without changing the mapping.
+
+    Shared by task parameters and framework policy defaults. Presence matters:
+    a missing key leaves default resolution to its owner; an explicit null is
+    invalid. The executable aggregation vocabulary remains the sole authority.
+    """
+    if "aggregation" not in value:
+        return value
+    declared = value["aggregation"]
+    if declared is None:
+        raise ValueError(
+            "aggregation is declared with no value. In YAML, a bare "
+            "'aggregation:' parses to None. Give it a mode from "
+            f"{sorted(VALID_AGGREGATION_MODES)}, or omit the key to leave "
+            "default resolution to the containing configuration."
+        )
+    if not isinstance(declared, str) or declared not in VALID_AGGREGATION_MODES:
+        raise ValueError(
+            f"aggregation {declared!r} is not a rule this runtime implements; "
+            f"valid modes: {sorted(VALID_AGGREGATION_MODES)}."
+        )
+    return value
+
+
 class HealthDisposition(StrEnum):
     """What a roster entry's gate MEANS scientifically.
 
@@ -429,26 +454,7 @@ class HealthRosterEntry(BaseModel):
         blank declaration silently inherit the framework default, teaching
         that a half-written line is a working line.
         """
-        if "aggregation" not in value:
-            return value
-        declared = value["aggregation"]
-        if declared is None:
-            raise ValueError(
-                "aggregation is declared with no value. In YAML, a bare "
-                "'aggregation:' parses to None — which the composer reads as "
-                "a DECLARATION and therefore withholds the framework default "
-                "for, while no check can act on it. Give it a mode from "
-                f"{sorted(VALID_AGGREGATION_MODES)}, or delete the key to "
-                "inherit health_policy.<disposition>.check_config."
-            )
-        if declared not in VALID_AGGREGATION_MODES:
-            raise ValueError(
-                f"aggregation {declared!r} is not a rule this runtime "
-                f"implements; valid modes: {sorted(VALID_AGGREGATION_MODES)}. "
-                f"A task may declare aggregation, but only from the "
-                f"framework's vocabulary."
-            )
-        return value
+        return validate_aggregation_config(value)
 
 
 class TaskHealthConfig(BaseModel):

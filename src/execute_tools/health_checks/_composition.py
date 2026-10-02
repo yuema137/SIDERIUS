@@ -58,7 +58,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from core.layout import checkout_root
 from execute_tools.health_checks._plugin_binding import ResolvedHealthPlugin
@@ -67,6 +67,7 @@ from execute_tools.health_checks._task_health_config import (
     TASK_DECLARABLE_POLICY_KEYS,
     HealthRosterEntry,
     TaskHealthConfig,
+    validate_aggregation_config,
 )
 from execute_tools.health_checks.schemas import GateAction
 
@@ -159,6 +160,12 @@ class DispositionPolicy(BaseModel):
             "silent still gets this. Every other key here is unconditional."
         ),
     )
+
+    @field_validator("check_config")
+    @classmethod
+    def _declared_aggregation_is_an_implemented_mode(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """Refuse invalid defaults before composition can turn them into Health errors."""
+        return validate_aggregation_config(value)
 
 
 class _DefaultPolicyDocument(BaseModel):
