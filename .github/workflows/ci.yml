@@ -3,8 +3,8 @@ name: CI
 on:
   push:
     branches: [master]
+  # Include stacked PRs targeting feature branches; selection uses their actual base.
   pull_request:
-    branches: [master]
   # Nightly full suite. The selective PR path is a speed optimisation, not a
   # coverage reduction: master and this schedule always run everything, so a
   # selector mistake costs at most one night, never a silent permanent gap.
