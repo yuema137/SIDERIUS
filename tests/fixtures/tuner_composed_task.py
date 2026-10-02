@@ -4,9 +4,41 @@ from __future__ import annotations
 
 import json
 import random
-from typing import Any, ClassVar
+from pathlib import Path
+from typing import Annotated, Any, ClassVar, Literal
 
-from execute_tools.task_data_path import ScopeBuildRequest
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from execute_tools.task_data_path import (
+    EvaluationReadRequest,
+    HealthCoverageRequest,
+    HealthCoverageResult,
+    ScopeBuildRequest,
+    TaskOutputArtifactInventory,
+)
+
+Partition = Annotated[int, Field(strict=True, ge=0, lt=20)]
+RowIndex = Annotated[int, Field(strict=True, ge=0, lt=8)]
+
+
+class _EvaluationScope(BaseModel):
+    """The fixture's symbolic evaluation identity, including transported JSON rows."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["tuner_rows"]
+    leg: Literal["eval"]
+    partitions: list[Partition] = Field(min_length=1)
+    rows: list[tuple[Literal["eval"], Partition, RowIndex]] = Field(min_length=1)
+    seed: int
+
+    @model_validator(mode="after")
+    def check_row_identity(self) -> _EvaluationScope:
+        if len(set(self.rows)) != len(self.rows):
+            raise ValueError("fixture evaluation rows must be unique")
+        if self.partitions != sorted({partition for _, partition, _ in self.rows}):
+            raise ValueError("fixture partitions must exactly describe the evaluation rows")
+        return self
 
 
 class TunerComposedTask:
@@ -57,6 +89,27 @@ class TunerComposedTask:
     def build_eval_scope(self, request: ScopeBuildRequest) -> object:
         return self._scope(request, "eval")
 
+    def validate_health_coverage(self, request: HealthCoverageRequest) -> HealthCoverageResult:
+        """Cover the fixture's categorical check over sampled evaluation rows.
+
+        The supplied-outcome fixture checks the selected population, not every
+        row in a partition. An explicit monitored-partition override additionally
+        requires at least one actual evaluation row from each requested partition.
+        This certifies scope coverage only; the supplied Health verdict is separate.
+        """
+        scope = _EvaluationScope.model_validate(request.evaluation_scope)
+        required = set(request.health_gate_files or ())
+        missing = sorted(required - set(scope.partitions))
+        return HealthCoverageResult(
+            applicable=True,
+            covered=not missing,
+            reason=(
+                f"fixture evaluation rows omit monitored partitions {missing}"
+                if missing
+                else "fixture evaluation rows cover the sampled categorical Health population"
+            ),
+        )
+
     def serialize_scope(self, scope: object) -> str:
         if not isinstance(scope, dict) or scope.get("kind") != "tuner_rows":
             raise ValueError("tuner scope must be a tuner_rows mapping")
@@ -79,3 +132,20 @@ class TunerComposedTask:
 
     def read_evaluation_payload(self, request: Any) -> object:
         raise AssertionError("pseudo tuner fixture must not read deliverables")
+
+    def enumerate_output_artifacts(
+        self, request: EvaluationReadRequest
+    ) -> TaskOutputArtifactInventory:
+        """RecordingSandbox supplies outcomes without writing prediction files.
+
+        Refuse unexpected fixture predictions rather than silently omitting them.
+        The deliverable root also holds unrelated configuration and record files.
+        """
+        directory = Path(request.deliverable_dir)
+        if any(directory.glob("tuner_fixture_predictions_*.json")):
+            raise ValueError("pseudo tuner fixture must not contain inference outputs")
+        return TaskOutputArtifactInventory(
+            run_name=request.run_name,
+            exp_id=request.exp_id,
+            model_type=request.model_type,
+        )

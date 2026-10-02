@@ -38,11 +38,87 @@ from execute_tools.health_checks.schemas import (
     HealthCheckResult,
     PersistedHealthGateResult,
 )
+from execute_tools.task_data_path import (
+    EvaluationReadRequest,
+    ScopeBuildRequest,
+    TaskHealthCoverageError,
+)
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from nodes.ml_hyperparameter_tune_agent.health_coverage import validate_attempt_health_coverage
+from tests.fixtures.tuner_composed_task import TunerComposedTask
 from tests.helpers.recording_llm_bridge import RecordingLLMBridge
 from tests.helpers.recording_sandbox import RecordingSandbox
 from tests.helpers.tuner_composed_effects import composed_tuner_effects
 from tests.helpers.tuner_composed_fixture import composed_run
+
+
+@pytest.mark.parametrize("round_kind", ["trial", "formal"])
+def test_fixture_coverage_uses_actual_rows_after_scope_transport(round_kind):
+    """A partition label cannot cover a monitored partition whose rows are absent."""
+    task = TunerComposedTask()
+    scope = task.build_eval_scope(
+        ScopeBuildRequest(
+            round_kind=round_kind,
+            portion=0.125,
+            selection_strategy="target",
+            target_partitions=(4, 7, 9),
+        )
+    )
+    scope = task.deserialize_scope(task.serialize_scope(scope))
+
+    def check(value):
+        return validate_attempt_health_coverage(
+            data_path=task,
+            evaluation_scope=value,
+            round_kind=round_kind,
+            health_binding="fixture_health.yaml",
+            health_gate_files=(4, 7, 9),
+            composed=True,
+            health_enabled=True,
+        )
+
+    assert check(scope).covered is True
+    scope["rows"] = [row for row in scope["rows"] if row[1] != 7]
+    with pytest.raises(TaskHealthCoverageError, match="partitions must exactly describe"):
+        check(scope)
+    scope["partitions"] = [4, 9]
+    with pytest.raises(TaskHealthCoverageError, match="omit monitored partitions \\[7\\]"):
+        check(scope)
+
+
+def test_fixture_coverage_refuses_training_rows_disguised_as_eval():
+    """Changing the scope label must not let train identities satisfy Health coverage."""
+    task = TunerComposedTask()
+    scope = task.build_training_scope(
+        ScopeBuildRequest(round_kind="trial", portion=0.125, selection_strategy="snapshot")
+    )
+    scope["leg"] = "eval"
+    with pytest.raises(TaskHealthCoverageError, match="malformed Health coverage"):
+        validate_attempt_health_coverage(
+            data_path=task,
+            evaluation_scope=scope,
+            round_kind="trial",
+            health_binding="fixture_health.yaml",
+            composed=True,
+            health_enabled=True,
+        )
+
+
+def test_fixture_empty_inventory_does_not_hide_prediction_files(tmp_path):
+    """Record files are not predictions; real fixture predictions cannot be ignored."""
+    task = TunerComposedTask()
+    request = EvaluationReadRequest(
+        deliverable_dir=str(tmp_path), exp_id="001", run_name="fixture", model_type="model"
+    )
+    (tmp_path / "records").mkdir()
+    (tmp_path / "records" / "summary.json").write_text("{}")
+    assert task.enumerate_output_artifacts(request).relative_paths == ()
+    prediction = tmp_path / "tuner_fixture_predictions_model_fixture_001_0004.json"
+    prediction.write_text("{}")
+    with pytest.raises(ValueError, match="must not contain inference outputs"):
+        task.enumerate_output_artifacts(request)
+    assert prediction.exists()
+
 
 TUNER_MODULE = "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
 PSEUDO = "tests/pseudo_data"
@@ -225,7 +301,7 @@ class TestPartialScopeNormalizationAndStamps:
         assert _gates_pass["n"] == 2  # gate machinery reachable each round
         assert len(sandbox.training_kwargs) == 2
         for call in sandbox.training_kwargs:
-            scopes = call["task_scopes"]
+            scopes = call["execution_bindings"].task_scopes
             assert scopes.acquired
             assert scopes.training["partitions"] == [4, 5, 6, 7, 8, 9]
             assert scopes.evaluation["partitions"] == [4, 5, 6, 7, 8, 9]
