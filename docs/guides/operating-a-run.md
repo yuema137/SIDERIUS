@@ -115,6 +115,18 @@ qualification, or campaign. The same candidate execution path serves both;
 the caller may vary declared scope and budget without introducing a second
 training mechanism.
 
+The iteration launcher and direct `run_workflow` entry validate the effective
+operator overrides before starting workspace execution or calling an LLM.
+With trial mode enabled, `max_rounds=1` and `force_formal_round=True`, an
+override that applies only to Trial would never take effect and is refused.
+Use at least two rounds, or remove those overrides for a Formal-only run;
+the chain launcher also accepts `--no-force_formal_round` when a forced
+Formal round is not intended. Explicit portion flags participate in this
+check after merging with `plan_overrides`. Under agent-owned formal training,
+`trial_portion` and `train_portion` remain usable in Formal; this exception
+does not apply to evaluation portions or strategies. The tuner retains the
+same validation at its own input boundary.
+
 By default, Formal does not impose a batch-size floor beyond the task and
 candidate contracts. A caller may declare an explicit rule when its scientific
 treatment requires one.

@@ -1527,6 +1527,46 @@ TRIAL_SCOPED_OVERRIDE_KEYS: frozenset[str] = frozenset(
 )
 
 
+def validate_trial_override_schedule(
+    *,
+    plan_overrides: dict[str, Any],
+    is_trial: bool,
+    max_rounds: int,
+    force_formal_round: bool,
+    formal_training_scope_source: Literal["operator", "agent"],
+) -> None:
+    """Refuse overrides discarded by every round, at launch and tuner intake.
+
+    This is the existing tuner invariant, shared without changing round
+    resolution. Callers supply their effective merged operator overrides.
+    """
+    discarded = TRIAL_SCOPED_OVERRIDE_KEYS
+    if formal_training_scope_source == "agent":
+        discarded = discarded - {"trial_portion", "train_portion"}
+    trial_scoped = discarded & set(plan_overrides)
+    if trial_scoped and is_trial and max_rounds == 1 and force_formal_round:
+        # Remedy ORDER is deliberate (F-316 finding: a remedy must be
+        # REACHABLE from the surface that names it). The refusal fires
+        # in practice on the tuner node CLI (`--is_trial` there is the
+        # only auto-bundling route), and that surface HAS NO
+        # force-formal flag — so the universally-typeable remedies
+        # lead, and the force-formal escape is marked chain-path-only.
+        raise ValueError(
+            f"plan_overrides carries trial-scoped key(s) {sorted(trial_scoped)} "
+            "but max_rounds=1 with force_formal_round=True forces the run's "
+            "only round to FORMAL, so the override would apply to zero "
+            "rounds (formal workload comes from --formal_strategy / "
+            "--formal_portion / --formal_train_portion / "
+            "--formal_eval_portion, with eval_strategy locked to "
+            "'snapshot'). Refusing "
+            "instead of silently ignoring the request. Remedies: raise "
+            "--max_rounds so trial rounds exist, or drop the trial-scoped "
+            "request (--is_trial / the trial overrides); on the CHAIN "
+            "launcher only, --no-force_formal_round makes the final round "
+            "honor the trial plan (the tuner node CLI has no such flag)."
+        )
+
+
 class EpochCapResolution(NamedTuple):
     """Resolved epoch ceiling for ONE round role (campaign decision D-BUD-6).
 
@@ -2801,31 +2841,13 @@ class HyperparamTuningInput(BaseModel):
         ``train_portion``) — the override demonstrably applies, so refusing
         there was simply wrong.
         """
-        discarded = TRIAL_SCOPED_OVERRIDE_KEYS
-        if self.formal_training_scope_source == "agent":
-            discarded = discarded - {"trial_portion", "train_portion"}
-        trial_scoped = discarded & set(self.plan_overrides)
-        if trial_scoped and self.is_trial and self.max_rounds == 1 and self.force_formal_round:
-            # Remedy ORDER is deliberate (F-316 finding: a remedy must be
-            # REACHABLE from the surface that names it). The refusal fires
-            # in practice on the tuner node CLI (`--is_trial` there is the
-            # only auto-bundling route), and that surface HAS NO
-            # force-formal flag — so the universally-typeable remedies
-            # lead, and the force-formal escape is marked chain-path-only.
-            raise ValueError(
-                f"plan_overrides carries trial-scoped key(s) {sorted(trial_scoped)} "
-                "but max_rounds=1 with force_formal_round=True forces the run's "
-                "only round to FORMAL, so the override would apply to zero "
-                "rounds (formal workload comes from --formal_strategy / "
-                "--formal_portion / --formal_train_portion / "
-                "--formal_eval_portion, with eval_strategy locked to "
-                "'snapshot'). Refusing "
-                "instead of silently ignoring the request. Remedies: raise "
-                "--max_rounds so trial rounds exist, or drop the trial-scoped "
-                "request (--is_trial / the trial overrides); on the CHAIN "
-                "launcher only, --no-force_formal_round makes the final round "
-                "honor the trial plan (the tuner node CLI has no such flag)."
-            )
+        validate_trial_override_schedule(
+            plan_overrides=self.plan_overrides,
+            is_trial=self.is_trial,
+            max_rounds=self.max_rounds,
+            force_formal_round=self.force_formal_round,
+            formal_training_scope_source=self.formal_training_scope_source,
+        )
         return self
 
     @model_validator(mode="after")

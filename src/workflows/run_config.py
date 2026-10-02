@@ -51,6 +51,7 @@ from agent.schemas.hyperparam_tuning import (
     HealthGateMode,
     ResultAuthority,
     TimeAdmissionSource,
+    validate_trial_override_schedule,
 )
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import OutputTypeName
@@ -298,3 +299,14 @@ def frozen_portion_overrides(launch: WorkflowLaunchConfig) -> dict | None:
             "Two authorities for one value — pick one: drop the flag or fix the JSON."
         )
     return existing | typed
+
+
+def validate_launch_trial_overrides(launch: WorkflowLaunchConfig) -> None:
+    """Apply the tuner-owned schedule invariant before workflow effects begin."""
+    validate_trial_override_schedule(
+        plan_overrides=frozen_portion_overrides(launch) or {},
+        is_trial=launch.is_trial,
+        max_rounds=launch.max_rounds,
+        force_formal_round=launch.force_formal_round,
+        formal_training_scope_source=launch.formal_training_scope_source,
+    )

@@ -107,7 +107,7 @@ from execute_tools.health_checks.launch_policy import (
     validate_formal_launch,
 )
 from workflows.llm_config import WorkflowLLMConfig
-from workflows.run_config import WorkflowLaunchConfig
+from workflows.run_config import WorkflowLaunchConfig, validate_launch_trial_overrides
 from workflows.scientific_evidence_stage import EvidenceStageOrder
 from workflows.task_composition import (
     RunTaskComposition,
@@ -2939,6 +2939,22 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
 
 def main():
     args = normalize_args(build_parser().parse_args())
+    # Validate the resolved schedule before workspace binding, task imports or LLM work.
+    try:
+        validate_launch_trial_overrides(
+            WorkflowLaunchConfig(
+                max_rounds=args.max_rounds,
+                is_trial=args.is_trial,
+                force_formal_round=args.force_formal_round,
+                formal_training_scope_source=args.formal_training_scope_source,
+                plan_overrides=args.plan_overrides,
+                trial_portion=args.trial_portion,
+                train_portion=args.train_portion,
+                eval_portion=args.eval_portion,
+            )
+        )
+    except ValueError as exc:
+        build_parser().error(str(exc))
     # Generated-capability identity participates in the run-invariants lock,
     # so bind it before composition preflight, resume validation, or any
     # other operation that can build those invariants.

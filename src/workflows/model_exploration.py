@@ -156,7 +156,11 @@ from nodes.result_interpretation_agent import (
 )
 from workflows.llm_config import ProposalLLMConfig, WorkflowLLMConfig
 from workflows.run_bindings import WorkflowRunBindings
-from workflows.run_config import WorkflowLaunchConfig, frozen_portion_overrides
+from workflows.run_config import (
+    WorkflowLaunchConfig,
+    frozen_portion_overrides,
+    validate_launch_trial_overrides,
+)
 from workflows.strategy_modes import (
     ExplorationMode,
     FormalRoundStrategy,
@@ -2135,6 +2139,8 @@ def run_workflow(
     # parameters carried before; the carrier restates none of them.
     if launch is None:
         launch = WorkflowLaunchConfig()
+
+    validate_launch_trial_overrides(launch)
 
     if llm_config is None:
         llm_config = WorkflowLLMConfig()
