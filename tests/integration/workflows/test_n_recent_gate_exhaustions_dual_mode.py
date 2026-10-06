@@ -51,7 +51,6 @@ from agent.schemas.hyperparam_tuning import GateExhaustionInfo
 from tests.unit.workflows.test_model_exploration import (
     _make_implementor_output,
     _make_interpretation_output,
-    _make_proposal_output,
     _make_tuning_output,
     _make_validator_output,
     _write_tuning_output,
@@ -112,7 +111,7 @@ _FAKE_PROPOSING = {
 }
 
 
-def _make_canned_bridge_factory():
+def _make_canned_bridge_factory(model_name):
     """Return a bridge_factory that makes a fresh MagicMock per call, each
     preloaded with the 3-stage proposer pipeline outputs.
 
@@ -125,7 +124,7 @@ def _make_canned_bridge_factory():
         bridge.generate.side_effect = [
             _FAKE_COMPARISON,
             _FAKE_REASONING,
-            _FAKE_PROPOSING,
+            {**_FAKE_PROPOSING, "model_name": model_name},
         ]
         return bridge
 
@@ -165,13 +164,22 @@ def _iter1_gate_exhaustion() -> GateExhaustionInfo:
 pytestmark = pytest.mark.dual_mode
 
 
-def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
+def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(
+    tmp_path, workflow_composition
+):
     """End-to-end: workflow deque + protocol filter + proposer render +
     debug dump must round-trip iter 1's gate_exhaustion summary into
     iter 3's proposing-stage system prompt, even when iter 2 succeeds
     in between."""
     # Seed tuning data so the workflow can bootstrap iteration 1.
-    _write_tuning_output(tmp_path, "punet", run="v1", score=1.5)
+    _write_tuning_output(
+        tmp_path,
+        "punet",
+        run="v1",
+        score=1.5,
+        fingerprint=workflow_composition.semantic_fingerprint,
+        metric_spec=workflow_composition.metric.spec,
+    )
 
     workspace = str(tmp_path / "workflow_output")
     data_dir = str(tmp_path / "data")
@@ -180,20 +188,32 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
     # Tune outputs: iter 1 carries gate_exhaustion (Trigger A simulated),
     # iter 2 succeeds (None), iter 3 is a filler (we only care about
     # what iter 3's proposer sees *before* iter 3's own tuner runs).
-    iter1_tune = _make_tuning_output(model_type="m_iter1", score=1.6)
+    iter1_tune = _make_tuning_output(
+        fingerprint=workflow_composition.semantic_fingerprint,
+        metric_spec=workflow_composition.metric.spec,
+        model_type="m_iter1",
+        score=1.6,
+    )
     iter1_tune.gate_exhaustion = _iter1_gate_exhaustion()
-    iter2_tune = _make_tuning_output(model_type="m_iter2", score=1.7)
+    iter2_tune = _make_tuning_output(
+        fingerprint=workflow_composition.semantic_fingerprint,
+        metric_spec=workflow_composition.metric.spec,
+        model_type="m_iter2",
+        score=1.7,
+    )
     assert iter2_tune.gate_exhaustion is None, (
         "sanity: default factory must produce None so iter 2 is filtered"
     )
-    iter3_tune = _make_tuning_output(model_type="m_iter3", score=1.8)
+    iter3_tune = _make_tuning_output(
+        fingerprint=workflow_composition.semantic_fingerprint,
+        metric_spec=workflow_composition.metric.spec,
+        model_type="m_iter3",
+        score=1.8,
+    )
 
     # Proposer produces a uniquely-named arch per iteration so the
     # workflow's existing_model_types bookkeeping stays sane.
     proposal_names = iter(["m_iter1", "m_iter2", "m_iter3"])
-
-    def proposal_factory(inp):
-        return _make_proposal_output(next(proposal_names))
 
     # Patch 4 agents + wire the real proposer with a canned bridge.
     with (
@@ -204,8 +224,12 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
         patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose,
     ):
         MockInterp.return_value.run.return_value = _make_interpretation_output()
-        MockImpl.return_value.run.return_value = _make_implementor_output()
-        MockValid.return_value.run.return_value = _make_validator_output(passed=True)
+        MockImpl.return_value.run.side_effect = lambda inp: _make_implementor_output(
+            model_type=inp.model_name
+        )
+        MockValid.return_value.run.side_effect = lambda inp: _make_validator_output(
+            passed=True
+        ).model_copy(update={"model_type": inp.model_type})
         MockTune.return_value.run.side_effect = [iter1_tune, iter2_tune, iter3_tune]
 
         # Real proposer: when the workflow calls MLModelProposalAgent(**kwargs),
@@ -219,7 +243,7 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
             # the real agent. Flattened kwargs from ProposalLLMConfig.get()
             # include comparison_*, reasoning_*, proposing_* plus legacy
             # provider/model_id; the real constructor accepts them via **kwargs.
-            kwargs["bridge_factory"] = _make_canned_bridge_factory()
+            kwargs["bridge_factory"] = _make_canned_bridge_factory(next(proposal_names))
             return _RealProposer(**kwargs)
 
         MockPropose.side_effect = _proposer_ctor
@@ -240,6 +264,7 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
         )
 
         run_workflow(
+            task_composition=workflow_composition,
             launch=WorkflowLaunchConfig(
                 data_dir=data_dir,
                 model_types=["punet"],
@@ -251,6 +276,12 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
             run_name=run_name,
             llm_config=llm_config,
         )
+
+    assert [call.args[0].model_type for call in MockTune.return_value.run.call_args_list] == [
+        "m_iter1",
+        "m_iter2",
+        "m_iter3",
+    ]
 
     # --- Validate the dumped iter 3 proposing-stage system prompt ---
     # The workflow writes to {workspace}/{run_name}/debug/
@@ -325,22 +356,9 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
 #             bridge.generate.call_args_list inspection, since the debug dump
 #             captures only the system prompt).
 #
-# `num_params` calibration — this test covers recent-history choreography
-# (gate exhaustion → blacklist → pre-flight rejection/revision flow), NOT
-# estimator accuracy. The pre-flight chain runs for real end to end (real
-# time estimation, real budget comparison, real gate decision, real
-# revision control flow); only the fixture is calibrated so the two drafts
-# land deterministically on opposite sides of the gate. The estimate is
-# machine-independent (static formulas; the scoring term falls back to the
-# ligroup server constants on unknown hosts). Verified 2026-07-23 against
-# the current estimator constants at seg=40000, batch=1, epochs=1,
-# train_portion=0.1, budget=20min:
-#   * 50_000_000 params → factor ≈ 335×   (OVER BUDGET)
-#   *    100_000 params → factor ≈ 0.76×  (FEASIBLE)
-# The ~440× spread gives deterministic verdict flips. If this test starts
-# failing with an extra revision call, re-derive these factors first —
-# estimator-constant drift moved the feasible draft from 0.31× to 1.93×
-# once before (fixture designed at epochs=10 against older constants).
+# The cost estimator is a supplied leaf in this orchestration witness.
+# The real advisory policy, annotation, prompt transport and no-revision
+# behavior still execute. Formula accuracy belongs to estimator tests.
 
 _SCAN_OVER_T_ENGLISH = (
     "Avoid selective-scan / SSM / Mamba-style sequential state recurrence over the time dimension"
@@ -383,11 +401,6 @@ def _make_fake_proposing(
             "model_config": {"segmentation_size": 40000},
             "train_config": {
                 "lr": 1e-4,
-                # epochs=1 (was 10): recalibrated 2026-07-23 — estimator
-                # constants evolved after this fixture was designed, and
-                # at epochs=10 the deliberately-feasible draft crept to
-                # factor 1.93x (> gate). See the num_params calibration
-                # comment above for current factors.
                 "epochs": 1,
                 "batch_size": 1,
                 "optimizer_type": "adamw",
@@ -408,7 +421,7 @@ def _make_fake_proposing(
     return fake
 
 
-def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
+def test_iter2_triple_guard_blacklist_and_preflight(tmp_path, workflow_composition, monkeypatch):
     """End-to-end: iter-1's `disallowed_architectural_patterns` must reach
     iter-2's proposer system prompt AS a `[DISALLOWED PATTERNS]` block
     (Fix 1); an over-budget draft is emitted with a labeled
@@ -420,8 +433,32 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
     Bridge call count for iter-2 is therefore exactly 3 — comparison +
     reasoning + draft-1; the queued draft-2 proves no revision call was
     made."""
+    # This witness tests advisory propagation, not a task-specific cost formula.
+    # The explicit tabular task has no applicable static timing formula. Supply
+    # estimates at that leaf while retaining real policy, annotation and output.
+    import importlib
+
+    proposer_module = importlib.import_module(
+        "nodes.ml_model_proposal_agent.ml_model_proposal_agent"
+    )
+    estimate_calls = []
+
+    def supplied_estimate(**kwargs):
+        estimate_calls.append(kwargs)
+        assert kwargs["model_type"] == "arch_iter2_draft1"
+        factor = 2.0
+        return {"estimated_minutes": factor * kwargs["time_budget_minutes"], "factor": factor}
+
+    monkeypatch.setattr(proposer_module, "estimate_proposal_time", supplied_estimate)
     # Seed tuning data so the workflow can bootstrap iteration 1.
-    _write_tuning_output(tmp_path, "punet", run="v1", score=1.5)
+    _write_tuning_output(
+        tmp_path,
+        "punet",
+        run="v1",
+        score=1.5,
+        fingerprint=workflow_composition.semantic_fingerprint,
+        metric_spec=workflow_composition.metric.spec,
+    )
 
     workspace = str(tmp_path / "workflow_output")
     data_dir = str(tmp_path / "data")
@@ -430,9 +467,19 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
     # --- Tuner outputs (unique model_types per iteration so the workflow's
     # duplicate-name guard does not silently skip iter 2 the way it does in
     # the existing N.5 scenario above) ---
-    iter1_tune = _make_tuning_output(model_type="arch_iter1", score=1.6)
+    iter1_tune = _make_tuning_output(
+        fingerprint=workflow_composition.semantic_fingerprint,
+        metric_spec=workflow_composition.metric.spec,
+        model_type="arch_iter1",
+        score=1.6,
+    )
     iter1_tune.gate_exhaustion = _triple_guard_iter1_gate_exhaustion()
-    iter2_tune = _make_tuning_output(model_type="arch_iter2_draft2", score=1.7)
+    iter2_tune = _make_tuning_output(
+        fingerprint=workflow_composition.semantic_fingerprint,
+        metric_spec=workflow_composition.metric.spec,
+        model_type="arch_iter2_draft1",
+        score=1.7,
+    )
 
     # Per-iteration state captured for post-workflow assertions.
     emitted_proposals: list = []
@@ -475,8 +522,12 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
         patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose,
     ):
         MockInterp.return_value.run.return_value = _make_interpretation_output()
-        MockImpl.return_value.run.return_value = _make_implementor_output()
-        MockValid.return_value.run.return_value = _make_validator_output(passed=True)
+        MockImpl.return_value.run.side_effect = lambda inp: _make_implementor_output(
+            model_type=inp.model_name
+        )
+        MockValid.return_value.run.side_effect = lambda inp: _make_validator_output(
+            passed=True
+        ).model_copy(update={"model_type": inp.model_type})
         MockTune.return_value.run.side_effect = [iter1_tune, iter2_tune]
 
         from nodes.ml_model_proposal_agent import MLModelProposalAgent as _RealProposer
@@ -511,6 +562,7 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
         )
 
         run_workflow(
+            task_composition=workflow_composition,
             launch=WorkflowLaunchConfig(
                 data_dir=data_dir,
                 model_types=["punet"],
@@ -585,6 +637,13 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
     assert len(emitted_proposals) == 2, (
         f"expected 2 proposer emissions (iter 1 + iter 2), got {len(emitted_proposals)}."
     )
+    assert [call.args[0].model_type for call in MockTune.return_value.run.call_args_list] == [
+        "arch_iter1",
+        "arch_iter2_draft1",
+    ]
+    assert len(estimate_calls) == 1
+    assert estimate_calls[0]["num_params"] == _OVERBUDGET_PARAM_COUNT
+    assert estimate_calls[0]["time_budget_minutes"] == _PREFLIGHT_TRIAL_BUDGET_MIN
     iter2_proposal = emitted_proposals[1]
     assert iter2_proposal.model_name == "arch_iter2_draft1", (
         f"C1: the over-budget draft itself must be emitted "

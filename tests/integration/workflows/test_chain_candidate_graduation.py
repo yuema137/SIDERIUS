@@ -276,7 +276,7 @@ def _write_chain_iter_artifacts(
 
 
 @pytest.mark.dual_mode
-def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
+def test_chain_bridge_promotes_foo_after_four_iters(tmp_path, workflow_composition):
     """Cold-start chain: 4 iters, each its own run_workflow call. Between
     iters, ``restore_prior_state`` walks the workspace from disk and
     forwards ``previous_proposal_data`` via the new
@@ -293,7 +293,14 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
     # Seed run_output JSON to bootstrap iter 1's source_paths
     seed_root = tmp_path / "seed"
     seed_root.mkdir(parents=True, exist_ok=True)
-    _write_tuning_output(seed_root, "punet", run="v1", score=1.5)
+    _write_tuning_output(
+        seed_root,
+        "punet",
+        run="v1",
+        score=1.5,
+        fingerprint=workflow_composition.semantic_fingerprint,
+        metric_spec=workflow_composition.metric.spec,
+    )
     seed_path = str(seed_root / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
 
     captured_interp_inputs: list = []
@@ -304,6 +311,7 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
         run_name = f"iter_{iteration:03d}"
 
         state = restore_prior_state(
+            dataset_partition_count=workflow_composition.dataset_profile.partition_count,
             workspace=chain_root,
             current_iter=iteration,
             seed_paths=[seed_path],
@@ -312,6 +320,8 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
 
         model_name = f"model_iter_{iteration:03d}"
         tune_output = _make_tuning_output(
+            fingerprint=workflow_composition.semantic_fingerprint,
+            metric_spec=workflow_composition.metric.spec,
             model_type=model_name,
             run_name=run_name,
             score=1.5,
@@ -338,7 +348,9 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
             )
 
             run_workflow(
+                task_composition=workflow_composition,
                 launch=WorkflowLaunchConfig(
+                    data_dir=str(tmp_path / "data"),
                     source_paths=state.resolved_source_paths,
                     max_iterations=1,
                     start_iteration=iteration,
@@ -451,7 +463,7 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
 
 
 @pytest.mark.dual_mode
-def test_in_process_run_workflow_promotes_foo_after_four_iters(tmp_path):
+def test_in_process_run_workflow_promotes_foo_after_four_iters(tmp_path, workflow_composition):
     """Single ``run_workflow(max_iterations=4)`` reaches the same final
     vocabulary state as the chain test above. This proves the bridge is
     path-symmetric: the in-process update at
@@ -465,7 +477,14 @@ def test_in_process_run_workflow_promotes_foo_after_four_iters(tmp_path):
 
     seed_root = tmp_path / "seed"
     seed_root.mkdir(parents=True, exist_ok=True)
-    _write_tuning_output(seed_root, "punet", run="v1", score=1.5)
+    _write_tuning_output(
+        seed_root,
+        "punet",
+        run="v1",
+        score=1.5,
+        fingerprint=workflow_composition.semantic_fingerprint,
+        metric_spec=workflow_composition.metric.spec,
+    )
     seed_path = str(seed_root / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
 
     captured_interp_inputs: list = []
@@ -477,6 +496,8 @@ def test_in_process_run_workflow_promotes_foo_after_four_iters(tmp_path):
         tune_call_counter[0] += 1
         n = tune_call_counter[0]
         return _make_tuning_output(
+            fingerprint=workflow_composition.semantic_fingerprint,
+            metric_spec=workflow_composition.metric.spec,
             model_type=f"model_iter_{n:03d}",
             run_name=f"in_process_v{n}",
             score=1.5,
@@ -503,7 +524,9 @@ def test_in_process_run_workflow_promotes_foo_after_four_iters(tmp_path):
         )
 
         run_workflow(
+            task_composition=workflow_composition,
             launch=WorkflowLaunchConfig(
+                data_dir=str(tmp_path / "data"),
                 source_paths=[seed_path],
                 max_iterations=4,
             ),

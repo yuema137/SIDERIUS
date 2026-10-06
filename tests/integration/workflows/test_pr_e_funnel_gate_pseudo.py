@@ -18,7 +18,10 @@ derived complete row     -> fan-in of all tuner records
 ```
 
 No real GPU. No real LLM. The scientific outcome (canned scores) is never
-the oracle — the assertion surface is the instrumentation path.
+the oracle — the assertion surface is the instrumentation path. Validator
+subprocess results and tuner preflight measurements are supplied explicitly;
+the implementor smoke check and generated-model registration run locally.
+Accidental provider calls, hardware discovery and subprocesses are refused.
 
 LLM boundaries are mocked at the BRIDGE level so every node's real
 ``run()`` body executes, including its persistence block; the interp
@@ -44,26 +47,19 @@ import pytest
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from agent.schemas.interpretation import InterpretationOutput
 from execute_tools.funnel_assembly import assemble_iteration_funnel
-from tests.unit.agent.ml_model_implementor.test_implementor_agent import (
-    FAKE_CODE_RESPONSE as IMPL_CODE_RESPONSE,
-)
-from tests.unit.agent.ml_model_implementor.test_implementor_agent import (
-    FAKE_REASONING as IMPL_REASONING,
-)
 from workflows.run_config import WorkflowLaunchConfig
 
 pytestmark = pytest.mark.dual_mode
 
-_PLUGIN_DIR_REL = "tests/pseudo_data/plugins"
 _MODEL_TYPE = "pe_wavenet_delta"  # matches the K.9 canned tuner choreography
 _TUNER_PSEUDO_FOLDER = "ml_hyperparameter_tune_agent_k9_invented"
 
-_PROPOSER_REASONING = "Reuse a compact gated architecture for the funnel gate."
+_PROPOSER_REASONING = "Use a two-layer tabular classifier for the funnel gate."
 _PROPOSER_COMMIT = {
     "model_name": _MODEL_TYPE,
     "output_type": "classifier",
-    "model_description": "A compact gated dilated model for the E4 funnel gate.",
-    "mathematical_definition": "y = tanh(W_f * x) * sigmoid(W_g * x)",
+    "model_description": "A two-layer tabular classifier for the E4 funnel gate.",
+    "mathematical_definition": "y = W_2 relu(W_1 x + b_1) + b_2",
     "motivation": "Deterministic funnel-gate candidate.",
     "expert_advice": {
         "focus_areas": ["funnel"],
@@ -73,9 +69,9 @@ _PROPOSER_COMMIT = {
         "rationale": "pseudo gate",
     },
     "baseline_config": {
-        "model_config": {"channels": 64, "depth": 4},
+        "model_config": {"hidden_dim": 128},
         "train_config": {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cuda"},
-        "loss_config": {"loss_type": "focal", "gamma": 2.0},
+        "loss_config": {"loss_type": "ce"},
     },
     "parameter_count_estimate": 5_000_000,
 }
@@ -95,33 +91,6 @@ _INTERP = InterpretationOutput(
     model_knowledge_cache={},
     runtime_vocab=[],
 )
-
-
-def _register_k9_plugin(monkeypatch, request):
-    """K.9's registration helper: the tuner's gates need the model class."""
-    plugin_dir_abs = os.path.abspath(_PLUGIN_DIR_REL)
-    monkeypatch.setenv("SIDERIUS_PLUGIN_DIRS", plugin_dir_abs)
-
-    from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
-    from ml_models.models_sandbox import MODEL_REGISTRY
-    from ml_models.plugin_loader import PLUGIN_OUTPUT_TYPE_REGISTRY, extend_registries
-
-    loaded = extend_registries(MODEL_REGISTRY, PLUGIN_CONFIG_REGISTRY)
-
-    def _cleanup():
-        for mt in loaded:
-            MODEL_REGISTRY.pop(mt, None)
-            PLUGIN_CONFIG_REGISTRY.pop(mt, None)
-            PLUGIN_OUTPUT_TYPE_REGISTRY.pop(mt, None)
-
-    request.addfinalizer(_cleanup)
-
-
-def _mock_cuda(monkeypatch):
-    import torch
-
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda *a, **kw: (20 * 1024**3, 32 * 1024**3))
 
 
 def _disable_sleeps(monkeypatch):
@@ -169,8 +138,14 @@ def _real_implementor_cls():
             agent = MLModelImplementor.__new__(MLModelImplementor)
             agent.bridge = MagicMock()
             agent._registry = MagicMock()
-            agent.bridge.generate_text.return_value = IMPL_REASONING
-            agent.bridge.generate.return_value = IMPL_CODE_RESPONSE
+            agent.bridge.generate_text.return_value = "Map four float features to two class logits."
+            agent.bridge.generate.return_value = {
+                "extra_imports": "",
+                "config_fields_code": "    hidden_dim: int = Field(default=128, ge=8, le=8192)",
+                "config_fields": {"hidden_dim": 128},
+                "init_body": "        self.net = nn.Sequential(nn.Linear(4, config.hidden_dim), nn.ReLU(), nn.Linear(config.hidden_dim, 2))",
+                "forward_body": "        return self.net(x.float())",
+            }
             self._agent = agent
             self.bridge = agent.bridge
 
@@ -198,35 +173,80 @@ def _real_validator_cls():
             self.bridge = agent.bridge
 
         def run(self, inp):
-            return self._agent.run(inp)
+            assert Path(inp.test_file_path).is_file()
+            with patch(
+                "nodes.ml_code_validator_agent.ml_code_validator_agent._run_tests",
+                return_value=(True, "Supplied validator test result; no subprocess executed."),
+            ) as run_tests:
+                output = self._agent.run(inp)
+            run_tests.assert_called_once_with(inp.test_file_path)
+            return output
 
     return _RealValidatorMockBridge
 
 
-def _real_tuner_cls(workspace: str, run_name: str):
+def _real_tuner_cls(workspace: str, run_name: str, monkeypatch, hardware):
     from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
-    from tests.helpers.recording_sandbox import RecordingSandbox
+    from tests.helpers.tuner_composed_effects import (
+        composed_tuner_effects,
+        recording_sandbox_for_attempts,
+    )
 
     class _RealTunerPseudoStack:
         def __init__(self, *a, **kw):
-            bridge = RecordingLLMBridge.for_agent(_TUNER_PSEUDO_FOLDER)
-            sandbox = RecordingSandbox.for_model(_MODEL_TYPE, base_dir=workspace, run_name=run_name)
+            self.bridge = bridge = RecordingLLMBridge.for_agent(_TUNER_PSEUDO_FOLDER)
+            self.sandbox = sandbox = recording_sandbox_for_attempts(
+                _MODEL_TYPE, base_dir=workspace, run_name=run_name, completed_attempts=2
+            )
             self._agent = HyperparamTuningAgent(
                 bridge_factory=lambda **_kw: bridge,
                 sandbox_factory=lambda **_kw: sandbox,
             )
 
         def run(self, inp):
-            return self._agent.run(inp)
+            with composed_tuner_effects(
+                monkeypatch,
+                sandbox=self.sandbox,
+                bridge=self.bridge,
+                expected_attempts=3,
+                hardware_context=hardware,
+                preflight_results=[
+                    ("MEASURED_PEAK_ABOVE_VRAM_CAP", 0.4),
+                    ("COMPLETED_MEASUREMENT", 0.1),
+                    ("COMPLETED_MEASUREMENT", 0.1),
+                ],
+            ):
+                return self._agent.run(inp)
 
     return _RealTunerPseudoStack
 
 
-@pytest.mark.dual_mode
-def test_complete_funnel_row_from_one_pseudo_iteration(tmp_path, request, monkeypatch):
-    _register_k9_plugin(monkeypatch, request)
-    _mock_cuda(monkeypatch)
+@pytest.fixture
+def funnel_composition(tmp_path):
+    from tests.helpers.tuner_composed_fixture import _isolated_registrations, make_tuner_composition
+    from workflows.task_composition import bind_run_task_composition
+
+    with _isolated_registrations():
+        composition = make_tuner_composition(tmp_path)
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        with bind_run_task_composition(composition, physical_data_root=str(data_dir)):
+            yield composition
+
+
+def test_complete_funnel_row_from_one_pseudo_iteration(tmp_path, monkeypatch, funnel_composition):
+    from tests.helpers.tuner_composed_effects import (
+        _install_effect_backstop,
+        synthetic_cuda_context,
+    )
+
+    _install_effect_backstop(monkeypatch)
+    hardware = synthetic_cuda_context(monkeypatch)
+    monkeypatch.setattr(
+        "workflows.model_exploration.get_or_create_hardware_context",
+        lambda *args, **kwargs: hardware,
+    )
     _disable_sleeps(monkeypatch)
 
     workspace = str(tmp_path)
@@ -239,6 +259,8 @@ def test_complete_funnel_row_from_one_pseudo_iteration(tmp_path, request, monkey
     seed_dir.mkdir(parents=True)
     (seed_dir / "run_output_v0_agent.json").write_text(
         HyperparamTuningOutput(
+            task_composition_fingerprint=funnel_composition.semantic_fingerprint,
+            metric_spec=funnel_composition.metric.spec,
             run_name="v0",
             model_type="punet",
             file_index=6,
@@ -276,15 +298,11 @@ def test_complete_funnel_row_from_one_pseudo_iteration(tmp_path, request, monkey
         stack.enter_context(
             patch(
                 "workflows.model_exploration.HyperparamTuningAgent",
-                _real_tuner_cls(workspace, run_name),
+                _real_tuner_cls(workspace, run_name, monkeypatch, hardware),
             )
         )
-        # Registration side effects: the canned plugin is already registered
-        # via SIDERIUS_PLUGIN_DIRS; promoting the generated one globally is
-        # out of the Gate's scope.
-        stack.enter_context(
-            patch("workflows.model_exploration._register_plugin", return_value=None)
-        )
+        # Retain real registration of the generated tabular model in the
+        # temporary workspace. Global-library promotion is outside this witness.
         stack.enter_context(
             patch("workflows.model_exploration._promote_model_to_global", return_value=None)
         )
@@ -295,6 +313,7 @@ def test_complete_funnel_row_from_one_pseudo_iteration(tmp_path, request, monkey
         from workflows.llm_config import TunerLLMConfig, WorkflowLLMConfig
 
         run_workflow(
+            task_composition=funnel_composition,
             llm_config=WorkflowLLMConfig(tune=TunerLLMConfig(planner_strategy="native-timing-v1")),
             launch=WorkflowLaunchConfig(
                 data_dir=str(tmp_path / "data"),

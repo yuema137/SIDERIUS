@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import os
-from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 
@@ -50,7 +49,7 @@ from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
-pytestmark = pytest.mark.dual_mode
+pytestmark = [pytest.mark.dual_mode, pytest.mark.usefixtures("offline_workflow")]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SYNTHETIC_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "synthetic_masked_regression.yaml"
@@ -58,7 +57,7 @@ SYNTHETIC_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "synthetic_mas
 
 @pytest.fixture(autouse=True)
 def _restore_health_plugin_globals():
-    """Keep the legacy and composed parameter cells run-isolated."""
+    """Keep the two explicit task packages run-isolated."""
     from execute_tools.health_checks import _plugin_binding
     from execute_tools.health_checks.registry import _PROVIDER_REGISTRY, _REGISTRY
 
@@ -76,20 +75,8 @@ def _restore_health_plugin_globals():
 
 
 def _composition_context(composition, data_dir: str):
-    if composition is None:
-        return nullcontext()
     Path(data_dir).mkdir(parents=True, exist_ok=True)
     return bind_run_task_composition(composition, physical_data_root=data_dir)
-
-
-def _stamp_seed_metric(tmp_path: Path, composition) -> None:
-    """Make the shared legacy seed fixture honest for a composed run."""
-    if composition is None:
-        return
-    path = tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    payload["metric_spec"] = composition.metric.spec.model_dump(mode="json")
-    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -197,8 +184,12 @@ def _make_llm_config() -> WorkflowLLMConfig:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("composed", [False, True], ids=["legacy", "composed-pack"])
-def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path, composed):
+@pytest.mark.parametrize(
+    "manifest",
+    [REPO_ROOT / "configs/task_composition/quickstart.yaml", SYNTHETIC_MANIFEST],
+    ids=["quickstart", "masked-regression"],
+)
+def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path, manifest):
     """End-to-end: with lit_review_enabled=True and a tmp YAML at a
     non-default path, the workflow opens THAT file (not the default),
     threads its root_papers into the LiteratureReviewInput, and the
@@ -210,15 +201,15 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path,
     workspace = str(tmp_path / "workflow_output")
     data_dir = str(tmp_path / "data")
     run_name = "lit_review_enabled_test"
-    composition = compose_run_task_bindings(str(SYNTHETIC_MANIFEST)) if composed else None
+    composition = compose_run_task_bindings(manifest)
     _write_tuning_output(
         tmp_path,
         "punet",
         run="v1",
         score=1.5,
-        fingerprint=(composition.semantic_fingerprint if composition else None),
+        fingerprint=composition.semantic_fingerprint,
+        metric_spec=composition.metric.spec,
     )
-    _stamp_seed_metric(tmp_path, composition)
 
     captured_lit_inputs: list = []
     captured_proposal_inputs: list = []
@@ -245,8 +236,8 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path,
         MockImpl.return_value.run.return_value = _make_implementor_output()
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
         tune_output = _make_tuning_output(model_type="test_arch", score=1.6)
-        if composition is not None:
-            tune_output.metric_spec = composition.metric.spec
+        tune_output.metric_spec = composition.metric.spec
+        tune_output.task_composition_fingerprint = composition.semantic_fingerprint
         MockTune.return_value.run.return_value = tune_output
 
         with _composition_context(composition, data_dir):
@@ -315,8 +306,12 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path,
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("composed", [False, True], ids=["legacy", "composed-pack"])
-def test_lit_review_disabled_tolerates_missing_yaml_path(tmp_path, composed):
+@pytest.mark.parametrize(
+    "manifest",
+    [REPO_ROOT / "configs/task_composition/quickstart.yaml", SYNTHETIC_MANIFEST],
+    ids=["quickstart", "masked-regression"],
+)
+def test_lit_review_disabled_tolerates_missing_yaml_path(tmp_path, manifest):
     """With lit_review_enabled=False, the workflow must NOT open
     lit_review_config_path even if it points at a non-existent file —
     the path is consulted only when actually used."""
@@ -328,15 +323,15 @@ def test_lit_review_disabled_tolerates_missing_yaml_path(tmp_path, composed):
     workspace = str(tmp_path / "workflow_output")
     data_dir = str(tmp_path / "data")
     run_name = "lit_review_disabled_test"
-    composition = compose_run_task_bindings(str(SYNTHETIC_MANIFEST)) if composed else None
+    composition = compose_run_task_bindings(manifest)
     _write_tuning_output(
         tmp_path,
         "punet",
         run="v1",
         score=1.5,
-        fingerprint=(composition.semantic_fingerprint if composition else None),
+        fingerprint=composition.semantic_fingerprint,
+        metric_spec=composition.metric.spec,
     )
-    _stamp_seed_metric(tmp_path, composition)
 
     captured_lit_inputs: list = []
     captured_proposal_inputs: list = []
@@ -363,8 +358,8 @@ def test_lit_review_disabled_tolerates_missing_yaml_path(tmp_path, composed):
         MockImpl.return_value.run.return_value = _make_implementor_output()
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
         tune_output = _make_tuning_output(model_type="test_arch", score=1.6)
-        if composition is not None:
-            tune_output.metric_spec = composition.metric.spec
+        tune_output.metric_spec = composition.metric.spec
+        tune_output.task_composition_fingerprint = composition.semantic_fingerprint
         MockTune.return_value.run.return_value = tune_output
 
         # No FileNotFoundError should be raised — the non-existent path
