@@ -82,6 +82,11 @@ from nodes.ml_model_proposal_agent.prediction_reference import (
     ground_prediction,
     observed_prediction_reference,
 )
+from nodes.ml_model_proposal_agent.stage_validation import (
+    StageVocabularyError,
+    correct_comparison_vocabulary,
+    stage_vocabulary,
+)
 from nodes.proposal_helpers import evidence_order
 from workflows.task_config import (
     get_task_description,
@@ -137,11 +142,13 @@ _MAX_PROPOSING_RETRIES = 2
 _MAX_REASONING_RETRIES = 1
 
 # P-1 fix (PR 3 audit §13): bounded correction retries when the causal stage's
-# owned fields (inherited_components / falsifiable_prediction) fail schema
-# validation. These fields are re-injected verbatim into ProposalOutput on
+# owned fields (inherited_components / falsifiable_prediction / vocabulary)
+# fail schema validation. These fields are re-injected verbatim into ProposalOutput on
 # every proposing structural attempt, so they can only be corrected at the
 # causal stage itself. Total causal validation attempts = retries + 1.
 _MAX_CAUSAL_CORRECTION_RETRIES = 2
+# Comparison repairs occur before downstream stages consume its vocabulary.
+_MAX_COMPARISON_CORRECTION_RETRIES = 2
 
 
 def _applicable_dataset_constraints() -> DatasetConfig | None:
@@ -2033,6 +2040,15 @@ class MLModelProposalAgent:
                     label=stage_label,
                     components=stage_audit["components"],
                 )
+                if stage.name == "comparison":
+                    result = correct_comparison_vocabulary(
+                        result,
+                        bridge=self.bridge,
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        components=stage_audit["components"],
+                        max_retries=_MAX_COMPARISON_CORRECTION_RETRIES,
+                    )
                 accumulated[stage.name] = result
 
             print(f"   Stage '{stage.name}': done.")
@@ -2135,8 +2151,9 @@ class MLModelProposalAgent:
         # it must be corrected here, by the stage whose retry can reach the
         # producing response. Runs AFTER the boldness block because a boldness
         # retry may have replaced the causal output with a new, unvalidated
-        # response. A pipeline without a causal_reasoning stage validates the
-        # empty defaults and passes unchanged.
+        # response. Vocabulary shares this correction budget; a repair must
+        # satisfy both the causal and consumed-vocabulary contracts. A pipeline
+        # without a causal_reasoning stage validates empty defaults unchanged.
         causal_raw = accumulated.get("causal_reasoning")
         for causal_attempt in range(_MAX_CAUSAL_CORRECTION_RETRIES + 1):
             causal_dict = causal_raw if isinstance(causal_raw, dict) else {}
@@ -2149,15 +2166,21 @@ class MLModelProposalAgent:
                         "falsifiable_prediction": causal_dict.get("falsifiable_prediction"),
                     }
                 )
+                stage_vocabulary(causal_dict, stage="causal_reasoning")
                 if causal_content.falsifiable_prediction is not None:
                     prediction = causal_content.falsifiable_prediction
                     reference = observed_prediction_reference(inp, prediction.metric)
                     grounded = ground_prediction(prediction, reference)
                     causal_dict["falsifiable_prediction"] = grounded.model_dump()
                 break
-            except ValidationError as exc:
-                error_summary = "; ".join(
-                    f"{' → '.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()[:5]
+            except (ValidationError, StageVocabularyError) as exc:
+                error_summary = (
+                    str(exc)
+                    if isinstance(exc, StageVocabularyError)
+                    else "; ".join(
+                        f"{' → '.join(str(p) for p in e['loc'])}: {e['msg']}"
+                        for e in exc.errors()[:5]
+                    )
                 )
                 if causal_attempt == _MAX_CAUSAL_CORRECTION_RETRIES:
                     raise RuntimeError(
@@ -2180,8 +2203,13 @@ class MLModelProposalAgent:
                     mindset=inp.mindset,
                     baseline_isolation=inp.baseline_isolation,
                 )
+                correction_context = (
+                    {**accumulated, "causal_reasoning": causal_raw}
+                    if isinstance(exc, StageVocabularyError)
+                    else accumulated
+                )
                 clamped_accumulated = clamp_and_backstop_accumulated(
-                    accumulated,
+                    correction_context,
                     top_k=policy.comparative_analysis_top_k,
                     max_chars=policy.prior_stage_max_chars,
                     input_keys=_PROPOSER_INPUT_KEYS,
@@ -2267,19 +2295,11 @@ class MLModelProposalAgent:
 
         inherited = reasoning_output.get("inherited_components", [])
         prediction = reasoning_output.get("falsifiable_prediction")
-        vocab_links = comparison_output.get("proposed_vocab_links", [])
-        # Separate candidates by kind: feature/capability → vocab pipeline; discovery → discoveries
-        vocab_candidates = []
-        discoveries = []
-        for stage_output in [comparison_output, reasoning_output]:
-            for candidate in stage_output.get("proposed_vocab_candidates", []):
-                if not isinstance(candidate, dict):
-                    continue
-                kind = candidate.get("kind", "")
-                if kind in {"feature", "capability"}:
-                    vocab_candidates.append(candidate)
-                elif kind == "discovery":
-                    discoveries.append(candidate)
+        comparison_vocab = stage_vocabulary(comparison_output, stage="comparison")
+        causal_vocab = stage_vocabulary(reasoning_output, stage="causal_reasoning")
+        vocab_links = comparison_vocab.links
+        vocab_candidates = comparison_vocab.candidates + causal_vocab.candidates
+        discoveries = comparison_vocab.discoveries + causal_vocab.discoveries
 
         # C1 (runtime_estimation_and_calibration.md §23-C1): the static time
         # pre-flight is ADVISORY ONLY — the former outer reject-revise loop

@@ -1,0 +1,11 @@
+{
+  "reference": "21e47cb8875fd2440931eddf07b0dcb33e29671c",
+  "cases": {
+    "empty": "4df78c1172b531d807bae89369932f01003fd66713da8def7cce7d8e94ded505",
+    "omitted": "9e2ed55352f00bd1eb7c93a03cd5b711a7c3cb666de6dec90dd8779acd9d2948",
+    "vocabulary": "06e02e6bd36efcff8a96676669f8ee58a11ababbb267f28b36f18155faebc0a6",
+    "ignored": "f12270cda44cb9c19cf41fe646c9e140a52fd32e9e3af6625f01af06bd3b953b",
+    "no-causal": "7a308fe94ca8e555f5157eafce4c6d8d903317af22a54b033e53b25c826f9de3",
+    "no-comparison": "03149878811d847c4ba01e93b4924829e8bcc79434139b29f00f8fdd904e54ae"
+  }
+}
