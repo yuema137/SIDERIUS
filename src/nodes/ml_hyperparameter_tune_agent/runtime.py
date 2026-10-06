@@ -22,6 +22,7 @@ from importlib import import_module as _import_module
 from pathlib import Path
 from typing import Any
 
+from agent.schemas.ordering import OrderingObservation, OrderingRefusalPhase, ResolvedOrdering
 from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from core.sandbox_executor import TidmadSandbox
 from nodes.ml_hyperparameter_tune_agent.policy import _latest_trial_inference_marginal
@@ -122,7 +123,8 @@ def _time_skip_memory_extra(time_check: dict, plan) -> dict:
 def _handle_admission_refusal(
     status: dict,
     *,
-    phase: str,
+    ordering: ResolvedOrdering,
+    phase: OrderingRefusalPhase,
     sandbox,
     exp_id: str,
     model_type: str,
@@ -167,7 +169,16 @@ def _handle_admission_refusal(
         attempt_in_round=attempt_in_round,
         admission_evidence=admission,
     )
-    _records._emit_record(sandbox, record, candidate_id=candidate_id, experiment_arm=experiment_arm)
+    _records._emit_record(
+        sandbox,
+        record,
+        candidate_id=candidate_id,
+        experiment_arm=experiment_arm,
+        ordering=ordering,
+        ordering_observation=OrderingObservation(
+            selection_state="selected", refused_before_phase=phase
+        ),
+    )
     print(
         f"  Saved admission refusal ({phase}): {record['status']} "
         f"[{record['memory']['reason_code']}]"
@@ -198,6 +209,7 @@ _PREPHASE_REASON_CODE = {
 
 def _handle_prephase_gpu_measurement(
     *,
+    ordering: ResolvedOrdering,
     agent_input,
     sandbox,
     is_trial: bool,
@@ -425,6 +437,10 @@ def _handle_prephase_gpu_measurement(
         record,
         candidate_id=agent_input.candidate_id,
         experiment_arm=agent_input.experiment_arm,
+        ordering=ordering,
+        ordering_observation=OrderingObservation(
+            selection_state="selected", refused_before_phase="preflight"
+        ),
     )
     _reason = _PREPHASE_REASON_CODE.get(outcome.disposition, "measurement_unavailable")
     if _reason == "insufficient_headroom":
@@ -1383,6 +1399,7 @@ def _build_runtime_policy(
 
 def _check_and_record_guardrail_skip(
     *,
+    ordering: ResolvedOrdering,
     sandbox,
     agent_input,
     plan,
@@ -1457,6 +1474,10 @@ def _check_and_record_guardrail_skip(
         record,
         candidate_id=agent_input.candidate_id,
         experiment_arm=agent_input.experiment_arm,
+        ordering=ordering,
+        ordering_observation=OrderingObservation(
+            selection_state="selected", refused_before_phase="preflight"
+        ),
     )
     return True
 
@@ -1464,6 +1485,7 @@ def _check_and_record_guardrail_skip(
 def _handle_in_subprocess_rejection(
     train_status: dict,
     *,
+    ordering: ResolvedOrdering,
     sandbox,
     run_name: str,
     exp_id: str,
@@ -1499,7 +1521,12 @@ def _handle_in_subprocess_rejection(
         fallback_message=train_status.get("message", "runtime verification rejected the attempt"),
     )
     _records._emit_record(
-        sandbox, reject_record, candidate_id=candidate_id, experiment_arm=experiment_arm
+        sandbox,
+        reject_record,
+        candidate_id=candidate_id,
+        experiment_arm=experiment_arm,
+        ordering=ordering,
+        ordering_observation=OrderingObservation(selection_state="selected"),
     )
     _append_runtime_observation(sandbox, run_name, rv_block)
     return True

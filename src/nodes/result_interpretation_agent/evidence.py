@@ -299,12 +299,13 @@ def _round_ordering(record) -> RoundOrdering:
 
     Selected settings do not prove completed traversal. Unstamped records
     outside named preflight skips retain the ``legacy_default`` shuffle
-    fallback, including historical errors and current pre-resolution failures.
+    fallback. Current observations distinguish unresolved selection explicitly.
     That fallback is distinct from a run actively selecting the default.
     """
     ordering = ResolvedOrdering.from_record(record)
     return RoundOrdering(
         exp_id=record.exp_id,
+        ordering_observation=getattr(record, "ordering_observation", None),
         resolved_order_strategy=ordering.resolved_strategy,
         resolved_file_order=ordering.resolved_file_order,
         resolution_source=ordering.resolution_source,

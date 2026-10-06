@@ -35,7 +35,7 @@ from pydantic import ValidationError
 from agent.schemas.hyperparam_tuning import (
     PhysicalRejection,
 )
-from agent.schemas.ordering import ResolvedOrdering
+from agent.schemas.ordering import OrderingObservation, OrderingRefusalPhase, ResolvedOrdering
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
@@ -165,7 +165,8 @@ def _emit_attempt_record(
     agent_input,
     *,
     status: dict | None = None,
-    ordering: ResolvedOrdering | None = None,
+    ordering: ResolvedOrdering | None,
+    refused_before_phase: OrderingRefusalPhase | None = None,
 ) -> None:
     """Emit one attempt record with the run's identity kwargs attached.
 
@@ -182,6 +183,15 @@ def _emit_attempt_record(
     exactly as before. Both branches pass the identity kwargs EXPLICITLY so
     the U1 emission census reads them from this function's own AST.
     """
+    if ordering is None:
+        # The operator configuration is known even if the planner never returns.
+        # Preserve intent without resolving it or implying it was selected.
+        record["override_order_strategy"] = agent_input.order_strategy_override
+        record["override_file_order"] = agent_input.file_order_override
+    observation = OrderingObservation(
+        selection_state="selected" if ordering is not None else "unresolved",
+        refused_before_phase=refused_before_phase,
+    )
     if status is None:
         _records._emit_record(
             sandbox,
@@ -189,6 +199,7 @@ def _emit_attempt_record(
             candidate_id=agent_input.candidate_id,
             experiment_arm=agent_input.experiment_arm,
             ordering=ordering,
+            ordering_observation=observation,
         )
     else:
         _records._emit_record(
@@ -198,6 +209,7 @@ def _emit_attempt_record(
             candidate_id=agent_input.candidate_id,
             experiment_arm=agent_input.experiment_arm,
             ordering=ordering,
+            ordering_observation=observation,
         )
 
 
@@ -343,6 +355,7 @@ def run_admission_preflight(
 
     stage.name = "guardrails"
     if _check_and_record_guardrail_skip(
+        ordering=prepared.ordering,
         sandbox=sandbox,
         agent_input=agent_input,
         plan=plan,
@@ -499,7 +512,13 @@ def run_admission_preflight(
                 f"plugin's PLUGIN_CONFIG_CLASS."
             ),
         )
-        _emit_attempt_record(sandbox, schema_record, agent_input)
+        _emit_attempt_record(
+            sandbox,
+            schema_record,
+            agent_input,
+            ordering=prepared.ordering,
+            refused_before_phase="preflight",
+        )
         return AdmissionOutcome.next_attempt()
 
     if not resource_check.get("feasible", True):
@@ -575,7 +594,13 @@ def run_admission_preflight(
             ),
             memory_extra=_vram_skip_memory_extra(resource_check, chosen_vram_budget),
         )
-        _emit_attempt_record(sandbox, oom_record, agent_input)
+        _emit_attempt_record(
+            sandbox,
+            oom_record,
+            agent_input,
+            ordering=prepared.ordering,
+            refused_before_phase="preflight",
+        )
         return AdmissionOutcome.next_attempt()
 
     # Phase 6.6 A.11 — capture the batch the VRAM skill picked
@@ -806,7 +831,13 @@ def run_admission_preflight(
                 ),
                 memory_extra=_time_skip_memory_extra(time_check, plan),
             )
-            _emit_attempt_record(sandbox, time_record, agent_input)
+            _emit_attempt_record(
+                sandbox,
+                time_record,
+                agent_input,
+                ordering=prepared.ordering,
+                refused_before_phase="preflight",
+            )
             return AdmissionOutcome.next_attempt()
 
     # RT2-G: operator runtime policy for the in-subprocess verification
@@ -838,6 +869,7 @@ def run_admission_preflight(
     # PR B admission — lives behind one call; nothing about
     # it is reimplemented here.
     _prephase = _handle_prephase_gpu_measurement(
+        ordering=prepared.ordering,
         agent_input=agent_input,
         sandbox=sandbox,
         is_trial=plan.is_trial,
@@ -913,6 +945,7 @@ def run_training(
     _raise_if_evidence_channel_failure(train_status, sandbox, run_name)
     if _handle_admission_refusal(
         train_status,
+        ordering=prepared.ordering,
         phase="training",
         sandbox=sandbox,
         exp_id=exp_id,
@@ -929,6 +962,7 @@ def run_training(
         return TrainingOutcome.next_attempt()
     if _handle_in_subprocess_rejection(
         train_status,
+        ordering=prepared.ordering,
         sandbox=sandbox,
         run_name=run_name,
         exp_id=exp_id,
@@ -1174,6 +1208,7 @@ def _run_local_evaluation_phase(
     _raise_if_evidence_channel_failure(inf_status, sandbox, run_name)
     if _handle_admission_refusal(
         inf_status,
+        ordering=prepared.ordering,
         phase="inference",
         sandbox=sandbox,
         exp_id=exp_id,

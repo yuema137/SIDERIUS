@@ -521,6 +521,11 @@ def _ordering_by_experiment(tune_output) -> list[dict]:
                     "resolved_order_strategy": ordering.resolved_strategy,
                     "resolved_file_order": ordering.resolved_file_order,
                     "ordering_resolution_source": ordering.resolution_source,
+                    **(
+                        {"ordering_observation": record.ordering_observation.model_dump()}
+                        if getattr(record, "ordering_observation", None) is not None
+                        else {}
+                    ),
                 }
             )
         except Exception as exc:  # pragma: no cover - defensive

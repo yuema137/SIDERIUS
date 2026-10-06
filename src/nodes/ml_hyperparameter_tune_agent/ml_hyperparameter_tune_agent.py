@@ -1635,7 +1635,9 @@ class HyperparamTuningAgent:
                         final_record, resource_check, final_record["runtime_verification"]
                     )
 
-                    _emit_attempt_record(sandbox, final_record, agent_input)
+                    _emit_attempt_record(
+                        sandbox, final_record, agent_input, ordering=prepared.ordering
+                    )
                     certified_ref = final_record.get("trained_model_artifact_ref")
                     _append_runtime_observation(
                         sandbox, run_name, final_record["runtime_verification"]

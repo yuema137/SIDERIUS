@@ -26,7 +26,7 @@ from agent.schemas.hyperparam_tuning import (
     ExperimentRecord,
     HyperparamTuningOutput,
 )
-from agent.schemas.ordering import ResolvedOrdering
+from agent.schemas.ordering import OrderingObservation, ResolvedOrdering
 from agent.skills.evaluate_time_skill.wrapper import _aggregate_inference_file_timings
 from core.checkpoint_selection import CheckpointSelection
 from core.durable_io import publish_json_atomically
@@ -715,6 +715,7 @@ def _emit_record(
     candidate_id: str | None = None,
     experiment_arm: str | None = None,
     ordering: ResolvedOrdering | None = None,
+    ordering_observation: OrderingObservation | None = None,
 ) -> None:
     """Stamp evidence, validate, persist — in that order (B-C4a0 E3/E4).
 
@@ -730,13 +731,16 @@ def _emit_record(
     Passing `None` — the default, and what every non-executor path does
     today — stamps nothing, which is what those paths do now.
 
-    `ordering` is explicitly supplied for scoped post-resolution errors.
-    Skips omit it; this seam neither resolves nor guesses selected settings.
+    Current producers supply attempt-local selection and an explicit observation,
+    including refusals. Older direct callers may omit both. This seam neither
+    resolves selection nor interprets a missing argument as current absence.
     """
     if status is not None:
         _attach_runtime_evidence(record, status)
     if ordering is not None:
         _attach_ordering(record, ordering)
+    if ordering_observation is not None:
+        record["ordering_observation"] = ordering_observation.model_dump()
     # V21 PR E: the candidate's observational identity is stamped at this
     # single validate-and-persist seam so no record-construction site can
     # forget it. None stays None — never synthesised (O-E-4/O-E-5).

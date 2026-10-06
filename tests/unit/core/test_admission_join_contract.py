@@ -25,6 +25,7 @@ from unittest.mock import patch
 import pytest
 
 from agent.schemas.hyperparam_tuning import ExperimentRecord
+from agent.schemas.ordering import resolve_ordering
 from core.runtime_control.gpu_accounting import DeviceIdentity, GpuAccountingSnapshot
 from core.sandbox_executor import _admission_refusal
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
@@ -108,6 +109,7 @@ def _joined(phase, sandbox=None):
         hypothesis="fixture",
         round_index=2,
         attempt_in_round=1,
+        ordering=resolve_ordering(resolved_scope=[0]),
     )
     return status, handled, sandbox, popen, run
 

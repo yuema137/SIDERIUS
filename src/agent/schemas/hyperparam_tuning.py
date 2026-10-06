@@ -22,6 +22,7 @@ from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
 from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
 from agent.schemas.model_io_contract import TensorContract
 from agent.schemas.ordering import (
+    OrderingObservation,
     OrderingValidationError,
     OrderStrategy,
     RejectedOrderingProposal,
@@ -744,19 +745,24 @@ class ExperimentRecord(BaseModel):
         default=None,
         description="File order the operator forced, if any.",
     )
+    ordering_observation: OrderingObservation | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Explicit current selection/refusal evidence; absent on unstamped records.",
+    )
     resolved_order_strategy: OrderStrategy | None = Field(
         default=None,
         description=(
             "Selected effective ordering for this attempt, including errors "
             "after resolution; not proof of completed traversal. None on "
-            "unstamped records and named preflight skips."
+            "unstamped records or explicitly unresolved attempts."
         ),
     )
     resolved_file_order: list[int] | None = Field(
         default=None,
         description=(
             "Selected file visitation order. None for 'shuffle', unstamped "
-            "records, or named preflight skips; not a list of files visited."
+            "records, or unresolved attempts; not a list of files visited."
         ),
     )
     ordering_resolution_source: (
@@ -765,7 +771,7 @@ class ExperimentRecord(BaseModel):
         default=None,
         description=(
             "Which level supplied selected ordering. None when unstamped, "
-            "including pre-resolution failures and named preflight skips."
+            "including old preflight skips or explicitly unresolved attempts."
         ),
     )
     file_vector: list[float | None] | None = Field(
@@ -847,6 +853,16 @@ class ExperimentRecord(BaseModel):
             "integrity failures."
         ),
     )
+
+    @model_validator(mode="after")
+    def _ordering_observation_matches_selection(self) -> ExperimentRecord:
+        if self.ordering_observation is not None:
+            self.ordering_observation.validate_selection(
+                self.resolved_order_strategy,
+                self.resolved_file_order,
+                self.ordering_resolution_source,
+            )
+        return self
 
     @model_validator(mode="after")
     def _each_secondary_metric_id_appears_in_exactly_one_carrier(self) -> ExperimentRecord:

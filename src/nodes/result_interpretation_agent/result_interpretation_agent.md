@@ -304,12 +304,30 @@ it does not independently establish policy-artifact availability (tracked in
 > default remains OFF; enabling it on an existing default-OFF
 > workspace is rejected by the run-invariants lock — use a new
 > workspace.
-- **Data ordering is exposed per round, and only the RESOLVED value describes execution (V19 PR 2).** `ModelRunSummary.round_ordering` is a `list[RoundOrdering]` parallel to `round_scores`, one entry per round, each carrying `exp_id`, the resolved strategy and file order, the resolution source, and the proposal (rejected or not). Two rules govern its use:
-  - `resolved_order_strategy` / `resolved_file_order` are the **only** fields that say what ran. An ordering the agent proposed but the operator overrode was *not* executed and must never be attributed as such — `resolution_source` names which level decided.
-  - A **rejected** proposal (`proposal_rejected=True`) is not the same as no proposal. The agent tried to steer that round and was overruled by validation; reading it as agent silence would misdescribe its behavior.
-  - A **`resolved_order_strategy` of `None`** means no ordering ran at all — the attempt was rejected at pre-flight (`resolution_source="not_executed"`). Do not describe such a round as having executed any ordering, and do not read the `None` as a default.
+- **Data ordering is selected configuration, not a visitation log.**
+  `ModelRunSummary.round_ordering` is parallel to `round_scores` and retains
+  each record's selected strategy, file order, source and rejected proposal.
+  A rejected proposal is distinct from no proposal; an override can select
+  a different ordering. Selection does not prove that training started or
+  visited all selected samples.
 
-  Ordering is kept per round, not per run, because it may legitimately differ between rounds of one iteration when no operator override is in force. Absence of an executed ordering has two distinct readings, both produced by `ResolvedOrdering.from_record` and never guessed at: `legacy_default` (a **pre-PR2 artifact** that predates the feature — reconstructed as `shuffle` for compatibility) and `not_executed` (a **current-code attempt** that never reached training — `resolved_order_strategy=None`). Conflating them would report a current run as partly produced by old code. See `docs/design/v19_priorities/pr2_data_ordering.md` §3.7.
+  Current records carry optional typed `ordering_observation` evidence:
+  `selection_state=selected|unresolved`, plus `refused_before_phase` when an
+  actual preflight, training or inference admission refusal was observed.
+  An inference refusal must not erase the selection used by earlier training.
+  A measured rejection inside training does not mean training was never started.
+  `unresolved` has no selected strategy; do not substitute shuffle.
+
+  Records without this object retain their historical reading through the same
+  `ResolvedOrdering.from_record` authority: `legacy_default` supplies compatibility
+  shuffle; named legacy skip statuses read as `not_executed`. Neither fallback
+  reconstructs missing physical evidence or identifies the record's exact age.
+  The new field is omitted from serialization when absent. Historical files are
+  never rewritten. New record metadata is not a byte-identical artifact replay.
+
+  The current per-model LLM renderer does not include `round_ordering` or send
+  this input schema to the provider. These fields remain structured consumer
+  evidence; correcting them does not add a new interpretation prompt section.
 
 ## Carried lifecycle (Step 10 / P5+P6)
 

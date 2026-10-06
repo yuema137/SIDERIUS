@@ -26,6 +26,7 @@ from __future__ import annotations
 import pytest
 
 import nodes.ml_hyperparameter_tune_agent as tuner_mod
+from agent.schemas.ordering import resolve_ordering
 from core.runtime_control.gpu_measurement_identity import (
     build_planned_identity,
     build_realized_identity,
@@ -167,6 +168,7 @@ class TestPrephasePayloadTruth:
                 hypothesis="",
                 round_index=1,
                 attempt_in_round=1,
+                ordering=resolve_ordering(resolved_scope=[0]),
             )
         return excinfo.value.spec
 

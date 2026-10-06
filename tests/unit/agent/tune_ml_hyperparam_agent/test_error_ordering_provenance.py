@@ -198,17 +198,59 @@ def test_trial_failure_retains_its_proposal_and_override(run_failure):
     assert ordering.resolution_source == "operator_override"
 
 
-def test_preflight_skip_is_not_stamped_as_selected_execution(run_failure):
-    """A real preflight emission must stay not_executed despite resolved planning."""
+@pytest.mark.parametrize("phase", ["training", "inference"])
+@pytest.mark.parametrize("reason", ["insufficient_headroom", "measurement_unavailable"])
+def test_real_admission_producer_preserves_selection_and_refused_phase(run_failure, phase, reason):
+    saved, _, dispatched, output = run_failure(
+        phase=f"{phase}_skill",
+        payload={
+            "status": "skipped_resource_admission",
+            "message": "synthetic refusal",
+            "admission": {"reason_code": reason},
+        },
+    )
+    assert len(saved) == 1
+    assert_selected(saved[0])
+    assert saved[0]["ordering_observation"] == {
+        "selection_state": "selected",
+        "refused_before_phase": phase,
+    }
+    assert saved[0]["status"] == (
+        "skipped_resource_admission"
+        if reason == "insufficient_headroom"
+        else "skipped_infrastructure_failure"
+    )
+    assert "denoising_score_skill" not in dispatched
+    assert ("inference_skill" in dispatched) == (phase == "inference")
+    summary = tuning_output_to_model_run_summary(output, order=MetricOrder(output.metric_spec))
+    assert summary.round_ordering[0].ordering_observation.refused_before_phase == phase
+
+
+def test_measured_time_rejection_is_not_claimed_to_precede_training(run_failure):
+    saved, _, dispatched, _ = run_failure(
+        phase="training_skill", payload={"status": "rejected_time_risk", "message": "measured"}
+    )
+    assert_selected(saved[0])
+    assert "training_skill" in dispatched
+    assert "inference_skill" not in dispatched
+    assert saved[0]["ordering_observation"] == {
+        "selection_state": "selected",
+        "refused_before_phase": None,
+    }
+
+
+def test_preflight_skip_preserves_selection_without_claiming_execution(run_failure):
+    """A real preflight emission retains selection and explicitly records refusal."""
     saved, _, dispatched, _ = run_failure(
         phase="evaluate_vram_skill", payload={"status": "schema_violation", "violations": []}
     )
     assert saved[0]["status"] == "skipped_schema_violation"
     assert "training_skill" not in dispatched
-    assert not (_FIELDS & saved[0].keys())
-    ordering = ResolvedOrdering.from_record(ExperimentRecord.model_validate(saved[0]))
-    assert ordering.resolution_source == "not_executed"
-    assert ordering.resolved_strategy is None
+    assert_selected(saved[0])
+    assert saved[0]["ordering_observation"] == {
+        "selection_state": "selected",
+        "refused_before_phase": "preflight",
+    }
 
 
 @pytest.mark.parametrize("refused", [False, True])
@@ -242,7 +284,9 @@ def test_outer_error_capture_is_attempt_local(run_failure, phase):
     assert all(record["counts_toward_completed_rounds"] is False for record in saved)
     assert all(record["counts_toward_attempt_budget"] is True for record in saved)
     assert_selected(saved[0])
-    assert not (_FIELDS & saved[1].keys()), "prior attempt ordering leaked"
+    assert saved[1].get("resolved_order_strategy") is None, "prior attempt ordering leaked"
+    assert saved[1]["ordering_observation"]["selection_state"] == "unresolved"
+    assert saved[1]["override_file_order"] == [3, 1, 0, 2]
     assert saved[1]["failure_reason"] == "before resolution"
     if phase == "preparation":
         assert "training_skill" not in dispatched
@@ -263,7 +307,7 @@ def test_saved_failures_reach_both_real_ordering_readers(run_failure, tmp_path):
     assert selected.resolved_file_order == [3, 1, 0, 2]
     assert selected.resolution_source == "operator_override"
     assert selected.proposal_rejected is True
-    assert absent.resolution_source == "legacy_default"
+    assert absent.resolution_source == "unresolved"
     manifest = write_manifest(str(tmp_path), "error_ordering", [output])
     selected_manifest, absent_manifest = manifest["ordering_by_experiment"]
     assert selected_manifest["resolved_order_strategy"] == "sequential"
@@ -272,7 +316,7 @@ def test_saved_failures_reach_both_real_ordering_readers(run_failure, tmp_path):
     assert {key: selected_manifest[key] for key in _FIELDS} == {
         key: saved[0][key] for key in _FIELDS
     }
-    assert absent_manifest["ordering_resolution_source"] == "legacy_default"
+    assert absent_manifest["ordering_resolution_source"] == "unresolved"
 
 
 def test_mode_collapse_keeps_completed_record_ordering(run_failure):
