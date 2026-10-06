@@ -7,7 +7,9 @@ Experiment distributions may install one default provider through
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -28,6 +30,23 @@ class PlannerStrategy:
     uses_timing_context: bool
     task_renderer: Callable[[str, PlannerTimingContext | None], str] | None = None
     system_renderer: Callable[[str, TunerTaskRender], str] | None = None
+    config_manual_renderer: Callable[[dict[str, Any]], str] | None = None
+
+    def render_config_manual(self, manual: dict[str, Any]) -> str:
+        """Render prompt-only configuration prose without changing execution schemas.
+
+        An explicit experiment provider may preserve a historical manual. It
+        receives a copy and owns qualification of that representation. Ordinary
+        providers retain the current JSON rendering.
+        """
+        text = (
+            self.config_manual_renderer(deepcopy(manual))
+            if self.config_manual_renderer is not None
+            else json.dumps(manual, indent=2)
+        )
+        if not isinstance(text, str):
+            raise TypeError("planner strategy must return a string configuration manual")
+        return text
 
     def render_system_template(self, task_render: TunerTaskRender) -> str:
         """Let the provider own conditional strategy prose before shared fact substitution."""

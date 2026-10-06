@@ -5,6 +5,35 @@ import pytest
 from agent import planner_strategy as strategies
 
 
+def test_manual_provider_reaches_request_without_mutating_execution_schema(monkeypatch):
+    """A bypassed renderer or a shared mutable input must fail at the bridge boundary."""
+    from dataclasses import replace
+
+    from agent import llm_bridge
+    from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
+    from tests.helpers.tuner_prompt_fixtures import planner_kwargs
+
+    manual = {"properties": {"current_field": {"type": "integer"}}}
+
+    def render(value):
+        value.clear()
+        return "Explicit experiment manual."
+
+    selected = replace(
+        strategies.resolve_planner_strategy("native-timing-v1"),
+        config_manual_renderer=render,
+    )
+    monkeypatch.setattr(llm_bridge, "resolve_planner_strategy", lambda *a, **k: selected)
+    bridge = BoundaryRecorderBridge()
+    bridge.plan(**(planner_kwargs() | {"config_manual": manual}))
+    assert "Explicit experiment manual." in bridge.captures[0][3]
+    assert manual == {"properties": {"current_field": {"type": "integer"}}}
+    selected = replace(selected, config_manual_renderer=None)
+    bridge.plan(**(planner_kwargs() | {"config_manual": manual}))
+    assert '"current_field"' in bridge.captures[1][3]
+    assert "Explicit experiment manual." not in bridge.captures[1][3]
+
+
 def test_absent_and_ambiguous_install_defaults_refuse(monkeypatch):
     for installed in ([], [object(), object()]):
         monkeypatch.setattr(
