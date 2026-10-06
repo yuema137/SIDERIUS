@@ -24,6 +24,7 @@ from typing import Any
 
 from agent.schemas.ordering import OrderingObservation, OrderingRefusalPhase, ResolvedOrdering
 from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
+from core.record_role import observed_attempt_role
 from core.sandbox_executor import TidmadSandbox
 from nodes.ml_hyperparameter_tune_agent.policy import _latest_trial_inference_marginal
 from nodes.ml_hyperparameter_tune_agent.records import (
@@ -123,6 +124,7 @@ def _time_skip_memory_extra(time_check: dict, plan) -> dict:
 def _handle_admission_refusal(
     status: dict,
     *,
+    is_trial: bool,
     ordering: ResolvedOrdering,
     phase: OrderingRefusalPhase,
     sandbox,
@@ -178,6 +180,7 @@ def _handle_admission_refusal(
         ordering_observation=OrderingObservation(
             selection_state="selected", refused_before_phase=phase
         ),
+        attempt_role=observed_attempt_role(is_trial),
     )
     print(
         f"  Saved admission refusal ({phase}): {record['status']} "
@@ -441,6 +444,7 @@ def _handle_prephase_gpu_measurement(
         ordering_observation=OrderingObservation(
             selection_state="selected", refused_before_phase="preflight"
         ),
+        attempt_role=observed_attempt_role(is_trial),
     )
     _reason = _PREPHASE_REASON_CODE.get(outcome.disposition, "measurement_unavailable")
     if _reason == "insufficient_headroom":
@@ -1478,6 +1482,7 @@ def _check_and_record_guardrail_skip(
         ordering_observation=OrderingObservation(
             selection_state="selected", refused_before_phase="preflight"
         ),
+        attempt_role=observed_attempt_role(plan.is_trial),
     )
     return True
 
@@ -1527,6 +1532,7 @@ def _handle_in_subprocess_rejection(
         experiment_arm=experiment_arm,
         ordering=ordering,
         ordering_observation=OrderingObservation(selection_state="selected"),
+        attempt_role=observed_attempt_role(is_trial),
     )
     _append_runtime_observation(sandbox, run_name, rv_block)
     return True

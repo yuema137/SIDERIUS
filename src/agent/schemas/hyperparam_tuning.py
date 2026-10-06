@@ -35,6 +35,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
 from core.checkpoint_selection import SelectedCheckpoint
 from core.planner_strategy_identity import PlannerStrategyIdentity
+from core.record_role import AttemptRole, RecordRoleError, is_formal_role
 
 # One vocabulary for the admission posture, shared with the policy that
 # enforces it. Two independent spellings would let a value be acceptable
@@ -599,6 +600,11 @@ class ExperimentRecord(BaseModel):
     memory: ExperimentMemory | None = None
 
     # --- Trial context (optional — absent or default in normal mode) ---
+    attempt_role: AttemptRole | None = Field(
+        default=None,
+        exclude_if=lambda v: v is None,
+        description="Explicit current-attempt role; absent on historical records.",
+    )
     is_trial: bool = Field(
         default=False,
         description="Whether this experiment ran in trial-explore mode with sparse sampling.",
@@ -853,6 +859,23 @@ class ExperimentRecord(BaseModel):
             "integrity failures."
         ),
     )
+
+    @model_validator(mode="after")
+    def _attempt_role_matches_trial_flag(self) -> ExperimentRecord:
+        if self.attempt_role is not None:
+            try:
+                is_formal_role(
+                    {
+                        "attempt_role": self.attempt_role,
+                        "is_trial": self.is_trial,
+                        "status": self.status,
+                        "trial_portion": self.trial_portion,
+                    },
+                    self.exp_id,
+                )
+            except RecordRoleError as exc:
+                raise ValueError(str(exc)) from exc
+        return self
 
     @model_validator(mode="after")
     def _ordering_observation_matches_selection(self) -> ExperimentRecord:

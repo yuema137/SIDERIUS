@@ -2716,6 +2716,8 @@ def compute_expected_invariants(
             # cannot contradict each other.
             training_validation_portion=args.training_validation_portion,
             formal_eval_portion=args.formal_eval_portion,
+            validation_max_portion=args.validation_max_portion,
+            validation_max_samples=args.validation_max_samples,
             formal_training_scope_source=args.formal_training_scope_source,
             workflow_parameter_rules=(
                 None

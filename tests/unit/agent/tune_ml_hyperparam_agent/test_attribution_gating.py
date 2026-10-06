@@ -465,6 +465,7 @@ class TestAdmissionRefusalConsumption:
             round_index=2,
             attempt_in_round=1,
             ordering=resolve_ordering(resolved_scope=[0]),
+            is_trial=False,
         )
         return handled, sandbox.saved
 
@@ -557,6 +558,7 @@ class TestAdmissionRefusalConsumption:
                 round_index=2,
                 attempt_in_round=attempt,
                 ordering=resolve_ordering(resolved_scope=[0]),
+                is_trial=False,
             )
         slots = [r["memory"]["attempt_in_round"] for r in sandbox.saved]
         assert slots == [1, 2, 3]
@@ -592,6 +594,7 @@ class TestAdmissionRefusalConsumption:
                 round_index=2,
                 attempt_in_round=attempt,
                 ordering=resolve_ordering(resolved_scope=[0]),
+                is_trial=False,
             )
         assert len(sandbox.saved) == 3
         # No authoritative result: nothing scored, nothing succeeded.

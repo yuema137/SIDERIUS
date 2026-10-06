@@ -795,6 +795,7 @@ _CONDENSED_KEYS = frozenset(
         "model_type",
         "denoising_score",
         "is_trial",
+        "attempt_role",  # Keep unresolved distinct from a legacy default after compaction.
         # Surface the task-specific health-check message even after a record
         # falls out of the verbatim window — failure_reason is the primary
         # learning signal for the planner when a previous formal round

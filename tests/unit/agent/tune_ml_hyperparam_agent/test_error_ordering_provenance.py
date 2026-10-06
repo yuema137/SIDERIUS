@@ -83,6 +83,14 @@ def run_failure(tmp_path):
                 return_value=_synth_reference(),
             ),
             patch("nodes.ml_hyperparameter_tune_agent.time.sleep"),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.execution.wall_time_preflight_applicable",
+                return_value=True,
+            ),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.execution._run_time_preflight",
+                return_value=payload if phase == "time_preflight" else None,
+            ),
             patch.object(_RECORDS, "_emit_record", side_effect=capture),
         ):
             brain = bridge.return_value
@@ -121,6 +129,10 @@ def run_failure(tmp_path):
                 llm_provider="gemini",
                 llm_model_id="test-model",
                 progress_bar=False,
+                trial_time_budget_minutes=1.0 if phase == "time_preflight" else None,
+                formal_time_budget_minutes=1.0 if phase == "time_preflight" else None,
+                trial_time_admission_source="forecast",
+                formal_time_admission_source="forecast",
                 storage=StorageConfig(
                     backend="local",
                     local=LocalStorageConfig(workspace=str(tmp_path), run_name="error_ordering"),

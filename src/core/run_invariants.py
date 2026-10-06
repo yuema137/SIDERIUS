@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from core.execution_calibration import calibration_provenance
 from core.generated_library import generated_library_provenance
@@ -305,6 +305,10 @@ class RunInvariants(BaseModel):
     # every legacy and every full-eval lock file stays byte-identical.
     training_validation_portion: float | None = None
     formal_eval_portion: float = 1.0
+    validation_max_portion: float | None = Field(default=None, ge=0.01, le=1.0)
+    validation_max_samples: int | None = Field(default=None, ge=1)
+    # False means the legacy lock did not record these settings.
+    validation_limits_recorded: bool = False
     formal_training_scope_source: Literal["operator", "agent"] = "operator"
     # Workflow-owned parameter rules change the effective plan and therefore
     # the scientific treatment. Store their canonical validated JSON shape;
@@ -410,6 +414,9 @@ class RunInvariants(BaseModel):
         # declaration for the five-row table and the legacy-lock consequence).
         "training_validation_portion",
         "formal_eval_portion",
+        "validation_max_portion",
+        "validation_max_samples",
+        "validation_limits_recorded",
         "formal_training_scope_source",
         "workflow_parameter_rules",
         "trial_time_admission_source",
@@ -513,6 +520,15 @@ class RunInvariants(BaseModel):
                 f"would name two different files."
             )
         return value
+
+    @model_validator(mode="after")
+    def _recorded_limits_are_explicit(self) -> RunInvariants:
+        required = {"validation_max_portion", "validation_max_samples"}
+        if self.validation_limits_recorded and not required <= self.model_fields_set:
+            raise ValueError(
+                "Recorded validation limits require both explicit values, including null"
+            )
+        return self
 
     @model_validator(mode="after")
     def _advice_path_and_digest_travel_together(self) -> RunInvariants:
@@ -696,6 +712,14 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
     # value, which is what confines the new refusal to workspaces that declare
     # a NON-DEFAULT portion (the field's declaration states the five rows and
     # the residual this accepts).
+    if not invariants.validation_limits_recorded:
+        for name in (
+            "validation_limits_recorded",
+            "validation_max_portion",
+            "validation_max_samples",
+        ):
+            if payload.get(name) in (None, False):
+                payload.pop(name, None)
     if payload.get("training_validation_portion") is None:
         payload.pop("training_validation_portion", None)
     if payload.get("formal_eval_portion") == 1.0:
@@ -778,6 +802,12 @@ def validate_run_invariants(workspace: str, expected: RunInvariants) -> None:
         raise RunInvariantsViolation(
             f"workspace {workspace!r} has no {RUN_INVARIANTS_BASENAME} to "
             f"validate against. Initialize it via ensure_run_invariants()."
+        )
+    if expected.validation_limits_recorded and not locked.validation_limits_recorded:
+        raise RunInvariantsViolation(
+            "Legacy workspace did not record validation limits; its settings cannot "
+            "be inferred from missing fields. Preserve this workspace and use the "
+            "original revision, or a new workspace with verified experiment settings."
         )
     _reject_legacy_runtime_lock(workspace, locked, expected)
     drifted = [
@@ -868,6 +898,8 @@ class LockLaunchIdentity(BaseModel):
     #: so a caller that omits it gets a byte-identical lock.
     training_validation_portion: float | None = None
     formal_eval_portion: float = 1.0
+    validation_max_portion: float | None = Field(default=None, ge=0.01, le=1.0)
+    validation_max_samples: int | None = Field(default=None, ge=1)
     formal_training_scope_source: Literal["operator", "agent"] = "operator"
     workflow_parameter_rules: dict[str, Any] | None = None
     trial_time_admission_source: Literal["forecast", "measured"] | None = None
@@ -1058,6 +1090,9 @@ def build_run_invariants(
             # F-SCANF-1 — CANONICAL, threaded explicitly like the six above.
             training_validation_portion=_launch_identity.training_validation_portion,
             formal_eval_portion=_launch_identity.formal_eval_portion,
+            validation_max_portion=_launch_identity.validation_max_portion,
+            validation_max_samples=_launch_identity.validation_max_samples,
+            validation_limits_recorded=True,
             formal_training_scope_source=_launch_identity.formal_training_scope_source,
             workflow_parameter_rules=_launch_identity.workflow_parameter_rules,
             trial_time_admission_source=_launch_identity.trial_time_admission_source,

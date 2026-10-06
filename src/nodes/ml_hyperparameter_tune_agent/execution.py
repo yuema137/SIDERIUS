@@ -40,6 +40,7 @@ from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from core.layout import checkout_root
+from core.record_role import AttemptRole, observed_attempt_role
 from execute_tools.dataset_config import (
     ScopeViolationError,
 )
@@ -167,6 +168,7 @@ def _emit_attempt_record(
     status: dict | None = None,
     ordering: ResolvedOrdering | None,
     refused_before_phase: OrderingRefusalPhase | None = None,
+    attempt_role: AttemptRole | None = None,
 ) -> None:
     """Emit one attempt record with the run's identity kwargs attached.
 
@@ -200,6 +202,7 @@ def _emit_attempt_record(
             experiment_arm=agent_input.experiment_arm,
             ordering=ordering,
             ordering_observation=observation,
+            attempt_role=attempt_role,
         )
     else:
         _records._emit_record(
@@ -210,6 +213,7 @@ def _emit_attempt_record(
             experiment_arm=agent_input.experiment_arm,
             ordering=ordering,
             ordering_observation=observation,
+            attempt_role=attempt_role,
         )
 
 
@@ -518,6 +522,7 @@ def run_admission_preflight(
             agent_input,
             ordering=prepared.ordering,
             refused_before_phase="preflight",
+            attempt_role=observed_attempt_role(prepared.plan.is_trial),
         )
         return AdmissionOutcome.next_attempt()
 
@@ -600,6 +605,7 @@ def run_admission_preflight(
             agent_input,
             ordering=prepared.ordering,
             refused_before_phase="preflight",
+            attempt_role=observed_attempt_role(prepared.plan.is_trial),
         )
         return AdmissionOutcome.next_attempt()
 
@@ -837,6 +843,7 @@ def run_admission_preflight(
                 agent_input,
                 ordering=prepared.ordering,
                 refused_before_phase="preflight",
+                attempt_role=observed_attempt_role(prepared.plan.is_trial),
             )
             return AdmissionOutcome.next_attempt()
 
@@ -958,6 +965,7 @@ def run_training(
         attempt_in_round=attempt_in_round,
         candidate_id=agent_input.candidate_id,
         experiment_arm=agent_input.experiment_arm,
+        is_trial=prepared.plan.is_trial,
     ):
         return TrainingOutcome.next_attempt()
     if _handle_in_subprocess_rejection(
@@ -1010,7 +1018,12 @@ def run_training(
             attempt_in_round=attempt_in_round,
         )
         _emit_attempt_record(
-            sandbox, error_record, agent_input, status=train_status, ordering=prepared.ordering
+            sandbox,
+            error_record,
+            agent_input,
+            status=train_status,
+            ordering=prepared.ordering,
+            attempt_role=observed_attempt_role(prepared.plan.is_trial),
         )
         print(f"  Saved error record: {error_record['status']}")
         return TrainingOutcome.next_attempt()
@@ -1221,6 +1234,7 @@ def _run_local_evaluation_phase(
         attempt_in_round=attempt_in_round,
         candidate_id=agent_input.candidate_id,
         experiment_arm=agent_input.experiment_arm,
+        is_trial=prepared.plan.is_trial,
     ):
         return AttemptExecution.next_attempt()
     # Step 11 C2 (F-11-1) — same authority as the training branch.
@@ -1242,7 +1256,12 @@ def _run_local_evaluation_phase(
             attempt_in_round=attempt_in_round,
         )
         _emit_attempt_record(
-            sandbox, error_record, agent_input, status=inf_status, ordering=prepared.ordering
+            sandbox,
+            error_record,
+            agent_input,
+            status=inf_status,
+            ordering=prepared.ordering,
+            attempt_role=observed_attempt_role(prepared.plan.is_trial),
         )
         print(f"  Saved error record: {error_record['status']}")
         return AttemptExecution.next_attempt()
@@ -1467,7 +1486,13 @@ def _run_local_evaluation_phase(
             round_index=round_index,
             attempt_in_round=attempt_in_round,
         )
-        _emit_attempt_record(sandbox, error_record, agent_input, ordering=prepared.ordering)
+        _emit_attempt_record(
+            sandbox,
+            error_record,
+            agent_input,
+            ordering=prepared.ordering,
+            attempt_role=observed_attempt_role(prepared.plan.is_trial),
+        )
         print(f"  Saved error record: {error_record['status']}")
         return AttemptExecution.next_attempt()
     scoring_time = round(time.time() - t0, 1)
@@ -1573,7 +1598,11 @@ def _run_evaluation_phase(
         )
         record["external_evaluation"] = exc.evaluation.model_dump(mode="json")
         _emit_attempt_record(
-            bindings.sandbox, record, bindings.agent_input, ordering=prepared.ordering
+            bindings.sandbox,
+            record,
+            bindings.agent_input,
+            ordering=prepared.ordering,
+            attempt_role=observed_attempt_role(prepared.plan.is_trial),
         )
         return AttemptExecution.next_attempt()
 
