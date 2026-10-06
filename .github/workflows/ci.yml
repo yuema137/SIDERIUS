@@ -27,7 +27,7 @@ jobs:
     # (31855504278, 31855238181) were cancelled at it before this branch
     # existed. The last SUCCESSFUL master run (31857482569) measured:
     #
-    #     install 47s · ruff 1s · pyright strict 2m17s · pytest 10m28s
+    #     install 47s · ruff 1s · pyright 2m17s · pytest 10m28s
     #     ---------------------------------------------------------------
     #     total 13m38s  ->  1m22s of headroom against a 15-minute cap
     #
@@ -66,15 +66,9 @@ jobs:
       - name: Lint — ruff format (check only, no rewrite)
         run: uv run ruff format --check .
 
-      # Q6, DEFERRED by operator ruling: this step is labelled "strict" but
-      # `pyrightconfig.json` sets `typeCheckingMode: basic`, and CLAUDE.md
-      # leans on the *strict* complexity ceiling to justify a binding
-      # architectural rule. Choosing the intended policy is a type-safety
-      # decision, not a test-pruning one, so this PR preserves CURRENT actual
-      # behaviour and changes neither the mode nor the rationale. The label is
-      # left as-is deliberately: correcting the prose here would quietly pick
-      # one side of the open question. Tracked as a separate follow-up.
-      - name: Type check — pyright (see Q6 note above re "strict")
+      # The configured basic baseline and diagnostic overrides are authoritative.
+      # See CLAUDE.md for policy; pyrightconfig.json owns scope and severities.
+      - name: Type check — pyright (configured basic)
         run: uv run pyright
 
       # ---- selective unit tests -------------------------------------------

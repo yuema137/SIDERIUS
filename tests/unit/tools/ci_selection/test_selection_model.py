@@ -532,16 +532,17 @@ class TestTheWorkflowActuallyConsumesTheSelector:
         selection on every PR."""
         assert "fetch-depth: 0" in self._workflow()
 
-    def test_pyright_mode_is_not_touched_by_this_pr(self):
-        """Q6 is DEFERRED. The workflow's "strict" label and
-        `pyrightconfig.json`'s `basic` disagree, and CLAUDE.md leans on the
-        strict ceiling. Preserve CURRENT behaviour; changing either side here
-        would quietly pick a side of an open policy question."""
+    def test_ci_preserves_the_adopted_basic_type_checking_policy(self):
+        """#222: selection must retain the adopted basic check in CI.
+
+        Changing the baseline is a separate type-policy decision, not an
+        optimization of which unit tests a pull request runs.
+        """
         import json
 
         cfg = json.loads((REPO_ROOT / "pyrightconfig.json").read_text(encoding="utf-8"))
         assert cfg["typeCheckingMode"] == "basic", (
-            "pyright's mode changed — that is a type-safety policy decision (Q6), "
+            "pyright's baseline changed — that is a type-safety policy decision, "
             "not a test-selection one"
         )
         assert "uv run pyright" in self._workflow()

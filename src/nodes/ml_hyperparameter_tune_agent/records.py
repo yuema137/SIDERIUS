@@ -768,10 +768,9 @@ def _attach_runtime_evidence(record: dict, status: dict) -> None:
     never that the device was idle, and an absent verdict means
     ``unknown``, never that the candidate was at fault.
 
-    One helper for both failure sites, which also keeps four conditional
-    branches out of ``run()`` — pyright's strict mode refuses to analyse
-    that method at all once it grows past its complexity ceiling, and a
-    method too complex to type-check is one nobody is checking.
+    One helper owns evidence attachment for both failure sites and keeps
+    those branches out of ``run()``. This preserves a reviewable boundary;
+    Pyright's complexity limits apply in basic as well as strict mode.
     """
     for key in ("gpu_evidence", "failure_attribution"):
         value = status.get(key)

@@ -574,8 +574,8 @@ def _classify_attempt_failure(exc: BaseException, failure_stage: str | None) -> 
     name, so conflating the two teaches the agent that its model is at
     fault when the measurement simply never finished.
 
-    Module-level rather than inline: the caller's `try` already sits at
-    pyright's complexity-analysis ceiling.
+    Module-level rather than inline: failure classification has its own
+    boundary and does not add branches to the caller's error handling.
     """
     if isinstance(exc, InconclusivePreflight):
         # Kind-specific so a host-memory kill is never read back as a
@@ -591,9 +591,9 @@ def _classify_attempt_failure(exc: BaseException, failure_stage: str | None) -> 
 def _runtime_phase_for(is_trial: bool) -> str:
     """C8c: the phase the shared runtime policy decides under.
 
-    A module-level helper rather than an inline conditional because
-    ``run()`` sits at pyright's strict-mode complexity ceiling — one more
-    branch inside it makes the whole method unanalyzable.
+    A module-level helper keeps phase selection explicit without adding
+    another conditional to the orchestrator. The original extraction
+    relieved a historical Pyright complexity limit, not a strict-only limit.
 
     No bounded live probe feeds the tuner pre-flight: the authoritative
     formal measurement is the RT2 in-subprocess verification, so a formal
@@ -615,9 +615,9 @@ def _run_time_preflight(
 ) -> dict:
     """Invoke the wall-time pre-flight gate for one attempt.
 
-    Extracted from ``run()`` (C8g): that method sits at pyright's
-    strict-mode complexity ceiling, and this block carried three inline
-    conditionals plus an eight-argument call. Behavior is unchanged —
+    Extracted from ``run()`` (C8g) to isolate pre-flight coordination and
+    relieve its historical complexity pressure. This block carried three
+    inline conditionals plus an eight-argument call. Behavior is unchanged —
     the same skill, the same arguments, the same log line.
 
     ``inference_per_psd_seg_ms_hint`` is the most recent successful trial

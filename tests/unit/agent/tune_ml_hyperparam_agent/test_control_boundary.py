@@ -1,10 +1,9 @@
 """B-C4a0 — the extracted tuner control boundary.
 
-`run()` is 2,300+ lines and sits on pyright's strict complexity ceiling:
-past it the checker abandons the whole function, so every annotation
-inside the tuner's main method goes unverified. B-C4 adds a refusal path
-to exactly that method. This extracts the surfaces admission needs so it
-has somewhere to live other than another `if`.
+At the time of B-C4a0, `run()` exceeded 2,300 lines and had reached a
+Pyright complexity limit. Such limits also apply in basic mode. The
+extraction gave B-C4's refusal path an explicit admission boundary
+instead of adding more branches to that historical orchestrator.
 
 The tests here are about the *boundary*, not the arithmetic: that the
 helpers are pure, that production actually reaches them, that they did

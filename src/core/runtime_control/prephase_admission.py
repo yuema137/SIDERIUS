@@ -13,13 +13,11 @@ run the isolated pre-phase measurement
 ```
 
 **Why a boundary and not four branches in the tuner.**
-`HyperparamTuningAgent.run()` is the giant orchestrator the decomposition
-rule governs -- it reached 2,487 lines and sat exactly on pyright's strict
-complexity ceiling, past which strict mode abandons the whole function
-rather than degrading. Adding measurement, classification, admission and
-disposition to it inline would be four more responsibilities in a scope
-that already has too many, and would put O-7's accounting inside the one
-function where it is hardest to see.
+At the time of the PR C2 extraction, `HyperparamTuningAgent.run()` had
+reached 2,487 lines and the historical Pyright complexity limit. Such
+limits also apply in basic mode. Keeping measurement, classification,
+admission and disposition at this boundary avoids adding those
+responsibilities to the orchestrator and makes O-7's accounting explicit.
 
 **The tuner consumes only the disposition.** It never reads an outcome, a
 peak, a coverage figure or an admission decision to decide what to do. Each

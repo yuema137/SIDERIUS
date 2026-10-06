@@ -239,6 +239,15 @@ validate.
 
 ## Coding Standards
 
+- **Type-checking policy (operator decision, 2026-10-06)**: the repository
+  baseline is Pyright `basic` with the explicit diagnostic overrides in
+  [`pyrightconfig.json`](pyrightconfig.json). That file owns the checked scope
+  and diagnostic severities. Run the configured check from the current
+  checkout; a passing basic check is not evidence of strict coverage. Warnings
+  remain warnings unless the configuration makes them errors. Stronger checks
+  require explicitly declared scope, configuration and matching evidence in
+  a separately reviewed change; incremental strict adoption is tracked in
+  [#597](https://github.com/Galileo-Sandbox/SIDERIUS/issues/597).
 - **Logic First**: Before every modification, review the current structure of
   the whole project. Think about whether the structure is appropriate, rather
   than just adding the desired feature. Keep the code clean and elegant.
@@ -350,7 +359,7 @@ validate.
   Every decomposition must preserve behaviour and prove it: parity before
   and after, unchanged retry/round behaviour, unchanged phase ordering,
   unchanged timeout and signal semantics, unchanged persisted artifacts
-  and statuses, and strict type checking over the extracted units. Never
+  and statuses, and configured type checking over the extracted units. Never
   change retry, phase order, signal, timeout or scientific behaviour
   "while refactoring".
 
@@ -406,13 +415,14 @@ validate.
   unsafe, or nearby duplication and special cases are accumulating. Keep such
   refactors bounded, behavior-preserving, and separately validated.
 
-  **Why this is a rule and not a preference**: `HyperparamTuningAgent.run()`
-  reached 2,487 lines and sat *exactly* on pyright's strict complexity
-  ceiling — 258 branch nodes passed, 259 failed. Past that limit strict
-  mode does not degrade, it abandons the whole function, so every
-  annotation inside the tuner's main method was unverified. The defect was
-  invisible until an unrelated PR added one `if`. Waiting for a type
-  checker or a test suite to collapse is not a design process.
+  **Why this is a rule and not a preference**: explicit responsibilities and
+  bounded control flow make code reviewable and independently testable. In the
+  historical PR B incident, `HyperparamTuningAgent.run()` reached 2,487 lines;
+  258 branch nodes passed Pyright and 259 failed its complexity check. Those
+  counts describe that revision, not a universal threshold or today's tuner.
+  Pyright can skip analyzing an overly complex function body in basic as well
+  as strict mode. Waiting for a checker or test suite to reach its limits is
+  not a design process; the decomposition rule does not depend on strict mode.
 
 - **Cold-start real-training gate runs (operator rule, 2026-07-27)**:
   every new real-training gate run (Gate 1 with real training, Gate 2,
