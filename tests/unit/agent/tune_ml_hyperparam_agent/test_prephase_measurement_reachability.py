@@ -36,6 +36,7 @@ import nodes.ml_hyperparameter_tune_agent as tuner
 # from four places; stubbing it on the public module would intercept none of
 # them. importlib because the package name is rebound to the main module.
 _tuner_records = importlib.import_module("nodes.ml_hyperparameter_tune_agent.records")
+from agent.schemas.ordering import resolve_ordering
 from core.runtime_control.gpu_accounting import DeviceIdentity
 from tests.helpers.tuner_source import tuner_lifecycle_source
 
@@ -80,7 +81,10 @@ def _call(tmp_path, **over):
         attempt_in_round=0,
     )
     kwargs.update(over)
-    return tuner._handle_prephase_gpu_measurement(**kwargs)
+    return tuner._handle_prephase_gpu_measurement(
+        **kwargs,
+        ordering=resolve_ordering(resolved_scope=[0]),
+    )
 
 
 class TestTheCallSiteExists:

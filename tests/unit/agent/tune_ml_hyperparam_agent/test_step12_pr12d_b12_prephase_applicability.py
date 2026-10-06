@@ -55,6 +55,7 @@ from core.runtime_control.gpu_accounting import DeviceIdentity
 #: `runtime` module must be reached through importlib — the same hop
 #: `test_prephase_measurement_reachability.py` makes for `records`.
 _runtime = importlib.import_module("nodes.ml_hyperparameter_tune_agent.runtime")
+from agent.schemas.ordering import resolve_ordering
 from execute_tools.dataset_config import (
     TIDMAD_PROFILE,
     DatasetProfile,
@@ -147,7 +148,10 @@ def _call(tmp_path, **over):
         attempt_in_round=0,
     )
     kwargs.update(over)
-    return tuner._handle_prephase_gpu_measurement(**kwargs)
+    return tuner._handle_prephase_gpu_measurement(
+        **kwargs,
+        ordering=resolve_ordering(resolved_scope=[0]),
+    )
 
 
 class _WorkerSpawned(BaseException):

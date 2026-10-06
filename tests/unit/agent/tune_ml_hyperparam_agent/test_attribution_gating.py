@@ -26,6 +26,7 @@ import pytest
 
 from agent.prompts import get_planner_user_prompt
 from agent.schemas.hyperparam_tuning import ExperimentRecord
+from agent.schemas.ordering import resolve_ordering
 from core.runtime_control.failure_attribution import (
     AttributionResult,
     may_recommend_resource_reduction,
@@ -463,6 +464,7 @@ class TestAdmissionRefusalConsumption:
             hypothesis="fixture",
             round_index=2,
             attempt_in_round=1,
+            ordering=resolve_ordering(resolved_scope=[0]),
         )
         return handled, sandbox.saved
 
@@ -554,6 +556,7 @@ class TestAdmissionRefusalConsumption:
                 hypothesis="fixture",
                 round_index=2,
                 attempt_in_round=attempt,
+                ordering=resolve_ordering(resolved_scope=[0]),
             )
         slots = [r["memory"]["attempt_in_round"] for r in sandbox.saved]
         assert slots == [1, 2, 3]
@@ -588,6 +591,7 @@ class TestAdmissionRefusalConsumption:
                 hypothesis="fixture",
                 round_index=2,
                 attempt_in_round=attempt,
+                ordering=resolve_ordering(resolved_scope=[0]),
             )
         assert len(sandbox.saved) == 3
         # No authoritative result: nothing scored, nothing succeeded.

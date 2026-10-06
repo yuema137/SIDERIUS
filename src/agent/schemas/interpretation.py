@@ -34,6 +34,7 @@ from agent.schemas.health_feedback import (
     RoundHealth,
 )
 from agent.schemas.hyperparam_tuning import ExperimentTiming, ExpertAdviceInput
+from agent.schemas.ordering import OrderingObservation
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
@@ -311,13 +312,13 @@ class InterpretationTaskBlocks(BaseModel):
 
 
 class RoundOrdering(BaseModel):
-    """What data ordering one round actually ran, and where it came from.
+    """Selected data ordering and its provenance, not proof of sample traversal.
 
     Interpreter-facing view of the ordering provenance
     (``docs/design/v19_priorities/pr2_data_ordering.md`` §3.7). Two rules
     govern how downstream reasoning may use it:
 
-    - ``resolved_*`` is the ONLY pair that describes execution. A proposal
+    - ``resolved_*`` describes selected settings, not completed traversal. A proposal
       the operator overrode was not what ran, and must never be reported as
       though it were.
     - a REJECTED proposal is not the same as no proposal. The agent tried to
@@ -333,25 +334,28 @@ class RoundOrdering(BaseModel):
         default=None,
         description="Experiment this ordering belongs to. None on legacy records.",
     )
+    ordering_observation: OrderingObservation | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Current selection/refusal evidence; absent on historical summaries.",
+    )
     resolved_order_strategy: str | None = Field(
         default=None,
         description=(
-            "The visitation order that ACTUALLY RAN for this round. None when "
-            "nothing ran — i.e. resolution_source is 'not_executed', an "
-            "attempt rejected at pre-flight. Downstream must not describe a "
-            "None as having executed any ordering."
+            "Selected strategy, not evidence of physical traversal. None for current "
+            "unresolved selection or the historical not_executed reading."
         ),
     )
     resolved_file_order: list[int] | None = Field(
         default=None,
-        description="File order that actually ran; None when the strategy was 'shuffle'.",
+        description="Selected file order, not a visitation log; None for shuffle or unresolved.",
     )
     resolution_source: str = Field(
         description=(
             "Which level decided it: 'operator_override', 'agent_proposal', "
-            "or 'default' when an ordering actually ran; 'legacy_default' for "
-            "a pre-ordering artifact; 'not_executed' for a current attempt "
-            "rejected at pre-flight, where no ordering ran at all."
+            "or 'default' for selected settings; 'unresolved' for explicit current "
+            "absence; 'legacy_default' or 'not_executed' for compatibility readings "
+            "of unstamped records. None of these proves physical traversal."
         ),
     )
     proposed_order_strategy: str | None = Field(
@@ -431,7 +435,7 @@ class ModelRunSummary(BaseModel):
     )
     round_ordering: list[RoundOrdering] = Field(
         default_factory=list,
-        description="Data ordering that actually ran, per round, in the same "
+        description="Selected data ordering and provenance, per round, in the same "
         "chronological order as round_scores. Kept per round because ordering "
         "may legitimately differ between rounds when no operator override is "
         "in force. Empty on runs that predate the ordering option.",

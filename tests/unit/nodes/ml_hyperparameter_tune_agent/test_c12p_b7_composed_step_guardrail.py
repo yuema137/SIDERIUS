@@ -42,6 +42,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agent.schemas.ordering import resolve_ordering
 from execute_tools.task_data_path import bind_task_data_path
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import AttemptScopes
 from tests.helpers.two_family_profile import make_two_family_profile
@@ -160,7 +161,16 @@ def emitted(monkeypatch):
     """
     captured: list[dict] = []
 
-    def _spy(sandbox, record, *, status=None, candidate_id=None, experiment_arm=None):
+    def _spy(
+        sandbox,
+        record,
+        *,
+        status=None,
+        candidate_id=None,
+        experiment_arm=None,
+        ordering=None,
+        ordering_observation=None,
+    ):
         captured.append(record)
 
     monkeypatch.setattr(runtime._records, "_emit_record", _spy)
@@ -202,6 +212,7 @@ def _run_guardrail(agent_input, *, train_sample_set):
             round_index=1,
             attempt_in_round=1,
             dataset_profile=PROFILE,
+            ordering=resolve_ordering(resolved_scope=[0]),
         )
 
 
@@ -316,6 +327,7 @@ class TestTheGuardrailCanSeeTheAttemptsTaskOwnedScope:
             round_index=1,
             attempt_in_round=1,
             dataset_profile=PROFILE,
+            ordering=resolve_ordering(resolved_scope=[0]),
         )
 
 
@@ -355,6 +367,7 @@ class TestTheLegacyPathIsUntouched:
             round_index=1,
             attempt_in_round=1,
             dataset_profile=PROFILE,
+            ordering=resolve_ordering(resolved_scope=[0]),
         )
 
         assert skipped is True

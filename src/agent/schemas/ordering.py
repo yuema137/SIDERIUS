@@ -51,6 +51,7 @@ OrderingResolutionSource = Literal[
     "default",
     "legacy_default",
     "not_executed",
+    "unresolved",
 ]
 """Which level supplied selected ordering, or how an unstamped record is read.
 
@@ -61,18 +62,18 @@ The first three describe selected configuration, including on attempt errors:
 ``default``            the current default was selected, because there was
                        no usable proposal and no override.
 
-The last two are reader states, not evidence of selected configuration:
+The remaining sources are reader states, not evidence of selected configuration:
 
 ``legacy_default``     an unstamped record uses the historical fallback.
-                       This includes old errors and pre-resolution failures;
+                       This includes unstamped errors from earlier producers;
                        it does not establish what actually executed.
-``not_executed``       a CURRENT-code attempt never reached training (it was
-                       rejected at pre-flight), so no ordering was applied.
-                       ``resolved_strategy`` / ``resolved_file_order`` are
-                       both ``None`` — inventing a shuffle value for
-                       something that never ran would be a lie.
+``not_executed``       the compatibility reading for named unstamped skip
+                       statuses, with no selected strategy or file order.
+                       Current observations take precedence over this rule.
 
-Neither of the last two is ever written by a live executed round.
+``unresolved``         a current observation explicitly records no selected ordering.
+
+These reader states are never written as selected sources by a live round.
 """
 
 DEFAULT_ORDER_STRATEGY: OrderStrategy = "shuffle"
@@ -84,13 +85,48 @@ NOT_EXECUTED_STATUSES: frozenset[str] = frozenset(
         "skipped_schema_violation",
     }
 )
-"""Record statuses meaning the attempt was rejected BEFORE training ran.
+"""Historical reader categories retained for unstamped records.
 
 Taken from the ``ExperimentRecord.status`` Literal. These are the pre-flight
-rejections — the gate declined the attempt, so no data was ever visited and
-no ordering was applied. Every other status implies training at least
-started.
+rejections. They are compatibility categories, not general proof of physical
+execution: current records use explicit selection/refusal observations.
 """
+
+
+OrderingRefusalPhase = Literal["preflight", "training", "inference"]
+
+
+class OrderingObservation(BaseModel):
+    """Current producer evidence, independent of physical sample traversal.
+
+    Absence of this object means historical/unstamped evidence, not unresolved
+    selection. A refusal names the phase refused at its call site; it does not
+    claim that no earlier phase or bounded probe ran.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    selection_state: Literal["selected", "unresolved"]
+    refused_before_phase: OrderingRefusalPhase | None = None
+
+    def validate_selection(self, strategy: Any, file_order: Any, source: Any) -> None:
+        """Refuse contradictory current evidence without tightening old records."""
+        if self.selection_state == "unresolved":
+            if strategy is not None or file_order is not None or source is not None:
+                raise ValueError("Unresolved ordering cannot carry selected settings or source")
+            return
+        if strategy not in ("shuffle", "sequential") or source not in (
+            "operator_override",
+            "agent_proposal",
+            "default",
+        ):
+            raise ValueError("Selected ordering requires a concrete strategy and live source")
+        if strategy == "shuffle" and file_order is not None:
+            raise ValueError("Selected shuffle cannot carry a file order")
+        if strategy == "sequential":
+            validate_ordering_shape(strategy, file_order, level="selected observation")
+            if file_order is None:
+                raise ValueError("Selected sequential ordering requires its resolved file order")
 
 
 class OrderingValidationError(ValueError):
@@ -335,18 +371,39 @@ class ResolvedOrdering(BaseModel):
         The single place the legacy rule lives, so the interpreter and the
         iteration manifest cannot drift apart on it: a record with no
         ``resolved_order_strategy`` outside the named preflight skips is read
-        as global shuffle with source ``legacy_default``. Such absence includes
-        historical errors and current pre-resolution failures; the fallback is
+        as global shuffle with source ``legacy_default``. Explicit current observations
+        are checked first; only unstamped records use this fallback, which is
         not proof of traversal and is never written back.
 
         Takes any object exposing the record's ordering attributes (duck
         typed, so this module stays free of a schema import cycle).
         """
         resolved = getattr(record, "resolved_order_strategy", None)
+        observation = getattr(record, "ordering_observation", None)
+        if observation is not None:
+            observation = OrderingObservation.model_validate(observation)
+            observation.validate_selection(
+                resolved,
+                getattr(record, "resolved_file_order", None),
+                getattr(record, "ordering_resolution_source", None),
+            )
+            if observation.selection_state == "unresolved":
+                return cls(
+                    proposed_strategy=getattr(record, "proposed_order_strategy", None),
+                    proposed_file_order=getattr(record, "proposed_file_order", None),
+                    proposal_rejected=bool(getattr(record, "ordering_proposal_rejected", False)),
+                    proposal_rejection_reason=getattr(
+                        record, "ordering_proposal_rejection_reason", None
+                    ),
+                    override_strategy=getattr(record, "override_order_strategy", None),
+                    override_file_order=getattr(record, "override_file_order", None),
+                    resolved_strategy=None,
+                    resolution_source="unresolved",
+                )
         if resolved is None:
             # Only these named preflight skips establish not_executed.
             # Other unstamped inputs retain the compatibility fallback,
-            # including pre-resolution and admission failures (issue #447).
+            # including ambiguous pre-resolution/admission failures from older producers.
             if getattr(record, "status", None) in NOT_EXECUTED_STATUSES:
                 return cls.not_executed(record)
             return cls.legacy_default()
@@ -364,19 +421,17 @@ class ResolvedOrdering(BaseModel):
 
     @classmethod
     def not_executed(cls, record: Any = None) -> ResolvedOrdering:
-        """A current-code attempt that never reached training.
+        """The preserved compatibility reading for a named unstamped skip.
 
-        Rejected at pre-flight (OOM risk, time risk, schema violation), so no
-        data was visited and no ordering was applied. Both resolved fields are
-        ``None``: inventing a shuffle value for something that never ran would
-        misreport the run, and is exactly the confusion that made
-        ``legacy_default`` the wrong label for these attempts.
+        Both resolved fields remain None. This does not reconstruct physical
+        traversal. Current producers carry explicit selection/refusal evidence
+        and do not use this status-based compatibility constructor.
 
         Any proposal the agent made is still preserved — including its
         rejection — because that describes what the agent DID, which is
         independent of whether the attempt survived admission. The
-        ``resolution_source`` describes what EXECUTED, never what would have
-        been selected had the attempt been admitted.
+        ``resolution_source`` preserves the historical absence reading without
+        reconstructing a selected setting.
         """
         return cls(
             proposed_strategy=getattr(record, "proposed_order_strategy", None),
