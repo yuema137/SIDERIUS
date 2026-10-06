@@ -11,7 +11,7 @@ answer neither phase's question (audit F2).
 
 Every test drives a REAL subprocess -- a fake worker script that writes a
 report and a journal, or hangs, or dies mid-phase -- with an injected
-device sampler. No GPU, no torch, no sleeps beyond the poll cadence, and
+device sampler. No GPU or torch; fixture waits are bounded, and
 the actual `Popen` / deadline / reap path under test rather than a
 simulation of it.
 """
@@ -20,10 +20,18 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import sys
+import time
+from collections.abc import Callable, Iterator
+from contextlib import suppress
+from pathlib import Path
+from textwrap import dedent
+from unittest.mock import Mock
 
 import pytest
 
+import core.runtime_control.gpu_measurement_runner as measurement_runner
 from core.runtime_control.gpu_accounting import (
     DeviceIdentity,
     GpuAccountingSnapshot,
@@ -163,6 +171,71 @@ def _run(tmp_path, worker_body: str, series, **over):
     )
 
 
+@pytest.fixture
+def hung_worker(tmp_path: Path) -> Iterator[tuple[str, Callable[[], float]]]:
+    """Own child reaping instead of racing the host's orphan reaper (#373).
+
+    Only the runner may signal the child. The worker's TERM handler waits for
+    that signal to take effect; it does not make a leader-only kill pass.
+    """
+    pgid_file = tmp_path / "worker_pgid"
+    ready_file = tmp_path / "child_pid"
+    reaped_file = tmp_path / "child_exit_code"
+    body = dedent(f"""
+        import signal, subprocess
+        with open({str(pgid_file)!r}, 'w') as handle:
+            handle.write(str(os.getpgid(0)))
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+        def reap_child(signum, frame):
+            code = child.wait(timeout=5)
+            with open({str(reaped_file)!r}, 'w') as handle:
+                handle.write(str(code))
+            sys.exit(0)
+        signal.signal(signal.SIGTERM, reap_child)
+        journal('phase_start', 'setup')
+        with open({str(ready_file)!r}, 'w') as handle:
+            handle.write(str(child.pid))
+        time.sleep(60)
+        """)
+    setup_started = time.monotonic()
+    ready_at: float | None = None
+
+    def elapsed_clock() -> float:
+        nonlocal ready_at
+        now = time.monotonic()
+        if ready_at is None:
+            # This witness times an established group, not interpreter startup.
+            if not ready_file.exists() or not ready_file.read_text():
+                assert now - setup_started < 5, "worker did not publish child readiness"
+                return 0.0
+            child_pid = int(ready_file.read_text())
+            assert os.getpgid(child_pid) == int(pgid_file.read_text())
+            ready_at = now
+        # Keep time advancing during TERM grace as well as the deadline loop.
+        assert now - ready_at < 30, "measurement runner did not stop"
+        return now - ready_at
+
+    try:
+        yield body, elapsed_clock
+    finally:
+        # Cleanup follows the assertions, including for deliberate mutations.
+        # Never use it to manufacture the kernel absence checked by the test.
+        if pgid_file.exists() and pgid_file.read_text():
+            pgid = int(pgid_file.read_text())
+            with suppress(ProcessLookupError):
+                os.killpg(pgid, signal.SIGKILL)
+            until = time.monotonic() + 5
+            while time.monotonic() < until:
+                try:
+                    if os.waitpid(pgid, os.WNOHANG)[0]:
+                        break
+                except ChildProcessError:
+                    break  # The runner already reaped its worker.
+                time.sleep(0.01)
+            else:
+                pytest.fail("test cleanup could not reap the worker")
+
+
 class TestTheTwoAccountsAreJoinedNotMerged:
     def test_both_figures_are_reported_side_by_side(self, tmp_path):
         run = _run(tmp_path, _GOOD_WORKER, [3000])
@@ -275,19 +348,14 @@ class TestTheRawEvidenceSurvives:
 
 
 class TestAWorkerThatLeavesNoReport:
-    def test_a_hung_worker_is_killed_at_the_deadline(self, tmp_path):
-        pgid_file = tmp_path / "worker_pgid"
+    def test_a_hung_worker_is_killed_at_the_deadline(self, tmp_path, hung_worker):
+        """A real group signal must stop the worker AND its child (#373)."""
+        body, elapsed_clock = hung_worker
         run = _run(
             tmp_path,
-            # A GRANDCHILD, deliberately. The previous worker was
-            # `journal(...); sleep(60)` and spawned nothing, so the process
-            # group was trivially dead and an orphan assertion could not fail.
-            "import os, subprocess, sys\n"
-            "journal('phase_start', 'setup')\n"
-            f"open({str(pgid_file)!r}, 'w').write(str(os.getpgid(0)))\n"
-            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-            "time.sleep(60)\n",
+            body,
             [1000],
+            elapsed_clock=elapsed_clock,
             spec={
                 "request": CandidateMeasurementRequest(
                     model_type="punet",
@@ -307,18 +375,37 @@ class TestAWorkerThatLeavesNoReport:
             "the classifier may only call this a timeout if the deadline was reached"
         )
         assert run.process.term_sent is True
+        assert run.process.exit_code == 0, "worker must reap its child before exiting"
+        assert int((tmp_path / "child_exit_code").read_text()) == -signal.SIGTERM
+        assert run.process.kill_sent is False
 
-        # Asked of the KERNEL, not read back from the runner. This previously
-        # asserted only `run.process.orphans_remaining is False` -- a value
-        # `gpu_measurement_runner.py:423` produces via `process_group_alive`.
-        # Delete that call, hardcode False, and the assertion stayed green.
-        # Character-for-character the defect corrected at `test_watchdog.py:53`,
-        # and outside what `test_no_self_referential_expectations.py` detects by
-        # design (`:27-31`).
-        pgid = int(pgid_file.read_text().strip())
+        # Independent kernel witness, after owned reaping, not the runner's
+        # earlier liveness snapshot. Record transport is checked separately.
+        pgid = int((tmp_path / "worker_pgid").read_text())
         with pytest.raises(ProcessLookupError):
             os.killpg(pgid, 0)
-        assert run.process.orphans_remaining is False  # and the runner agrees
+
+    @pytest.mark.parametrize("observed_alive", [True, False])
+    def test_orphan_evidence_preserves_the_observation(self, tmp_path, monkeypatch, observed_alive):
+        """Catch a bypassed query or constant result without racing a later reap.
+
+        Issue 373's True-then-False sequence is valid: the later observation
+        must not be substituted for the snapshot recorded by the runner.
+        """
+        observe = Mock(side_effect=[observed_alive, False])
+        monkeypatch.setattr(measurement_runner, "process_group_alive", observe)
+        pid_file = tmp_path / "observed_worker_pid"
+        run = _run(
+            tmp_path,
+            f"with open({str(pid_file)!r}, 'w') as handle:\n    handle.write(str(os.getpid()))\n",
+            [1000],
+        )
+        worker_pid = int(pid_file.read_text())
+        assert run.process.exit_code == 0
+        observe.assert_called_once_with(worker_pid)
+        assert run.process.orphans_remaining is observed_alive
+        assert observe(worker_pid) is False
+        assert run.process.orphans_remaining is observed_alive
 
     def test_the_journal_names_the_phase_that_was_in_flight(self, tmp_path):
         """The difference between telling an operator "it died during
