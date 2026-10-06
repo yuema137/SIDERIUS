@@ -84,6 +84,7 @@ TASK_RENDER = TunerTaskRender(
 def planner_kwargs(metric_spec: MetricSpec | None = None) -> dict:
     """Return one complete, task-neutral planner call surface."""
     return {
+        "planner_strategy": "native-timing-v1",
         "memory_history": HISTORY,
         "expert_advice": "Compare the recorded evidence.",
         "force_model": "auto",

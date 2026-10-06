@@ -62,6 +62,7 @@ def test_preflight_batch_reaches_inference_and_record(tmp_path, request, monkeyp
     run_name = "g2_coherence"
 
     agent_input = HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type=_PLUGIN_MODEL_TYPE,
         max_rounds=2,
         is_trial=True,

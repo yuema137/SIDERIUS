@@ -7,18 +7,25 @@ LLMBridge").
 One bounded pseudo tuner iteration (the same production-path harness as
 REC-2) crosses the real ``plan()``/``reflect()`` call sites; the widened
 ``RecordingLLMBridge`` records the full surfaces. The ``plan()`` surface
-is 27 parameters excl. ``self`` — ``memory_history`` bound POSITIONALLY
-(itself part of the pinned surface, review F11) plus 26 keywords, all
-passed explicitly by the sole production call site.
+has ``memory_history`` bound POSITIONALLY (itself part of the pinned
+surface, review F11); the golden key set records the current keywords
+passed explicitly by the production call site.
 
 Justified exclusions (design §13, WF-1 row): ``registry`` is a live
 object — pinned by type name; ``memory_history`` is recorded by
 reference — pinned by type/length here and by content in the registered
 k9 choreography (WF-4). Every VALUE-carrying kwarg remains deep-compared,
-so the exclusions cannot hide drift.
+with source digests normalized as described below.
 
 DECLARED GOLDEN DELTAS (never a re-baseline to make a test green)
 ----------------------------------------------------------------
+
+* **Issue #372** — adds ``planner_strategy``, ``expected_planner_strategy``
+  and the full JSON ``timing_context``. Every previous value is unchanged.
+  Provider name/version remain pinned; source hashes are normalized to
+  markers because strategy identity tests own source-change/refusal checks.
+  The fixture explicitly selects native and does not require an installed
+  experiment default. Historical rendered text remains exp-owned.
 
 * **PR01A2 builtin loss offers (2026-09-12)** — one textual field-name
   insertion: ``kwargs.task_render.fields`` gains ``loss_context``. This is
@@ -113,6 +120,15 @@ def project_plan_call(call: tuple) -> dict:
     """
     _method, memory_history, expert_advice, force_model, kwargs = call
     projected = dict(kwargs)
+    # #372 adds typed policy facts and a verified provider pin. Choreography
+    # freezes their transport, while strategy tests own source-digest identity.
+    for name in ("timing_context", "expected_planner_strategy"):
+        carrier = projected[name]
+        projected[name] = carrier.model_dump(mode="json")
+    for name in ("content_sha256", "assembly_sha256"):
+        value = projected["expected_planner_strategy"][name]
+        assert isinstance(value, str) and len(value) == 64
+        projected["expected_planner_strategy"][name] = "<source SHA-256>"
     registry = projected.pop("registry", None)
     config_manual = projected.pop("config_manual", None)
     # WF-1 owns the call surface, not one scientific task's rendered prose.

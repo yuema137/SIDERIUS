@@ -192,6 +192,7 @@ def _agent(bridge, sandbox) -> HyperparamTuningAgent:
 
 def _input(tmp_path, run_name: str, rounds: int, **overrides) -> HyperparamTuningInput:
     base = dict(
+        planner_strategy="native-timing-v1",
         model_type="quickstart_reference_mlp",
         max_rounds=rounds,
         attempts_per_round=1,

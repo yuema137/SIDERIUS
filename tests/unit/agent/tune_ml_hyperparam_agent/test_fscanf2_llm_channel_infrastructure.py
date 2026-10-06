@@ -74,6 +74,7 @@ def _drive_one_attempt(tmp_path, planning_error: BaseException) -> list[dict]:
     planning stage, and the records the sandbox is asked to save.
     """
     agent_input = HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,
         max_rounds=1,

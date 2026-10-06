@@ -72,7 +72,9 @@ _BASE_ARGV = [
 
 
 def _args(extra=()):
-    return roi.build_parser().parse_args([*_BASE_ARGV, *extra])
+    return roi.build_parser().parse_args(
+        [*_BASE_ARGV, "--llm_config", str(_REPO / "configs/llm/certify_minimal.json"), *extra]
+    )
 
 
 def _call_windows(src: str) -> list[str]:
@@ -264,12 +266,14 @@ class TestLaunchIdentityResolution:
         assert implicit.canonical() == explicit.canonical()
 
     def test_data_analysis_on_off_changes_resume_identity(self, tmp_path):
+        from workflows.llm_config import TunerLLMConfig, WorkflowLLMConfig
         from workflows.model_exploration import _workflow_lock_identity
         from workflows.run_config import WorkflowLaunchConfig
 
-        on = _workflow_lock_identity(WorkflowLaunchConfig(data_analysis_enabled=True))
-        off = _workflow_lock_identity(WorkflowLaunchConfig(data_analysis_enabled=False))
-        legacy = _workflow_lock_identity(WorkflowLaunchConfig())
+        config = WorkflowLLMConfig(tune=TunerLLMConfig(planner_strategy="native-timing-v1"))
+        on = _workflow_lock_identity(WorkflowLaunchConfig(data_analysis_enabled=True), config)
+        off = _workflow_lock_identity(WorkflowLaunchConfig(data_analysis_enabled=False), config)
+        legacy = _workflow_lock_identity(WorkflowLaunchConfig(), config)
         assert on.data_analysis_enabled is True
         assert off.data_analysis_enabled is False
         assert legacy.data_analysis_enabled is None

@@ -145,10 +145,11 @@ def run_bounded_pseudo_iteration(
     run_name = "step00_pseudo"
 
     agent_input = HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         **{
             **_fixture_input_kwargs(workspace, run_name),
             **(input_overrides or {}),
-        }
+        },
     )
 
     if bridge is None:

@@ -41,6 +41,7 @@ from openai import APIError, OpenAI
 from openai.types.chat import ChatCompletionMessageFunctionToolCall
 from pydantic import ValidationError
 
+from agent.planner_strategy import resolve_planner_strategy
 from agent.prompt_templates.tuner.rendering import (
     EFFICIENCY_BAND_PCT,
     LEGACY_PER_FILE_COMPARISON_BLOCK,
@@ -50,12 +51,11 @@ from agent.prompt_templates.tuner.rendering import (
     render_metric_identity_line,
 )
 from agent.prompts import (
-    PLANNER_PROMPT,
     REFLECTOR_PROMPT,
-    get_planner_user_prompt,
     get_reflector_user_prompt,
     render_collapse_advice,
 )
+from agent.schemas.planner_timing import PlannerTimingContext
 from agent.schemas.telemetry import (
     LLMBridgeContextError,
     TokenCounts,
@@ -63,6 +63,7 @@ from agent.schemas.telemetry import (
     TokenUsageRow,
 )
 from core.execution_deadline import deadline_sleep, remaining_seconds
+from core.planner_strategy_identity import PlannerStrategyIdentity
 from execute_tools.evaluation_metric import MetricSpec
 
 # Fallback markdown injected at the {SCORE_COMPARISON_TABLE} token when no
@@ -1043,6 +1044,9 @@ class LLMBridge:
         task_render: TunerTaskRender | None = None,
         # --- Step 07 PR 07b (P3) — the run's golden-metric declaration ---
         metric_spec: MetricSpec | None = None,
+        timing_context: PlannerTimingContext | None = None,
+        planner_strategy: str | None = None,
+        expected_planner_strategy: PlannerStrategyIdentity | None = None,
     ) -> dict:
         """
         Uses the Planner logic to observe Research Memory and decide next steps.
@@ -1161,7 +1165,13 @@ class LLMBridge:
         loss_context = task_render.loss_context
         if loss_context is not None:
             loss_context.validate_fixed_model(force_model)
-        planner_template = PLANNER_PROMPT
+        selected_strategy = resolve_planner_strategy(
+            planner_strategy, expected=expected_planner_strategy
+        )
+        print("    [PLANNER_STRATEGY] " + selected_strategy.identity.model_dump_json())
+        if selected_strategy.task_renderer is not None:
+            task_description = selected_strategy.task_renderer(task_description, timing_context)
+        planner_template = selected_strategy.render_system_template(task_render)
         for token, section in render_loss_sections(loss_context).items():
             planner_template = planner_template.replace("{" + token + "}", section)
         # Both planner prompts consume this one already-resolved inventory;
@@ -1223,30 +1233,33 @@ class LLMBridge:
             manual_context += f"\n\n[STRICT PHYSICAL CONSTRAINTS / CONFIG MANUAL]:\n{json.dumps(config_manual, indent=2)}"
 
         # Pass the new arguments to the prompt generator
-        user_prompt = get_planner_user_prompt(
-            memory_history=memory_history,
-            expert_advice=expert_advice,
-            force_model=force_model,
-            current_round=current_round,
-            max_rounds=max_rounds,
-            trial_allowed=trial_allowed,
-            force_formal_round=force_formal_round,
-            plan_overrides=plan_overrides,
-            max_epochs=max_epochs,
-            trial_max_epochs=trial_max_epochs,
-            formal_max_epochs=formal_max_epochs,
-            resolved_data_scope=resolved_data_scope,
-            trial_vram_budget_gb=trial_vram_budget_gb,
-            formal_vram_budget_gb=formal_vram_budget_gb,
-            trial_time_budget_minutes=trial_time_budget_minutes,
-            formal_time_budget_minutes=formal_time_budget_minutes,
-            last_vram_estimate_gb=last_vram_estimate_gb,
-            last_time_estimate_minutes=last_time_estimate_minutes,
-            last_batch_size=last_batch_size,
-            last_mode=last_mode,
-            custom_loss_inventory=custom_loss_inventory,
-            # Step 07 PR 07b (P2) — roster + output-contract shape.
-            task_render=task_render,
+        user_prompt = selected_strategy.render_user(
+            dict(
+                memory_history=memory_history,
+                timing_context=timing_context,
+                expert_advice=expert_advice,
+                force_model=force_model,
+                current_round=current_round,
+                max_rounds=max_rounds,
+                trial_allowed=trial_allowed,
+                force_formal_round=force_formal_round,
+                plan_overrides=plan_overrides,
+                max_epochs=max_epochs,
+                trial_max_epochs=trial_max_epochs,
+                formal_max_epochs=formal_max_epochs,
+                resolved_data_scope=resolved_data_scope,
+                trial_vram_budget_gb=trial_vram_budget_gb,
+                formal_vram_budget_gb=formal_vram_budget_gb,
+                trial_time_budget_minutes=trial_time_budget_minutes,
+                formal_time_budget_minutes=formal_time_budget_minutes,
+                last_vram_estimate_gb=last_vram_estimate_gb,
+                last_time_estimate_minutes=last_time_estimate_minutes,
+                last_batch_size=last_batch_size,
+                last_mode=last_mode,
+                custom_loss_inventory=custom_loss_inventory,
+                # Step 07 PR 07b (P2) — roster + output-contract shape.
+                task_render=task_render,
+            )
         )
 
         # Assemble final prompt: user prompt + plugin source + checklist + description + manual.

@@ -91,6 +91,28 @@ def proposal_output():
 
 
 class TestLocalValidatedModel:
+    def test_selected_planner_strategy_survives_workflow_protocol(
+        self, validator_output, proposal_output, storage
+    ):
+        """The workflow selection must not disappear at the validator-to-tuner edge."""
+        from core.planner_strategy_identity import PlannerStrategyIdentity
+        from workflows.llm_config import TunerLLMConfig, WorkflowLLMConfig
+
+        pin = PlannerStrategyIdentity(
+            name="fixture-policy-v2", version="2", content_sha256="b" * 64
+        )
+        config = WorkflowLLMConfig(tune=TunerLLMConfig(planner_strategy="fixture-policy-v2"))
+        kwargs = config.get("tune")
+        inp = local_validated_model(
+            validator_output,
+            proposal_output,
+            storage,
+            planner_strategy=kwargs["planner_strategy"],
+            expected_planner_strategy=pin,
+        )
+        assert inp.planner_strategy == "fixture-policy-v2"
+        assert inp.expected_planner_strategy == pin
+
     def test_training_checkpoint_retention_is_explicit_transport(
         self, validator_output, proposal_output, storage
     ):

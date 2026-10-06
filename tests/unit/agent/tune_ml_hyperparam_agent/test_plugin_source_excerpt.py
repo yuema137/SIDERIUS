@@ -278,6 +278,7 @@ class TestBrainPlanRendering:
         assert block, "pre-condition: block helper should emit non-empty text"
 
         bridge.plan(
+            planner_strategy="native-timing-v1",
             memory_history=[],
             plugin_source_excerpt=block,
             task_render=TASK_RENDER,
@@ -293,6 +294,7 @@ class TestBrainPlanRendering:
     def test_section_omitted_when_excerpt_empty(self):
         bridge, captured = self._make_bridge()
         bridge.plan(
+            planner_strategy="native-timing-v1",
             memory_history=[],
             plugin_source_excerpt="",
             task_render=TASK_RENDER,
@@ -309,6 +311,7 @@ class TestBrainPlanRendering:
         checklist = "### EXPLORATION CHECKLIST\n- sentinel_checklist_marker"
 
         bridge.plan(
+            planner_strategy="native-timing-v1",
             memory_history=[],
             plugin_source_excerpt=block,
             exploration_checklist=checklist,

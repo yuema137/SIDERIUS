@@ -48,6 +48,7 @@ from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator, mod
 
 from core.execution_calibration import calibration_provenance
 from core.generated_library import generated_library_provenance
+from core.planner_strategy_identity import PlannerStrategyIdentity
 
 RUN_INVARIANTS_BASENAME = "run_invariants_lock.json"
 
@@ -314,6 +315,7 @@ class RunInvariants(BaseModel):
     # cannot silently resume under the new measured-by-default behavior.
     trial_time_admission_source: Literal["forecast", "measured"] | None = None
     formal_time_admission_source: Literal["forecast", "measured"] | None = None
+    planner_strategy_identity: PlannerStrategyIdentity | None = None
     created_at: str | None = None
     # Step 11 C3 (R-11-6) — the per-role subprocess memory ceilings this
     # run executed under, plus their provenance. RECORDED, never compared.
@@ -412,6 +414,7 @@ class RunInvariants(BaseModel):
         "workflow_parameter_rules",
         "trial_time_admission_source",
         "formal_time_admission_source",
+        "planner_strategy_identity",
     )
 
     #: Fields RECORDED for audit and never compared (Step 11 C3, R-11-6).
@@ -705,6 +708,8 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
         payload.pop("trial_time_admission_source", None)
     if payload.get("formal_time_admission_source") is None:
         payload.pop("formal_time_admission_source", None)
+    if payload.get("planner_strategy_identity") is None:
+        payload.pop("planner_strategy_identity", None)
     fd, tmp_path = tempfile.mkstemp(dir=workspace, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
@@ -867,6 +872,7 @@ class LockLaunchIdentity(BaseModel):
     workflow_parameter_rules: dict[str, Any] | None = None
     trial_time_admission_source: Literal["forecast", "measured"] | None = None
     formal_time_admission_source: Literal["forecast", "measured"] | None = None
+    planner_strategy_identity: PlannerStrategyIdentity | None = None
 
 
 #: The unlabelled default — module-level so call sites can splat a shared
@@ -1056,6 +1062,7 @@ def build_run_invariants(
             workflow_parameter_rules=_launch_identity.workflow_parameter_rules,
             trial_time_admission_source=_launch_identity.trial_time_admission_source,
             formal_time_admission_source=_launch_identity.formal_time_admission_source,
+            planner_strategy_identity=_launch_identity.planner_strategy_identity,
             # Step 11 C3 (R-11-6) — stamped at the SAME shared builder, for
             # the same reason C9d is: every entry point then records the
             # ceilings its children actually ran under. Provenance, never

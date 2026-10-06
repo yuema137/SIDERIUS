@@ -219,6 +219,7 @@ def _make_input(tmp_path, max_rounds=1, expert_advice="", model_type="punet"):
     # fail-rounds). Tests that need different budgets should construct
     # ``HyperparamTuningInput`` directly.
     return HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type=model_type,
         file_index=6,
         max_rounds=max_rounds,
@@ -683,6 +684,7 @@ FAKE_PLAN_WITH_TRIAL = {
 
 def _make_trial_input(tmp_path, max_rounds=1, is_trial=True):
     return HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,
         max_rounds=max_rounds,
@@ -761,6 +763,48 @@ class TestDynamicTrialFormal:
         assert call_kwargs.kwargs.get("current_round") is not None
         assert call_kwargs.kwargs.get("max_rounds") is not None
         assert call_kwargs.kwargs.get("trial_allowed") is True
+
+    def test_timing_context_and_strategy_pin_reach_provider(self, agent_and_mocks, tmp_path):
+        """Dropping either production carrier must fail at the real planner boundary."""
+        from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
+
+        agent, mock_brain, _, _ = agent_and_mocks
+        recorder = BoundaryRecorderBridge()
+
+        def captured_plan(*args, **kwargs):
+            recorder.plan(*args, **kwargs)
+            return FAKE_PLAN_WITH_TRIAL
+
+        mock_brain.plan.side_effect = captured_plan
+        inp = _make_trial_input(tmp_path, max_rounds=1, is_trial=True)
+        inp.force_formal_round = False
+        inp.planner_strategy = "native-timing-v1"
+        inp.plan_overrides = {"eval_portion": 0.23}
+        inp.formal_eval_portion = 0.29
+        inp.formal_max_epochs = 7
+        agent.run(inp)
+        assert len(recorder.captures) == 1
+        sent = mock_brain.plan.call_args.kwargs
+        assert sent["expected_planner_strategy"].name == "native-timing-v1"
+        assert sent["timing_context"].plan_overrides == {"eval_portion": 0.23}
+        user = recorder.captures[0][3]
+        assert '"formal_eval_portion": 0.29' in user
+        assert '"epoch_cap": 7' in user
+        assert "TIMING CONTROL CONTEXT — incomplete" not in user
+
+    def test_parent_strategy_pin_is_enforced_before_child_planning(self, agent_and_mocks, tmp_path):
+        """A fresh child workspace must not bypass its parent workflow's policy pin."""
+        from core.planner_strategy_identity import PlannerStrategyIdentity
+
+        agent, mock_brain, _, _ = agent_and_mocks
+        inp = _make_trial_input(tmp_path)
+        inp.planner_strategy = "native-timing-v1"
+        inp.expected_planner_strategy = PlannerStrategyIdentity(
+            name="different-parent-policy", version="1", content_sha256="b" * 64
+        )
+        with pytest.raises(ValueError, match="changed after run preflight"):
+            agent.run(inp)
+        mock_brain.plan.assert_not_called()
 
     def test_invalid_trial_fields_fallback(self, agent_and_mocks, tmp_path):
         """LLM returns trial_portion=5.0 → ExperimentPlan.with_defaults falls back."""
@@ -1000,6 +1044,7 @@ def _make_input_with_budget(
     here AND override ``mock_brain.plan.return_value`` to include
     ``"is_trial": True``."""
     return HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,
         max_rounds=max_rounds,

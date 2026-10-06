@@ -135,6 +135,7 @@ def test_fail_round_abort_triggers_phase_l_termination(tmp_path, request, monkey
     run_name = "l_fail_round_abort"
 
     agent_input = HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type=_PLUGIN_MODEL_TYPE,
         # Phase L choreography for L.8: round 1 success + 3 fail-rounds
         # → abort. max_rounds=4 because Trigger B requires

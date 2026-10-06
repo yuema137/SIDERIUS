@@ -115,19 +115,17 @@ class TestTheClampArithmetic:
     def test_min_semantics(self, planned, ceiling, expected):
         assert min(planned, ceiling) == expected
 
-    def test_formal_portions_are_deliberately_out_of_scope(self):
-        """Formal-mode portions already come from operator input
-        (`agent_input.formal_*`), so clamping them would add a second policy
-        over a value the operator already controls."""
-        import importlib
-        import inspect
+    def test_resolution_preserves_operator_and_plan_values_before_clamping(self):
+        """The resolver selects ownership; the later ceiling owns clamping."""
+        from nodes.ml_hyperparameter_tune_agent.policy import _resolve_sample_set_cfg
+        from tests.helpers.experiment_plans import make_scope_plan
 
-        mod = importlib.import_module(
-            "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
+        request = HyperparamTuningInput.model_validate(
+            {**BASE, "formal_portion": 0.3, "validation_max_portion": 0.02}
         )
-        src = inspect.getsource(mod._resolve_sample_set_cfg)
-        assert "agent_input.formal_portion" in src
-        assert "plan.trial_portion" in src
+        plan = make_scope_plan(trial_portion=0.6)
+        assert _resolve_sample_set_cfg("formal", request, plan)["trial_portion"] == 0.3
+        assert _resolve_sample_set_cfg("trial", request, plan)["trial_portion"] == 0.6
 
 
 class TestEndToEndPlumbing:

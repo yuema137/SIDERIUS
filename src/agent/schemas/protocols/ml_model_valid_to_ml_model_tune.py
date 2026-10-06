@@ -34,6 +34,7 @@ from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorOutput
+from core.planner_strategy_identity import PlannerStrategyIdentity
 from core.runtime_control.admission import AdmissionEnforcement
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import DataScope
@@ -66,6 +67,8 @@ def local_validated_model(
     llm_provider: Literal["gemini", "openai", "deepseek"] = "gemini",
     llm_model_id: str = "gemini-3.1-flash-lite-preview",
     reasoning_effort: str | None = None,
+    planner_strategy: str | None = None,
+    expected_planner_strategy: PlannerStrategyIdentity | None = None,
     reflect_provider: Literal["gemini", "openai", "deepseek"] | None = None,
     reflect_model_id: str | None = None,
     reflect_reasoning_effort: str | None = None,
@@ -345,6 +348,8 @@ def local_validated_model(
         llm_provider=llm_provider,
         llm_model_id=llm_model_id,
         reasoning_effort=reasoning_effort,
+        planner_strategy=planner_strategy,
+        expected_planner_strategy=expected_planner_strategy,
         reflect_provider=reflect_provider,
         reflect_model_id=reflect_model_id,
         reflect_reasoning_effort=reflect_reasoning_effort,

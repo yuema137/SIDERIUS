@@ -90,6 +90,7 @@ def _mock_run_skill(skill_folder, sandbox, **params):
 
 def _make_input(tmp_path) -> HyperparamTuningInput:
     return HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,
         max_rounds=1,

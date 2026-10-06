@@ -174,6 +174,7 @@ def _make_input(
     ``max_fail_rounds=N`` explicitly.
     """
     return HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,
         max_rounds=max_rounds,

@@ -18,7 +18,6 @@ never re-derives one.
 """
 
 import math
-from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -33,6 +32,7 @@ from agent.schemas.hyperparam_tuning import (
     PlanOverridesError,
     TrialConfig,
 )
+from agent.schemas.planner_timing import WorkloadSource
 from agent.schemas.score_table import ScoreComparisonTable
 from execute_tools.dataset_config import (
     DatasetConfig,
@@ -768,54 +768,47 @@ def _canonical_strategy(name: str) -> str:
     return _LEGACY_STRATEGY_ALIASES.get(name, name)
 
 
-def _strategy_full_clone(plan: ExperimentPlan, winner: dict) -> list[str]:
-    """Inherit all five fields: model_cfg, loss_cfg, lr, epochs, batch_size.
+@dataclass(frozen=True)
+class _InheritanceStrategy:
+    """The same assignments describe inheritance and apply it to a real plan."""
 
-    Production default. Required for the trial→formal inference-time
-    measurement reuse landed in commits B-D of
-    ``docs/refine_inference_time_estimator.md`` — the timing measurement
-    must be for the same architecture the formal round runs.
-    """
-    p = winner["params"]
-    plan.model_cfg = dict(p.get("model_config") or {})
-    plan.loss_cfg = dict(p["loss_config"])
-    plan.train_cfg["lr"] = p["train_config"]["lr"]
-    inherited = ["model_cfg", "loss_cfg", "lr"]
-    inherited_epochs = p["train_config"].get("epochs")
-    if inherited_epochs is not None:
-        plan.train_cfg["epochs"] = inherited_epochs
-        inherited.append("epochs")
-    inherited_bs = p["train_config"].get("batch_size")
-    if inherited_bs is not None:
-        plan.train_cfg["batch_size"] = inherited_bs
-        inherited.append("batch_size")
-    return inherited
+    fields: tuple[str, ...]
+    optional_fields: tuple[str, ...] = ()
 
+    def assignments(self, winner: dict) -> dict[str, Any]:
+        if not self.fields:
+            return {}
+        params = winner["params"]
+        values: dict[str, Any] = {}
+        for field in self.fields:
+            if field == "model_cfg":
+                values[field] = dict(params.get("model_config") or {})
+            elif field == "loss_cfg":
+                values[field] = dict(params["loss_config"])
+            else:
+                value = params["train_config"].get(field)
+                if field in self.optional_fields and value is None:
+                    continue
+                values[field] = params["train_config"][field]
+        return values
 
-def _strategy_hybrid_params(plan: ExperimentPlan, winner: dict) -> list[str]:
-    """Inherit only loss_cfg + lr; planner keeps model_cfg, epochs, batch_size.
-
-    Audit/exploration use case — lock the evaluation surface (loss + lr)
-    but let the LLM scale capacity for the full-data pass. The time gate
-    may reject the planner's heavier choice on the formal round; that is
-    the intended trade-off, not a bug.
-    """
-    p = winner["params"]
-    plan.loss_cfg = dict(p["loss_config"])
-    plan.train_cfg["lr"] = p["train_config"]["lr"]
-    return ["loss_cfg", "lr"]
+    def __call__(self, plan: ExperimentPlan, winner: dict) -> list[str]:
+        values = self.assignments(winner)
+        for field, value in values.items():
+            if field in {"model_cfg", "loss_cfg"}:
+                setattr(plan, field, value)
+            else:
+                plan.train_cfg[field] = value
+        return list(values)
 
 
-def _strategy_independent(plan: ExperimentPlan, winner: dict) -> list[str]:
-    """No-op. Planner's full plan survives verbatim.
+_strategy_full_clone = _InheritanceStrategy(
+    ("model_cfg", "loss_cfg", "lr", "epochs", "batch_size"), ("epochs", "batch_size")
+)
+_strategy_hybrid_params = _InheritanceStrategy(("loss_cfg", "lr"))
+_strategy_independent = _InheritanceStrategy(())
 
-    ``winner`` is unused but kept in the signature so the registry can
-    dispatch without special-casing.
-    """
-    return []
-
-
-_FORMAL_STRATEGY_REGISTRY: dict[str, Callable[[ExperimentPlan, dict], list[str]]] = {
+_FORMAL_STRATEGY_REGISTRY: dict[str, _InheritanceStrategy] = {
     "full_clone": _strategy_full_clone,
     "hybrid_params": _strategy_hybrid_params,
     "independent": _strategy_independent,
@@ -856,6 +849,22 @@ def _formal_recovery_kind(memory_history: list | None, *, current_round: int | N
     if admission.get("reason_code") in {"budget_exceeded", "training_allocation_exceeded"}:
         return "runtime_verification"
     return None
+
+
+def _formal_inheritance_spec(
+    strategy: str, memory_history: list | None, current_round: int | None
+) -> tuple[_InheritanceStrategy | None, tuple[str, ...], str | None]:
+    """Resolve the registered handler and conditional retry exceptions once."""
+    canonical = _canonical_strategy(strategy)
+    handler = _FORMAL_STRATEGY_REGISTRY.get(canonical)
+    recovery = (
+        _formal_recovery_kind(memory_history, current_round=current_round)
+        if canonical == "full_clone"
+        else None
+    )
+    if recovery == "oom":
+        return _strategy_hybrid_params, (), recovery
+    return handler, (("batch_size", "epochs") if recovery is not None else ()), recovery
 
 
 def _apply_mode_override_chain(
@@ -977,22 +986,21 @@ def _apply_mode_override_chain(
             )
         return plan
 
-    recovery = (
-        _formal_recovery_kind(memory_history, current_round=current_round)
-        if canonical == "full_clone"
-        else None
+    effective_handler, preserve_authored, recovery = _formal_inheritance_spec(
+        canonical, memory_history, current_round
     )
+    assert effective_handler is not None  # validated registry lookup above
     if recovery == "oom":
-        inherited = _strategy_hybrid_params(plan, winner)
+        inherited = effective_handler(plan, winner)
         print("  [FORMAL RECOVERY] reason=oom — preserving planner model_cfg/batch_size/epochs")
     elif recovery is not None:
         # A resource retry keeps the winning scientific configuration while
         # allowing execution adjustments. Do not re-clone the rejected batch
         # and horizon; do not silently replace the winning architecture either.
         execution_changes = {
-            key: plan.train_cfg[key] for key in ("batch_size", "epochs") if key in plan.train_cfg
+            key: plan.train_cfg[key] for key in preserve_authored if key in plan.train_cfg
         }
-        inherited = _strategy_full_clone(plan, winner)
+        inherited = effective_handler(plan, winner)
         plan.train_cfg.update(execution_changes)
         inherited = [key for key in inherited if key not in execution_changes]
         print(
@@ -1000,7 +1008,7 @@ def _apply_mode_override_chain(
             f"execution adjustments={execution_changes}; model/loss/lr remain inherited"
         )
     else:
-        inherited = handler(plan, winner)
+        inherited = effective_handler(plan, winner)
     print(
         f"  [FORMAL OVERRIDE] strategy={canonical} "
         f"winner={winner['exp_id']!r} score={winner['denoising_score']:.4f} "
@@ -1239,33 +1247,60 @@ def _resolve_sample_set_cfg(
         A dict with exactly 5 keys — ``trial_strategy``, ``trial_portion``,
         ``train_portion``, ``eval_strategy``, ``eval_portion``.
     """
-    if mode == "formal":
-        agent_scope = agent_input.formal_training_scope_source == "agent"
-        return {
-            "trial_strategy": plan.trial_strategy if agent_scope else agent_input.formal_strategy,
-            "trial_portion": plan.trial_portion if agent_scope else agent_input.formal_portion,
-            "train_portion": plan.train_portion
-            if agent_scope
-            else agent_input.formal_train_portion,
-            "eval_strategy": "snapshot",
-            "eval_portion": agent_input.formal_eval_portion,
-        }
-    if mode == "trial":
-        return {
-            "trial_strategy": plan.trial_strategy,
-            "trial_portion": plan.trial_portion,
-            "train_portion": plan.train_portion,
-            "eval_strategy": plan.eval_strategy,
-            "eval_portion": plan.eval_portion,
-        }
-    # single_file
     return {
-        "trial_strategy": "snapshot",
-        "trial_portion": plan.trial_portion,
-        "train_portion": plan.train_portion,
-        "eval_strategy": "snapshot",
-        "eval_portion": 1.0,
+        binding.field: getattr(plan, binding.source)
+        if binding.owner == "resolved_plan"
+        else binding.value
+        for binding in _sample_set_sources(mode, agent_input)
     }
+
+
+def _sample_set_sources(
+    mode: str, agent_input: HyperparamTuningInput
+) -> tuple[WorkloadSource, ...]:
+    """Select each workload field's source once for execution and disclosure."""
+    sources = {
+        name: WorkloadSource(field=name, owner="resolved_plan", source=name)
+        for name in (
+            "trial_strategy",
+            "trial_portion",
+            "train_portion",
+            "eval_strategy",
+            "eval_portion",
+        )
+    }
+    if mode == "formal":
+        if agent_input.formal_training_scope_source != "agent":
+            for name, attr in (
+                ("trial_strategy", "formal_strategy"),
+                ("trial_portion", "formal_portion"),
+                ("train_portion", "formal_train_portion"),
+            ):
+                sources[name] = WorkloadSource(
+                    field=name, owner="run", source=attr, value=getattr(agent_input, attr)
+                )
+        sources["eval_strategy"] = WorkloadSource(
+            field="eval_strategy",
+            owner="execution_contract",
+            source="formal evaluation strategy",
+            value="snapshot",
+        )
+        sources["eval_portion"] = WorkloadSource(
+            field="eval_portion",
+            owner="run",
+            source="formal_eval_portion",
+            value=agent_input.formal_eval_portion,
+        )
+    elif mode != "trial":
+        for name, value in (
+            ("trial_strategy", "snapshot"),
+            ("eval_strategy", "snapshot"),
+            ("eval_portion", 1.0),
+        ):
+            sources[name] = WorkloadSource(
+                field=name, owner="execution_contract", source="single_file workload", value=value
+            )
+    return tuple(sources.values())
 
 
 def _apply_plan_overrides(plan: ExperimentPlan, overrides: dict[str, Any]) -> ExperimentPlan:

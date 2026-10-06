@@ -165,7 +165,7 @@ def test_locked_objective_reaches_all_loss_instruction_surfaces(loss):
         assert "Cycle through" not in prompt
         assert "Valid loss types" not in prompt
     assert "not exploration levers" in user
-    assert "loss_config is task-locked (not a control surface)" in user
+    assert "Do not select an alternative loss" in user
     assert "architecture, lr, and loss_type" not in user
     assert "cost an extra implementor" not in system
 

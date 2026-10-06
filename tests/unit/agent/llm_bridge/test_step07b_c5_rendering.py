@@ -289,7 +289,6 @@ class TestB07b2RenderingAxis:
         system, _user = _render_planner(metric_spec=spec)
         assert f"Your goal is to {expected_verb} the `denoising_score` metric" in system
         assert f"(golden metric `{spec.id}` ({expected_comparative} is better))" in system
-        assert f"Goal: {expected_verb} the score" in system
         assert f"does not\n  move toward {expected_comparative}" in system
 
     @pytest.mark.parametrize(

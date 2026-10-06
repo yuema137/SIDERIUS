@@ -61,6 +61,10 @@ from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
     acquire_attempt_scopes,
     project_attempt_topology_facts,
 )
+from nodes.ml_hyperparameter_tune_agent.timing_context import (
+    build_timing_context,
+    partial_scope_strategy_overrides,
+)
 
 
 def _apply_declared_objective(plan: Any, composition_ref: Any) -> Any:
@@ -162,19 +166,16 @@ def _normalize_strategies_for_scope(
     planned_trial_strategy = plan.trial_strategy
     planned_eval_strategy = plan.eval_strategy
     strategy_normalization_reason: str | None = None
-    if (
-        scope_is_partial
-        and plan.is_trial
-        and (plan.trial_strategy != "snapshot" or plan.eval_strategy != "snapshot")
-    ):
+    strategy_overrides = partial_scope_strategy_overrides(scope_is_partial, plan.is_trial)
+    if any(getattr(plan, field) != value for field, value in strategy_overrides.items()):
         print(
             f"  [DATASCOPE] normalized strategies: "
             f"trial {plan.trial_strategy} → snapshot, "
             f"eval {plan.eval_strategy} → snapshot "
             f"(partial scope {resolved_data_scope})"
         )
-        plan.trial_strategy = "snapshot"
-        plan.eval_strategy = "snapshot"
+        for field, value in strategy_overrides.items():
+            setattr(plan, field, value)
         strategy_normalization_reason = "partial_data_scope"
         resolution.record(plan, "partial_scope_strategy_normalization")
     return planned_trial_strategy, planned_eval_strategy, strategy_normalization_reason
@@ -419,6 +420,17 @@ def prepare_attempt(
     # B. THINK: Plan next experiment
     decision = brain.plan(
         memory_history,
+        planner_strategy=agent_input.planner_strategy,
+        expected_planner_strategy=bindings.planner_strategy_identity,
+        timing_context=build_timing_context(
+            agent_input,
+            trial_allowed=trial_allowed,
+            is_formal_round=is_formal_round,
+            current_round=iteration,
+            trial_winner=formal_trial_winner,
+            memory_history=memory_history,
+            scope_is_partial=scope_is_partial,
+        ),
         **allocation_kwargs,
         expert_advice=expert_advice_str,
         force_model=model_type_setting,
@@ -451,21 +463,6 @@ def prepare_attempt(
         task_description=(
             agent_input.task_description
             + training_validation_disclosure(agent_input.training_validation_portion)
-            + (
-                "\n\nRUN-SPECIFIC DATA/SCORE CONTRACT: Trial training strategy and fractions "
-                "(`trial_portion`, `train_portion`) and Trial validation "
-                "fraction (`eval_portion`) are your choices. Formal training "
-                "strategy and fractions also come from your validated plan's "
-                "`trial_strategy`, `trial_portion` "
-                "and `train_portion`; choose them for the Formal round. "
-                "Formal validation does not use your `eval_portion`: it is "
-                f"operator-fixed at {agent_input.formal_eval_portion:.6g} of "
-                "the declared validation scope. A valid full-scope Formal "
-                "score is the official comparable result; Trial scores are "
-                "development feedback, not the official result."
-                if agent_input.formal_training_scope_source == "agent"
-                else ""
-            )
         ),
         # L6b — loss-registry awareness. Drives both the
         # AVAILABLE CUSTOM LOSSES system-prompt block and

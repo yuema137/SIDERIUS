@@ -309,6 +309,7 @@ def test_plan_uses_tuner_planner_label(tmp_path, capsys):
     )
     # plan() needs a memory_history; an empty list exercises the prompt path.
     bridge.plan(
+        planner_strategy="native-timing-v1",
         memory_history=[],
         expert_advice="None",
         current_round=1,

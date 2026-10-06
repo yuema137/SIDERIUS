@@ -169,6 +169,7 @@ def _make_input(tmp_path) -> HyperparamTuningInput:
     """1 round, 1 attempt, 1 fail-budget — the moment our single
     inference-side failure lands a record, the outer loop aborts."""
     return HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,
         max_rounds=1,

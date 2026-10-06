@@ -309,16 +309,11 @@ class TestTrainConfigCompatibilityLrDefault:
         t_cfg = {"epochs": 1, "batch_size": 1, "device": "cpu"}  # no "lr" key
         assert TrainConfig(**t_cfg).lr == 5e-4
 
-    def test_collapse_recovery_prompt_names_the_same_compatibility_value(self):
-        """Defect only this catches: the planner prompt's known-working
-        value drifting from the schema default (two authorities again).
+    def test_native_recovery_does_not_prescribe_the_schema_default(self):
+        """A serialization default must not become a native search strategy.
 
-        The collapse-recovery block tells the LLM to "reset to the
-        known-working baseline: ... ``lr=5e-4``". That literal and the
-        schema default above are pinned to the same hardcoded value,
-        so whichever surface moves first fails one of these two tests
-        rather than silently disagreeing with the other. Fails when: the
-        rendered legacy prompt literal is edited, removed, or no longer wired.
+        Historical recovery wording is covered by the exp-owned provider's
+        offline parity checks; the framework tests its explicit native path.
         """
         from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
         from tests.helpers.tuner_prompt_fixtures import planner_kwargs
@@ -326,4 +321,5 @@ class TestTrainConfigCompatibilityLrDefault:
         bridge = BoundaryRecorderBridge()
         bridge.plan(**planner_kwargs())
         assert len(bridge.captures) == 1
-        assert "`lr=5e-4`" in bridge.captures[0][2]
+        assert "`lr=5e-4`" not in bridge.captures[0][2]
+        assert "A failure does not by itself prescribe an optimizer" in bridge.captures[0][2]

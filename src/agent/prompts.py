@@ -25,6 +25,8 @@ from agent.prompt_templates.tuner.rendering import (
     render_reflector_dynamics_block,
 )
 from agent.prompt_templates.tuner.runtime_evidence import render_training_epoch_evidence
+from agent.prompt_templates.tuner.timing_context import render_timing_context
+from agent.schemas.planner_timing import PlannerTimingContext
 
 # Step 07 PR 07b (P2) — collapse advice about a health check the run does not
 # actually run would tell the planner to look for a signal it can never
@@ -78,78 +80,36 @@ Your goal is to {METRIC_VERB} the `denoising_score` {SCORE_FIELD_NOUN} ({METRIC_
 {TASK_DESCRIPTION}
 
 {AVAILABLE_MODELS_BLOCK}
-### BASELINE REFERENCE RULE:
-In Round 1, you **must** use the Baseline Configuration found in the initial Research Memory
-(the record with "baseline" in its exp_id). {LOSS_BASELINE} This establishes a "Sparse
-Baseline" — a reference point that shows how the baseline config performs on sparse data.
-Do not change hyperparameters until this reference is set.
+### BASELINE EVIDENCE:
+A record labelled baseline is evidence from its recorded configuration and scope.
+Use any explicit experiment instructions governing baseline comparisons. A round
+number alone does not require repeating a baseline or freezing hyperparameters.
 
-### PROGRESSIVE RESEARCH STRATEGY:
-Plan your experiments across rounds, not just one at a time:
-- **Phase 1: Screening** (first 25% of rounds): Broad exploration with low trial_portion
-  (0.02-0.05) and low epochs (1-3). {LOSS_SCREENING}
-  Discard configs that fail to converge. Goal: find 2-3 promising directions.
-- **Phase 2: Refinement** (middle 50% of rounds): Pick the top performing configs from
-  Phase 1. Increase trial_portion to 0.1-0.3 and epochs to 5-10. Fine-tune lr,
-  {LOSS_REFINEMENT} Goal: {METRIC_VERB} the score with sufficient data.
-- **Phase 3: Solidification** (last 25% of rounds): Select the best candidate. Increase
-  trial_portion to 0.5+ or switch to formal mode for definitive validation.
-  The final round may be configured to require formal mode — see the
-  ROUND CONTEXT block below for the per-run policy.
-
-### RESEARCH MEMORY GUIDELINES:
-- You operate based on the **Research Memory**, a log of all past experiments and insights.
-- **Cross-Exploration Rule**: To avoid local minima, you must explore broadly:
-    - **Architecture** (when free to choose): do not stay on one model for more than 2 consecutive runs if improvement is < 5%. Switch to a different architecture.
-    - **Model config** (always applies): explore ALL tunable fields in model_config. Read the MODEL DESCRIPTION and CONFIG MANUAL carefully — every field listed there is a tuning lever. Model-specific parameters (e.g. gate vectors, layer counts, channel widths) are equally important as loss and learning rate.
-{LOSS_EXPLORATION}
-    - **Train config** (always applies): do not repeat the same `lr` and `batch_size` region for more than 2 consecutive runs. Try different learning rates (e.g. 1e-3, 3e-4, 1e-4) and batch sizes.
-    - **EXCEPTION — Data Volume Override**: The Cross-Exploration Rule is **suspended** if
-      `trial_portion` < 0.1 and the model shows signs of underfitting (high training loss,
-      poor denoising score). In this case, your primary action must be to **double the
-      trial_portion** while keeping the architecture and hyperparameters constant.
-- **Hypothesis-Driven**: Every experiment must test a specific hypothesis.
-
-### DEEP LEARNING BEST PRACTICES:
-- **LR-Batch Scaling**: When increasing batch_size, scale learning_rate proportionally
-  (linear scaling: lr_new = lr_old × bs_new / bs_old, or square-root scaling:
-  lr_new = lr_old × sqrt(bs_new / bs_old)).
-- **Underfitting vs Data**: If training loss is high, **increase trial_portion** before
-  changing the model. Low data often prevents the optimizer from finding stable gradients.
-- **Overfitting Control**: If training loss improves but denoising score drops, you MUST
-  increase dropout, weight_decay, or reduce model capacity. Do NOT add more parameters.
-- **Score Reliability**: Treat score improvements of < ±5% at trial_portion < 0.1 as
-  noise. Do not pivot strategy based on noise — repeat with more data if unsure.
+### RESEARCH MEMORY AND CONFIGURATION:
+Use the supplied observations to form a testable hypothesis. Read the task contract,
+configuration manual, declared constraints and TIMING CONTROL CONTEXT together.
+A field appearing in a schema does not establish that you control it in this run.
+Distinguish measured outcomes from suggestions in prior records. Uncertainty about
+score differences requires evidence; no fixed percentage defines statistical noise.
+Choose an experiment within the supplied constraints without assuming a required
+parameter-adjustment order, data-growth schedule or architecture-switch cadence.
 
 ### COLLAPSE RECOVERY GUIDELINES:
 - `denoising_score=-inf` or `denoising_score=None` with a non-None
   `failure_reason` means HealthGate detected model collapse or invalid output.
 - `gate_action="continue"` with a non-None `failure_reason` means the gate
   detected a problem but allowed later rounds to run; it is NOT a healthy round.
-{GATE_OUTPUT_DIVERSITY_ADVICE}{GATE_AMPLITUDE_COLLAPSE_ADVICE}{LOSS_COLLAPSE}- If `lr` is already low and collapse persists, switch from Adam to AdamW
-  with `weight_decay=1e-4`.
-- Do NOT increase model capacity or change architecture during collapse
-  recovery. Stabilize training first and change one major factor at a time.
-- Three or more consecutive records with non-None `failure_reason` indicate
-  a fundamental configuration problem, not random variance.
-{LOSS_RESET}
-- Do not continue exploring a loss/optimizer/learning-rate region that has
-  collapsed repeatedly.
+{GATE_OUTPUT_DIVERSITY_ADVICE}{GATE_AMPLITUDE_COLLAPSE_ADVICE}- Use recorded diagnostics to state a recovery hypothesis within the declared
+  constraints. A failure does not by itself prescribe an optimizer, numerical
+  setting, architecture change, or adjustment order. Preserve task-locked inputs.
 - A finite score such as `-3.14` is NOT collapse. It is valid,
   low-but-real performance below the anchor ceiling.
 - Treat collapse as present only when `failure_reason` is set; do not infer
   collapse from the sign of a finite score alone.
 
-### EFFICIENCY AWARENESS:
-- A simpler model (fewer parameters) or shorter training (fewer epochs) that achieves a score
-  within {EFFICIENCY_BAND_PCT}% of the current best is a **highly valuable result** — prefer it over marginal gains
-  from larger, slower experiments.
-- When memory shows `is_more_efficient=True` for a past experiment, note its config:
-  simpler configurations often generalise better and should be preferred as a starting point.
-- Do not blindly scale up architecture or epochs when scores plateau. Instead, try:
-    - Smaller model with better regularisation (dropout, weight_decay)
-    - Fewer epochs with a better learning rate schedule
-    - Different loss functions that may converge faster
+### RESOURCE EVIDENCE:
+Compare measured cost and scientific evidence under the declared resource constraints.
+Do not infer a preferred model size or training duration solely from budget headroom.
 
 ### TRAINING DYNAMICS (per experiment, from its training history):
 - `final_loss` / `loss_history` in memory records = the TRAINING objective.
@@ -166,7 +126,7 @@ Plan your experiments across rounds, not just one at a time:
   the trends, the gap and the data volume — decide it here rather than applying a fixed rule.
 
 ### TRIAL vs FORMAL MODE:
-You can choose how much data to use for each experiment:
+The run supplies which workload fields you may propose for each mode:
 - **Trial mode** (`is_trial=true`): Train and evaluate on a sparse sample of segments across
   multiple files. Fast iteration — use this for early exploration when you are still searching
   for good hyperparameters. Scores are anchor-normalized and comparable across runs.
@@ -189,37 +149,12 @@ Trial strategies (only relevant when `is_trial=true`):
 **Key tradeoff**: snapshot gives broad but shallow coverage per file. anchors and target
 give deep coverage on fewer files.{SAMPLING_IMPACT_TRADEOFF}
 
-`trial_portion` (0.01-1.0): fraction of segments per file for the **training scope**.
-This determines how much data the model trains on. More data = better model but slower.
-Start small (0.02-0.05) for fast hyperparameter exploration. If scores are consistently
-poor, **increase trial_portion** (0.1-0.5) before changing hyperparameters — low scores
-often mean insufficient training data, not bad hyperparameters.
-
-`eval_portion` (0.01-1.0): fraction of segments per file for **validation** (inference +
-scoring). Controls score fidelity. Can match trial_portion for fast checks, or be larger
-for more reliable scores. In formal mode your proposed `eval_portion` is
-replaced by the operator's formal evaluation fraction.
-
-`train_portion` (0.01-1.0): per-epoch subsample from the training scope. Default 0.1.
-Each epoch sees a different random 10% of the training scope. Over multiple epochs the
-model sees diverse data without loading everything at once.
-
-### DATA VOLUME AWARENESS — CRITICAL:
-- The baseline was trained on ALL segments (trial_portion=1.0). If your trial_portion is 0.05,
-  you are training on 20× less data. **Poor scores on sparse data do not mean the hyperparameters
-  are wrong** — they may mean the model needs more data.
-- **Before switching hyperparameters after poor results, consider increasing trial_portion.**
-  A 2× increase in trial_portion often helps more than changing loss_type or lr.
-- If 2+ consecutive rounds show no improvement despite hyperparameter changes, double your
-  trial_portion (e.g. 0.05 → 0.1 → 0.2).
-- When you find a config that works well on sparse data, increase eval_portion or switch to
-  formal mode to get a definitive score.
-
-When reviewing past experiments in Research Memory:
-- Compare `training_psd_segments` across records. The baseline typically trains on {FULL_SCOPE_SEGMENTS} segments.
-  If your experiments train on 200 segments, you have 20× less data — increase trial_portion.
-- Scores from larger portions are more reliable. A full-scope formal score is
-  the definitive comparable result when the run enables full formal evaluation.
+Training and evaluation portions describe workload requests. Their effective values,
+constraints and ownership are supplied by the run; do not invent default fractions.
+Use the recorded scope identities and sample counts when comparing experiments.
+Do not assume a baseline used the entire dataset or that more data guarantees a better
+score. Distinguish training scope, per-epoch sampling, epoch validation and final
+inference/scoring. Consult TIMING CONTROL CONTEXT for the active relationships.
 
 ### AVAILABLE CUSTOM LOSSES:
 
@@ -594,37 +529,23 @@ def format_plugin_source_excerpt_block(config_cls) -> str:
 # 2.5 RESOURCE-GATE BLOCKS (Phase K, K.6 — see §10.3 / §10.11)
 # ==========================================
 
-# Static guidance text appended to the planner user prompt. Tells the LLM how
-# to read the per-round [ACTIVE RESOURCE BUDGETS] block and which lever to
-# pick when factors are over budget. Verbatim from
-# docs/resource_estimator_implement.md §10.3.
-RESOURCE_GATE_GUIDANCE_BLOCK = """### [RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]
+# Interpret prior resource evidence without selecting a search strategy.
+RESOURCE_GATE_GUIDANCE_BLOCK = """### [RESOURCE GATE — EVIDENCE AND CONSTRAINTS]
 
-You will be shown vram_estimate_gb, time_estimate_minutes, the matching
-budgets, the resulting factors (>1 = over budget, <1 = under), and the
-current batch_size.
+The resource block reports the supplied budgets and the most recent attempt's
+available estimates, candidate mode and batch size. Compare only matching units
+and scopes. A ratio above one exceeds that reported budget; it does not identify
+which parameter caused the excess or predict the next candidate's cost.
 
-When deciding the next config:
+Use TIMING CONTROL CONTEXT, the task contract and configuration constraints to
+identify controls that can affect the requested workload. An override, inherited
+value or task constraint can make a proposed adjustment ineffective or invalid.
+No batch-size-first rule, architecture-size preference, task-specific segment
+length, or monotonic memory/time relationship is assumed here.
 
-  - If both factors are <= 1: continue per the exploration plan.
-  - Otherwise, first consider whether changing batch_size alone can bring
-    BOTH factors <= 1.
-      - Lowering batch_size reduces vram_factor and raises time_factor.
-      - Raising batch_size does the opposite.
-      - batch_size cannot go below 1; whether you have room to lower or
-        raise depends on the current batch_size shown above.
-  - If batch_size adjustment alone cannot satisfy both budgets
-    simultaneously, reduce model depth/width (num_blocks,
-    hidden_channels, embedding_dim, etc.). Both axes shrink together.
-
-Constraint: do NOT change segmentation_size to fit either budget. It is
-pinned by frequency-resolution physics (must divide PSD_SEGMENT_LENGTH;
-the valid divisor list is in your expert advice). Lowering seg_size to
-escape the time gate inflates step count and typically makes the overrun
-worse, not better.
-
-The gates run again before training, so a misjudgement just costs one
-skipped attempt (no round consumed). Prefer the cheaper lever first.
+Distinguish measurements from forecasts, and missing evidence from a measured
+failure. State the evidence behind a feasible configuration hypothesis. Admission,
+validation and retry behavior remain governed by the configured execution policy.
 """
 
 
@@ -813,19 +734,17 @@ def _format_fixed_params_block(
     if "is_trial" in overrides:
         lines.append(
             f"  is_trial         = {overrides['is_trial']}   "
-            f"← trial mode (final round auto-flips to formal)"
+            f"← requested plan override; role resolution still applies"
         )
     if "trial_portion" in overrides:
         lines.append(f"  trial_portion    = {overrides['trial_portion']}")
     if "train_portion" in overrides:
         lines.append(
             f"  train_portion    = {overrides['train_portion']}    "
-            f"← full per-epoch pass (no per-epoch subsampling)"
+            f"← requested per-epoch sampling fraction"
         )
     if "eval_portion" in overrides:
-        lines.append(
-            f"  eval_portion     = {overrides['eval_portion']}    ← formal mode auto-uses 1.0"
-        )
+        lines.append(f"  eval_portion     = {overrides['eval_portion']}")
     # Render any other override keys generically. NOT the same concept as
     # the schema's TRIAL_SCOPED_OVERRIDE_KEYS (review NOTE-g): that set is
     # "which keys the resolver DISCARDS on a formal round"; this set is
@@ -853,40 +772,19 @@ def _format_fixed_params_block(
             f"← the ONLY files this run may access"
         )
         lines.append(
-            "  trial_strategy   = snapshot   ← forced under a partial data_scope "
-            "(anchors/target are normalized to snapshot)"
+            "  trial_strategy   = snapshot   ← partial-scope Trial normalization only "
+            "(anchors/target are normalized to snapshot for Trial; see role context)"
         )
-        lines.append("  eval_strategy    = snapshot   ← forced under a partial data_scope")
+        lines.append("  eval_strategy    = snapshot   ← partial-scope Trial normalization only")
 
     fixed_lines = "\n".join(lines)
-    strategy_surface = (
-        "  - train_validation_align (trial_strategy/eval_strategy are FIXED to snapshot\n"
-        "    over the data_scope files; target_files is unavailable this run)"
-        if has_partial_scope
-        else "  - trial_strategy + target_files; eval_strategy; train_validation_align"
-    )
-    loss_control = "  - loss_config (loss_type)"
-    focus = "architecture, lr, and loss_type"
-    if loss_context is not None and loss_context.objective is not None:
-        loss_control = "  - loss_config is task-locked (not a control surface)"
-        focus = "architecture and lr, retaining the task-locked objective"
     return f"""
-### SYSTEM-FIXED PARAMETERS (operator-set; do NOT vary):
-The operator has frozen these plan fields. Any other value you pick will be silently
-overridden — reflect these values verbatim in your JSON output and do not waste reasoning
-on them.
+### SYSTEM-FIXED PARAMETERS (supplied overrides and bounds):
+These are supplied plan overrides and bounds, not a complete control surface.
+An epoch ceiling is a maximum, not an exact epoch assignment. Consult the timing
+context for later resolution, role applicability and additional constraints.
 
 {fixed_lines}
-
-Your control surface this run:
-  - model_type + model_config (architecture, segmentation_size, channel widths, …)
-{loss_control}
-  - train_config (lr, batch_size; epochs is capped)
-{strategy_surface}
-
-NOTE: Standard guidance below mentions varying trial_portion/epochs (phase-progression,
-"increase trial_portion if scores are poor"). Those instructions do not apply this run
-since those knobs are frozen — focus your reasoning on {focus}.
 """
 
 
@@ -1047,6 +945,7 @@ def get_planner_user_prompt(
     custom_loss_inventory=None,
     # --- Step 07 PR 07b (P2) — the run's authority-rendered task tokens ---
     task_render=None,
+    timing_context: PlannerTimingContext | None = None,
 ):
     """
     Constructs the prompt for the Planner.
@@ -1197,18 +1096,13 @@ def get_planner_user_prompt(
             f"\n### CRITICAL CONSTRAINT:\n"
             f"- You MUST use the '{force_model}' architecture. The model type is fixed and cannot be changed.\n"
             f"{loss_note}"
-            f"- Because the architecture is fixed, the Cross-Exploration Rule applies to "
-            f"**model_config, loss config, and train config**. You must explore ALL tunable "
-            f"parameters in model_config (see the CONFIG MANUAL and MODEL DESCRIPTION for the "
-            f"full list — every field is a tuning lever), as well as `loss_type`, `lr`, and "
-            f"`batch_size`. Do not repeat the same configuration for more than 2 consecutive "
-            f"runs without meaningful improvement. Model-specific parameters (e.g. gate vectors, "
-            f"layer counts, channel widths) are equally important as loss and learning rate."
+            "- Use the declared constraints and recorded evidence to identify adjustable "
+            "model, loss and training inputs. No adjustment order is implied.\n"
         )
     else:
         model_constraint = (
-            "\n- You are free to choose any architecture based on the Cross-Exploration Rule. "
-            "Even when switching architectures, continue to vary loss_type and train_config to explore the full search space.\n"
+            "\n- No fixed architecture was supplied here. Task, workflow and plugin "
+            "constraints still apply; absence of a fixed name does not establish unrestricted choice.\n"
             "- **Loss compatibility**: 'smooth_l1' is ONLY for regressor models (fcnet). "
             "All other models are classifiers — use 'ce', 'focal', or 'focal_cw'."
             f"{custom_loss_note}"
@@ -1219,15 +1113,13 @@ def get_planner_user_prompt(
     oom_warning = ""
     if oom_records:
         last_oom = oom_records[-1]
-        fix_hint = last_oom.get("memory", {}).get(
-            "memory_update", "Reduce batch_size or segmentation_size."
-        )
+        fix_hint = last_oom.get("memory", {}).get("memory_update", "No remediation was recorded.")
         oom_warning = (
-            f"\n### ⚠️  OOM WARNING — MANDATORY ACTION REQUIRED:\n"
-            f"Your last proposed config was REJECTED due to insufficient GPU memory "
+            f"\n### RECORDED MEMORY REFUSAL:\n"
+            f"A proposal in the supplied history was REJECTED due to insufficient GPU memory "
             f"(status='skipped_oom_risk'). It was NEVER trained.\n"
-            f"Required fix: {fix_hint}\n"
-            f"You MUST propose a smaller config this round.\n"
+            f"Recorded suggestion (subject to current constraints): {fix_hint}\n"
+            "Use its measured diagnostics and the current constraints to form a feasible hypothesis.\n"
         )
 
     # An INCONCLUSIVE pre-flight measured nothing, so it must not act as a
@@ -1328,9 +1220,8 @@ def get_planner_user_prompt(
             + attribution_note
             + epoch_evidence
             + "The time budget is a HARD UPPER LIMIT, not a target. If the last "
-            "run exceeded it, reduce model complexity. If it was well under, "
-            "do NOT scale up just because there is headroom — smaller "
-            "experiments are equally valid as long as they test the hypothesis.\n"
+            "run exceeded it, use the measured evidence and disclosed controls to "
+            "form a feasible next hypothesis. Spare budget does not mandate scaling up.\n"
         )
 
     # Round context with phase information (when provided)
@@ -1340,28 +1231,10 @@ def get_planner_user_prompt(
         rounds_left = max_rounds - current_round
         rounds_completed = current_round - 1
 
-        # Determine current phase and compute rounds remaining in this phase
-        progress = current_round / max_rounds
-        if progress <= 0.25:
-            phase = "Screening"
-            phase_end = int(max_rounds * 0.25)
-            rounds_in_phase_left = phase_end - current_round + 1
-            phase_advice = "Focus on broad exploration with low trial_portion and low epochs."
-        elif progress <= 0.75:
-            phase = "Refinement"
-            phase_end = int(max_rounds * 0.75)
-            rounds_in_phase_left = phase_end - current_round + 1
-            phase_advice = "Pick top configs from Screening. Increase trial_portion and epochs."
-        else:
-            phase = "Solidification"
-            rounds_in_phase_left = rounds_left + 1  # includes current round
-            phase_advice = "Select best candidate. Use high trial_portion or formal mode."
-
         round_context = (
             f"\n### ROUND CONTEXT:\n"
             f"- Current round: {current_round} / {max_rounds} "
             f"({rounds_completed} completed, {rounds_left} remaining after this one)\n"
-            f"- Current phase: **{phase}** ({rounds_in_phase_left} rounds left in this phase) — {phase_advice}\n"
         )
         if is_final and force_formal_round:
             round_context += "- **THIS IS THE FINAL ROUND** — formal mode is MANDATORY. You MUST set `is_trial`: false.\n"
@@ -1408,6 +1281,7 @@ def get_planner_user_prompt(
     )
 
     return f"""
+{render_timing_context(timing_context)}
 {fixed_params_block}
 ### Human Expert Advice:
 {expert_advice}
@@ -1420,7 +1294,7 @@ def get_planner_user_prompt(
    - Records with status='skipped_oom_risk' were NEVER trained — they exceeded GPU memory.
    - Always follow the `memory.memory_update` field of any skipped record before proposing the next config.
    - Check the `timing` field of past experiments and compare against the time budget
-     in Expert Advice. Reduce segmentation_size or model complexity if needed.
+     in the supplied run configuration; reason within the disclosed controls.
 2. **Follow Expert Advice**: Prioritize the direction suggested by the human expert.
 3. **Formulate Hypothesis**: Predict the outcome of this new trial.{model_constraint}
 4. **Choose Trial or Formal Mode**: Decide whether to run a fast trial or a full formal evaluation.
@@ -1433,10 +1307,10 @@ def get_planner_user_prompt(
     "hypothesis": "Specific prediction for this run",
     "is_trial": "true | false (choose based on confidence in config)",
     "trial_strategy": "snapshot | anchors | target",
-    "trial_portion": "0.02-1.0 (increase if scores are poor — more data helps)",
-    "train_portion": "0.1 (rarely change)",
+    "trial_portion": "value consistent with the declared schema and effective constraints",
+    "train_portion": "value consistent with the declared schema and effective constraints",
     "eval_strategy": "snapshot | anchors | target",
-    "eval_portion": "0.02-1.0 (match trial_portion or larger for reliable scores)",
+    "eval_portion": "value consistent with the declared schema and effective constraints",
     "train_validation_align": "true | false",
     "model_config": {{ ... }},
     "train_config": {{ "lr": ..., "epochs": ..., "batch_size": ..., "device": "cuda" }},

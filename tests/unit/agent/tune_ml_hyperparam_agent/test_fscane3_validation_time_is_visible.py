@@ -181,16 +181,14 @@ class TestTheRecordCarriesTheSplit:
 # The two LLM-facing renderers
 # ---------------------------------------------------------------------------
 
-#: Captured in a PRISTINE `3995400b` worktree before any part of this fix
-#: existed. Hardcoded so the byte-parity claim is not read back from the
-#: renderer under test.
-_PRISTINE_PLANNER_TIMING_BLOCK = (
+#: Native #372 wording preserves measurements without prescribing architecture.
+#: Historical strategy text is checked by the exp-owned compatibility package.
+_NATIVE_PLANNER_TIMING_BLOCK = (
     "### ⏱  LAST EXPERIMENT TIMING:\n"
     "train=20.0 min, inference=5.0 min, total=25.0 min (segmentation_size=4096).\n"
     "The time budget is a HARD UPPER LIMIT, not a target. If the last "
-    "run exceeded it, reduce model complexity. If it was well under, "
-    "do NOT scale up just because there is headroom — smaller "
-    "experiments are equally valid as long as they test the hypothesis."
+    "run exceeded it, use the measured evidence and disclosed controls to form a "
+    "feasible next hypothesis. Spare budget does not mandate scaling up."
 )
 
 _PRISTINE_TIMING_DISCOVERY = (
@@ -236,11 +234,10 @@ class TestThePlannerPromptStatesTheTerm:
         assert "validation 3.0 min of that" in block
         assert "training+overhead 17.0 min" in block
         assert TIMING_ATTRIBUTION_NOTE.strip() in block
-        # The instruction the row objects to is still present — the fix is to
-        # let the model apply it to the right number, not to remove it.
-        assert "reduce model complexity" in block
+        assert "measured evidence and disclosed controls" in block
+        assert "reduce model complexity" not in block
 
-    def test_a_record_without_the_split_renders_the_pristine_bytes(self):
+    def test_a_record_without_the_split_preserves_measurements_and_native_guidance(self):
         block = _timing_block(
             get_planner_user_prompt(
                 [
@@ -256,7 +253,7 @@ class TestThePlannerPromptStatesTheTerm:
                 max_rounds=3,
             )
         )
-        assert block == _PRISTINE_PLANNER_TIMING_BLOCK
+        assert block == _NATIVE_PLANNER_TIMING_BLOCK
 
     def test_an_incoherent_split_is_refused_rather_than_rendered_negative(self):
         """A part cannot exceed its whole. Production cannot produce this

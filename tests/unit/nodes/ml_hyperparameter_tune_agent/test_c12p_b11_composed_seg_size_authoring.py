@@ -248,6 +248,7 @@ def _bindings(agent_input, configs_dir, data_path=None) -> RunBindings:
 
 def _composed_input() -> HyperparamTuningInput:
     return HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type="wavenet",
         task_composition_ref=TaskCompositionRef(
             semantic_fingerprint="c12p-b11-fingerprint",

@@ -1,7 +1,7 @@
 {
   "_captured_at": {
-    "commit": "worktree-pr422",
-    "note": "DECLARED DELTA: the generic choreography oracle now binds a neutral synthetic profile and metric. TaskRender content is projected to its typed field set because rendered scientific prose belongs to focused renderer tests; the call-surface oracle no longer embeds TIDMAD metric, scoreability, Health, geometry, or model-roster authority."
+    "commit": "issue372-final-review on 0f7738bb",
+    "note": "DECLARED DELTA: explicit native strategy, verified provider identity and full typed timing context now reach plan(). Existing call values are unchanged. Content and assembly hashes are projected to source SHA-256 markers; dedicated strategy tests verify identity enforcement. Captured offline through the bounded pseudo iteration."
   },
   "memory_history": {
     "type": "list",
@@ -74,6 +74,109 @@
     "config_manual_keys": [
       "quick_notes",
       "schemas"
-    ]
+    ],
+    "planner_strategy": "native-timing-v1",
+    "expected_planner_strategy": {
+      "assembly_sha256": "<source SHA-256>",
+      "content_sha256": "<source SHA-256>",
+      "name": "native-timing-v1",
+      "version": "1"
+    },
+    "timing_context": {
+      "forced_formal": false,
+      "formal_eval_portion": 1.0,
+      "formal_training_scope_source": "operator",
+      "inheritance_recovery": null,
+      "inheritance_strategy": "full_clone",
+      "inheritance_unless_authored": [],
+      "inheritance_values": {},
+      "inheritance_winner": null,
+      "partial_scope_strategy_overrides": {},
+      "plan_overrides": {},
+      "roles": [
+        {
+          "epoch_cap": null,
+          "epoch_cap_source": null,
+          "mode": "trial",
+          "workload": [
+            {
+              "field": "trial_strategy",
+              "owner": "resolved_plan",
+              "source": "trial_strategy",
+              "value": null
+            },
+            {
+              "field": "trial_portion",
+              "owner": "resolved_plan",
+              "source": "trial_portion",
+              "value": null
+            },
+            {
+              "field": "train_portion",
+              "owner": "resolved_plan",
+              "source": "train_portion",
+              "value": null
+            },
+            {
+              "field": "eval_strategy",
+              "owner": "resolved_plan",
+              "source": "eval_strategy",
+              "value": null
+            },
+            {
+              "field": "eval_portion",
+              "owner": "resolved_plan",
+              "source": "eval_portion",
+              "value": null
+            }
+          ]
+        },
+        {
+          "epoch_cap": null,
+          "epoch_cap_source": null,
+          "mode": "formal",
+          "workload": [
+            {
+              "field": "trial_strategy",
+              "owner": "run",
+              "source": "formal_strategy",
+              "value": "snapshot"
+            },
+            {
+              "field": "trial_portion",
+              "owner": "run",
+              "source": "formal_portion",
+              "value": 0.1
+            },
+            {
+              "field": "train_portion",
+              "owner": "run",
+              "source": "formal_train_portion",
+              "value": 1.0
+            },
+            {
+              "field": "eval_strategy",
+              "owner": "execution_contract",
+              "source": "formal evaluation strategy",
+              "value": "snapshot"
+            },
+            {
+              "field": "eval_portion",
+              "owner": "run",
+              "source": "formal_eval_portion",
+              "value": 1.0
+            }
+          ]
+        }
+      ],
+      "task_rules": null,
+      "training_budget_reserve_fraction": null,
+      "training_validation_portion": null,
+      "trial_allowed": true,
+      "validation_max_portion": null,
+      "validation_max_samples": null,
+      "validation_max_train_samples": null,
+      "workflow_rules": null
+    }
   }
 }

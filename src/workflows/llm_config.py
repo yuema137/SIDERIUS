@@ -100,6 +100,11 @@ class TunerLLMConfig(BaseModel):
     either or both via the JSON config or the Python constructor.
     """
 
+    planner_strategy: str | None = Field(
+        default=None,
+        description="Installed versioned planner strategy; omitted uses the installation default.",
+    )
+
     planner: NodeLLMConfig = Field(
         default_factory=lambda: NodeLLMConfig(
             provider="gemini",
@@ -368,6 +373,8 @@ class WorkflowLLMConfig(BaseModel):
                 "reflect_provider": config.reflector.provider,
                 "reflect_model_id": config.reflector.model_id,
             }
+            if config.planner_strategy is not None:
+                result["planner_strategy"] = config.planner_strategy
             # The tuner creates one LLMBridge — use the planner's retry config.
             if config.planner.max_retries is not None:
                 result["max_retries"] = config.planner.max_retries

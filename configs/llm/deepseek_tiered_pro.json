@@ -26,6 +26,7 @@
     "model_id": "deepseek-v4-pro"
   },
   "tune": {
+    "planner_strategy": "native-timing-v1",
     "planner": {
       "provider": "deepseek",
       "model_id": "deepseek-v4-pro"

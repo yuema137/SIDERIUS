@@ -106,6 +106,7 @@ def run_failure(tmp_path):
             stub_scoring(sandbox, [1.75] * 4, 1.75)
             composition = compose_run_task_bindings(str(QUICKSTART_MANIFEST))
             agent_input = HyperparamTuningInput(
+                planner_strategy="native-timing-v1",
                 model_type="quickstart_reference_mlp",
                 run_name="error_ordering",
                 max_rounds=2 if trial else 1,

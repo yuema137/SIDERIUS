@@ -1956,3 +1956,13 @@ persists a reconstruction-bound transform. It defaults to `none`.
 The optional [training batch policy](../../../docs/reference/training-batches.md)
 keeps selected tail rows when `train_config.drop_last=false`; guardrails and
 training use matching step arithmetic. Completed-epoch row counts are recorded.
+
+### Planner strategy and timing disclosure (#372, under review)
+
+`HyperparamTuningInput.planner_strategy` selects a declared planner provider.
+The startup identity is pinned in the run invariant lock and forwarded to the
+planner call. The timing context reads the same role-source and inheritance
+owners as execution; it supplies facts without selecting a search schedule.
+See [the planner strategy contract](../../../docs/reference/planner-strategies.md)
+for provider selection, installation defaults, missing-context behavior and
+historical-workspace migration limits.

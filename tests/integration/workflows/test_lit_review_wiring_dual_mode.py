@@ -182,6 +182,7 @@ def _make_llm_config() -> WorkflowLLMConfig:
         implement=NodeLLMConfig(provider="openai", model_id="test"),
         validate_model=NodeLLMConfig(provider="openai", model_id="test"),
         tune=TunerLLMConfig(
+            planner_strategy="native-timing-v1",
             planner=NodeLLMConfig(provider="openai", model_id="test"),
             reflector=NodeLLMConfig(provider="openai", model_id="test"),
         ),

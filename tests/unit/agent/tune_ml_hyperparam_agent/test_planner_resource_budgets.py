@@ -40,25 +40,23 @@ class TestPlannerSystemPromptCleanup:
 
 
 # ---------------------------------------------------------------------------
-# RESOURCE_GATE_GUIDANCE_BLOCK — static text, verbatim from §10.3
+# RESOURCE_GATE_GUIDANCE_BLOCK — native evidence and constraint contract
 # ---------------------------------------------------------------------------
 
 
 class TestStaticGuidanceBlock:
     def test_header_present(self):
-        assert "[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]" in RESOURCE_GATE_GUIDANCE_BLOCK
+        assert "[RESOURCE GATE — EVIDENCE AND CONSTRAINTS]" in RESOURCE_GATE_GUIDANCE_BLOCK
 
-    def test_lever_decision_tree_phrases_present(self):
-        """Spot-check the load-bearing phrases. Don't assert the whole
-        body byte-for-byte (formatting drift would create noisy diffs);
-        instead assert the decision-tree language survives."""
+    def test_guidance_defers_control_ownership_and_does_not_prescribe_a_search_order(self):
+        """Resource estimates must not become an unconfigured search policy."""
         text = RESOURCE_GATE_GUIDANCE_BLOCK
-        assert "If both factors are <= 1: continue" in text
-        assert "Lowering batch_size reduces vram_factor" in text
-        assert "Raising batch_size does the opposite" in text
-        assert "reduce model depth/width" in text
-        assert "do NOT change segmentation_size" in text
-        assert "frequency-resolution physics" in text
+        assert "Use TIMING CONTROL CONTEXT" in text
+        assert "An override, inherited" in text
+        assert "does not identify" in text
+        assert "If both factors are <= 1: continue" not in text
+        assert "Lowering batch_size reduces vram_factor" not in text
+        assert "frequency-resolution physics" not in text
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +228,7 @@ class TestPlannerPromptIntegration:
         rendered alongside the dynamic block)."""
         prompt = get_planner_user_prompt(memory_history=[])
         assert "[ACTIVE RESOURCE BUDGETS" not in prompt
-        assert "[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]" not in prompt
+        assert "[RESOURCE GATE — EVIDENCE AND CONSTRAINTS]" not in prompt
 
     def test_both_blocks_rendered_when_budgets_set(self):
         prompt = get_planner_user_prompt(
@@ -249,8 +247,8 @@ class TestPlannerPromptIntegration:
         assert "estimate 5.20 GB" in prompt
         assert "Current batch_size: 4" in prompt
         # Static guidance follows
-        assert "[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]" in prompt
-        assert "Lowering batch_size reduces vram_factor" in prompt
+        assert "[RESOURCE GATE — EVIDENCE AND CONSTRAINTS]" in prompt
+        assert "Use TIMING CONTROL CONTEXT" in prompt
         # Order: dynamic block precedes static guidance
         assert prompt.index("[ACTIVE RESOURCE BUDGETS") < prompt.index("[RESOURCE GATE")
 

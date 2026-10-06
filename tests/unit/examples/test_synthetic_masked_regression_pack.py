@@ -647,7 +647,12 @@ def test_composed_manifest_traverses_the_production_workflow(tmp_path: Path) -> 
         tune.return_value.run.side_effect = tune_run
 
         with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
+            from workflows.llm_config import TunerLLMConfig, WorkflowLLMConfig
+
             results = run_workflow(
+                llm_config=WorkflowLLMConfig(
+                    tune=TunerLLMConfig(planner_strategy="native-timing-v1")
+                ),
                 launch=WorkflowLaunchConfig(
                     data_dir=str(tmp_path / "data"),
                     model_types=[model_type],

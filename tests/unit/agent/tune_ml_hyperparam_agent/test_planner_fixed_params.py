@@ -65,13 +65,10 @@ def test_workflow_default_overrides_render_all_lines():
     assert "train_portion    = 1.0" in block
     assert "eval_portion     = 0.1" in block
     assert "epochs (cap)     ≤ 1" in block
-    # Annotations present
-    assert "final round auto-flips to formal" in block
-    assert "formal mode auto-uses 1.0" in block
-    # Control surface guidance present
-    assert "Your control surface this run" in block
-    # NOTE about contradicting prose present
-    assert "phase-progression" in block
+    # Supplied overrides cannot establish downstream Formal values or freedom.
+    assert "not a complete control surface" in block
+    assert "maximum, not an exact epoch assignment" in block
+    assert "formal mode auto-uses 1.0" not in block
 
 
 # ---- get_planner_user_prompt integration ----

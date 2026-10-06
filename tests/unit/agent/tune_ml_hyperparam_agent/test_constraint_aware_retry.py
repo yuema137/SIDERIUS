@@ -284,6 +284,7 @@ def _make_input(
     # tests run a deterministic, small number of attempts regardless of the
     # default budget knobs (which the design may tune over time).
     return HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,
         max_rounds=max_rounds,

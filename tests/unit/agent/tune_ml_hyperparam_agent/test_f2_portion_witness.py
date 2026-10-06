@@ -79,6 +79,7 @@ def _run_real_route(tmp_path, plan_overrides):
         stub_scoring(mock_sandbox, [1.0] * 20, 1.5)
 
         inp = HyperparamTuningInput(
+            planner_strategy="native-timing-v1",
             model_type="punet",
             file_index=6,
             max_rounds=2,

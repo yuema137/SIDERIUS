@@ -35,6 +35,7 @@ from typing import Any
 
 from agent.schemas.ordering import ResolvedOrdering
 from core.capability_registry import CapabilityContractSnapshot
+from core.planner_strategy_identity import PlannerStrategyIdentity
 from execute_tools.evaluation_execution import CandidateEvaluationResult
 from execute_tools.evaluation_metric import MetricResult, NotScoreableResult
 
@@ -234,6 +235,9 @@ class RunBindings:
 
     run_forward_contract: Any = None
     """The run-bound ``ForwardContract`` used to certify trained-model artifacts."""
+
+    planner_strategy_identity: PlannerStrategyIdentity | None = None
+    """The resolved provider identity pinned before the first planner call."""
 
     def __post_init__(self) -> None:
         offending = sorted(FORBIDDEN_BINDING_FIELDS & {f.name for f in fields(self)})

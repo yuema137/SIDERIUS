@@ -71,7 +71,7 @@ from tests.helpers.metric_fixtures import shipped_spec
 #: in this file is unchanged; the direction is now stated instead of assumed.
 _STEP09A_ORDER = MetricOrder(shipped_spec())
 from workflows.data_analysis_stage import WorkflowAnalysisOutput
-from workflows.llm_config import NodeLLMConfig, WorkflowLLMConfig
+from workflows.llm_config import NodeLLMConfig, TunerLLMConfig, WorkflowLLMConfig
 from workflows.model_exploration import (
     _register_plugin,
     load_tuning_outputs,
@@ -417,6 +417,10 @@ def workflow_env(tmp_path, monkeypatch):
 
     def composed_run_workflow(*args, **kwargs):
         kwargs.setdefault("task_composition", composition)
+        kwargs.setdefault(
+            "llm_config",
+            WorkflowLLMConfig(tune=TunerLLMConfig(planner_strategy="native-timing-v1")),
+        )
         with bind_run_task_composition(composition, physical_data_root=data_root):
             return original_run_workflow(*args, **kwargs)
 
@@ -774,7 +778,8 @@ class TestRunWorkflowSingleIteration:
                 run_name="test_run",
                 task_composition=composition,
                 llm_config=WorkflowLLMConfig(
-                    interpret=NodeLLMConfig(provider="openai", model_id="test")
+                    interpret=NodeLLMConfig(provider="openai", model_id="test"),
+                    tune=TunerLLMConfig(planner_strategy="native-timing-v1"),
                 ),
             )
 

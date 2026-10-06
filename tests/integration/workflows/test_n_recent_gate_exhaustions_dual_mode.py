@@ -233,6 +233,7 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
             implement=NodeLLMConfig(provider="openai", model_id="test"),
             validate_model=NodeLLMConfig(provider="openai", model_id="test"),
             tune=TunerLLMConfig(
+                planner_strategy="native-timing-v1",
                 planner=NodeLLMConfig(provider="openai", model_id="test"),
                 reflector=NodeLLMConfig(provider="openai", model_id="test"),
             ),
@@ -503,6 +504,7 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
             implement=NodeLLMConfig(provider="openai", model_id="test"),
             validate_model=NodeLLMConfig(provider="openai", model_id="test"),
             tune=TunerLLMConfig(
+                planner_strategy="native-timing-v1",
                 planner=NodeLLMConfig(provider="openai", model_id="test"),
                 reflector=NodeLLMConfig(provider="openai", model_id="test"),
             ),

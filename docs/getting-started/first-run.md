@@ -110,7 +110,10 @@ Notes on the flags that are not obvious:
   launch without both exits `2`.
 - `--data_dir` is **required** for a composed run.
 - `--llm_config` is caller-owned per-node routing; an external task should
-  provide its reviewed routing JSON explicitly.
+  provide its reviewed routing JSON explicitly. Set `tune.planner_strategy` to
+  `native-timing-v1` for configuration-driven planning, or install the experiment
+  compatibility package declaring its historical default. Missing or ambiguous
+  defaults stop startup; see [planner strategies](../reference/planner-strategies.md).
 - A task may add a supported partial `--data_scope`; when it does, the
   task-owned `--health_gate_files` must be present and in scope.
 - The trial budget bounds the training phase; setup, provider calls and

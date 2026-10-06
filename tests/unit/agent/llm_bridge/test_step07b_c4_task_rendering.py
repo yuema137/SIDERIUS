@@ -88,7 +88,9 @@ class TestRenderedAuthorities:
         bridge = BoundaryRecorderBridge()
         bridge.plan(**{**planner_kwargs(), "task_render": _task_render()})
         _method, _label, system, _user = bridge.captures[0]
-        assert "trains on 150 segments" in system
+        # Native guidance must not turn full-scope geometry into a baseline
+        # training prescription. The loss offer still reads the task contract.
+        assert "trains on 150 segments" not in system
         assert "Compatible builtin loss types: **smooth_l1**" in system
         assert "alpha=0.5" not in system
 
@@ -113,9 +115,8 @@ class TestRenderedAuthorities:
 
     def test_templates_keep_authority_owned_values_as_tokens(self):
         for token in (
-            "{FULL_SCOPE_SEGMENTS}",
-            "{LOSS_COLLAPSE}",
-            "{LOSS_RESET}",
+            "{TASK_DESCRIPTION}",
+            "{LOSS_INVENTORY_RULE}",
         ):
             assert token in PLANNER_PROMPT
 

@@ -40,6 +40,8 @@ from workflows import run_one_iteration as runner
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _QUICKSTART_ARGS = [
+    "--llm_config",
+    str(_REPO_ROOT / "configs/llm/certify_minimal.json"),
     "--task_composition",
     str(_REPO_ROOT / "configs/task_composition/quickstart.yaml"),
     "--data_dir",
@@ -537,6 +539,8 @@ def _run_main(argv):
     # wiring layer, not the launch-policy refusal. The refusal itself is
     # tested directly in test_formal_launch_policy.py, which builds its
     # argv explicitly and does NOT go through this helper.
+    if "--llm_config" not in argv:
+        argv = [*argv, "--llm_config", str(_REPO_ROOT / "configs/llm/certify_minimal.json")]
     if "--healthgate_mode" not in argv:
         argv = [*argv, "--healthgate_mode", "blocking"]
     if "--result_authority" not in argv:

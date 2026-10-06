@@ -292,7 +292,10 @@ def test_complete_funnel_row_from_one_pseudo_iteration(tmp_path, request, monkey
             patch("workflows.model_exploration._promote_loss_to_global", return_value=None)
         )
 
+        from workflows.llm_config import TunerLLMConfig, WorkflowLLMConfig
+
         run_workflow(
+            llm_config=WorkflowLLMConfig(tune=TunerLLMConfig(planner_strategy="native-timing-v1")),
             launch=WorkflowLaunchConfig(
                 data_dir=str(tmp_path / "data"),
                 model_types=["punet"],
@@ -326,7 +329,7 @@ def test_complete_funnel_row_from_one_pseudo_iteration(tmp_path, request, monkey
     # Mutation M-6 (parent §15) is exactly that deletion, and this is its
     # RED target. It is asserted on whichever proposer SYSTEM surface this
     # Gate renders — the LEGACY reasoning prompt, because the Gate passes
-    # no `llm_config` (so `propose=None` selects the legacy path). The
+    # a tune-only `llm_config` (`propose=None` selects the legacy path). The
     # three-stage pipeline JOIN is proven separately by the S1-C unit
     # captures, the six regenerated PB-3 goldens, and Checkpoint C.
     from workflows.task_config import get_task_description, load_task_config

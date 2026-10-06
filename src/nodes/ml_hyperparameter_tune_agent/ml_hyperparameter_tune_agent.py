@@ -580,7 +580,12 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
     destination are a carrier, not inline kwargs in a 1,100-line method.
     Locked + stamped, never consumed by the tuner (ruling R2).
     """
+    from agent.planner_strategy import resolve_planner_strategy
+
     return LockLaunchIdentity(
+        planner_strategy_identity=resolve_planner_strategy(
+            agent_input.planner_strategy, expected=agent_input.expected_planner_strategy
+        ).identity,
         experiment_arm=agent_input.experiment_arm,
         lit_review_enabled=agent_input.lit_review_enabled,
         data_analysis_enabled=agent_input.data_analysis_enabled,
@@ -1337,6 +1342,7 @@ class HyperparamTuningAgent:
         # refuses those structurally, because an object passed this widely is
         # precisely where mutable state would accumulate unnoticed.
         run_bindings = RunBindings(
+            planner_strategy_identity=run_invariants.planner_strategy_identity,
             agent_input=agent_input,
             sandbox=sandbox,
             brain=brain,

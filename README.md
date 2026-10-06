@@ -169,7 +169,7 @@ to a real composed run:
 | --- | --- |
 | `--task_composition` | Selects the task contract; it is required for composed runs |
 | `--data_dir` and optional `--data_scope` | Select external data and a bounded subset. Scope support is task-dependent; effective HealthGate files, including any `--health_gate_files` override, must remain inside that subset. |
-| `--llm_config` | Chooses provider/model routing for each enabled LLM capability |
+| `--llm_config` | Chooses provider/model routing and the planner strategy; see [strategy selection](docs/reference/planner-strategies.md) |
 | `--healthgate_mode` | `blocking` enforces validity verdicts; `observe_only` records them without enforcing them |
 | `--result_authority` | `diagnostic` or `scientific`; `observe_only` cannot be combined with `scientific` |
 | `--num_iterations` | Number of research iterations in the caller's schedule |

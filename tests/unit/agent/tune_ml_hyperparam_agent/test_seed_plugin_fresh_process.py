@@ -77,6 +77,7 @@ def bridge(**kwargs):
 composition = compose_run_task_bindings(str(checkout / "configs/task_composition/quickstart.yaml"))
 with bind_run_task_composition(composition, physical_data_root=str(workspace / "data")):
     request = HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type=name, file_index=2, seed_plugin_path=str(workspace / "seed.py"),
         storage={"backend": "local", "local": {"workspace": str(workspace / "records"), "run_name": "probe"}},
         data_dir=str(workspace / "data"), health_gate_enabled=False,

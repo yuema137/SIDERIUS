@@ -49,6 +49,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Model ID for the planner sub-call (default for reflector when not overridden).",
     )
     parser.add_argument(
+        "--planner_strategy",
+        default=None,
+        help="Versioned installed planner provider, or native-timing-v1; omitted uses the declared installation default.",
+    )
+    parser.add_argument(
         "--reflect_provider",
         type=str,
         choices=["gemini", "openai"],
@@ -657,6 +662,7 @@ def build_agent_input(
         "expert_advice": args.expert_advice,
         "llm_provider": args.provider,
         "llm_model_id": args.model_id,
+        "planner_strategy": args.planner_strategy,
         "reflect_provider": args.reflect_provider,
         "reflect_model_id": args.reflect_model_id,
         "storage": {

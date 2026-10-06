@@ -1945,7 +1945,7 @@ def _refuse_data_scope_for_a_foreign_topology(scope_is_partial: bool, task_compo
         ) from exc
 
 
-def _workflow_lock_identity(launch) -> LockLaunchIdentity:
+def _workflow_lock_identity(launch, llm_config: WorkflowLLMConfig) -> LockLaunchIdentity:
     """The workflow's arXiv-U1/U3 lock identity, from the launch config.
 
     Pure construction, extracted from ``run_workflow`` under the 12a
@@ -1956,8 +1956,12 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
     the run reads.
     """
     from agent.data_analysis.source_scope import source_prompt_identity
+    from agent.planner_strategy import resolve_planner_strategy
 
     return LockLaunchIdentity(
+        planner_strategy_identity=resolve_planner_strategy(
+            llm_config.get("tune").get("planner_strategy")
+        ).identity,
         lit_review_enabled=launch.lit_review_enabled,
         data_analysis_enabled=launch.data_analysis_enabled,
         lit_review_config_sha256=lit_review_config_sha256(
@@ -2426,7 +2430,7 @@ def run_workflow(
         # built by the ONE module-level helper (the SE.2 extraction under the
         # 12a budget); the config sha is derived from the same resolved path
         # the lit-review branch below opens.
-        launch_identity=_workflow_lock_identity(launch),
+        launch_identity=_workflow_lock_identity(launch, llm_config),
     )
     for _output in tuning_outputs:
         validate_stamped_invariants(
@@ -3395,6 +3399,8 @@ def run_workflow(
             llm_provider=tune_llm.get("provider", "gemini"),
             llm_model_id=tune_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
             reasoning_effort=tune_llm.get("reasoning_effort"),
+            planner_strategy=tune_llm.get("planner_strategy"),
+            expected_planner_strategy=_run_invariants.planner_strategy_identity,
             reflect_provider=tune_llm.get("reflect_provider"),
             reflect_model_id=tune_llm.get("reflect_model_id"),
             reflect_reasoning_effort=tune_llm.get("reflect_reasoning_effort"),

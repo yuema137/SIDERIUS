@@ -26,6 +26,7 @@
     "model_id": "gpt-5.4-mini"
   },
   "tune": {
+    "planner_strategy": "native-timing-v1",
     "planner": {
       "provider": "openai",
       "model_id": "gpt-5.4"

@@ -162,6 +162,7 @@ def test_ten_collapsed_rounds_are_recorded_and_do_not_terminate(tmp_path, monkey
         sandbox_factory=lambda **_kwargs: sandbox,
     )
     agent_input = HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type="quickstart_reference_mlp",
         max_rounds=N_ROUNDS,
         attempts_per_round=1,

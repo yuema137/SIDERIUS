@@ -2590,6 +2590,7 @@ def compute_expected_invariants(
     *,
     run_composition: RunTaskComposition | None = None,
     launch_identity: LaunchIdentity | None = None,
+    llm_config: WorkflowLLMConfig | None = None,
 ) -> RunInvariants:
     """DS6c — compute this run's invariants via the ONE shared path.
 
@@ -2625,6 +2626,16 @@ def compute_expected_invariants(
     the same function, so a caller that predates the parameter still locks
     the values the workflow will lock.
     """
+    from agent.planner_strategy import resolve_planner_strategy
+
+    if llm_config is None:
+        config_path = getattr(args, "llm_config", None)
+        llm_config = (
+            WorkflowLLMConfig.from_json(config_path) if config_path else WorkflowLLMConfig()
+        )
+    planner_identity = resolve_planner_strategy(
+        llm_config.get("tune").get("planner_strategy")
+    ).identity
     identity = launch_identity if launch_identity is not None else resolve_launch_identity(args)
     run_scope = args.data_scope if args.data_scope is not None else DataScope.default()
     # Step 12 / PR-12a **F-12-1** — resolve against the RUN's topology.
@@ -2678,6 +2689,7 @@ def compute_expected_invariants(
         ),
         # arXiv U1 — the identity the workflow's pre-flight will lock too.
         launch_identity=LockLaunchIdentity(
+            planner_strategy_identity=planner_identity,
             lit_review_enabled=identity.lit_review_enabled,
             data_analysis_enabled=identity.data_analysis_enabled,
             retain_model_outputs=identity.retain_model_outputs,
@@ -3228,6 +3240,22 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
     print(f"  Start iteration  : {args.start_iteration}")
     print(f"  Run name         : {run_name}")
     print(f"  Iter directory   : {iter_dir}")
+    if args.llm_config:
+        llm_config = WorkflowLLMConfig.from_json(args.llm_config)
+    else:
+        if args.llm_model != "gemini-3.1-pro-preview":
+            warnings.warn(
+                "--llm_model is deprecated; use --llm_config instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        llm_config = WorkflowLLMConfig.uniform(
+            "gemini",
+            args.llm_model,
+            reflect_provider=reflect_provider,
+            reflect_model_id=reflect_model_id,
+        )
+
     # Report what will actually run. `--llm_config` supersedes
     # `--llm_model` (deprecated) below, so printing the latter announced
     # `gemini / gemini-3.1-pro-preview` on a run whose every role was
@@ -3378,7 +3406,10 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
 
     try:
         expected_invariants = compute_expected_invariants(
-            args, run_composition=run_composition, launch_identity=launch_identity
+            args,
+            run_composition=run_composition,
+            launch_identity=launch_identity,
+            llm_config=llm_config,
         )
     except ValueError as e:
         print(f"FAIL: run-invariants computation refused to start: {e}")
@@ -3459,22 +3490,6 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
             json.dump(snapshot, f, indent=2)
         print(f"[CHAIN] Wrote {snapshot['count']} accumulated findings → {snapshot_path}")
     resolved_paths = state.resolved_source_paths
-
-    if args.llm_config:
-        llm_config = WorkflowLLMConfig.from_json(args.llm_config)
-    else:
-        if args.llm_model != "gemini-3.1-pro-preview":
-            warnings.warn(
-                "--llm_model is deprecated; use --llm_config instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        llm_config = WorkflowLLMConfig.uniform(
-            "gemini",
-            args.llm_model,
-            reflect_provider=reflect_provider,
-            reflect_model_id=reflect_model_id,
-        )
 
     # The lit-review enable flag (Design Decisions 1 + 2, 2026-06-11) is
     # resolved ONCE, above, inside `launch_identity` — arXiv U1 moved the

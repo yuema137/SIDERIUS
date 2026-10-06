@@ -171,7 +171,12 @@ def test_plan_method_routes_to_synthesiser():
     # other caller. The stub's DISPATCH is what this test is about; the
     # tuner always supplies the object in production, including under
     # `--is_pseudo_llm`, which is why the guard costs the stub path nothing.
-    raw = bridge.plan(memory_history=[], task_render=TASK_RENDER, metric_spec=accuracy_like_spec())
+    raw = bridge.plan(
+        memory_history=[],
+        task_render=TASK_RENDER,
+        metric_spec=accuracy_like_spec(),
+        planner_strategy="native-timing-v1",
+    )
     plan = ExperimentPlan.model_validate(raw)
     assert plan.model_type == _synth_stub_model_name(0, "a")
 

@@ -119,6 +119,7 @@ def formal_round(tmp_path):
 
         composition = compose_run_task_bindings(str(QUICKSTART_MANIFEST))
         agent_input = HyperparamTuningInput(
+            planner_strategy="native-timing-v1",
             model_type="quickstart_reference_mlp",
             run_name="formal_ordering_test",
             max_rounds=1,

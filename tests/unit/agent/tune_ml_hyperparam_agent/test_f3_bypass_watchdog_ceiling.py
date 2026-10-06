@@ -112,6 +112,7 @@ def _run(tmp_path, *, formal_check, bypass_minutes, bypass_delta=0.0, trial_chec
         mock_skill.side_effect = dispatch
 
         inp = HyperparamTuningInput(
+            planner_strategy="native-timing-v1",
             model_type="punet",
             file_index=6,
             max_rounds=2,

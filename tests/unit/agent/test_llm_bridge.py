@@ -956,6 +956,7 @@ class TestPlanScoreTableSubstitution:
         create_mock = MagicMock(return_value=_chat_response(VALID_JSON_STR))
         bridge = self._bridge_with_mocked_create(create_mock)
         bridge.plan(
+            planner_strategy="native-timing-v1",
             memory_history=[],
             expert_advice="none",
             score_table_md=_RENDERED_SENTINEL,
@@ -972,6 +973,7 @@ class TestPlanScoreTableSubstitution:
         create_mock = MagicMock(return_value=_chat_response(VALID_JSON_STR))
         bridge = self._bridge_with_mocked_create(create_mock)
         bridge.plan(
+            planner_strategy="native-timing-v1",
             memory_history=[],
             expert_advice="none",
             task_render=TASK_RENDER,
@@ -987,6 +989,7 @@ class TestPlanScoreTableSubstitution:
         create_mock = MagicMock(return_value=_chat_response(VALID_JSON_STR))
         bridge = self._bridge_with_mocked_create(create_mock)
         bridge.plan(
+            planner_strategy="native-timing-v1",
             memory_history=[],
             expert_advice="none",
             score_table_md="",

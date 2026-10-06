@@ -66,6 +66,8 @@ class TestChainCli:
             [
                 "--workspace",
                 "/tmp/ws",
+                "--llm_config",
+                str(_REPO / "configs/llm/certify_minimal.json"),
                 "--start_iteration",
                 "1",
                 "--run_name",

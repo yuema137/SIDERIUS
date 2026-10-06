@@ -41,6 +41,7 @@ def _input(
     tmp_path, *, max_rounds: int = 1, is_trial: bool = True, **kwargs
 ) -> HyperparamTuningInput:
     return HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type="punet",
         file_index=6,
         max_rounds=max_rounds,

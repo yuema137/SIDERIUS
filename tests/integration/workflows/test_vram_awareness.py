@@ -91,7 +91,7 @@ def _llm_config() -> WorkflowLLMConfig:
         propose=ProposalLLMConfig(),
         implement=node,
         validate_model=node,
-        tune=TunerLLMConfig(planner=node, reflector=node),
+        tune=TunerLLMConfig(planner_strategy="native-timing-v1", planner=node, reflector=node),
     )
 
 

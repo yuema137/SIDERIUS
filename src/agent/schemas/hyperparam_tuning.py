@@ -33,6 +33,7 @@ from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
 from core.checkpoint_selection import SelectedCheckpoint
+from core.planner_strategy_identity import PlannerStrategyIdentity
 
 # One vocabulary for the admission posture, shared with the policy that
 # enforces it. Two independent spellings would let a value be acceptable
@@ -1598,6 +1599,15 @@ class HyperparamTuningInput(BaseModel):
     """
 
     # --- Research ---
+    expected_planner_strategy: PlannerStrategyIdentity | None = Field(
+        default=None,
+        description="Parent workflow's resolved planner identity; standalone callers may omit it.",
+    )
+    planner_strategy: str | None = Field(
+        default=None,
+        description="Explicit installed planner strategy; omitted uses the installed default declaration.",
+    )
+
     model_type: str = Field(
         description="Architecture to tune. One of the registered model keys, or 'auto' to let the agent decide.",
     )

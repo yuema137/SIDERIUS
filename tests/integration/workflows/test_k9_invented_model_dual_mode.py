@@ -146,6 +146,7 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
     run_name = "k9_invented"
 
     agent_input = HyperparamTuningInput(
+        planner_strategy="native-timing-v1",
         model_type=_PLUGIN_MODEL_TYPE,
         # ``max_rounds`` must be >= 2 so the agent does NOT promote round 1
         # to formal mode. The agent forces ``plan.is_trial = False`` on the

@@ -768,6 +768,7 @@ def _run_one_formal_round(tmp_path, *, seeded_trial: dict, gates_enabled: bool) 
 
         HyperparamTuningAgent().run(
             HyperparamTuningInput(
+                planner_strategy="native-timing-v1",
                 model_type="punet",
                 run_name="dc3_launch",
                 max_rounds=2,
