@@ -191,6 +191,17 @@ compatibility loading; that behavior is retained for compatibility, not a
 reliable per-launch binding. Offline installation, focused tests, and
 `--dry-run` onboarding do not need an API key.
 
+For authenticated Semantic Scholar lookup, export `S2_API_KEY` in the process
+that calls the paper resolver; an LLM key is not required for that standalone
+operation. Source checkouts also support a compatibility fallback: when the
+variable is absent, the resolver loads that checkout's `.env` before requesting
+Semantic Scholar. This adds all missing variables from the file, not just the
+key, and never overrides existing values. An explicitly empty `S2_API_KEY`
+prevents fallback; `PYTHON_DOTENV_DISABLED=1` disables dotenv loading. Installed
+packages without a source checkout use environment variables only. See the
+[resolver contract](../../src/agent/skills/paper_resolver_skill/paper_resolver_skill.md#credentials-and-checkout-compatibility)
+for lookup, error and cache behavior.
+
 ## Verify
 
 ```bash

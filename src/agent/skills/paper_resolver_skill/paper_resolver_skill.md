@@ -51,10 +51,45 @@ user of that key must be included in the worker count; otherwise 429 retries
 remain the fallback, not a global rate guarantee. Invalid or partial slot
 configuration returns an error envelope before an HTTP request.
 
+## Credentials and checkout compatibility
+
+`_s2_get` initializes credentials before the first throttle/request attempt,
+shared by resolve and search. If `S2_API_KEY` exists in the process environment,
+the resolver does not load a dotenv file. A nonempty value becomes `x-api-key`;
+an explicitly empty value keeps the request anonymous and prevents fallback.
+
+When the variable is absent and `core.layout.checkout_root()` identifies a source
+checkout, the resolver calls `load_dotenv` on that checkout's `.env` with
+`override=False`. This imports **all missing variables** from the file, including
+shared-key scheduling settings, without replacing existing values. It preserves
+python-dotenv's interpolation and `PYTHON_DOTENV_DISABLED` behavior. It does not
+search the caller's working directory or ancestor directories. Ordinary package
+installations without a checkout use the supplied environment only.
+
+Missing files or missing keys retain anonymous requests. File-read or decoding
+errors raised by python-dotenv become a configuration error through the existing
+envelope before HTTP, without including credential values or file contents.
+File discovery retains python-dotenv's behavior: some metadata-access failures
+are treated as an absent file, so this fallback is not a strict file validator.
+Local-only resolution, invalid inputs and cache hits do not enter this initialization path.
+There is no import-time load or separate initialization cache; the existing
+request cache remains unchanged, including cached error results.
+
+Standalone use does not require an LLMBridge or an LLM provider key. Normal
+bridge-first callers with a populated S2 key keep the same request behavior.
+For deployments, prefer explicit external credential injection as described in
+[installation](../../../../docs/getting-started/installation.md#api-keys).
+Set `PYTHON_DOTENV_DISABLED=1` to disable compatibility loading, or supply the key
+in the process environment. An authenticated header does not prove key validity,
+quota availability or freedom from rate limiting.
+
 ## Callers and evidence
 
 The literature-review node consumes resolve/search context. Offline tests in
 `tests/unit/agent/skills/test_paper_resolver_skill.py` and
 `test_arxiv_source.py` cover validation, routing, local safety, mocked network,
-and extraction fallback. Live retrieval is isolated in
+extraction fallback, standalone credential precedence, and initialization before
+shared-key pacing. A fresh-interpreter test uses synthetic dotenv data and mocked
+HTTP to verify that no bridge or LLM credentials are needed; it does not claim
+live-service authentication. Live retrieval is isolated in
 `tests/integration/skills/test_paper_resolver_skill.py`.

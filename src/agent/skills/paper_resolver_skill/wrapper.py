@@ -36,6 +36,7 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
+from dotenv import load_dotenv
 
 from agent.skills.paper_resolver_skill.arxiv_source import parse_arxiv_source
 from core.layout import checkout_root
@@ -168,6 +169,18 @@ def _s2_get(
     any terminal failure returns ``(None, str)``; callers map that onto the
     universal envelope.
     """
+    # Standalone callers need the same checkout compatibility as bridge-first
+    # callers. Load before pacing: the file may also declare shared-key slots.
+    # An explicitly empty key remains authoritative; never search unrelated CWDs.
+    if "S2_API_KEY" not in os.environ and _PROJECT_ROOT is not None:
+        try:
+            load_dotenv(dotenv_path=_PROJECT_ROOT / ".env", override=False)
+        except (OSError, UnicodeError):
+            return None, (
+                "S2 configuration error: could not read checkout .env; "
+                "export S2_API_KEY or check the file's permissions and UTF-8 encoding"
+            )
+
     last_err: str | None = None
     for attempt in range(S2_MAX_RETRIES + 1):
         try:

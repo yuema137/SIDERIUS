@@ -9,6 +9,10 @@ docs/commit_plan_ml_literature_review.md).
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,7 +26,7 @@ from agent.skills.paper_resolver_skill import wrapper
 
 
 @pytest.fixture(autouse=True)
-def _reset_skill_state(monkeypatch):
+def _reset_skill_state(tmp_path):
     """Reset per-process skill state before each test.
 
     Clears the S2 cache, resets the throttle clock, and neutralises
@@ -31,8 +35,20 @@ def _reset_skill_state(monkeypatch):
     """
     wrapper._S2_CACHE.clear()
     wrapper._LAST_S2_REQUEST_TS = 0.0
-    monkeypatch.setattr(wrapper.time, "sleep", lambda *_a, **_k: None)
-    yield
+    # Restore dotenv's direct environment writes as well as test overrides.
+    # The autouse scope encloses each test's monkeypatch fixture teardown.
+    environment = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("S2_", "PYTHON_DOTENV_", "RESOLVER_TEST_"))
+    }
+    with (
+        patch.dict(os.environ, environment, clear=True),
+        patch.object(wrapper, "_PROJECT_ROOT", tmp_path),
+        patch.object(wrapper.time, "sleep", lambda *_a, **_k: None),
+        patch("dotenv.main.find_dotenv", side_effect=AssertionError("implicit dotenv lookup")),
+    ):
+        yield
     wrapper._S2_CACHE.clear()
 
 
@@ -715,6 +731,159 @@ class TestAuthHeader:
         monkeypatch.setenv("S2_API_KEY", "secret123")
         headers = wrapper._s2_headers()
         assert headers["x-api-key"] == "secret123"
+
+
+class TestStandaloneCredentials:
+    @pytest.mark.parametrize("mode", ["resolve", "search"])
+    def test_public_request_loads_checkout_key_without_bridge(self, tmp_path, monkeypatch, mode):
+        (tmp_path / ".env").write_text(
+            "RESOLVER_TEST_BASE=file-value\nS2_API_KEY=${RESOLVER_TEST_BASE}\n"
+            "S2_SHARED_KEY_WORKERS=2\nS2_SHARED_KEY_SLOT=0\n"
+            "RESOLVER_TEST_EXTRA=loaded\n"
+        )
+        monkeypatch.setenv("RESOLVER_TEST_BASE", "environment-value")
+        monkeypatch.setenv("S2_SHARED_KEY_SLOT", "1")
+        other = tmp_path / "unrelated"
+        other.mkdir()
+        (other / ".env").write_text("S2_API_KEY=wrong-directory\n")
+        monkeypatch.chdir(other)
+        payload = _paper_metadata_only()
+        response = payload if mode == "resolve" else {"data": [payload], "total": 1}
+
+        def check_pacing():
+            # The FIRST request must already see the file's shared-key policy.
+            assert wrapper._shared_key_slot() == (2, 1)
+
+        with (
+            patch.object(wrapper, "_throttle_s2", side_effect=check_pacing) as pacing,
+            patch.object(wrapper.requests, "get", return_value=_ok_response(response)) as get,
+        ):
+            out = wrapper.run_skill(
+                None,
+                mode=mode,
+                source_type="doi",
+                identifier="10.1234/demo",
+                query="demo",
+                verbosity=0,
+            )
+        assert out["status"] == "ok"
+        pacing.assert_called_once()
+        get.assert_called_once()
+        assert get.call_args.kwargs["headers"]["x-api-key"] == "environment-value"
+        assert os.environ["RESOLVER_TEST_EXTRA"] == "loaded"
+        assert os.environ["RESOLVER_TEST_BASE"] == "environment-value"
+
+    @pytest.mark.parametrize("key", ["exported-key", ""])
+    def test_explicit_environment_key_bypasses_dotenv(self, tmp_path, monkeypatch, key):
+        (tmp_path / ".env").write_text("S2_API_KEY=file-key\nRESOLVER_TEST_EXTRA=loaded\n")
+        monkeypatch.setenv("S2_API_KEY", key)
+        with (
+            patch.object(wrapper, "load_dotenv", wraps=wrapper.load_dotenv) as load,
+            patch.object(wrapper.requests, "get", return_value=_ok_response({"data": []})) as get,
+        ):
+            out = wrapper.run_skill(None, mode="search", query="demo")
+        assert out["status"] == "ok"
+        load.assert_not_called()
+        headers = get.call_args.kwargs["headers"]
+        assert headers == {
+            "User-Agent": "siderius-paper-resolver/1.0",
+            **({"x-api-key": "exported-key"} if key else {}),
+        }
+        assert "RESOLVER_TEST_EXTRA" not in os.environ
+
+    @pytest.mark.parametrize("case", ["missing-file", "missing-key", "disabled", "installed"])
+    def test_no_eligible_checkout_key_preserves_anonymous_request(
+        self, tmp_path, monkeypatch, case
+    ):
+        other = tmp_path / "unrelated"
+        other.mkdir()
+        (other / ".env").write_text("S2_API_KEY=wrong-directory\n")
+        monkeypatch.chdir(other)
+        if case == "missing-key":
+            (tmp_path / ".env").write_text("RESOLVER_TEST_EXTRA=loaded\n")
+        elif case in {"disabled", "installed"}:
+            (tmp_path / ".env").write_text("S2_API_KEY=file-key\n")
+        if case == "disabled":
+            monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "true")
+        if case == "installed":
+            monkeypatch.setattr(wrapper, "_PROJECT_ROOT", None)
+        with patch.object(wrapper.requests, "get", return_value=_ok_response({"data": []})) as get:
+            out = wrapper.run_skill(None, mode="search", query="demo")
+        assert out["status"] == "ok"
+        assert "x-api-key" not in get.call_args.kwargs["headers"]
+        assert "S2_API_KEY" not in os.environ
+
+    @pytest.mark.parametrize("failure", ["unreadable", "encoding"])
+    def test_broken_dotenv_refuses_http_without_exposing_contents(self, tmp_path, failure, caplog):
+        path = tmp_path / ".env"
+        path.write_bytes(b"S2_API_KEY=synthetic-sensitive-marker\xff")
+        # Permission bits cannot simulate EACCES reliably when CI runs as root.
+        real_open = open
+
+        def open_file(file, *args, **kwargs):
+            if file == path and failure == "unreadable":
+                raise PermissionError("synthetic-sensitive-marker")
+            return real_open(file, *args, **kwargs)
+
+        with (
+            patch("builtins.open", side_effect=open_file),
+            patch.object(wrapper.requests, "get") as get,
+        ):
+            out = wrapper.run_skill(None, mode="search", query="demo")
+        assert out["status"] == "error"
+        assert "S2 configuration error: could not read checkout .env" in out["message"]
+        assert "synthetic-sensitive-marker" not in str(out) + caplog.text
+        get.assert_not_called()
+
+    def test_local_invalid_and_cached_calls_do_not_initialize_credentials(self, tmp_path):
+        (tmp_path / "paper.md").write_text("Local paper")
+        with patch.object(wrapper, "load_dotenv", side_effect=AssertionError("unexpected loading")):
+            assert wrapper.run_skill(None, mode="search", query="")["status"] == "error"
+            local = wrapper.run_skill(
+                None, mode="resolve", source_type="local", identifier="paper.md"
+            )
+            assert local["status"] == "ok"
+        with patch.object(wrapper.requests, "get", return_value=_ok_response({"data": []})):
+            assert wrapper.run_skill(None, mode="search", query="cached")["status"] == "ok"
+        with (
+            patch.object(wrapper, "load_dotenv", side_effect=AssertionError("unexpected loading")),
+            patch.object(wrapper.requests, "get", side_effect=AssertionError("unexpected HTTP")),
+        ):
+            assert wrapper.run_skill(None, mode="search", query="cached")["status"] == "ok"
+
+    def test_fresh_interpreter_needs_no_bridge_or_llm_credentials(self, tmp_path):
+        (tmp_path / ".env").write_text("S2_API_KEY=cold-process-key\n")
+        script = dedent("""
+            import os
+            import sys
+            from pathlib import Path
+            from unittest.mock import Mock, patch
+            from agent.skills.paper_resolver_skill import wrapper
+
+            assert 'agent.llm_bridge' not in sys.modules
+            assert 'S2_API_KEY' not in os.environ
+            wrapper._PROJECT_ROOT = Path(sys.argv[1])
+            response = Mock(status_code=200)
+            response.json.return_value = {'data': []}
+            with patch('dotenv.main.find_dotenv', side_effect=AssertionError('implicit lookup')), \
+                 patch('socket.socket.connect', side_effect=AssertionError('live network')), \
+                 patch.object(wrapper.requests, 'get', return_value=response) as get:
+                out = wrapper.run_skill(None, mode='search', query='demo')
+            assert out['status'] == 'ok'
+            assert get.call_args.kwargs['headers']['x-api-key'] == 'cold-process-key'
+            assert 'agent.llm_bridge' not in sys.modules
+            print('standalone request verified')
+        """)
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", script, str(tmp_path)],
+            cwd=tmp_path,
+            env={},
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "standalone request verified"
 
 
 # ---------------------------------------------------------------------------
