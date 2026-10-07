@@ -46,6 +46,7 @@ from core.runtime_control.gpu_requirement import (
     CandidateMeasurementRequest,
     MeasuredPhase,
 )
+from core.runtime_control.inference_checkpoint_reference import InferenceCheckpointReference
 from core.runtime_control.inference_measurement_binding import InferenceMeasurementBinding
 from execute_tools.dataset_config import DatasetProfile
 from execute_tools.task_data_path import TaskProbeDataSpec
@@ -94,6 +95,9 @@ class GpuMeasurementSpec(BaseModel):
     label: str = Field(min_length=1)
     request: CandidateMeasurementRequest
     inference_binding: InferenceMeasurementBinding | None = None
+    inference_checkpoint: InferenceCheckpointReference | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     #: The candidate exactly as production would construct it. These are
     #: the same three payloads the trainer receives.
@@ -237,6 +241,14 @@ class GpuMeasurementSpec(BaseModel):
     #: process group and classifies the timeout from its own elapsed time.
     #: `None` means the parent's hard deadline is the only bound.
     soft_deadline_seconds: float | None = Field(default=None, gt=0.0)
+
+    @model_validator(mode="after")
+    def _checkpoint_describes_native_inference(self) -> GpuMeasurementSpec:
+        if self.inference_checkpoint is not None:
+            if self.request.phase != "inference":
+                raise ValueError("a checkpoint reference is only valid for inference measurement")
+            self.inference_checkpoint.validate_native_path(self.request.model_type)
+        return self
 
     @property
     def phase(self) -> MeasuredPhase:
@@ -444,6 +456,10 @@ class WorkerMeasurementReport(BaseModel):
     label: str = Field(min_length=1)
     request: CandidateMeasurementRequest
     inference_binding: InferenceMeasurementBinding | None = None
+    verified_checkpoint: InferenceCheckpointReference | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
     status: WorkerStatus
 
     device: str = Field(min_length=1)

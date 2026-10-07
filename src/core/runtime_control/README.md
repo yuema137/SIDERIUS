@@ -67,3 +67,43 @@ Measurement receipts report `verification_active_wall_ms` and
 `verification_excluded_inactive_seconds` to distinguish a real phase stall from
 time spent elsewhere. The enclosing training allocation and campaign deadline
 continue running throughout; pausing calibration does not extend either budget.
+
+### Measuring a native inference checkpoint
+
+The inference measurement worker can load an explicitly identified checkpoint
+through `GpuMeasurementSpec.inference_checkpoint`. This supports the native
+state-dictionary format written by `training_checkpoint_path`; whole-model
+pickles and arbitrary external trainer formats are outside this interface.
+The caller must already know the absolute path, experiment ID, SHA256 and byte
+size, and provide the existing task evaluation scope and measurement budgets.
+The historical training artifact sidecar can supply identity when present,
+but is not available for every task or training path.
+
+1. Construct an `InferenceCheckpointReference` with those four identity fields
+   and attach it to an inference spec. Leave it absent to measure a fresh model.
+2. Compute and attach `inference_measurement_binding(spec)` after adding the
+   reference. Dispatch requires that complete binding; the initial spec does not.
+3. Use the existing bounded measurement runner. Inside measured setup, the worker
+   checks the training completion marker, verifies the opened file, loads weights
+   on CPU into the resident model, and restores target-standardization state.
+   Streaming checks before and after loading consume the existing worker budget;
+   the parent retains its hard deadline and host-memory limit. A changed file or
+   expired verification budget yields unavailable evidence.
+4. Assess the returned run with `assess_inference_measurement`. A positive result
+   requires the verified checkpoint receipt, complete setup and inference
+   sampling, acknowledged reservation holds, matching evaluation geometry and
+   identity, and clean process termination. `worker_requirement_mib` covers the
+   larger of setup and inference peaks. A classifier result alone is insufficient.
+
+For example, setup at 900 MiB followed by inference at 700 MiB needs a 900 MiB
+worker requirement, subject to all those evidence checks. This says what the
+bounded evaluation workload observed, not what arbitrary later inputs will use.
+Two file checks detect ordinary mutation; they do not provide an immutable
+snapshot against a hostile concurrent writer.
+
+This interface does **not** dispatch measurements for trial or post-training
+inference, produce missing checkpoint identities, or populate runtime admission
+tables. Those integrations remain required before isolated GPU onboarding works.
+Fresh-model request serialization remains unchanged when the optional reference
+is absent. The implementation's source identity changes, so externally selected
+preflight estimators must qualify the new assembly explicitly.
