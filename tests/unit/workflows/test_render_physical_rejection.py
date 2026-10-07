@@ -165,11 +165,13 @@ class TestRenderPhysicalRejection:
         # Not "1 attempts"
         assert "1 attempts" not in out
 
-    def test_reports_overshoot_and_budget(self):
+    def test_legacy_numbers_do_not_claim_measured_overshoot(self):
         r = _mk("deep_punet", estimated_gb=29.1, budget_gb=20.0)
         out = _render_physical_rejection(r, n_rejections=1)
-        assert "estimated 29.10 GB" in out
-        assert "budget 20.00 GB" in out
+        assert "Recorded estimate: 29.1 GiB" in out
+        assert "Measurement basis is unavailable" in out
+        assert " > " not in out
+        assert "recorded budget: 20.00 GiB" in out
         assert "binding cap: vram" in out
 
     def test_dominant_layer_line_present_when_named(self):
@@ -181,9 +183,10 @@ class TestRenderPhysicalRejection:
             dominant_fraction=0.46,
         )
         out = _render_physical_rejection(r, n_rejections=1)
-        assert "Dominant layer: encoder.attention.block7.mha" in out
-        assert "13.40 GB" in out
-        assert "46% of peak" in out
+        assert "Recorded layer attribution: encoder.attention.block7.mha" in out
+        assert "13.40 GiB" in out
+        assert "46% of the recorded estimate" in out
+        assert "consumed" not in out
 
     def test_dominant_layer_line_suppressed_when_empty(self):
         """compute_intensity path: dominant_layer='' means there is no

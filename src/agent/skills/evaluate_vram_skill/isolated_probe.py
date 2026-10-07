@@ -50,6 +50,7 @@ from typing import Any, Literal, get_args
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.model_io_contract import ModelIOContract
+from agent.schemas.preflight import StaticPreflightEvidence
 from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
 from core.capability_registry import CapabilityContractSnapshot
 from core.runtime_control.process_group import (
@@ -66,6 +67,7 @@ from execute_tools.task_data_path import TaskProbeDataSpec
 PreflightOutcome = Literal[
     "COMPLETED_MEASUREMENT",
     "MEASURED_CUDA_OOM",
+    "STATIC_PREFLIGHT_REFUSAL",
     "MEASURED_PEAK_ABOVE_VRAM_CAP",
     "MEASURED_HARD_TIMEOUT",
     "INCONCLUSIVE_MEASUREMENT",
@@ -302,6 +304,7 @@ class IsolatedProbeResult(BaseModel):
     trainable_parameter_count: int | None = Field(default=None, ge=0)
     dtype: str | None = None
     device: str | None = None
+    static_preflight_evidence: StaticPreflightEvidence | None = None
     estimated_gb: float | None = Field(default=None, ge=0.0)
     vram_cap_gb: float | None = Field(default=None, gt=0.0)
     cuda_peak_allocated_gb: float | None = Field(default=None, ge=0.0)
@@ -364,6 +367,21 @@ class IsolatedProbeResult(BaseModel):
     timeout_elapsed_seconds: float | None = Field(default=None, ge=0.0)
 
     @model_validator(mode="after")
+    def _static_evidence_matches_outcome(self) -> IsolatedProbeResult:
+        evidence = self.static_preflight_evidence
+        if evidence is None:
+            if self.outcome == "STATIC_PREFLIGHT_REFUSAL":
+                raise ValueError("Static refusal requires decision evidence")
+            return self
+        expected = "STATIC_PREFLIGHT_REFUSAL" if evidence.binding_caps else "COMPLETED_MEASUREMENT"
+        if self.outcome != expected:
+            raise ValueError(
+                f"Static decision evidence requires {expected}, not {self.outcome}; "
+                "it cannot establish a measured GPU-capacity outcome"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _a_timeout_must_have_reached_its_deadline(self) -> IsolatedProbeResult:
         """A result faster than its own budget is not a timeout.
 
@@ -402,6 +420,12 @@ class IsolatedProbeResult(BaseModel):
         candidate may fit the GPU perfectly and still have blown up CPU
         tracing.
         """
+        if self.outcome == "STATIC_PREFLIGHT_REFUSAL":
+            from agent.skills.evaluate_vram_skill.evidence import render_static_refusal
+
+            if self.static_preflight_evidence is None:
+                raise ValueError("Static refusal requires decision evidence")
+            return render_static_refusal(self.static_preflight_evidence)
         if self.outcome == "COMPLETED_MEASUREMENT":
             return (
                 f"Pre-flight completed: {self.realized_parameter_count:,} parameters, "
@@ -584,6 +608,7 @@ def run_isolated_preflight(
         phase: str,
         *,
         realized_parameter_count: int | None = None,
+        static_preflight_evidence: StaticPreflightEvidence | None = None,
         estimated_gb: float | None = None,
         inference_batch: int | None = None,
         schema_field: str | None = None,
@@ -618,6 +643,7 @@ def run_isolated_preflight(
             host_memory=host_evidence,
             vram_cap_gb=spec.effective_cap_gb(),
             realized_parameter_count=realized_parameter_count,
+            static_preflight_evidence=static_preflight_evidence,
             estimated_gb=estimated_gb,
             inference_batch=inference_batch,
             schema_field=schema_field,
@@ -703,31 +729,45 @@ def run_isolated_preflight(
     outcome = _str_or_none(payload.get("outcome")) or "PROBE_INFRASTRUCTURE_FAILURE"
     if outcome not in get_args(PreflightOutcome):
         outcome = "PROBE_INFRASTRUCTURE_FAILURE"
-    return _result(
-        outcome,  # type: ignore[arg-type]  - narrowed against the Literal above
-        _str_or_none(payload.get("detail")) or "",
-        _str_or_none(payload.get("phase")) or "complete",
-        realized_parameter_count=_int_or_none(payload.get("realized_parameter_count")),
-        estimated_gb=_float_or_none(payload.get("estimated_gb")),
-        inference_batch=_int_or_none(payload.get("inference_batch")),
-        schema_field=_str_or_none(payload.get("schema_field")),
-        schema_message=_str_or_none(payload.get("schema_message")),
-        timeout_operation=_str_or_none(payload.get("timeout_operation")),
-        timeout_budget_seconds=_float_or_none(payload.get("timeout_budget_seconds")),
-        timeout_elapsed_seconds=_float_or_none(payload.get("timeout_elapsed_seconds")),
-        # A5 repair — carried explicitly, in the same style as the fields
-        # above. The schema-diff guardrail fails if a worker field is
-        # added without appearing here.
-        limit_gb=_float_or_none(payload.get("limit_gb")),
-        dominant_phase=_str_or_none(payload.get("dominant_phase")),
-        verdict=_str_or_none(payload.get("verdict")) or "",
-        suggestion=_str_or_none(payload.get("suggestion")) or "",
-        violations=_list_or_none(payload.get("violations")),
-        offending_config=_dict_or_none(payload.get("offending_config")),
-        memory_killer=_dict_or_none(payload.get("memory_killer")),
-        truncated=payload.get("truncated") is True,
-        violations_omitted_count=_int_or_none(payload.get("violations_omitted_count")),
-    )
+    try:
+        evidence = (
+            StaticPreflightEvidence.model_validate(payload["static_preflight_evidence"])
+            if payload.get("static_preflight_evidence") is not None
+            else None
+        )
+
+        return _result(
+            outcome,  # type: ignore[arg-type]  - narrowed against the Literal above
+            _str_or_none(payload.get("detail")) or "",
+            _str_or_none(payload.get("phase")) or "complete",
+            static_preflight_evidence=evidence,
+            realized_parameter_count=_int_or_none(payload.get("realized_parameter_count")),
+            estimated_gb=_float_or_none(payload.get("estimated_gb")),
+            inference_batch=_int_or_none(payload.get("inference_batch")),
+            schema_field=_str_or_none(payload.get("schema_field")),
+            schema_message=_str_or_none(payload.get("schema_message")),
+            timeout_operation=_str_or_none(payload.get("timeout_operation")),
+            timeout_budget_seconds=_float_or_none(payload.get("timeout_budget_seconds")),
+            timeout_elapsed_seconds=_float_or_none(payload.get("timeout_elapsed_seconds")),
+            # A5 repair — carried explicitly, in the same style as the fields
+            # above. The schema-diff guardrail fails if a worker field is
+            # added without appearing here.
+            limit_gb=_float_or_none(payload.get("limit_gb")),
+            dominant_phase=_str_or_none(payload.get("dominant_phase")),
+            verdict=_str_or_none(payload.get("verdict")) or "",
+            suggestion=_str_or_none(payload.get("suggestion")) or "",
+            violations=_list_or_none(payload.get("violations")),
+            offending_config=_dict_or_none(payload.get("offending_config")),
+            memory_killer=_dict_or_none(payload.get("memory_killer")),
+            truncated=payload.get("truncated") is True,
+            violations_omitted_count=_int_or_none(payload.get("violations_omitted_count")),
+        )
+    except ValueError as exc:
+        return _result(
+            "PROBE_INFRASTRUCTURE_FAILURE",
+            f"Invalid preflight worker result: {exc}",
+            "worker_contract",
+        )
 
 
 def _load_worker_result(path: Path) -> dict | None:

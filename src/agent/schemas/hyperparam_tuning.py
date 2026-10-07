@@ -30,6 +30,7 @@ from agent.schemas.ordering import (
     validate_ordering_shape,
 )
 from agent.schemas.parameter_rules import ParameterRules
+from agent.schemas.preflight import StaticPreflightEvidence
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
@@ -200,6 +201,10 @@ class ExperimentTiming(BaseModel):
 
 
 class ExperimentMemory(BaseModel):
+    static_preflight_evidence: StaticPreflightEvidence | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+    preflight_outcome: str | None = Field(default=None, exclude_if=lambda v: v is None)
     expert_advice_followed: str
     hypothesis: str
     conclusion: str | None = None
@@ -3397,6 +3402,10 @@ class PhysicalRejection(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    static_preflight_evidence: StaticPreflightEvidence | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
+
     attempt_config: dict[str, Any] = Field(
         description=(
             "Compact snapshot of the tuner's active_params at rejection "
@@ -3441,7 +3450,7 @@ class PhysicalRejection(BaseModel):
             "min(HardwareContext.usable_cap_gb, operator_budget_gb)."
         ),
     )
-    estimated_gb: float = Field(
+    estimated_gb: float | None = Field(
         ge=0.0,
         description="Predicted peak that failed the cap.",
     )

@@ -16,7 +16,9 @@ import torch.nn as nn
 from agent.skills.evaluate_vram_skill import batch_resolver
 from agent.skills.evaluate_vram_skill.batch_resolver import (
     _DEFAULT_CANDIDATE_BATCHES,
+    BatchSearchRefused,
     resolve_inference_batch,
+    resolve_inference_decision,
 )
 from agent.skills.evaluate_vram_skill.compute_intensity import _MAX_BATCH_TIMESTEPS
 from agent.skills.evaluate_vram_skill.overhead import cuda_context_bytes
@@ -341,3 +343,71 @@ def test_known_ineligible_batches_never_execute_a_probe(monkeypatch):
     _install_probe(monkeypatch, curve)
     assert resolve_inference_batch(_NoOp(), segmentation_size=40000, cap_bytes=10 * 1024**3) == 16
     assert measured == [16]
+
+
+def test_typed_refusal_keeps_last_custom_batch_and_original_estimate(monkeypatch):
+    """#615: diagnosis must retain the rejecting sum, not re-probe B=1 with max."""
+    _install_probe(monkeypatch, lambda batch: (1024, batch * 10_000))
+    with pytest.raises(BatchSearchRefused) as exc:
+        resolve_inference_decision(
+            _NoOp(), segmentation_size=10, cap_bytes=1, candidate_batches=(7, 3)
+        )
+    assert isinstance(exc.value, ValueError)
+    decision = exc.value.decision
+    assert decision.batch_size == 3
+    assert decision.vram_estimate_bytes == 1024 + 30_000 + cuda_context_bytes()
+    assert decision.binding_caps == ("vram",)
+    assert decision.estimator == "inference_leaf_sum_v1"
+
+
+def test_prefilter_refusal_keeps_actual_custom_batch_without_vram_observation(monkeypatch):
+    """#615: intensity prefilter must not invent a B=1 probe or zero-byte peak."""
+    monkeypatch.setattr(
+        batch_resolver,
+        "probe_activation_footprint",
+        lambda **kwargs: pytest.fail("ineligible candidates were probed"),
+    )
+    with pytest.raises(BatchSearchRefused) as exc:
+        resolve_inference_decision(
+            _NoOp(), segmentation_size=400_000, cap_bytes=1, candidate_batches=(7, 3)
+        )
+    assert exc.value.decision.batch_size == 3
+    assert exc.value.decision.intensity_product == 1_200_000
+    assert exc.value.decision.vram_estimate_bytes is None
+    assert exc.value.decision.binding_caps == ("compute_intensity",)
+
+
+@pytest.mark.parametrize(
+    "failure", [MemoryError("host allocation failed"), RuntimeError("CUDA out of memory")]
+)
+def test_exhausted_allocation_failures_keep_original_domain(monkeypatch, failure):
+    """#615: an unobserved final candidate cannot become a structural VRAM refusal."""
+    visited = []
+
+    def fail(**kwargs):
+        visited.append(kwargs["input_sample"].shape[0])
+        raise failure
+
+    monkeypatch.setattr(batch_resolver, "probe_activation_footprint", fail)
+    with pytest.raises(type(failure)) as exc:
+        resolve_inference_decision(
+            _NoOp(), segmentation_size=10, cap_bytes=1, candidate_batches=(7, 3)
+        )
+    assert exc.value is failure
+    assert visited == [7, 3]
+
+
+def test_typed_success_keeps_no_temporal_dimension_and_boundary_selection(monkeypatch):
+    """The evidence API must retain integer-API choice and absent intensity geometry."""
+    _install_probe(monkeypatch, lambda batch: (1024, batch * 100))
+    decision = resolve_inference_decision(
+        _NoOp(),
+        segmentation_size=None,
+        cap_bytes=1024 + 300 + cuda_context_bytes(),
+        candidate_batches=(7, 3),
+        supplied_probe=torch.zeros(1, 4),
+    )
+    assert decision.batch_size == 3
+    assert decision.vram_estimate_bytes == decision.vram_cap_bytes
+    assert decision.intensity_product is None
+    assert decision.binding_caps == ()

@@ -14,7 +14,7 @@ tuner's consumer needs no change.
 
 Division of responsibility, deliberately strict:
 
-* the **worker** measures, and forwards the agent-facing text the skill
+* the **worker** inspects or measures, and forwards the agent-facing text the skill
   already produced (`KillerReport.verdict` / `.suggestion`);
 * this **adapter** maps and forwards. It composes no operator-facing
   prose, decides no policy, and derives no downsizing recommendation.
@@ -74,15 +74,17 @@ class PreflightWiringError(RuntimeError):
 
 #: Exhaustive ``PreflightOutcome`` → ``(legacy status, feasible)``.
 #:
-#: ``feasible=False`` is reserved for the two outcomes that establish the
-#: model does not fit. Everything else leaves it ``None``, which the tuner
-#: reads through ``.get("feasible", True)``.
+#: ``feasible=False`` preserves the existing no-training disposition for
+#: static refusal and measured GPU-capacity failures. A static refusal does
+#: not establish actual GPU capacity. Other unsuccessful outcomes leave it
+#: ``None`` and retain their distinct failure domains.
 #:
 #: MEASURED_PEAK_ABOVE_VRAM_CAP and MEASURED_CUDA_OOM deliberately share a
 #: legacy pair (operator decision D-A1): PR A does not change control flow
 #: while wiring. They stay distinguishable through ``preflight_outcome``.
 OUTCOME_TO_LEGACY: dict[str, tuple[str, bool | None]] = {
     "COMPLETED_MEASUREMENT": ("success", True),
+    "STATIC_PREFLIGHT_REFUSAL": ("success", False),
     "MEASURED_PEAK_ABOVE_VRAM_CAP": ("success", False),
     "MEASURED_CUDA_OOM": ("success", False),
     "SCHEMA_REJECTED": ("schema_violation", None),
@@ -183,6 +185,7 @@ def adapt_result(payload: dict[str, Any]) -> dict[str, Any]:
         result["feasible"] = feasible
 
     for key in (
+        "static_preflight_evidence",
         "estimated_gb",
         "inference_batch",
         "limit_gb",

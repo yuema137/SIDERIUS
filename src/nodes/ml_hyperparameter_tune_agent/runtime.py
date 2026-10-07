@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.schemas.ordering import OrderingObservation, OrderingRefusalPhase, ResolvedOrdering
+from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from core.record_role import observed_attempt_role
 from core.runtime_control.records import AdmissionRecord
@@ -85,7 +86,7 @@ def _vram_skip_memory_extra(resource_check: dict, chosen_vram_budget: float | No
     `skipped_oom_risk` so post-hoc analysis can discount rejections that
     came from an uncalibrated estimate.
     """
-    extra: dict[str, Any] = {}
+    extra: dict[str, Any] = preflight_memory_fields(resource_check)
     if chosen_vram_budget is not None:
         extra["vram_estimate_gb"] = resource_check.get("estimated_gb")
         extra["vram_budget_gb"] = resource_check.get("limit_gb")

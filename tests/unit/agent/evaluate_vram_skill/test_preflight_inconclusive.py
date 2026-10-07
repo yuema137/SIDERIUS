@@ -72,7 +72,7 @@ class TestBudgetsAreSeparate:
 
     def test_the_old_single_shared_budget_is_no_longer_used(self):
         source = (REPO_ROOT / "src/agent/skills/evaluate_vram_skill/wrapper.py").read_text()
-        block = source[source.index("resolve_inference_batch(") :]
+        block = source[source.index("resolve_inference_decision(") :]
         assert "_FORWARD_PASS_TIMEOUT_S" not in block.split(")")[0]
 
     @pytest.mark.parametrize(

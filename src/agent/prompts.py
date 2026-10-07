@@ -1117,10 +1117,10 @@ def get_planner_user_prompt(
         fix_hint = last_oom.get("memory", {}).get("memory_update", "No remediation was recorded.")
         oom_warning = (
             f"\n### RECORDED MEMORY REFUSAL:\n"
-            f"A proposal in the supplied history was REJECTED due to insufficient GPU memory "
+            f"A proposal in the supplied history was REJECTED by resource preflight "
             f"(status='skipped_oom_risk'). It was NEVER trained.\n"
             f"Recorded suggestion (subject to current constraints): {fix_hint}\n"
-            "Use its measured diagnostics and the current constraints to form a feasible hypothesis.\n"
+            "Read its recorded cause and evidence basis; this status alone does not establish a GPU measurement.\n"
         )
 
     # An INCONCLUSIVE pre-flight measured nothing, so it must not act as a
@@ -1292,7 +1292,7 @@ def get_planner_user_prompt(
 {dynamics_section}{oom_warning}{inconclusive_note}{unattributed_oom_note}{slow_warning}{round_context}{active_budgets_section}{resource_gate_guidance_section}
 ### INSTRUCTIONS:
 1. **Review Memory**: Look for patterns and previous failures/successes.
-   - Records with status='skipped_oom_risk' were NEVER trained — they exceeded GPU memory.
+   - Records with status='skipped_oom_risk' were NEVER trained. Inspect their refusal evidence: a static estimate, compute-intensity rule and measured GPU excess are different causes.
    - Always follow the `memory.memory_update` field of any skipped record before proposing the next config.
    - Check the `timing` field of past experiments and compare against the time budget
      in the supplied run configuration; reason within the disclosed controls.

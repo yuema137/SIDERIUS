@@ -1,34 +1,35 @@
 """Pre-flight VRAM gate — Phase 6.6 §3.7.
 
 Replaces the Phase K "empirical polling" wrapper with a deterministic
-forecast built from five primitives that all landed earlier in the
-phase:
+forecast built from structural inspection and bounded inference search:
 
   * ``structural_probe.probe_activation_footprint``  (§3.2, A.2)
   * ``overhead`` {``training_overhead_bytes``, ``cuda_context_bytes``,
      ``cudnn_backward_workspace_bytes``}                (§3.3, A.3)
-  * ``batch_resolver.resolve_inference_batch``       (§3.5, A.4)
+  * ``batch_resolver.resolve_inference_decision``    (§3.5, A.4)
   * ``compute_intensity.passes``                     (§3.10, A.4.5)
-  * ``killer_report.{render_vram,render_intensity,render_combined}``
-                                                      (§3.6, A.5)
+  * ``evidence`` — typed decision projection and refusal text
 
 The wrapper is the single consumer that glues them together. Training
 and inference run in isolated subprocesses (``core.sandbox_executor``),
-so the binding cap is the single phase with the larger peak, not their
-sum — the wrapper probes both, composes each peak from the probe's
-primitives plus overhead, and takes ``max()`` (§3.8).
+so the legacy success diagnostic takes the maximum of their reporting
+proxies, not their sum (§3.8). The inference search uses its own conservative
+leaf-sum decision formula. ``static_preflight_evidence`` identifies the exact
+admission formula and values separately from those legacy success diagnostics.
 
 Return contract (§3.7)
 ----------------------
-Preserved (same semantics as Phase K):
+Legacy diagnostic fields (unchanged on success):
     status, feasible, verdict, suggestion, num_params,
     dominant_phase, phase_breakdown,
     estimated_gb, limit_gb, vram_budget_gb
 
 New:
-    inference_batch  — int chosen by ``resolve_inference_batch``
-    memory_killer    — dict (flattened ``killer_report.MemoryKillerDetails``)
-                       on an infeasible verdict, ``None`` otherwise.
+    inference_batch  — int chosen by ``resolve_inference_decision``
+    memory_killer    — binding caps and configuration dimensions on refusal;
+                       no asserted per-layer live allocation.
+    static_preflight_evidence — exact structural decisions on inspected paths;
+                       absent when CPU mode skips the gate.
 
 Removed:
     inference_batch_uncalibrated — obsolete now every batch is probed.
@@ -50,10 +51,17 @@ import psutil
 import torch
 from pydantic import ValidationError
 
-from agent.skills.evaluate_vram_skill import compute_intensity, killer_report
+from agent.schemas.preflight import StaticPreflightEvidence
+from agent.skills.evaluate_vram_skill import compute_intensity
 from agent.skills.evaluate_vram_skill.batch_resolver import (
+    BatchSearchRefused,
     BatchSearchTimeout,
-    resolve_inference_batch,
+    resolve_inference_decision,
+)
+from agent.skills.evaluate_vram_skill.evidence import (
+    phase_decision,
+    render_static_refusal,
+    static_refusal_suggestion,
 )
 from agent.skills.evaluate_vram_skill.overhead import (
     cuda_context_bytes,
@@ -613,18 +621,7 @@ def _schema_violation_response(violations: list[dict], offending_cfg: dict) -> d
     }
 
 
-# ── Killer-report routing ───────────────────────────────────────────────────
-
-
-def _parse_binding_label(exc_msg: str) -> str:
-    """``resolve_inference_batch`` raises ``ValueError`` whose message contains
-    ``Binding cap(s): <label>.``. Extract just the label (``vram``,
-    ``compute_intensity``, or ``vram+compute_intensity``) so the wrapper can
-    dispatch to the right killer-report renderer."""
-    parts = exc_msg.split("Binding cap(s):", 1)
-    if len(parts) < 2:
-        return "vram"
-    return parts[1].split(".", 1)[0].strip()
+# ── Declared probe geometry ─────────────────────────────────────────────────
 
 
 def _require_segmentation_size(seg_size: int | None, *, context: str) -> int:
@@ -640,148 +637,6 @@ def _require_segmentation_size(seg_size: int | None, *, context: str) -> int:
             f"segmentation dimension unavailable: {context} requires a declared segmentation_size"
         )
     return seg_size
-
-
-def _render_inference_killer(
-    *,
-    binding: str,
-    model_type: str,
-    model_cfg: dict,
-    loss_type: str,
-    seg_size: int | None,
-    cap_bytes: int,
-    total_memory_bytes: int,
-    model_io_contract: ModelIOContract | None = None,
-    supplied_probe: torch.Tensor | None = None,
-) -> killer_report.KillerReport:
-    """Build a killer report for the inference-resolver-failed case.
-
-    The resolver exits with a ``ValueError`` after exhausting its candidate
-    list; it does not hand back the probes it consumed along the way. For
-    VRAM-binding failures we re-probe the model once at ``B=1`` so the
-    per-layer attribution the Proposer reads is faithful to the failing
-    mode (inference, not training)."""
-    if "compute_intensity" in binding and seg_size is None:
-        raise RuntimeError(
-            "compute-intensity cannot bind without a declared segmentation dimension"
-        )
-    if binding == "compute_intensity":
-        # Intensity failure at ``B=1`` means ``1 × T > 800_000`` — a pure
-        # ``segmentation_size`` problem, no layer attribution required.
-        return killer_report.render_intensity_report(
-            batch_size=1,
-            segmentation_size=_require_segmentation_size(
-                seg_size, context="compute-intensity attribution"
-            ),
-        )
-
-    if supplied_probe is None and seg_size is None:
-        raise SegmentationDimensionUnavailableError(
-            "segmentation dimension unavailable: inference killer attribution "
-            "needs a declared segmentation_size or task-owned probe"
-        )
-    model_tmp = _build_model(model_type, model_cfg, loss_type)
-    inf_probe = probe_activation_footprint(
-        model=model_tmp,
-        loss_module=None,
-        input_sample=(
-            supplied_probe[:1].clone()
-            if supplied_probe is not None
-            else _probe_input_tensor(
-                1,
-                _require_segmentation_size(seg_size, context="VRAM/compute-intensity attribution"),
-                model_io_contract,
-            )
-        ),
-        target_sample=None,
-        mode="inference",
-    )
-    inf_peak, _ = _compose_inference_peak(inf_probe)
-    if binding == "vram+compute_intensity":
-        declared_seg_size = _require_segmentation_size(
-            seg_size, context="VRAM/compute-intensity attribution"
-        )
-        return killer_report.render_combined_report(
-            probe=inf_probe,
-            predicted_peak_bytes=inf_peak,
-            cap_bytes=cap_bytes,
-            total_memory_bytes=total_memory_bytes,
-            batch_size=1,
-            segmentation_size=declared_seg_size,
-        )
-    return killer_report.render_vram_report(
-        probe=inf_probe,
-        predicted_peak_bytes=inf_peak,
-        cap_bytes=cap_bytes,
-        total_memory_bytes=total_memory_bytes,
-    )
-
-
-def _render_killer(
-    *,
-    training_probe: ProbeResult,
-    training_peak: int,
-    training_vram_ok: bool,
-    training_intensity_ok: bool,
-    inference_ok: bool,
-    inference_err: str | None,
-    model_type: str,
-    model_cfg: dict,
-    loss_type: str,
-    batch_size: int,
-    seg_size: int | None,
-    cap_bytes: int,
-    total_memory_bytes: int,
-    model_io_contract: ModelIOContract | None = None,
-    supplied_probe: torch.Tensor | None = None,
-) -> killer_report.KillerReport:
-    """Pick the right renderer based on which cap(s) bound the refusal.
-
-    Training-phase failures take precedence over inference-phase ones
-    because training is the more expensive phase to run (autograd tape
-    dominates memory + wall time). The attribution for a training
-    failure uses the training probe we already have in hand.
-    """
-    if not training_intensity_ok and seg_size is None:
-        raise RuntimeError(
-            "training compute-intensity cannot bind without a declared segmentation dimension"
-        )
-    if not training_vram_ok and not training_intensity_ok:
-        return killer_report.render_combined_report(
-            probe=training_probe,
-            predicted_peak_bytes=training_peak,
-            cap_bytes=cap_bytes,
-            total_memory_bytes=total_memory_bytes,
-            batch_size=batch_size,
-            segmentation_size=_require_segmentation_size(
-                seg_size, context="VRAM/compute-intensity attribution"
-            ),
-        )
-    if not training_vram_ok:
-        return killer_report.render_vram_report(
-            probe=training_probe,
-            predicted_peak_bytes=training_peak,
-            cap_bytes=cap_bytes,
-            total_memory_bytes=total_memory_bytes,
-        )
-    if not training_intensity_ok:
-        return killer_report.render_intensity_report(
-            batch_size,
-            _require_segmentation_size(seg_size, context="compute-intensity attribution"),
-        )
-    if not inference_ok:
-        return _render_inference_killer(
-            binding=_parse_binding_label(inference_err or ""),
-            model_type=model_type,
-            model_cfg=model_cfg,
-            loss_type=loss_type,
-            seg_size=seg_size,
-            cap_bytes=cap_bytes,
-            total_memory_bytes=total_memory_bytes,
-            model_io_contract=model_io_contract,
-            supplied_probe=supplied_probe,
-        )
-    raise RuntimeError("_render_killer called with no binding failure")
 
 
 # ── Main entry ──────────────────────────────────────────────────────────────
@@ -901,7 +756,6 @@ def run_skill(sandbox, **kwargs):
         cap_bytes = physical_cap_bytes
         if vram_budget_gb is not None:
             cap_bytes = min(cap_bytes, int(vram_budget_gb * _GB))
-        total_memory_bytes = hardware_context.total_memory_bytes
 
         # Classify which of the three cap regimes is active so the log line
         # is self-explanatory (the operator should not have to compare
@@ -1019,6 +873,13 @@ def run_skill(sandbox, **kwargs):
         training_intensity_ok = (
             True if seg_size is None else compute_intensity.passes(batch_size, seg_size)
         )
+        training_decision = phase_decision(
+            phase="training",
+            batch_size=batch_size,
+            cap_bytes=cap_bytes,
+            estimate_bytes=training_peak,
+            segmentation_size=seg_size,
+        )
 
         # Free training-phase objects before building inference models.
         del model_for_train, loss_module, x_train, y_train
@@ -1036,7 +897,7 @@ def run_skill(sandbox, **kwargs):
             print(f"    [Probe RSS] delta={rss_delta_gb:.2f} GB")
 
         # 4. Inference-phase resolution + breakdown probe ────────────────
-        #    ``resolve_inference_batch`` probes each candidate B internally
+        #    ``resolve_inference_decision`` probes each candidate B internally
         #    and enforces both caps simultaneously. We pass a fresh model
         #    instance because the resolver moves tensors around; re-probe
         #    at the chosen B for the breakdown.
@@ -1044,14 +905,13 @@ def run_skill(sandbox, **kwargs):
         inference_peak: int = 0
         inference_breakdown: dict = {}
         inference_batch: int | None = None
-        inference_err: str | None = None
         try:
             model_for_resolve = _build_model(model_type, model_cfg, loss_type)
-            # No enclosing alarm here: `resolve_inference_batch` now times
+            # No enclosing alarm here: `resolve_inference_decision` times
             # each candidate AND the whole search separately, so wrapping it
             # in one more budget would recreate the very conflation this
             # replaced.
-            inference_batch = resolve_inference_batch(
+            inference_decision = resolve_inference_decision(
                 model_for_resolve,
                 segmentation_size=seg_size,
                 cap_bytes=cap_bytes,
@@ -1061,6 +921,7 @@ def run_skill(sandbox, **kwargs):
                 model_io_contract=model_io_contract,
                 supplied_probe=probe_input_sample,
             )
+            inference_batch = inference_decision.batch_size
             del model_for_resolve
             gc.collect()
 
@@ -1090,12 +951,12 @@ def run_skill(sandbox, **kwargs):
 
             inference_peak, inference_breakdown = _compose_inference_peak(inference_probe)
             inference_breakdown["inference_batch"] = inference_batch
-        except ValueError as e:
-            raise_if_code_package_failure(e)
-            inference_err = str(e)
+        except BatchSearchRefused as exc:
+            inference_decision = exc.decision
 
         inference_ok = inference_batch is not None
         feasible = training_vram_ok and training_intensity_ok and inference_ok
+        static_evidence = StaticPreflightEvidence(phases=(training_decision, inference_decision))
 
         # 5. Phase breakdown + dominant phase ─────────────────────────────
         phase_breakdown: dict[str, dict] = {
@@ -1141,27 +1002,16 @@ def run_skill(sandbox, **kwargs):
                 "vram_budget_gb": vram_budget_gb,
                 "inference_batch": inference_batch,
                 "memory_killer": None,
+                "static_preflight_evidence": static_evidence.model_dump(mode="json"),
             }
 
-        # 6b. Infeasible path: Memory Killer report ──────────────────────
-        report = _render_killer(
-            training_probe=training_probe,
-            training_peak=training_peak,
-            training_vram_ok=training_vram_ok,
-            training_intensity_ok=training_intensity_ok,
-            inference_ok=inference_ok,
-            inference_err=inference_err,
-            model_type=model_type,
-            model_cfg=model_cfg,
-            loss_type=loss_type,
-            batch_size=batch_size,
-            seg_size=seg_size,
-            cap_bytes=cap_bytes,
-            total_memory_bytes=total_memory_bytes,
-            model_io_contract=model_io_contract,
-            supplied_probe=probe_input_sample,
-        )
-        print(f"    Verdict    : {report.verdict}")
+        # 6b. Refusal uses the actual decision, never a diagnostic re-probe.
+        refused = static_evidence.refused_phase
+        if refused is None:
+            raise RuntimeError("Static preflight refused without a binding decision")
+        verdict = render_static_refusal(static_evidence)
+        suggestion = static_refusal_suggestion(static_evidence)
+        print(f"    Verdict    : {verdict}")
         print("    Feasible   : NO")
 
         return {
@@ -1173,16 +1023,27 @@ def run_skill(sandbox, **kwargs):
             # real ValidationErrors (_schema_violation_response above).
             "status": "success",
             "feasible": False,
-            "verdict": report.verdict,
-            "suggestion": report.suggestion,
+            "verdict": verdict,
+            "suggestion": suggestion,
             "num_params": num_params,
-            "dominant_phase": dominant_phase,
+            "dominant_phase": refused.phase,
             "phase_breakdown": phase_breakdown,
-            "estimated_gb": round(total_est / _GB, 3),
+            "estimated_gb": (
+                round(refused.vram_estimate_bytes / _GB, 3)
+                if "vram" in refused.binding_caps and refused.vram_estimate_bytes is not None
+                else None
+            ),
             "limit_gb": round(cap_bytes / _GB, 3),
             "vram_budget_gb": vram_budget_gb,
             "inference_batch": inference_batch,  # None on inference failure
-            "memory_killer": report.memory_killer.model_dump(),
+            # Retain the existing feedback shape without pretending leaf-call
+            # output counts establish live allocation by a particular layer.
+            "memory_killer": {
+                "binding_cap": "+".join(static_evidence.binding_caps),
+                "batch_size": refused.batch_size,
+                "segmentation_size": seg_size,
+            },
+            "static_preflight_evidence": static_evidence.model_dump(mode="json"),
         }
 
     except BatchSearchTimeout as e:
@@ -1212,7 +1073,7 @@ def run_skill(sandbox, **kwargs):
             "message": str(e),
             "timeout_record": record.model_dump(mode="json"),
         }
-    except RuntimeError as e:
+    except (MemoryError, RuntimeError) as e:
         # An allocation failure is a CANDIDATE-level fact and must be
         # reported as one. On 2026-07-31 a baseline-scale candidate's
         # torchinfo trace failed because the allocator refused it, and

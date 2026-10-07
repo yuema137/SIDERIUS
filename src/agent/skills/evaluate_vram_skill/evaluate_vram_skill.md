@@ -149,17 +149,64 @@ unknown layout refuses explicitly instead of reporting a partial estimate.
 
 | Field | Meaning |
 |---|---|
-| `feasible` | whether the estimate fits the configured budget |
-| `estimated_gb` | the predicted allocated peak — **not** driver-visible |
+| `feasible` | whether the completed structural and applicable compute-intensity checks pass |
+| `estimated_gb` | legacy diagnostic estimate on success; selected refused phase's structural estimate when VRAM binds, otherwise `None` — **not** driver-visible; full observations remain in typed evidence |
 | `limit_gb` | the budget it was compared against |
 | `verdict` | operator-facing explanation |
-| `suggestion` | what to change, when the estimate is the binding constraint |
-| `inference_batch_uncalibrated` | the inference estimate used an unregistered batch |
+| `suggestion` | evidence-based inspection or configuration guidance; a static refusal does not establish GPU excess |
+| `inference_batch` | selected inference batch, including when training checks refuse; absent when inference search refuses |
+| `static_preflight_evidence` | versioned exact structural decisions; absent when no structural decision was observed |
 
 On a CPU-only host it returns `feasible=True` with
 `estimated_gb=0.0` and a verdict naming the device — there is no VRAM
 constraint to evaluate, and that is not evidence that any model fits a
 GPU.
+
+### Static decision evidence
+
+`agent.schemas.preflight.StaticPreflightEvidence` owns the additive
+`static-preflight-v1` contract. Each of its one or two unique phase entries
+contains `phase`, `batch_size`, `vram_cap_bytes`, optional
+`vram_estimate_bytes` and `estimator`, and optional paired
+`intensity_product` / `intensity_limit`. The estimate and estimator must be
+present together. Unknown estimates remain `None`; an unobserved estimate
+cannot establish a passing decision. Binding constraints are derived from the
+recorded comparisons, not from diagnostic prose or layer attribution.
+
+Training uses `training_saved_tensors_v1`; inference admission uses
+`inference_leaf_sum_v1`. These identify the existing formulas, not measured
+GPU peaks. The separate successful inference diagnostic still uses its existing
+maximum-output proxy. A refusal reports the exact decision from the tested
+candidate, including a custom minimum batch, without running another probe to
+construct an explanation. The integer `resolve_inference_batch` API remains
+available; `resolve_inference_decision` returns the typed decision, and
+`BatchSearchRefused` remains a `ValueError` with a `.decision` attribute.
+Allocation failures preserve their host/CUDA domain instead of becoming
+structural VRAM estimates.
+
+The worker emits `STATIC_PREFLIGHT_REFUSAL` for completed static refusals.
+The parent validates the evidence, the adapter retains the existing
+`status="success", feasible=False` disposition, and the tuner records the
+historical status spelling `skipped_oom_risk`. That spelling alone is not proof
+of an OOM. Neither this outcome nor compute-intensity evidence grants measured
+GPU-capacity authority. Genuine measured failures retain their existing outcomes.
+Passing static results retain the existing `COMPLETED_MEASUREMENT` spelling;
+that legacy name does not turn their attached structural evidence into a peak
+measurement.
+
+Decision evidence crosses worker JSON separately from bounded diagnostics;
+truncating `memory_killer` cannot erase a refusal cause. Tuner records preserve
+`memory.static_preflight_evidence` and `memory.preflight_outcome` together,
+including successful preflight followed by failed or invalid training.
+`PhysicalRejection` also carries static evidence for proposer feedback.
+Gate-exhaustion summaries retain the same evidence after repeated failures.
+Static refusals cannot authorize architectural-pattern bans or unconditional
+model-shrinking advice. Existing time-only feedback and measured failure
+policies remain separate.
+Stored observations are immutable inputs to any external historical prompt
+adapter: experiment-owned, explicitly selected adapters may restore a verified
+old presentation without altering infra defaults or inventing missing evidence.
+No new historical execution policy or corrected estimator is introduced here.
 
 ---
 

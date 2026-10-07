@@ -130,14 +130,8 @@ class TestTheSkillToClassifySeam:
             "MEASURED_PEAK_ABOVE_VRAM_CAP",
         }, f"{status!r} was reported as a measurement of the candidate"
 
-    def test_an_unknown_status_is_reported_as_a_completed_measurement(self):
-        """Documents the hazard the first test guards, so the reason is not
-        just a claim in a docstring.
-
-        This is CURRENT production behaviour and is not a defect on its own
-        -- the trailing block cannot distinguish "success" from "a status I
-        do not know". It is why the exhaustiveness check has to live at the
-        seam rather than relying on a runtime default.
-        """
+    def test_an_unknown_status_is_a_worker_contract_failure(self):
+        """Unknown vocabulary cannot establish a successful inspection."""
         classified = preflight_worker_main._classify({"status": "some_future_status"})
-        assert classified["outcome"] == "COMPLETED_MEASUREMENT"
+        assert classified["outcome"] == "PROBE_INFRASTRUCTURE_FAILURE"
+        assert classified["phase"] == "worker_contract"

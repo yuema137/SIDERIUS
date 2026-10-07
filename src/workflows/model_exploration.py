@@ -108,6 +108,7 @@ from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_valida
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
+from agent.skills.evaluate_vram_skill.evidence import render_static_refusal
 from agent.utils.proposer_preflight import (
     UNCONSTRAINED_TRAIN_PORTION,
     UNCONSTRAINED_TRIAL_PORTION,
@@ -508,7 +509,11 @@ def _aggregate_worst_offender_rejections(
     for _mt, rejs in groups.items():
 
         def _rank(r: PhysicalRejection) -> tuple[float, float]:
-            ratio = (r.estimated_gb / r.budget_gb) if r.budget_gb > 0 else float("inf")
+            ratio = (
+                ((r.estimated_gb / r.budget_gb) if r.budget_gb > 0 else float("inf"))
+                if r.estimated_gb is not None
+                else float("-inf")
+            )
             return (ratio, r.dominant_fraction)
 
         worst = max(rejs, key=_rank)
@@ -591,30 +596,32 @@ def _render_physical_rejection(rej: PhysicalRejection, n_rejections: int) -> str
     """Render one aggregated ``[PHYSICAL REJECTION]`` string for the
     Proposer's ``previous_failures`` list.
 
-    Format (multi-line, leading ``[PHYSICAL REJECTION]`` tag so the
-    downstream prompt's "DO NOT repeat these mistakes" header is
-    unambiguous; the Proposer's existing previous_failures renderer in
-    ``_build_reasoning_prompt`` splices the whole string verbatim):
-
-        [PHYSICAL REJECTION] <model_type>: rejected N attempt(s) by the VRAM gate.
-          Worst offender: estimated X.XX GB > budget Y.YY GB (binding cap: ...).
-          Dominant layer: <name> consumed Z.ZZ GB (PP% of peak).
-          Attempted config: {...}.
-          Suggestion: <verbatim from killer_report>.
+    Typed static evidence supplies the exact phase, batch and refusal cause.
+    Legacy records without that evidence retain their recorded numbers and
+    explicitly lack a measurement basis. Neither path invents a GPU peak.
+    The proposer includes the returned string verbatim in its reasoning input.
     """
     model_type = str(rej.attempt_config.get("model_type", "unknown"))
     plural = "s" if n_rejections != 1 else ""
+    if rej.static_preflight_evidence is not None:
+        return (
+            f"[PHYSICAL REJECTION] {model_type}: rejected {n_rejections} attempt{plural}.\n"
+            f"  {render_static_refusal(rej.static_preflight_evidence)}\n"
+            f"  Attempted config: {rej.attempt_config}.\n"
+            f"  Suggestion: {rej.suggestion}"
+        )
     lines = [
         f"[PHYSICAL REJECTION] {model_type}: rejected {n_rejections} "
         f"attempt{plural} by the VRAM gate.",
-        f"  Worst offender: estimated {rej.estimated_gb:.2f} GB > "
-        f"budget {rej.budget_gb:.2f} GB (binding cap: {rej.binding_cap}).",
+        f"  Recorded estimate: {rej.estimated_gb} GiB; "
+        f"recorded budget: {rej.budget_gb:.2f} GiB (binding cap: {rej.binding_cap}). "
+        "Measurement basis is unavailable in this legacy record.",
     ]
     if rej.dominant_layer:
         lines.append(
-            f"  Dominant layer: {rej.dominant_layer} consumed "
-            f"{rej.dominant_layer_gb:.2f} GB "
-            f"({rej.dominant_fraction * 100:.0f}% of peak)."
+            f"  Recorded layer attribution: {rej.dominant_layer}, "
+            f"{rej.dominant_layer_gb:.2f} GiB "
+            f"({rej.dominant_fraction * 100:.0f}% of the recorded estimate)."
         )
     lines.append(f"  Attempted config: {rej.attempt_config}.")
     if rej.suggestion:

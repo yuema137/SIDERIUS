@@ -424,7 +424,35 @@ def _classify(outcome: dict) -> dict:
             "phase": "skill_error",
         }
 
+    from agent.schemas.preflight import StaticPreflightEvidence
+
+    if status != "success" or type(outcome.get("feasible")) is not bool:
+        return {
+            "outcome": "PROBE_INFRASTRUCTURE_FAILURE",
+            "detail": "Unrecognized or incomplete structural preflight result",
+            "phase": "worker_contract",
+        }
+    try:
+        evidence = (
+            StaticPreflightEvidence.model_validate(outcome["static_preflight_evidence"])
+            if outcome.get("static_preflight_evidence") is not None
+            else None
+        )
+        if outcome["feasible"] is False and (evidence is None or not evidence.binding_caps):
+            raise ValueError("Static refusal requires the original rejecting evidence")
+        if outcome["feasible"] is True and evidence is not None and evidence.binding_caps:
+            raise ValueError("A passing result contains refusing evidence")
+    except ValueError as exc:
+        return {
+            "outcome": "PROBE_INFRASTRUCTURE_FAILURE",
+            "detail": f"Invalid structural preflight evidence: {exc}"[:400],
+            "phase": "worker_contract",
+        }
+
     common = {
+        "static_preflight_evidence": evidence.model_dump(mode="json")
+        if evidence is not None
+        else None,
         "realized_parameter_count": outcome.get("num_params"),
         "estimated_gb": outcome.get("estimated_gb"),
         "inference_batch": outcome.get("inference_batch"),
@@ -442,9 +470,9 @@ def _classify(outcome: dict) -> dict:
     }
     if outcome.get("feasible") is False:
         return {
-            "outcome": "MEASURED_PEAK_ABOVE_VRAM_CAP",
+            "outcome": "STATIC_PREFLIGHT_REFUSAL",
             "detail": str(outcome.get("verdict") or "")[:400],
-            "phase": "vram_gate",
+            "phase": "static_preflight",
             **common,
             # PR A / D-A2 — the killer report is the actionable part of an
             # infeasible verdict.

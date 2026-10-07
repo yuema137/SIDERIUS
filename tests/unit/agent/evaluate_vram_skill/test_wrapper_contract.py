@@ -1,8 +1,7 @@
 """Return-contract tests for ``agent/skills/evaluate_vram_skill/wrapper.py``.
 
-Phase 6.6 §3.7. The wrapper is the single consumer of five primitives
-(``structural_probe``, ``overhead``, ``batch_resolver``, ``compute_intensity``,
-``killer_report``). These tests pin:
+Phase 6.6 §3.7 and #615. The wrapper composes structural probes, overhead,
+batch decisions and compute intensity. These tests pin:
 
 - exact top-level keys of the return dict — downstream consumers in
   ``ml_hyperparameter_tune_agent`` read by name;
@@ -14,9 +13,8 @@ Phase 6.6 §3.7. The wrapper is the single consumer of five primitives
 - ``hardware_context=None`` kwarg falls back to ``discover()`` (kept
   green until A.11 wires the tuner pass-through);
 - CPU-only short-circuit honoured;
-- over-budget paths (training-VRAM, training-intensity, inference-resolver)
-  route to the correct ``killer_report`` renderer and flatten via
-  ``model_dump`` into the ``memory_killer`` slot;
+- over-budget paths retain actual decision bytes and caps separately from
+  the legacy diagnostic proxies, without re-probing or inventing layer attribution;
 - schema-violation path (``pydantic.ValidationError`` from plugin config)
   preserved from Phase D.4.
 
@@ -34,10 +32,11 @@ import pytest
 import torch
 from pydantic import BaseModel, ValidationError
 
+from agent.schemas.preflight import StaticPreflightEvidence
 from agent.skills.evaluate_vram_skill import wrapper
-from agent.skills.evaluate_vram_skill.killer_report import (
-    KillerReport,
-    MemoryKillerDetails,
+from agent.skills.evaluate_vram_skill.batch_resolver import BatchSearchRefused
+from agent.skills.evaluate_vram_skill.evidence import (
+    phase_decision,
 )
 from agent.skills.evaluate_vram_skill.structural_probe import (
     AutogradTapeReport,
@@ -167,7 +166,7 @@ class _Patches:
             ),
             patch.object(
                 wrapper,
-                "resolve_inference_batch",
+                "resolve_inference_decision",
                 side_effect=self._resolve_side_effect,
             ),
             patch.object(wrapper, "training_overhead_bytes", return_value=20),
@@ -194,7 +193,13 @@ class _Patches:
         return self.training_probe if mode == "training" else self.inference_probe
 
     def _resolve_side_effect(self, model, *, segmentation_size, cap_bytes, **kwargs):
-        return self.resolved_batch
+        return phase_decision(
+            phase="inference",
+            batch_size=self.resolved_batch,
+            cap_bytes=cap_bytes,
+            estimate_bytes=1_000_130,
+            segmentation_size=segmentation_size,
+        )
 
 
 # ── Common kwargs ───────────────────────────────────────────────────────────
@@ -229,6 +234,7 @@ _REQUIRED_KEYS = frozenset(
         # Phase 6.6 new:
         "inference_batch",
         "memory_killer",
+        "static_preflight_evidence",
     }
 )
 
@@ -423,8 +429,8 @@ def test_cpu_only_host_short_circuits_with_success():
 
 
 def test_training_vram_over_budget_produces_vram_killer():
-    """When training peak exceeds the cap but intensity passes, the
-    wrapper must route to ``render_vram_report``: ``memory_killer.binding_cap
+    """When training estimate exceeds the cap but intensity passes,
+    ``memory_killer.binding_cap
     == 'vram'``, ``feasible=False``, ``status='success'`` (transport status
     is success — the verdict is infeasible; ``schema_violation`` is reserved
     for real ValidationErrors so the tuner's Phase-D.4 branch never swallows
@@ -446,15 +452,16 @@ def test_training_vram_over_budget_produces_vram_killer():
     assert out["memory_killer"] is not None
     assert isinstance(out["memory_killer"], dict)
     assert out["memory_killer"]["binding_cap"] == "vram"
-    assert out["memory_killer"]["dominant_layer"] == "big_layer"
+    assert "dominant_layer" not in out["memory_killer"]
+    evidence = StaticPreflightEvidence.model_validate(out["static_preflight_evidence"])
+    assert evidence.refused_phase.phase == "training"
 
 
 # ── 5. Training-intensity over-budget ──────────────────────────────────────
 
 
 def test_training_intensity_over_budget_produces_intensity_killer():
-    """When training VRAM fits but B*T > 800k, route to
-    ``render_intensity_report`` — the fix is a config lever, not a layer."""
+    """When the VRAM estimate fits but B*T > 800k, retain the intensity dimensions."""
     with _Patches() as p:
         p.intensity_passes.return_value = False
         out = wrapper.run_skill(
@@ -490,7 +497,7 @@ def test_both_training_caps_binding_produces_combined_killer():
         )
     assert out["feasible"] is False
     assert out["memory_killer"]["binding_cap"] == "vram+compute_intensity"
-    assert out["memory_killer"]["dominant_layer"] == "huge"
+    assert "dominant_layer" not in out["memory_killer"]
     assert out["memory_killer"]["batch_size"] == 25
 
 
@@ -498,33 +505,45 @@ def test_both_training_caps_binding_produces_combined_killer():
 
 
 def test_inference_resolver_vram_failure_produces_vram_killer():
-    """``resolve_inference_batch`` raises ``ValueError`` with a message
-    that contains ``Binding cap(s): vram.`` when every candidate B blows
-    the cap. The wrapper must parse the label, re-probe at B=1, and emit a
-    VRAM killer report."""
+    """The actual custom batch decision survives; no B=1 diagnostic re-probe."""
     with _Patches() as p:
-        p.resolve.side_effect = ValueError("No inference batch size fits. Binding cap(s): vram.")
-        # Re-probe at B=1 returns an inference probe with a dominant layer:
-        p.inference_probe = _probe(
-            mode="inference",
-            layers=[_leaf("dom_layer", "Any", 9_000_000_000)],
-            input_bytes=10,
-            output_bytes=10,
-            total_param_bytes=100,
+        decision = phase_decision(
+            phase="inference",
+            batch_size=3,
+            cap_bytes=5 * 1024**3,
+            estimate_bytes=9 * 1024**3,
+            segmentation_size=40_000,
         )
-        out = wrapper.run_skill(sandbox=None, hardware_context=_gpu_ctx(), **_run_kwargs())
+        p.resolve.side_effect = BatchSearchRefused(decision, 40_000)
+        out = wrapper.run_skill(
+            sandbox=None, hardware_context=_gpu_ctx(), vram_budget_gb=5.0, **_run_kwargs()
+        )
+        assert p.probe.call_count == 1
+        assert p.build_model.call_count == 2
     assert out["feasible"] is False
     assert out["inference_batch"] is None
     assert out["memory_killer"]["binding_cap"] == "vram"
-    assert out["memory_killer"]["dominant_layer"] == "dom_layer"
+    assert "dominant_layer" not in out["memory_killer"]
+    assert out["estimated_gb"] == 9.0
+    assert out["dominant_phase"] == "inference"
+    assert "B=3" in out["verdict"]
+    assert "9,663,676,416 bytes" in out["verdict"]
+    assert out["static_preflight_evidence"]["phases"][1] == decision.model_dump(mode="json")
 
 
 def test_inference_resolver_intensity_failure_produces_intensity_killer():
     """When the resolver fails on intensity at B=1, the wrapper must NOT
     re-probe (pure ``segmentation_size`` problem, no layer attribution)."""
     with _Patches() as p:
-        p.resolve.side_effect = ValueError(
-            "No inference batch size fits. Binding cap(s): compute_intensity."
+        p.resolve.side_effect = BatchSearchRefused(
+            phase_decision(
+                phase="inference",
+                batch_size=1,
+                cap_bytes=int(25.6 * 1024**3),
+                estimate_bytes=None,
+                segmentation_size=900_000,
+            ),
+            900_000,
         )
         out = wrapper.run_skill(
             sandbox=None,
@@ -534,6 +553,86 @@ def test_inference_resolver_intensity_failure_produces_intensity_killer():
     assert out["feasible"] is False
     assert out["memory_killer"]["binding_cap"] == "compute_intensity"
     assert out["memory_killer"]["segmentation_size"] == 900_000
+    assert out["estimated_gb"] is None
+
+
+@pytest.mark.parametrize(
+    ("failure", "status"),
+    [
+        (ValueError("unsupported input geometry"), "error"),
+        (MemoryError("host allocator refused"), "host_memory"),
+        (RuntimeError("CUDA out of memory"), "cuda_oom"),
+    ],
+)
+def test_inference_failures_keep_their_domain_without_diagnostic_reprobe(failure, status):
+    """#615: unrelated errors and allocator refusals cannot become static VRAM claims."""
+    with _Patches() as patches:
+        patches.resolve.side_effect = failure
+        out = wrapper.run_skill(None, hardware_context=_gpu_ctx(), **_run_kwargs())
+        assert patches.probe.call_count == 1
+        assert patches.build_model.call_count == 2
+    assert out["status"] == status
+    assert "memory_killer" not in out
+    assert "static_preflight_evidence" not in out
+
+
+def actual_inference_refusal(monkeypatch):
+    """Run the real resolver and wrapper with bounded synthetic probe observations."""
+    from functools import partial
+
+    from agent.skills.evaluate_vram_skill import batch_resolver
+
+    observed = []
+    inference_probe = _probe(
+        mode="inference",
+        layers=[_leaf(str(index), "Linear", 512 * 1024**2) for index in range(16)],
+        total_param_bytes=1024,
+    )
+
+    def probe(**kwargs):
+        observed.append(kwargs["input_sample"].shape[0])
+        return inference_probe
+
+    monkeypatch.setattr(batch_resolver, "probe_activation_footprint", probe)
+    monkeypatch.setattr(batch_resolver, "cuda_context_bytes", lambda: 30)
+    with _Patches() as patches:
+        patches.resolve.side_effect = partial(
+            batch_resolver.resolve_inference_decision, candidate_batches=(7, 3)
+        )
+        out = wrapper.run_skill(
+            None, hardware_context=_gpu_ctx(), vram_budget_gb=5.0, **_run_kwargs()
+        )
+        assert patches.probe.call_count == 1
+    assert observed == [7, 3]
+    return out
+
+
+def test_actual_inference_decision_reaches_wrapper_without_max_proxy_or_reprobe(monkeypatch):
+    """#615: the real resolver's large sum must survive a much smaller max diagnostic."""
+    out = actual_inference_refusal(monkeypatch)
+    assert out["feasible"] is False
+    assert out["dominant_phase"] == "inference"
+    assert out["estimated_gb"] == 8.0
+    assert out["static_preflight_evidence"]["phases"][1]["vram_estimate_bytes"] == 8_589_935_646
+    assert "8,589,935,646 bytes" in out["verdict"]
+    assert "5,368,709,120 bytes" in out["verdict"]
+
+
+def test_success_retains_legacy_diagnostics_and_separate_admission_evidence():
+    """#615: adding exact decision evidence must not rewrite successful prompt inputs."""
+    with _Patches() as patches:
+        patches.inference_probe = _probe(
+            mode="inference",
+            layers=[_leaf("a", "Linear", 1_000_000)] * 4,
+            input_bytes=10,
+            output_bytes=5,
+            total_param_bytes=100,
+        )
+        out = wrapper.run_skill(None, hardware_context=_gpu_ctx(), **_run_kwargs())
+    assert out["feasible"] is True
+    assert out["phase_breakdown"]["inference"]["total_bytes"] == 1_000_140
+    assert out["estimated_gb"] == round(1_000_140 / 1024**3, 3)
+    assert out["static_preflight_evidence"]["phases"][1]["vram_estimate_bytes"] == 1_000_130
 
 
 # ── 8. Schema violation preserved from Phase D.4 ───────────────────────────

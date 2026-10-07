@@ -36,8 +36,10 @@ from agent.schemas.hyperparam_tuning import (
     PhysicalRejection,
 )
 from agent.schemas.ordering import OrderingObservation, OrderingRefusalPhase, ResolvedOrdering
+from agent.schemas.preflight import StaticPreflightEvidence
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.training_diagnosis import derive_training_diagnosis
+from agent.skills.evaluate_vram_skill.evidence import render_static_refusal
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from core.layout import checkout_root
 from core.record_role import AttemptRole, observed_attempt_role
@@ -539,7 +541,16 @@ def run_admission_preflight(
         # F-SCANB-2 — the union's str member (the worker's truncation
         # marker) must map to "no structure", exactly like None/absent.
         _killer = _structured_mapping(resource_check.get("memory_killer"))
-        _binding = _killer.get("binding_cap", "vram")
+        _evidence = (
+            StaticPreflightEvidence.model_validate(resource_check["static_preflight_evidence"])
+            if resource_check.get("static_preflight_evidence") is not None
+            else None
+        )
+        _binding = (
+            "+".join(_evidence.binding_caps)
+            if _evidence is not None
+            else _killer.get("binding_cap", "vram")
+        )
         _dom_bytes = _killer.get("dominant_layer_bytes") or 0
         _attempt_snapshot = {
             "model_type": model_type,
@@ -561,15 +572,18 @@ def run_admission_preflight(
                 _attempt_snapshot[_k] = active_params[_k]
         try:
             physical_rejections_buffer.append(
-                PhysicalRejection(
-                    attempt_config=_attempt_snapshot,
-                    binding_cap=_binding,
-                    dominant_layer=_killer.get("dominant_layer") or "",
-                    dominant_layer_gb=round(_dom_bytes / (1024**3), 4),
-                    dominant_fraction=_killer.get("dominant_fraction") or 0.0,
-                    budget_gb=float(resource_check.get("limit_gb") or 0.0),
-                    estimated_gb=float(resource_check.get("estimated_gb") or 0.0),
-                    suggestion=resource_check.get("suggestion", ""),
+                PhysicalRejection.model_validate(
+                    {
+                        "static_preflight_evidence": _evidence,
+                        "attempt_config": _attempt_snapshot,
+                        "binding_cap": _binding,
+                        "dominant_layer": _killer.get("dominant_layer") or "",
+                        "dominant_layer_gb": round(_dom_bytes / (1024**3), 4),
+                        "dominant_fraction": _killer.get("dominant_fraction") or 0.0,
+                        "budget_gb": float(resource_check.get("limit_gb") or 0.0),
+                        "estimated_gb": resource_check.get("estimated_gb"),
+                        "suggestion": resource_check.get("suggestion", ""),
+                    }
                 )
             )
         except ValidationError as _rej_err:
@@ -590,12 +604,14 @@ def run_admission_preflight(
             round_index=round_index,
             attempt_in_round=attempt_in_round,
             conclusion=(
-                f"Skipped: estimated VRAM ({resource_check.get('estimated_gb', '?')} GB) "
-                f"exceeds 80% safety limit ({resource_check.get('limit_gb', '?')} GB)."
+                "Skipped: " + render_static_refusal(_evidence)
+                if _evidence is not None
+                else "Skipped by resource preflight: "
+                + str(resource_check.get("verdict", "No decision evidence recorded."))
             ),
             discovery=resource_check.get("verdict", ""),
             memory_update=resource_check.get(
-                "suggestion", "Reduce batch_size or segmentation_size."
+                "suggestion", "Inspect the recorded refusal evidence before changing the candidate."
             ),
             memory_extra=_vram_skip_memory_extra(resource_check, chosen_vram_budget),
         )

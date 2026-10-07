@@ -12,10 +12,10 @@ applicable Phase 6.6 cap:
       A concrete task-owned probe with no temporal dimension is still
       measured, but is not judged against invented temporal geometry.
 
-If no candidate satisfies both caps, raise ``ValueError`` whose diagnostic
-names the binding cap ("vram", "compute_intensity", or both) at the
-smallest candidate — downstream ``killer_report.py`` (§3.6) keys on this
-distinction to steer the Proposer's next attempt toward the right fix.
+If no candidate satisfies both caps, raise ``BatchSearchRefused``, a
+``ValueError`` carrying the last candidate's typed decision. Allocation
+failures retain their host/CUDA exception domain rather than inventing a
+structural VRAM estimate. Callers never need to parse the diagnostic text.
 
 Why descending search over closed form (§3.5 rationale)
 -------------------------------------------------------
@@ -43,7 +43,9 @@ from typing import TYPE_CHECKING
 import torch
 import torch.nn as nn
 
+from agent.schemas.preflight import StaticPhaseDecision
 from agent.skills.evaluate_vram_skill import compute_intensity
+from agent.skills.evaluate_vram_skill.evidence import phase_decision
 from agent.skills.evaluate_vram_skill.overhead import cuda_context_bytes
 from agent.skills.evaluate_vram_skill.probe_budgets import (
     ProbeBudgets,
@@ -137,6 +139,26 @@ class BatchSearchTimeout(Exception):
         super().__init__(record.agent_facing_summary())
 
 
+class BatchSearchRefused(ValueError):
+    """A completed static decision, with the exact tested batch and values."""
+
+    def __init__(self, decision: StaticPhaseDecision, segmentation_size: int | None):
+        self.decision = decision
+        binding = "+".join(decision.binding_caps)
+        estimate = decision.vram_estimate_bytes
+        observation = (
+            f"predicted_peak={estimate:,} B"
+            if estimate is not None
+            else "VRAM footprint not measured"
+        )
+        super().__init__(
+            f"No candidate batch satisfies both caps at segmentation_size={segmentation_size}. "
+            f"Binding cap(s): {binding}. At B={decision.batch_size}: {observation}, "
+            f"cap_bytes={decision.vram_cap_bytes:,} B, "
+            f"compute_intensity_passes={'compute_intensity' not in decision.binding_caps}."
+        )
+
+
 def resolve_inference_batch(
     model: nn.Module,
     segmentation_size: int | None,
@@ -149,6 +171,36 @@ def resolve_inference_batch(
     max_batch_size: int | None = None,
     supplied_probe: torch.Tensor | None = None,
 ) -> int:
+    """Compatibility entry point returning the selected batch as an integer.
+
+    Consumers needing admission evidence use :func:`resolve_inference_decision`.
+    Static refusals remain catchable as ``ValueError``.
+    """
+    return resolve_inference_decision(
+        model,
+        segmentation_size,
+        cap_bytes,
+        candidate_batches=candidate_batches,
+        budgets=budgets,
+        model_identity=model_identity,
+        model_io_contract=model_io_contract,
+        max_batch_size=max_batch_size,
+        supplied_probe=supplied_probe,
+    ).batch_size
+
+
+def resolve_inference_decision(
+    model: nn.Module,
+    segmentation_size: int | None,
+    cap_bytes: int,
+    *,
+    candidate_batches: Sequence[int] = _DEFAULT_CANDIDATE_BATCHES,
+    budgets: ProbeBudgets | None = None,
+    model_identity: str | None = None,
+    model_io_contract: ModelIOContract | None = None,
+    max_batch_size: int | None = None,
+    supplied_probe: torch.Tensor | None = None,
+) -> StaticPhaseDecision:
     """Return the largest candidate batch that clears both caps.
 
     Args:
@@ -163,15 +215,15 @@ def resolve_inference_batch(
             fails, the raised ``ValueError`` diagnoses why.
 
     Returns:
-        The first (largest) ``B`` for which
+        The exact decision for the first (largest) ``B`` for which
         ``predicted_peak ≤ cap_bytes`` and, when T is declared,
         ``compute_intensity.passes(B, T)``.
 
     Raises:
-        ValueError: when no candidate satisfies both caps, or when
-            ``candidate_batches`` is empty. The message names the binding
-            cap — "vram", "compute_intensity", or "vram+compute_intensity"
-            — so ``killer_report`` can emit a targeted suggestion.
+        BatchSearchRefused: no candidate satisfies the completed static checks.
+        ValueError: invalid candidate list or probe input.
+        MemoryError, RuntimeError: the last candidate could not be allocated;
+            the original exception preserves its host/CUDA domain.
     """
     if max_batch_size is not None:
         if isinstance(max_batch_size, bool) or max_batch_size < 1:
@@ -190,19 +242,20 @@ def resolve_inference_batch(
             if compute_intensity.passes(batch, segmentation_size)
         )
         if not eligible:
-            raise ValueError(
-                f"No candidate batch in {list(candidate_batches)} satisfies both caps "
-                f"at segmentation_size={segmentation_size}. "
-                "Binding cap(s): compute_intensity. "
-                "VRAM footprint not measured; no candidate passed the intensity cap. "
-                "Remediation: reduce segmentation_size or batch_size."
+            raise BatchSearchRefused(
+                phase_decision(
+                    phase="inference",
+                    batch_size=candidate_batches[-1],
+                    cap_bytes=cap_bytes,
+                    estimate_bytes=None,
+                    segmentation_size=segmentation_size,
+                ),
+                segmentation_size,
             )
         candidate_batches = eligible
 
-    last_peak: int = 0
-    last_vram_ok: bool = False
-    last_intensity_ok: bool = False
-    last_B: int = candidate_batches[-1]
+    last_decision: StaticPhaseDecision | None = None
+    last_allocation_failure: MemoryError | RuntimeError | None = None
 
     # Each candidate is timed on its own, and the search has its own
     # separate budget. Sharing one budget across every candidate is what
@@ -257,7 +310,8 @@ def resolve_inference_batch(
             # a model that would have probed fine at B=8 was never reached.
             if not is_memory_exception(exc):
                 raise
-            last_peak, last_vram_ok, last_intensity_ok, last_B = 0, False, True, B
+            last_allocation_failure = exc
+            last_decision = None
             continue
         candidate_elapsed = time.monotonic() - candidate_started
         if candidate_elapsed >= budgets.single_candidate_seconds:
@@ -301,40 +355,19 @@ def resolve_inference_batch(
             True if segmentation_size is None else compute_intensity.passes(B, segmentation_size)
         )
 
-        if vram_ok and intensity_ok:
-            return B
-
-        last_peak = peak
-        last_vram_ok = vram_ok
-        last_intensity_ok = intensity_ok
-        last_B = B
-
-    # Diagnose which cap was binding at the smallest attempted batch. Both
-    # can be binding simultaneously (e.g. a huge T both blows VRAM and trips
-    # the intensity cap even at B=1) — report both in that case so
-    # killer_report can surface two suggestions.
-    reasons: list[str] = []
-    if not last_vram_ok:
-        reasons.append("vram")
-    if not last_intensity_ok:
-        reasons.append("compute_intensity")
-    binding = "+".join(reasons) if reasons else "unknown"
-
-    remediation = (
-        "reduce model memory or use a smaller task-supported inference batch"
-        if segmentation_size is None
-        else (
-            "if binding includes 'vram', reduce model size or segmentation_size; "
-            "if binding includes 'compute_intensity', reduce segmentation_size "
-            "or batch_size"
+        last_decision = phase_decision(
+            phase="inference",
+            batch_size=B,
+            cap_bytes=cap_bytes,
+            estimate_bytes=peak,
+            segmentation_size=segmentation_size,
         )
-    )
-    raise ValueError(
-        f"No candidate batch in {list(candidate_batches)} satisfies both caps "
-        f"at segmentation_size={segmentation_size}. "
-        f"Binding cap(s): {binding}. "
-        f"At B={last_B}: predicted_peak={last_peak:,} B, "
-        f"cap_bytes={cap_bytes:,} B, "
-        f"compute_intensity_passes={last_intensity_ok}. "
-        f"Remediation: {remediation}."
-    )
+        last_allocation_failure = None
+        if vram_ok and intensity_ok:
+            return last_decision
+
+    if last_allocation_failure is not None:
+        raise last_allocation_failure
+    if last_decision is None:
+        raise RuntimeError("Inference search ended without a decision or allocation failure")
+    raise BatchSearchRefused(last_decision, segmentation_size)

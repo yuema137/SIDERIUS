@@ -165,10 +165,10 @@ class TestBuildGateExhaustionVramOnly:
             vram_budget_gb=4.0,
             time_budget_minutes=20.0,
         )
-        assert "VRAM gate" in info.summary_message
+        assert "resource preflight" in info.summary_message
         # Verdict line points at the right lever
-        assert "too heavy" in info.summary_message
-        assert "Reduce parameter count" in info.summary_message
+        assert "too heavy" not in info.summary_message
+        assert "recorded cause and evidence basis" in info.summary_message
 
 
 # ---------------------------------------------------------------------------
@@ -248,8 +248,8 @@ class TestBuildGateExhaustionMixed:
             vram_budget_gb=4.0,
             time_budget_minutes=20.0,
         )
-        assert "multiple" in info.summary_message
-        assert "Both parameter count AND per-step compute" in info.summary_message
+        assert "Inspect resource and time refusals separately" in info.summary_message
+        assert "Both parameter count AND per-step compute" not in info.summary_message
 
 
 # ---------------------------------------------------------------------------
@@ -479,10 +479,10 @@ class TestBuildGateExhaustionTriggerBPopulated:
         )
         msg = info.summary_message
         # Lead phrase per §11.4 spec.
-        assert "Model too large" in msg
+        assert "Model too large" not in msg
         assert "3 consecutive rounds" in msg
         assert "after 2 successful round(s)" in msg
-        assert "reduce model size" in msg
+        assert "recorded causes and evidence" in msg
         # Burst-focused diagnostic.
         assert "Burst baseline" in msg
         assert "2.00×" in msg  # baseline factor 8.0/4.0
@@ -505,7 +505,7 @@ class TestBuildGateExhaustionTriggerBPopulated:
             completed_rounds=1,
         )
         assert info is not None
-        assert "VRAM/time gate" in info.summary_message
+        assert "resource preflight and the time gate" in info.summary_message
 
 
 # ---------------------------------------------------------------------------

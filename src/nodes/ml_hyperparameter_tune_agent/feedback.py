@@ -4,7 +4,7 @@ Step 07 PR 07b, C7 (operator scope amendment): moved VERBATIM out of
 ``ml_hyperparameter_tune_agent.py``. Zero behaviour change.
 
 What belongs here: the structured signals a finished iteration hands forward —
-gate exhaustion (the architecture was too heavy for the budgets), trial-validity
+gate exhaustion (attempts were refused by resource checks), trial-validity
 feedback (trials ran, succeeded, then failed their scientific gates), the
 disallowed-pattern collection, and the compact summaries that render them.
 
@@ -24,6 +24,8 @@ from agent.schemas.health_feedback import (
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
 )
+from agent.schemas.preflight import StaticPreflightEvidence
+from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields, render_static_refusal
 from agent.utils.architectural_pattern_tagger import (
     TIME_FACTOR_THRESHOLD,
     VRAM_FACTOR_THRESHOLD,
@@ -162,6 +164,10 @@ def _collect_disallowed_patterns(
             continue
 
         mem = r.get("memory") or {}
+        if preflight_memory_fields(mem).get("preflight_outcome") == "STATIC_PREFLIGHT_REFUSAL":
+            # A structural estimate cannot establish architectural infeasibility.
+            # The independent time-refusal/actual-timeout paths retain their policy.
+            continue
 
         vram_factor = None
         if vram_budget_gb and vram_budget_gb > 0:
@@ -503,6 +509,15 @@ def _build_gate_exhaustion(
             trained=_attempts_that_trained(report_records),
         )
 
+    static_refusals: set[str] = set()
+    for record in report_records:
+        fields = preflight_memory_fields(record.get("memory") or {})
+        if fields.get("preflight_outcome") == "STATIC_PREFLIGHT_REFUSAL":
+            evidence = StaticPreflightEvidence.model_validate(fields["static_preflight_evidence"])
+            static_refusals.add(render_static_refusal(evidence))
+    if static_refusals:
+        summary += " " + " ".join(sorted(static_refusals))
+
     return GateExhaustionInfo(
         total_attempts=len(report_records),
         vram_gated_attempts=len(vram_gated),
@@ -560,7 +575,7 @@ def _render_gate_exhaustion_summary(
     if vram_gated and not time_gated:
         parts.append(
             f"Of {total} attempt(s), {vram_gated} were rejected by the "
-            f"pre-flight VRAM gate ({other} other failure(s))."
+            f"resource preflight ({other} other failure(s))."
         )
     elif time_gated and not vram_gated:
         parts.append(
@@ -569,8 +584,8 @@ def _render_gate_exhaustion_summary(
         )
     else:
         parts.append(
-            f"Of {total} attempt(s), {vram_gated} were rejected by the VRAM "
-            f"gate and {time_gated} by the time gate "
+            f"Of {total} attempt(s), {vram_gated} were rejected by resource "
+            f"preflight and {time_gated} by the time gate "
             f"({other} other failure(s))."
         )
 
@@ -619,9 +634,9 @@ def _render_gate_exhaustion_summary(
     # Verdict line — point the next proposer at the right lever.
     if vram_gated and not time_gated:
         parts.append(
-            "Verdict: the proposed architecture is too heavy for the active "
-            "VRAM budget. Reduce parameter count and/or layer count so the "
-            "next baseline lands below the budget."
+            "Inspect each resource refusal's recorded cause and evidence basis. "
+            "A structural estimate or compute-intensity rule does not establish "
+            "measured GPU excess or a need to shrink the architecture."
         )
     elif time_gated and not vram_gated:
         parts.append(
@@ -631,8 +646,9 @@ def _render_gate_exhaustion_summary(
         )
     else:
         parts.append(
-            "Verdict: the proposed architecture is over budget on multiple "
-            "axes. Both parameter count AND per-step compute must come down."
+            "Inspect resource and time refusals separately. Their recorded "
+            "causes and evidence determine which changes are justified; static "
+            "resource checks do not establish measured GPU excess."
         )
 
     return " ".join(parts)
@@ -659,8 +675,8 @@ def _render_gate_exhaustion_trigger_b_summary(
     """One-paragraph LLM-readable synthesis for the Phase L Trigger B
     case — the search collapsed into a fail-round burst after some
     successful rounds (§11.4). Lead sentence makes the
-    "model too large after K successful rounds" framing explicit so the
-    next proposer reduces model size before exploring further.
+    failed-round burst explicit without inferring GPU capacity from a
+    historical status name. Time-only wording remains unchanged.
     """
     # Lead sentence — Trigger B framing per §11.4 spec.
     if vram_gated and not time_gated:
@@ -669,15 +685,25 @@ def _render_gate_exhaustion_trigger_b_summary(
         gated_axis = "time"
     else:
         gated_axis = "VRAM/time"
-    parts = [
-        f"Model too large — {consecutive_fail_rounds_at_exit} consecutive "
-        f"rounds exhausted attempts at the {gated_axis} gate after "
-        f"{completed_rounds} successful round(s); proposer should reduce "
-        f"model size before the next iteration."
-    ]
+    if vram_gated:
+        parts = [
+            f"{consecutive_fail_rounds_at_exit} consecutive rounds exhausted attempts "
+            f"at resource preflight{' and the time gate' if time_gated else ''} "
+            f"after {completed_rounds} successful round(s). Inspect the recorded "
+            "causes and evidence before choosing changes; a static refusal "
+            "does not establish measured GPU excess."
+        ]
+    else:
+        parts = [
+            f"Model too large — {consecutive_fail_rounds_at_exit} consecutive "
+            f"rounds exhausted attempts at the {gated_axis} gate after "
+            f"{completed_rounds} successful round(s); proposer should reduce "
+            f"model size before the next iteration."
+        ]
+    resource_count = f"{vram_gated} resource-preflight refusals" if vram_gated else "0 VRAM-gated"
     parts.append(
         f"Burst breakdown: {total} attempt(s) "
-        f"({vram_gated} VRAM-gated, {time_gated} time-gated, "
+        f"({resource_count}, {time_gated} time-gated, "
         f"{other} other failures)."
     )
 

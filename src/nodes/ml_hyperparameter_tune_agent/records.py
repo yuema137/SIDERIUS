@@ -28,6 +28,7 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.ordering import OrderingObservation, ResolvedOrdering
 from agent.skills.evaluate_time_skill.wrapper import _aggregate_inference_file_timings
+from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from core.checkpoint_selection import CheckpointSelection
 from core.durable_io import publish_json_atomically
 from core.record_role import AttemptRole
@@ -1628,6 +1629,7 @@ def build_attempt_record(
     # was set); omitted when the gate fell back to free×0.8.
     # Mode is inferred from `time_mode` above when present.
     # See docs/resource_estimator_implement.md §10.4.
+    final_record["memory"].update(preflight_memory_fields(resource_check))
     if chosen_vram_budget is not None:
         final_record["memory"]["vram_estimate_gb"] = resource_check.get("estimated_gb")
         final_record["memory"]["vram_budget_gb"] = resource_check.get("limit_gb")
