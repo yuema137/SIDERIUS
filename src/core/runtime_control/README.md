@@ -154,3 +154,52 @@ is provided by this change. Successful ordinary output and launch semantics rema
 unchanged; exception/orphan cleanup deliberately improves. The shared supervision
 source identity changes, including the existing estimation assembly digest, so
 external historical estimator qualifications must be refreshed explicitly.
+
+### Preparing a checkpoint reference on CPU
+
+`checkpoint_identity_runner.prepare_checkpoint_identity` can produce the explicit
+reference required by native inference measurement. It reads and hashes a completed
+native checkpoint in a fixed CPU worker; it does not deserialize weights, import
+model registries or select a scientific task. This interface supports the native
+filename owned by `training_checkpoint_path` and its existing completion marker.
+Historical artifact sidecars are not required.
+
+1. Supply a `CheckpointIdentityRequest` with the absolute native checkpoint path,
+   model type, experiment ID and a fresh request nonce. Set `cooperative_seconds`
+   to the same work allowance supplied in `ProcessLimits`; the parent remains the
+   hard deadline owner.
+2. Supply explicit process limits, the child environment and an absolute,
+   caller-owned `request_directory`. The adapter creates a temporary request
+   directory there and removes it on completion. Package-bound callers pass the
+   existing `subprocess_env()` result so the usual code-integrity guard applies.
+3. Read `CheckpointPreparationResult.status`. Only `available` has an accepted
+   `reference`. Unavailable results retain parsed worker evidence and lifecycle
+   information where available; their raw worker receipt is not authorization.
+   The result also reports request preparation, supervised execution and final
+   checking/cleanup time. No attempt budget is debited by this interface.
+
+Preparation consumes the supplied allowance. With 10 seconds available, request
+preparation taking 3 seconds and package preparation taking 2 seconds leave at
+most 5 seconds for monitoring preparation and the worker. Each layer deducts its
+own preceding work; expiry before launch refuses without spawning. Parsing and
+request cleanup count too: a valid worker receipt that finishes those steps late
+becomes unavailable, retaining its evidence and actual elapsed time.
+
+The worker hashes the same unbuffered regular file twice, checks metadata and
+pathname continuity, and refuses missing completion markers, changed files,
+symlinks and unsupported file types. The parent requires the matching request
+nonce, child PID and native reference, plus a clean process lifecycle. Package
+refusals retain child cleanup evidence. The file checks are shared with the bound
+inference loader; two checks detect ordinary mutation, not a hostile-writer
+snapshot. A later production load must still verify the same identity.
+
+Only this fixed worker's compact protocol output is supported. The supervisor
+does not impose a general output-memory cap or interrupt blocked parent request,
+package or filesystem operations. If parent preparation returns late, it refuses
+instead of granting the child a fresh allowance; necessary cleanup may overrun
+the work deadline and is reported. This interface does not connect trial/formal
+phase measurement, shared attempt budgets, inference authorization or GPU memory
+stopping. Those remain separate prerequisites for isolated onboarding. Shared
+file-verification code participates in the estimator assembly identity, so source
+qualification must be updated even though absent-checkpoint request bytes and
+ordinary inference loading remain unchanged.

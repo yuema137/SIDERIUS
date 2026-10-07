@@ -81,6 +81,17 @@ class ObservedProcessResult(BaseModel):
     lifecycle: ProcessLifecycle
 
 
+def remaining_process_limits(limits: ProcessLimits, elapsed: float) -> ProcessLimits:
+    """Deduct one caller-owned preparation interval without replenishing work."""
+    remaining = limits.deadline_seconds - elapsed
+    if remaining <= 0:
+        raise ProcessSupervisionError(
+            "Process preparation exhausted the work deadline before launch",
+            ProcessLifecycle(elapsed_seconds=elapsed, stop_reason="work_deadline_exceeded"),
+        )
+    return limits.model_copy(update={"deadline_seconds": remaining})
+
+
 def _finalize(
     proc: subprocess.Popen,
     *,
@@ -171,13 +182,15 @@ def supervise_process(
     A zero-exit leader that needed descendant termination is not clean success.
     Legacy deadline stops retain their existing timeout dictionary projection.
     """
+    strict_started = time.perf_counter() if limits is not None else None
     if limits is not None:
+        assert strict_started is not None
         baseline = observe_tree_rss(os.getpgrp())
         if baseline.status != "complete":
             raise ProcessSupervisionError(
                 "Process RSS monitoring unavailable before launch",
                 ProcessLifecycle(
-                    elapsed_seconds=0,
+                    elapsed_seconds=time.perf_counter() - strict_started,
                     stop_reason="monitoring_unavailable",
                     last_rss_observation=baseline,
                 ),
@@ -189,7 +202,11 @@ def supervise_process(
     cleanup_poll = poll_seconds if poll_seconds > 0 else 0.05
     if observer is not None:
         observer.capture_baseline()
-    started = time.perf_counter()
+    started = strict_started if strict_started is not None else time.perf_counter()
+    if limits is not None:
+        # RSS and baseline preparation can block the parent. Once they return,
+        # expired work must refuse here rather than give a fresh child allowance.
+        remaining_process_limits(limits, time.perf_counter() - started)
     owned = deadline_provider is not None or limits is not None
     session_kwargs: _SessionOptions = {"start_new_session": True} if owned else {}
     proc = subprocess.Popen(
@@ -357,6 +374,62 @@ def run_observed_process(
     return result.completed, result.timeout
 
 
+def supervise_subprocess(
+    cmd: list[str],
+    *,
+    env: dict,
+    preexec_fn: Callable[[], None] | None,
+    capture_stdout: bool,
+    deadline_provider: Callable[[], tuple[float | None, str]] | None = None,
+    grace_seconds: float = 0.0,
+    poll_seconds: float = 0.0,
+    label: str = "",
+    observer: ProcessObserver | None = None,
+    limits: ProcessLimits | None = None,
+) -> ObservedProcessResult:
+    """Retain package refusal checks around the process owner."""
+    prepared_at = time.perf_counter() if limits is not None else None
+    from core.local_code.child import prepare_child
+
+    invocation = prepare_child(cmd, env)
+    if limits is not None and prepared_at is not None:
+        limits = remaining_process_limits(limits, time.perf_counter() - prepared_at)
+    try:
+        result = supervise_process(
+            invocation.argv,
+            env=invocation.env,
+            preexec_fn=preexec_fn,
+            capture_stdout=capture_stdout,
+            deadline_provider=deadline_provider,
+            grace_seconds=grace_seconds,
+            poll_seconds=poll_seconds,
+            label=label,
+            observer=observer,
+            limits=limits,
+        )
+    except Exception as exc:
+        try:
+            invocation.check(
+                exc.returncode if isinstance(exc, subprocess.CalledProcessError) else None
+            )
+        except Exception as refusal:
+            evidence = (
+                exc.lifecycle
+                if isinstance(exc, ProcessSupervisionError)
+                else getattr(exc, "process_lifecycle", None)
+            )
+            if isinstance(evidence, ProcessLifecycle):
+                refusal.process_lifecycle = evidence  # type: ignore[attr-defined]
+            raise
+        raise
+    try:
+        invocation.check(result.completed.returncode if result.completed is not None else None)
+    except Exception as refusal:
+        refusal.process_lifecycle = result.lifecycle  # type: ignore[attr-defined]
+        raise
+    return result
+
+
 def run_observed_subprocess(
     cmd: list[str],
     *,
@@ -370,25 +443,17 @@ def run_observed_subprocess(
     observer: ProcessObserver | None = None,
     limits: ProcessLimits | None = None,
 ) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
-    """Retain package refusal checks around the process owner."""
-    from core.local_code.child import prepare_child
-
-    invocation = prepare_child(cmd, env)
-    try:
-        result, kill_info = run_observed_process(
-            invocation.argv,
-            env=invocation.env,
-            preexec_fn=preexec_fn,
-            capture_stdout=capture_stdout,
-            deadline_provider=deadline_provider,
-            grace_seconds=grace_seconds,
-            poll_seconds=poll_seconds,
-            label=label,
-            observer=observer,
-            limits=limits,
-        )
-    except Exception as exc:
-        invocation.check(exc.returncode if isinstance(exc, subprocess.CalledProcessError) else None)
-        raise
-    invocation.check(result.returncode if result is not None else None)
-    return result, kill_info
+    """Keep the historical tuple facade over package-aware typed supervision."""
+    result = supervise_subprocess(
+        cmd,
+        env=env,
+        preexec_fn=preexec_fn,
+        capture_stdout=capture_stdout,
+        deadline_provider=deadline_provider,
+        grace_seconds=grace_seconds,
+        poll_seconds=poll_seconds,
+        label=label,
+        observer=observer,
+        limits=limits,
+    )
+    return result.completed, result.timeout

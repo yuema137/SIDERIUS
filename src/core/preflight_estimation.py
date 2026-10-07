@@ -51,6 +51,7 @@ def estimation_assembly_digest() -> str:
             "core/runtime_control/inference_measurement_assessment.py",
             "core/runtime_control/inference_checkpoint_reference.py",
             "core/stream_identity.py",
+            "core/file_identity.py",
             "execute_tools/inference_checkpoint.py",
             "core/runtime_control/gpu_inference_components.py",
             "core/runtime_control/gpu_measurement_spec.py",

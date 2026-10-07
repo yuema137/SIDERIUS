@@ -10,6 +10,15 @@ from agent.schemas.data_analysis.common import NonEmptyStr, Sha256
 from core.sandbox_layout import training_checkpoint_path
 
 
+def validate_native_checkpoint_path(path_value: str, model_type: str, experiment_id: str) -> None:
+    """Share the native filename/path rule before and after bytes are identified."""
+    path = Path(path_value)
+    if not path.is_absolute():
+        raise ValueError("inference checkpoint path must be absolute")
+    if path != training_checkpoint_path(path.parent, model_type, experiment_id):
+        raise ValueError("inference checkpoint path differs from its model and experiment")
+
+
 class InferenceCheckpointReference(BaseModel):
     """Supplied identity, never checkpoint discovery or a model construction rule."""
 
@@ -29,6 +38,4 @@ class InferenceCheckpointReference(BaseModel):
 
     def validate_native_path(self, model_type: str) -> None:
         """Use the native writer's owner rather than interpret a filename."""
-        path = Path(self.checkpoint_path)
-        if path != training_checkpoint_path(path.parent, model_type, self.experiment_id):
-            raise ValueError("inference checkpoint path differs from its model and experiment")
+        validate_native_checkpoint_path(self.checkpoint_path, model_type, self.experiment_id)

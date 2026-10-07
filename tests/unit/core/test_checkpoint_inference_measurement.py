@@ -359,6 +359,7 @@ def test_checkpoint_receipt_cannot_replace_complete_workload_evidence(bound_spec
         "core/runtime_control/inference_checkpoint_reference.py",
         "core/runtime_control/inference_measurement_assessment.py",
         "core/stream_identity.py",
+        "core/file_identity.py",
         "execute_tools/inference_checkpoint.py",
     ],
 )

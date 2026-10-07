@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import math
 import os
-import stat
 import time
 from collections.abc import Callable
 from typing import Any, BinaryIO
 
+from core.file_identity import (
+    FileIdentityError,
+    FileSnapshot,
+    open_identity_file,
+    path_matches_snapshot,
+    regular_file_snapshot,
+)
 from core.runtime_control.inference_checkpoint_reference import InferenceCheckpointReference
 from core.stream_identity import stream_file_identity
 
@@ -66,13 +72,13 @@ def load_bound_inference_checkpoint(
         if clock() >= deadline_at:
             raise TimeoutError("checkpoint verification exhausted the measurement deadline")
 
-    def metadata(handle: BinaryIO) -> tuple[int, int, int, int, int]:
-        info = os.fstat(handle.fileno())
-        if not stat.S_ISREG(info.st_mode):
-            raise ValueError("inference checkpoint is not a regular file")
-        if info.st_size != reference.checkpoint_byte_size:
-            raise ValueError("inference checkpoint byte size differs from its reference")
-        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+    def metadata(handle: BinaryIO) -> FileSnapshot:
+        try:
+            return regular_file_snapshot(handle, expected_size=reference.checkpoint_byte_size)
+        except FileIdentityError as exc:
+            if exc.reason == "not_regular":
+                raise ValueError("inference checkpoint is not a regular file") from exc
+            raise ValueError("inference checkpoint byte size differs from its reference") from exc
 
     def verify(handle: BinaryIO) -> None:
         handle.seek(0)
@@ -84,9 +90,7 @@ def load_bound_inference_checkpoint(
 
     check_budget()
     assert_training_sentinel(reference.checkpoint_path, reference.experiment_id)
-    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(reference.checkpoint_path, flags)
-    with os.fdopen(descriptor, "rb", buffering=0) as handle:
+    with open_identity_file(reference.checkpoint_path) as handle:
         before = metadata(handle)
         verify(handle)
         if metadata(handle) != before:
@@ -101,8 +105,8 @@ def load_bound_inference_checkpoint(
         )
         check_budget()
         verify(handle)
-        current_path = os.stat(reference.checkpoint_path, follow_symlinks=False)
-        if metadata(handle) != before or (current_path.st_dev, current_path.st_ino) != before[:2]:
+        path_matches = path_matches_snapshot(reference.checkpoint_path, before)
+        if metadata(handle) != before or not path_matches:
             raise ValueError("inference checkpoint changed during loading")
         check_budget()
     return loaded, reference
