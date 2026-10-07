@@ -18,16 +18,19 @@ autograd on two parameters costs microseconds and cannot be fooled.
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 
 import pytest
 import torch
 from torch import nn
+from torch.utils.data import DataLoader, TensorDataset
 
 from core.runtime_control.gpu_measurement_phases import (
     CandidateComponents,
     PhaseJournal,
     run_measured_phases,
 )
+from execute_tools.task_probe_batch import InferenceProbeBatches
 
 
 class _TinyNet(nn.Module):
@@ -52,12 +55,24 @@ def _components(*, lr: float = 0.1, detach: bool = False) -> CandidateComponents
         # that is numerically identical and connected to nothing.
         return base_loss(output.detach() if detach else output, tgt)
 
+    def inference_batches(units):
+        dataset = TensorDataset(inputs.repeat(units, 1))
+        return nullcontext(
+            InferenceProbeBatches(
+                loader=DataLoader(dataset, batch_size=len(inputs)),
+                dataset_samples=len(dataset),
+                selected_samples=len(dataset),
+                selected_batches=units,
+            )
+        )
+
     return CandidateComponents(
         model=model,
         model_input=inputs,
         loss_target=target,
         optimizer=torch.optim.AdamW(model.parameters(), lr=lr),
         loss_fn=loss_fn,
+        inference_batches_factory=inference_batches,
     )
 
 
@@ -532,19 +547,11 @@ class TestInferenceHoldsOneRealStateInsteadOfRepeating:
         _run("inference", inference_batches=1, build_components=build, phase_observed_enough=hold)
         assert seen == [True]
 
-    def test_the_output_is_released_before_the_next_forward(self):
-        """The two-resident defect, as a lifecycle property.
+    def test_the_output_lifetime_matches_the_production_task_stream(self):
+        """The prior batch and its last view remain live during the next forward.
 
-        Leaving `output` bound across iterations means the next forward
-        computes a second full output while the first is still alive. At the
-        production batch of 25 each is 976 MiB; the measured effect was the
-        pool growing 2830 -> 4266 MiB and the driver figure reaching 4870
-        against a real 3434.
-
-        Asserted at the START of each forward: every output handed out
-        before this one must already be collectable. Weak references
-        throughout -- a strong one would keep the tensor alive itself and
-        the test could never observe a release.
+        Releasing them early would under-read the actual task inference loop.
+        Weak references observe lifetime without changing it.
         """
         import gc
         import weakref
@@ -573,29 +580,22 @@ class TestInferenceHoldsOneRealStateInsteadOfRepeating:
             phase_observed_enough=lambda: True,
         )
         assert len(alive_at_forward) == 3, "all three configured batches must still run"
-        assert alive_at_forward == [0, 0, 0], (
-            f"an earlier output survived into a later forward: {alive_at_forward}"
-        )
-        assert outcome.realism.outputs_released == 3
+        assert alive_at_forward == [0, 1, 1]
+        assert outcome.realism.outputs_released == 0
 
-    def test_every_executed_batch_releases_its_output(self):
-        """The counter is the artifact-visible form of the property, so a
-        reader of a persisted report can check it without rerunning."""
+    def test_every_executed_batch_records_real_coverage(self):
+        """Coverage counts real consumed examples and does not claim early releases."""
         for batches in (1, 2, 3):
             outcome = _run(
                 "inference", inference_batches=batches, phase_observed_enough=lambda: True
             )
-            assert outcome.realism.outputs_released == batches
+            assert outcome.realism.outputs_released == 0
             assert outcome.realism.inference_batches == batches
+            assert outcome.realism.inference_data.consumed_samples == 2 * batches
 
-    def test_the_release_does_not_depend_on_the_parent_confirming(self):
-        """The peak that was hidden appeared on batches AFTER the parent
-        stopped sampling. So the release must not be conditional on the
-        parent's answer -- otherwise the exact case that concealed it is
-        the case that still leaks.
-        """
+    def test_data_coverage_does_not_imply_driver_sampling_succeeded(self):
         outcome = _run("inference", inference_batches=3, phase_observed_enough=lambda: False)
-        assert outcome.realism.outputs_released == 3
+        assert outcome.realism.outputs_released == 0
         assert outcome.realism.peak_state_observed is False
 
     def test_a_confirmed_hold_records_the_sample_target_as_reached(self):

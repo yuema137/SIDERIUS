@@ -53,6 +53,7 @@ from core.runtime_control.gpu_measurement_worker_main import (
 )
 from core.runtime_control.gpu_requirement import CandidateMeasurementRequest
 from execute_tools.task_data_path import EpochSamplingParams, TaskProbeDataSpec
+from tests.helpers.inference_measurement import evaluation_probe
 from tests.helpers.two_family_profile import make_two_family_profile
 
 MODEL_TYPE = "c2probe"
@@ -553,6 +554,7 @@ class TestTheInferencePhaseUsesTheProductionBatch:
         )
 
         batch = resolve_inference_batch(MODEL_TYPE)
+        probe = evaluation_probe(tmp_path, rows=batch * 2 + 1, data_dir=data_dir)
         return _spec(
             tmp_path,
             data_dir,
@@ -563,6 +565,9 @@ class TestTheInferencePhaseUsesTheProductionBatch:
                     model_config={},
                     train_config={"batch_size": 2},
                     inference_batch_size=batch,
+                    segmentation_applicability="not_applicable"
+                    if phase == "inference"
+                    else "temporal",
                 ),
                 request_id="req-inf",
                 device_uuid=UUID,
@@ -570,6 +575,7 @@ class TestTheInferencePhaseUsesTheProductionBatch:
                 deadline_seconds=60.0,
             ),
             inference_batch_size=batch,
+            task_probe_data=probe if phase == "inference" else None,
         )
 
     def test_the_inference_input_uses_the_production_batch_not_the_training_one(
@@ -581,8 +587,15 @@ class TestTheInferencePhaseUsesTheProductionBatch:
 
         spec = self._spec(tmp_path, registered, "inference")
         components = build_production_components(spec)()
-        assert components.model_input.shape[0] == resolve_inference_batch(MODEL_TYPE)
-        assert components.model_input.shape[0] != 2, "not the training batch"
+        assert components.model_input is None
+        with components.inference_batches_factory(2) as workload:
+            inputs, _ = next(iter(workload.loader))
+        assert inputs.shape[0] == resolve_inference_batch(MODEL_TYPE)
+        assert inputs.shape[0] != 2, "not the training batch"
+        assert inputs.dtype == torch.int16
+        assert components.optimizer is None
+        assert components.loss_target is None
+        assert components.loss_fn is None
 
     def test_the_training_input_still_uses_the_training_batch(self, tmp_path, registered):
         """The validated 1474/1476 MiB training result must not move."""

@@ -58,8 +58,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from torch.utils.data import DataLoader
 
 from core.runtime_control.session import RuntimeVerificationSession
-from execute_tools.inference_forward import forward_inference_batch
 from execute_tools.inference_runtime import InferenceRuntimeEvidence
+from execute_tools.inference_stream import InferenceProgress, prediction_stream
 from execute_tools.task_data_path import (
     DeliverableSourceContext,
     DeliverableWriteRequest,
@@ -141,32 +141,7 @@ def run_generic_inference(
         if runtime_session is not None
         else None
     )
-    produced = 0
-    batches = 0
-
-    def _prediction_stream():
-        """Yield detached predictions without retaining the complete scope."""
-        nonlocal batches, produced
-        iterator = iter(loader)
-        while True:
-            batch_started = evidence.start_batch() if evidence is not None else 0.0
-            try:
-                batch = next(iterator)
-            except StopIteration:
-                break
-            # `validation_dataset` yields (model_input, supervision_target);
-            # inference consumes the input and ignores the target, which is
-            # present because ONE method serves both the R3 pass and this one.
-            inputs = batch[0] if isinstance(batch, (list, tuple)) else batch
-            predictions = forward_inference_batch(
-                model, inputs, device=device, input_dtype=input_dtype, stage="task inference"
-            )
-            batches += 1
-            for prediction in predictions:
-                produced += 1
-                yield prediction.detach().cpu()
-            if evidence is not None:
-                evidence.finish_batch(batch_started, len(predictions))
+    progress = InferenceProgress()
 
     request = write_request.model_copy(
         update={
@@ -177,17 +152,26 @@ def run_generic_inference(
             ),
         }
     )
-    data_path.write_deliverable(_prediction_stream(), request)
-    if produced != dataset_size:
+    predictions = prediction_stream(
+        loader,
+        model=model,
+        device=device,
+        input_dtype=input_dtype,
+        progress=progress,
+        stage="task inference",
+        runtime_evidence=evidence,
+    )
+    data_path.write_deliverable(predictions, request)
+    if progress.samples != dataset_size:
         raise RuntimeError(
-            f"task deliverable writer consumed {produced} predictions, "
+            f"task deliverable writer consumed {progress.samples} predictions, "
             f"but the evaluation scope materialized {dataset_size} samples"
         )
     if evidence is not None:
         evidence.finish()
     return GenericInferenceOutcome(
-        samples=produced,
-        batches=batches,
+        samples=progress.samples,
+        batches=progress.batches,
         inference_seconds=time.perf_counter() - started,
         deliverable_name=task_declared_deliverable_name(data_path, request),
     )

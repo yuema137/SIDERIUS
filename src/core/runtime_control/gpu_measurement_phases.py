@@ -19,7 +19,7 @@ against a mock.
 **What is deliberately NOT simulated.** The known under-read axes stay
 under-read here and are recorded rather than papered over:
 
-  * one preloaded batch instead of a `DataLoader` pipeline;
+  * training uses one preloaded batch; inference reads bounded evaluation batches;
   * a handful of steps instead of an epoch;
   * a single worker instead of two concurrent chains.
 
@@ -40,8 +40,12 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from execute_tools.task_probe_batch import InferenceProbeBatches
 
 from core.local_code.failure import raise_if_code_package_failure
 from core.runtime_control.gpu_measurement_spec import (
@@ -54,6 +58,10 @@ from core.runtime_control.gpu_measurement_spec import (
 from core.runtime_control.gpu_requirement import MeasuredPhase
 
 _MIB = 1024 * 1024
+
+
+class _InferenceDeadlineReached(Exception):
+    """Only the worker's own elapsed-budget check may raise this signal."""
 
 
 @dataclass(frozen=True)
@@ -81,6 +89,13 @@ class CandidateComponents:
     #: How much of the dataset the bounded loader actually read (D-C2-12).
     #: Recorded so "bounded" is auditable rather than asserted.
     bounded_read: Any = None
+    #: Inference opens a bounded evaluation loader inside the measured phase.
+    #: Training retains its existing preloaded-batch contract.
+    inference_batches_factory: (
+        Callable[[int], AbstractContextManager[InferenceProbeBatches]] | None
+    ) = None
+    inference_device: str = "cpu"
+    inference_input_dtype: Any = None
 
 
 @dataclass
@@ -286,10 +301,8 @@ def run_measured_phases(
         "trainable_parameter_count": None,
         "peak_state_holds": 0,
         "peak_state_observed": False,
-        #: Outputs explicitly released before the following forward. Equal
-        #: to the batches executed when the lifecycle is correct; a shortfall
-        #: means an output survived into the next forward, which is the
-        #: two-resident state that inflated the measurement to 4870 MiB.
+        #: Kept for reading historical reports; the shared prediction stream
+        #: now owns output lifetimes and does not release them early.
         "outputs_released": 0,
     }
     #: Kept out of `counters` so it never reaches `RealismEvidence(**counters)`.
@@ -584,99 +597,101 @@ def _run_inference(
     hold_peak_state: Callable[[], bool] | None = None,
     trace: Any = None,
 ) -> tuple[int, PhaseStatus, str]:
-    """Forward only, outside autograd -- the shape production actually runs.
-
-    `inference_grad_free` is recorded from the OUTPUT tensor rather than
-    from the fact that `no_grad()` was entered. Entering the context proves
-    the code meant to; checking `requires_grad` on what came out proves it
-    worked. Under `no_grad` no activation graph is retained, and the
-    retained graph is most of what a training peak is made of -- so
-    measuring inference with one would silently return a training-shaped
-    number for an inference requirement.
-    """
+    """Consume bounded evaluation predictions through the production stream."""
     import torch
 
-    executed = 0
+    from core.runtime_control.gpu_measurement_spec import (
+        InferenceBatchObservation,
+        InferenceDataCoverage,
+    )
+    from execute_tools.inference_stream import InferenceProgress, prediction_stream
+
+    progress = InferenceProgress()
+    observations: list[InferenceBatchObservation] = []
+    grad_free = True
     status: PhaseStatus = "COMPLETED"
     detail = ""
-    grad_free = True
+
+    def observe(inputs: Any, output: Any) -> None:
+        nonlocal grad_free
+        counters["forward_calls"] += 1
+        counters["inference_batches"] += 1
+        grad_free = grad_free and not output.requires_grad
+        observations.append(
+            InferenceBatchObservation(
+                shape=tuple(inputs.shape),
+                storage_dtype=str(inputs.dtype),
+                input_dtype=str(components.inference_input_dtype or inputs.dtype),
+                output_shape=tuple(output.shape),
+            )
+        )
+        if hold_peak_state is not None:
+            _synchronize_device(output)
+            if trace is not None:
+                trace.record(
+                    "after_forward_output_resident",
+                    batch_index=progress.batches - 1,
+                    synchronize=True,
+                    model=components.model,
+                    model_input=inputs,
+                    output=output,
+                    detail="model_input is the storage batch; conversion is owned by the forward boundary",
+                )
+            counters["peak_state_holds"] += 1
+            if hold_peak_state():
+                counters["peak_state_observed"] = True
+
     try:
-        if hasattr(components.model, "eval"):
-            components.model.eval()
-        with torch.no_grad():
-            for _ in range(units):
-                if out_of_time():
-                    status = "FAILED"
-                    detail = f"deadline: the worker budget was spent after {executed} batch(es)"
-                    break
-                output = components.model(components.model_input)
-                counters["forward_calls"] += 1
-                counters["inference_batches"] += 1
-                if getattr(output, "requires_grad", False):
-                    grad_free = False
-                executed += 1
-                # THE OBSERVATION HOLD (D-C2-18). `output` is still bound,
-                # so the full inference result is still resident: this is
-                # the real peak state, held long enough to be seen rather
-                # than re-created.
-                #
-                # Repeating the forward instead grew the caching
-                # allocator's pool -- 14 repetitions x 3 batches reserved
-                # 4266 MiB against 2588 MiB allocated, and the driver
-                # figure counts reserved. That inflated inference to
-                # 4870 MiB against a real 3642 MiB and opened a
-                # false-refusal band. Holding allocates nothing.
-                if hold_peak_state is not None:
-                    _synchronize_device(output)
-                    # V20 PR C2, validation only. Recorded BEFORE the hold
-                    # releases and before anything touches `output`, which
-                    # is the same lifecycle point formal inference records
-                    # (`inference_single.py`, after the forward and before
-                    # the argmax/`.cpu()`). Recording it after the hold
-                    # would compare a released state with a held one.
-                    if trace is not None:
-                        trace.record(
-                            "after_forward_output_resident",
-                            batch_index=executed - 1,
-                            synchronize=True,
-                            model=components.model,
-                            model_input=components.model_input,
-                            output=output,
+        if components.inference_batches_factory is None:
+            raise ValueError("Inference measurement requires an evaluation batch source")
+        components.model.eval()
+        with components.inference_batches_factory(units) as workload:
+
+            def bounded_batches():
+                iterator = iter(workload.loader)
+                for _ in range(workload.selected_batches):
+                    if out_of_time():
+                        raise _InferenceDeadlineReached(
+                            "the worker budget was spent before the next evaluation batch"
                         )
-                    counters["peak_state_holds"] += 1
-                    if hold_peak_state():
-                        counters["peak_state_observed"] = True
-                # RELEASE BEFORE THE NEXT FORWARD.
-                #
-                # Without this, `output = model(input)` on the next
-                # iteration computes the new output while the previous one
-                # is STILL BOUND to this name, so two full inference
-                # outputs are resident at once. At the production batch of
-                # 25 each is 976 MiB, and the measured effect was the
-                # allocator pool growing 2830 -> 4266 MiB and the
-                # driver-visible figure reaching 4870 MiB against a real
-                # phase of 3434.
-                #
-                # That peak was previously invisible only because the
-                # parent stops sampling once the hold satisfies its sample
-                # target -- batches after the first ran unobserved. An
-                # authoritative measurement must not depend on observation
-                # stopping early, so the two-output state is removed rather
-                # than left to be missed.
-                #
-                # Formal inference has no such state: `process_batch`
-                # returns between batches and its locals die with the
-                # frame. Releasing here makes the probe's loop match that
-                # lifecycle instead of inventing a heavier one.
-                del output
-                counters["outputs_released"] += 1
-    except BaseException as exc:  # classified below, never swallowed
+                    yield next(iterator)
+
+            predictions = prediction_stream(
+                bounded_batches(),
+                model=components.model,
+                device=torch.device(components.inference_device),
+                input_dtype=components.inference_input_dtype,
+                progress=progress,
+                stage="inference measurement",
+                observe_forward=observe,
+            )
+            try:
+                for _prediction in predictions:
+                    pass
+            finally:
+                predictions.close()
+                counters["inference_data"] = InferenceDataCoverage(
+                    dataset_samples=workload.dataset_samples,
+                    selected_samples=workload.selected_samples,
+                    selected_batches=workload.selected_batches,
+                    consumed_samples=progress.samples,
+                    batches=tuple(observations),
+                )
+            if progress.samples != workload.selected_samples:
+                raise ValueError(
+                    "Inference output count does not match the selected evaluation scope"
+                )
+    except BaseException as exc:
         raise_if_code_package_failure(exc)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
         kind = _classify_exception(exc)
         status = "CUDA_OOM" if kind == "cuda" else "FAILED"
-        detail = f"{type(exc).__name__}: {exc}"[:400]
+        detail = (
+            f"deadline: {exc}"
+            if isinstance(exc, _InferenceDeadlineReached)
+            else f"{type(exc).__name__}: {exc}"
+        )[:400]
 
-    counters["inference_grad_free"] = grad_free if executed else None
-    return executed, status, detail
+    counters["inference_grad_free"] = grad_free if progress.batches else None
+    return progress.batches, status, detail

@@ -146,8 +146,12 @@ def _run_inference_child(tmp_path, monkeypatch, *, deliverable):
     # CPU regardless of host: the assertion is about a filename, and a
     # GPU-dependent unit test is not portable to CI.
     monkeypatch.setattr(inference_single, "DEVICE", torch.device("cpu"))
-    monkeypatch.setitem(inference_single.MODEL_REGISTRY, "tinymodel", TinyModel)
-    monkeypatch.setattr(inference_single, "get_config_class", lambda model_type: TinyConfig)
+    from ml_models.models_sandbox import MODEL_REGISTRY
+
+    monkeypatch.setitem(MODEL_REGISTRY, "tinymodel", TinyModel)
+    monkeypatch.setattr(
+        "ml_models.models_format_sandbox.get_config_class", lambda model_type: TinyConfig
+    )
     monkeypatch.setattr(
         "sys.argv",
         [

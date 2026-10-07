@@ -126,7 +126,7 @@ class GpuMeasurementSpec(BaseModel):
     #: validates and still runs; `None` means Regime-A at the call site.
     dataset_profile: DatasetProfile | None = None
 
-    #: A composed task's exact training scope and sampling request. When
+    #: A composed task's exact training/evaluation scopes and sampling request. When
     #: present, the worker materializes its batch through TaskDataPath instead
     #: of the legacy physical-array loader. This is the same typed projection
     #: used by the isolated VRAM preflight.
@@ -294,6 +294,27 @@ class GpuMeasurementSpec(BaseModel):
         return self
 
 
+class InferenceBatchObservation(BaseModel):
+    """Actual input geometry and dtype for one bounded evaluation batch."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    shape: tuple[int, ...]
+    storage_dtype: str
+    input_dtype: str
+    output_shape: tuple[int, ...]
+
+
+class InferenceDataCoverage(BaseModel):
+    """Coverage of real evaluation examples; never a whole-dataset guarantee."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    dataset_samples: int = Field(gt=0)
+    selected_samples: int = Field(gt=0)
+    selected_batches: int = Field(gt=0)
+    consumed_samples: int = Field(ge=0)
+    batches: tuple[InferenceBatchObservation, ...]
+
+
 class RealismEvidence(BaseModel):
     """Proof that the measurement ran the real thing.
 
@@ -315,6 +336,7 @@ class RealismEvidence(BaseModel):
     backward_calls: int = Field(default=0, ge=0)
     optimizer_steps: int = Field(default=0, ge=0)
     inference_batches: int = Field(default=0, ge=0)
+    inference_data: InferenceDataCoverage | None = None
 
     #: Largest absolute change in the watched trainable parameter across
     #: the training phase. `None` when training did not run.
@@ -333,13 +355,9 @@ class RealismEvidence(BaseModel):
     peak_state_holds: int = Field(default=0, ge=0)
     #: True when the parent confirmed it had seen enough during a hold.
     peak_state_observed: bool = False
-    #: Inference outputs explicitly released before the following forward.
-    #: Equal to `inference_batches` when the lifecycle is correct. A
-    #: shortfall means an output survived into the next forward, leaving two
-    #: full outputs resident -- the state that grew the allocator pool to
-    #: 4266 MiB and the driver figure to 4870 MiB against a real 3434, and
-    #: which went unseen only because the parent stops sampling once its
-    #: hold is satisfied.
+    #: Historical diagnostic for explicit releases. The task prediction
+    #: stream preserves production lifetimes instead of releasing early;
+    #: zero does not imply an incorrect lifecycle.
     outputs_released: int = Field(default=0, ge=0)
     #: Realized parameter count from the instantiated module -- never the
     #: LLM's estimate (F-1b).

@@ -759,35 +759,34 @@ result: `repetitions`, `required_samples`, `observed_in_phase_samples`,
 `observation_bound_reached`, `sampler_ready` and `sampler_ready_at`. An
 artifact missing them is incomplete and its result carries no authority.
 
-**One inference output is resident at a time (V20 PR C2).** The inference
-loop releases each output **before** the next forward begins:
+**Task inference measurement uses the production prediction stream (#615).**
+When explicitly requested with `phase="inference"`, the worker requires a
+composed task's evaluation scope. It constructs the model through
+`execute_tools.inference_model.construct_inference_model`, including the
+production task-cardinality resolution and existing constructor convention.
+It creates no loss criterion, optimizer or device-resident target.
+`task_inference_probe_batches` reads at most `inference_batches` real evaluation
+batches at the declared inference batch size, preserving incomplete tail batches
+and the task's batch ceiling. Missing or empty evaluation scope, a changed task
+binding/fingerprint or a changed batch ceiling refuses; training data are never
+substituted. Binding a reply to the complete request is a separate integration.
 
-```text
-forward -> synchronize -> hold the output while the parent samples
-        -> parent confirms -> release the output
-        -> only then the next forward
-```
+`execute_tools.inference_stream.prediction_stream` owns the forward, dtype
+conversion, ordered CPU consumption and tensor lifetimes in both the measurement
+and task execution. In particular, the previous output tensor and its last item
+view can remain live at the next forward, matching the existing task execution
+loop. `outputs_released` remains a historical diagnostic; zero no longer means
+an incorrect lifecycle. `realism.inference_data` records actual storage/input
+dtypes, input/output shapes and selected/consumed sample counts. A sampling hold
+observes a resident real output; it does not repeat the dataset to manufacture
+coverage.
 
-Without the release, `output = model(input)` on the next iteration computed
-a second full output while the previous one was still bound. At the
-production batch of 25 each is 976 MiB; the measured effect was the
-allocator pool growing 2830 → 4266 MiB and the driver figure reaching
-**4870 MiB against a real 3434**.
-
-That peak was **invisible**, not absent: the parent stops sampling once its
-hold is satisfied, so batches after the first ran unobserved and the
-reported figure happened to be the correct one. **An authoritative
-measurement must not depend on observation stopping early**, so the
-two-resident state is removed rather than left to be missed. The release is
-unconditional — it does not wait on the parent's answer, because the
-batches that leaked were exactly the ones the parent had stopped watching.
-
-`outputs_released` on the phase record equals `inference_batches` when the
-lifecycle is correct; a shortfall in a persisted artifact means an output
-survived into a later forward. Formal inference has no such state —
-`process_batch` returns between batches and its locals die with the frame —
-so this makes the probe's loop match production rather than invent a
-heavier lifecycle.
+This bounded, pretraining measurement does not certify all data-dependent
+branches or trained-weight behavior. Driver samples and allocator high-water
+marks remain different instruments. These primitives do not themselves clear a
+static preflight refusal: the production tuner still calls the training
+measurement path, and bounded inference admission is a separate integration.
+Training measurement construction, identity and repetition are unchanged.
 
 **Validation-only lifecycle trace (V20 PR C2).** The measurement worker and
 the formal inference process can each record a set of named lifecycle

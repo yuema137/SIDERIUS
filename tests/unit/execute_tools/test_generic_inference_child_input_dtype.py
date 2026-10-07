@@ -104,8 +104,10 @@ def test_child_converts_storage_input_using_transported_contract(
         argv += ["--model_io_json", str(contract_file)]
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(inference_single, "DEVICE", torch.device("cpu"))
-    monkeypatch.setitem(inference_single.MODEL_REGISTRY, "strict_input_fixture", StrictModel)
-    monkeypatch.setattr(inference_single, "get_config_class", lambda _: Config)
+    from ml_models.models_sandbox import MODEL_REGISTRY
+
+    monkeypatch.setitem(MODEL_REGISTRY, "strict_input_fixture", StrictModel)
+    monkeypatch.setattr("ml_models.models_format_sandbox.get_config_class", lambda _: Config)
     if expected is None:
         from execute_tools.model_input_dtype import UnsupportedModelInputDtypeError
 

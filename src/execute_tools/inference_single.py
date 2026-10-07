@@ -38,7 +38,6 @@ from execute_tools.deliverable_spec import (
 from execute_tools.hdf5_deliverable import is_complete_hdf5_deliverable
 from execute_tools.model_input_dtype import (
     INFERENCE_SITE_DTYPE,
-    apply_contract_cardinality,
     resolve_inference_input_dtype,
     resolve_input_dtype,
 )
@@ -50,10 +49,9 @@ from execute_tools.task_data_path import (
 )
 from execute_tools.workload_resolvers import resolve_inference_workload
 from ml_models.loss_models_sandbox import get_target_torch_dtype
-from ml_models.models_format_sandbox import LossConfig, get_config_class
+from ml_models.models_format_sandbox import LossConfig
 
 # Import your sandboxed components for Agent Mode
-from ml_models.models_sandbox import MODEL_REGISTRY
 from ml_models.plugin_loader import UnknownOutputContractError, get_output_type
 from ml_models.target_standardization import load_trained_state
 
@@ -713,31 +711,14 @@ def main():
         with open(args.model_cfg) as f:
             m_data = json.load(f)
 
-        # --- MINIMAL CHANGE: Dynamic Initialization ---
-        config_class = get_config_class(args.denoising_model)
-        model_class = MODEL_REGISTRY.get(args.denoising_model)
+        from execute_tools.inference_model import construct_inference_model
 
-        if config_class is None or model_class is None:
-            raise ValueError(
-                f"Model type '{args.denoising_model}' is not supported in MODEL_REGISTRY"
-            )
-
-        # Instantiate Pydantic config and then the Model
-        # Step 03 M6 — same derivation as the training engine.
-        m_cfg = config_class(**apply_contract_cardinality(m_data, args._model_io))
-
-        # Special handling for AE (loss_type injection), others use standard config init
-        #
-        # Construction and transfer are two statements rather than one
-        # chained expression so a milestone can sit between them (V20 PR
-        # C2, validation only). This is not a behaviour change:
-        # ``nn.Module.to()`` moves parameters in place and returns ``self``,
-        # so both forms perform the identical sequence of operations on the
-        # identical object — the split only binds a name in between.
-        if args.denoising_model == "fcnet":
-            model = model_class(m_cfg, loss_type=current_loss_type)
-        else:
-            model = model_class(m_cfg)
+        model, m_cfg = construct_inference_model(
+            args.denoising_model,
+            m_data,
+            model_io_contract=args._model_io,
+            loss_type=current_loss_type,
+        )
 
         if trace is not None:
             trace.record(

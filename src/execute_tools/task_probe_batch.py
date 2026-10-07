@@ -2,16 +2,76 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Sized
+from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 from execute_tools.task_data_path import (
     EvalMaterializationParams,
     TaskProbeDataSpec,
+    resolve_max_inference_batch_size,
     resolve_task_scope_capability,
 )
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+
+
+@dataclass(frozen=True)
+class InferenceProbeBatches:
+    """A bounded view, without eagerly copying the evaluation dataset."""
+
+    loader: DataLoader
+    dataset_samples: int
+    selected_samples: int
+    selected_batches: int
+
+
+@contextmanager
+def task_inference_probe_batches(
+    reference: TaskProbeDataSpec, *, batch_size: int, max_batches: int
+) -> Iterator[InferenceProbeBatches]:
+    """Materialize real evaluation batches under the same task binding.
+
+    The limit bounds how many examples the loader reads, not the dataset's
+    total size. The dataset's own construction remains under the worker's
+    host-memory and deadline limits. Tail batches are neither dropped nor
+    padded, matching production task inference.
+    """
+    ref = TaskProbeDataSpec.model_validate(reference)
+    if batch_size < 1 or max_batches < 1:
+        raise ValueError("Inference probe batch size and batch limit must be positive")
+    if ref.evaluation_scope_payload is None:
+        raise ValueError("Inference measurement requires an explicit evaluation scope")
+    composition = compose_run_task_bindings(ref.manifest_path)
+    if composition.semantic_fingerprint != ref.semantic_fingerprint:
+        raise ValueError("Inference measurement task composition fingerprint mismatch")
+    with bind_run_task_composition(composition, physical_data_root=ref.sampling.data_dir):
+        ceiling = resolve_max_inference_batch_size(composition.task_data_path)
+        if ceiling != ref.max_inference_batch_size:
+            raise ValueError("Inference measurement task batch ceiling changed after dispatch")
+        if ceiling is not None and batch_size > ceiling:
+            raise ValueError("Inference measurement exceeds the task batch ceiling")
+        capability = resolve_task_scope_capability(composition.task_data_path)
+        scope = capability.deserialize_scope(ref.evaluation_scope_payload)
+        dataset = composition.task_data_path.validation_dataset(
+            scope, EvalMaterializationParams(data_dir=ref.sampling.data_dir)
+        )
+        if not isinstance(dataset, Sized) or len(dataset) == 0:
+            raise ValueError("Inference measurement needs a nonempty sized evaluation dataset")
+        count = min(len(dataset), batch_size * max_batches)
+        yield InferenceProbeBatches(
+            loader=DataLoader(
+                Subset(dataset, range(count)),
+                batch_size=batch_size,
+                shuffle=False,
+                drop_last=False,
+            ),
+            dataset_samples=len(dataset),
+            selected_samples=count,
+            selected_batches=(count + batch_size - 1) // batch_size,
+        )
 
 
 def load_task_probe_batch(

@@ -173,15 +173,8 @@ def resolve_device(spec: GpuMeasurementSpec) -> DeviceResolution:
     return DeviceResolution(None, observed_uuid=observed, device_name=name)
 
 
-#: The MEASUREMENT site's input-dtype preference (Step 07 / PR 07c, Q-07c-8).
-#:
-#: Declared once, here, rather than inlined at the call: it is this site's
-#: historical dtype and the reason 07c's batches are byte-identical. It is
-#: deliberately NOT the phase-correct inference dtype — the measurement worker
-#: runs an inference phase at the production inference batch, so a phase-aware
-#: preference is arguably more faithful, but adopting it would CHANGE what is
-#: measured, and 07c's whole claim is that it does not. Recorded as separate
-#: debt.
+#: Training measurement preserves its qualified historical site preference.
+#: Inference resolves its dtype through the production inference owner.
 _MEASUREMENT_DTYPE_PREFERENCE = "int32"
 
 
@@ -215,6 +208,11 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
     vector is 256 elements and cannot move a GB-scale measurement either
     way.
     """
+
+    if spec.phase == "inference":
+        from core.runtime_control.gpu_inference_components import build_inference_components
+
+        return lambda: build_inference_components(spec, trace)
 
     def _build() -> CandidateComponents:
         from core.runtime_control.gpu_measurement_data import load_bounded_probe_batch
@@ -297,24 +295,8 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
                 consumer="legacy temporal measurement probe",
             )
         )
-        # TWO batches, deliberately distinct.
-        #
-        # `batch_size` is the TRAINING batch. It is the identity field C1's
-        # hash uses, so it must keep meaning the same thing in every phase;
-        # overloading it with the inference batch made every inference
-        # measurement mismatch its own request.
-        #
-        # `input_batch` is what the measured tensor is actually built at:
-        # the training batch for a training phase, the production inference
-        # batch for an inference phase. Using the training batch there is
-        # the attempt-6 under-read -- 1050 MiB reported for a phase that
-        # really held 3642 MiB.
         batch_size = int(spec.train_config.get("batch_size", 1))
-        input_batch = (
-            int(spec.inference_batch_size)
-            if spec.phase == "inference" and spec.inference_batch_size
-            else batch_size
-        )
+        input_batch = batch_size
         # D-C2-12. BOUNDED read. The predecessor materialized the whole
         # 2,010,000,000-sample channel before `max_segments` applied, and
         # Gate 2 Lite-A c1 was killed at 24.10 GiB host RSS before the model
@@ -353,13 +335,8 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
             batch = bounded.tensor.to(spec.device)
             bounded_evidence = bounded.evidence
 
-        # 07c C3 / Q-07c-8. The dtype authority, not a model name. The site
-        # preference stays `int32` -- the MEASUREMENT site's historical dtype,
-        # which reproduces today's tensor exactly for every builtin in both
-        # phases, with and without a transported contract. Adopting the
-        # phase-correct inference dtype is recorded as separate debt: it would
-        # change what is measured, and this PR's whole claim is that it does
-        # not.
+        # Training measurement uses its existing dtype contract. Inference
+        # dispatches to its separate builder before reaching this path.
         model_input = batch.to(
             resolve_input_dtype(
                 model_type, spec.model_io_contract, site_preference=_MEASUREMENT_DTYPE_PREFERENCE
