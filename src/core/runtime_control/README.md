@@ -107,3 +107,50 @@ tables. Those integrations remain required before isolated GPU onboarding works.
 Fresh-model request serialization remains unchanged when the optional reference
 is absent. The implementation's source identity changes, so externally selected
 preflight estimators must qualify the new assembly explicitly.
+
+### Supervising an owned subprocess
+
+`observed_subprocess` owns the lifecycle used by the executor's training and
+inference launches. Ordinary calls retain their existing arguments and return
+values. Plain children stay in the caller's session so terminal stop signals
+still reach them. Watchdog calls create a separate process group so termination
+can reach that child's descendants. The executor keeps its existing import and
+mocking entry points; this owner does not import model registries.
+
+Code that explicitly needs a CPU work deadline and host-memory monitoring can
+call `supervise_process` with validated `ProcessLimits`. Supply the deadline,
+RSS limit in bytes, polling interval, termination grace and reap interval; none
+is inferred from a scientific task. This opt-in route creates its own session
+and requires usable Linux `/proc` evidence before launch and during execution.
+It returns `ObservedProcessResult` with the process result and a typed lifecycle
+receipt. It is not yet wired to checkpoint identity preparation or phase budgets.
+
+The supervisor now cleans up when observer startup or a deadline callback raises,
+and checks for descendants after an owned leader exits. For example, a leader
+can return 0 while its child still holds an output pipe open. The supervisor
+terminates the remaining owned group and reports an unclean lifecycle rather than
+waiting indefinitely for that pipe. Required cleanup and remaining descendants
+are separate facts: successful termination does not erase the first problem.
+Only the direct child can be reaped here; descendant zombies may still await the
+host reaper and are recorded as present.
+
+`ProcessSupervisionError.lifecycle` reports new monitoring/resource/cleanup
+failures. A pre-existing exception, including a nonzero child exit, keeps its type
+and identity and receives `process_lifecycle` evidence instead. Observer shutdown
+cannot replace that primary failure. Missing process-memory evidence is distinct
+from zero usage; a permission error checking group liveness is unknown, not proof
+that the group is gone. Existing numeric and Boolean process helpers retain their
+legacy projections for callers that have not selected strict supervision.
+
+These checks sample a process group. They do not contain children that deliberately
+escape into another session, cap arbitrary captured output, or interrupt blocked
+parent callbacks and package preparation. The watchdog clock now starts before child creation and observer startup, and
+checks the deadline before its first wait. This deliberately includes startup
+time that the old path excluded; thresholds remain unchanged. Startup time counts
+toward the work deadline, but the synchronous callback itself cannot be interrupted
+by this loop. Cleanup may extend beyond that work deadline. No GPU memory stop,
+measurement-budget sharing, checkpoint handshake or complete isolated onboarding
+is provided by this change. Successful ordinary output and launch semantics remain
+unchanged; exception/orphan cleanup deliberately improves. The shared supervision
+source identity changes, including the existing estimation assembly digest, so
+external historical estimator qualifications must be refreshed explicitly.

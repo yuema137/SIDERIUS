@@ -4,7 +4,6 @@ import json
 import os
 import random
 import re
-import signal
 import subprocess
 import sys
 import time
@@ -49,6 +48,15 @@ from core.recorders import BaseRecorder as BaseRecorder
 from core.recorders import LocalRecorder as LocalRecorder
 from core.recorders import MongoRecorder as MongoRecorder
 from core.runtime_control.launch_argv import has_scope_to_launch_from, runtime_control_argv
+
+# Foreground run_chain.sh:171 and install_chain_stop_traps depend on plain
+# children retaining the caller session; the extracted owner preserves the split.
+from core.runtime_control.observed_subprocess import (
+    run_observed_process as _run_observed_process,  # noqa: F401 (compatibility)
+)
+from core.runtime_control.observed_subprocess import (
+    run_observed_subprocess as _run_observed_subprocess,
+)
 from core.runtime_control.records import RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
 from core.runtime_control.watchdog_deadline import (
@@ -755,242 +763,6 @@ def _with_gpu_evidence(result: dict, observer: Any) -> dict:
     with contextlib.suppress(Exception):  # telemetry never fails the phase
         result["gpu_evidence"] = observer.bundle().model_dump(mode="json")
     return result
-
-
-def _run_observed_subprocess(
-    cmd: list[str],
-    *,
-    env: dict,
-    preexec_fn: Callable[[], None] | None,
-    capture_stdout: bool,
-    deadline_provider: Callable[[], tuple[float | None, str]] | None = None,
-    grace_seconds: float = 0.0,
-    poll_seconds: float = 0.0,
-    label: str = "",
-    observer: Any = None,
-) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
-    """Retain package refusals around the existing observed process owner."""
-    from core.local_code.child import prepare_child
-
-    invocation = prepare_child(cmd, env)
-    try:
-        result, kill_info = _run_observed_process(
-            invocation.argv,
-            env=invocation.env,
-            preexec_fn=preexec_fn,
-            capture_stdout=capture_stdout,
-            deadline_provider=deadline_provider,
-            grace_seconds=grace_seconds,
-            poll_seconds=poll_seconds,
-            label=label,
-            observer=observer,
-        )
-    except Exception as exc:
-        invocation.check(exc.returncode if isinstance(exc, subprocess.CalledProcessError) else None)
-        raise
-    invocation.check(result.returncode if result is not None else None)
-    return result, kill_info
-
-
-def _run_observed_process(
-    cmd: list[str],
-    *,
-    env: dict,
-    preexec_fn: Callable[[], None] | None,
-    capture_stdout: bool,
-    deadline_provider: Callable[[], tuple[float | None, str]] | None = None,
-    grace_seconds: float = 0.0,
-    poll_seconds: float = 0.0,
-    label: str = "",
-    observer: Any = None,
-) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
-    """The single seam every GPU child is launched through (V20 B-C2a1).
-
-    **Routing only.** This commit changes *where* the four GPU launches
-    are expressed, not *how* any of them runs. Both implementations below
-    are the pre-existing ones, moved behind one door so that the observer
-    in B-C2b attaches once instead of at four call sites, where one
-    branch could silently lose it.
-
-    ``deadline_provider=None`` — plain mode, delegating to the same
-    ``subprocess.run(..., check=True)`` these call sites used before.
-
-    ``deadline_provider`` supplied — deadline mode, the existing §4
-    watchdog: own process group, SIGTERM, ``grace_seconds``, SIGKILL,
-    then assert the group is gone. Returns ``(None, kill_info)`` when the
-    deadline fires.
-
-    **Why plain mode is not also on ``Popen`` yet.** B-C2b needs the child
-    PID while the child is alive, which ``subprocess.run`` cannot give.
-    But moving plain mode to ``Popen`` retires the launch point that 58
-    existing stubs across six test files are aimed at, and a stub that
-    stops intercepting does not fail — it lets the real thing run. That
-    was measured, not predicted: real ``train_engine_sandbox.py``
-    subprocesses launched out of the unit suite. The migration is
-    therefore its own checkpoint (B-C2a2), so a test-infrastructure
-    change, an execution-mechanism change and a telemetry change cannot
-    mask one another.
-
-    **Why the session behaviour is not unified, and will not be.**
-    ``killpg`` needs its own group, so deadline mode passes
-    ``start_new_session=True``. A child in its own session does *not*
-    receive a terminal SIGINT, while a child in the caller's group does,
-    and operator stop depends on that signal reaching the work. Unifying
-    the two would change operator stop semantics through a diff that looks
-    like a refactor.
-
-    **Correction (Step 11 C7 / §3.5): the mechanism named here was wrong.**
-    This paragraph used to justify the split with *"the chain runs under
-    ``timeout --signal=INT``"*. No launcher uses ``timeout`` — the string
-    appears in no shell script in the repository. The real anchor is
-    ``sdsc_submission_scripts/run_chain.sh:171``, which runs the iteration
-    as a FOREGROUND child in the caller's process group, together with the
-    ``INT``/``TERM``/``HUP`` traps ``_chain_common.sh::install_chain_stop_traps``
-    installs. The conclusion is unchanged and so is every line of behaviour;
-    only the cited mechanism is corrected. **Fix the reason, never the
-    behaviour** — a stale justification is how a future reader talks
-    themselves into "unifying" a split that operator stop depends on.
-
-    **The observer is an argument, not a third return value.** B-C2b
-    needs evidence out of this function, and the obvious shape is to
-    return it — but the return tuple is what 48 migrated test stubs
-    across six files were just reshaped around, and widening it would
-    re-break every one of them for a reason unrelated to what they test.
-    So the caller owns the observer, passes it in, and reads
-    ``observer.bundle()`` afterwards. The seam only drives its lifecycle.
-    """
-    if deadline_provider is None:
-        # Plain mode. Faithful to the `subprocess.run(..., check=True)`
-        # this replaced, but on `Popen` so B-C2b can hold the child PID
-        # while the child is alive — which is the whole reason for the
-        # migration, and something `subprocess.run` cannot give.
-        #
-        # `start_new_session` is NOT passed, matching `subprocess.run`'s
-        # default: a child in the caller's process group receives the
-        # terminal SIGINT that reaches the chain's foreground iteration
-        # (`run_chain.sh:171` + `_chain_common.sh::install_chain_stop_traps`).
-        # Only the deadline path below takes its own session, because
-        # `killpg` requires one. See the docstring's C7 correction: this
-        # used to cite `timeout --signal=INT`, which no launcher uses.
-        if observer is not None:
-            # Before the child exists, so it can claim nothing about it.
-            observer.capture_baseline()
-        plain = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE if capture_stdout else None,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=os.getcwd(),
-            env=env,
-            preexec_fn=preexec_fn,
-        )
-        if observer is not None:
-            observer.start(plain.pid)
-        failed = True
-        try:
-            stdout, stderr = plain.communicate()
-            failed = plain.returncode != 0
-        except BaseException:
-            # `subprocess.run` kills and reaps rather than leaking the
-            # child on any exception; reproduce that exactly.
-            plain.kill()
-            plain.wait()
-            raise
-        finally:
-            # In `finally`, so the observer stops on every path — success,
-            # non-zero exit, and any exception. It never affects the
-            # child's own result.
-            if observer is not None:
-                observer.stop(child_pid=plain.pid, failed=failed)
-        if plain.returncode != 0:
-            # `Popen` has no `check`. The property downstream handlers
-            # depend on is the exception, not the keyword.
-            raise subprocess.CalledProcessError(plain.returncode, cmd, output=stdout, stderr=stderr)
-        return (
-            subprocess.CompletedProcess(cmd, plain.returncode, stdout=stdout, stderr=stderr),
-            None,
-        )
-
-    if observer is not None:
-        observer.capture_baseline()
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE if capture_stdout else None,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd=os.getcwd(),
-        env=env,
-        preexec_fn=preexec_fn,
-        start_new_session=True,  # own process group — killpg reaches every child
-    )
-    if observer is not None:
-        observer.start(proc.pid)
-    t_start = time.perf_counter()
-    stdout, stderr = "", ""
-    while True:
-        try:
-            stdout, stderr = proc.communicate(timeout=poll_seconds)
-            break  # natural exit
-        except subprocess.TimeoutExpired:
-            elapsed = time.perf_counter() - t_start
-            deadline, source = deadline_provider()
-            if deadline is None or elapsed <= deadline:
-                continue
-            # §4 kill sequence: TERM the group → grace → KILL the group.
-            pgid = os.getpgid(proc.pid)
-            print(
-                f"--- Watchdog [{label}] deadline exceeded "
-                f"({elapsed:.1f}s > {deadline:.1f}s, source={source}) — "
-                f"killing process group {pgid} ---"
-            )
-            escalated = False
-            os.killpg(pgid, signal.SIGTERM)
-            try:
-                stdout, stderr = proc.communicate(timeout=grace_seconds)
-            except subprocess.TimeoutExpired:
-                escalated = True
-                os.killpg(pgid, signal.SIGKILL)
-                stdout, stderr = proc.communicate()
-            # Orphan check: the group must be gone (§4 "verify no
-            # surviving pids"). killpg(0) probes without sending.
-            # After SIGKILL the kernel needs a brief moment to reap PIDs;
-            # ``proc.communicate()`` above only waits for the TRACKED
-            # child, so children in the same process group can still be
-            # in the reap window when the probe runs. Poll briefly
-            # (bounded, ≤2 s at 50 ms intervals) so the fast path
-            # (already reaped) still returns on the first probe while
-            # ruling out reap-window races that used to false-positive
-            # under load (CI runners, busy dev boxes).
-            survivors = True
-            _survivor_probe_deadline = time.perf_counter() + 2.0
-            while time.perf_counter() < _survivor_probe_deadline:
-                try:
-                    os.killpg(pgid, 0)
-                except ProcessLookupError:
-                    survivors = False
-                    break
-                time.sleep(0.05)
-            if survivors:
-                print(f"--- Watchdog [{label}] WARNING: process group {pgid} survived ---")
-            if observer is not None:
-                observer.stop(child_pid=proc.pid, failed=True)
-            return None, {
-                "elapsed_s": round(elapsed, 3),
-                "deadline_s": round(deadline, 3),
-                "estimate_source": source,
-                "escalated_to_kill": escalated,
-                "survivors_detected": survivors,
-                "stdout_tail": (stdout or "")[-2000:],
-                "stderr_tail": (stderr or "")[-2000:],
-            }
-    if observer is not None:
-        observer.stop(child_pid=proc.pid, failed=proc.returncode != 0)
-    if proc.returncode != 0:
-        raise subprocess.CalledProcessError(proc.returncode, cmd, output=stdout, stderr=stderr)
-    return (
-        subprocess.CompletedProcess(cmd, proc.returncode, stdout=stdout, stderr=stderr),
-        None,
-    )
 
 
 def _read_runtime_observation_sidecar(path: str) -> dict[str, Any] | None:
