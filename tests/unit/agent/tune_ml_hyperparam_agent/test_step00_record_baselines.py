@@ -117,6 +117,8 @@ EXPERIMENT_RECORD_FIELDS = [
     "target_standardization",
     "runtime_verification",
     "memory",
+    # #601 preserves the observed attempt role, including preflight refusals.
+    "attempt_role",
     "is_trial",
     "trial_strategy",
     "trial_portion",
@@ -153,6 +155,8 @@ EXPERIMENT_RECORD_FIELDS = [
     "ordering_proposal_rejection_reason",
     "override_order_strategy",
     "override_file_order",
+    # #447 separates selected ordering from actual execution evidence.
+    "ordering_observation",
     "resolved_order_strategy",
     "resolved_file_order",
     "ordering_resolution_source",

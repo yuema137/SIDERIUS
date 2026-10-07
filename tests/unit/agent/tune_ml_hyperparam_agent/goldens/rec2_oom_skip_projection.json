@@ -1,7 +1,7 @@
 {
   "_captured_at": {
     "commit": "83987b216dd35d4dbc6132f5221bbdd68729099e",
-    "note": "REGENERATED at Step 07a C3 from the C2 head plus the C3 working tree, in the C3 commit (design \u00a717 rule 3; Step-06 precedent): ExperimentRecord gained the ADDITIVE training_history / training_diagnosis fields (persisted, hidden from both LLM-facing renders); every pre-existing key and value is unchanged. Ledger: docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07a_training_history_diagnosis.md \u00a714.3"
+    "note": "REGENERATED at Step 07a C3 from the C2 head plus the C3 working tree, in the C3 commit (design \u00a717 rule 3; Step-06 precedent): ExperimentRecord gained the ADDITIVE training_history / training_diagnosis fields (persisted, hidden from both LLM-facing renders); every pre-existing key and value is unchanged. Ledger: docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07a_training_history_diagnosis.md \u00a714.3 Issue #606 declares #601 trial-role correction and #447 selected ordering before preflight refusal, plus #607 absent runtime feedback version."
   },
   "attempt_index": null,
   "candidate_id": null,
@@ -23,7 +23,7 @@
   "gpu_evidence": null,
   "health_gate_enabled": null,
   "health_gate_results": [],
-  "is_trial": false,
+  "is_trial": true,
   "logical_round": null,
   "loss_history": null,
   "memory": {
@@ -46,7 +46,8 @@
     "time_estimate_minutes": null,
     "time_mode": null,
     "vram_budget_gb": "<present>",
-    "vram_estimate_gb": "<present>"
+    "vram_estimate_gb": "<present>",
+    "runtime_feedback_version": null
   },
   "metric_refusal": null,
   "metric_result": null,
@@ -54,7 +55,7 @@
   "model_type": "pe_wavenet_delta",
   "ordering_proposal_rejected": false,
   "ordering_proposal_rejection_reason": null,
-  "ordering_resolution_source": null,
+  "ordering_resolution_source": "default",
   "override_file_order": null,
   "override_order_strategy": null,
   "params": {
@@ -89,7 +90,7 @@
   "record_type": "experiment",
   "resolved_data_scope": null,
   "resolved_file_order": null,
-  "resolved_order_strategy": null,
+  "resolved_order_strategy": "shuffle",
   "scientific_authority": null,
   "score_table": null,
   "secondary_metric_errors": {},
@@ -110,5 +111,10 @@
   "training_psd_segments": null,
   "trial_portion": null,
   "trial_strategy": null,
-  "validation_workload_ceiling": null
+  "validation_workload_ceiling": null,
+  "attempt_role": "trial",
+  "ordering_observation": {
+    "selection_state": "selected",
+    "refused_before_phase": "preflight"
+  }
 }

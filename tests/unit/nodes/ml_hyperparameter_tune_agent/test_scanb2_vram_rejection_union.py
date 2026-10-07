@@ -36,6 +36,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, PhysicalRejection
+from agent.schemas.ordering import ResolvedOrdering
 from agent.skills.evaluate_vram_skill.preflight_worker_main import _bounded_rich_fields
 from nodes.ml_hyperparameter_tune_agent.contracts import (
     AdmissionOutcome,
@@ -141,10 +142,23 @@ def _drive_admission(monkeypatch, payload: dict):
     emitted: list[dict] = []
 
     def _spy(
-        sandbox, record, *, status=None, candidate_id=None, experiment_arm=None, ordering=None
+        sandbox,
+        record,
+        *,
+        status=None,
+        candidate_id=None,
+        experiment_arm=None,
+        ordering=None,
+        ordering_observation=None,
+        attempt_role=None,
     ):
-        # #139 adds explicit ordering transport for errors, not preflight skips.
-        assert ordering is None, "preflight rejection must remain unstamped"
+        # #447 preserves selected ordering without claiming training executed.
+        assert ordering == prepared.ordering
+        assert ordering_observation.model_dump() == {
+            "selection_state": "selected",
+            "refused_before_phase": "preflight",
+        }
+        assert attempt_role == "trial"
         emitted.append(record)
 
     monkeypatch.setattr(execution._records, "_emit_record", _spy)
@@ -180,6 +194,7 @@ def _drive_admission(monkeypatch, payload: dict):
         workspace="/tmp/scanb2-unused",
     )
     prepared = SimpleNamespace(
+        ordering=ResolvedOrdering(resolved_strategy="shuffle", resolution_source="default"),
         active_params={
             "model_type": "punet",
             "model_config": {"depth": 4},

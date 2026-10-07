@@ -37,6 +37,7 @@ from execute_tools.analysis_materialization import (
 )
 from tests.unit.agent.data_analysis.test_contracts_and_authorization import _asset, _policy
 from tests.unit.nodes.test_data_analysis_agent import _input
+from workflows.llm_config import TunerLLMConfig, WorkflowLLMConfig
 from workflows.model_exploration import _workflow_lock_identity
 from workflows.run_config import WorkflowLaunchConfig
 
@@ -209,9 +210,16 @@ def test_prompt_is_bounded_and_participates_in_run_identity() -> None:
     directive = "lock: raw=dataset; models=none"
     assert source_prompt_identity(directive) is not None
     assert _workflow_lock_identity(
-        WorkflowLaunchConfig(analysis_source_prompt=directive)
+        WorkflowLaunchConfig(analysis_source_prompt=directive),
+        llm_config=WorkflowLLMConfig(tune=TunerLLMConfig(planner_strategy="native-timing-v1")),
     ).analysis_source_prompt_sha256 == source_prompt_identity(directive)
-    assert _workflow_lock_identity(WorkflowLaunchConfig()).analysis_source_prompt_sha256 is None
+    assert (
+        _workflow_lock_identity(
+            WorkflowLaunchConfig(),
+            llm_config=WorkflowLLMConfig(tune=TunerLLMConfig(planner_strategy="native-timing-v1")),
+        ).analysis_source_prompt_sha256
+        is None
+    )
     base = RunInvariants(
         resolved_data_scope=[0], health_gate_enabled=False, health_config_sha256=None
     )

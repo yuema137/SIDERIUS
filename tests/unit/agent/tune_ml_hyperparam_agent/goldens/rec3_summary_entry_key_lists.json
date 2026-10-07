@@ -10,6 +10,18 @@
       "params",
       "denoising_score",
       "memory",
+      "attempt_role",
+      "is_trial",
+      "proposed_order_strategy",
+      "proposed_file_order",
+      "ordering_proposal_rejected",
+      "ordering_proposal_rejection_reason",
+      "override_order_strategy",
+      "override_file_order",
+      "resolved_order_strategy",
+      "resolved_file_order",
+      "ordering_resolution_source",
+      "ordering_observation",
       "candidate_id",
       "task_composition_fingerprint"
     ]
@@ -62,6 +74,8 @@
       "planned_eval_strategy",
       "strategy_normalization_reason",
       "runtime_verification",
+      "attempt_role",
+      "ordering_observation",
       "candidate_id",
       "task_composition_fingerprint"
     ]
@@ -106,6 +120,9 @@
       "ordering_resolution_source",
       "scientific_authority",
       "runtime_verification",
+      "attempt_role",
+      "is_trial",
+      "ordering_observation",
       "candidate_id",
       "task_composition_fingerprint"
     ]

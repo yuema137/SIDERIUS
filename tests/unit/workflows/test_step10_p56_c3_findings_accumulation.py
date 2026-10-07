@@ -45,6 +45,7 @@ from tests.unit.workflows.test_model_exploration import (
     _make_validator_output,
     _write_tuning_output,
 )
+from workflows.llm_config import TunerLLMConfig, WorkflowLLMConfig
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
@@ -94,6 +95,9 @@ def _drive(tmp_path, per_iteration_findings, *, restored_state=None):
 
         with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
             run_workflow(
+                llm_config=WorkflowLLMConfig(
+                    tune=TunerLLMConfig(planner_strategy="native-timing-v1")
+                ),
                 launch=WorkflowLaunchConfig(
                     data_dir=str(tmp_path / "data"),
                     model_types=["punet"],
@@ -294,6 +298,9 @@ class TestTheRenderedBlock:
             )
             with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
                 run_workflow(
+                    llm_config=WorkflowLLMConfig(
+                        tune=TunerLLMConfig(planner_strategy="native-timing-v1")
+                    ),
                     launch=WorkflowLaunchConfig(
                         data_dir=str(tmp_path / "data"),
                         model_types=["punet"],

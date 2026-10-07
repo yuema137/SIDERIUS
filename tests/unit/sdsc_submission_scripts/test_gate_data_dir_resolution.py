@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -44,6 +45,8 @@ class TestTheLaunchBoundary:
     @staticmethod
     def _argv(tmp_path, *extra):
         manifest = Path(__file__).resolve().parents[3] / "configs/task_composition/quickstart.yaml"
+        routing = tmp_path / "llm.json"
+        routing.write_text(json.dumps({"tune": {"planner_strategy": "native-timing-v1"}}))
         return [
             "run_one_iteration.py",
             "--workspace",
@@ -56,6 +59,8 @@ class TestTheLaunchBoundary:
             "blocking",
             "--result_authority",
             "scientific",
+            "--llm_config",
+            str(routing),
             "--task_composition",
             str(manifest),
             *extra,

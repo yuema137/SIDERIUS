@@ -1,7 +1,7 @@
 {
   "_captured_at": {
     "commit": "worktree-pr422",
-    "note": "DECLARED DELTA: REC-2 now runs under an explicitly bound neutral synthetic dataset profile and metric. The prior golden encoded TIDMAD geometry, score-table references, and scoreability; the replacement preserves every record field and production-decision value while the undeclared comparison table is correctly absent."
+    "note": "DECLARED DELTA: REC-2 now runs under an explicitly bound neutral synthetic dataset profile and metric. The prior golden encoded TIDMAD geometry, score-table references, and scoreability; the replacement preserves every record field and production-decision value while the undeclared comparison table is correctly absent. Issue #606 adds only the audited #601 attempt role, #447 selected-ordering observation, and #607 absent runtime feedback version; original scientific and execution values are retained."
   },
   "record_type": "experiment",
   "exp_id": "<present>",
@@ -25,7 +25,7 @@
       "epochs": 1,
       "batch_size": 1,
       "optimizer_type": "adamw",
-      "weight_decay": 0.00001,
+      "weight_decay": 1e-05,
       "device": "cuda"
     },
     "loss_config": {
@@ -183,7 +183,8 @@
     "inference_process_startup_ms": null,
     "inference_ms_source": null,
     "round_index": "<present>",
-    "attempt_in_round": "<present>"
+    "attempt_in_round": "<present>",
+    "runtime_feedback_version": null
   },
   "is_trial": false,
   "trial_strategy": null,
@@ -253,5 +254,10 @@
   "metric_refusal": null,
   "secondary_metric_results": [],
   "secondary_metric_refusals": [],
-  "secondary_metric_errors": {}
+  "secondary_metric_errors": {},
+  "attempt_role": "formal",
+  "ordering_observation": {
+    "selection_state": "selected",
+    "refused_before_phase": null
+  }
 }

@@ -170,6 +170,7 @@ def emitted(monkeypatch):
         experiment_arm=None,
         ordering=None,
         ordering_observation=None,
+        attempt_role=None,
     ):
         captured.append(record)
 

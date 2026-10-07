@@ -85,6 +85,19 @@ class TestLegacyRenderIsByteIdentical:
                 previous = (
                     "   NUMERICAL OUTCOME. The boldness (abs(predicted - current) / abs(current))"
                 )
+                # PR588 deliberately explains citation identities. Pin and remove
+                # that exact addition before checking the original byte oracle.
+                citation_guidance = (
+                    "For `inherited_components`, copy the actual source identity. An `experiment`\n"
+                    "uses its bare `model_type`. An `external_agent` uses the originating expert\n"
+                    "item's `source_ref`, for example `arxiv:2312.00752`; a `human` source uses\n"
+                    "its supplied instruction ID, for example `human:instruction_20260603`.\n"
+                    "Both non-experiment types require `prefix:identifier`; a bare `iter_004`\n"
+                    "is not a valid external citation. These are format examples, not sources\n"
+                    "to invent: use them only when the corresponding source was supplied.\n\n"
+                )
+                assert text.count(citation_guidance) == 1
+                text = text.replace(citation_guidance, "")
                 assert text.count(current) == 1
                 text = text.replace(current, previous)
             assert hashlib.sha256(text.encode("utf-8")).hexdigest() == sha, (
