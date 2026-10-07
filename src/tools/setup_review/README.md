@@ -105,6 +105,7 @@ Prefer an absolute literature configuration path for an external project.
 The static-route table shows the four individual nodes, three proposer stages,
 tuner planner and reflector, and literature main and search routes. It includes
 models, reasoning effort, retry settings, request timeouts and client reuse.
+Shared-client labels describe matching routes, not which stage executes first.
 For example, omitting `implement` uses the implementor's model default; writing
 `"implement": {}` uses the LLM configuration schema's default instead. The table
 shows that difference rather than treating an empty block as an absent block.

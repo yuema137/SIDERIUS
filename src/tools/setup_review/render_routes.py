@@ -26,8 +26,11 @@ def render_route_sections(report: SetupDeclarationReport) -> str:
             )
             if route.issue:
                 detail += f"<br>{html.escape(route.issue)}"
-        if route.reuse_client_of:
-            detail += f"<br>Reuses client from {html.escape(route.reuse_client_of)}"
+        if route.shares_client_with:
+            detail += (
+                f"<br>Shares a client/cache entry with {html.escape(route.shares_client_with)}"
+                " when both routes are used"
+            )
         detail += (
             "<details><summary>Bridge arguments</summary><pre>"
             f"{html.escape(json.dumps(route.bridge_arguments, indent=2))}</pre></details>"

@@ -97,8 +97,34 @@ def test_three_proposer_routes_match_actual_stage_factories(tmp_path):
             == captures[id(agent._bridge_for_stage(stage))]
         )
     shared = route_map({})
-    assert shared["propose.comparison"].reuse_client_of == "propose.reasoning"
-    assert shared["propose.proposing"].reuse_client_of == "propose.reasoning"
+    assert shared["propose.comparison"].shares_client_with == "propose.reasoning"
+    assert shared["propose.proposing"].shares_client_with == "propose.reasoning"
+
+
+def test_shared_proposer_client_does_not_assume_comparison_runs_first(tmp_path):
+    from nodes.ml_model_proposal_agent import MLModelProposalAgent
+
+    shared = {"provider": "openai", "model_id": "shared"}
+    payload = {
+        "propose": {
+            "comparison": shared,
+            "proposing": shared,
+            "reasoning": {"provider": "gemini", "model_id": "different"},
+        }
+    }
+    factory = Mock(side_effect=lambda **kwargs: Mock())
+    agent = MLModelProposalAgent(
+        **WorkflowLLMConfig.model_validate(payload).get("propose"),
+        bridge_factory=factory,
+        capability_index_path=str(tmp_path / "index.json"),
+    )
+    proposing = agent._bridge_for_stage("proposing")
+    assert agent._bridge_for_stage("comparison") is proposing
+    assert proposing is not agent.bridge
+    assert factory.call_count == 2
+    routes = route_map(payload)
+    assert routes["propose.proposing"].shares_client_with == "propose.comparison"
+    assert routes["propose.reasoning"].shares_client_with is None
 
 
 @pytest.mark.parametrize("planner_retries", [None, 0, 6])
@@ -188,7 +214,7 @@ def test_actual_workflow_tuner_forwarding_and_protocol(tmp_path, planner_retries
     assert planner.max_retries == reflector.max_retries == planner_retries
     assert reflector.model_id == "reflector"
     assert reflector.reasoning_effort == ("high" if reflect_provider == "openai" else None)
-    assert routes["tune.reflector"].reuse_client_of == (
+    assert routes["tune.reflector"].shares_client_with == (
         "tune.planner" if reflect_provider == "openai" else None
     )
 
@@ -211,7 +237,7 @@ def test_missing_blocks_and_literature_inheritance():
         }
     )
     assert inherited["data_analysis"].bridge_arguments == inherited["interpret"].bridge_arguments
-    assert inherited["lit_review.search"].reuse_client_of == "lit_review.main"
+    assert inherited["lit_review.search"].shares_client_with == "lit_review.main"
     assert inherited["lit_review.main"].transport.max_retries is None
     assert inherited["data_analysis"].applicability == "task_dependent"
 

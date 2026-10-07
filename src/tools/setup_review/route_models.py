@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 RouteApplicability = Literal["conditional", "task_dependent", "disabled", "pseudo"]
 
@@ -26,7 +26,10 @@ class LLMRoute(BaseModel):
     applicability: RouteApplicability
     bridge_arguments: dict[str, JsonValue]
     transport: RouteTransport | None
-    reuse_client_of: str | None = None
+    shares_client_with: str | None = Field(
+        default=None,
+        description="A route with an equivalent client/cache entry when both are used; not creation order.",
+    )
     issue: str | None = None
 
 

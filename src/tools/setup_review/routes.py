@@ -89,7 +89,7 @@ def _tuner_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> list[
             request_timeout=main.request_timeout,
             timeout_retries=main.timeout_retries,
         ),
-        reuse_client_of=planner.name if reflect.reuse_main_client else None,
+        shares_client_with=planner.name if reflect.reuse_main_client else None,
     )
     return [planner, reflector]
 
@@ -119,7 +119,7 @@ def _literature_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> 
     main = _route("lit_review.main", arguments.main, state)
     search = _route("lit_review.search", arguments.search or arguments.main, state)
     if arguments.search is None:
-        search = search.model_copy(update={"reuse_client_of": main.name})
+        search = search.model_copy(update={"shares_client_with": main.name})
     return [main, search]
 
 
@@ -178,7 +178,7 @@ def standard_llm_routes(
             name,
         )
         if shared != name:
-            route = route.model_copy(update={"reuse_client_of": shared})
+            route = route.model_copy(update={"shares_client_with": shared})
         else:
             shared_proposer_routes.append((stage_settings, name))
         routes.append(route)
