@@ -14,7 +14,8 @@ load_stage_prompt() and render_expert_context().
 
 import os
 
-from agent.prompt_templates.native_training import NATIVE_TRAINING_CONTRACT
+from agent.prompt_rendering import prompt_boundary
+from agent.prompt_templates.native_training import render_native_training_appendix
 from core.layout import checkout_path
 
 _PROMPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +26,7 @@ _PROMPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _GLOBAL_LOSS_DIR = checkout_path("agent_generated", "losses")
 
 
+@prompt_boundary("proposal.template")
 def load_prompt(filename: str) -> str:
     """Load a prompt template from this directory."""
     path = os.path.join(_PROMPT_DIR, filename)
@@ -121,7 +123,7 @@ def load_stage_prompt(
     for key, value in merged.items():
         prompt = prompt.replace(f"{{{key}}}", str(value))
 
-    return prompt + "\n\n" + NATIVE_TRAINING_CONTRACT
+    return prompt + render_native_training_appendix()
 
 
 def render_agent_cards(cards: list) -> str:

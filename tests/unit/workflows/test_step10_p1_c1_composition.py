@@ -49,6 +49,44 @@ QUICKSTART_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "quickstart.y
 FOURTH_MANIFEST = FIXTURES / "fourth_task" / "composition.yaml"
 
 
+def test_prompt_profile_enters_identity_binding_and_drift_guard(tmp_path, monkeypatch):
+    """A declared renderer must reach real prompt assembly and pin its code."""
+    import yaml
+
+    from agent.prompt_rendering import PromptRenderingProfile, bind_prompt_profile
+    from agent.prompt_templates.native_training import render_native_training_appendix
+    from workflows import task_composition as composition
+
+    target = tmp_path / "task"
+    shutil.copytree(FOURTH_MANIFEST.parent, target)
+    manifest = target / "composition.yaml"
+    source = tmp_path / "provider.txt"
+    source.write_text("provider v1")
+    profile = PromptRenderingProfile(
+        "example-v1",
+        "1",
+        {"native_training.appendix": lambda: "EXPLICIT"},
+        frozenset(),
+        {"provider": source},
+    )
+    monkeypatch.setattr(composition, "resolve_prompt_profile", lambda name: profile)
+    native = compose_run_task_bindings(str(manifest))
+    declaration = yaml.safe_load(manifest.read_text())
+    declaration["prompt_renderer"] = "example-v1"
+    manifest.write_text(yaml.safe_dump(declaration))
+    explicit = compose_run_task_bindings(str(manifest))
+    assert explicit.semantic_fingerprint != native.semantic_fingerprint
+    with composition.bind_run_task_composition(explicit, physical_data_root=str(tmp_path)):
+        assert render_native_training_appendix() == "EXPLICIT"
+        composition.verify_composition_is_bound(explicit)
+        with bind_prompt_profile(None), pytest.raises(composition.CompositionNotBoundError):
+            composition.verify_composition_is_bound(explicit)
+    source.write_text("provider v2")
+    with pytest.raises(ValueError, match="changed after composition"):
+        with composition.bind_run_task_composition(explicit, physical_data_root=str(tmp_path)):
+            pytest.fail("stale provider must not bind")
+
+
 @pytest.fixture(autouse=True)
 def _clear_task_config_cache():
     """``load_task_config`` memoizes per absolute path, process-wide.

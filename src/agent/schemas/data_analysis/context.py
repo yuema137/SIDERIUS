@@ -22,6 +22,7 @@ from .common import (
     canonical_sha256,
 )
 from .generated_skill import GeneratedExperimentSkillRegistryRef
+from .recovery import AnalysisRecoveryPolicy
 from .resources import AnalysisResourceEnvelope
 from .source_scope import (
     AnalysisSourceScope,
@@ -145,6 +146,9 @@ class DataAnalysisInput(FrozenModel):
     )
     access_policy: AnalysisAccessPolicy
     resource_envelope: AnalysisResourceEnvelope
+    recovery_policy: AnalysisRecoveryPolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     allowed_skill_packs: tuple[SkillPackRef, ...]
     generated_skill_registry: GeneratedExperimentSkillRegistryRef | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -225,6 +229,12 @@ class DataAnalysisInput(FrozenModel):
             ):
                 raise ValueError("resolved model order differs from certified completion order")
         return self
+
+    def effective_recovery_policy(self) -> AnalysisRecoveryPolicy:
+        """Resolve the native allowance only when the caller omitted a policy."""
+        return (
+            self.recovery_policy if self.recovery_policy is not None else AnalysisRecoveryPolicy()
+        )
 
     def effective_source_scope(self) -> AnalysisSourceScope:
         """Automatic selection is still restricted to the declared ceiling."""

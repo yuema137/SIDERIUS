@@ -35,14 +35,15 @@ def generate_resolved_analysis_plan(
     user: str,
     semantic_projection: Callable[[object], object | None],
 ) -> tuple[AnalysisPlan, tuple[ResolvedAnalysisInvocation, ...]]:
-    """Share one replan allowance across schema and resolution failures.
+    """Share the declared replan allowance across schema and resolution failures.
 
     Representation repair cannot change decisions. A new planning attempt can,
     but must satisfy the same declarations, access policy and existing deadline.
     Exhaustion, provider failures and deadline failures still propagate honestly.
     """
 
-    for attempt in range(2):
+    retries = analysis_input.effective_recovery_policy().plan_retries
+    for attempt in range(retries + 1):
         plan = None
         try:
             plan = generate_validated(
@@ -76,7 +77,7 @@ def generate_resolved_analysis_plan(
             )
             return plan, resolved
         except (DataAnalysisStructuredOutputError, AnalysisPlanResolutionError) as exc:
-            if attempt:
+            if attempt >= retries:
                 raise
             if isinstance(exc, DataAnalysisStructuredOutputError):
                 detail = exc.planning_feedback

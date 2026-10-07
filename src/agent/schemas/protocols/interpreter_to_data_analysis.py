@@ -12,6 +12,7 @@ from agent.schemas.data_analysis.context import (
     SkillPackRef,
 )
 from agent.schemas.data_analysis.generated_skill import GeneratedExperimentSkillRegistryRef
+from agent.schemas.data_analysis.recovery import AnalysisRecoveryPolicy
 from agent.schemas.data_analysis.resources import AnalysisResourceEnvelope
 from agent.schemas.data_analysis.source_scope import DeclaredAnalysisScope
 from agent.schemas.interpretation import InterpretationOutput
@@ -39,6 +40,7 @@ def local_analysis_input(
     human_advice: str | None = None,
     allow_generated_skill_promotion: bool = False,
     retain_model_outputs: bool = False,
+    recovery_policy: AnalysisRecoveryPolicy | None = None,
 ) -> DataAnalysisInput:
     """Combine an Interpreter-owned brief with caller-owned run authorities.
 
@@ -60,6 +62,7 @@ def local_analysis_input(
         generated_skill_registry=generated_skill_registry,
         access_policy=access_policy,
         resource_envelope=resource_envelope,
+        recovery_policy=recovery_policy,
         allowed_skill_packs=allowed_skill_packs,
         human_advice=human_advice,
         storage=storage,

@@ -180,6 +180,7 @@ def run_optional_data_analysis(
             declared_scope=binding.declared_scope,
             access_policy=binding.access_policy,
             resource_envelope=binding.resource_envelope,
+            recovery_policy=binding.recovery_policy,
             allowed_skill_packs=binding.allowed_skill_packs,
             storage=storage,
             caller=CallerIdentity(

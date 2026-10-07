@@ -47,6 +47,7 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `static_observables` | — | quantities read off the TRAINED model after training | the run observes none: no record key, no rendered bytes |
 | `parameter_rules` | — | deterministic constraints on configured parameter leaves | no task-declared parameter constraints |
 | `data_analysis` | — | optional analysis topology plus a caller-owned policy/config reference | no brief call, analysis node, report, or identity change |
+| `prompt_renderer` | — | installed, versioned rendering provider | native messages and existing identity serialization |
 | `code_package` | — | one finite, content-pinned set of task-local Python files | existing independent file loading and identities, without task-relative helper imports |
 
 ### Why `task_health` is required but may say "none"
@@ -623,3 +624,50 @@ repository.
 - [Define your own task](../guides/define-a-task.md)
 - [Configuration map](configuration-map.md) — which file is owned by whom
 - [Composition mechanism reference](../agent-reference/mechanisms/composition.md) — for implementers
+
+
+## Explicit prompt rendering providers
+
+The optional top-level `prompt_renderer` selects exactly one installed entry
+point in `siderius.prompt_renderers`. Its factory returns a
+`agent.prompt_rendering.PromptRenderingProfile`. Install the trusted consumer
+package into this checkout's environment before composition. No installed
+provider is selected implicitly. Planner strategies remain a separate contract.
+
+The profile declares named rendering callbacks, explicit native boundaries,
+and the complete set of provider source/template files. Callbacks receive
+copies of rendering inputs through the original function's keyword signature,
+including defaults, and return only a string or a system/user string pair.
+They cannot replace the node's validated response, saved record, or execution
+decision through this interface. Installed plugins are trusted Python code;
+this contract is not a sandbox.
+
+The implementor, code validator and proposer share the native training
+appendix boundary. Supported boundaries are `native_training.appendix`, `proposal.template`,
+`interpretation.model_system`, `interpretation.model_user`, and the
+`data_analysis.` stages `skill_selection`, `analysis_plan`,
+`generated_program`, `report_synthesis`, `generated_skill_promotion`,
+and `structured_output_repair`. See the decorated functions for exact typed
+input signatures. An undeclared boundary raises when reached; it never silently
+uses another historical profile. These boundaries are not a universal replacement
+for every message produced by every node.
+
+Composition pins the provider name, version, source/template and boundary-map
+digest, and the framework assembly digest. They contribute to the semantic
+fingerprint. Binding checks that identity; each decorated call checks source
+drift. A changed profile requires a new workspace. Provider authors must include
+their full implementation dependency closure in `sources` and qualify any
+native boundaries against the intended framework version.
+
+`bind_run_task_composition` scopes rendering for composed execution.
+Standalone callers may explicitly use `resolve_prompt_profile` and
+`bind_prompt_profile`; they own recording and checking the expected identity.
+Nested bindings restore the previous context even on failure. Omitting the
+manifest field leaves native rendering and unconfigured fingerprints unchanged.
+
+Preparation recovery is a separate declaration:
+`data_analysis`'s referenced analysis-policy file may contain
+`recovery_policy: {schema_version: 1, generated_program_retries: 0, plan_retries: 1}`.
+These numbers are an explicit caller example, not a historical framework
+default. See the [data-analysis contract](../../src/nodes/data_analysis_agent/data_analysis_agent.md#caller-selected-preparation-recovery)
+for counting, deadlines, validation and identity semantics.

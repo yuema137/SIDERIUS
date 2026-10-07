@@ -114,7 +114,8 @@ def prepare_generated_program(
     )
     # Generation precedes AnalysisPlan recovery and needs its own bounded retry.
     # A fresh draft may change decisions; a representation repair still may not.
-    for attempt in range(2):
+    retries = analysis_input.effective_recovery_policy().generated_program_retries
+    for attempt in range(retries + 1):
         try:
             draft = generate_validated(
                 bridge,
@@ -131,7 +132,7 @@ def prepare_generated_program(
             )
             break
         except DataAnalysisStructuredOutputError as exc:
-            if attempt:
+            if attempt >= retries:
                 raise
             user += (
                 f"\nThe previous generated program was rejected before execution: {exc}.\n"

@@ -1517,10 +1517,13 @@ def test_generated_read_binding_replans_then_executes_and_resumes(tmp_path: Path
 
 
 @pytest.mark.allow_real_subprocess
-@pytest.mark.parametrize("retry_outcome", ["schema", "access"])
+@pytest.mark.parametrize(
+    "retry_outcome,retries", [("schema", None), ("access", None), ("schema", 0), ("schema", 2)]
+)
 def test_generated_plan_recovery_exhausts_one_shared_retry_before_access(
     tmp_path: Path,
     retry_outcome: str,
+    retries: int | None,
 ) -> None:
     """Fails if retries multiply across error classes or admit an unauthorized target.
 
@@ -1528,6 +1531,12 @@ def test_generated_plan_recovery_exhausts_one_shared_retry_before_access(
     stop before the task materializer runs; no fabricated success report is allowed.
     """
     inp = _input(tmp_path)
+    from agent.schemas.data_analysis.recovery import AnalysisRecoveryPolicy
+
+    if retries is not None:
+        inp = inp.model_copy(
+            update={"recovery_policy": AnalysisRecoveryPolicy(plan_retries=retries)}
+        )
     bridge = _GeneratedBindingRecoveryBridge(analysis_input=inp, retry_outcome=retry_outcome)
     capability = _RecordingCapability()
     agent = DataAnalysisAgent(
@@ -1548,9 +1557,10 @@ def test_generated_plan_recovery_exhausts_one_shared_retry_before_access(
         assert not report.findings and not report.assets_inspected
         assert report.limitations[0].limitation_id == "analysis-preparation-failed"
         assert json.loads((root / "plan.json").read_text())["invocations"] == []
-    assert bridge.calls.count("data_analysis.plan.resolution_retry") == 1
+    expected_retries = 1 if retries is None else retries
+    assert bridge.calls.count("data_analysis.plan.resolution_retry") == expected_retries
     assert bridge.calls.count("data_analysis.plan.resolution_retry.repair") == (
-        retry_outcome == "schema"
+        expected_retries if retry_outcome == "schema" else 0
     )
     assert not capability.requested_scopes
 

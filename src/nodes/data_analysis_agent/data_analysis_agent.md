@@ -153,8 +153,8 @@ directly.
 - Reference/configured skills are preferred when they cleanly answer a question. A real toolbox gap may instead trigger a separate source-generation stage. That stage validates and persists one immutable `GeneratedAnalysisProgram`; only then may the final `AnalysisPlan` reference its exact `GeneratedProgramIdentity`. Resume never regenerates equivalent source.
 - Generated `source_code` is Python even though its enclosing declaration is JSON. Source validation rejects JSON literal names (`null`, `true`, `false`) before persistence. One existing bounded structured-output repair may change only those literal spellings to Python (`None`, `True`, `False`) while preserving the tokenized program, `match` pattern semantics, and all other executable declaration fields; repair refuses ambiguous Python bindings of those names. A changed scientific computation fails the semantic guard. The repair is receipt-visible, and only the validated final source is content-addressed and executed.
 - `AnalysisPlan.invocations` is a discriminated union of trusted skill invocations, already-persisted one-off generated-program invocations, and discovered generated-experiment-skill invocations. Pre-union persisted skill wire forms remain readable.
-- Before any action runs, a plan rejected by structured-output validation/repair or by binding resolution has one shared complete-replan allowance. The fresh attempt receives the concrete validation error and uses the same immutable discovery, program declarations, access policy and whole-node deadline. Representation-only repair still cannot change decisions; a fresh plan may correct them, then must pass all schema and resolution checks. The existing `data_analysis.plan.resolution_retry` label identifies this second attempt. There are at most two planning attempts, each with at most one schema-only repair (four plan model calls total). Exhausted structured-output recovery before plan publication produces an explicit non-execution report: all questions unresolved, no inspected assets, no findings, and a preparation-failure limitation delivered to the consumer. This is not successful empirical analysis. Access/resolution failures still raise; provider, persistence and deadline errors are not converted into planning retries. Failures after execution, including evidence grounding, retain their existing refusal behavior.
-- Generated-program drafting precedes the plan loop and has one separate fresh-generation allowance after structured-output repair fails (at most four generation/repair model calls, all under the original deadline). Generation repair prompts preserve generated-program seeds; historical-inference seed rules appear only in plan repair prompts. Only a validated source may be persisted or executed.
+- Before any action runs, a plan rejected by structured-output validation/repair or by binding resolution has a caller-configurable shared complete-replan allowance (one by default). The fresh attempt receives the concrete validation error and uses the same immutable discovery, program declarations, access policy and whole-node deadline. Representation-only repair still cannot change decisions; a fresh plan may correct them, then must pass all schema and resolution checks. The existing `data_analysis.plan.resolution_retry` label identifies this second attempt. With the default policy there are at most two planning attempts, each with at most one schema-only repair (four plan model calls total). Exhausted structured-output recovery before plan publication produces an explicit non-execution report: all questions unresolved, no inspected assets, no findings, and a preparation-failure limitation delivered to the consumer. This is not successful empirical analysis. Access/resolution failures still raise; provider, persistence and deadline errors are not converted into planning retries. Failures after execution, including evidence grounding, retain their existing refusal behavior.
+- Generated-program drafting precedes the plan loop and has a separate caller-configurable fresh-generation allowance after structured-output repair fails (one by default: at most four generation/repair model calls, all under the original deadline). Generation repair prompts preserve generated-program seeds; historical-inference seed rules appear only in plan repair prompts. Only a validated source may be persisted or executed.
 - Failed structured-output receipts retain the initial and, when available, repaired JSON drafts alongside their hashes and validation errors. These node-owned diagnostic drafts are untrusted evidence, never executable plans. Only the validated, fully resolved final plan is persisted as `plan.json` and executed.
 - Generated-program and generated-experiment-skill bindings must use `materialize` for ordinary certified input views or `infer` for trusted prediction views, never `read`. A retry grants no additional data access.
 - Promotion is optional and explicit. A bounded structured decision may add a completed program to an immutable run-scoped registry. The decision sees the exact verified declaration and complete source (at most 24 KiB); larger programs remain one-off rather than being promoted from a truncated preview. The review asks whether the operation is generic across unrelated datasets, not merely useful again on the present task. This is an LLM judgment, not proof of scientific correctness. The resulting local skill exposes a normal `SkillCard`, `SkillDeclaration`, and resolved parameter interface, but its exact originating program identity remains the execution authority. No directory scanning or mutable global registry is used.
@@ -219,6 +219,26 @@ call occurs. The normal whole-node budget receipt includes discovery/planning
 latency, and exact-input resume reuses the report. An executable plan cannot
 also carry a non-execution reason. Downstream consumers receive the explicit
 limitation; this must not be described as successful empirical analysis.
+
+### Caller-selected preparation recovery
+
+`DataAnalysisInput.recovery_policy` and the reference workflow's analysis-policy
+file accept an `AnalysisRecoveryPolicy` object. `generated_program_retries` and
+`plan_retries` count additional fresh attempts after the initial attempt and
+its representation-only repair. Both default to one when no policy is declared;
+zero disables fresh attempts for that stage. Counts are strict non-negative
+integers. The plan allowance is shared across schema and binding-resolution
+failures, rather than reset for each error class.
+
+The policy is persisted with the input and contributes to standalone and
+composed run identity. An explicit change requires a new workspace; it cannot
+silently reuse a report produced under another policy. Policy omission preserves
+existing identity serialization and default behavior. Recovery configuration is
+excluded from the scientific planning prompt. Representation-only repair,
+synthesis grounding, validation, access rules, and provider-error handling remain
+unchanged. All additional attempts consume the original request deadline.
+Experiment-specific historical values belong in the consumer repository; the
+framework contains no experiment-name or revision-based selection.
 
 ### Bounded report grounding retry
 

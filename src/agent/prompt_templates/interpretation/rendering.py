@@ -15,6 +15,7 @@ It must never import the node package (``nodes.result_interpretation_agent``)
 import json
 from typing import TYPE_CHECKING, Any
 
+from agent.prompt_rendering import prompt_boundary
 from agent.prompt_templates.interpretation.execution import render_execution_evidence
 from agent.schemas.health_feedback import CollapseFingerprint
 from agent.schemas.interpretation import ModelRunSummary
@@ -130,6 +131,7 @@ def _render_task_sections(blocks: "InterpretationTaskBlocks | None", names: tupl
     return "".join(parts)
 
 
+@prompt_boundary("interpretation.model_system")
 def _build_per_model_system_prompt(inp: "InterpretationInput") -> str:
     """Assemble the Phase-1 system prompt: framework template + task values.
 
@@ -495,6 +497,7 @@ def _render_record_roles(summary: ModelRunSummary) -> list[str]:
     return lines
 
 
+@prompt_boundary("interpretation.model_user")
 def _build_per_model_prompt(
     summary: ModelRunSummary,
     description: str | None,

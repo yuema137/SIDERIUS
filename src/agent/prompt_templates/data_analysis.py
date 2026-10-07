@@ -9,6 +9,7 @@ from agent.data_analysis.discovery import (
     DiscoveredGeneratedExperimentSkill,
     DiscoverySnapshot,
 )
+from agent.prompt_rendering import prompt_boundary
 from agent.schemas.data_analysis.action_identity import GeneratedProgramIdentity
 from agent.schemas.data_analysis.common import canonical_sha256
 from agent.schemas.data_analysis.context import DataAnalysisInput
@@ -57,6 +58,8 @@ def _planning_input(analysis_input: DataAnalysisInput) -> dict:
     # The declaration is a caller-side ceiling and may name locked-out assets.
     # The planner receives only the resolved scope and its filtered descriptors.
     payload.pop("declared_scope", None)
+    # Recovery controls orchestration, not the scientific decision requested.
+    payload.pop("recovery_policy", None)
     payload["available_assets"] = [
         item.model_dump(mode="json") for item in analysis_input.planning_assets()
     ]
@@ -71,6 +74,7 @@ def _source_catalog_block(analysis_input: DataAnalysisInput) -> str:
     )
 
 
+@prompt_boundary("data_analysis.skill_selection", pair=True)
 def render_skill_selection_prompt(
     analysis_input: DataAnalysisInput,
     candidates: tuple[DiscoveredAnalysisSkill, ...],
@@ -110,6 +114,7 @@ Authoritative output JSON schema:
     return system, user
 
 
+@prompt_boundary("data_analysis.analysis_plan", pair=True)
 def render_analysis_plan_prompt(
     analysis_input: DataAnalysisInput,
     discovery: DiscoverySnapshot,
@@ -212,6 +217,7 @@ AnalysisPlan JSON schema:
     return system, user
 
 
+@prompt_boundary("data_analysis.generated_program", pair=True)
 def render_generated_program_prompt(
     analysis_input: DataAnalysisInput,
     *,
@@ -330,6 +336,7 @@ Authoritative JSON schema for the payload returned by analyze(...):
     return system, user
 
 
+@prompt_boundary("data_analysis.report_synthesis", pair=True)
 def render_report_synthesis_prompt(
     analysis_input: DataAnalysisInput,
     results: tuple[SkillResult, ...],
@@ -391,6 +398,7 @@ Authoritative output JSON schema:
     return system, user
 
 
+@prompt_boundary("data_analysis.generated_skill_promotion", pair=True)
 def render_generated_skill_promotion_prompt(
     analysis_input: DataAnalysisInput,
     *,
@@ -425,6 +433,7 @@ Authoritative output schema:
     return system, user
 
 
+@prompt_boundary("data_analysis.structured_output_repair", pair=True)
 def render_structured_output_repair_prompt(
     *,
     stage: str,
