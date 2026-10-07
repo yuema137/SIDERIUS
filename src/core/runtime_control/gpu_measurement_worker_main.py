@@ -218,7 +218,7 @@ def build_production_components(
 
     def _build() -> CandidateComponents:
         from core.runtime_control.gpu_measurement_data import load_bounded_probe_batch
-        from execute_tools.model_input_dtype import resolve_input_dtype
+        from execute_tools.model_input_dtype import apply_contract_cardinality, resolve_input_dtype
         from execute_tools.train_engine_sandbox import build_training_optimizer
         from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
         from ml_models.models_format_sandbox import (
@@ -238,7 +238,9 @@ def build_production_components(
         if config_cls is None:
             raise RuntimeError(f"no config class registered for {model_type!r}")
 
-        model_cfg = config_cls(**spec.model_config_payload)
+        model_cfg = config_cls(
+            **apply_contract_cardinality(spec.model_config_payload, spec.model_io_contract)
+        )
         train_cfg = TrainConfig(**spec.train_config)
         loss_cfg = LossConfig(**spec.loss_config)
 
@@ -423,6 +425,7 @@ def validate_candidate_configs(spec: GpuMeasurementSpec) -> str | None:
     usable.
     """
     try:
+        from execute_tools.model_input_dtype import apply_contract_cardinality
         from ml_models.models_format_sandbox import (
             LossConfig,
             TrainConfig,
@@ -447,7 +450,7 @@ def validate_candidate_configs(spec: GpuMeasurementSpec) -> str | None:
                 f"no config class registered for {spec.request.model_type!r} "
                 f"({len(MODEL_REGISTRY)} model(s) in the live registry)"
             )
-        config_cls(**spec.model_config_payload)
+        config_cls(**apply_contract_cardinality(spec.model_config_payload, spec.model_io_contract))
         TrainConfig(**spec.train_config)
         LossConfig(**spec.loss_config)
     except Exception as exc:
