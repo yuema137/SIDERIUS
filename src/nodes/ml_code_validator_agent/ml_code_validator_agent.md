@@ -207,3 +207,12 @@ executed interventions; trainability and specification alignment remain separate
 The optional [scoped target standardization](../../../docs/reference/target-standardization.md)
 policy fits training-only statistics, exports original-unit predictions and
 persists a reconstruction-bound transform. It defaults to `none`.
+
+
+## Explicit rendering profiles
+
+The review system message obtains the native-training appendix through `native_training.appendix`, shared with implementor and proposer. An explicit run-scoped rendering profile changes only this text. Model-I/O checks, probes, response validation and verdict construction are unchanged.
+
+Composition declares the optional `prompt_renderer` and pins its identity.
+See the [task-composition contract](../../../docs/reference/task-composition.md#explicit-prompt-rendering-providers)
+for installation, binding, failure behavior and new-workspace requirements.

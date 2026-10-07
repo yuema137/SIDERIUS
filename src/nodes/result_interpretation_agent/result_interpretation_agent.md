@@ -726,3 +726,12 @@ missing role evidence. Overall-best and Formal aggregates may identify the
 same record. Their equality does not establish a Trial/Formal comparison or
 independent replication. These additions do not change candidate eligibility,
 metric ordering, or training behavior.
+
+
+## Explicit rendering profiles
+
+Per-model system/user messages expose `interpretation.model_system` and `interpretation.model_user`. Explicit providers receive copies of the already constructed rendering inputs; canonical model summaries and stored evidence remain unchanged. Other interpretation stages are outside these named boundaries.
+
+Composition declares the optional `prompt_renderer` and pins its identity.
+See the [task-composition contract](../../../docs/reference/task-composition.md#explicit-prompt-rendering-providers)
+for installation, binding, failure behavior and new-workspace requirements.

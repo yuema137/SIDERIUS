@@ -336,3 +336,12 @@ unrecognized prediction metrics have no reference: `current_value` and
 relative `boldness` are null, and relative-boldness enforcement is skipped.
 Absolute predictions remain permitted. Grounded predictions are revalidated;
 a no-change prediction is corrected by the causal stage's existing retry.
+
+
+## Explicit rendering profiles
+
+Stage system prompts load templates through `proposal.template` and append training guidance through `native_training.appendix`. An explicit run-scoped rendering profile may replace these text boundaries. Stage orchestration, vocabulary validation and correction budgets remain native; selecting old text does not bypass current validators.
+
+Composition declares the optional `prompt_renderer` and pins its identity.
+See the [task-composition contract](../../../docs/reference/task-composition.md#explicit-prompt-rendering-providers)
+for installation, binding, failure behavior and new-workspace requirements.
