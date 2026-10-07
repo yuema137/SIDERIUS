@@ -38,7 +38,7 @@ scientific task, objective, data root or temporal geometry.
 |---|---|
 | `task_probe_data` | Required existing `TaskProbeDataSpec`: absolute `manifest_path`, pinned `semantic_fingerprint`, task-serialized `training_scope_payload`, `sampling` with absolute `data_dir`, and explicit `segmentation_applicability`. Optional evaluation transport is retained but this bounded probe measures one training batch for both phases. |
 | `model_config_payload` | Required object, validated against each eligible candidate's registered config class inside the worker. One workload applies to all eligible candidates in this invocation. |
-| `train_config` | Required `TrainConfig`, including the selected batch size and device. Its established schema defaults apply; callers should specify the workload they intend to compare. |
+| `train_config` | Required `TrainConfig`, including the selected batch size and device (`cpu` or `cuda`). Its established schema defaults apply; callers should specify the workload they intend to compare. |
 | `loss_config` | Optional `LossConfig`. Omission uses the manifest's objective; absence from both refuses. A supplied loss must equal a task-declared objective. |
 | `caps` | `ProbeCaps`; defaults: 90 seconds, 3 warmup training steps, 7 timed training steps, 5 timed inference batches. |
 | `device_vram_gb` | Optional positive threshold input for the existing contention classifier. CUDA can discover capacity if omitted. An explicit CPU probe requires this field and never reports a GPU memory measurement. |
@@ -59,7 +59,10 @@ changed declarations refuse. A redundant worker `data_dir` must agree with
 
 Data access uses `TaskDataPath.training_dataset` through
 `load_task_probe_batch`, with the exact serialized training scope. Inputs and
-supervised targets remain separate. The existing bound temporal adapter stays
+supervised targets remain separate. Task-bound model construction applies the
+existing class-cardinality authority, inputs use the production Model-I/O dtype
+resolver, and targets use the loss-owned dtype authority. Contradictory class
+counts refuse before candidate construction. The existing bound temporal adapter stays
 available to existing in-process callers; standalone workers require task
 transport. This change does not alter runtime decision, retention, Health,
 retry, calibration-identity or certified-watchdog policy.
@@ -78,6 +81,10 @@ The snapshot remains read-only. The final replay report goes to stdout; callers
 can redirect it to their own storage. Missing task/data/plugin infrastructure
 aborts with a nonzero exit rather than presenting a scientific measurement.
 OOM and hard-cap outcomes retain the existing measured-failure classification.
+Only `cpu` and process-default `cuda` are accepted for standalone probes. Select
+a physical accelerator with the deployment's `CUDA_VISIBLE_DEVICES`; indexed
+strings such as `cuda:1` refuse because the existing collectors and timers use
+the process-default device.
 Workers retain diagnostics even when the parent cannot produce a report.
 
 ## Qualification boundary
@@ -87,6 +94,8 @@ unrelated directory without inherited `PYTHONPATH`. The small Quickstart task
 uses float feature vectors and distinct integer labels; actual CPU training and
 inference catch dropped task transport and accidental input-as-target training.
 Other worker cases reject missing transport, fingerprint drift, contradictory
-data roots and objective mismatch. Metadata and planning remain independently
+data roots, objective mismatch and contradictory class counts. A separate
+CPU regression supplies non-native storage dtypes and verifies that actual
+model/loss execution uses the production conversion authorities. Metadata and planning remain independently
 exercised. This establishes transport and task access, not CUDA timing quality,
 historical paper artifact equivalence or live campaign qualification.

@@ -69,7 +69,7 @@ def replay_inputs(tmp_path):
 
 def _cli(tmp_path, *args):
     env = os.environ.copy()
-    for name in ("PYTHONPATH", "SIDERIUS_PLUGIN_DIRS", "SIDERIUS_LOSS_PLUGIN_DIRS"):
+    for name in ("PYTHONPATH", "SIDERIUS_PLUGIN_DIRS", "SIDERIUS_LOSS_DIRS"):
         env.pop(name, None)
     env.update(CUDA_VISIBLE_DEVICES="", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
     cwd = tmp_path / "unrelated-cwd"
@@ -124,7 +124,9 @@ def test_clean_cli_reaches_real_task_data_and_worker(replay_inputs, tmp_path):
     }
 
 
-@pytest.mark.parametrize("defect", ["missing", "fingerprint", "data-root", "objective"])
+@pytest.mark.parametrize(
+    "defect", ["missing", "fingerprint", "data-root", "objective", "cardinality"]
+)
 def test_actual_worker_refuses_bad_binding_as_infrastructure(
     replay_inputs, tmp_path, monkeypatch, defect
 ):
@@ -134,6 +136,8 @@ def test_actual_worker_refuses_bad_binding_as_infrastructure(
     if defect == "fingerprint":
         task["semantic_fingerprint"] = "incorrect-parent-fingerprint"
     loss = {"loss_type": "focal" if defect == "objective" else "ce"}
+    if defect == "cardinality":
+        config["model_config_payload"]["num_classes"] = 3
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
     monkeypatch.setenv("OMP_NUM_THREADS", "1")
     spec = ProbeWorkerSpec(
@@ -155,6 +159,7 @@ def test_actual_worker_refuses_bad_binding_as_infrastructure(
         "fingerprint": "fingerprint mismatch",
         "data-root": "data_dir disagrees",
         "objective": "task-declared objective",
+        "cardinality": "num_classes=3",
     }
     assert expected[defect] in outcome.detail
 
@@ -203,3 +208,38 @@ def test_metadata_and_plan_need_no_task_or_output(tmp_path):
     missing = _cli(tmp_path, "executable", "--snapshot", str(snapshot), "--run")
     assert missing.returncode == 2
     assert "requires --probe-config and --output-dir" in missing.stderr
+
+
+def test_task_probe_uses_production_dtype_authorities(replay_inputs, monkeypatch):
+    """Storage float64/int16 must reach the model/loss as declared float32/int64.
+
+    Deleting either production conversion fails in real Linear/CrossEntropy;
+    the old Quickstart-only witness uses native dtypes and cannot catch this.
+    """
+    import torch
+
+    import execute_tools.task_probe_batch as task_batches
+    from core.runtime_control.probe_production import production_probe_executors
+    from core.runtime_control.probe_task import bind_probe_task
+
+    _, config = replay_inputs
+    reference = TaskProbeDataSpec.model_validate(config["task_probe_data"])
+    original_loader = task_batches.load_task_probe_batch
+
+    def storage_batch(ref, batch_size):
+        inputs, targets = original_loader(ref, batch_size)
+        return inputs.to(torch.float64), targets.to(torch.int16)
+
+    monkeypatch.setattr(task_batches, "load_task_probe_batch", storage_batch)
+    with bind_probe_task(reference) as composition:
+        executors = production_probe_executors(
+            model_type="quickstart_reference_mlp",
+            model_config=config["model_config_payload"],
+            train_config=config["train_config"],
+            loss_config=composition.objective.model_dump(mode="json"),
+            task_probe_data=reference,
+            device="cpu",
+        )
+        executors.setup()
+        assert executors.train_step() > 0
+        assert executors.inference_batch() > 0

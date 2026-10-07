@@ -5,11 +5,16 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from execute_tools.task_data_path import TaskProbeDataSpec
     from workflows.task_composition import RunTaskComposition
+
+
+# Device collectors currently address the process-visible default CUDA device.
+# Indexed selection needs coordinated collectors and timing, not a partial cast.
+StandaloneProbeDevice = Literal["cpu", "cuda"]
 
 
 @contextmanager

@@ -10,7 +10,7 @@
     # register the legacy k-table by content hash (never imports it)
     .venv/bin/python -m tools.runtime_replay legacy --dry-run
 
-Executable replay with `--run` touches the GPU and is operator-gated.
+Executable replay with `--run` executes the caller-declared device and task.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     action.add_argument(
         "--run",
         action="store_true",
-        help="ACTUALLY probe on the GPU (operator-gated).",
+        help="Execute probes with the explicit task/device configuration.",
     )
     ex.add_argument("--probe-config", help="JSON ReplayProbeConfig; required with --run.")
     ex.add_argument("--output-dir", help="Caller-owned worker artifacts; required with --run.")

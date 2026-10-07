@@ -63,6 +63,7 @@ from core.execution_calibration import MalformedCeilingOverride
 from core.local_code.child import ChildInvocation, prepare_child
 from core.local_code.failure import raise_if_code_package_failure
 from core.runtime_control.probe import descendant_pids
+from core.runtime_control.probe_task import StandaloneProbeDevice
 from core.subprocess_env import subprocess_env
 from execute_tools.task_data_path import TaskProbeDataSpec
 
@@ -205,7 +206,7 @@ class ProbeWorkerSpec(BaseModel):
     expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None
     data_dir: str | None = None
     task_probe_data: TaskProbeDataSpec | None = None
-    device: str = "cuda"
+    device: StandaloneProbeDevice = "cuda"
     caps: dict[str, Any] = Field(default_factory=dict)
     device_vram_gb: float = Field(gt=0.0)
     result_path: str

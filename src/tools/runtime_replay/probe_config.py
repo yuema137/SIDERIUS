@@ -2,9 +2,10 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from core.runtime_control.probe import ProbeCaps
+from core.runtime_control.probe_task import StandaloneProbeDevice
 from execute_tools.task_data_path import TaskProbeDataSpec
 from ml_models.models_format_sandbox import LossConfig, TrainConfig
 
@@ -26,3 +27,9 @@ class ReplayProbeConfig(BaseModel):
     loss_config: LossConfig | None = None
     caps: ProbeCaps = Field(default_factory=ProbeCaps)
     device_vram_gb: float | None = Field(default=None, gt=0.0)
+
+    @field_validator("train_config")
+    @classmethod
+    def _supported_device(cls, value: TrainConfig) -> TrainConfig:
+        TypeAdapter(StandaloneProbeDevice).validate_python(value.device)
+        return value

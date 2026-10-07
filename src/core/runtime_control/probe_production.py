@@ -241,7 +241,15 @@ def production_probe_executors(
         config_cls = get_config_class(model_type)
         if config_cls is None:
             raise RuntimeError(f"no config class registered for {model_type!r}")
-        cfg = config_cls(**model_config)
+        model_io = None
+        resolved_config = model_config
+        if task_probe_data is not None:
+            from execute_tools.model_input_dtype import apply_contract_cardinality
+            from workflows.task_config import run_bound_model_io_contract
+
+            model_io = run_bound_model_io_contract()
+            resolved_config = apply_contract_cardinality(model_config, model_io)
+        cfg = config_cls(**resolved_config)
         model = MODEL_REGISTRY[model_type](cfg).to(device)
         n_params = sum(p.numel() for p in model.parameters())
         n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -262,7 +270,12 @@ def production_probe_executors(
             )
             targets = inputs
         batch = inputs.to(device)
-        target = targets.to(device) if task_probe_data is not None else batch
+        if task_probe_data is not None:
+            from execute_tools.model_input_dtype import TRAINING_SITE_DTYPE, resolve_input_dtype
+
+            batch = batch.to(
+                resolve_input_dtype(model_type, model_io, site_preference=TRAINING_SITE_DTYPE)
+            )
 
         # Optimizer switch mirrors execute_tools/train_engine_sandbox.py
         # (§verified 2026-07-30: AdamW default w/ weight_decay, Adam, SGD).
@@ -277,17 +290,21 @@ def production_probe_executors(
                 lr=train_cfg.lr,
                 weight_decay=getattr(train_cfg, "weight_decay", 0.0),
             )
-        from ml_models.loss_models_sandbox import get_criterion
+        from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 
+        loss_cfg = LossConfig(**loss_config)
+        loss_fn = get_criterion(loss_cfg, expected_contract_snapshot=expected_custom_loss_snapshot)
+        target = (
+            targets.to(device=device, dtype=get_target_torch_dtype(loss_cfg))
+            if task_probe_data is not None
+            else batch
+        )
         state.update(
             model=model,
             batch=batch,
             loss_target=target,
             optimizer=optimizer,
-            loss_fn=get_criterion(
-                LossConfig(**loss_config),
-                expected_contract_snapshot=expected_custom_loss_snapshot,
-            ),
+            loss_fn=loss_fn,
             torch=torch,
         )
         return RealizedModelProperties(

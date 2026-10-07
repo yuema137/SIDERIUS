@@ -104,6 +104,7 @@ def production_probe(
     """Run real workers with caller-owned artifacts and explicit task semantics."""
     from pathlib import Path
     from tempfile import mkdtemp
+    from typing import cast
 
     from core.runtime_control.probe_production import probe_device_vram_gb
     from core.runtime_control.probe_subprocess import (
@@ -111,7 +112,7 @@ def production_probe(
         ProbeWorkerSpec,
         run_worker,
     )
-    from core.runtime_control.probe_task import bind_probe_task
+    from core.runtime_control.probe_task import StandaloneProbeDevice, bind_probe_task
 
     # Validate binding and objective before creating output or touching CUDA.
     with bind_probe_task(config.task_probe_data) as composition:
@@ -139,7 +140,7 @@ def production_probe(
                 train_config=config.train_config.model_dump(mode="json"),
                 loss_config=loss.model_dump(mode="json"),
                 task_probe_data=config.task_probe_data,
-                device=config.train_config.device,
+                device=cast(StandaloneProbeDevice, config.train_config.device),
                 caps=config.caps.model_dump(mode="json"),
                 device_vram_gb=vram,
                 result_path=str(result_path),
