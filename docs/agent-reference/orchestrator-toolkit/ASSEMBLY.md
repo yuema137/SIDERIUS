@@ -1,5 +1,16 @@
 # Assemble an additive runtime documentation package
 
+For a source-checkout installation, the supported
+[external-project assembler](../../../src/tools/orchestration_setup/README.md)
+copies this payload, a user-authored run declaration and an explicit sandbox
+profile without overwriting existing files. It also writes exact check/launch
+instructions. Installation does not execute or validate a scientific task.
+
+Onboarding has two phases: preparation may author the user's task/experiment;
+execution uses the selected frozen inputs. State the current phase and missing
+prerequisites in the run declaration. The protected-input guidance below applies
+to execution, not to a requirement that a new user already have a finished task.
+
 ## Runtime layout
 
 Place the payload in the actual fresh coding-agent working directory:
