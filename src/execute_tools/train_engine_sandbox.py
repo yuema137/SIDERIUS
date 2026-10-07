@@ -7,7 +7,7 @@ import random
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence, Sized
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from typing import Any, Literal, cast
 
 import h5py
@@ -1681,229 +1681,227 @@ def run_experiment_streaming(
     for ep in range(epoch_limit):
         if budget_execution:
             budget_execution.start_epoch()
-        model.train()
+        # One verifier spans successive training passes. The first interval
+        # starts after setup; later intervals include dataset reconstruction.
+        # Closing the interval before validation excludes unrelated phase work
+        # without resetting evidence, slowdown history or measurement limits.
+        with ExitStack() as training_interval:
+            if verifier is not None:
+                training_interval.enter_context(verifier.active_interval())
+            model.train()
 
-        # Build a fresh dataset each epoch — subsamples train_portion from the
-        # scope, loads via HDF5 slicing, enables cross-file shuffling.
-        # Reproducible: base_seed from exp_id, +ep for diversity across epochs.
-        epoch_seed = base_seed if freeze_subsample else base_seed + ep
-        t_dataset = time.perf_counter()
-        # D14-1 C3: seam call. The implementation reconstructs
-        # ``random.Random(epoch_seed)`` internally — stream-identical to the
-        # pre-relocation call site (pinned per grid cell by the committed
-        # parity manifest).
-        dataset = data_path.training_dataset(
-            task_scope,
-            EpochSamplingParams(
-                data_dir=data_dir,
-                epoch_seed=epoch_seed,
-                train_portion=train_portion,
-                max_samples=max_train_samples,
-            ),
-        )
-        # Every implementation returns a SIZED map-style dataset (the engine's
-        # loops depend on it); the cast records that invariant for the type
-        # checker — torch's Dataset stub deliberately omits __len__.
-        dataset_size = len(cast("Sized", dataset))
-        if max_train_samples is not None:
+            # Build a fresh dataset each epoch — subsamples train_portion from the
+            # scope, loads via HDF5 slicing, enables cross-file shuffling.
+            # Reproducible: base_seed from exp_id, +ep for diversity across epochs.
+            epoch_seed = base_seed if freeze_subsample else base_seed + ep
+            t_dataset = time.perf_counter()
+            # D14-1 C3: seam call. The implementation reconstructs
+            # ``random.Random(epoch_seed)`` internally — stream-identical to the
+            # pre-relocation call site (pinned per grid cell by the committed
+            # parity manifest).
+            dataset = data_path.training_dataset(
+                task_scope,
+                EpochSamplingParams(
+                    data_dir=data_dir,
+                    epoch_seed=epoch_seed,
+                    train_portion=train_portion,
+                    max_samples=max_train_samples,
+                ),
+            )
+            # Every implementation returns a SIZED map-style dataset (the engine's
+            # loops depend on it); the cast records that invariant for the type
+            # checker — torch's Dataset stub deliberately omits __len__.
+            dataset_size = len(cast("Sized", dataset))
+            if max_train_samples is not None:
+                print(
+                    f"[validation_envelope] epoch {ep}: {dataset_size} ML segments "
+                    f"(ceiling {max_train_samples})",
+                    flush=True,
+                )
+            if order_strategy == "sequential":
+                # Independent RNG stream, seeded from the same epoch seed: the
+                # dataset above consumes a variable number of draws depending on
+                # train_portion and file count, so sharing its generator would
+                # couple visit order to subsampling internals. The "order:" prefix
+                # keeps epoch N's ordering stream from colliding with epoch N+1's
+                # subsampling stream.
+                order_rng = random.Random(f"order:{epoch_seed}")
+                # Sequential ordering is an optional dataset capability. Tasks
+                # that select it must expose the declared row groups.
+                epoch_indices = build_sequential_indices(
+                    resolve_sequential_file_row_ranges(dataset), file_order, order_rng
+                )
+                # ONE global loader with the global drop_last, exactly as the
+                # shuffle path: ordering changes the visit sequence only. Batches
+                # may therefore span a file boundary, and the step count is
+                # identical to shuffle's for the same selection.
+                loader = DataLoader(
+                    dataset,
+                    batch_size=train_cfg.batch_size,
+                    sampler=epoch_indices,
+                    drop_last=train_cfg.drop_last,
+                )
+            else:
+                loader = DataLoader(
+                    dataset,
+                    batch_size=train_cfg.batch_size,
+                    shuffle=True,
+                    drop_last=train_cfg.drop_last,
+                )
             print(
-                f"[validation_envelope] epoch {ep}: {dataset_size} ML segments "
-                f"(ceiling {max_train_samples})",
-                flush=True,
+                f"[data_order] resolved={order_strategy} "
+                f"file_order={'none' if file_order is None else file_order} "
+                f"epoch={ep} epoch_seed={epoch_seed}"
             )
-        if order_strategy == "sequential":
-            # Independent RNG stream, seeded from the same epoch seed: the
-            # dataset above consumes a variable number of draws depending on
-            # train_portion and file count, so sharing its generator would
-            # couple visit order to subsampling internals. The "order:" prefix
-            # keeps epoch N's ordering stream from colliding with epoch N+1's
-            # subsampling stream.
-            order_rng = random.Random(f"order:{epoch_seed}")
-            # Sequential ordering is an optional dataset capability. Tasks
-            # that select it must expose the declared row groups.
-            epoch_indices = build_sequential_indices(
-                resolve_sequential_file_row_ranges(dataset), file_order, order_rng
-            )
-            # ONE global loader with the global drop_last, exactly as the
-            # shuffle path: ordering changes the visit sequence only. Batches
-            # may therefore span a file boundary, and the step count is
-            # identical to shuffle's for the same selection.
-            loader = DataLoader(
-                dataset,
-                batch_size=train_cfg.batch_size,
-                sampler=epoch_indices,
-                drop_last=train_cfg.drop_last,
-            )
-        else:
-            loader = DataLoader(
-                dataset,
-                batch_size=train_cfg.batch_size,
-                shuffle=True,
-                drop_last=train_cfg.drop_last,
-            )
-        print(
-            f"[data_order] resolved={order_strategy} "
-            f"file_order={'none' if file_order is None else file_order} "
-            f"epoch={ep} epoch_seed={epoch_seed}"
-        )
-        if ep == 0:
-            epoch0_dataset_seconds = time.perf_counter() - t_dataset
+            if ep == 0:
+                epoch0_dataset_seconds = time.perf_counter() - t_dataset
 
-        if runtime_session is not None and ep == 0:
-            # RT2-B post-setup boundary (§2.1/§2.2): everything up to here —
-            # config load, model/optimizer/criterion init, CUDA context, the
-            # epoch-0 dataset and DataLoader — is the measured setup. The
-            # steps-per-epoch count comes from the MATERIALIZED loader
-            # (drop_last floor), the production ground truth; ``n_keep`` is
-            # deterministic per epoch, so every epoch runs the same count.
-            steps_per_epoch = len(loader)
-            runtime_session.complete_setup(
-                storage_provenance=_setup_storage_provenance(
-                    data_dir,
-                    sample_set,
-                    profile,
-                    data_path=data_path,
-                    task_scope=task_scope,
-                ),
-                training_workload=ResolvedPhaseWorkload(
-                    phase="training",
-                    unit="optimizer_step",
-                    unit_count=steps_per_epoch * prediction_epochs,
-                    detail={
-                        "source": "materialized_epoch0_loader",
-                        "steps_per_epoch": steps_per_epoch,
-                        "epochs": prediction_epochs,
-                        "epoch0_samples": len(cast("Sized", dataset)),
-                        "batch_size": train_cfg.batch_size,
-                        "train_portion": train_portion,
-                        # Provenance only — ordering permutes the same rows,
-                        # so it changes no term in the workload arithmetic.
-                        # Recorded so observations stay attributable if
-                        # ordering ever turns out to affect unit time.
-                        "resolved_order_strategy": order_strategy,
-                    },
-                ),
-                detail={"dataset_construction_seconds": epoch0_dataset_seconds},
-            )
-            report_training_budget(
-                runtime_session, stage="before_optimizer", epochs=train_cfg.epochs
-            )
-            # §6a calibration-key inputs — recorded by the engine that
-            # knows them. runtime_flags are literal facts of THIS loop
-            # (no workers / pinning / accumulation / compile); flipping
-            # any of them must update this record (§6a reserved field).
-            # C-C5b: built through the SHARED definition, so the pre-launch
-            # time gate can reconstruct this identity exactly. Two
-            # independent constructions of this mapping would drift, and a
-            # drifted hash never matches -- which looks identical to "no
-            # calibration recorded yet".
-            from core.runtime_control.calibration_context import (
-                CalibrationContextInputs,
-                build_calibration_context,
-                model_precision,
-                trainable_param_count,
-            )
+            if runtime_session is not None and ep == 0:
+                # RT2-B post-setup boundary (§2.1/§2.2): everything up to here —
+                # config load, model/optimizer/criterion init, CUDA context, the
+                # epoch-0 dataset and DataLoader — is the measured setup. The
+                # steps-per-epoch count comes from the MATERIALIZED loader
+                # (drop_last floor), the production ground truth; ``n_keep`` is
+                # deterministic per epoch, so every epoch runs the same count.
+                steps_per_epoch = len(loader)
+                runtime_session.complete_setup(
+                    storage_provenance=_setup_storage_provenance(
+                        data_dir,
+                        sample_set,
+                        profile,
+                        data_path=data_path,
+                        task_scope=task_scope,
+                    ),
+                    training_workload=ResolvedPhaseWorkload(
+                        phase="training",
+                        unit="optimizer_step",
+                        unit_count=steps_per_epoch * prediction_epochs,
+                        detail={
+                            "source": "materialized_epoch0_loader",
+                            "steps_per_epoch": steps_per_epoch,
+                            "epochs": prediction_epochs,
+                            "epoch0_samples": len(cast("Sized", dataset)),
+                            "batch_size": train_cfg.batch_size,
+                            "train_portion": train_portion,
+                            # Provenance only — ordering permutes the same rows,
+                            # so it changes no term in the workload arithmetic.
+                            # Recorded so observations stay attributable if
+                            # ordering ever turns out to affect unit time.
+                            "resolved_order_strategy": order_strategy,
+                        },
+                    ),
+                    detail={"dataset_construction_seconds": epoch0_dataset_seconds},
+                )
+                report_training_budget(
+                    runtime_session, stage="before_optimizer", epochs=train_cfg.epochs
+                )
+                # §6a calibration-key inputs — recorded by the engine that
+                # knows them. runtime_flags are literal facts of THIS loop
+                # (no workers / pinning / accumulation / compile); flipping
+                # any of them must update this record (§6a reserved field).
+                # C-C5b: built through the SHARED definition, so the pre-launch
+                # time gate can reconstruct this identity exactly. Two
+                # independent constructions of this mapping would drift, and a
+                # drifted hash never matches -- which looks identical to "no
+                # calibration recorded yet".
+                from core.runtime_control.calibration_context import (
+                    CalibrationContextInputs,
+                    build_calibration_context,
+                    model_precision,
+                    trainable_param_count,
+                )
 
-            runtime_session.set_calibration_context(
-                build_calibration_context(
-                    CalibrationContextInputs(
-                        precision=model_precision(model),
-                        optimizer_type=train_cfg.optimizer_type,
-                        model_family=model_cfg.model_type,
-                        param_count=trainable_param_count(model),
-                        seg_size=seg_size,
-                        batch_size=train_cfg.batch_size,
+                runtime_session.set_calibration_context(
+                    build_calibration_context(
+                        CalibrationContextInputs(
+                            precision=model_precision(model),
+                            optimizer_type=train_cfg.optimizer_type,
+                            model_family=model_cfg.model_type,
+                            param_count=trainable_param_count(model),
+                            seg_size=seg_size,
+                            batch_size=train_cfg.batch_size,
+                        )
                     )
                 )
-            )
-            admission = runtime_session.decide_admission()
-            if admission.decision == "rejected":
-                print(f"[runtime_control] REJECTED before formal training: {admission.reason}")
-                del dataset, loader
-                del model, optimizer, criterion
-                torch.cuda.empty_cache()
-                gc.collect()
-                return None
-            # Admitted: continue directly into THIS loop — the very objects
-            # measured during setup are the ones formal training uses. The
-            # first production steps double as the adaptive training
-            # verification (RT2-C, §2.5): timed with explicit CUDA sync
-            # until a terminal verdict, untimed afterwards. The historical
-            # prior (RT2-F store, RT2-G wiring) enables §2.5 early exit on
-            # verified_match — never a verification substitute.
-            t_train_start = time.perf_counter()
-            verifier = runtime_session.start_phase_verification(
-                "training",
-                unit="optimizer_step",
-                prior_expected_unit_ms=runtime_session.lookup_phase_prior("training"),
-            )
+                admission = runtime_session.decide_admission()
+                if admission.decision == "rejected":
+                    print(f"[runtime_control] REJECTED before formal training: {admission.reason}")
+                    del dataset, loader
+                    del model, optimizer, criterion
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                    return None
+                # Admitted: continue directly into THIS loop — the very objects
+                # measured during setup are the ones formal training uses. The
+                # first production steps double as the adaptive training
+                # verification (RT2-C, §2.5): timed with explicit CUDA sync
+                # until a terminal verdict, untimed afterwards. The historical
+                # prior (RT2-F store, RT2-G wiring) enables §2.5 early exit on
+                # verified_match — never a verification substitute.
+                t_train_start = time.perf_counter()
+                verifier = runtime_session.start_phase_verification(
+                    "training",
+                    unit="optimizer_step",
+                    prior_expected_unit_ms=runtime_session.lookup_phase_prior("training"),
+                )
+                training_interval.enter_context(verifier.active_interval())
 
-        if budget_execution and not budget_execution.admit_materialized_epoch(
-            optimizer_steps=len(loader)
-        ):
+            if budget_execution and not budget_execution.admit_materialized_epoch(
+                optimizer_steps=len(loader)
+            ):
+                del dataset, loader
+                gc.collect()
+                break
+            batch_losses = []
+            batch_rows = []
+            rejected_mid_epoch = False
+            batch_iterator = iter(loader)
+            for _ in tqdm(range(len(loader)), desc=f"Epoch {ep}", file=sys.stdout):
+                enforce_training_allocation(runtime_session, phase="training")
+                if verifier is not None:
+                    if use_cuda_sync:
+                        torch.cuda.synchronize()
+                    t_step = time.perf_counter()
+
+                input_batch, target_batch = next(batch_iterator)
+                input_seq = input_batch.to(device)
+                target_seq = target_batch.to(device)
+
+                input_seq = input_seq.to(
+                    resolve_input_dtype(
+                        model_cfg.model_type, model_io, site_preference=TRAINING_SITE_DTYPE
+                    )
+                )
+
+                # I13 — see comment at the first occurrence above. Same
+                # single-source-of-truth dispatch via get_target_torch_dtype.
+                target_seq = target_seq.to(dtype=get_target_torch_dtype(loss_cfg))
+
+                optimizer.zero_grad()
+                output = model(input_seq)
+                loss = criterion(output, target_seq)
+                loss.backward()
+                optimizer.step()
+                batch_losses.append(loss.item())
+                batch_rows.append(int(input_seq.shape[0]))
+
+                if verifier is not None:
+                    if use_cuda_sync:
+                        torch.cuda.synchronize()
+                    state = verifier.feed(max((time.perf_counter() - t_step) * 1000.0, 1e-6))
+                    if state in ("verified", "failed_no_steady_state", "failed_pathological_unit"):
+                        rejected_mid_epoch = _finish_training_verification(decide_admission=True)
+                        verifier = None
+                        if rejected_mid_epoch:
+                            break
+
+            del batch_iterator
+            # Captured BEFORE the epoch's dataset is released, so the zero-step
+            # refusal below can still name the geometry that produced the
+            # empty epoch.
+            epoch_rows = _declared_len(dataset)
             del dataset, loader
             gc.collect()
-            break
-        batch_losses = []
-        batch_rows = []
-        rejected_mid_epoch = False
-        batch_iterator = iter(loader)
-        for _ in tqdm(range(len(loader)), desc=f"Epoch {ep}", file=sys.stdout):
-            enforce_training_allocation(runtime_session, phase="training")
-            if verifier is not None:
-                if use_cuda_sync:
-                    torch.cuda.synchronize()
-                t_step = time.perf_counter()
-
-            input_batch, target_batch = next(batch_iterator)
-            input_seq = input_batch.to(device)
-            target_seq = target_batch.to(device)
-
-            input_seq = input_seq.to(
-                resolve_input_dtype(
-                    model_cfg.model_type, model_io, site_preference=TRAINING_SITE_DTYPE
-                )
-            )
-
-            # I13 — see comment at the first occurrence above. Same
-            # single-source-of-truth dispatch via get_target_torch_dtype.
-            target_seq = target_seq.to(dtype=get_target_torch_dtype(loss_cfg))
-
-            optimizer.zero_grad()
-            output = model(input_seq)
-            loss = criterion(output, target_seq)
-            loss.backward()
-            optimizer.step()
-            batch_losses.append(loss.item())
-            batch_rows.append(int(input_seq.shape[0]))
-
-            if verifier is not None:
-                if use_cuda_sync:
-                    torch.cuda.synchronize()
-                state = verifier.feed(max((time.perf_counter() - t_step) * 1000.0, 1e-6))
-                if state in ("verified", "failed_no_steady_state", "failed_pathological_unit"):
-                    rejected_mid_epoch = _finish_training_verification(decide_admission=True)
-                    verifier = None
-                    if rejected_mid_epoch:
-                        break
-
-        del batch_iterator
-        if verifier is not None:
-            # Epoch-0 loader exhausted before a verdict: resolve from the
-            # evidence collected. With a single epoch the training work is
-            # already DONE — record evidence only; with more epochs ahead,
-            # the admission decision still protects them.
-            rejected_mid_epoch = _finish_training_verification(
-                decide_admission=train_cfg.epochs > 1
-            )
-            verifier = None
-
-        # Captured BEFORE the epoch's dataset is released, so the zero-step
-        # refusal below can still name the geometry that produced the
-        # empty epoch.
-        epoch_rows = _declared_len(dataset)
-        del dataset, loader
-        gc.collect()
 
         if rejected_mid_epoch:
             del model, optimizer, criterion
@@ -1972,6 +1970,18 @@ def run_experiment_streaming(
             decision = budget_execution.finish_epoch(optimizer_steps=len(batch_losses))
             if decision.action == "stop":
                 break
+
+    if verifier is not None:
+        # The workload has actually ended (including a cooperative epoch stop).
+        # Incomplete evidence is retained and follows the same admission policy
+        # as a terminal verdict reached inside the optimizer loop.
+        rejected = _finish_training_verification(decide_admission=True)
+        verifier = None
+        if rejected:
+            del model, optimizer, criterion
+            torch.cuda.empty_cache()
+            gc.collect()
+            return None
 
     if runtime_session is not None and budget_execution is not None:
         budget_execution.reconcile(

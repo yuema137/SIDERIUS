@@ -59,7 +59,14 @@ TrainingHistory's resolved plan equals the number of epochs actually allocated;
 the initial proposal and safety cap are separate provenance, so a normal
 budget stop is not mislabeled as an interrupted fixed schedule.
 
-Runtime verification initially describes one calibration epoch. At completion,
+The initial runtime prediction uses one calibration epoch as its workload.
+Verification evidence can span multiple allocated epochs: training retains
+one verifier and excludes intervening validation from its active measurement
+clock. Epoch boundaries do not reset evidence or verifier limits. At the true
+workload end, pending verification is finalized; insufficient evidence remains
+a failure, with record-only versus enforcing admission handled by the existing
+runtime policy. See the [training-verification contract](../design/runtime_estimation_and_watchdog.md#25-training-verification-phase-b).
+At completion,
 workload counts are reconciled to all executed steps/validation samples. The
 original limited-scope prediction is retained in workload detail. A verified
 unit rate is reprojected to the executed workload, explicitly labelled as

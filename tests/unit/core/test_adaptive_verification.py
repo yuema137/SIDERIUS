@@ -560,3 +560,59 @@ def test_continuous_verification_still_counts_wall_gaps(monkeypatch):
     v.feed(1)
     assert v.state == "failed_no_steady_state"
     assert "wall-time cap exhausted" in v.failure_reason
+
+
+@pytest.mark.parametrize("unit_ms", [0.125, 2.0, 32.0, 512.0, 4096.0, 8192.0])
+@pytest.mark.parametrize("steps_per_epoch", [1, 4, 17, 4096])
+@pytest.mark.parametrize("shape", ["steady", "warmup", "sustained_slowdown"])
+def test_epoch_partition_preserves_verdict_across_time_scales(
+    monkeypatch, unit_ms, steps_per_epoch, shape
+):
+    """Epoch partitioning cannot alter evidence or evade cumulative caps.
+
+    Compare the existing continuous-feed contract with disjoint active passes.
+    A slow workload may legitimately exhaust the wall cap: equivalence means
+    preserving that refusal, not making every scale verify successfully.
+    """
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    import core.runtime_control.adaptive as adaptive
+
+    trace = [unit_ms] * 4096
+    if shape == "warmup":
+        trace[:2] = [unit_ms * 64, unit_ms * 8]
+    elif shape == "sustained_slowdown":
+        trace[16:] = [unit_ms * 16] * (len(trace) - 16)
+    clock = [0.0]
+    monkeypatch.setattr(adaptive, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    def drive(partitioned):
+        clock[0] = 0.0
+        verifier = AdaptiveUnitVerification("optimizer_step")
+        width = steps_per_epoch if partitioned else len(trace)
+        for start in range(0, len(trace), width):
+            if start:
+                clock[0] += 256  # Unrelated phase work between training passes.
+            with verifier.active_interval() if partitioned else nullcontext():
+                for duration in trace[start : start + width]:
+                    clock[0] += duration / 1000
+                    verifier.feed(duration)
+                    if verifier.is_terminal:
+                        break
+            if verifier.is_terminal:
+                break
+        verifier.finalize()
+        measurement = verifier.measurement()
+        assert measurement is not None
+        prediction = verifier.prediction(_WORKLOAD, "real_training_verification")
+        return (
+            verifier.state,
+            (verifier.failure_reason or "").startswith("verification wall-time cap exhausted"),
+            measurement.raw_timings_ms,
+            measurement.n_stabilization_units,
+            measurement.n_measured_units,
+            None if prediction is None else prediction.predicted_seconds,
+        )
+
+    assert drive(True) == drive(False)

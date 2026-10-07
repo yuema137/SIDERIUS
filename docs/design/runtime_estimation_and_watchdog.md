@@ -331,6 +331,19 @@ a few observations suffice — one pathologically slow step terminates
 verification early and REJECTS the proposal rather than completing a
 fixed sample.
 
+**Training-pass lifecycle:** a short epoch is not the end of verification.
+The same verifier retains observations and slowdown history across subsequent
+requested training epochs. Its active wall clock includes later training
+passes' dataset/loader construction, optimizer work and dataset cleanup, but excludes the
+validation intervals between passes. The initial dataset/loader construction
+remains setup. Total execution-budget accounting still includes all phases.
+No additional epoch is requested solely to satisfy verification. At the true
+end of the allocated workload, including a cooperative epoch stop, pending
+evidence is finalized once: insufficient evidence yields no prediction and
+is rejected when admission enforces a budget; record-only execution retains
+the failure and may complete. A terminal decision is published immediately.
+This lifecycle does not relax detector thresholds or late-stability rules.
+
 **Historical prior comparison** — outcomes: `verified_match` (early
 exit permitted) | `verified_drift` (keep measuring within budget, use
 live result, flag prior per §6 policy) | `new_configuration` |
