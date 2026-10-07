@@ -34,13 +34,29 @@ import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, TypedDict, cast
+from typing import Any, ClassVar, cast
 
 from dotenv import load_dotenv
 from openai import APIError, OpenAI
 from openai.types.chat import ChatCompletionMessageFunctionToolCall
 from pydantic import ValidationError
 
+from agent.llm_settings import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS as DEFAULT_REQUEST_TIMEOUT_SECONDS,
+)
+from agent.llm_settings import (
+    DEFAULT_TIMEOUT_RETRIES as DEFAULT_TIMEOUT_RETRIES,
+)
+from agent.llm_settings import (
+    KNOWN_PROVIDERS as _KNOWN_PROVIDERS,
+)
+from agent.llm_settings import (
+    ProviderConfig as _ProviderConfig,
+)
+from agent.llm_settings import (
+    resolve_main_transport,
+    resolve_reflect_transport,
+)
 from agent.planner_strategy import resolve_planner_strategy
 from agent.prompt_templates.tuner.rendering import (
     EFFICIENCY_BAND_PCT,
@@ -105,18 +121,6 @@ class ToolCallResult:
 # Known providers — convenience defaults, not a restriction.
 # Any OpenAI-compatible endpoint can be used via base_url/api_key overrides.
 # ---------------------------------------------------------------------------
-class _ProviderConfig(TypedDict):
-    """Static shape of a `_KNOWN_PROVIDERS` entry.
-
-    ``base_url`` is ``None`` for providers that rely on the OpenAI SDK
-    default endpoint (currently ``openai``); ``api_key_env`` and
-    ``default_model`` are always populated, which lets ``os.getenv`` and
-    ``self.model_name`` resolve as ``str`` without a runtime guard.
-    """
-
-    base_url: str | None
-    api_key_env: str
-    default_model: str
 
 
 #: The variable the OpenAI SDK falls back to when ``api_key=None`` reaches it
@@ -142,31 +146,6 @@ _SDK_FALLBACK_KEY_ENV = "OPENAI_API_KEY"
 #: covers every present and future subclass, and so no consumer has to
 #: re-derive the provider surface from a string match on a class name.
 LLM_PROVIDER_TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (APIError,)
-
-_KNOWN_PROVIDERS: dict[str, _ProviderConfig] = {
-    "openai": {
-        "base_url": None,  # SDK default
-        "api_key_env": "OPENAI_API_KEY",
-        "default_model": "gpt-4o",
-    },
-    "gemini": {
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "api_key_env": "GEMINI_API_KEY",
-        "default_model": "gemini-3.1-flash-lite-preview",
-    },
-    "deepseek": {
-        "base_url": "https://api.deepseek.com",
-        "api_key_env": "DEEPSEEK_API_KEY",
-        "default_model": "deepseek-v4-pro",
-    },
-    # Claude via Bedrock/Vertex requires non-standard auth (AWS SigV4 / Google
-    # OAuth).  Placeholder entry — wire up when a compatible endpoint is available.
-    # "claude": {
-    #     "base_url": "https://...",
-    #     "api_key_env": "ANTHROPIC_API_KEY",
-    #     "default_model": "claude-sonnet-4-20250514",
-    # },
-}
 
 
 def _provider_credential_or_refuse(provider: str, known: _ProviderConfig) -> str | None:
@@ -328,36 +307,6 @@ def _stub_baseline_config_dict() -> dict:
             "loss_type": "ce",
         },
     }
-
-
-#: Per-request wall-clock timeout, in seconds, for every provider client.
-#:
-#: 600 s is the OpenAI SDK's OWN default (`openai._constants.DEFAULT_TIMEOUT`
-#: is `Timeout(connect=5.0, read=600, write=600, pool=600)` at v2.26.0,
-#: verified locally rather than read from docs). This bridge previously
-#: hardcoded 120 s — one fifth of that — with no recorded justification.
-#:
-#: WHY IT CHANGED (operator decision, 2026-08-17). A real Gate run proved the
-#: 120 s bound was killing legitimate work: the implementor's code-generation
-#: call against a reasoning model exceeded it TEN consecutive times and the
-#: chain never reached training, while an independent probe to the same model
-#: with a small prompt returned in 1.3 s. The API was healthy; our own client
-#: was the thing hanging up. Long generations are precisely what this system
-#: asks an implementor to do, so a bound below the vendor default cannot be
-#: the right policy.
-DEFAULT_REQUEST_TIMEOUT_SECONDS = 600.0
-
-#: Bounded retry budget for TIMEOUT and CONNECTION errors — total attempts,
-#: not additional ones.
-#:
-#: Kept separate from `max_retries` (which governs 429 / 5xx) because the two
-#: failures mean different things. A 503 says "try again shortly" and usually
-#: heals. A timeout says "this request did not fit the budget" — and retrying
-#: it unchanged reproduces the same outcome. Combined with the old
-#: `timeout=120s, max_retries=None`, that produced a genuinely pathological
-#: loop: kill at 120 s, back off, kill at 120 s, forever, making no progress
-#: and billing every attempt.
-DEFAULT_TIMEOUT_RETRIES = 3
 
 
 def _reflector_score_noun(task_render: "TunerTaskRender | None") -> str:
@@ -537,17 +486,19 @@ class LLMBridge:
                       waiting longer will help.
         """
         load_dotenv()
-        self.provider = provider.lower()
-        if reasoning_effort is not None and self.provider != "openai":
-            raise ValueError("reasoning_effort requires the OpenAI provider")
-        self.reasoning_effort = reasoning_effort
+        main_settings = resolve_main_transport(
+            provider=provider,
+            model_id=model_id,
+            base_url=base_url,
+            reasoning_effort=reasoning_effort,
+            request_timeout=request_timeout,
+            timeout_retries=timeout_retries,
+        )
+        self.provider = main_settings.provider
+        self.reasoning_effort = main_settings.reasoning_effort
         self.max_retries = max_retries
-        self.request_timeout = (
-            DEFAULT_REQUEST_TIMEOUT_SECONDS if request_timeout is None else float(request_timeout)
-        )
-        self.timeout_retries = (
-            DEFAULT_TIMEOUT_RETRIES if timeout_retries is None else int(timeout_retries)
-        )
+        self.request_timeout = main_settings.request_timeout
+        self.timeout_retries = main_settings.timeout_retries
 
         known = _KNOWN_PROVIDERS.get(self.provider)
 
@@ -559,21 +510,10 @@ class LLMBridge:
             api_key = _provider_credential_or_refuse(self.provider, known)
         self.api_key = api_key
 
-        # Resolve base_url: explicit arg > known default > None (SDK default)
-        if base_url is None and known:
-            base_url = known["base_url"]
-
-        # Resolve model: explicit arg > known default (unknown providers must supply model_id)
-        if model_id is None and known:
-            model_id = known["default_model"]
-        # ``cast`` is a pure type-system shim. If a caller passes an unknown
-        # provider with no ``model_id``, ``model_id`` remains ``None`` and
-        # the existing crash at the API-call site (``client.chat.completions.create``)
-        # is preserved verbatim — no behavior change, no early raise.
-        self.model_name: str = cast(str, model_id)
-        # Reflect model defaults to the main model when unset, so existing
-        # callers see no behavior change.
-        self.reflect_model_name: str = reflect_model_id or self.model_name
+        base_url = main_settings.base_url
+        # Unknown providers historically accept an omitted model until request
+        # time. The cast preserves that contract rather than adding validation.
+        self.model_name: str = cast(str, main_settings.model_id)
 
         # Retry policy: SDK retries are disabled (max_retries=0) and
         # replaced with our own loop in _chat_json that uses a longer
@@ -608,49 +548,28 @@ class LLMBridge:
         # connections, no extra resource cost). When it differs, we
         # instantiate a second OpenAI client with the reflect provider's
         # credentials.
-        normalized_reflect_provider = (
-            reflect_provider.lower() if reflect_provider else self.provider
+        reflect_settings = resolve_reflect_transport(
+            main_settings,
+            provider=reflect_provider,
+            model_id=reflect_model_id,
+            reasoning_effort=reflect_reasoning_effort,
         )
-        self.reflect_provider = normalized_reflect_provider
-        if reflect_reasoning_effort is not None and normalized_reflect_provider != "openai":
-            raise ValueError("reflect_reasoning_effort requires the OpenAI provider")
-        self.reflect_reasoning_effort = (
-            reflect_reasoning_effort
-            if reflect_reasoning_effort is not None
-            else reasoning_effort
-            if normalized_reflect_provider == self.provider
-            else None
-        )
+        self.reflect_provider = reflect_settings.provider
+        self.reflect_model_name: str = cast(str, reflect_settings.model_id)
+        self.reflect_reasoning_effort = reflect_settings.reasoning_effort
 
-        if normalized_reflect_provider == self.provider:
-            # Same provider — reuse the main client. Saves a connection
-            # and ensures both calls hit the same authenticated endpoint.
+        if reflect_settings.reuse_main_client:
             self.reflect_client = self.client
         else:
-            # Different provider — resolve its credentials from
-            # _KNOWN_PROVIDERS and instantiate a second OpenAI client.
-            reflect_known = _KNOWN_PROVIDERS.get(normalized_reflect_provider)
-            if reflect_known is None:
-                raise ValueError(
-                    f"Unknown reflect_provider {normalized_reflect_provider!r}. "
-                    f"Known providers: {list(_KNOWN_PROVIDERS.keys())}. "
-                    f"For ad-hoc providers, instantiate the second client "
-                    f"manually and assign it to LLMBridge.reflect_client "
-                    f"after construction."
-                )
-            # The SAME rule the main client resolved through, for the same
-            # reason: this branch is reached only when the reflect provider
-            # DIFFERS from the main one, which is exactly the cross-provider
-            # substitution `_provider_credential_or_refuse` refuses.
+            reflect_known = _KNOWN_PROVIDERS[reflect_settings.provider]
             reflect_api_key = _provider_credential_or_refuse(
-                normalized_reflect_provider, reflect_known
+                reflect_settings.provider, reflect_known
             )
-            reflect_base_url = reflect_known["base_url"]
             self.reflect_client = OpenAI(
                 api_key=reflect_api_key,
                 max_retries=0,
                 timeout=self.request_timeout,
-                base_url=reflect_base_url,
+                base_url=reflect_settings.base_url,
             )
 
         # --- Run-context state (Commit 1: scaffolding; Commit 2: setter) ---

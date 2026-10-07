@@ -19,12 +19,30 @@ executes training, inference or scoring.
 | file | surface |
 |---|---|
 | `llm_bridge.py` | `LLMBridge` — every provider is accessed through the OpenAI SDK. Known providers `openai` / `gemini` / `deepseek` resolve `base_url` + key env var automatically; **any OpenAI-compatible endpoint** works via explicit `base_url`/`api_key`. Also the `reflect_provider` split (route the reflector to a second provider/model) and the stub-mode bridge for $0 pseudo runs |
+| `llm_settings.py` | Pure provider/model/timeout and reflector-inheritance resolution used by the bridge and offline inspection; no credentials or client construction |
 | `prompts.py` + `prompt_templates/` | per-node prompt rendering (`proposal/`, `implementor/`, `interpretation/`, `tuner/`, `literature_review/`). Task science enters ONLY as caller-supplied task-blocks values parsed by `prompt_templates/_task_blocks_loader.py` — the shared mechanics of the three adapters (proposal / implementor / interpretation) |
 | `schemas/` | node input/output contracts and the typed edge protocols — see [`schemas/README.md`](schemas/README.md) |
 | `skills/` | atomic tools invoked by agents: `training_skill`, `inference_skill`, `denoising_score_skill`, `evaluate_time_skill` (+ the `~/.siderius` calibration store), `evaluate_vram_skill`, `check_config_format_skill`, `model_io_probe_skill.py`, `forbidden_pattern_skill.py`, `paper_resolver_skill` |
 | `tools_schema.py` | `load_skills_from_library` — scans `skills/` for `skill_config.json` declarations |
 | `cache_consolidator.py` | LLM-powered semantic consolidation of the model-knowledge cache's two accumulating list fields |
 | `utils/` | `architectural_pattern_tagger.py` (closed-vocabulary structural tags for proposals) · `proposer_preflight.py` (pre-implementor wall-time risk signal) |
+
+## Inspect transport settings without calling a provider
+
+```python
+from agent.llm_settings import resolve_main_transport, resolve_reflect_transport
+
+main = resolve_main_transport(provider="openai", model_id="your-model-id")
+reflect = resolve_reflect_transport(main, model_id="your-reflector-model-id")
+print(main.request_timeout, reflect.reuse_main_client)  # 600.0, True
+```
+
+These functions resolve the same transport choices used by `LLMBridge` without
+loading dotenv, reading keys or creating clients. They do not resolve a node's
+routing, validate provider access or prove that a model exists. An endpoint of
+`None` means the SDK/environment chooses the destination. An omitted reflector
+model inherits the main model even when its provider differs; supply the model
+explicitly when selecting a different provider.
 
 ## Inputs
 
@@ -71,7 +89,8 @@ reads it (CLAUDE.md binding rule).
 
 - **A new LLM endpoint needs no code** when it is OpenAI-compatible: pass
   `base_url` and `api_key` explicitly (or route via `configs/llm/*.json`).
-  The `_KNOWN_PROVIDERS` table is convenience defaults, not a gate.
+  The `llm_settings.KNOWN_PROVIDERS` table supplies convenience defaults, not a gate.
+  `llm_bridge._KNOWN_PROVIDERS` remains a compatibility export.
 - **New task science** for the proposer/implementor/interpreter is a
   task-owned blocks YAML named by the composition manifest — no template
   edit, no new adapter.
