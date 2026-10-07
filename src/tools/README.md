@@ -14,3 +14,7 @@ for its inputs and failure behavior.
 
 All paths are derived from the current checkout or supplied explicitly. Tools
 must not edit the checkout as a substitute for caller-owned task configuration.
+
+The optional [run settings preview](setup_review/README.md) is also intended for
+operators: it writes offline JSON and HTML for a fresh standard single-iteration
+declaration. It does not launch the workflow or certify task/environment readiness.
