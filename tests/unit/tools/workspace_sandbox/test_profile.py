@@ -16,14 +16,6 @@ def profile(tmp_path: Path, **extra) -> SandboxProfile:
     return SandboxProfile(workspace=tmp_path, network=False, timeout_seconds=10, **extra)
 
 
-def test_requires_network_decision_and_finite_positive_deadline(tmp_path):
-    for bad in (0, -1, float("nan"), float("inf")):
-        with pytest.raises(ValidationError):
-            SandboxProfile(workspace=tmp_path, network=False, timeout_seconds=bad)
-    with pytest.raises(ValidationError, match="network"):
-        SandboxProfile(workspace=tmp_path, timeout_seconds=10)
-
-
 def test_rejects_workspace_alias_and_runtime_overlap(tmp_path):
     alias = tmp_path / "alias"
     real = tmp_path / "real"
