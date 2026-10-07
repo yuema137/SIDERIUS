@@ -35,6 +35,7 @@ from agent.schemas.score_table import (
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.dataset_config import bind_dataset_profile
 from nodes.result_interpretation_agent import ResultInterpretationAgent
+from tests.helpers.formal_evidence import disabled_formal_evidence
 from tests.helpers.metric_fixtures import shipped_spec
 from tests.helpers.two_family_profile import make_two_family_profile
 
@@ -1330,6 +1331,7 @@ class TestScientificAggregationReachesTheRealOutput:
             worst_denoising_score=formal,
             formal_score=formal,
             scientific_authority=verdict,
+            formal_evidence=disabled_formal_evidence(model_type, formal),
             round_scores=[formal],
             round_conclusions=["c"],
         )

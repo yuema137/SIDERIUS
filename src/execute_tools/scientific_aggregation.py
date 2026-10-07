@@ -25,21 +25,27 @@ exclusion text placed inside a prompt can steer the scientific
 interpretation the model then writes. So this module derives the counts and
 reasons, and the report renders them from the typed object.
 
-**Authority is consumed, never re-derived.** The verdict comes from
-:mod:`core.scientific_authority`. This module must not look at a score, a
-gate id, a configured action, a `_blocking` suffix, or a model name — a
-second authority implementation is what the predecessor hotfix `af5339ce`
-existed to delete.
+**Policy is delegated to its existing owners.** Stored verdicts go through
+:mod:`core.scientific_authority`; independent formal-record facts go through
+:mod:`execute_tools.health_checks.candidate_eligibility`. This boundary
+requires their agreement and checks transport identity. It does not infer
+scientific membership from gate names or enforcement actions.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from typing import Any, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_field
 
 from core.scientific_authority import RecordAuthority, resolve_record_authority
+from execute_tools.formal_evidence import FormalResultEvidence
+from execute_tools.health_checks.candidate_eligibility import (
+    CandidateHealthValidity,
+    classify_candidate_health,
+)
 
 #: What ``provenance_lines`` calls its own scope when the caller names none.
 #:
@@ -61,7 +67,10 @@ class HasScientificAuthority(Protocol):
     """
 
     model_type: str
+    run_name: str | None
     scientific_authority: dict[str, Any] | None
+    formal_score: float | None
+    formal_evidence: FormalResultEvidence | None
 
 
 class ExcludedResult(BaseModel):
@@ -169,6 +178,45 @@ class AggregationScope(BaseModel):
         return lines
 
 
+def _independent_exclusion(summary: HasScientificAuthority) -> str | None:
+    """Verify a stored positive claim against transported record facts."""
+    raw = getattr(summary, "formal_evidence", None)
+    if raw is None:
+        return "formal_evidence_missing"
+    try:
+        evidence = (
+            raw
+            if isinstance(raw, FormalResultEvidence)
+            else FormalResultEvidence.model_validate_json(json.dumps(raw), strict=True)
+        )
+    except (ValidationError, TypeError):
+        return "formal_evidence_malformed"
+    if (
+        isinstance(summary.formal_score, bool)
+        or not isinstance(summary.formal_score, int | float)
+        or evidence.model_type != summary.model_type
+        or evidence.run_name != getattr(summary, "run_name", None)
+        or evidence.denoising_score != summary.formal_score
+        or evidence.is_trial
+    ):
+        return "formal_evidence_mismatch"
+    validity = classify_candidate_health(evidence, required_gate_ids=evidence.required_gate_ids)
+    if validity is not CandidateHealthValidity.VALID:
+        return (
+            "formal_validity_unknown"
+            if validity is CandidateHealthValidity.UNKNOWN
+            else "gate_invalidated"
+        )
+    stored = summary.scientific_authority or {}
+    for declared, field in (
+        (evidence.healthgate_mode, "healthgate_mode"),
+        (evidence.result_authority, "declared_result_authority"),
+    ):
+        if declared is not None and declared != stored.get(field):
+            return "formal_declaration_mismatch"
+    return None
+
+
 def partition_for_aggregation(
     summaries: Iterable[Any],
     *,
@@ -208,14 +256,21 @@ def partition_for_aggregation(
             declared_result_authority=None,
             commit_time_validity="unknown",
         )
-        if resolution.authoritative:
+        reason = (
+            _independent_exclusion(summary)
+            if resolution.authoritative
+            else resolution.exclusion_reason or "authority_not_established"
+        )
+        if reason is None:
             included.append(identity)
         else:
             excluded.append(
                 ExcludedResult(
                     record_id=identity,
-                    reason=resolution.exclusion_reason or "authority_not_established",
-                    basis=resolution.basis,
+                    reason=reason,
+                    basis="independent_formal_evidence"
+                    if resolution.authoritative
+                    else resolution.basis,
                 )
             )
     return AggregationScope(included=included, excluded=excluded)

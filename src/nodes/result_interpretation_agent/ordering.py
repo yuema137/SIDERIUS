@@ -66,7 +66,10 @@ class _CachedAggregationCandidate:
     """
 
     model_type: str
+    run_name: str | None
     scientific_authority: dict[str, Any] | None
+    formal_score: float
+    formal_evidence: Any = None
 
 
 @dataclass(frozen=True)
@@ -233,7 +236,10 @@ def precompute_evidence(
             cached_aggregation_candidates.append(
                 _CachedAggregationCandidate(
                     model_type=mt,
+                    run_name=stats.get("run_name"),
                     scientific_authority=stats.get("scientific_authority"),
+                    formal_score=formal_score,
+                    formal_evidence=stats.get("formal_evidence"),
                 )
             )
         best = stats.get("best_denoising_score")

@@ -60,6 +60,7 @@ from unittest.mock import patch
 
 from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
 from nodes.result_interpretation_agent import ResultInterpretationAgent
+from tests.helpers.formal_evidence import disabled_formal_evidence
 from tests.unit.agent.result_interpretation_agent.test_interpretation_agent import (
     _llm_dispatch,
     shipped_spec,
@@ -100,6 +101,7 @@ def _summary(
         worst_denoising_score=best,
         formal_score=formal,
         scientific_authority=verdict,
+        formal_evidence=disabled_formal_evidence(model_type, formal),
         round_scores=[best],
         round_conclusions=["c"],
     )
@@ -156,6 +158,8 @@ def _cached(model_type: str, *, best: float, formal: float | None, verdict: dict
             "formal_score": formal,
             "completed_rounds": 1,
             "scientific_authority": verdict,
+            "run_name": "v1",
+            "formal_evidence": disabled_formal_evidence(model_type, formal).model_dump(mode="json"),
         },
     }
 

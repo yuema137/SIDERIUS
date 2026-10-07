@@ -48,6 +48,7 @@ from execute_tools.evaluation_metric import (
     StampedMetricSpec,
     reconcile_metric_specs,
 )
+from execute_tools.formal_evidence import FormalResultEvidence
 from execute_tools.metric_order import MetricOrder
 
 if TYPE_CHECKING:
@@ -542,6 +543,26 @@ def tuning_output_to_model_run_summary(
         # this model from the scientific aggregate rather than admitting it
         # on an unestablished authority.
         scientific_authority=(formal_rec.scientific_authority if formal_rec else None),
+        formal_evidence=(
+            FormalResultEvidence(
+                model_type=formal_rec.model_type,
+                run_name=output.run_name,
+                exp_id=formal_rec.exp_id,
+                status=formal_rec.status,
+                denoising_score=formal_rec.denoising_score,
+                is_trial=formal_rec.is_trial,
+                health_gate_enabled=formal_rec.health_gate_enabled,
+                health_gate_results=tuple(formal_rec.health_gate_results),
+                required_gate_ids=(
+                    None if required_gate_ids is None else tuple(sorted(required_gate_ids))
+                ),
+                healthgate_mode=output.healthgate_mode,
+                result_authority=output.result_authority,
+                health_config_sha256=output.health_config_sha256,
+            )
+            if formal_rec
+            else None
+        ),
         formal_file_vector=formal_rec.file_vector if formal_rec else None,
         # Per-file performance (enriched — Phase 4)
         best_score_table=best_score_table,

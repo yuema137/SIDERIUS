@@ -28,6 +28,7 @@ from execute_tools.scientific_aggregation import (
     AggregationScope,
     partition_for_aggregation,
 )
+from tests.helpers.formal_evidence import disabled_formal_evidence
 
 
 def _verdict(mode: str | None, authority: str | None, validity: str) -> dict:
@@ -49,10 +50,12 @@ class _Summary:
     """The structural shape the boundary consumes — deliberately not the
     real `ModelRunSummary`, so the contract stays task-generic."""
 
-    def __init__(self, model_type: str, verdict: dict | None, score: float | None = None):
+    def __init__(self, model_type: str, verdict: dict | None, score: float | None = 1.0):
         self.model_type = model_type
+        self.run_name = "v1"
         self.scientific_authority = verdict
         self.formal_score = score
+        self.formal_evidence = disabled_formal_evidence(model_type, score)
 
 
 class TestWhatIsIncluded:

@@ -199,6 +199,37 @@ not mistake either for an oversight:
 | `is_degraded` | `bool` | `True` when the interpreter produced this output via the fallback path (LLM call failed after `LLMBridge`'s 3-retry envelope). Degraded outputs preserve numeric stats but carry empty LLM text. |
 | `evolution_stats` | `dict[str, Any]` | Per-iteration vocab-evolution metrics: `vocab_total`, `vocab_canonical`, `vocab_candidate`, `promoted_this_iter`, `is_degraded`. Also written as one line into `evolution_log.jsonl`. |
 
+## Independent formal evidence
+
+`ModelRunSummary.formal_evidence` transports the exact formal record's model/run/
+experiment identity, status, score, role, Health-enabled flag, gate results,
+resolved required gate IDs, output authority declarations and available policy
+hash. It is evidence, not another stored validity verdict. The shared Health
+classifier remains the sole validity owner.
+
+A positive `scientific_authority` also needs this independent evidence before
+aggregation. The record model, producing run and score must match the summary;
+a trial cannot supply formal evidence. Known output declarations must agree with
+the stored authority. Missing, malformed or mismatched evidence is excluded with
+an explicit reason. Gate-roster `None` remains unknown; an explicitly empty
+roster and explicitly disabled Health retain their classifier-defined meanings.
+
+The real cache writer carries `run_name` and JSON `formal_evidence` beside the
+score/verdict. Cached evidence is parsed strictly, including nested gate booleans;
+`"true"` is not a passing boolean. Old caches remain readable and their scores/text
+remain stored, but missing proof cannot establish scientific authority. Rebuild
+proof from independently verified producing records and the run's resolved policy
+in a separately identified consumer-owned replay/new workspace; do not rewrite
+archives or invent facts from the positive verdict itself. Extra evidence also
+changes whole-input fingerprints, so this is not an in-place resume migration.
+
+The main workflow supplies its resolved scientific gate roster. Direct protocol
+callers pass `local_all_records(..., required_gate_ids=...)`; the standalone CLI
+accepts `--required_gate_ids ID ...`. The IDs must come from the producing run's
+resolved Health policy. Omitting them keeps unknown validity. Passing the flag
+with no IDs explicitly declares an empty roster; it is not a workaround for
+missing policy evidence.
+
 ## CLI usage
 
 ```bash
@@ -223,6 +254,7 @@ The CLI reads `{workspace}/run_output_{run_name}.json` (the upstream tuning agen
 | `--model_type` | `str` | required | Model architecture (e.g. `punet`, `wavenet`, `fcnet`). |
 | `--provider` | `str` (`gemini` \| `openai`) | `gemini` | LLM provider for the per-model + synthesis + dedup calls. |
 | `--model_id` | `str` | `gemini-3.1-flash-lite-preview` | Specific model id passed to the provider. |
+| `--required_gate_ids` | zero or more `str` | omitted (`None`) | Caller-resolved scientific gate roster; omitted means unknown, explicitly no IDs means no required gates. |
 
 ## Python API usage
 
@@ -285,12 +317,12 @@ The constructor accepts `bridge_factory` (for test injection — defaults to `LL
 The summary helper requires the caller's resolved `required_gate_ids` for
 Health-valid selection. Omitting it, or passing `None`, means UNKNOWN rather
 than loading a default. The main workflow supplies this value. The standalone
-`ml_model_tune_to_ml_result_interp` protocol and ad-hoc interpreter CLI have no
-run-policy context: they retain raw scores and persisted verdict evidence, but
-cannot establish valid-best eligibility unless the record explicitly disabled
-Health. Summary-only aggregation still checks stored authority consistency;
-it does not independently establish policy-artifact availability (tracked in
-[#445](https://github.com/Galileo-Sandbox/SIDERIUS/issues/445)).
+`ml_model_tune_to_ml_result_interp` protocol and ad-hoc interpreter CLI accept
+an explicit resolved gate roster as described under Independent formal evidence.
+Without it, they retain unknown validity unless the record explicitly disabled
+Health. Aggregation checks both stored authority consistency and independent
+record facts. The transported policy hash records provenance when available;
+it is not a claim that the source policy remains accessible.
 
 > **Experimental status (V19 PR 3, final).** This optional feature is
 > fully implemented and operationally validated, but no universal
@@ -379,13 +411,13 @@ default set).
 
 `ModelRunSummary.scientific_authority` carries the verdict of the FORMAL record its `formal_score` came from, so the score and its authority cannot describe different experiments. Before any LLM call, `ordering.precompute_evidence()` partitions only score-bearing Formal results via `execute_tools.scientific_aggregation.partition_for_aggregation()` and filters `per_model_formal` to authoritative results only — a non-authoritative formal score therefore never reaches the synthesis prompt and cannot inform a scientific claim. A current Trial-only summary has no Formal result to partition and appears on neither side; it is not mislabeled as `unreconstructable_legacy`. The ordering is not merely conventional: `run()` calls the boundary before Phase 1, and Phase 1 consumes the summary index the same call returns.
 
-**The partition ranges over `summaries` AND the cached-only models (N-2).** `per_model_formal` is filled from both, so partitioning only `summaries` left every cached model outside both halves of the verdict: its formal score was dropped by the authority filter and no exclusion reason existed to report it. In a chain subprocess that is the normal case — after the first iteration `model_exploration.run_workflow` passes exactly ONE new summary and carries every other model in `model_knowledge_cache`. A cached model is presented to the partition through the same structural protocol a fresh summary satisfies (`model_type` + `scientific_authority`), never through a second rule.
+**The partition ranges over `summaries` AND the cached-only models (N-2).** `per_model_formal` is filled from both, so partitioning only `summaries` left every cached model outside both halves of the verdict: its formal score was dropped by the authority filter and no exclusion reason existed to report it. In a chain subprocess that is the normal case — after the first iteration `model_exploration.run_workflow` passes exactly ONE new summary and carries every other model in `model_knowledge_cache`. A cached model is presented to the partition through the same structural protocol a fresh summary satisfies (`model_type`, `run_name`, `formal_score`, `scientific_authority`, `formal_evidence`), never through a second rule.
 
 Nothing is deleted. The excluded results are retained in `InterpretationOutput.scientific_aggregation` (`included` / `excluded` / `excluded_count` / `all_excluded` / `no_records` / `exclusion_reason_counts`), written at BOTH the healthy and the degraded assembly so an interpreter LLM failure cannot lose the provenance. Render it with `AggregationScope.provenance_lines(scope=…)`.
 
 The exclusion is derived and rendered **deterministically, never by the model** (design §4.7): a model may simply omit it, and exclusion text placed inside a prompt can steer the interpretation it then writes. `all_excluded` is explicit because an empty aggregate alone reads identically to a campaign that found nothing — the opposite conclusion.
 
-**The `_stats` cache carries the verdict beside the score it judges (N-2).** Phase 1 writes `scientific_authority` into `_stats` alongside `formal_score`. Caching the number without its verdict made a model's authority expire the moment it went quiet: it could not be checked next iteration, so the score was dropped with nothing to report. A `_stats` block written before this — a resumed pre-N-2 workspace — carries no verdict, resolves to `unreconstructable_legacy` and is excluded fail-closed, which is the frozen rule for anything missing the authority contract.
+**The `_stats` cache carries the verdict beside the score it judges (N-2).** Phase 1 writes `scientific_authority`, `formal_evidence` and `run_name` into `_stats` alongside `formal_score`. Caching the number without its verdict made a model's authority expire the moment it went quiet: it could not be checked next iteration, so the score was dropped with nothing to report. A `_stats` block written before this — a resumed pre-N-2 workspace — carries no verdict, resolves to `unreconstructable_legacy` and is excluded fail-closed, which is the frozen rule for anything missing the authority contract.
 
 **A conclusion may not out-scope its partition (N-3).** `provenance_lines()` takes a keyword-only `scope`, defaulting to `"this aggregation"` — the object's own reach, and therefore always true. `run()` passes `scope=f"iteration {inp.iteration}"`, so the all-excluded line reads *"EVERY result was excluded — no scientifically authoritative result is available in iteration N."* It previously concluded *"this campaign produced no scientifically authoritative result"* from one iteration's evidence, printed once per iteration, including in campaigns whose other iterations produced authoritative results. The `scope` word governs only that sentence; a partition that excluded nothing renders byte-identically with or without it.
 

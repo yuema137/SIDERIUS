@@ -630,6 +630,12 @@ class ResultInterpretationAgent:
                     # Whatever `partition_for_aggregation` may conclude, it
                     # must conclude it from this model's own recorded verdict.
                     "scientific_authority": summary.scientific_authority,
+                    "run_name": summary.run_name,
+                    "formal_evidence": (
+                        summary.formal_evidence.model_dump(mode="json")
+                        if summary.formal_evidence is not None
+                        else None
+                    ),
                     "model_description": model_descriptions.get(mt),
                     # V19 PR 3 — deterministic side of the cache (§3.6):
                     # cached (non-active) models keep their health facts
@@ -1387,6 +1393,13 @@ def main():
     )
     parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai"])
     parser.add_argument("--model_id", type=str, default="gemini-3.1-flash-lite-preview")
+    parser.add_argument(
+        "--required_gate_ids",
+        nargs="*",
+        default=None,
+        help="Scientific gate IDs resolved from the producing run's effective Health policy. "
+        "Omit to retain unknown validity; pass with no IDs only for an explicitly empty roster.",
+    )
     args = parser.parse_args()
 
     # Load run output from workspace
@@ -1407,6 +1420,9 @@ def main():
     summary = tuning_output_to_model_run_summary(
         tune_output,
         order=MetricOrder(run_metric_spec) if run_metric_spec is not None else None,
+        required_gate_ids=(
+            None if args.required_gate_ids is None else frozenset(args.required_gate_ids)
+        ),
     )
 
     # Step 09b C2 — the ad-hoc CLI is a Regime-A entry point like the

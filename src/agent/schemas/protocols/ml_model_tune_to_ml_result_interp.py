@@ -34,6 +34,8 @@ from nodes.result_interpretation_agent import (
 def local_all_records(
     output: HyperparamTuningOutput,
     storage: StorageConfig,
+    *,
+    required_gate_ids: frozenset[str] | None = None,
 ) -> InterpretationInput:
     """
     Local in-memory protocol — converts tuning output to a condensed summary.
@@ -53,6 +55,10 @@ def local_all_records(
       - metric_spec (Step 09a — the run's already-resolved MetricSpec,
         forwarded so the interpreter can order without deriving one)
 
+    The caller supplies its resolved scientific gate roster through
+    required_gate_ids. None preserves unknown evidence; an empty set explicitly
+    declares no required gates. This protocol never reads ambient policies.
+
     Populates in ml-result-interp (InterpretationInput):
       - summaries    : [ModelRunSummary] — condensed run summary
       - metric_spec  : the reconciled run MetricSpec (None on a legacy output,
@@ -64,6 +70,7 @@ def local_all_records(
     summary = tuning_output_to_model_run_summary(
         output,
         order=MetricOrder(run_metric_spec) if run_metric_spec is not None else None,
+        required_gate_ids=required_gate_ids,
     )
 
     return InterpretationInput(

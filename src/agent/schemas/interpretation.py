@@ -47,6 +47,7 @@ from execute_tools.evaluation_metric import (
     MetricSpecField,
     NotScoreableResult,
 )
+from execute_tools.formal_evidence import FormalResultEvidence
 from ml_models.model_descriptions import DescriptionSourcePolicy
 
 # ---------------------------------------------------------------------------
@@ -476,6 +477,10 @@ class ModelRunSummary(BaseModel):
     best_valid_formal_score: float | None = Field(
         default=None,
         description="Highest HealthGate-valid formal score; None when none is valid.",
+    )
+    formal_evidence: FormalResultEvidence | None = Field(
+        default=None,
+        description="Independent facts for the exact formal score, including the run's gate roster.",
     )
     scientific_authority: dict[str, Any] | None = Field(
         default=None,
