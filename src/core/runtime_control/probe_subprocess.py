@@ -64,6 +64,7 @@ from core.local_code.child import ChildInvocation, prepare_child
 from core.local_code.failure import raise_if_code_package_failure
 from core.runtime_control.probe import descendant_pids
 from core.subprocess_env import subprocess_env
+from execute_tools.task_data_path import TaskProbeDataSpec
 
 WorkerPhase = Literal["launch", "setup", "training", "inference", "complete"]
 WorkerStatus = Literal["ok", "oom", "load_failure", "wall_cap"]
@@ -203,6 +204,7 @@ class ProbeWorkerSpec(BaseModel):
     loss_config: dict[str, Any] = Field(default_factory=dict)
     expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None
     data_dir: str | None = None
+    task_probe_data: TaskProbeDataSpec | None = None
     device: str = "cuda"
     caps: dict[str, Any] = Field(default_factory=dict)
     device_vram_gb: float = Field(gt=0.0)
@@ -376,17 +378,6 @@ def spawn_worker(
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             start_new_session=True,
-            # Step 11 C1 (F-11-2, same omission). This spawner is reachable
-            # only from the retired historical campaign driver, so it is NOT the
-            # production defect — it is included so the transport census
-            # can be a UNIVERSAL rule instead of carrying a by-name
-            # exemption, which is the F-11-8 / F-P2b-4 shape.
-            #
-            # `ProbeWorkerSpec` declares no run-scoped plugin directories,
-            # so none are transported and plugin resolution is unchanged:
-            # the worker still falls back to the legacy global dir exactly
-            # as before. What it gains is the PYTHONPATH extension every
-            # other SIDERIUS worker already receives.
             env=invocation.env,
         )
     except Exception as exc:
