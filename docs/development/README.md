@@ -1,5 +1,10 @@
-# docs/development
+# Working on SIDERIUS
 
-Documentation index for docs/development. The Markdown pages in this directory are the named authority for their subject; source modules own behavior and this README routes maintainers without duplicating contracts.
+Start with [CONTRIBUTING.md](../../CONTRIBUTING.md) for the development route
+and [CLAUDE.md](../../CLAUDE.md) for repository rules. The
+[agent reference](../agent-reference/README.md) helps locate the code and
+contracts for a particular change.
 
-See [the parent guide](../README.md) for child ownership and the focused validation route.
+[Context continuity](claude_context_continuity.md) describes how local working
+notes support a resumed coding session. They are not a substitute for checking
+the current branch, source and pending work.

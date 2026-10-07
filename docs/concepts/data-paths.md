@@ -86,7 +86,8 @@ looks inside.
 ## Resolution: keyed on binding presence, never on a task name
 
 The registry (`register_task_data_path` / `resolve_task_data_path`) is
-fail-closed, and **no code anywhere branches on a task's name**:
+fail-closed: it resolves the declared implementation identity and supplies no
+scientific default:
 
 - an explicit binding whose id is unknown → `TaskDataPathResolutionError`,
   naming the id and the registered set;
@@ -95,9 +96,8 @@ fail-closed, and **no code anywhere branches on a task's name**:
 - a run that needs scope construction from an implementation without the
   sibling capability → `TaskScopeCapabilityError`, naming the id *and* the
   missing methods;
-- **only the complete absence of a binding context** — the launch surfaces
-  that predate task composition — resolves the legacy TIDMAD compatibility
-  default.
+- absence of a binding context or a bound implementation →
+  `TaskDataPathResolutionError`; no scientific task is selected implicitly.
 
 Registration follows the two-phase identity rule (same id + same content ⇒
 idempotent; different content ⇒ refused), and children verify a
@@ -106,11 +106,12 @@ parent-pinned content identity before consuming — see
 
 ## The shipped implementations, and yours
 
-Four real implementations exist as worked examples: `tidmad_data_path.py`,
-`pets_data_path.py`, `davis_data_path.py` (in `execute_tools/`), and the
-quickstart pack's `QuickstartTaskDataPath`
-(`examples/quickstart/plugins/_quickstart_task.py`) — the last one loaded
-purely by `file:` reference, exactly as an out-of-tree task would be.
+The shipped examples are Quickstart's `QuickstartTaskDataPath`
+(`examples/quickstart/plugins/_quickstart_task.py`) and synthetic masked
+regression (`examples/synthetic_masked_regression/plugins/_masked_task.py`).
+They load through manifest `file:` references, as an external task does.
+Scientific data paths for TIDMAD, Pets and DAVIS belong to siderius-exp;
+they are not implementations under this framework's `execute_tools/`.
 
 Your task binds through its composition manifest:
 

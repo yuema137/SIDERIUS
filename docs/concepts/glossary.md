@@ -8,15 +8,17 @@ from the one here, the difference is stated.
 **Attempt** — one try at a tuning round. A round may consume several attempts if
 training fails or a plan is rejected; `--attempts_per_round` caps them.
 
-**Blocking / observational** — a health check's *disposition*: the only policy
-choice a task makes about a check. Blocking failures change what the run does;
-observational ones are recorded and change nothing.
+**Blocking / observational** — effective Health gate roles. A task selects a
+`blocking` or `recording` disposition; framework policy resolves the role and
+actions. Blocking-role failures affect scientific eligibility even when an
+observe-only policy does not enforce an action. Observational gates provide
+evidence without deciding eligibility.
 
 **Composition / composition manifest** — the YAML file that declares a task's
 semantics, and the act of resolving it. Composing a run binds the task's data
 path, dataset profile, metric, secondaries, health family and task config for the
-whole run. Pointing SIDERIUS at a manifest is what makes a run task-aware; without
-one it takes the legacy un-composed path.
+whole run. Production execution requires explicit task authority; absent
+bindings do not select a scientific default.
 
 **Deliverable** — what a model produces for evaluation: the artefact written by
 `write_deliverable` and read back by `read_evaluation_payload`. Naming is
@@ -49,7 +51,8 @@ a pass.
 implement → validate → tune. Contains many *rounds*.
 
 **Node** — one stage of the workflow with a typed input schema and output schema.
-Six are LLM-powered.
+The current node map includes seven research capabilities; see the
+[source node index](../../src/nodes/README.md).
 
 **Objective** — what training minimises. Distinct from the evaluation metric by
 *role*, even when the mathematics is the same.

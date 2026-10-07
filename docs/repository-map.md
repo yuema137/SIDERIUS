@@ -2,9 +2,9 @@
 
 Use this page to find an existing capability, its source owner and its entrypoint.
 The current physical source layout places eight packages under `src/`, with
-unchanged Python import names. PR 03A relocated the advice guide and optional
-provider diagnostic; PR 03B relocates the packages and their resources. Chain
-and iteration CLI paths are under `scripts/launch/` and `src/workflows/`.
+unchanged Python import names. Chain and iteration CLI paths are under
+`scripts/launch/` and `src/workflows/`. This map describes the landed framework;
+consumer installations follow their own recorded dependency pin.
 
 ## Start here
 
@@ -53,10 +53,8 @@ SIDERIUS/
 | [docs/](./) | User/agent documentation and design history; includes the [advice guide](guides/advice.md) |
 | [.github/](../.github/) | Automatic CI workflow |
 
-The initial audit at `2091acdf` counted 19 visible tracked roots. PR 03A retired
-`advice/` and `env_validation/`, leaving 17. PR 03B consolidates eight packages
-under `src/`, leaving 10 visible roots plus `.github`. Ignored files left in old
-locations are user state, not alternative source packages or cleanup targets.
+The source consolidation is landed. Ignored files left in old locations are
+user state, not alternative source packages or cleanup targets.
 
 Root files such as [`pyproject.toml`](../pyproject.toml),
 [`uv.lock`](../uv.lock), [`Makefile`](../Makefile) and
@@ -123,7 +121,8 @@ it does not borrow one environment for the other.
 Pass the task manifest through `--task_composition`, physical input data through
 `--data_dir`, and output storage through `--workspace`. Real tasks select these
 in exp launchers. Data, generated models, workspaces, secrets and report outputs
-remain external; tracked `reports/` is historical evidence. For generated
+remain external. Historical scientific reports are preserved in the experiment
+repository; there is no tracked framework `reports/` root. For generated
 synthetic data, follow the selected example's materialization instructions.
 For scientific data, use the task package's declared files and input contract.
 
@@ -141,51 +140,39 @@ reads, and an external wrapper can create directories before forwarding
 
 ## External consumer and evidence
 
-Inspected counterpart: `/home/yuema137/siderius-exp-current`, an explicit local
-deployment path, on `recovery/persist-demo-run-records` at
-`ae12ae13abb6e2c1618f0f185ba468d669868399`. This is a recovery branch, not exp
-master. Its `SIDERIUS_REVISION`, `pyproject.toml` and `uv.lock` pin framework
-`66d3edf2b2045eaf037fb5cc9ecb3dffee94523b`. Git confirms that pin and infra
-`2091acdf` have identical tracked trees. Commit equality is a separate check.
+The companion [siderius-exp](https://github.com/yuema137/siderius-exp) repository
+owns real scientific task packages, experiments, campaigns, deployments and
+result evidence. Start with its [task index](https://github.com/yuema137/siderius-exp/blob/main/tasks/README.md)
+and [experiment index](https://github.com/yuema137/siderius-exp/blob/main/experiments/README.md).
+The framework does not maintain a second scientific task roster.
 
-The following paths are relative to the external
-[exp tree at the inspected revision](https://github.com/Galileo-Sandbox/siderius-exp/tree/ae12ae13abb6e2c1618f0f185ba468d669868399).
-They are not directories under SIDERIUS.
+Consumer installation is pinned by its `SIDERIUS_REVISION`, `pyproject.toml`
+and `uv.lock`. The inspected private consumer default at `39100f7` pins
+framework `e800fc1f08b0e067fc21076a200f3f70d04b38b8`; this is distinct from the
+framework documentation baseline `69d20786`. Newer landed framework behavior
+is not automatically available in that consumer installation. Historical units
+may have still earlier source pairs.
 
-| Exp responsibility | Actual paths |
-| --- | --- |
-| Task declarations and manifests | `tasks/{tidmad,oxford_iiit_pet,davis_future_prediction,cancer_gene_identification,supernemo_signal_background,majorana_low_avse}/compositions/` and each package's declarations/plugins |
-| TIDMAD / Pets / DAVIS data loading | `tasks/tidmad/runtime/tidmad_data_path.py`, `tasks/oxford_iiit_pet/runtime/pets_data_path.py`, `tasks/davis_future_prediction/runtime/davis_data_path.py` |
-| Cancer data/task adapter | `tasks/cancer_gene_identification/plugins/_cancer_gene_task.py` |
-| SuperNEMO data/task adapters | `tasks/supernemo_signal_background/plugins/_supernemo_data.py` and `_supernemo_task.py` |
-| MAJORANA data/task adapters | `tasks/majorana_low_avse/plugins/_majorana_data.py` and `_majorana_task.py` |
-| Independent baseline tools | `tasks/tidmad/tools/run_comparison.py`, `tasks/supernemo_signal_background/tools/run_baseline.py`; reference-model plugins elsewhere do not imply independent baseline campaigns |
-| Experiment settings and launch | `experiments/*/launch.sh` or `experiments/*/two_iteration_qualification/launch.sh`; SuperNEMO also has `baseline_study/` |
-| Campaign/deployment settings | `campaigns/`, `deployments/`; their existence grants no launch authority |
-| Run records and receipts | `experiments/*/qualification_2026-09-02.md`, recovered demo notes and `receipts/` |
-| Migration/dependency evidence | `provenance/validation/2026-09-09_pr422_candidate_pin.md` |
-| Report generation | `reporting/metric_dashboard.py`; HTML/raw output remains in configured external storage |
+Use the consumer's tutorials for simplified workflow demonstrations and its
+[paper artifact reference](https://github.com/yuema137/siderius-exp/blob/main/experiments/paper-artifacts.md)
+for frozen configurations, archived evidence and reproduction limits. Do not
+infer complete paper reproducibility from a notebook or a successful prompt
+comparison. These public entry URLs name the publication destinations; updating
+documentation does not itself synchronize the private repositories.
 
-TIDMAD's qualification launcher accepts `--siderius-checkout`, `--workspace`
-and `--data_dir`, and checks the task's expected training/validation HDF5 names.
-SuperNEMO additionally requires four process files and four event indexes; it
-creates the workspace even when forwarding `--dry-run`. P0 established the
-local TIDMAD data directory, not local SuperNEMO data availability.
-
-The retained [PR #422 receipt](https://github.com/Galileo-Sandbox/siderius-exp/blob/ae12ae13abb6e2c1618f0f185ba468d669868399/provenance/validation/2026-09-09_pr422_candidate_pin.md)
-records the earlier 40 migration checks, 37 pin/task checks and framework CI.
-Those results are not reruns of this documentation change. The
-[SuperNEMO recovery note](https://github.com/Galileo-Sandbox/siderius-exp/blob/ae12ae13abb6e2c1618f0f185ba468d669868399/experiments/supernemo_signal_background/recovered_model_demo_v3_2026-09-03.md)
-states that exact executable provenance from the deleted RunPod is unavailable.
-Recovered trajectories and plots must not be presented as complete provenance.
+Earlier separation receipts remain at their original evidence locations:
+[PR #422 validation](https://github.com/Galileo-Sandbox/siderius-exp/blob/ae12ae13abb6e2c1618f0f185ba468d669868399/provenance/validation/2026-09-09_pr422_candidate_pin.md)
+and [SuperNEMO recovery](https://github.com/Galileo-Sandbox/siderius-exp/blob/ae12ae13abb6e2c1618f0f185ba468d669868399/experiments/supernemo_signal_background/recovered_model_demo_v3_2026-09-03.md).
+They describe those exact old revisions. The latter lacks complete executable
+provenance from the deleted RunPod; recovered trajectories are not a substitute.
 
 ## Retained and mixed material
 
 | Material | Actual reader/evidence and disposition |
 | --- | --- |
 | Trial anchor maps | [`trial_anchor_map.py`](../src/execute_tools/trial_anchor_map.py) reads an explicit caller/task-owned JSON artifact; no infra default or builder is shipped |
-| Scientific scoring/Health compatibility | [`scoring_utils.py`](../src/execute_tools/scoring_utils.py) and [`Health evaluation`](../src/execute_tools/health_checks/evaluation.py) retain task-specific behavior; existing [#423](https://github.com/Galileo-Sandbox/SIDERIUS/issues/423) tracks the Health boundary |
-| Default policy package resources | Existing [#424](https://github.com/Galileo-Sandbox/SIDERIUS/issues/424); exact-checkout entry checks do not qualify wheel-only execution |
+| Scientific compatibility vocabulary | Legacy record names remain readable, but active task scoring requires composition. Health eligibility uses declared roles and pinned policy; see the [Health contract](agent-reference/mechanisms/health-gates.md). |
+| Default policy resources | The generic policy ships under `execute_tools/health_checks/resources/`; source and wheel callers use `default_health_policy_path()`. See [policy configuration](../configs/health/README.md). |
 | Mixed scripts/configs | `scripts/launch/inspect_run_state.py` is active; dated harnesses and review material require caller-by-caller audit, not directory-wide deletion |
 | Historical reports | Preserved externally by the owning experiment repository; not an infra runtime root |
 | Former `advice/` root | Retired; the [format guide](guides/advice.md) documents caller-owned input |

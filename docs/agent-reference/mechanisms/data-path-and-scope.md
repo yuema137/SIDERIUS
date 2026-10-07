@@ -58,6 +58,9 @@ data-path method.
 | `TaskScopeCapability` | `build_training_scope`, `build_eval_scope`, `serialize_scope`, `deserialize_scope` | duck-typed callability against `_SCOPE_CAPABILITY_METHODS`; missing ⇒ fails closed **by name** |
 | `TaskTrialAnchoring` | `trial_anchor_path` | `declares_trial_anchoring` TypeGuard |
 | `TaskInferenceBatching` | `max_inference_batch_size` | `declares_inference_batching` TypeGuard; malformed or non-positive values fail closed |
+| `TaskHealthCoverageCapability` | `validate_health_coverage` | task-owned coverage proof before an enabled composed Health attempt |
+| `TaskStorageReadScope` | `storage_read_scope` | optional validated physical-read provenance; absence means unavailable evidence |
+| `TaskOutputArtifactCapability` | `enumerate_output_artifacts` | task-owned enumeration for an exact evaluation request; no framework filename guessing |
 
 `build_training_scope` and `build_eval_scope` are **separate methods**, not one
 method with a `leg` argument — the leg is not a parameter, it is a different
@@ -132,11 +135,12 @@ transports that value to execution children. Importing generic composition or
 workflow modules performs no task selection and therefore must not read
 `tidmad_data_config.yaml`.
 
-The two historical module attributes, `TIDMAD_DATA_DIR` and
-`SIDERIUS_DATA_DIR`, remain available for un-composed legacy callers. Their
-configuration is resolved lazily on first value access, preserving the prior
-real-file/template precedence, warning, and missing-config refusal. An explicit
-composed data root never falls through to that legacy task configuration.
+`resolve_dataset_dir` requires a nonblank existing directory supplied by the
+caller. `bind_physical_data_root` validates and binds it for the context lifetime;
+`active_physical_data_root` reports absence as `None`, while
+`resolve_physical_data_root` raises `DatasetDirectoryUnavailable` when unbound.
+The old `TIDMAD_DATA_DIR` / `SIDERIUS_DATA_DIR` module attributes and task-specific
+configuration fallback are not current interfaces.
 
 ## Registration
 
@@ -161,29 +165,25 @@ registration* and the child verifies it *before consuming*.
 | generic (non-TIDMAD) inference iteration | ✅ PR-12d — a supplied scope ⇒ the child iterates the task's own evaluation scope |
 | prediction-aligned deliverable source context | ✅ issue #385 repair — additive request context; four-method contract unchanged |
 
-On landed master the emitter is `task_scope_argv`
-(`execute_tools/scope_artifact.py:252`), called at **all three** spawn sites in
-`core/sandbox_executor.py` — `execute_training` (`:1542`), `execute_inference`
-(`:1839`) and `execute_scoring` (`:2180`); it returns `[]` for an absent scope,
-so un-composed argv is unchanged. All three children accept
-`--task_scope_ref` / `--task_scope_digest` and recompute the digest before
-deserializing.
+The emitter is `task_scope_argv` in `execute_tools/scope_artifact.py`, called
+by `SandboxExecutor.execute_training`, `execute_inference` and
+`execute_scoring`. It returns an empty list when no training scope was acquired;
+that preserves the transport shape for callers without scope artifacts. This is
+not permission to launch production children without a declared task. Children
+consume their transported scope through `load_transported_scope`, which verifies
+the digest before deserializing.
 
 ## Source map
 
-| concern | location |
-|---|---|
-| `TaskDataPath` | `execute_tools/task_data_path.py:350` |
-| `TaskScopeCapability` | `:394` |
-| `TaskTrialAnchoring` | `:453` |
-| registry lifecycle | `:612-743` (`register_task_data_path` `:682`) |
-| `DatasetProfile` | `execute_tools/dataset_config.py:466-486` |
-| `DataScope` | `:186-336` |
-| TIDMAD topology | `:814` |
-| scope artifact contract | `execute_tools/scope_artifact.py:1-40` |
-| read/write/paths | `:81`, `:91`, `:137` |
-| child-side consumption (`load_transported_scope`, `execute_tools/scope_artifact.py:199`) | `train_engine_sandbox.py:2207-2210` · `inference_single.py:772` · `denoising_score_single.py:240` |
-| implementations | `execute_tools/{tidmad,pets,davis}_data_path.py` |
+| Concern | Owner and symbols |
+| --- | --- |
+| Task protocols and registration | `src/execute_tools/task_data_path.py`: `TaskDataPath`, optional sibling protocols, `register_task_data_path` |
+| Generic dataset profile and partition scope | `src/execute_tools/dataset_config.py`: `DatasetProfile`, `DataScope` |
+| Scope artifact identity and transport | `src/execute_tools/scope_artifact.py`: `task_scope_argv`, `load_transported_scope` |
+| Parent subprocess boundaries | `src/core/sandbox_executor.py`: `execute_training`, `execute_inference`, `execute_scoring` |
+| Child consumption | `src/execute_tools/train_engine_sandbox.py`, `inference_single.py`, `denoising_score_single.py` |
+| Physical data root | `src/execute_tools/data_paths.py`: bind, active and resolve functions |
+| Shipped implementation examples | `examples/quickstart/plugins/_quickstart_task.py`, `examples/synthetic_masked_regression/plugins/_masked_task.py`; scientific implementations are external |
 
 ## Related
 

@@ -79,11 +79,14 @@ One honest boundary: pre-run admission currently prices the *training* phase
 only — the training child's validation pass is priced for runtime prediction
 and the watchdog, not at admission (a recorded open item, Q-07c-6).
 
-## The watchdog is opt-in
+## Watchdog selection
 
-`--runtime_watchdog` arms a process-group deadline kill for a child that
-overruns its predicted budget. It is **disabled by default**; without it,
-overruns are observed and recorded but not killed.
+The standard CLI accepts explicit enable/disable choices. When omitted, the
+watchdog policy is resolved from the selected hardware/profile inputs rather
+than a universal disabled default. `workflows.runtime_settings` records the
+resolved choice and its provenance. Enabled watchdogs can terminate a child
+process group when its deadline is exceeded. See the
+[launch reference](../reference/entrypoints.md) for controls and refusal rules.
 
 ## Transport is emitted only when bound
 
@@ -96,10 +99,9 @@ plugin directories. The scoring child composes the run's **declared metric**
 with **no fallback** — a failed composition terminates the subprocess rather
 than silently scoring with the wrong task's metric.
 
-An **un-composed legacy run emits none of this**: its child argv is
-byte-identical to what it was before task composition existed. That
-"only-when-bound" rule is what lets the legacy TIDMAD path and composed runs
-share one launch surface without cross-contamination.
+Transport helpers emit task inputs from their bindings. Missing bindings are
+not a supported scientific fallback: production data and metric resolvers refuse
+absent authority.
 
 Deliverable file naming is declared by the task and validated by
 `DeliverableNaming` (`extra="forbid"` — a misspelled key refuses rather than

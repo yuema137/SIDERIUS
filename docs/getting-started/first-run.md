@@ -24,7 +24,7 @@ first contact.
 
 The integration tree contains both pseudo and opt-in real tests; it is not a
 uniform millisecond, credential-free command. Read the
-[pseudo-full-loop and integration-tier guide](../architecture.md#pseudo-full-loop-tests)
+[pseudo-full-loop and integration-tier guide](../architecture.md#pseudo-full-loop-tests-dual-mode)
 before selecting a bounded family test; do not assume the whole tree is a
 smoke test.
 

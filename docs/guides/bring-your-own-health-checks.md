@@ -77,7 +77,7 @@ union, three states:
 
 | state | expressed by | meaning |
 |---|---|---|
-| `LEGACY_OMITTED` | the caller said nothing at all | the bounded legacy path: resolves TIDMAD's shipped config. **A composition manifest cannot express this state** — it would let a composed run silently inherit another task's thresholds |
+| `LEGACY_OMITTED` | the caller said nothing at all | the uncomposed neutral default; it selects no scientific task family. **A composition manifest cannot express this state** — it would let a composed run silently inherit another task's thresholds |
 | `EXPLICIT_NONE` | `task_health: {none: true}` in the manifest | a **named absence**: this task declares no health family. Recorded, distinguishable from "was never asked", never satisfied by falling back to another task's family |
 | an explicit path | `task_health: {config: ./declared/task_health.yaml}` | your family |
 
@@ -183,12 +183,9 @@ Rules that will actually bite:
 ## Worked example 1: a named absence (the quickstart pack)
 
 The shipped onboarding pack declares **no** health family — and must say so
-explicitly. From `configs/task_composition/quickstart.yaml`, verbatim
-including its own comment:
+explicitly. Its `configs/task_composition/quickstart.yaml` binding is:
 
 ```yaml
-# A NAMED absence, not an omission: saying nothing at all would be the
-# LEGACY_OMITTED state that resolves TIDMAD's Health family.
 task_health:
   none: true
 ```
@@ -199,69 +196,58 @@ thresholds. The deterministic proof is
 `tests/unit/examples/test_quickstart_pack.py::test_shipped_manifest_composes_with_the_declared_values`,
 which composes this exact manifest.
 
-## Worked example 2: a real roster with a pack plugin (Oxford-IIIT Pet)
+## Worked example 2: a shipped synthetic roster
 
-`examples/oxford_iiit_pet/declared/task_health.yaml` is a complete,
-shipped family built on the generic categorical checks — thresholds chosen
-against a preserved *real* collapse (369/370 predictions in one class),
-with the provenance written into the file's own comments:
+The [masked-regression declaration](../../examples/synthetic_masked_regression/declared/task_health.yaml)
+loads its task-owned view provider and selects the framework's
+`sample_dispersion_floor` check with `min_dispersion: 0.1`. The check receives
+valid continuous predictions; a constant output fails the synthetic control.
+The value is a demonstration threshold, not scientific calibration.
 
 ```yaml
 facts:
-  encoding_family: categorical_labels
-  symbol_cardinality: 37          # the ONE cardinality authority — injected, never a parameter
-
+  encoding_family: continuous_float
 plugins:
-  - kind: file                    # underscore-prefixed so no directory scanner
-    ref: ../plugins/_pets_health_views.py   # ever execs it; this ref is its only loading path
-
+  - kind: file
+    ref: ../plugins/_masked_health_views.py
 providers:
-  - provider_id: pets.prediction_views
-
+  - provider_id: synthetic_masked_regression.valid_predictions
 roster:
-  - gate_id: pets_distinct_symbols_blocking
-    check: categorical_distinct_symbols
+  - gate_id: synthetic_masked_prediction_dispersion
+    check: sample_dispersion_floor
     disposition: blocking
     parameters:
-      min_distinct_symbols: 5     # the real collapse used 2 of 37
-    reason: >-
-      A 37-breed classifier predicting fewer than 5 distinct breeds has
-      stopped using its alphabet — the preserved D14 collapse used 2.
-
-  - gate_id: pets_dominant_fraction_blocking
-    check: categorical_dominant_fraction
-    disposition: blocking
-    parameters:
-      max_dominant_fraction: 0.95 # the real collapse sat at 369/370 ≈ 0.997
-    reason: >-
-      One breed above 95% of predictions is a constant or near-constant
-      deliverable — the preserved D14 collapse sat at 369/370.
+      min_dispersion: 0.1
+    reason: Demonstration boundary for continuous prediction dispersion.
 ```
 
-Note what is *absent*: no `on_fail`, no cadence, no severity — the task
-cannot state them. `aggregation` is absent too, but by choice rather than
-by refusal: neither gate peeks multiple files, so both take the framework
-default. And note the threshold style worth imitating: a
-*fraction* bound rather than `distinct == 1`, because the real failure mode
-is near-constant, not constant.
+This excerpt summarizes the binding; the linked file owns its exact reason text
+and resulting identity. Policy supplies cadence, role and actions. The
+[example guide](../../examples/synthetic_masked_regression/README.md) gives the
+offline execution route. Real task rosters, including Pets and DAVIS, live in
+siderius-exp and require their own thresholds and qualification.
 
-## An honesty note about enforcement today
+## Production evaluation and its limits
 
-Declaring a family and having it *fire* are different claims, and on the
-current source they diverge in one place: **a run composed from a manifest
-does not currently evaluate HealthGates** — gate evaluation is reached only
-on the legacy (un-composed TIDMAD) chain path, so a composed run records
-zero gate results. This is declared debt in the PR-12d ledger (§A1), not a
-documented feature. What *is* demonstrated: composition validates and pins
-your family exactly as described above, and the Pets/DAVIS families caught
-a real collapse through the direct-execution harnesses (Step 08c evidence).
-Deterministic suites you can run today, no key, no GPU:
+The tuner reaches `round_health.apply_round_health` after successful scoring,
+including the composed task-owned route. A scoring failure produces an
+`error_scoring` record and returns before Health evaluation. When
+`health_gate_enabled=False`, the Health engine is not called and no gate I/O
+occurs; score-validity classification still runs.
 
-```bash
-.venv/bin/python -m pytest tests/unit/examples/test_pets_health_family.py \
-              tests/unit/examples/test_davis_health_family.py \
-              tests/unit/examples/test_quickstart_pack.py -q
-```
+When enabled, the effective policy selects gates for the round's position.
+An empty roster, a position with no selected gates, and an inapplicable check
+are not evidence that a scientific check passed. Applicability, blocking versus
+observational roles, and enforcement are separate decisions; follow the
+[Health mechanism](../agent-reference/mechanisms/health-gates.md).
+
+The execution owner is
+[execution.py](../../src/nodes/ml_hyperparameter_tune_agent/execution.py), with
+[evaluation and persistence](../../src/nodes/ml_hyperparameter_tune_agent/round_health.py)
+at the shared round boundary. The synthetic extension tests in
+`tests/unit/execute_tools/health_checks/test_out_of_tree_extension.py` validate
+external registration and composition. A real task still needs its own execution
+evidence; its existence in a manifest is insufficient.
 
 ---
 

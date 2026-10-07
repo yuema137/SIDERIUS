@@ -601,177 +601,47 @@ modified by agents.
 
 ## Data Paths (current)
 
-Roots are machine-specific and resolved by the config layer
-(`tidmad_data_config.yaml` → `execute_tools/data_paths.py`; PR #125/#127
-made scoring reference data committed + package-relative, so a new server
-needs config edits only). lilab example below; on the H100 box the roots
-are `/workspace/DATA/TIDMAD_DATA/` and `/workspace/DATA/SIDERIUS_DATA/`.
+The caller supplies an explicit physical data root and workspace. The task
+composition selects the data-path implementation, dataset profile, metric and
+plugins. `execute_tools.data_paths.resolve_dataset_dir` rejects an omitted or
+nonexistent root; it does not read a task-specific machine configuration.
+Scientific dataset adapters and reference rulers belong to external task packages.
 
-```
-/home/klz/Data/TIDMAD/                          # raw input data (read-only)
-/home/klz/Data/SIDEREIS_DATA/
-├── {model}/
-│   ├── baseline/                               # baseline run (shared across run_names)
-│   └── {run_name}/agent/                       # agent run outputs
-│       ├── run_config_{run_name}.json          # startup config (includes file_index)
-│       ├── summary_{run_name}.json             # DERIVED view: latest-wins-by-exp_id projection of records.jsonl
-│       ├── run_output_{run_name}.json          # validated HyperparamTuningOutput (published atomically)
-│       ├── records/{run_name}/                 # per-experiment detail JSONs
-│       │   └── records.jsonl                   # CANONICAL append-only record history (S2 / U5)
-│       ├── configs/                            # model/train/loss configs per exp_id
-│       ├── cached_models/                      # trained model checkpoints (.pth)
-│       ├── run_invariants_lock.json            # immutable run invariants (scope + gate policy)
-│       └── health_checks_effective.yaml        # materialized HealthGate config (sha lock-pinned)
-└── raw_baseline/
-    └── raw_baseline_score_file_{index:04d}.json  # undenoised reference scores
-```
+The current data and output layouts are defined in
+[data paths](agent-reference/mechanisms/data-path-and-scope.md) and
+[workspaces and resume](guides/workspaces-and-resume.md). Historical TIDMAD
+machine paths in archived designs are not framework launch defaults.
 
----
+## Dataset Profile (current)
 
-## Dataset Profile (profile-driven data path — shipped 2026-08, PR 02a)
+`DatasetProfile` carries generic partition identity, explicit anchor/Health file
+sets and task-owned topology. The framework transports the declaration without
+interpreting the task's opaque topology payload. Task-data scopes are separately
+serialized by the task and digest-verified by execution children.
 
-The production data path resolves its dataset semantics from a **resolved
-Dataset Profile** rather than module-level constants.
-`DatasetProfile` (`execute_tools/dataset_config.py`) composes three
-declarations:
+Production resolves explicit or run-bound declarations. Legacy type names and
+wire compatibility do not establish a scientific default for an unbound run.
+See the [data-path contract](agent-reference/mechanisms/data-path-and-scope.md)
+for validation, optional capabilities and process transport.
 
-```text
-dataset   DatasetConfig — file topology (patterns, count, index space),
-          sample geometry (psd_segment_length, segments_per_file) and the
-          sample-shape legality rule
-channels  ChannelIdentity — which in-file channel is the model INPUT and
-          which is the TRUTH
-encoding  ValueEncoding — storage/compute dtype, value offset, class count
-```
+## Evaluation Metric Interface (current)
 
-It **composes** `DatasetConfig` rather than extending it, so the shipped
-`TIDMAD` object and its `model_dump()` are unchanged and the Step-00
-golden keeps pinning the object production reads.
+A task declares scientific ordering and its executable evaluation implementation.
+For deliverable-based evaluation, `EvaluationMetric.evaluate` checks scoreability
+before calling the selected metric's arithmetic. Task packages can supply their
+own `ScoreabilityContract` subclasses through composition; an unknown undeclared
+contract refuses. The candidate-execution adapter has a separate typed contract.
 
-**Resolution has two regimes**, and confusing them is the failure the
-design guards against:
+`MetricOrder` owns direction interpretation throughout ranking. Primary metrics
+select candidates; secondaries are observational. Persisted external scoreability
+declarations can be read without implicitly importing their code, but must be
+rebound through active composition before execution. The
+[metric mechanism](agent-reference/mechanisms/metrics.md) owns these interfaces,
+refusals and validation references; scientific formulas are external task code.
 
-| Situation | Behaviour |
-|---|---|
-| an explicit profile path is supplied but is missing / unreadable / not JSON / schema-invalid | **FAIL CLOSED**, with a diagnostic naming the path. Never falls back to the singleton — a fallback would run a bound task against TIDMAD's topology and produce plausible, wrong numbers |
-| a caller omits the transport entirely | **Regime-A compatibility adapter** — resolve the shipped TIDMAD profile exactly, preserving pre-profile behaviour |
-
-`TIDMAD_PROFILE` is that adapter. It is **not** a universal framework
-default; every value in it is a property of the TIDMAD dataset.
-
-**Transport across the subprocess boundary** reuses the existing
-config-file + argv-flag pattern (`--model_cfg`, `--train_cfg`,
-`--loss_cfg`). `TidmadSandbox._write_dataset_profile_config(exp_id)`
-writes `dataset_profile_{exp_id}.json` into the run's `configs/` directory
-and all three entry points receive its path:
-
-```text
-execute_tools/train_engine_sandbox.py   --dataset_profile_json PATH
-execute_tools/inference_single.py       --dataset_profile_json PATH
-execute_tools/denoising_score_single.py --dataset_profile_json PATH
-```
-
-Omitting the flag is legal and means Regime-A.
-
-**In-process consumers** take the profile as an argument. Two consume it at
-import time — `agent/schemas/score_table.py`'s row/index bounds and
-`nodes/scoring_reference.py`'s file-index tuple — and use
-`resolve_dataset_profile()`, with `bind_dataset_profile()` (a scoped
-`ContextVar`) for tests and future task binding.
-
-**Not owned here**: SampleSet/selection semantics, systematic groups, and
-the Deliverable Contract (denoised naming/layout/attrs). The raw
-validation filename is Step-02 input topology and comes from the profile;
-every denoised name still comes from `denoised_filename_fn`.
-
----
-
-## Evaluation Metric Interface (shipped 2026-08, Step 06)
-
-Production scoring invokes the frozen TIDMAD scorer **through a generic
-metric handle** (`execute_tools/evaluation_metric.py`). The interface is
-extracted FROM the TIDMAD instance and extends the `metric_id:
-"tidmad_denoising_score"` precedent `per_file_best` already emitted; the
-frozen formula (`scoring_utils.score_vector`, `_LOG_BASE`, `s_max`,
-anchor normalisation, grand-mean) is referenced, never re-implemented, and
-its 2-tuple return is untouched.
-
-```text
-MetricSpec           id · direction ("higher" | "lower") · aggregation id ·
-                     transform (+params) · references · scoreability
-ScoreabilityContract abstract, EXECUTABLE: check({input_identity: path}) ->
-                     ScoreabilityVerdict (structured failures, never an h5py
-                     traceback). Declared PER METRIC INSTANCE against the
-                     producer-side DeliverableSpec — there is no universal
-                     completeness/channel/shape schema.
-EvaluationMetric     the handle: evaluate(deliverables, **kwargs) runs the
-                     contract FIRST, then the instance's arithmetic ->
-                     MetricResult | NotScoreableResult
-MetricResult         metric_id · direction · scalar (mandatory) · optional
-                     per_sample evidence · references_used
-```
-
-**Instance #1 — TIDMAD** is DERIVED under Regime A with no declaration
-(`derive_tidmad_metric(profile, deliverable_spec)`): identity
-`tidmad_denoising_score`, direction `higher`, aggregation = `score_vector`,
-transform `log` (base 5.27, imported — one contract, four expressions),
-references `anchor_map` / `raw_baseline` / `ground_truth`, and a
-`TidmadScoreabilityContract` requiring exactly what the live scorer reads
-of the deliverable: file-level completeness, the input channel dataset
-(`ch=1`), the `voltage_range_mV` / `sampling_frequency` attrs, the declared
-storage dtype. Task-level metric DECLARATION for other tasks is Step 12
-(an additive block in the existing task configuration — no new hierarchy).
-
-**Ownership split** (design §4, operator-confirmed): `DeliverableSpec`
-(Step 05c) owns producer-side REPRESENTATION — naming, cleanup identity,
-channel-group identity, layout, storage dtype/offset. The metric owns
-evaluation-side ACCEPTANCE — what THIS metric requires of that artifact —
-and REFERENCES the deliverable spec (channel group and dtype are read from
-it). `_is_complete_trial_output` stays a crash-resume REUSE guard; it is
-not the scoreability mechanism.
-
-**Two routes, one handle.** The tuner binds `run_metric` once at run scope
-(beside `run_profile`, `run_model_io`, `run_deliverable_spec`) and scores
-through `TidmadSandbox.evaluate_metric(run_metric, …)` — DataScope
-validation first (unchanged), then scoreability, then `score_vector` with
-its previous keyword arguments; a refused deliverable raises the typed
-`NotScoreableError` (carrying the structured result) into the tuner's
-scoring failure path (`error_scoring`, `failure_type="not_scoreable"`).
-`TidmadSandbox.score_vector` remains as the legacy 2-tuple wrapper. The
-scoring subprocess (`execute_tools/denoising_score_single.py`) RECONSTRUCTS
-the same instance from `--dataset_profile_json` (05c Option A — no new argv),
-names the deliverable through the deliverable spec, evaluates through the
-handle, and on refusal exits 1 with the structured payload on stderr and in
-`--output_json` (`not_scoreable`); the parent's classifier is unchanged.
-The two routes are pinned equal on one deliverable (Checkpoint 0 / C).
-
-**Record payload (additive).** `ExperimentRecord.metric_result`
-(`MetricResult`, `per_sample` stored as a pointer to `file_vector`) and
-`ExperimentRecord.metric_refusal` (`NotScoreableResult`) sit beside the
-untouched `denoising_score` / `file_vector` / `score_table`; historical
-records validate unchanged; on a `success` record the payload is validated
-to agree with the frozen fields (the `failed_mode_collapse` penalty is the
-documented exception).
-
-**Losses are not metrics.** Train/validation loss have no deliverable, no
-reference and no task-independent direction (roadmap §20.2); surfacing losses
-is Step 07's `TrainingHistory` / `TrainingDiagnosis`.
-
-**Step 12 / PR-12a C5 (D16) changed HOW that is enforced.** Step 06 enforced
-it LEXICALLY — `_is_loss_shaped` refused any identity whose *name* looked
-like a loss. That rule was wrong in both directions: it refused a legitimate
-declared metric called `log_loss` (Oxford-IIIT Pet's, deliberately named to
-force this), and it would have accepted a genuine training objective under
-any other name. **`MetricSpec.id` is now an OPAQUE identifier**: meaning and
-direction come from the declaration, and the boundary is enforced where the
-real distinction lives — the metric types still forbid extra keys and carry
-no loss field, and a loss has no deliverable to score. Naming is validated
-for hygiene only, never for semantics.
-
-**Not reached by Step 06** (enumerated and asserted, D1 / Step 07a debt):
-incumbent/best selection in the tuner, `workflows/model_exploration.py`,
-`core/resume.py`, `per_file_best._row_beats`, dashboard ordering — they
-still encode higher-is-better literally.
+The former Regime-A implicit TIDMAD scorer and higher-is-better-only descriptions
+belong to the [Step 06 design history](design/generic_framework_upgrade/step_06_metric_interface.md),
+not current execution instructions.
 
 ---
 

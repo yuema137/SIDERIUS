@@ -184,10 +184,9 @@ its data path — `write_deliverable` / `read_evaluation_payload` with a declare
 deliverable name, as Pets and DAVIS do — omit the section: a composed run then
 gets an **honest refusal** wherever an indexed template would be consulted,
 never TIDMAD's template. Declare the section only if your task genuinely names
-its artifacts by a zero-padded input index. (Before PR-12d landed, absence
-silently resolved to TIDMAD's naming — that fallback is gone for tasks that own
-their names; a composed task that declares neither, like TIDMAD's own manifest,
-still resolves the shipped template.)
+its artifacts by a zero-padded input index. A composition declaring neither
+indexed naming nor a task-owned `deliverable_name` is refused. There is no
+implicit scientific naming default for a freshly composed task.
 
 ---
 

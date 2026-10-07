@@ -143,15 +143,6 @@ class Finding:
 # that file, or the test fails as stale.
 ALLOWLIST: tuple[tuple[str, str, str], ...] = (
     (
-        "examples/quickstart/README.md",
-        "add `configs/task_composition/quickstart.yaml` binding it",
-        "A struck-through (~~…~~), completed item of the pack's own "
-        "post-PR-12d finalization checklist — a historical record of "
-        "framework-side maintenance already executed, addressed to the "
-        "pack's maintainers at the time, not an instruction to a reader "
-        "using the framework.",
-    ),
-    (
         "tests/pseudo_data/README.md",
         "A schema change is a two-file change.",
         "Historical pseudo-data maintenance guidance for preserving fixture parity.",

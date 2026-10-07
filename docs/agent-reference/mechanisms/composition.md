@@ -35,13 +35,14 @@ run_one_iteration.py: compose_run_task_bindings(manifest)
       → verify_composition_is_bound(task_composition)   # first thing
 ```
 
-`composition is None` is a **total no-op** — no ContextVar is set and the run
-takes the ⚠ legacy un-composed path with byte-identical child argv.
+Passing `None` to the binding context creates no task binding. It does not
+make production execution usable without a composition: task-data and metric
+resolvers refuse missing authority rather than selecting a scientific default.
 
 ## Inputs
 
-A manifest path. Thirteen possible sections, five required; unknown keys refused
-by set difference. See the [composition reference](../../reference/task-composition.md)
+A manifest path. The typed manifest declares required and optional sections;
+unknown keys are refused. See the [composition reference](../../reference/task-composition.md)
 for the table.
 
 ## Outputs
@@ -78,8 +79,9 @@ A half-composed run is fatal (`CompositionNotBoundError`), never degraded.
   are relocatable.
 - **Absolute paths are never hashed** into the fingerprint, so the same package at
   two locations has one identity.
-- **`task_health` may not be omitted.** Omission is `LEGACY_OMITTED`, which
-  resolves TIDMAD's family; a composition may only express `EXPLICIT_NONE`
+- **`task_health` may not be omitted.** The uncomposed
+  `LEGACY_OMITTED` state is neutral and is not valid in a manifest; a composition
+  may only express `EXPLICIT_NONE`
   (`none: true`) or a path.
 - **`secondary_metrics` order is semantic** — it participates in the fingerprint
   and the record stamp.
@@ -107,13 +109,12 @@ the same file-plugin contents, since those hashes are folded in.
 
 ## Deliverable-absence semantics
 
-Omitting `deliverable` is resolved by declared **capability**
-(`resolve_deliverable_naming`, `execute_tools/deliverable_spec.py:380` —
-PR-12d seam E, closing F-A4-1): a composed task that names its own artifacts
-through its data path is **refused** an indexed template (so no cleanup glob can
-address files the run never wrote); a composed task that does not — TIDMAD's own
-manifest — still resolves the shipped naming; the un-composed path is
-byte-unchanged. Four states, keyed on capability, never on task identity.
+A manifest either declares indexed `deliverable` naming or supplies a task
+data path with its own `deliverable_name`. Omitting both is refused during
+composition. Own-naming tasks may use their codec without an indexed template;
+`resolve_deliverable_naming` refuses that inapplicable capability, while
+`active_deliverable_naming` returns `None`. These decisions are based on declared
+capability, never task identity.
 
 ## Source map
 
@@ -131,7 +132,7 @@ byte-unchanged. Four states, keyed on capability, never on task identity.
 | compose entrypoint | `:1970` |
 | run-scoped binding | `:2237` |
 | post-condition guard | `:2333` |
-| shipped manifests | `configs/task_composition/{tidmad,pets,davis,quickstart}.yaml` |
+| shipped manifests | `configs/task_composition/{quickstart,synthetic_masked_regression}.yaml` |
 
 ## Related
 

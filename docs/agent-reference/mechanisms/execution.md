@@ -42,8 +42,9 @@ the child inferring anything.
 | declared metric | the scoring child re-composes it from the transported manifest | **no fallback** — a failed composition terminates the subprocess |
 | task inference batch ceiling | optional `TaskInferenceBatching` capability projected through `TaskProbeDataSpec` | resource selection and generic inference both enforce the same task-semantic maximum |
 
-**Transport is emitted only when bound**, so a legacy un-composed run's child
-argv is byte-identical to what it always was.
+Task transport is emitted from explicit bindings. This conditional emission
+is not an execution fallback: production children require the declared task
+and refuse missing authority.
 
 The scoring child having *no fallback* is deliberate: silently scoring with
 TIDMAD's metric would be the same class of defect as an implicit task binding,
@@ -64,17 +65,19 @@ Host-RAM ceilings per role, declared with provenance in
 |---|---:|---|
 | training | 40 | measured |
 | inference | **60** | ⚠ empirical, unverified |
-| scoring | 24 | measured |
+| scoring | 24 | incident-derived |
 
 Resolution is **exactly two layers** — declared default, then an environment
 override — with no third. `0` disables the ceiling; a malformed override
 **refuses loudly**. The invariants lock *records* the ceilings and never compares
 them.
 
-> The inference value is not arbitrary. Full-scope baseline inference needs it:
-> CUDA static VA ~18–20 GiB, plus ~7.4 GiB NumPy peak per partition, plus
-> caching-allocator overhead. **Lowering it without re-verifying full-scope
-> baseline inference is a regression.**
+The inference declaration explicitly retires its old four-array arithmetic:
+task-declared storage and agent-mode writes changed that path. The 60 GiB value
+remains because the historical full-scope baseline failed under 40 GiB;
+re-measurement is still debt. These are recorded host/process ceilings, not a
+portable claim about every task's current memory use. Follow the declaration's
+calibration evidence before changing them.
 
 ## Deliverables
 
@@ -85,13 +88,11 @@ them.
 yield the shipped TIDMAD template *and* a cleanup glob that deletes files the run
 never wrote.
 
-Absence of the manifest's `deliverable` section resolves by **declared
-capability** (`resolve_deliverable_naming`,
-`execute_tools/deliverable_spec.py:380` — four states, F-A4-1 closed by PR-12d
-seam E): a composed task that names its own artifacts through its data path is
-**refused** an indexed template; a composed task that does not (TIDMAD's own
-manifest) still resolves the shipped one; the un-composed path is
-byte-unchanged.
+The composer requires indexed `deliverable` naming or a task-owned
+`deliverable_name`. It refuses a declaration with neither. A task that owns
+its artifact names uses its codec; asking for an undeclared indexed naming
+capability raises `DeliverableNamingNotApplicableError`. See
+[composition absence semantics](composition.md#deliverable-absence-semantics).
 
 ## Task-neutrality — closed by PR-12d
 
@@ -100,17 +101,19 @@ six boundary rows this section used to carry as ⏳ are all landed:
 
 | | status | evidence |
 |---|---|---|
-| training child receives the task scope | ✅ | `task_scope_argv` in `execute_training`, `core/sandbox_executor.py:1542` |
-| inference child receives the task scope | ✅ | `task_scope_argv` in `execute_inference`, `:1839`; parsed at `execute_tools/inference_single.py:147` |
-| scoring child receives the task scope | ✅ | `task_scope_argv` in `execute_scoring`, `:2180`; parsed at `execute_tools/denoising_score_single.py:76` |
-| scoring child is task-neutral | ✅ | task-owned route: run-bound `TaskDataPath` resolution + `_emit_task_owned_score` (`denoising_score_single.py:178,195`), payload via `read_evaluation_payload` |
-| inference iteration is task-neutral | ✅ | a supplied scope artifact ⇒ the child iterates the task's own evaluation scope and writes through `write_deliverable` (`inference_single.py:142-155`) |
+| training child receives the task scope | ✅ | `task_scope_argv` in `execute_training`, `core/sandbox_executor.py::SandboxExecutor.execute_training` |
+| inference child receives the task scope | ✅ | `task_scope_argv` in `execute_inference`, `SandboxExecutor.execute_inference`; consumed by `execute_tools/inference_single.py` |
+| scoring child receives the task scope | ✅ | `task_scope_argv` in `execute_scoring`, `SandboxExecutor.execute_scoring`; consumed by `execute_tools/denoising_score_single.py` |
+| scoring child is task-neutral | ✅ | task-owned route: run-bound `TaskDataPath` resolution + `_emit_task_owned_score` in `denoising_score_single.py`, payload via `read_evaluation_payload` |
+| inference iteration is task-neutral | ✅ | a supplied scope artifact ⇒ the child iterates the task's own evaluation scope and writes through `write_deliverable` in `inference_single.py` |
 | a pack's model plugin reaches a composed child | ✅ | `model_plugins:` / `loss_plugins:` → run-scoped binding → env **union** at every spawn (`core/subprocess_env.py::subprocess_env`) |
 
-The real-run witnesses are the `G-12d` Pets and DAVIS composed runs (one formal
-round each, persisted in the packs' `STATUS.md`) and `G-12e`'s external package.
-Still deliberately open: HealthGate evaluation on the composed chain path
-(declared debt, PR-12d ledger §A1).
+Historical PR-12d/PR-12e witnesses belong to their recorded revisions and task
+packages. Current composed rounds reach the shared Health boundary after
+successful scoring; disabled Health, position selection and applicability still
+control which checks execute. See the [Health mechanism](health-gates.md) and
+external task qualification records; source reachability is not a fresh run
+qualification.
 
 ## Provenance stamps
 
@@ -126,18 +129,14 @@ changes.
 
 ## Source map
 
-| concern | location |
-|---|---|
-| scope argv emitter | `execute_tools/scope_artifact.py:252` (`task_scope_argv`), validation rows `:313` |
-| manifest argv | `core/sandbox_executor.py:847` (`_task_manifest_argv`) |
-| data-root argv | `:823` (`_data_root_argv`) |
-| training spawn | manifest `:1444`, data root `:1445`, scope `:1542` |
-| inference spawn | manifest `:1817`, data root `:1818`, scope `:1839` |
-| scoring spawn | `--raw_data_dir` `:2166`, manifest `:2167`, scope `:2180` |
-| child env (plugin-root union) | `core/subprocess_env.py::subprocess_env` |
-| role ceilings | `core/execution_calibration.py:95`, resolver `:152` |
-| ceiling consumer | `core/sandbox_executor.py:137` (`_subprocess_rss_gb`) |
-| deliverable naming | `execute_tools/deliverable_spec.py:92` (`DeliverableNaming`), resolution `:380` |
+| Concern | Owner and symbols |
+| --- | --- |
+| Scope and validation rows | `src/execute_tools/scope_artifact.py`: `task_scope_argv`, `validation_rows_argv` |
+| Manifest and physical-root transport | `src/core/task_transport.py`: `task_manifest_argv`, `data_root_argv` |
+| Training, inference and scoring spawn | `src/core/sandbox_executor.py`: corresponding `SandboxExecutor.execute_*` methods |
+| Child environment and plugin-root union | `src/core/subprocess_env.py`: `subprocess_env` |
+| Role ceilings | `src/core/execution_calibration.py`: `ROLE_CEILINGS`, `resolve_role_ceiling_gb`; consumed by `sandbox_executor._subprocess_rss_gb` |
+| Deliverable naming | `src/execute_tools/deliverable_spec.py`: `DeliverableNaming`, `resolve_deliverable_naming`, `task_names_its_own_deliverables` |
 
 ## Related
 

@@ -58,27 +58,33 @@ requirement becomes a structured refusal (`NotScoreableResult` → an
 `error_scoring` record with `failure_type="not_scoreable"`), never a garbage
 number.
 
-The declarable vocabulary is a **closed lookup, not a plugin surface** —
-it grows only when a contract class is added to
-`execute_tools/evaluation_metric.py`:
+The framework provides `deliverable_presence`, which checks that at least one
+artifact is named and every named path is a file. It does not validate scientific
+shape, dtype, channel contents or sample coverage.
 
-| `contract_id` | requires |
-|---|---|
-| `deliverable_presence` | every named deliverable exists as a file (and at least one was named). The right choice for most external tasks — the quickstart uses it |
-| `tidmad_denoised_h5` | TIDMAD's HDF5 channel/attrs/dtype requirements |
+For stronger acceptance, implement a task-owned `ScoreabilityContract` subclass
+and select it in the metric section's `scoreability_contracts` mapping:
 
-Declaring anything else is refused at composition with:
-
+```yaml
+metric:
+  declaration: ./metric.json
+  implementation:
+    file: ./plugins/metric.py
+    symbol: MyMetric
+  scoreability_contracts:
+    my_artifact_contract:
+      file: ./plugins/scoreability.py
+      symbol: MyArtifactContract
 ```
-unknown scoreability contract_id '<yours>'; known: ['deliverable_presence', 'tidmad_denoised_h5']
-```
 
-If `deliverable_presence` is too weak for your task — you want shape or
-dtype checked before scoring — that is currently a framework contribution
-(a new `ScoreabilityContract` subclass), not something a pack can ship.
-Your implementation may still refuse malformed payloads itself by raising:
-an exception inside the metric becomes a structured scoring error, not a
-score.
+The declaration's `scoreability.contract_id` selects that mapping entry. The
+composer validates the subclass and reconstructs the contract using its Pydantic
+schema. An undeclared id refuses; merely spelling a scientific contract id does
+not load an implementation. The selected plugin contributes to composition
+identity, including primary/secondary role and file content where applicable.
+See the [composition contract](../reference/task-composition.md) and
+[metric mechanism](../agent-reference/mechanisms/metrics.md) for identity and
+persisted-record replay behavior.
 
 ## The implementation
 
