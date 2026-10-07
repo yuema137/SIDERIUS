@@ -47,6 +47,7 @@ from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNNER = REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
+CLI_DECLARATIONS = REPO_ROOT / "src" / "workflows" / "standard_cli.py"
 
 #: The canonical executable floor, hand-written. Every assertion below compares
 #: a real boundary against THIS, never one boundary against another — so two
@@ -131,7 +132,7 @@ class TestNoPortionFlagBypassesTheParserAuthority:
         instead of re-implementing the scan — a re-implementation would prove
         that a copy of the detector bites while the real one could be broken.
         """
-        tree = ast.parse(RUNNER.read_text(encoding="utf-8") if source is None else source)
+        tree = ast.parse(CLI_DECLARATIONS.read_text(encoding="utf-8") if source is None else source)
         found: dict[str, str | None] = {}
         for node in ast.walk(tree):
             if not (

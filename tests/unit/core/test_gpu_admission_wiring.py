@@ -280,7 +280,11 @@ class TestReachabilityGuardrails:
         """One assertion per hop, so a break names the hop."""
         chain = [
             (CHAIN_COMMON.read_text(), "--gpu_pair_ceiling_gib", "run_chain -> app args"),
-            (RUNNER.read_text(), "--gpu_pair_ceiling_gib", "app args -> CLI"),
+            (
+                (RUNNER.parent / "standard_cli.py").read_text(),
+                "--gpu_pair_ceiling_gib",
+                "app args -> CLI",
+            ),
             (RUNNER.read_text(), "gpu_pair_ceiling_gib=args", "CLI -> schema"),
             (
                 tuner_node_source(),

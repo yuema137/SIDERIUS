@@ -330,22 +330,13 @@ class TestTheOperatorSurface:
     def test_the_launcher_help_gains_exactly_one_flag(self):
         """`--help` must gain one line and change no other byte of the
         validation-posture group."""
-        import ast
-        from pathlib import Path
+        from workflows.standard_cli import build_parser
 
-        source = (
-            Path(__file__).resolve().parents[3] / "src" / "workflows" / "run_one_iteration.py"
-        ).read_text(encoding="utf-8")
-        tree = ast.parse(source)
         flags = [
-            n.args[0].value
-            for n in ast.walk(tree)
-            if isinstance(n, ast.Call)
-            and getattr(n.func, "attr", None) == "add_argument"
-            and n.args
-            and isinstance(n.args[0], ast.Constant)
-            and isinstance(n.args[0].value, str)
-            and n.args[0].value.startswith("--validation_max")
+            option
+            for action in build_parser()._actions
+            for option in action.option_strings
+            if option.startswith("--validation_max")
         ]
         assert sorted(flags) == [
             "--validation_max_phase_seconds",

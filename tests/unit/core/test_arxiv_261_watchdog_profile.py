@@ -303,11 +303,13 @@ def test_one_resolution_authority_for_runtime_profiles():
     parallel reader of ``configs/runtime_profiles.yaml`` (or a second
     module re-implementing profile resolution) appearing outside the one
     authority. The allowlist is exact: the authority itself, and the launch
-    layer that IMPORTS it (whose flag help/banner may name the config path
+    layer that IMPORTS it and the shared parser declaration owner
+    (whose flag help/banner may name the config path
     for discoverability). Fails by: naming the new file."""
     allowed = {
         Path("src/core/runtime_control/watchdog_profile.py"),
         Path("src/workflows/run_one_iteration.py"),
+        Path("src/workflows/standard_cli.py"),
     }
     mentions: set[Path] = set()
     for root in (*_PRODUCTION_ROOTS, "src/workflows"):
