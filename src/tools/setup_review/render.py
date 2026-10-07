@@ -7,6 +7,7 @@ import json
 import shlex
 
 from tools.setup_review.models import SetupDeclarationReport
+from tools.setup_review.render_routes import render_route_sections
 
 
 def _display(value: object) -> str:
@@ -91,6 +92,7 @@ It does not compare the current configuration with this report. Running it can c
 LLM services and start training; this inspector has done neither.</p>
 <pre>{html.escape(command)}</pre>
 <h2>What remains unchecked</h2><ul>{limitations}</ul>
+{render_route_sections(report)}
 <h2>Settings after CLI parsing</h2>
 <p>Defaults come from the standard runner's parser. The last column is the normalized
 setting after parsing, aliases and advice have been applied, not a complete effective
@@ -104,9 +106,9 @@ explicitly written; matching a default does not prove that a flag was omitted.</
 do not cover task implementation or all runtime inputs.</p>
 <pre>{_display(report.launch_identity)}</pre>
 <h2>Declared LLM configuration</h2>
-<p>Owner: workflows.llm_config.resolve_standard_llm_config. Missing node blocks keep
-their downstream defaults, which are not resolved here. This is not a list of all
-effective node/provider settings or a credential check.</p>
+<p>Owner: workflows.llm_config.resolve_standard_llm_config. This is the declaration;
+the separate static-route table applies node/transport defaults. Authentication,
+task enablement and SDK/environment-selected values remain unchecked.</p>
 <pre>{_display(report.declared_llm_config)}</pre>
 <details><summary>Original request and complete report</summary>
 <pre>{_display(report.model_dump(mode="json"))}</pre></details>

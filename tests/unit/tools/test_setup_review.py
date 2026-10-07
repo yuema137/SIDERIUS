@@ -97,7 +97,7 @@ def test_missing_and_explicit_llm_blocks_are_not_effective_defaults(request_for,
     assert isinstance(report.declared_llm_config["implement"], dict)
     assert report.declared_llm_config["implement"]["provider"] == "gemini"
     assert report.llm_review == "not_performed"
-    assert "not complete effective" in " ".join(report.unresolved)
+    assert "Static LLM routes" in " ".join(report.unresolved)
 
 
 @pytest.mark.parametrize(

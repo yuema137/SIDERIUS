@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue, field_validator
 
+from tools.setup_review.route_models import CredentialNameCheck, LLMRoute
+
 
 class SetupReviewRequest(BaseModel):
     """Arguments for the standard runner, interpreted from the named directory."""
@@ -51,7 +53,7 @@ class SetupDeclarationReport(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
-    schema_version: Literal["siderius.setup-declaration/v1"] = "siderius.setup-declaration/v1"
+    schema_version: Literal["siderius.setup-declaration/v2"] = "siderius.setup-declaration/v2"
     outcome: Literal["declaration_inspected"] = "declaration_inspected"
     scope: Literal["fresh_standard_single_iteration"] = "fresh_standard_single_iteration"
     llm_review: Literal["not_performed"] = "not_performed"
@@ -63,4 +65,7 @@ class SetupDeclarationReport(BaseModel):
     parameters: list[ParameterDeclaration]
     launch_identity: dict[str, JsonValue]
     declared_llm_config: dict[str, JsonValue]
+    llm_routes: list[LLMRoute]
+    environment_check_requested: bool
+    credentials: list[CredentialNameCheck]
     unresolved: list[str]

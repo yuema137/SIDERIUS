@@ -16,10 +16,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request", type=Path, required=True, help="Setup request JSON file")
     parser.add_argument("--output", type=Path, required=True, help="New absolute report directory")
+    parser.add_argument(
+        "--check-environment",
+        action="store_true",
+        help="Explicitly check provider key names for nonempty values in this shell; never authenticate",
+    )
     args = parser.parse_args(argv)
     try:
         request = SetupReviewRequest.model_validate_json(args.request.read_bytes())
-        report = inspect_declaration(request, args.output)
+        report = inspect_declaration(request, args.output, check_environment=args.check_environment)
         payloads = {
             "report.json": (report.model_dump_json(indent=2) + "\n").encode("utf-8"),
             "index.html": render_html(report).encode("utf-8"),
