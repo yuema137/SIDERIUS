@@ -27,6 +27,7 @@ the flags that decide *what a run is*.
 
 | you want to | use |
 |---|---|
+| inspect or explicitly probe a forensic snapshot | `python -m tools.runtime_replay`; see the [replay contract](runtime-replay.md) |
 | run the full multi-iteration agent loop | `scripts/launch/run_chain.sh` |
 | launch a task-specific campaign | use the campaign entrypoint in the experiment repository; it delegates to this repository's `run_chain.sh` |
 | run one arm of a task-specific comparison | use that experiment repository's launcher with an explicit SIDERIUS checkout |

@@ -2,7 +2,7 @@
 
     # what the stopped run believed — reads only, no GPU, no LLM
     .venv/bin/python -m tools.runtime_replay metadata \
-        --snapshot /home/klz/Data/SIDEREIS_DATA/v19/forensics
+        --snapshot /path/to/forensics
 
     # what an executable replay WOULD probe (no device touched)
     .venv/bin/python -m tools.runtime_replay executable --snapshot ... --plan
@@ -10,7 +10,7 @@
     # register the legacy k-table by content hash (never imports it)
     .venv/bin/python -m tools.runtime_replay legacy --dry-run
 
-Executable replay with `--run` touches the GPU and is operator-gated.
+Executable replay with `--run` executes the caller-declared device and task.
 """
 
 from __future__ import annotations
@@ -44,15 +44,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     ex = sub.add_parser("executable", help="Probe candidates that still have implementations.")
     ex.add_argument("--snapshot", required=True)
-    ex.add_argument("--plan", action="store_true", help="Report what would run; touch nothing.")
-    ex.add_argument(
+    action = ex.add_mutually_exclusive_group()
+    action.add_argument("--plan", action="store_true", help="Report what would run; touch nothing.")
+    action.add_argument(
         "--run",
         action="store_true",
-        help="ACTUALLY probe on the GPU (operator-gated).",
+        help="Execute probes with the explicit task/device configuration.",
     )
-    ex.add_argument("--segmentation-size", type=int, default=40_000)
-    ex.add_argument("--batch-size", type=int, default=8)
-    ex.add_argument("--data-dir", default=None)
+    ex.add_argument("--probe-config", help="JSON ReplayProbeConfig; required with --run.")
+    ex.add_argument("--output-dir", help="Caller-owned worker artifacts; required with --run.")
     ex.add_argument("--json", dest="as_json", action="store_true")
 
     legacy = sub.add_parser("legacy", help="Register legacy k-tables by content hash.")
@@ -63,7 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
     if args.command == "metadata":
         report = run_metadata_replay(args.snapshot)
@@ -75,25 +76,22 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "executable":
-        report = run_metadata_replay(args.snapshot)
         if not args.run:
+            report = run_metadata_replay(args.snapshot)
             plan = plan_executable_replay(report)
             print(json.dumps(plan, indent=2) if args.as_json else _render_plan(plan))
             return 0
-        probe = production_probe(
-            model_config={"segmentation_size": args.segmentation_size},
-            train_config={
-                "lr": 1e-4,
-                "batch_size": args.batch_size,
-                "epochs": 1,
-                "optimizer_type": "adamw",
-                "weight_decay": 1e-5,
-                "device": "cuda",
-            },
-            loss_config={"loss_type": "ce"},
-            data_dir=args.data_dir,
-        )
-        measured_report = run_executable_replay(report, probe=probe)
+        if not args.probe_config or not args.output_dir:
+            parser.error("executable --run requires --probe-config and --output-dir")
+        from core.runtime_control.probe_task import bind_probe_task
+        from tools.runtime_replay.probe_config import ReplayProbeConfig
+
+        config = ReplayProbeConfig.model_validate_json(Path(args.probe_config).read_text())
+        with bind_probe_task(config.task_probe_data):
+            # Task-declared plugins must exist before eligibility is inspected.
+            report = run_metadata_replay(args.snapshot)
+            probe = production_probe(config=config, output_dir=args.output_dir)
+            measured_report = run_executable_replay(report, probe=probe)
         print(
             json.dumps(measured_report.model_dump(mode="json"), indent=2)
             if args.as_json

@@ -1,12 +1,12 @@
 """Production executors + profile collection for the bounded probe (C6b).
 
-Everything here touches heavy subsystems (torch, CUDA, the plugin
-registry, the real dataset) and is therefore:
+Device collection and candidate execution import heavy dependencies lazily.
+CPU regression tests use small real task datasets and models; accelerator
+qualification remains an operator-owned activity.
 
-* imported lazily inside functions (no module-level heavy imports; the
-  core layering rule from C4 applies);
-* exercised for real ONLY in the operator-gated GPU smoke and the C12
-  campaign — unit tests use the injected fakes of ``probe.py``.
+Standalone replay carries TaskProbeDataSpec and uses task-owned training
+inputs and targets. Existing in-process callers retain the explicit-profile
+temporal adapter; neither route selects a dataset implicitly.
 
 F-1b: ``setup`` loads the ACTUAL implemented candidate from the LIVE
 ``MODEL_REGISTRY`` (the validator has just registered it) and recomputes
@@ -26,7 +26,10 @@ task-specific fallback.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from execute_tools.task_data_path import TaskProbeDataSpec
 
 from core.capability_registry import CapabilityContractSnapshot
 from core.runtime_control.probe import ProbeExecutors, RealizedModelProperties
@@ -169,6 +172,40 @@ def collect_execution_environment_profile(
     )
 
 
+def _legacy_probe_batch(
+    *, model_type: str, model_config: dict[str, Any], data_dir: str | None, batch_size: int
+) -> Any:
+    """Preserve the explicit-profile temporal adapter for existing in-process callers."""
+    import os
+
+    resolved_dir = data_dir
+    if not resolved_dir:
+        raise RuntimeError(
+            "no dataset directory was supplied to the probe. Generic "
+            "runtime-control does not choose one: pass `data_dir` resolved "
+            "from the task's measurement capability (no silent synthetic "
+            "or task-specific fallback — F-1a)."
+        )
+    if not os.path.isdir(resolved_dir):
+        raise RuntimeError(
+            f"dataset directory unavailable for the probe: {resolved_dir!r} "
+            "(no silent synthetic fallback — F-1a)"
+        )
+    from agent.skills.training_skill.estimator import require_declared_segmentation_size
+    from execute_tools.dataset_config import resolve_dataset_profile
+    from execute_tools.probe_batch import build_bounded_probe_batch
+
+    seg = require_declared_segmentation_size(
+        model_type, model_config, consumer="production temporal probe"
+    )
+    return build_bounded_probe_batch(
+        profile=resolve_dataset_profile(),
+        data_dir=resolved_dir,
+        batch_size=batch_size,
+        segment_length=seg,
+    ).tensor
+
+
 def production_probe_executors(
     *,
     model_type: str,
@@ -176,6 +213,7 @@ def production_probe_executors(
     train_config: dict[str, Any],
     loss_config: dict[str, Any],
     data_dir: str | None = None,
+    task_probe_data: TaskProbeDataSpec | None = None,
     device: str = "cuda",
     expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
 ) -> ProbeExecutors:
@@ -203,70 +241,44 @@ def production_probe_executors(
         config_cls = get_config_class(model_type)
         if config_cls is None:
             raise RuntimeError(f"no config class registered for {model_type!r}")
-        cfg = config_cls(**model_config)
+        model_io = None
+        resolved_config = model_config
+        if task_probe_data is not None:
+            from execute_tools.model_input_dtype import apply_contract_cardinality
+            from workflows.task_config import run_bound_model_io_contract
+
+            model_io = run_bound_model_io_contract()
+            resolved_config = apply_contract_cardinality(model_config, model_io)
+        cfg = config_cls(**resolved_config)
         model = MODEL_REGISTRY[model_type](cfg).to(device)
         n_params = sum(p.numel() for p in model.parameters())
         n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
         dtype = str(next(model.parameters()).dtype).replace("torch.", "")
         bytes_per = _DTYPE_BYTES.get(dtype, 4)
 
-        # F-1a: real data, supplied by a caller that knows the task.
-        #
-        # 07c C4 removed the `TIDMAD_DATA_DIR` fallback that used to fill in
-        # here. It was a task assumption inside generic runtime-control: on any
-        # other task it resolved somebody else's dataset, or resolved nothing
-        # and reported a path the caller never chose. An absent `data_dir` is
-        # now an explicit refusal — the caller resolves the root (from its
-        # task's measurement capability) or the probe does not run.
-        import os
+        train_cfg = TrainConfig(**train_config)
+        if task_probe_data is not None:
+            from execute_tools.task_probe_batch import load_task_probe_batch
 
-        resolved_dir = data_dir
-        if not resolved_dir:
-            raise RuntimeError(
-                "no dataset directory was supplied to the probe. Generic "
-                "runtime-control does not choose one: pass `data_dir` resolved "
-                "from the task's measurement capability (no silent synthetic "
-                "or task-specific fallback — F-1a)."
+            inputs, targets = load_task_probe_batch(task_probe_data, train_cfg.batch_size)
+        else:
+            inputs = _legacy_probe_batch(
+                model_type=model_type,
+                model_config=model_config,
+                data_dir=data_dir,
+                batch_size=train_cfg.batch_size,
             )
-        if not os.path.isdir(resolved_dir):
-            raise RuntimeError(
-                f"dataset directory unavailable for the probe: {resolved_dir!r} "
-                "(no silent synthetic fallback — F-1a)"
+            targets = inputs
+        batch = inputs.to(device)
+        if task_probe_data is not None:
+            from execute_tools.model_input_dtype import TRAINING_SITE_DTYPE, resolve_input_dtype
+
+            batch = batch.to(
+                resolve_input_dtype(model_type, model_io, site_preference=TRAINING_SITE_DTYPE)
             )
-        # C12-P / B11. The legacy temporal probe builds its batch at the
-        # declared segmentation size. A task-owned fixed-shape probe would need
-        # a separate transport capability; absent geometry therefore refuses.
-        from agent.skills.training_skill.estimator import (
-            require_declared_segmentation_size,
-        )
-
-        seg = require_declared_segmentation_size(
-            model_type, model_config, consumer="production temporal probe"
-        )
-        bs = int(train_config.get("batch_size", 1))
-        # 07c C2: the ONE builder, the same one the measurement worker goes
-        # through. It replaces `load_probe_batch`, which reached
-        # `TIDMADDataset` and materialized the WHOLE channel before
-        # `max_segments` applied — 24.10 GiB host RSS for a 0.31 MiB batch
-        # (D-C2-12). The tensor is byte-identical; only the host path differs.
-        #
-        # This call site is in-process, so it resolves the profile through the
-        # Regime-A seam exactly as `TIDMADDataset` does. The builder itself
-        # takes no default: a task assumption must be made by a caller that
-        # holds one, never by the builder's omission.
-        from execute_tools.dataset_config import resolve_dataset_profile
-        from execute_tools.probe_batch import build_bounded_probe_batch
-
-        batch = build_bounded_probe_batch(
-            profile=resolve_dataset_profile(),
-            data_dir=resolved_dir,
-            batch_size=bs,
-            segment_length=seg,
-        ).tensor.to(device)
 
         # Optimizer switch mirrors execute_tools/train_engine_sandbox.py
         # (§verified 2026-07-30: AdamW default w/ weight_decay, Adam, SGD).
-        train_cfg = TrainConfig(**train_config)
         opt_type = getattr(train_cfg, "optimizer_type", "adamw")
         if opt_type == "adam":
             optimizer = torch.optim.Adam(model.parameters(), lr=train_cfg.lr)
@@ -278,16 +290,21 @@ def production_probe_executors(
                 lr=train_cfg.lr,
                 weight_decay=getattr(train_cfg, "weight_decay", 0.0),
             )
-        from ml_models.loss_models_sandbox import get_criterion
+        from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 
+        loss_cfg = LossConfig(**loss_config)
+        loss_fn = get_criterion(loss_cfg, expected_contract_snapshot=expected_custom_loss_snapshot)
+        target = (
+            targets.to(device=device, dtype=get_target_torch_dtype(loss_cfg))
+            if task_probe_data is not None
+            else batch
+        )
         state.update(
             model=model,
             batch=batch,
+            loss_target=target,
             optimizer=optimizer,
-            loss_fn=get_criterion(
-                LossConfig(**loss_config),
-                expected_contract_snapshot=expected_custom_loss_snapshot,
-            ),
+            loss_fn=loss_fn,
             torch=torch,
         )
         return RealizedModelProperties(
@@ -309,7 +326,7 @@ def production_probe_executors(
         t0 = _time.perf_counter()
         optimizer.zero_grad(set_to_none=True)
         logits = model(batch)
-        loss = loss_fn(logits, batch)
+        loss = loss_fn(logits, state["loss_target"])
         loss.backward()
         optimizer.step()
         if use_cuda:
