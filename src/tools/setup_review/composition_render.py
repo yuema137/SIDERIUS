@@ -82,7 +82,7 @@ def render_task_check(report: TaskCheckReport) -> str:
     execution = (
         _json(report.execution.model_dump(mode="json"))
         if report.execution is not None
-        else "Sandbox execution did not start."
+        else "No sandbox execution result is available."
     )
     limits = "".join(f"<li>{html.escape(item)}</li>" for item in report.limitations)
     return f"""<!doctype html>

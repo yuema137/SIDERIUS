@@ -98,6 +98,10 @@ def test_missing_sandbox_does_not_fall_back_to_host_execution(check_request, mon
     assert report.execution is None
     assert report.result.failure.exception_type == "SandboxUnavailable"
     assert "install bubblewrap" in report.result.failure.message
+    assert (
+        "No sandbox execution result is available."
+        in (check_request.output / "index.html").read_text()
+    )
 
 
 def test_manifest_edit_is_stale_even_after_successful_transport(check_request, monkeypatch):

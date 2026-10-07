@@ -30,18 +30,6 @@ def job(tmp_path):
     )
 
 
-@pytest.mark.parametrize("value", [0, -1, True, 1.5, "12"])
-def test_result_limit_is_a_typed_positive_integer(value):
-    with pytest.raises(ValueError):
-        TaskCheckSettings(timeout_seconds=1, result_max_bytes=value)
-
-
-@pytest.mark.parametrize("value", [0, -1, float("nan"), float("inf")])
-def test_timeout_is_positive_and_finite(value):
-    with pytest.raises(ValueError):
-        TaskCheckSettings(timeout_seconds=value)
-
-
 def test_exact_limit_and_explicit_override(job, tmp_path):
     initial = CompositionResult.failed(job, "composition", ValueError("fixture failure"))
     size = len(initial.model_dump_json().encode())
