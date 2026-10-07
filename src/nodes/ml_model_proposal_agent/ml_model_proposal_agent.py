@@ -82,6 +82,11 @@ from nodes.ml_model_proposal_agent.prediction_reference import (
     ground_prediction,
     observed_prediction_reference,
 )
+from nodes.ml_model_proposal_agent.routing import (
+    ProposerRoute,
+    ProposerRouting,
+    resolve_proposer_routing,
+)
 from nodes.ml_model_proposal_agent.stage_validation import (
     StageVocabularyError,
     correct_comparison_vocabulary,
@@ -97,7 +102,10 @@ from workflows.task_config import (
 __all__ = [
     "MLModelProposalAgent",
     "ProposalContractRenderError",
+    "ProposerRoute",
+    "ProposerRouting",
     "main",
+    "resolve_proposer_routing",
 ]
 
 #: COMPATIBILITY ONLY — not part of the node's contract.
@@ -1556,24 +1564,55 @@ class MLModelProposalAgent:
         capability_index_path: str | None = None,
         **kwargs,
     ):
-        # **kwargs absorbs per-stage kwargs from ProposalLLMConfig flattening
-        # (comparison_provider, reasoning_model_id, etc.) — these are for
-        # future per-stage bridge routing, currently unused.
         self._bridge_factory = bridge_factory or LLMBridge
-        bridge_kwargs: dict[str, Any] = dict(
-            provider=provider,
-            model_id=model_id,
-            max_retries=max_retries,
+        self._routing = resolve_proposer_routing(
+            ProposerRoute(
+                provider=provider,
+                model_id=model_id,
+                max_retries=max_retries,
+                reasoning_effort=reasoning_effort,
+            ),
+            kwargs,
         )
-        if reasoning_effort is not None:
-            bridge_kwargs["reasoning_effort"] = reasoning_effort
-        self.bridge = self._bridge_factory(**bridge_kwargs)
+        self.bridge = self._bridge_factory(**self.routing.reasoning.bridge_kwargs())
+        self._stage_bridges: dict[ProposerRoute, Any] = {}
+        self._pending_run_context: dict | None = None
         # L5b — registry handle for loss-awareness rendering in the proposer
         # prompt. Mirrors the L4b implementor DI pattern. Tests pass
         # ``capability_index_path=str(tmp_path / "_capability_index.json")``
         # to avoid contaminating the canonical index; production callers
         # leave it None to use ``agent_generated/_capability_index.json``.
         self._registry = CapabilityRegistry(index_path=capability_index_path)
+
+    @property
+    def routing(self) -> ProposerRouting:
+        """The immutable settings used to select this agent's stage bridges."""
+        return self._routing
+
+    def set_run_context(self, *, workspace, iter: int, run_name: str, run_id: str) -> None:
+        """Bind existing bridges and retain context for lazily created stages."""
+        context = dict(workspace=workspace, iter=iter, run_name=run_name, run_id=run_id)
+        seen = set()
+        for bridge in (self.bridge, *self._stage_bridges.values()):
+            if id(bridge) not in seen:
+                bridge.set_run_context(**context)
+                seen.add(id(bridge))
+        self._pending_run_context = context
+
+    def _bridge_for_stage(self, name: str):
+        route = self.routing.for_stage(name)
+        if route == self.routing.reasoning:
+            return self.bridge
+        if route not in self._stage_bridges:
+            bridge = self._bridge_factory(**route.bridge_kwargs())
+            already_bound = bridge is self.bridge or any(
+                bridge is cached for cached in self._stage_bridges.values()
+            )
+            if self._pending_run_context is not None and not already_bound:
+                bridge.set_run_context(**self._pending_run_context)
+            # A context refusal must not leave an unbound bridge in the cache.
+            self._stage_bridges[route] = bridge
+        return self._stage_bridges[route]
 
     def _custom_loss_inventory(self, inp: ProposalInput):
         """Resolve one loss view for every prompt and schema consumer."""
@@ -2025,8 +2064,9 @@ class MLModelProposalAgent:
                 stage_name=stage.name,
             )
             stage_label = f"proposer.{stage.name}"
+            stage_bridge = self._bridge_for_stage(stage.name)
             if stage.output_mode == "text":
-                result = self.bridge.generate_text(
+                result = stage_bridge.generate_text(
                     system_prompt,
                     user_prompt,
                     label=stage_label,
@@ -2034,7 +2074,7 @@ class MLModelProposalAgent:
                 )
                 accumulated[stage.name] = result
             else:
-                result = self.bridge.generate(
+                result = stage_bridge.generate(
                     system_prompt,
                     user_prompt,
                     label=stage_label,
@@ -2043,7 +2083,7 @@ class MLModelProposalAgent:
                 if stage.name == "comparison":
                     result = correct_comparison_vocabulary(
                         result,
-                        bridge=self.bridge,
+                        bridge=stage_bridge,
                         system_prompt=system_prompt,
                         user_prompt=user_prompt,
                         components=stage_audit["components"],
@@ -2129,7 +2169,9 @@ class MLModelProposalAgent:
                                 system_prompt=retry_system,
                                 stage_name="causal_reasoning",
                             )
-                            accumulated["causal_reasoning"] = self.bridge.generate(
+                            accumulated["causal_reasoning"] = self._bridge_for_stage(
+                                "causal_reasoning"
+                            ).generate(
                                 retry_system,
                                 retry_user,
                                 label="proposer.causal_reasoning",
@@ -2248,7 +2290,7 @@ class MLModelProposalAgent:
                     system_prompt=correction_system,
                     stage_name="causal_reasoning",
                 )
-                causal_raw = self.bridge.generate(
+                causal_raw = self._bridge_for_stage("causal_reasoning").generate(
                     correction_system,
                     correction_user,
                     label="proposer.causal_reasoning.correction",
@@ -2348,7 +2390,7 @@ class MLModelProposalAgent:
                 system_prompt=proposing_prompt,
                 stage_name="proposing",
             )
-            raw = self.bridge.generate(
+            raw = self._bridge_for_stage("proposing").generate(
                 proposing_prompt,
                 proposing_user,
                 label="proposer.proposing",

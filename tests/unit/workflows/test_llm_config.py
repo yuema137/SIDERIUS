@@ -482,7 +482,7 @@ def test_explicit_effort_reaches_every_configured_role():
     assert config.get("lit_review")["search_llm_reasoning_effort"] == "medium"
 
 
-def test_proposer_refuses_conflicting_effort_when_it_has_one_bridge():
+def test_proposer_transports_independent_stage_efforts():
     from workflows.llm_config import ProposalLLMConfig
 
     medium = NodeLLMConfig(provider="openai", model_id="gpt-5.6-sol", reasoning_effort="medium")
@@ -490,5 +490,8 @@ def test_proposer_refuses_conflicting_effort_when_it_has_one_bridge():
     config = WorkflowLLMConfig(
         propose=ProposalLLMConfig(comparison=medium, reasoning=high, proposing=medium)
     )
-    with pytest.raises(ValueError, match="share one bridge"):
-        config.get("propose")
+    routed = config.get("propose")
+    assert routed["comparison_reasoning_effort"] == "medium"
+    assert routed["reasoning_reasoning_effort"] == "high"
+    assert routed["proposing_reasoning_effort"] == "medium"
+    assert routed["comparison_max_retries"] is None

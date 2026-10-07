@@ -14,3 +14,15 @@ semantics, or task declarations.
 Effects: the configured provider is called and structural retries may occur;
 implementation and execution are later stages. Read the [node contract](ml_model_proposal_agent.md)
 for exact input and refusal behavior. `evidence_rendering.py` is private.
+
+In a workflow's LLM JSON file, `propose.comparison`, `propose.reasoning` and
+`propose.proposing` select the model for each pipeline stage. Each selection
+includes `provider`, `model_id`, `reasoning_effort` and `max_retries`. A correction
+request uses the same selection as the stage being corrected. You can use one
+model for all three stages or give each stage a different model.
+
+Earlier releases silently used the reasoning selection for every stage. To
+preserve that behavior for an existing experiment, copy its actual historical
+reasoning selection into all three entries in the experiment's configuration.
+Preserve retry and reasoning settings as well as the model name. The standalone
+two-call legacy mode still uses the reasoning selection for both calls.

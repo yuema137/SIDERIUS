@@ -430,15 +430,10 @@ class WorkflowLLMConfig(BaseModel):
             }
             if config.reasoning.max_retries is not None:
                 result["max_retries"] = config.reasoning.max_retries
-            efforts = {
-                stage.reasoning_effort
-                for stage in (config.comparison, config.reasoning, config.proposing)
-            }
-            if len(efforts) > 1:
-                raise ValueError(
-                    "proposal stages share one bridge; reasoning_effort must agree "
-                    "across comparison, reasoning and proposing"
-                )
+            for stage_name in ("comparison", "reasoning", "proposing"):
+                stage = getattr(config, stage_name)
+                result[f"{stage_name}_reasoning_effort"] = stage.reasoning_effort
+                result[f"{stage_name}_max_retries"] = stage.max_retries
             if config.reasoning.reasoning_effort is not None:
                 result["reasoning_effort"] = config.reasoning.reasoning_effort
             return result
