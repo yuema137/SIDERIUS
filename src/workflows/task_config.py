@@ -45,7 +45,7 @@ from core.layout import checkout_root, require_checkout
 
 # F-SCANA-2 — repository root, derived from this file's own location (the
 # established root-derivation idiom, same as
-# ``workflows/model_exploration.py::SIDERIUS_ROOT``). The canonical config
+# ``workflows/literature_config.py::SIDERIUS_ROOT``). The canonical config
 # used to be resolved against the CALLER'S CWD here while the workspace
 # snapshot (``model_exploration._snapshot_task_config``) resolved against
 # SIDERIUS_ROOT, with a comment asserting "the chain runner always invokes

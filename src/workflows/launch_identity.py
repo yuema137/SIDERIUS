@@ -64,7 +64,7 @@ def resolve_lit_review_enabled(cli_flag: bool | None, config_path: str | None) -
         return cli_flag
     if config_path is None:
         return False
-    from workflows.model_exploration import resolve_lit_review_config_path
+    from workflows.literature_config import resolve_lit_review_config_path
 
     yaml_path = resolve_lit_review_config_path(config_path)
     try:
@@ -84,7 +84,7 @@ def resolve_launch_identity(args: argparse.Namespace) -> LaunchIdentity:
             the declared advice artifact cannot be certified
             (:class:`AdviceArtifactError`).
     """
-    from workflows.model_exploration import lit_review_config_sha256
+    from workflows.literature_config import lit_review_config_sha256
 
     retain_model_outputs = bool(getattr(args, "retain_model_outputs", False))
     if getattr(args, "cleanup_denoised", False) and retain_model_outputs:

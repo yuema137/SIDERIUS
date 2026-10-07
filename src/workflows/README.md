@@ -104,6 +104,29 @@ this startup guarantee. Even configuration inspection can import plugins and
 emit their stdout; it is not a sandbox. See the
 [one-iteration entry contract](../../docs/reference/entrypoints.md#run_one_iterationpy--one-iteration).
 
+## Reading launch settings without starting the workflow
+
+Configuration tools can import `workflows.literature_config` to resolve a
+literature configuration path and hash its exact bytes. Absolute paths are
+used directly; relative paths refer to the SIDERIUS checkout, not your current
+directory. An installed package without a checkout requires an absolute path.
+Calling `lit_review_config_sha256(..., enabled=False)` does not read or hash
+that file. Resolving an omitted enable flag may still read YAML to determine
+whether literature review is enabled.
+
+`workflows.runtime_settings.resolve_watchdog_policy(args)` resolves the standard
+CLI's watchdog settings (the controls that stop work when it exceeds its time
+limit). It uses the same hardware/profile authority as the launcher, writes the
+resolved values back to `args`, and caches their provenance there. Pass a fresh
+parsed namespace to inspect changed settings; reusing one returns its cached
+result. An incomplete required-profile declaration or unenforceable phase limit
+still refuses the launch.
+
+Importing these modules does not load nodes or the workflow runner. Calling
+their helpers may read configuration files and inspect hardware. These helpers
+are configuration building blocks, not a complete setup review or a sandbox
+for task plugins. They add no review requirement to existing launch commands.
+
 ## Failure modes
 
 | refusal | meaning |

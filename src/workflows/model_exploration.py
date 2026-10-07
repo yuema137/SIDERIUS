@@ -61,7 +61,6 @@ Usage:
 
 import argparse
 import gc
-import hashlib
 import json
 import os
 import shutil
@@ -115,7 +114,7 @@ from agent.utils.proposer_preflight import (
 )
 from core.chain_state import ChainState
 from core.hardware_context import get_or_create as get_or_create_hardware_context
-from core.layout import checkout_root, package_root, require_checkout
+from core.layout import package_root
 
 # Step 12 / PR-12a C6 — `core.resume` no longer imports a private symbol from
 # THIS module, so the cycle that forced `RestoredState` under TYPE_CHECKING and
@@ -156,6 +155,12 @@ from nodes.result_interpretation_agent import (
     reconcile_metric_spec,
     tuning_output_to_model_run_summary,
 )
+from workflows.literature_config import (
+    lit_review_config_sha256 as lit_review_config_sha256,
+)
+from workflows.literature_config import (
+    resolve_lit_review_config_path as resolve_lit_review_config_path,
+)
 from workflows.llm_config import (
     ProposalLLMConfig,
     WorkflowLLMConfig,
@@ -180,8 +185,6 @@ from workflows.task_composition import (
     verify_composition_is_bound,
 )
 from workflows.task_config import get_task_description, load_task_config
-
-SIDERIUS_ROOT = checkout_root()
 
 
 def _log_rss(step: str) -> None:
@@ -747,54 +750,6 @@ def merge_external_agent_outputs(
         "agent_cards": merged_cards,
         "mindset": last_mindset,
     }
-
-
-def resolve_lit_review_config_path(config_path: str) -> str:
-    """The ONE rule that turns a lit-review config path into a file to read.
-
-    Relative paths resolve against ``SIDERIUS_ROOT`` (the checkout), exactly
-    as the lit-review branch of ``run_workflow`` has always done; absolute
-    paths are taken as-is. Both the workflow's read and the chain runner's
-    ``enabled`` peek call this, so the lock's config pin can never describe
-    a file the run does not read.
-    """
-    if os.path.isabs(config_path):
-        return config_path
-    return str(require_checkout(SIDERIUS_ROOT) / config_path)
-
-
-def lit_review_config_sha256(config_path: str | None, *, enabled: bool) -> str | None:
-    """sha256 of the resolved lit-review YAML bytes, or ``None`` when disabled.
-
-    arXiv U1 (#253): the lock pins the lit-review CONFIG, not just the
-    topology flag — two runs whose literature-review node read different
-    root-paper lists are not comparable. Hashed at pre-flight from the same
-    resolved path the node later opens.
-
-    Raises:
-        ValueError: lit-review is enabled but the resolved config cannot be
-            read. Refused here, before any LLM call, instead of crashing
-            inside the iteration after the interpreter has already run.
-    """
-    if not enabled:
-        return None
-    if config_path is None:
-        raise ValueError(
-            "literature review is enabled but no config was declared. Supply "
-            "the task or experiment config explicitly before launch."
-        )
-    resolved = resolve_lit_review_config_path(config_path)
-    try:
-        with open(resolved, "rb") as f:
-            payload = f.read()
-    except OSError as exc:
-        raise ValueError(
-            f"lit-review is enabled but its config {resolved!r} cannot be read "
-            f"({exc}). The run-invariants lock pins the config's sha256, so an "
-            "unreadable config is refused at pre-flight rather than after the "
-            "first LLM call."
-        ) from exc
-    return hashlib.sha256(payload).hexdigest()
 
 
 def _build_lit_review_input(

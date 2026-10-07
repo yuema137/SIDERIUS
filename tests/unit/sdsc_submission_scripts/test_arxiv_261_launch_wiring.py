@@ -27,6 +27,7 @@ import pytest
 
 from agent.skills.evaluate_time_skill.calibration import gpu_slug
 from core.runtime_control.watchdog_profile import ResolvedWatchdogSettings
+from workflows import runtime_settings
 
 _REPO = Path(__file__).resolve().parents[3]
 _ROI = _REPO / "src" / "workflows" / "run_one_iteration.py"
@@ -90,7 +91,7 @@ def test_resolution_writes_back_and_is_idempotent_with_stable_provenance(monkeyp
         calls.append(kwargs)
         return resolved
 
-    monkeypatch.setattr(roi, "resolve_watchdog_launch_settings", fake_resolve)
+    monkeypatch.setattr(runtime_settings, "resolve_watchdog_launch_settings", fake_resolve)
     args = _parse()
     first = roi.resolve_watchdog_policy(args)
     assert args.runtime_watchdog is True
@@ -119,7 +120,7 @@ def test_operator_flags_reach_the_authority_verbatim(monkeypatch):
             enabled=False, safety_factor=None, floor_seconds=60.0, provenance="cli"
         )
 
-    monkeypatch.setattr(roi, "resolve_watchdog_launch_settings", fake_resolve)
+    monkeypatch.setattr(runtime_settings, "resolve_watchdog_launch_settings", fake_resolve)
     args = _parse(
         "--no-runtime_watchdog",
         "--runtime_watchdog_safety_factor",
@@ -410,7 +411,7 @@ class TestRequiredProfileDeclaration:
         now = roi.resolve_watchdog_policy(args)
 
         pristine_args = _parse(*argv)
-        before = roi.resolve_watchdog_launch_settings(
+        before = runtime_settings.resolve_watchdog_launch_settings(
             cli_enabled=pristine_args.runtime_watchdog,
             cli_safety_factor=pristine_args.runtime_watchdog_safety_factor,
             cli_floor_seconds=pristine_args.runtime_watchdog_floor_seconds,
@@ -445,7 +446,7 @@ class TestRequiredProfileDeclaration:
 def test_phase_deadline_validated_at_launch_before_agent_calls(monkeypatch, enabled):
     """A smoke must not spend LLM calls discovering an unenforced time limit."""
     monkeypatch.setattr(
-        roi,
+        runtime_settings,
         "resolve_watchdog_launch_settings",
         lambda **kwargs: ResolvedWatchdogSettings(
             enabled=enabled, safety_factor=None, floor_seconds=60.0, provenance="test"
@@ -462,7 +463,7 @@ def test_phase_deadline_validated_at_launch_before_agent_calls(monkeypatch, enab
 
 def test_disabled_watchdog_without_phase_deadline_remains_allowed(monkeypatch):
     monkeypatch.setattr(
-        roi,
+        runtime_settings,
         "resolve_watchdog_launch_settings",
         lambda **kwargs: ResolvedWatchdogSettings(
             enabled=False, safety_factor=None, floor_seconds=60.0, provenance="cli"
