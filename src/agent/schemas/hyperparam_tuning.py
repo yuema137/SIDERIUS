@@ -206,6 +206,10 @@ class ExperimentMemory(BaseModel):
     key_factor: str | None = None
     discovery: str | None = None
     memory_update: str | None = None
+    runtime_feedback_version: Literal["facts-v1"] | None = Field(
+        default=None,
+        description="Explicit factual runtime-refusal producer format; absent on historical memory.",
+    )
 
     # Phase J — pre-flight time-budget context surfaced to the planner via the
     # next round's experiment_history. Populated only when the time gate ran

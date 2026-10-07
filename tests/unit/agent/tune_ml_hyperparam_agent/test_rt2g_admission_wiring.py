@@ -196,7 +196,15 @@ def harness():
         workspace = ws_cm.__enter__()
 
         mock_brain = MockBridge.return_value
-        mock_brain.plan.return_value = FAKE_PLAN
+
+        def capture_plan(memory_history, **kwargs):
+            from copy import deepcopy
+
+            calls = seen_params.setdefault("planner_calls", {})
+            calls[str(len(calls))] = deepcopy({"memory_history": memory_history, **kwargs})
+            return FAKE_PLAN
+
+        mock_brain.plan.side_effect = capture_plan
         mock_brain.reflect.return_value = FAKE_REFLECT
 
         saved: list[dict] = []
@@ -414,3 +422,37 @@ class TestWatchdogTimeoutRouting:
 
 
 pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")
+
+
+@pytest.mark.parametrize(
+    "code, expected",
+    [
+        ("budget_exceeded", "Measured runtime evidence exceeded"),
+        ("verification_failed", "does not prove a budget overrun"),
+        (None, "cause classification is unavailable"),
+    ],
+)
+def test_actual_refusal_facts_reach_the_next_planner(harness, tmp_path, code, expected):
+    with tempfile.TemporaryDirectory() as obs_dir:
+        block = _rejected_observation_block(obs_dir)
+    block["admission"]["reason_code"] = code
+    block["admission"]["reason"] = "Recorded admission evidence for this attempt"
+    rejected = {"status": "rejected_time_risk", "runtime_verification": block}
+    agent, saved, seen, _, cleanup = harness(rejected, {"status": "error"})
+    request = _make_input(tmp_path).model_copy(
+        update={"attempts_per_formal_round": 2, "max_fail_rounds": 1}
+    )
+    try:
+        agent.run(request)
+    finally:
+        cleanup()
+    assert len(seen["planner_calls"]) == 2
+    history = seen["planner_calls"]["1"]["memory_history"]
+    first = next(r for r in history if r["exp_id"] == saved[0]["exp_id"])
+    memory = first["memory"]
+    assert memory["runtime_feedback_version"] == "facts-v1"
+    assert expected in memory["memory_update"]
+    assert block["admission"]["reason"] in memory["memory_update"]
+    assert "Reduce the workload" not in memory["memory_update"]
+    assert "consumed an attempt" in memory["memory_update"]
+    assert first["runtime_verification"]["admission"] == block["admission"]

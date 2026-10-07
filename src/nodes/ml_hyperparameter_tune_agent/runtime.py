@@ -25,6 +25,7 @@ from typing import Any
 from agent.schemas.ordering import OrderingObservation, OrderingRefusalPhase, ResolvedOrdering
 from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from core.record_role import observed_attempt_role
+from core.runtime_control.records import AdmissionRecord
 from core.sandbox_executor import TidmadSandbox
 from nodes.ml_hyperparameter_tune_agent.policy import _latest_trial_inference_marginal
 from nodes.ml_hyperparameter_tune_agent.records import (
@@ -1606,6 +1607,26 @@ def _apply_watchdog_failure_fields(record: dict, exc: Exception) -> None:
     memory["watchdog_estimate_source"] = exc.watchdog.get("estimate_source")
 
 
+def _runtime_rejection_feedback(admission: AdmissionRecord | None, reason: str) -> str:
+    """Describe the admission evidence without prescribing a search strategy."""
+    code = admission.reason_code if admission is not None else None
+    if code == "verification_failed":
+        meaning = "A reliable runtime prediction was not established; this does not prove a budget overrun."
+    elif code in {"budget_exceeded", "training_allocation_exceeded"}:
+        meaning = "Measured runtime evidence exceeded the declared budget or allocation."
+    elif code == "evidence_channel_failure":
+        meaning = (
+            "The runtime evidence channel failed; no candidate-cost conclusion is established."
+        )
+    else:
+        meaning = "The cause classification is unavailable; do not infer a budget overrun."
+    return (
+        f"Runtime admission rejected this attempt (reason_code={code or 'unknown'}). "
+        f"{meaning} Reported reason: {reason} "
+        "This rejection consumed an attempt after real setup, unlike pre-flight skips."
+    )
+
+
 def _build_in_subprocess_rejection_record(
     *,
     exp_id: str,
@@ -1627,6 +1648,7 @@ def _build_in_subprocess_rejection_record(
     CONSUMES an attempt (operator decision 2026-07-23)."""
     admission = rv_block.get("admission") or {}
     reject_reason = admission.get("reason") or fallback_message
+    typed_admission = AdmissionRecord.model_validate(admission) if admission else None
     return {
         "exp_id": exp_id,
         "status": "skipped_time_risk",
@@ -1647,12 +1669,8 @@ def _build_in_subprocess_rejection_record(
                 f"verification_cost_s={admission.get('verification_cost_seconds')}; "
                 f"avoided_predicted_s={admission.get('avoided_predicted_runtime_seconds')}"
             ),
-            "memory_update": (
-                "The measured runtime prediction exceeded the budget (or "
-                "verification failed). Reduce the workload (steps, "
-                "segmentation_size, portions, model size) — this rejection "
-                "consumed an attempt, unlike pre-flight skips."
-            ),
+            "memory_update": _runtime_rejection_feedback(typed_admission, reject_reason),
+            "runtime_feedback_version": "facts-v1",
             "time_mode": "trial" if is_trial else "formal",
             "verification_stage": "in_subprocess",
             "round_index": round_index,

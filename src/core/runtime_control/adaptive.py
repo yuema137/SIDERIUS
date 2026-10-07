@@ -6,8 +6,7 @@ Adaptive phase verification driver (RT2-C).
 Design: docs/design/runtime_estimation_and_watchdog.md §2.5 (B1
 stabilization / B2 measurement), §2.11 (fail closed), §2.12
 (verification performance budget). One INCREMENTAL driver for phases
-whose production loop owns execution (training: the epoch-0 batch loop
-feeds real per-step timings): the driver consumes one unit duration at
+whose production loop owns execution (training passes feed real per-step timings): the driver consumes one unit duration at
 a time, detects steady state (RT2a rolling-median detector with re-arm
 on drift), enforces evidence minimums and hard caps, detects
 pathological units, compares against a historical prior, and produces
@@ -42,6 +41,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from core.runtime_control.distribution_shift import find_distribution_shift, relative_median_change
 from core.runtime_control.records import (
     Confidence,
     PhaseMeasurement,
@@ -120,10 +120,10 @@ class AdaptiveVerificationConfig(BaseModel):
         default=10.0,
         gt=1.0,
         description=(
-            "A unit measured AFTER steady-state declaration exceeding "
-            "factor × steady median records a slow observation. A sustained streak "
-            "of steady.stable_windows such observations terminates verification. "
-            "Never applied to warm-up transients."
+            "A unit exceeding a detected plateau by this factor records a slow "
+            "observation; steady.stable_windows consecutive observations terminate "
+            "verification. Before acceptance, a separate distribution-block check "
+            "also uses this factor without treating recurring expensive units as drift."
         ),
     )
     max_unit_ms: float | None = Field(
@@ -267,32 +267,49 @@ class AdaptiveUnitVerification:
             return self._all_times_ms[self._fast_steady_from :]
         return self._detector.steady_times_ms()
 
+    def _complete_verification(self) -> VerificationState:
+        """Do not let an accepted suffix hide a distinct earlier rate regime."""
+        shift = find_distribution_shift(
+            self._all_times_ms,
+            steady=self.config.steady,
+            pathological_factor=self.config.pathological_factor,
+        )
+        if shift is not None:
+            self._failure_reason = (
+                "pathological sustained slowdown: disjoint observed rate blocks "
+                f"[{shift.reference_start}:{shift.split}] and "
+                f"[{shift.split}:{len(self._all_times_ms)}], median "
+                f"{shift.previous_median_ms:.6g} -> {shift.current_median_ms:.6g} ms "
+                f"> {self.config.pathological_factor}x"
+            )
+            self._state = "failed_pathological_unit"
+        else:
+            self._state = "verified"
+        return self._state
+
     def _try_fast_phase_suffix(self) -> bool:
         """Accept a distribution-stable suffix when the time floor is unreachable.
 
         This fallback is deliberately derived from policy and measurements:
-        it is unreachable when the median physical observation predicts it can satisfy
-        ``min_timed_ms`` within ``max_steps``. Comparing two half-suffix medians
+        it is unnecessary when retained steady time plus remaining physical observations
+        can satisfy ``min_timed_ms`` within ``max_steps``. Late detection must not
+        be credited with measurement opportunities that have already been consumed. Comparing two half-suffix medians
         rejects trends while tolerating heterogeneous batch costs.
         """
-        count = self.config.fast_phase_min_observations
+        count = max(self.config.fast_phase_min_observations, self._required_steady_steps())
         if len(self._all_times_ms) < count:
             self._fast_suffix_status = (
                 f"insufficient_observations:{len(self._all_times_ms)}/{count}"
             )
             return False
         elapsed = self._elapsed_times_ms[-count:]
-        steady_capacity = self.config.max_steps - self.config.steady.min_steps_to_detect + 1
-        if statistics.median(elapsed) * steady_capacity >= self.config.min_timed_ms:
+        remaining = max(0, self.config.max_steps - len(self._all_times_ms))
+        measured = self._steady_elapsed_ms() if self._detector.detected else 0.0
+        if measured + statistics.median(elapsed) * remaining >= self.config.min_timed_ms:
             self._fast_suffix_status = "time_floor_reachable_within_observation_cap"
             return False
         rates = self._all_times_ms[-count:]
-        split = count // 2
-        if split == 0:
-            return False
-        first_median = statistics.median(rates[:split])
-        second_median = statistics.median(rates[split:])
-        relative_change = abs(second_median / first_median - 1.0)
+        relative_change = relative_median_change(rates)
         if relative_change > self.config.steady.rel_spread_tol:
             self._fast_suffix_status = (
                 f"distribution_drift:{relative_change:.6g}>{self.config.steady.rel_spread_tol:.6g}"
@@ -302,8 +319,9 @@ class AdaptiveUnitVerification:
         self._fast_suffix_status = "accepted"
         return True
 
-    def _has_sufficient_evidence(self, steady_count: int) -> bool:
-        """Whether the active, possibly re-armed plateau has enough evidence."""
+    def _has_sufficient_evidence(self) -> bool:
+        """Check the same retained observations that will supply the prediction."""
+        steady_count = len(self._steady_unit_times_ms())
         if steady_count < self._required_steady_steps():
             return False
         return self._steady_elapsed_ms() >= self.config.min_timed_ms or (
@@ -355,7 +373,7 @@ class AdaptiveUnitVerification:
                 if self._slow_streak >= self.config.steady.stable_windows:
                     self._failure_reason = (
                         f"pathological sustained slowdown: {self._slow_streak} consecutive "
-                        f"units > {self.config.pathological_factor}x steady median "
+                        f"units > {self.config.pathological_factor}x reference median "
                         f"{reference:.3g} ms; latest {unit_ms:.3g} ms"
                     )
                     self._state = "failed_pathological_unit"
@@ -387,9 +405,8 @@ class AdaptiveUnitVerification:
                 return self._state
             self._state = "measuring"
             self._compare_prior(steady_median)
-            if self._slow_streak == 0 and self._has_sufficient_evidence(len(steady)):
-                self._state = "verified"
-                return self._state
+            if self._slow_streak == 0 and self._has_sufficient_evidence():
+                return self._complete_verification()
         else:
             # Not (or no longer — re-arm) detected.
             self._state = "stabilizing"
@@ -405,9 +422,8 @@ class AdaptiveUnitVerification:
                 return self._state
             self._state = "measuring"
             self._compare_prior(statistics.median(steady))
-            if self._has_sufficient_evidence(len(steady)):
-                self._state = "verified"
-                return self._state
+            if self._has_sufficient_evidence():
+                return self._complete_verification()
 
         # A fast, already stable phase can need more observations to accumulate
         # the same evidence time. Never extend an unstable/count-deficient trace.
@@ -415,7 +431,7 @@ class AdaptiveUnitVerification:
             (self._detector.detected or self._fast_steady_from is not None)
             and self._slow_streak == 0
             and len(self._steady_unit_times_ms()) >= self._required_steady_steps()
-            and not self._has_sufficient_evidence(len(self._steady_unit_times_ms()))
+            and not self._has_sufficient_evidence()
         )
         wall_ms = self._last_wall_ms = self._verification_wall_ms()
         if (
