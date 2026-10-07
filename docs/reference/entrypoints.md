@@ -32,6 +32,7 @@ the flags that decide *what a run is*.
 | launch a task-specific campaign | use the campaign entrypoint in the experiment repository; it delegates to this repository's `run_chain.sh` |
 | run one arm of a task-specific comparison | use that experiment repository's launcher with an explicit SIDERIUS checkout |
 | run exactly one iteration (or debug one) | `src/workflows/run_one_iteration.py` |
+| preview arguments/defaults for a fresh standard iteration without launching | [`python -m tools.setup_review`](../../src/tools/setup_review/README.md); optional JSON/HTML declaration inspection, not complete preflight |
 | drive the workflow directly from Python | `src/workflows/model_exploration.py` |
 | compare a task model against baselines | use the task package's comparison entrypoint |
 | gate a campaign launch | use the campaign-owned preflight in the experiment repository |

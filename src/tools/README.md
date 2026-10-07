@@ -21,3 +21,7 @@ for isolated orchestration commands. It does not alter existing workflow launche
 [`orchestration_setup`](orchestration_setup/README.md) installs the existing
 agent toolkit and explicit run/profile files into a user's external project.
 Its generated guide shows the selected Python and exact check/launch commands.
+
+The optional [run settings preview](setup_review/README.md) is also intended for
+operators: it writes offline JSON and HTML for a fresh standard single-iteration
+declaration. It does not launch the workflow or certify task/environment readiness.
