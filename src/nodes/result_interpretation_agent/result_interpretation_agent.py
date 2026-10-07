@@ -45,6 +45,7 @@ from agent.schemas.interpretation import (
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.metric_order import MetricOrder
 from ml_models.model_descriptions import get_model_description
+from nodes.llm_settings import INTERPRET, node_bridge_kwargs
 
 # Node-private modules (Step 09a C1b). Imported EAGERLY and at module scope on
 # purpose: `__init__.py` rebinds `sys.modules["nodes.result_interpretation_agent"]`
@@ -193,19 +194,22 @@ def _append_evolution_log(workspace_root: str, payload: dict[str, Any]) -> None:
 class ResultInterpretationAgent:
     def __init__(
         self,
-        provider: str = "gemini",
-        model_id: str = "gemini-3.1-flash-lite-preview",
-        max_retries: int | None = None,
-        reasoning_effort: str | None = None,
+        provider: str = INTERPRET.provider,
+        model_id: str = INTERPRET.model_id,
+        max_retries: int | None = INTERPRET.max_retries,
+        reasoning_effort: str | None = INTERPRET.reasoning_effort,
         bridge_factory=None,
         **kwargs,
     ):
         self._bridge_factory = bridge_factory or LLMBridge
         self._provider = provider
         self._model_id = model_id
-        bridge_kwargs = {"provider": provider, "model_id": model_id, "max_retries": max_retries}
-        if reasoning_effort is not None:
-            bridge_kwargs["reasoning_effort"] = reasoning_effort
+        bridge_kwargs = node_bridge_kwargs(
+            provider=provider,
+            model_id=model_id,
+            max_retries=max_retries,
+            reasoning_effort=reasoning_effort,
+        )
         self.bridge = self._bridge_factory(**bridge_kwargs)
 
     def run(self, inp: InterpretationInput) -> InterpretationOutput:

@@ -38,6 +38,16 @@ private modules from outside it.
 
 Package-level helpers shared across nodes: `agent_data_stream.py`,
 `interpretation_helpers.py`, `proposal_helpers.py`, `scoring_reference.py`.
+For offline configuration inspection, use the public, inert modules
+[`llm_settings.py`](llm_settings.py), [`proposer_routing.py`](proposer_routing.py)
+and [`tuner_llm_settings.py`](tuner_llm_settings.py). Execution uses the same
+constructor defaults and argument builders. Importing these modules does not
+construct an agent or provider client. Constructor defaults are distinct from
+`WorkflowLLMConfig` defaults: an omitted implementor block selects its pro model,
+while an explicitly empty block uses the configuration schema's flash-lite
+model. Inspect the selected route; its presence does not prove that a disabled
+stage or cold-start interpreter will make an LLM call.
+
 The top-level [tuner page](ml_hyperparameter_tune_agent.md) is a **legacy
 pointer** kept for old links; the real contract doc lives inside the node
 directory, and the pointer links to the preserved historical body.

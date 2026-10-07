@@ -145,6 +145,7 @@ from execute_tools.impl_attempts import impl_attempt_dir
 from execute_tools.metric_order import MetricOrder
 from ml_models.model_descriptions import DescriptionSourcePolicy
 from ml_models.plugin_loader import register_model_in_memory
+from nodes.llm_settings import VALIDATE
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.ml_literature_review import MLLiteratureReviewAgent
@@ -155,7 +156,11 @@ from nodes.result_interpretation_agent import (
     reconcile_metric_spec,
     tuning_output_to_model_run_summary,
 )
-from workflows.llm_config import ProposalLLMConfig, WorkflowLLMConfig
+from workflows.llm_config import (
+    ProposalLLMConfig,
+    WorkflowLLMConfig,
+    resolve_standard_tuner_llm_options,
+)
 from workflows.run_bindings import WorkflowRunBindings
 from workflows.run_config import (
     WorkflowLaunchConfig,
@@ -3254,8 +3259,8 @@ def run_workflow(
                     valid_input = local_all_fields(
                         impl_output,
                         impl_storage.storage,
-                        llm_provider=valid_llm.get("provider", "gemini"),
-                        llm_model_id=valid_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
+                        llm_provider=valid_llm.get("provider", VALIDATE.provider),
+                        llm_model_id=valid_llm.get("model_id", VALIDATE.model_id),
                     )
                     if launch.human_advice_validate is not None:
                         valid_input.human_advice = launch.human_advice_validate
@@ -3391,7 +3396,7 @@ def run_workflow(
         _promote_model_to_global(impl_output)
 
         print(f"  [{iteration}] Tuning '{proposal.model_name}' for {launch.max_rounds} rounds...")
-        tune_llm = bindings.llm_config.get("tune")
+        tune_llm = resolve_standard_tuner_llm_options(bindings.llm_config.get("tune"))
         tune_input = local_validated_model(
             validation,
             proposal,
@@ -3413,8 +3418,8 @@ def run_workflow(
             healthgate_mode=launch.healthgate_mode,
             result_authority=launch.result_authority,
             file_index=launch.file_index,
-            llm_provider=tune_llm.get("provider", "gemini"),
-            llm_model_id=tune_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
+            llm_provider=tune_llm["provider"],
+            llm_model_id=tune_llm["model_id"],
             reasoning_effort=tune_llm.get("reasoning_effort"),
             planner_strategy=tune_llm.get("planner_strategy"),
             expected_planner_strategy=_run_invariants.planner_strategy_identity,

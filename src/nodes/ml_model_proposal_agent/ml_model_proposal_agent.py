@@ -66,6 +66,7 @@ from ml_models.models_format_sandbox import (
     CLASSIFICATION_LOSSES,
     REGRESSION_LOSSES,
 )
+from nodes.llm_settings import PROPOSE
 from nodes.ml_model_proposal_agent.evidence_rendering import (
     build_interpretation_summary,
     render_falsifiable_prediction_example,
@@ -82,6 +83,9 @@ from nodes.ml_model_proposal_agent.prediction_reference import (
     ground_prediction,
     observed_prediction_reference,
 )
+
+# Load the compatibility submodule before this package rebinds to the node.
+# Inspection imports the inert nodes.proposer_routing owner directly.
 from nodes.ml_model_proposal_agent.routing import (
     ProposerRoute,
     ProposerRouting,
@@ -1556,10 +1560,10 @@ class MLModelProposalAgent:
 
     def __init__(
         self,
-        provider: str = "gemini",
-        model_id: str = "gemini-3.1-flash-lite-preview",
-        max_retries: int | None = None,
-        reasoning_effort: str | None = None,
+        provider: str = PROPOSE.provider,
+        model_id: str = PROPOSE.model_id,
+        max_retries: int | None = PROPOSE.max_retries,
+        reasoning_effort: str | None = PROPOSE.reasoning_effort,
         bridge_factory=None,
         capability_index_path: str | None = None,
         **kwargs,

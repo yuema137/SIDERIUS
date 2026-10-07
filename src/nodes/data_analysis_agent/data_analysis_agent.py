@@ -64,6 +64,7 @@ from core.execution_deadline import (
 )
 from execute_tools.analysis_materialization import TaskAnalysisCapability
 from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
+from nodes.llm_settings import ANALYZE, node_bridge_kwargs
 
 from .report_synthesis import generate_grounded_synthesis
 
@@ -117,10 +118,10 @@ class DataAnalysisAgent:
         self,
         *,
         task_analysis_capability: TaskAnalysisCapability,
-        provider: str = "gemini",
-        model_id: str | None = None,
-        max_retries: int | None = None,
-        reasoning_effort: str | None = None,
+        provider: str = ANALYZE.provider,
+        model_id: str | None = ANALYZE.model_id,
+        max_retries: int | None = ANALYZE.max_retries,
+        reasoning_effort: str | None = ANALYZE.reasoning_effort,
         bridge_factory: Callable[..., object] | None = None,
         historical_model_inference_capability: HistoricalModelInferenceCapability | None = None,
     ) -> None:
@@ -133,11 +134,13 @@ class DataAnalysisAgent:
         self._historical_inference_capability = historical_model_inference_capability
 
     def _bridge(self):
-        kwargs = {"provider": self._provider, "model_id": self._model_id}
-        if self._max_retries is not None:
-            kwargs["max_retries"] = self._max_retries
-        if self._reasoning_effort is not None:
-            kwargs["reasoning_effort"] = self._reasoning_effort
+        kwargs = node_bridge_kwargs(
+            provider=self._provider,
+            model_id=self._model_id,
+            max_retries=self._max_retries,
+            reasoning_effort=self._reasoning_effort,
+            omit_unset_retries=True,
+        )
         return self._bridge_factory(**kwargs)
 
     @staticmethod

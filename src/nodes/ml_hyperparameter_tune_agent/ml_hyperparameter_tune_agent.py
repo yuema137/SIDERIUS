@@ -227,6 +227,9 @@ from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
     project_attempt_topology_facts,
 )
 from nodes.ml_hyperparameter_tune_agent.seed_plugin import stage_seed_model
+from nodes.tuner_llm_settings import (
+    tuner_bridge_arguments as _bridge_kwargs_from_input,
+)
 from workflows.task_config import load_task_config, run_bound_model_io_contract
 
 
@@ -607,23 +610,6 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
         trial_time_admission_source=agent_input.trial_time_admission_source,
         formal_time_admission_source=agent_input.formal_time_admission_source,
     )
-
-
-def _bridge_kwargs_from_input(agent_input: HyperparamTuningInput) -> dict[str, Any]:
-    """Keep optional LLM transport out of the tuner execution loop."""
-
-    kwargs: dict[str, Any] = {
-        "provider": agent_input.llm_provider,
-        "model_id": agent_input.llm_model_id,
-        "reflect_provider": agent_input.reflect_provider,
-        "reflect_model_id": agent_input.reflect_model_id,
-        "max_retries": agent_input.max_retries,
-    }
-    if agent_input.reasoning_effort is not None:
-        kwargs["reasoning_effort"] = agent_input.reasoning_effort
-    if agent_input.reflect_reasoning_effort is not None:
-        kwargs["reflect_reasoning_effort"] = agent_input.reflect_reasoning_effort
-    return kwargs
 
 
 def _load_run_model_description(

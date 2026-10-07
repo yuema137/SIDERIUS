@@ -72,6 +72,7 @@ from core.local_code.child import prepare_child
 from core.local_code.failure import raise_if_code_package_failure
 from core.subprocess_env import subprocess_env
 from ml_models.plugin_loader import PLUGIN_LEGAL_OUTPUT_TYPES
+from nodes.llm_settings import VALIDATE, node_bridge_kwargs
 from nodes.ml_code_validator_agent.source import (
     REQUIRED_PLUGIN_ATTRIBUTES,
     captured_plugin,
@@ -694,17 +695,20 @@ class MLCodeValidatorAgent:
 
     def __init__(
         self,
-        provider: str = "gemini",
-        model_id: str = "gemini-3.1-flash-lite-preview",
-        max_retries: int | None = None,
-        reasoning_effort: str | None = None,
+        provider: str = VALIDATE.provider,
+        model_id: str = VALIDATE.model_id,
+        max_retries: int | None = VALIDATE.max_retries,
+        reasoning_effort: str | None = VALIDATE.reasoning_effort,
         bridge_factory=None,
         **kwargs,
     ):
         self._bridge_factory = bridge_factory or LLMBridge
-        bridge_kwargs = {"provider": provider, "model_id": model_id, "max_retries": max_retries}
-        if reasoning_effort is not None:
-            bridge_kwargs["reasoning_effort"] = reasoning_effort
+        bridge_kwargs = node_bridge_kwargs(
+            provider=provider,
+            model_id=model_id,
+            max_retries=max_retries,
+            reasoning_effort=reasoning_effort,
+        )
         self.bridge = self._bridge_factory(**bridge_kwargs)
 
     def run(self, inp: ValidatorInput) -> ValidatorOutput:

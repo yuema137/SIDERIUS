@@ -56,6 +56,7 @@ from core.capability_registry import (
     CapabilityRegistry,
 )
 from core.hardware_context import HardwareContext
+from nodes.llm_settings import IMPLEMENT, node_bridge_kwargs
 from workflows.task_config import render_forward_contract
 
 # ---------------------------------------------------------------------------
@@ -1721,18 +1722,21 @@ def _assemble_test(
 class MLModelImplementor:
     def __init__(
         self,
-        provider: str = "gemini",
-        model_id: str = "gemini-3.1-pro-preview",
-        max_retries: int | None = None,
-        reasoning_effort: str | None = None,
+        provider: str = IMPLEMENT.provider,
+        model_id: str = IMPLEMENT.model_id,
+        max_retries: int | None = IMPLEMENT.max_retries,
+        reasoning_effort: str | None = IMPLEMENT.reasoning_effort,
         bridge_factory=None,
         capability_index_path: str | None = None,
         **kwargs,
     ):
         self._bridge_factory = bridge_factory or LLMBridge
-        bridge_kwargs = {"provider": provider, "model_id": model_id, "max_retries": max_retries}
-        if reasoning_effort is not None:
-            bridge_kwargs["reasoning_effort"] = reasoning_effort
+        bridge_kwargs = node_bridge_kwargs(
+            provider=provider,
+            model_id=model_id,
+            max_retries=max_retries,
+            reasoning_effort=reasoning_effort,
+        )
         self.bridge = self._bridge_factory(**bridge_kwargs)
         # L4b — registry handle for custom-loss provenance writes. Tests pass
         # ``capability_index_path=str(tmp_path / "_capability_index.json")``

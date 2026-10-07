@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import warnings
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -538,3 +539,17 @@ class WorkflowLLMConfig(BaseModel):
             tune=tune_cfg,
             lit_review=lit_review_cfg,
         )
+
+
+def resolve_standard_tuner_llm_options(options: Mapping[str, Any]) -> dict[str, Any]:
+    """Apply the standard workflow's omitted tuner defaults from its input schema.
+
+    An absent tune block differs from an explicitly empty TunerLLMConfig. Keep
+    that existing distinction; do not replace either with the other's defaults.
+    """
+    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+
+    options = dict(options)
+    for option, field in (("provider", "llm_provider"), ("model_id", "llm_model_id")):
+        options.setdefault(option, HyperparamTuningInput.model_fields[field].default)
+    return options

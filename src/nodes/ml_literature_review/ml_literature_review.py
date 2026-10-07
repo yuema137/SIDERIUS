@@ -66,6 +66,7 @@ from agent.schemas.literature_review import (
 from agent.schemas.proposal import AgentCard, ExpertContextItem
 from agent.skills.paper_resolver_skill.wrapper import run_skill
 from core.layout import checkout_root, require_checkout
+from nodes.llm_settings import literature_bridge_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -312,23 +313,20 @@ class MLLiteratureReviewAgent:
             }
         )
         started_at = _utc_now()
-        main_kwargs: dict[str, Any] = {"provider": inp.llm_provider, "model_id": inp.llm_model_id}
-        if inp.llm_reasoning_effort is not None:
-            main_kwargs["reasoning_effort"] = inp.llm_reasoning_effort
-        self.bridge = self._bridge_factory(**main_kwargs)
-        # Search-decision bridge: the cheap, templated query/escalate/done step may
-        # run on a cheaper model (e.g. deepseek-v4) while compression + synthesis
-        # stay on the main model. Falls back to the main bridge when unconfigured.
-        if inp.search_llm_provider or inp.search_llm_model_id or inp.search_llm_reasoning_effort:
-            search_kwargs: dict[str, Any] = {
-                "provider": inp.search_llm_provider or inp.llm_provider,
-                "model_id": inp.search_llm_model_id or inp.llm_model_id,
-            }
-            if inp.search_llm_reasoning_effort is not None:
-                search_kwargs["reasoning_effort"] = inp.search_llm_reasoning_effort
-            self.search_bridge = self._bridge_factory(**search_kwargs)
-        else:
-            self.search_bridge = self.bridge
+        bridge_arguments = literature_bridge_arguments(
+            provider=inp.llm_provider,
+            model_id=inp.llm_model_id,
+            reasoning_effort=inp.llm_reasoning_effort,
+            search_provider=inp.search_llm_provider,
+            search_model_id=inp.search_llm_model_id,
+            search_reasoning_effort=inp.search_llm_reasoning_effort,
+        )
+        self.bridge = self._bridge_factory(**bridge_arguments.main)
+        self.search_bridge = (
+            self._bridge_factory(**bridge_arguments.search)
+            if bridge_arguments.search is not None
+            else self.bridge
+        )
         # Fix 6 (6.5b-5) + Commit F: the task description threaded into all
         # three render call sites (compression / search-decision / synthesis).
         # Step 04b: the production workflow sources this from the canonical
