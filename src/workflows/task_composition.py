@@ -340,9 +340,11 @@ class RunTaskComposition:
     """
 
     data_analysis: Any = None
+    """Optional edge-owned Data Analysis workflow policy, resolved and pinned."""
+
     prompt_renderer: PromptRenderingProfile | None = None
     prompt_renderer_identity: PromptRenderingIdentity | None = None
-    """Optional edge-owned Data Analysis workflow policy, resolved and pinned."""
+    """Explicit run-scoped presentation provider and its pinned identity."""
 
     def __post_init__(self) -> None:
         """Refuse mutable cross-iteration state, by DERIVED name set.

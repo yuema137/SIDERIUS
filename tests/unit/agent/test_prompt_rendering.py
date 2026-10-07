@@ -92,3 +92,34 @@ def test_implementor_consumes_scoped_appendix_provider(tmp_path):
         for render in (_build_reasoning_system_prompt, _build_code_system_prompt):
             assert render(inp).endswith("\nCUSTOM APPENDIX")
             assert "## Native training execution boundary" not in render(inp)
+
+
+def test_loader_refuses_missing_duplicate_and_misnamed_providers(tmp_path, monkeypatch):
+    """Entry-point discovery must never choose an arbitrary matching distribution."""
+    from types import SimpleNamespace
+
+    from agent import prompt_rendering as module
+
+    profile = _profile(tmp_path)
+    entry = SimpleNamespace(name="test-v1", load=lambda: lambda: profile)
+    for entries in ([], [entry, entry]):
+        monkeypatch.setattr(module, "entry_points", lambda entries=entries, **_: entries)
+        with pytest.raises(ValueError, match="Expected one installed"):
+            module.resolve_prompt_profile("test-v1")
+    wrong = SimpleNamespace(name="requested-v1", load=lambda: lambda: profile)
+    monkeypatch.setattr(module, "entry_points", lambda **_: [wrong])
+    with pytest.raises(TypeError, match="selected PromptRenderingProfile"):
+        module.resolve_prompt_profile("requested-v1")
+
+
+def test_boundary_declaration_changes_identity(tmp_path):
+    """Identical source files must not hide a different native/override selection."""
+    profile = _profile(tmp_path, native={"synthetic.message"})
+    other = PromptRenderingProfile(
+        profile.name,
+        profile.version,
+        {"synthetic.message": lambda **_: "x"},
+        frozenset(),
+        profile.sources,
+    )
+    assert profile.identity().content_sha256 != other.identity().content_sha256

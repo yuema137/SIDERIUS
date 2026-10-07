@@ -6,6 +6,7 @@ text only; node orchestration, response validation and execution remain native.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -39,7 +40,15 @@ def rendering_assembly_digest() -> str:
     root = Path(__file__).parent
     paths = [Path(__file__), *(root / "prompt_templates").rglob("*.py")]
     paths += list((root / "prompt_templates").rglob("*.md"))
-    paths += [root.parent / "nodes/ml_model_implementor/ml_model_implementor.py"]
+    paths += list((root / "schemas").rglob("*.py"))
+    paths += list((root / "data_analysis").glob("*.py"))
+    for node in (
+        "ml_model_implementor",
+        "ml_model_proposal_agent",
+        "result_interpretation_agent",
+        "data_analysis_agent",
+    ):
+        paths += list((root.parent / "nodes" / node).glob("*.py"))
     return source_fingerprint({str(p.relative_to(root.parent)): p.read_bytes() for p in paths})
 
 
@@ -67,10 +76,17 @@ class PromptRenderingProfile:
         object.__setattr__(self, "native_boundaries", frozenset(self.native_boundaries))
 
     def identity(self) -> PromptRenderingIdentity:
+        sources = {k: p.read_bytes() for k, p in self.sources.items()}
+        if "__boundaries__.json" in sources:
+            raise ValueError("Provider source label '__boundaries__.json' is reserved")
+        sources["__boundaries__.json"] = json.dumps(
+            {"overridden": sorted(self.renderers), "native": sorted(self.native_boundaries)},
+            sort_keys=True,
+        ).encode()
         return PromptRenderingIdentity(
             name=self.name,
             version=self.version,
-            content_sha256=source_fingerprint({k: p.read_bytes() for k, p in self.sources.items()}),
+            content_sha256=source_fingerprint(sources),
             assembly_sha256=rendering_assembly_digest(),
         )
 
