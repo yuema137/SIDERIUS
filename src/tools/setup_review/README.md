@@ -173,3 +173,77 @@ atomic transaction. Success is printed only after both files have been written.
 This tool leaves existing execution behavior, prompts and defaults unchanged.
 It is one part of optional setup assistance, not a completed onboarding workflow
 or paper-artifact reproduction check.
+
+## Optionally check that the task and its providers compose
+
+The ordinary preview above never imports your task. If you also want to check
+whether its declared plugins and installed providers can load together, run this
+**separate command**. It executes trusted task/provider factories in the existing
+[workspace sandbox](../workspace_sandbox/README.md). It requires Linux, bubblewrap
+and enabled user namespaces; there is no fallback to executing on the host.
+
+Use task code you trust. Keep credentials out of your source installation and
+every directory you expose: the child can read all files under a mounted root,
+and arbitrary factory code can print what it reads. The sandbox provides a wall
+timeout and its supported process/filesystem/network/device boundaries. It is
+not a defense against malicious same-user code, nor a host-memory or disk quota.
+
+Reuse `review-request.json` from the earlier example. Keep your task code/configs
+under `tasks/my-task` and your dataset separately under `data`. The data directory
+is not exposed to this check. Declare every external source/config/provider root
+needed by composition with another `--read-only`; the exact Python installation
+and its framework source are already mounted by the sandbox owner.
+
+```bash
+cd /home/alex/siderius-project &&
+/path/to/SIDERIUS/.venv/bin/python -m tools.setup_review.check_task \
+  --request review-request.json \
+  --read-only /home/alex/siderius-project/tasks/my-task \
+  --scratch /home/alex/siderius-project/check-scratch-001 \
+  --output /home/alex/siderius-project/task-check-001 \
+  --timeout-seconds 30
+```
+
+Choose the timeout for this check; `30` is an example, not a training budget.
+Both new directories must have existing parents, use canonical absolute paths,
+and be separate from one another, the actual run workspace, installation and
+read-only roots. Existing directories are refused. No caller environment variables,
+API keys, GPU devices or network access are forwarded. A plugin needing unavailable
+resources fails visibly; the checker does not widen access or install dependencies.
+
+The scratch directory holds the child's request, response and any files its
+factories create. Its generated-library binding is separate from your actual run
+workspace. The report directory contains:
+
+| File | What to inspect |
+|---|---|
+| `index.html` | Start here: task/provider check outcome, metric and direction, dataset declaration, parameter rules, inference policy, Health declaration and remaining limits. |
+| `settings.html` | CLI defaults, static model routes, original arguments and the ordinary command to run later. This is the declaration-only preview, linked from the task-check page. |
+| `report.json` | Typed task-check result, including the original v2 declaration snapshot, selected limits, actual sandbox profile, source identities and runner status. |
+
+**Passed means the task and selected planner provider composed.** It does not mean
+the data is valid, a model trains, Health checks pass, credentials work, or hardware
+fits the budget. The checker does not invoke data loaders, construct training
+models, materialize Health or call an LLM. Task imports/factories are executable
+Python, so they can still perform arbitrary computation within the declared
+boundary. For example, a missing installed planner strategy produces a failed
+check even if the task itself composed; the page preserves those task facts and
+identifies the provider failure. Configure or install the intended provider yourself
+and rerun; no historical or native fallback is silently selected.
+
+Child-result JSON is limited to `1048576` bytes (1 MiB) by default. The report records
+the actual `result_max_bytes`. If an expected task summary exceeds it, inspect the
+cause and explicitly add, for example, `--result-max-bytes 2097152` on a new check.
+This limits result transport; it does not restrict dataset size or allocate memory.
+Special files, links, malformed results and mismatched request identities are refused.
+
+Failure or timeout returns a nonzero exit and leaves a report when possible. A
+changed manifest is marked stale. Other source identities describe what the
+composition captured; they do not prove every ambient import stayed unchanged.
+The runner reports status, return code and elapsed time, not independently measured
+proof that no orphan process survived. No report is enforced by the ordinary launch.
+
+Each output file is published without overwriting; the page is published last.
+An interruption can leave partial report/scratch directories. Inspect them yourself
+before removing them, or choose new names. They are diagnostic artifacts, not
+experimental results. This command does not create the actual run workspace.
