@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import StrictBool, model_validator
+from pydantic import Field, StrictBool, model_validator
 
 from agent.data_analysis.discovery import discover_skills
 from agent.data_analysis.reference_packs import builtin_pack_refs
@@ -22,6 +22,7 @@ from agent.schemas.data_analysis.access import AnalysisAccessPolicy
 from agent.schemas.data_analysis.assets import AnalysisAsset, TaskDataAssetLocation
 from agent.schemas.data_analysis.common import CertifiedArtifactRef, FrozenModel, NonEmptyStr
 from agent.schemas.data_analysis.context import AnalysisTaskContext, SkillPackRef
+from agent.schemas.data_analysis.recovery import AnalysisRecoveryPolicy
 from agent.schemas.data_analysis.resources import AnalysisResourceEnvelope
 from agent.schemas.data_analysis.source_scope import DeclaredAnalysisScope
 from execute_tools.analysis_materialization import (
@@ -43,6 +44,9 @@ class DataAnalysisWorkflowConfig(FrozenModel):
     declared_scope: DeclaredAnalysisScope
     access_policy: AnalysisAccessPolicy
     resource_envelope: AnalysisResourceEnvelope
+    recovery_policy: AnalysisRecoveryPolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     builtin_skill_packs: tuple[Literal["core-analysis", "time-series"], ...] = ()
     external_skill_packs: tuple[SkillPackRef, ...] = ()
     allow_generated_skill_promotion: StrictBool = False
@@ -99,6 +103,7 @@ class ResolvedWorkflowDataAnalysis:
     allow_generated_skill_promotion: bool = False
     historical_inference_base_asset_id: str | None = None
     dataset_profile_path: str | None = None
+    recovery_policy: AnalysisRecoveryPolicy | None = None
 
     def canonical_identity(self) -> dict[str, Any]:
         """Host-independent semantic identity; absolute paths are excluded."""
@@ -122,6 +127,8 @@ class ResolvedWorkflowDataAnalysis:
             ],
             "report_schema_version": self.report_schema_version,
         }
+        if self.recovery_policy is not None:
+            identity["recovery_policy"] = self.recovery_policy.model_dump(mode="json")
         if self.allow_generated_skill_promotion:
             identity["allow_generated_skill_promotion"] = True
         if self.historical_inference_base_asset_id is not None:
@@ -250,6 +257,7 @@ def compose_workflow_data_analysis(
         declared_scope=config.declared_scope,
         access_policy=config.access_policy,
         resource_envelope=config.resource_envelope,
+        recovery_policy=config.recovery_policy,
         allowed_skill_packs=tuple(packs),
         task_analysis_capability=task_data_path,
         report_schema_version=config.report_schema_version,

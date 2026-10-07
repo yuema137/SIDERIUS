@@ -254,3 +254,21 @@ def test_historical_inference_base_is_explicit_workflow_policy(tmp_path) -> None
     config_path.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(ValueError, match="requires model inference policy"):
         _compose(tmp_path, config_path)
+
+
+def test_recovery_policy_reaches_binding_and_changes_identity(tmp_path):
+    """Fails if a policy is parsed but lost before run identity is built."""
+    path = _write_config(tmp_path)
+    native = _compose(tmp_path, path)
+    config = json.loads(path.read_text())
+    config["recovery_policy"] = {
+        "schema_version": 1,
+        "generated_program_retries": 0,
+        "plan_retries": 2,
+    }
+    path.write_text(json.dumps(config))
+    explicit = _compose(tmp_path, path)
+    assert explicit.recovery_policy.generated_program_retries == 0
+    assert explicit.recovery_policy.plan_retries == 2
+    assert explicit.canonical_identity()["recovery_policy"] == config["recovery_policy"]
+    assert native.canonical_identity() != explicit.canonical_identity()

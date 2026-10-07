@@ -57,6 +57,8 @@ def _planning_input(analysis_input: DataAnalysisInput) -> dict:
     # The declaration is a caller-side ceiling and may name locked-out assets.
     # The planner receives only the resolved scope and its filtered descriptors.
     payload.pop("declared_scope", None)
+    # Recovery controls orchestration, not the scientific decision requested.
+    payload.pop("recovery_policy", None)
     payload["available_assets"] = [
         item.model_dump(mode="json") for item in analysis_input.planning_assets()
     ]

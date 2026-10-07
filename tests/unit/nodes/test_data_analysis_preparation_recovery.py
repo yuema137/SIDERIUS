@@ -8,6 +8,7 @@ import pytest
 from agent.data_analysis.analysis_code_sandbox import AnalysisCodeSandbox
 from agent.prompt_templates.proposal import render_data_analysis_evidence
 from agent.schemas.data_analysis.common import CallerIdentity
+from agent.schemas.data_analysis.recovery import AnalysisRecoveryPolicy
 from agent.schemas.protocols.interpreter_to_data_analysis import local_analysis_input
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from nodes.data_analysis_agent import DataAnalysisAgent
@@ -53,6 +54,18 @@ class BrokenRepairBridge(_GeneratedProgramBridge):
         return result
 
 
+def test_recovery_policy_changes_resume_identity_not_scientific_prompt(tmp_path):
+    """Detect an unpinned recovery change or accidental policy leakage into prompts."""
+    from agent.prompt_templates.data_analysis import _planning_input
+
+    native = _input(tmp_path)
+    historical = native.model_copy(
+        update={"recovery_policy": AnalysisRecoveryPolicy(generated_program_retries=0)}
+    )
+    assert native.canonical_scientific_digest() != historical.canonical_scientific_digest()
+    assert _planning_input(native) == _planning_input(historical)
+
+
 @pytest.mark.allow_real_subprocess
 def test_program_regeneration_executes_and_reuses_report(tmp_path):
     probe = AnalysisCodeSandbox().probe()
@@ -77,7 +90,8 @@ def test_program_regeneration_executes_and_reuses_report(tmp_path):
     assert bridge.calls == calls
 
 
-def test_exhausted_program_recovery_reaches_proposer_without_data_access(tmp_path):
+@pytest.mark.parametrize("retries", [None, 0, 2])
+def test_exhausted_program_recovery_reaches_proposer_without_data_access(tmp_path, retries):
     template = _input(tmp_path)
     interpretation = _interpretation(template.analysis_brief)
     capability = _RecordingCapability()
@@ -87,6 +101,9 @@ def test_exhausted_program_recovery_reaches_proposer_without_data_access(tmp_pat
         declared_scope=template.declared_scope,
         access_policy=template.access_policy,
         resource_envelope=template.resource_envelope,
+        recovery_policy=(
+            None if retries is None else AnalysisRecoveryPolicy(generated_program_retries=retries)
+        ),
         allowed_skill_packs=template.allowed_skill_packs,
         task_analysis_capability=capability,
         report_schema_version=1,
@@ -101,6 +118,7 @@ def test_exhausted_program_recovery_reaches_proposer_without_data_access(tmp_pat
         declared_scope=binding.declared_scope,
         access_policy=binding.access_policy,
         resource_envelope=binding.resource_envelope,
+        recovery_policy=binding.recovery_policy,
         allowed_skill_packs=binding.allowed_skill_packs,
         storage=template.storage,
         caller=CallerIdentity(
@@ -128,8 +146,12 @@ def test_exhausted_program_recovery_reaches_proposer_without_data_access(tmp_pat
     prompt = render_data_analysis_evidence(proposal.data_analysis_evidence)
     assert "Analysis preparation exhausted" in prompt
     assert not capability.requested_scopes
-    assert bridge.calls.count("data_analysis.generated_program.regeneration") == 1
-    assert bridge.calls.count("data_analysis.generated_program.regeneration.repair") == 1
+    expected_retries = 1 if retries is None else retries
+    assert bridge.calls.count("data_analysis.generated_program.regeneration") == expected_retries
+    assert (
+        bridge.calls.count("data_analysis.generated_program.regeneration.repair")
+        == expected_retries
+    )
     assert "data_analysis.plan" not in bridge.calls
     receipt_path = (
         tmp_path
@@ -140,4 +162,5 @@ def test_exhausted_program_recovery_reaches_proposer_without_data_access(tmp_pat
     )
     receipts = [json.loads(line) for line in receipt_path.read_text().splitlines()]
     failed = [r for r in receipts if r["stage"].startswith("data_analysis.generated_program")]
-    assert len(failed) == 2 and all(r["repair_passed"] is False for r in failed)
+    assert len(failed) == 1 + expected_retries
+    assert all(r["repair_passed"] is False for r in failed)
