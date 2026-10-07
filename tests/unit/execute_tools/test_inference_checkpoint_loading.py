@@ -49,28 +49,25 @@ def _main_function() -> ast.FunctionDef:
     raise AssertionError("main() not found in inference_single.py")
 
 
-def _state_dict_load_call() -> ast.Call:
-    """The `torch.load` that reads the agent-mode state dict.
+def _checkpoint_function() -> ast.FunctionDef:
+    source = _INFERENCE_SOURCE.with_name("inference_checkpoint.py")
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    return next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "load_inference_checkpoint"
+    )
 
-    Located by its argument rather than by line, so the test survives
-    edits above it. The fix-mode `torch.load(model_file, ...)` at the top
-    of `main` loads a whole pickled model object and is a different call
-    with different requirements -- it is deliberately not matched here.
-    """
-    for node in ast.walk(_main_function()):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-            continue
-        if node.func.attr != "load":
-            continue
-        first = node.args[0] if node.args else None
-        if (
-            isinstance(first, ast.Attribute)
-            and first.attr == "model_path"
-            and isinstance(first.value, ast.Name)
-            and first.value.id == "args"
-        ):
-            return node
-    raise AssertionError("no torch.load(args.model_path, ...) call found in main()")
+
+def _state_dict_load_call() -> ast.Call:
+    """The production shared loader, independent of checkpoint transport."""
+    return next(
+        node
+        for node in ast.walk(_checkpoint_function())
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "load"
+    )
 
 
 class TestTheCheckpointIsReadOnTheHost:
@@ -102,7 +99,7 @@ class TestTheCheckpointIsReadOnTheHost:
         pressure is not the fix."""
         names = {
             target.id
-            for node in ast.walk(_main_function())
+            for node in ast.walk(_checkpoint_function())
             if isinstance(node, ast.Delete)
             for target in node.targets
             if isinstance(target, ast.Name)
@@ -129,20 +126,20 @@ class TestTheCheckpointIsReadOnTheHost:
             for node in ast.walk(main)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id == "load_trained_state"
+            and node.func.id == "load_inference_checkpoint"
         )
         assert transfer < load
 
     def test_the_sentinel_preflight_still_runs_first(self):
         """A silent training crash must still surface as `error_training:`
         rather than as a FileNotFoundError on the .pth path."""
-        main = _main_function()
+        main = _checkpoint_function()
         sentinel = next(
             node.lineno
             for node in ast.walk(main)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id == "_assert_training_sentinel"
+            and node.func.id == "assert_training_sentinel"
         )
         assert sentinel < _state_dict_load_call().lineno
 

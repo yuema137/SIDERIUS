@@ -178,7 +178,9 @@ def resolve_device(spec: GpuMeasurementSpec) -> DeviceResolution:
 _MEASUREMENT_DTYPE_PREFERENCE = "int32"
 
 
-def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
+def build_production_components(
+    spec: GpuMeasurementSpec, trace: Any = None, *, deadline_at: float | None = None
+):
     """A builder that constructs exactly what the phase will really run.
 
     Returns a zero-argument callable so construction happens INSIDE the
@@ -212,7 +214,7 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
     if spec.phase == "inference":
         from core.runtime_control.gpu_inference_components import build_inference_components
 
-        return lambda: build_inference_components(spec, trace)
+        return lambda: build_inference_components(spec, trace, deadline_at=deadline_at)
 
     def _build() -> CandidateComponents:
         from core.runtime_control.gpu_measurement_data import load_bounded_probe_batch
@@ -523,6 +525,8 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
         "worker_pid": os.getpid(),
         "request_id": spec.request.request_id,
     }
+    if spec.inference_checkpoint is not None and spec.inference_binding is None:
+        raise ValueError("checkpoint measurement requires a full inference source binding")
     if spec.inference_binding is not None:
         from core.runtime_control.inference_measurement_binding import inference_measurement_binding
 
@@ -592,7 +596,7 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
         )
 
     outcome = run_measured_phases(
-        build_components=build_production_components(spec, trace),
+        build_components=build_production_components(spec, trace, deadline_at=worker_deadline),
         phase=spec.phase,
         device=spec.device,
         training_steps=spec.training_steps,
@@ -631,6 +635,7 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
     return WorkerMeasurementReport(
         **base,
         status=outcome.status,
+        verified_checkpoint=outcome.verified_checkpoint,
         observed_device_uuid=resolution.observed_uuid,
         device_name=resolution.device_name,
         phases=outcome.phases,

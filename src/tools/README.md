@@ -14,3 +14,6 @@ for its inputs and failure behavior.
 
 All paths are derived from the current checkout or supplied explicitly. Tools
 must not edit the checkout as a substitute for caller-owned task configuration.
+
+[`workspace_sandbox`](workspace_sandbox/README.md) is an optional operator entry
+for isolated orchestration commands. It does not alter existing workflow launches.

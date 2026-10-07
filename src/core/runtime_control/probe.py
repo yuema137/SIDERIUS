@@ -52,6 +52,7 @@ from core.runtime_control.estimate_types import (
     make_estimate,
 )
 from core.runtime_control.measurement_validity import MeasurementValidity
+from core.runtime_control.process_visibility import ProcessVisibility, declared_visibility
 from core.runtime_control.registry_schemas import CalibrationObservation
 
 PROBE_PRODUCER_SEMVER = "1.0.0"
@@ -79,6 +80,9 @@ class ContentionSnapshot(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    process_visibility: ProcessVisibility | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     foreign_compute_processes: int | None = None
     gpu_utilization_pct: float | None = None
     gpu_memory_used_gb: float | None = None
@@ -242,6 +246,7 @@ def capture_contention_snapshot(*, exclude_pids: Iterable[int] | None = None) ->
     on the snapshot for after-the-fact audit."""
     import subprocess
 
+    visibility = declared_visibility()
     try:
         util = (
             subprocess.run(
@@ -303,6 +308,7 @@ def capture_contention_snapshot(*, exclude_pids: Iterable[int] | None = None) ->
         reported = tuple(per_process)
         foreign = tuple(pid for pid in reported if pid not in excluded)
         return ContentionSnapshot(
+            process_visibility=visibility,
             compute_process_memory_gb={str(k): v for k, v in per_process.items()},
             foreign_compute_processes=len(foreign),
             gpu_utilization_pct=util_pct,
@@ -314,7 +320,7 @@ def capture_contention_snapshot(*, exclude_pids: Iterable[int] | None = None) ->
             throttle_reasons_hex=_query_throttle_reasons(),
         )
     except Exception:
-        return ContentionSnapshot(telemetry_available=False)
+        return ContentionSnapshot(telemetry_available=False, process_visibility=visibility)
 
 
 def is_out_of_memory(exc: BaseException) -> bool:

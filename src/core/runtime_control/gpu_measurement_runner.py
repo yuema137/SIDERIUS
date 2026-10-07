@@ -72,6 +72,7 @@ from core.runtime_control.gpu_requirement import (
     MeasurementDeadline,
     SamplingCoverage,
 )
+from core.runtime_control.inference_checkpoint_reference import InferenceCheckpointReference
 from core.runtime_control.inference_measurement_binding import InferenceMeasurementBinding
 from core.runtime_control.process_group import (
     process_group_alive,
@@ -175,6 +176,9 @@ class PrephaseMeasurementRun(BaseModel):
     label: str
     request: CandidateMeasurementRequest
     inference_binding: InferenceMeasurementBinding | None = None
+    verified_checkpoint: InferenceCheckpointReference | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     #: `None` when the worker produced no structured report at all.
     worker_status: WorkerStatus | None = None
@@ -249,6 +253,12 @@ def run_prephase_measurement(
     Never raises for anything it can observe. A launch failure, a hung
     worker and a crashed worker are all recorded outcomes.
     """
+    if spec.inference_checkpoint is not None and spec.inference_binding is None:
+        return _launch_failure(
+            spec,
+            spec.request.deadline_seconds,
+            ValueError("checkpoint measurement requires a full inference source binding"),
+        )
     started = elapsed_clock()
     deadline_seconds = spec.request.deadline_seconds
     if deadline_at is not None:
@@ -482,6 +492,7 @@ def run_prephase_measurement(
         request=spec.request,
         worker_status=report.status if report is not None else None,
         inference_binding=report.inference_binding if report is not None else None,
+        verified_checkpoint=report.verified_checkpoint if report is not None else None,
         report_present=report is not None,
         observed_device_uuid=report.observed_device_uuid if report is not None else None,
         device_name=report.device_name if report is not None else None,

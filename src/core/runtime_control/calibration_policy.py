@@ -284,6 +284,11 @@ def classify_contention_window(
             f"across the whole {len(samples)}-sample window"
         )
         return "foreign_contended", tuple(reasons)
+    if any(s.process_visibility == "namespace_limited" for s in samples):
+        reasons.append(
+            "GPU process visibility is namespace-limited; unreported outside processes cannot establish an idle or expected-peer-only device"
+        )
+        return "unknown_contention", tuple(reasons)
     if observed_foreign:
         reasons.append(
             "only the current probe plus the explicitly registered "

@@ -36,6 +36,10 @@ from execute_tools.deliverable_spec import (
     derive_run_deliverable_spec,
 )
 from execute_tools.hdf5_deliverable import is_complete_hdf5_deliverable
+from execute_tools.inference_checkpoint import (
+    assert_training_sentinel,
+    load_inference_checkpoint,
+)
 from execute_tools.model_input_dtype import (
     INFERENCE_SITE_DTYPE,
     resolve_inference_input_dtype,
@@ -53,9 +57,11 @@ from ml_models.models_format_sandbox import LossConfig
 
 # Import your sandboxed components for Agent Mode
 from ml_models.plugin_loader import UnknownOutputContractError, get_output_type
-from ml_models.target_standardization import load_trained_state
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
+_assert_training_sentinel = assert_training_sentinel
 
 
 def _is_complete_trial_output(
@@ -96,21 +102,6 @@ def _persisted_storage(args: Any) -> DeliverableStorage:
     """
     spec = getattr(args, "_deliverable_spec", None)
     return spec.storage if spec is not None else default_deliverable_storage()
-
-
-def _assert_training_sentinel(model_path: str, exp_id: str) -> None:
-    """Raise ``error_training`` if the trainer-side ``_OK_<exp_id>`` sentinel
-    is missing. The orchestrator pattern-matches the ``error_training:``
-    prefix in the exception message to tag the failure category, so a
-    silent training crash never gets misclassified as ``error_inference:
-    FileNotFoundError`` on the .pth path. Phase 6.7 Fix 3.
-    """
-    sentinel_path = os.path.join(os.path.dirname(model_path), f"_OK_{exp_id}")
-    if not os.path.exists(sentinel_path):
-        raise RuntimeError(
-            f"error_training: checkpoint never written: {model_path} "
-            f"(missing sentinel: {sentinel_path})"
-        )
 
 
 def get_parser():
@@ -732,55 +723,12 @@ def main():
         if trace is not None:
             trace.record("after_model_to_device", synchronize=True, model=model)
 
-        # Phase 6.7 Fix 3 — preflight the trainer sentinel. No retry loop:
-        # the spec explicitly drops it because it would mask, not fix, the
-        # silent-crash root cause.
-        _assert_training_sentinel(args.model_path, args.exp_id)
+        # The shared loader checks the training marker, reads weights on the
+        # host and preserves target-standardization state. Loading on CPU avoids
+        # a second full GPU parameter set and its persistent allocator reserve.
+        model = load_inference_checkpoint(model, args.model_path, args.exp_id)
 
-        # Load weights from the agent's specific experiment run.
-        #
-        # HOST-SIDE, deliberately. `map_location=DEVICE` materialises a
-        # SECOND full set of parameter tensors on the GPU before
-        # `load_state_dict` copies them into the model. The temporary state
-        # dict is then freed — but the CUDA caching allocator keeps the
-        # freed segments RESERVED, and driver-visible memory counts
-        # reserved, not allocated. So the process carries a checkpoint's
-        # worth of dead pool for the rest of its life.
-        #
-        # Measured on a V20 PR C2 lifecycle trace (punet, 216.9 MiB
-        # checkpoint), immediately after this line:
-        #
-        #     allocator reserved   236 -> 464 MiB   (+228)
-        #     allocator allocated  218 -> 218 MiB   (unchanged)
-        #
-        # and the +228 MiB persisted through the forward, leaving formal
-        # inference 208 MiB above an otherwise byte-identical process that
-        # loads no checkpoint. Loading on the host and letting
-        # `load_state_dict` copy parameter-by-parameter into the already
-        # resident GPU model never allocates the second copy at all.
-        #
-        # `map_location="cpu"` is also the convention this repository
-        # already uses everywhere else it reads a state dict
-        # (`tests/integration/execute_tools/test_training_loop.py`).
-        # Strictness is untouched: `weights_only` keeps its default and
-        # `load_state_dict` keeps `strict=True`, so a mismatched or
-        # malicious checkpoint fails exactly as it did before.
-        state_dict = torch.load(args.model_path, map_location="cpu")
-        model = load_trained_state(model, state_dict)
-        del state_dict
-
-        # The one step the pre-phase worker has no equivalent for — it
-        # builds from the live MODEL_REGISTRY and loads no checkpoint —
-        # which is why the milestone comparison isolated it (V20 PR C2,
-        # validation only).
-        #
-        # Recorded AFTER the host copy is released, so it captures the
-        # settled post-load state rather than a transient. Its job is now
-        # the opposite of what found the defect: with the host-side load
-        # above, allocator reserved must stay at the model-only baseline
-        # here instead of rising by a checkpoint. A future regression that
-        # put the load back on the device would show up at exactly this
-        # milestone.
+        # Record settled device state after releasing the temporary host copy.
         if trace is not None:
             trace.record("after_checkpoint_load", synchronize=True, model=model)
 

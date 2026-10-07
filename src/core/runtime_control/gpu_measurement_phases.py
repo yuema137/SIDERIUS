@@ -57,6 +57,7 @@ from core.runtime_control.gpu_measurement_spec import (
     WorkerStatus,
 )
 from core.runtime_control.gpu_requirement import MeasuredPhase
+from core.runtime_control.inference_checkpoint_reference import InferenceCheckpointReference
 
 _MIB = 1024 * 1024
 
@@ -97,6 +98,7 @@ class CandidateComponents:
     ) = None
     inference_device: str = "cpu"
     inference_input_dtype: Any = None
+    verified_checkpoint: InferenceCheckpointReference | None = None
 
 
 @dataclass
@@ -115,6 +117,7 @@ class PhaseRunOutcome:
     #: request, even when a later phase failed.
     realized_identity: Any = None
     detail: str = ""
+    verified_checkpoint: InferenceCheckpointReference | None = None
 
 
 class PhaseJournal:
@@ -312,7 +315,7 @@ def run_measured_phases(
         "outputs_released": 0,
     }
     #: Kept out of `counters` so it never reaches `RealismEvidence(**counters)`.
-    identity_slot: dict[str, Any] = {"realized_identity": None}
+    identity_slot: dict[str, Any] = {"realized_identity": None, "verified_checkpoint": None}
 
     def _evidence() -> RealismEvidence:
         return RealismEvidence(**counters)
@@ -349,6 +352,7 @@ def run_measured_phases(
             phases=tuple(reports),
             realism=_evidence(),
             realized_identity=identity_slot["realized_identity"],
+            verified_checkpoint=identity_slot["verified_checkpoint"],
             detail=detail[:400],
         )
 
@@ -364,6 +368,7 @@ def run_measured_phases(
     _reset_peaks(device)
     try:
         components = build_components()
+        identity_slot["verified_checkpoint"] = components.verified_checkpoint
         if setup_reservation_observer is not None:
             setup_reservations.append(setup_reservation_observer())
             if not setup_reservations[-1].acknowledged:
