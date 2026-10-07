@@ -97,8 +97,13 @@ JSON execution summary on stderr contains only status, exit code and elapsed tim
 
 For GPU execution, validate the actual runtime libraries and selected device
 mounts before training. The lightweight `check` does not establish CUDA readiness.
-Host `/sys` is not implicitly exposed; this first profile supports only the
-resources it declares. Do not call a failed environment check a model failure.
+Host `/sys` is not implicitly exposed. Add `/sys` to `read_only` when your
+hardware runtime needs that metadata. On the checked RTX 5090 host, explicitly
+mounting its device nodes plus read-only `/sys` allowed an `nvidia-smi` device
+query; device nodes alone did not. This is driver visibility evidence, not a
+training qualification. Host `/proc` and its subtrees remain unavailable as
+profile mounts; the sandbox retains its private PID view. Do not call a failed
+environment check a model failure.
 
 ## What is inside the boundary
 

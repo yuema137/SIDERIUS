@@ -188,3 +188,16 @@ assert torch.__file__.startswith(sys.prefix)
 assert pydantic.__file__.startswith(sys.prefix)
 """
     assert run(config, [sys.executable, "-c", code]).status == "completed"
+
+
+def test_declared_hardware_metadata_is_read_only_and_proc_stays_private(tmp_path):
+    config = _profile(tmp_path, read_only=(Path("/sys"),))
+    host_pid_namespace = os.readlink("/proc/self/ns/pid")
+    code = f"""
+import os
+from pathlib import Path
+assert Path('/sys/devices').is_dir()
+assert os.statvfs('/sys').f_flag & os.ST_RDONLY
+assert os.readlink('/proc/self/ns/pid') != {host_pid_namespace!r}
+"""
+    assert run(config, [sys.executable, "-c", code]).status == "completed"

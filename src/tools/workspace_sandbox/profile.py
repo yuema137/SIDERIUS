@@ -107,12 +107,14 @@ class SandboxProfile(BaseModel):
 
     @model_validator(mode="after")
     def mount_boundaries(self) -> SandboxProfile:
-        control_roots = tuple(Path(p) for p in ("/proc", "/dev", "/sys", "/sandbox-home"))
+        control_roots = tuple(Path(p) for p in ("/proc", "/dev", "/sandbox-home"))
         for path in (self.workspace, *self.read_only):
             if path in (Path("/"), Path("/tmp"), Path("/etc"), Path("/home")):
                 raise ValueError(f"declare a specific project/resource path, not {path}")
             if any(path.is_relative_to(root) for root in control_roots):
                 raise ValueError(f"path conflicts with sandbox control mounts: {path}")
+        if self.workspace.is_relative_to("/sys"):
+            raise ValueError("workspace cannot overlap read-only hardware metadata")
         for root in (*runtime_roots(), *SYSTEM_DIRECTORIES, Path("/etc")):
             if self.workspace.is_relative_to(root) or root.is_relative_to(self.workspace):
                 raise ValueError(f"workspace overlaps the protected runtime: {root}")

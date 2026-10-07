@@ -72,3 +72,14 @@ def test_paths_revalidated_when_used(tmp_path):
     task.symlink_to("/etc/hosts")
     with pytest.raises(ValidationError, match="canonical absolute"):
         build_command(value, ["/bin/true"])
+
+
+@pytest.mark.parametrize("path", ["/proc", "/proc/self", "/dev", "/sys"])
+def test_control_trees_cannot_be_writable_workspaces(path):
+    with pytest.raises(ValidationError):
+        profile(Path(path))
+
+
+def test_host_proc_cannot_replace_private_pid_view(tmp_path):
+    with pytest.raises(ValidationError, match="control mounts"):
+        profile(tmp_path, read_only=(Path("/proc"),))
