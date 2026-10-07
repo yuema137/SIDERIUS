@@ -2656,8 +2656,9 @@ def run_workflow(
     # When either kwarg is None (legacy / pseudo-mode tests) the bind is
     # skipped; bridges keep their default no-op behaviour. Dispatches on
     # the agent contract:
-    #   * agents with an eager ``self.bridge`` (interpreter / proposer /
+    #   * agents with an eager ``self.bridge`` (interpreter /
     #     implementor / validator) get the bridge bound directly.
+    #   * the proposer binds all stage bridges through ``set_run_context``.
     #   * the tuner exposes its own ``set_run_context`` that stashes the
     #     args until ``run()`` builds ``brain``.
     def _bind_iter_context(agent) -> None:
@@ -2669,7 +2670,7 @@ def run_workflow(
             run_name=bindings.chain_run_name,
             run_id=bindings.run_id,
         )
-        if hasattr(agent, "set_run_context") and not hasattr(agent, "bridge"):
+        if hasattr(agent, "set_run_context"):
             agent.set_run_context(**kwargs)
         elif hasattr(agent, "bridge") and agent.bridge is not None:
             agent.bridge.set_run_context(**kwargs)

@@ -12,7 +12,7 @@ This page describes capability, not qualification of any scientific experiment.
 | Data Analysis | Requires a real task analysis capability plus authorized inputs; cannot be activated by supplying a JSON stub |
 | Persistence | Local storage and typed local protocols; database protocol alternatives remain placeholders |
 | Parallel calls | Caller-controlled scheduling, with real shared filesystem/registry/process/GPU conflicts to account for; no blanket safety guarantee |
-| Model routing | Different constructor/input locations by node; proposer **kwargs are not implemented per-stage routing |
+| Model routing | Different constructor/input locations by node; proposer honors stage overrides through its public routing contract; legacy two-call mode uses reasoning routing |
 | Measurement | Native node/provider receipts where available; documentation adds no universal accounting or enforcement |
 | Scientific contract | External task owns data selection, metric, Health, eligibility and deliverables; native defaults are not experiment requirements |
 
