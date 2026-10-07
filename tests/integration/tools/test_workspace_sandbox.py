@@ -177,15 +177,22 @@ def test_cli_sigterm_cleans_detached_child(tmp_path):
             process.wait(timeout=5)
 
 
-def test_exact_frozen_environment_imports_native_dependencies(tmp_path):
-    config = _profile(tmp_path)
+def test_exact_frozen_environment_initializes_native_dependencies(tmp_path):
+    """Joint #431/#585 witness: imports passed but optimizer setup lacked a user."""
+    config = _profile(tmp_path, timeout_seconds=30)
     code = """
+import getpass
 import sys
 import torch
 import pydantic
+from pathlib import Path
 from workflows.task_composition import compose_run_task_bindings
 assert torch.__file__.startswith(sys.prefix)
 assert pydantic.__file__.startswith(sys.prefix)
+assert not Path('/etc/passwd').exists()
+assert getpass.getuser() == 'siderius'
+# Lazy optimizer imports initialize PyTorch's per-user cache paths.
+torch.optim.AdamW(torch.nn.Linear(4, 2).parameters())
 """
     assert run(config, [sys.executable, "-c", code]).status == "completed"
 

@@ -29,6 +29,10 @@ def child_environment(profile: SandboxProfile, source: Mapping[str, str]) -> dic
     env.update(
         {
             "HOME": "/sandbox-home",
+            # getpass users (including PyTorch cache setup) need an identity
+            # without exposing the host's account database.
+            "USER": "siderius",
+            "LOGNAME": "siderius",
             "TMPDIR": "/tmp",
             "XDG_CACHE_HOME": "/sandbox-home/cache",
             "XDG_CONFIG_HOME": "/sandbox-home/config",

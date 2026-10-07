@@ -18,6 +18,10 @@ NETWORK_FILES = tuple(
 )
 _RESERVED_ENV = {
     "HOME",
+    "USER",
+    "LOGNAME",
+    "LNAME",
+    "USERNAME",
     "PATH",
     "TMPDIR",
     "XDG_CACHE_HOME",

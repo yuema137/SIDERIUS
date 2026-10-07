@@ -52,7 +52,20 @@ def test_environment_is_explicit_and_never_embedded_in_command(tmp_path, monkeyp
         child_environment(value, {})
 
 
-@pytest.mark.parametrize("name", ["LD_PRELOAD", "PYTHONPATH", "HOME", "BASH_ENV", "BAD=VALUE"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "LD_PRELOAD",
+        "PYTHONPATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "LNAME",
+        "USERNAME",
+        "BASH_ENV",
+        "BAD=VALUE",
+    ],
+)
 def test_reserved_environment_cannot_replace_runtime(tmp_path, name):
     with pytest.raises(ValidationError):
         profile(tmp_path, environment_names=(name,))

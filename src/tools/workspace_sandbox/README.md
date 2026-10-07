@@ -83,6 +83,10 @@ mounts cannot prevent writes through a separate writable inode alias. Prepare
 a fresh workspace rather than treating hostile pre-existing contents as safe.
 
 The caller gets a private temporary home and `/tmp`; they disappear at exit.
+The launcher supplies the internal username `siderius` through `USER` and
+`LOGNAME` so libraries can resolve per-user cache paths without the host account
+database. These identity variables cannot be forwarded from the host. They do
+not change the process's numeric permissions or create a host account.
 Host home configuration, authentication files and caches are not inherited.
 Declare calibration, model/strategy configuration or other required resources
 explicitly, expose their paths read-only where appropriate, and forward only
