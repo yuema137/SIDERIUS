@@ -1576,7 +1576,7 @@ class MLModelProposalAgent:
         )
         self.bridge = self._bridge_factory(**self.routing.reasoning.bridge_kwargs())
         self._stage_bridges: dict[ProposerRoute, Any] = {}
-        self._pending_run_context: dict | None = None
+        self._pending_run_context: dict[str, Any] | None = None
         # L5b — registry handle for loss-awareness rendering in the proposer
         # prompt. Mirrors the L4b implementor DI pattern. Tests pass
         # ``capability_index_path=str(tmp_path / "_capability_index.json")``
@@ -1591,7 +1591,9 @@ class MLModelProposalAgent:
 
     def set_run_context(self, *, workspace, iter: int, run_name: str, run_id: str) -> None:
         """Bind existing bridges and retain context for lazily created stages."""
-        context = dict(workspace=workspace, iter=iter, run_name=run_name, run_id=run_id)
+        context: dict[str, Any] = dict(
+            workspace=workspace, iter=iter, run_name=run_name, run_id=run_id
+        )
         seen = set()
         for bridge in (self.bridge, *self._stage_bridges.values()):
             if id(bridge) not in seen:
