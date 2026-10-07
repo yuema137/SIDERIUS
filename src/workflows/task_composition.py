@@ -91,6 +91,13 @@ from core.local_code import (
     selected_identity,
     selected_member,
 )
+from core.preflight_estimation import (
+    PreflightEstimatorIdentity,
+    PreflightEstimatorProfile,
+    active_preflight_identity,
+    bind_preflight_estimator,
+    resolve_preflight_estimator,
+)
 from ml_models.model_descriptions import DescriptionSourcePolicy
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -134,6 +141,7 @@ _MANIFEST_KEYS = frozenset(
         "static_observables",
         "data_analysis",
         "prompt_renderer",
+        "preflight_estimator",
         "code_package",
     }
 )
@@ -341,6 +349,14 @@ class RunTaskComposition:
 
     data_analysis: Any = None
     """Optional edge-owned Data Analysis workflow policy, resolved and pinned."""
+
+    preflight_estimator: PreflightEstimatorProfile = field(
+        default_factory=resolve_preflight_estimator
+    )
+    preflight_estimator_identity: PreflightEstimatorIdentity = field(
+        default_factory=lambda: resolve_preflight_estimator().identity()
+    )
+    """Pinned structural-estimation arithmetic, including the native default."""
 
     prompt_renderer: PromptRenderingProfile | None = None
     prompt_renderer_identity: PromptRenderingIdentity | None = None
@@ -2065,6 +2081,7 @@ def compute_semantic_fingerprint(
     code_package: PackageIdentity | None = None,
     data_analysis: Any = None,
     prompt_renderer_identity: PromptRenderingIdentity | None = None,
+    preflight_estimator_identity: PreflightEstimatorIdentity | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -2137,11 +2154,12 @@ def compute_semantic_fingerprint(
     # precedent, so an un-declared manifest's fingerprint is unchanged.
     if deliverable_naming_declaration:
         payload["deliverable_naming"] = deliverable_naming_declaration
-    # Step 12 / PR-12a C7 (D-12a-6) — declared proposer science is semantic:
-    # it changes what the model is ASKED, so two runs whose proposer guidance
-    # differs are not the same run. ADDITIVE WHEN DECLARED, on the same
-    # precedent as the two above, so every existing composed manifest's
-    # fingerprint is byte-unchanged and its resume still validates.
+    # Every new run pins estimation arithmetic, including the native default.
+    # Historical locks remain readable, but cannot silently resume with a
+    # different accounting policy; migration creates a new workspace.
+    payload["preflight_estimator"] = (
+        preflight_estimator_identity or resolve_preflight_estimator().identity()
+    ).model_dump(mode="json")
     if prompt_renderer_identity is not None:
         payload["prompt_renderer"] = prompt_renderer_identity.model_dump(mode="json")
     if proposal_blocks is not None:
@@ -2761,6 +2779,14 @@ def _compose_resolved_task_bindings(
             "composing an unpinned fingerprint (arXiv #255)."
         )
 
+    estimator_selection = raw.get("preflight_estimator")
+    if "preflight_estimator" in raw and (
+        not isinstance(estimator_selection, str) or not estimator_selection
+    ):
+        raise TaskCompositionError("preflight_estimator must name an installed versioned provider")
+    preflight_estimator = resolve_preflight_estimator(estimator_selection)
+    preflight_estimator_identity = preflight_estimator.identity()
+
     prompt_renderer = None
     prompt_renderer_identity = None
     if "prompt_renderer" in raw:
@@ -2801,6 +2827,7 @@ def _compose_resolved_task_bindings(
         code_package=package.identity if package is not None else None,
         data_analysis=data_analysis,
         prompt_renderer_identity=prompt_renderer_identity,
+        preflight_estimator_identity=preflight_estimator_identity,
     )
 
     return RunTaskComposition(
@@ -2830,7 +2857,9 @@ def _compose_resolved_task_bindings(
         observables=observables or None,
         data_analysis=data_analysis,
         prompt_renderer=prompt_renderer,
+        preflight_estimator=preflight_estimator,
         prompt_renderer_identity=prompt_renderer_identity,
+        preflight_estimator_identity=preflight_estimator_identity,
     )
 
 
@@ -3070,6 +3099,11 @@ def bind_run_task_composition(
                 composition.prompt_renderer, expected=composition.prompt_renderer_identity
             )
         )
+        stack.enter_context(
+            bind_preflight_estimator(
+                composition.preflight_estimator, expected=composition.preflight_estimator_identity
+            )
+        )
         yield composition
 
 
@@ -3104,6 +3138,8 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
     from workflows.task_config import resolve_bound_task_config
 
     unbound: list[str] = []
+    if active_preflight_identity() != composition.preflight_estimator_identity:
+        unbound.append("preflight_estimator")
     if active_prompt_identity() != composition.prompt_renderer_identity:
         unbound.append("prompt_renderer")
     if active_task_data_path() is not composition.task_data_path:

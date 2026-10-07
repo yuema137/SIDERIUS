@@ -23,9 +23,18 @@ no VRAM estimate at all.
 
 The next planner and proposer receive that distinction. Completed static
 refusals still skip training and permit another attempt; this change does not
-make the estimator less conservative. Accepted candidates retain their existing
-diagnostic estimates and selected inference batch, with decision evidence stored
-separately. CPU-only bypasses and older records have no such evidence. See the
+make a static estimate a measured peak. Native accounting now counts registered
+parameters and buffers, including state that a forward-call listing misses.
+For example, calling one layer eight times no longer prices its parameters eight
+times. Estimated bytes and the selected inference batch can therefore change.
+
+For a historical experiment, select its qualified estimation plugin explicitly
+in a copied task manifest and use a new workspace. The experiment repository
+owns that plugin and its installation instructions; installing it alone does not
+change normal runs. New evidence records the selected estimator's identity, so a
+missing or different worker installation fails clearly. CPU-only runs
+carry a separate `static_preflight_bypass` record with the estimator identity
+and the reason for skipping. Older records may have neither form of evidence. See the
 [evidence contract](evaluate_vram_skill.md#static-decision-evidence) for fields,
 validation, and compatibility limits.
 

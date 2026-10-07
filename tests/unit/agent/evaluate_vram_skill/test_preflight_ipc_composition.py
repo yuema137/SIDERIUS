@@ -32,6 +32,7 @@ from pathlib import Path
 
 import pytest
 
+from agent.schemas.preflight import StaticPhaseDecision, StaticPreflightEvidence
 from agent.skills.evaluate_vram_skill.isolated_probe import (
     IsolatedProbeResult,
     IsolatedProbeSpec,
@@ -43,6 +44,7 @@ from agent.skills.evaluate_vram_skill.preflight_worker_main import (
     _bounded_rich_fields,
     _classify,
 )
+from core.preflight_estimation import active_preflight_identity
 
 MIB = 1024**2
 
@@ -85,6 +87,19 @@ def _run(tmp_path: Path, payload: dict) -> dict:
 
 COMPLETED = {
     "outcome": "COMPLETED_MEASUREMENT",
+    "static_preflight_evidence": StaticPreflightEvidence(
+        version="static-preflight-v2",
+        estimator_identity=active_preflight_identity(),
+        phases=(
+            StaticPhaseDecision(
+                phase="training",
+                batch_size=1,
+                vram_cap_bytes=12 * 1024**3,
+                vram_estimate_bytes=int(1.724 * 1024**3),
+                estimator="synthetic_training_v1",
+            ),
+        ),
+    ).model_dump(mode="json"),
     "detail": "FITS - estimated 1.72 GB <= cap 12.00 GB",
     "phase": "complete",
     "realized_parameter_count": 6_762_568,
@@ -99,6 +114,7 @@ COMPLETED = {
 ABOVE_CAP = {
     **COMPLETED,
     "outcome": "MEASURED_PEAK_ABOVE_VRAM_CAP",
+    "static_preflight_evidence": None,
     "estimated_gb": 19.5,
     "verdict": "DOES NOT FIT - estimated 19.50 GB > cap 12.00 GB",
     "suggestion": "halve batch_size, or reduce segmentation_size to 20000",

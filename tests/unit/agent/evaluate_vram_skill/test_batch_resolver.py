@@ -13,7 +13,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from agent.skills.evaluate_vram_skill import batch_resolver
+from agent.skills.evaluate_vram_skill import batch_resolver, estimation_inputs
 from agent.skills.evaluate_vram_skill.batch_resolver import (
     _DEFAULT_CANDIDATE_BATCHES,
     BatchSearchRefused,
@@ -26,6 +26,7 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
     ForwardLayerReport,
     ProbeResult,
 )
+from core.preflight_observations import RegisteredStateInventory
 
 # ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -68,9 +69,22 @@ def _install_probe(monkeypatch, curve):
     def fake_probe(*, model, loss_module, input_sample, target_sample, mode, device="cpu"):
         B = input_sample.shape[0]
         params_bytes, activation_bytes = curve(B)
+        model.projected_parameter_bytes = params_bytes
         return _make_probe_result(params_bytes, activation_bytes)
 
     monkeypatch.setattr(batch_resolver, "probe_activation_footprint", fake_probe)
+    monkeypatch.setattr(
+        estimation_inputs,
+        "inventory_registered_state",
+        lambda model: RegisteredStateInventory(
+            status="available",
+            parameter_bytes=model.projected_parameter_bytes,
+            trainable_parameter_bytes=model.projected_parameter_bytes,
+            buffer_bytes=0,
+            parameter_count=1,
+            buffer_count=0,
+        ),
+    )
 
 
 # ── Happy path: VRAM-only acceptance at various batches ─────────────────────
@@ -309,7 +323,7 @@ def test_exhausts_all_candidates_before_raising(monkeypatch):
 
     def fake_probe(*, model, loss_module, input_sample, target_sample, mode, device="cpu"):
         calls.append(input_sample.shape[0])
-        return _make_probe_result(1000 * 1024**3, 0)  # 1000 GB
+        return _make_probe_result(0, 1000 * 1024**3)  # 1000 GB of activations
 
     monkeypatch.setattr(batch_resolver, "probe_activation_footprint", fake_probe)
 
@@ -357,7 +371,7 @@ def test_typed_refusal_keeps_last_custom_batch_and_original_estimate(monkeypatch
     assert decision.batch_size == 3
     assert decision.vram_estimate_bytes == 1024 + 30_000 + cuda_context_bytes()
     assert decision.binding_caps == ("vram",)
-    assert decision.estimator == "inference_leaf_sum_v1"
+    assert decision.estimator == "inference_registered_state_v1"
 
 
 def test_prefilter_refusal_keeps_actual_custom_batch_without_vram_observation(monkeypatch):

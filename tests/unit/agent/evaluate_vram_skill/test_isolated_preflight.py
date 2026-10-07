@@ -28,6 +28,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from agent.schemas.preflight import (
+    StaticPhaseDecision,
+    StaticPreflightBypass,
+    StaticPreflightEvidence,
+)
 from agent.skills.evaluate_vram_skill.isolated_probe import (
     HOST_MEMORY_OUTCOMES,
     NO_DOWNSIZING_AUTHORITY,
@@ -38,6 +43,7 @@ from agent.skills.evaluate_vram_skill.isolated_probe import (
     default_worker_memory_limit_bytes,
     run_isolated_preflight,
 )
+from core.preflight_estimation import active_preflight_identity
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 MIB = 1024**2
@@ -77,16 +83,43 @@ signal.signal(signal.SIGTERM, signal.SIG_IGN)   # worst case
 time.sleep(600)
 """
 
-COMPLETES = """
-import json, sys
-json.dump({{
-    "outcome": "COMPLETED_MEASUREMENT",
-    "realized_parameter_count": 323281352,
-    "estimated_gb": 5.732,
-    "inference_batch": 16,
-    "phase": "complete",
-}}, open(r"{result}", "w"))
-"""
+
+def _completion_script(tmp_path: Path, *, structural: bool = True) -> str:
+    """Emit a valid synthetic completion without importing torch in the worker.
+
+    Structural cases retain the numeric pass-through witness. Orchestration
+    cases explicitly declare CPU bypass instead of implying it from absent
+    hardware metadata. Neither case claims a real GPU measurement.
+    """
+    identity = active_preflight_identity()
+    payload: dict[str, object] = {"outcome": "COMPLETED_MEASUREMENT", "phase": "complete"}
+    if structural:
+        evidence = StaticPreflightEvidence(
+            version="static-preflight-v2",
+            estimator_identity=identity,
+            phases=(
+                StaticPhaseDecision(
+                    phase="training",
+                    batch_size=16,
+                    vram_cap_bytes=12 * 1024**3,
+                    vram_estimate_bytes=int(5.732 * 1024**3),
+                    estimator="training_registered_state_v1",
+                ),
+            ),
+        )
+        payload.update(
+            {
+                "realized_parameter_count": 323281352,
+                "estimated_gb": 5.732,
+                "inference_batch": 16,
+                "static_preflight_evidence": evidence.model_dump(mode="json"),
+            }
+        )
+    else:
+        bypass = StaticPreflightBypass(estimator_identity=identity)
+        payload["static_preflight_bypass"] = bypass.model_dump(mode="json")
+    return f"import json\njson.dump({payload!r}, open({str(tmp_path / 'result.json')!r}, 'w'))\n"
+
 
 REPORTS_CUDA_OOM = """
 import json
@@ -146,7 +179,7 @@ class TestHostMemoryBound:
         result = run_isolated_preflight(
             _spec(tmp_path),
             deadline_seconds=30.0,
-            command=_worker(tmp_path, COMPLETES.format(result=tmp_path / "result.json")),
+            command=_worker(tmp_path, _completion_script(tmp_path)),
         )
         assert result.host_memory is not None
         assert result.host_memory.exceeded is False
@@ -182,11 +215,13 @@ class TestResultClassification:
         result = run_isolated_preflight(
             _spec(tmp_path),
             deadline_seconds=30.0,
-            command=_worker(tmp_path, COMPLETES.format(result=tmp_path / "result.json")),
+            command=_worker(tmp_path, _completion_script(tmp_path)),
         )
         assert result.outcome == "COMPLETED_MEASUREMENT"
         assert result.realized_parameter_count == 323281352
         assert result.estimated_gb == 5.732
+        assert result.static_preflight_evidence is not None
+        assert result.static_preflight_bypass is None
 
     def test_a_reported_cuda_oom_stays_a_cuda_oom(self, tmp_path):
         result = run_isolated_preflight(
@@ -356,13 +391,13 @@ class TestIpcBounds:
         body = (
             "import json\n"
             "for i in range(20000):\n"
-            "    print('noise %d' % i)\n"
-            f"json.dump({{'outcome': 'COMPLETED_MEASUREMENT'}}, open(r'{tmp_path / 'result.json'}', 'w'))\n"
+            "    print('noise %d' % i)\n" + _completion_script(tmp_path, structural=False)
         )
         result = run_isolated_preflight(
             _spec(tmp_path), deadline_seconds=60.0, command=_worker(tmp_path, body)
         )
         assert result.outcome == "COMPLETED_MEASUREMENT"
+        assert result.static_preflight_bypass is not None
 
 
 class TestBatchSearchSurvivesAnUnprobeableCandidate:
@@ -475,7 +510,7 @@ class TestRssIsAuthoritativeNotAddressSpace:
             "import json, mmap\n"
             # 8 GiB of reserved-but-untouched address space
             "reserved = mmap.mmap(-1, 8 * 1024**3)\n"
-            f"json.dump({{'outcome': 'COMPLETED_MEASUREMENT'}}, open(r'{tmp_path / 'result.json'}', 'w'))\n"
+            + _completion_script(tmp_path, structural=False)
         )
         result = run_isolated_preflight(
             _spec(tmp_path, limit_mib=4096),  # ceiling BELOW the reservation
@@ -485,6 +520,7 @@ class TestRssIsAuthoritativeNotAddressSpace:
         assert result.outcome == "COMPLETED_MEASUREMENT", (
             "address-space reservation must not be mistaken for consumption"
         )
+        assert result.static_preflight_bypass is not None
         assert result.host_memory is not None
         assert result.host_memory.exceeded is False
 
@@ -541,7 +577,7 @@ class TestNoFalseTimeout:
         result = run_isolated_preflight(
             _spec(tmp_path),
             deadline_seconds=600.0,
-            command=_worker(tmp_path, COMPLETES.format(result=tmp_path / "result.json")),
+            command=_worker(tmp_path, _completion_script(tmp_path)),
         )
         assert result.elapsed_seconds < 600.0
         assert result.outcome != "MEASURED_HARD_TIMEOUT"
@@ -705,7 +741,7 @@ class TestThirdValidationOutcomesUnchanged:
         result = run_isolated_preflight(
             _spec(tmp_path),
             deadline_seconds=600.0,
-            command=_worker(tmp_path, COMPLETES.format(result=tmp_path / "result.json")),
+            command=_worker(tmp_path, _completion_script(tmp_path)),
         )
         assert result.outcome == "COMPLETED_MEASUREMENT"
         assert result.realized_parameter_count == 323281352

@@ -186,6 +186,7 @@ def adapt_result(payload: dict[str, Any]) -> dict[str, Any]:
 
     for key in (
         "static_preflight_evidence",
+        "static_preflight_bypass",
         "estimated_gb",
         "inference_batch",
         "limit_gb",

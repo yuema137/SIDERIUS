@@ -141,7 +141,7 @@ def test_passing_preflight_evidence_reaches_record_without_replacing_legacy_esti
     assert record.memory.vram_estimate_gb == 1.25
     assert record.memory.vram_budget_gb == 5.0
     planner = get_planner_user_prompt([records[0]], force_model="punet")
-    assert '"version": "static-preflight-v1"' in planner
+    assert '"version": "static-preflight-v2"' in planner
     assert '"vram_estimate_bytes": 4294967296' in planner
 
 
@@ -188,7 +188,7 @@ def test_actual_resolver_wrapper_refusal_reaches_tuner_and_next_prompts(
     decision = typed.memory.static_preflight_evidence.phases[1]
     assert decision.phase == "inference"
     assert decision.batch_size == 3
-    assert decision.vram_estimate_bytes == 8_589_935_646
+    assert decision.vram_estimate_bytes == 8_589_934_722
     assert decision.vram_cap_bytes == 5_368_709_120
     assert typed.memory.vram_estimate_gb == 8.0
     assert typed.memory.preflight_outcome == "STATIC_PREFLIGHT_REFUSAL"
@@ -196,7 +196,7 @@ def test_actual_resolver_wrapper_refusal_reaches_tuner_and_next_prompts(
     proposer = _render_physical_rejection(output.physical_rejections[0], n_rejections=1)
     for message in (planner, proposer, output.gate_exhaustion.summary_message):
         assert "inference B=3" in message
-        assert "8,589,935,646 bytes" in message
+        assert "8,589,934,722 bytes" in message
         assert "5,368,709,120 bytes" in message
         assert "not a measured GPU peak or CUDA OOM" in message
         assert "too heavy" not in message

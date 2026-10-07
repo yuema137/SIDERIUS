@@ -13,13 +13,17 @@ def phase_decision(
     cap_bytes: int,
     estimate_bytes: int | None,
     segmentation_size: int | None,
+    estimator: str | None = None,
 ) -> StaticPhaseDecision:
     return StaticPhaseDecision(
         phase=phase,
         batch_size=batch_size,
         vram_cap_bytes=cap_bytes,
         vram_estimate_bytes=estimate_bytes,
-        estimator=("training_saved_tensors_v1" if phase == "training" else "inference_leaf_sum_v1")
+        estimator=(
+            estimator
+            or ("training_saved_tensors_v1" if phase == "training" else "inference_leaf_sum_v1")
+        )
         if estimate_bytes is not None
         else None,
         intensity_product=(

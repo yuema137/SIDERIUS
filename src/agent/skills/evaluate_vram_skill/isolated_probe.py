@@ -50,9 +50,10 @@ from typing import Any, Literal, get_args
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.model_io_contract import ModelIOContract
-from agent.schemas.preflight import StaticPreflightEvidence
+from agent.schemas.preflight import StaticPreflightBypass, StaticPreflightEvidence
 from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
 from core.capability_registry import CapabilityContractSnapshot
+from core.preflight_estimation import PreflightEstimatorIdentity, active_preflight_identity
 from core.runtime_control.process_group import (
     process_group_alive,
     signal_group,
@@ -182,6 +183,10 @@ class IsolatedProbeSpec(BaseModel):
     vram_budget_gb: float | None = Field(default=None, gt=0.0)
     result_path: str
     worker_memory_limit_bytes: int = Field(gt=0)
+    #: Dispatch pins arithmetic and the complete observation/decision assembly.
+    preflight_estimator_identity: PreflightEstimatorIdentity = Field(
+        default_factory=active_preflight_identity
+    )
     #: Absent only for standalone tooling that opts into discovery. In
     #: production its absence is a configuration error, never a fallback.
     hardware: HardwareSnapshot | None = None
@@ -305,6 +310,7 @@ class IsolatedProbeResult(BaseModel):
     dtype: str | None = None
     device: str | None = None
     static_preflight_evidence: StaticPreflightEvidence | None = None
+    static_preflight_bypass: StaticPreflightBypass | None = None
     estimated_gb: float | None = Field(default=None, ge=0.0)
     vram_cap_gb: float | None = Field(default=None, gt=0.0)
     cuda_peak_allocated_gb: float | None = Field(default=None, ge=0.0)
@@ -334,7 +340,7 @@ class IsolatedProbeResult(BaseModel):
     # applied. They normally agree, and the similar name is the likely
     # reason the omission went unnoticed. Keep both: a divergence is a
     # real signal, and collapsing them would hide it.
-    limit_gb: float | None = Field(default=None, gt=0.0)
+    limit_gb: float | None = Field(default=None, ge=0.0)
     dominant_phase: str | None = None
     #: Agent-facing text, FORWARDED from the skill, never regenerated
     #: here — a second generator would drift where nobody reads it.
@@ -369,6 +375,10 @@ class IsolatedProbeResult(BaseModel):
     @model_validator(mode="after")
     def _static_evidence_matches_outcome(self) -> IsolatedProbeResult:
         evidence = self.static_preflight_evidence
+        if self.static_preflight_bypass is not None and (
+            evidence is not None or self.outcome != "COMPLETED_MEASUREMENT"
+        ):
+            raise ValueError("CPU bypass cannot contain static decisions or a failure outcome")
         if evidence is None:
             if self.outcome == "STATIC_PREFLIGHT_REFUSAL":
                 raise ValueError("Static refusal requires decision evidence")
@@ -609,6 +619,7 @@ def run_isolated_preflight(
         *,
         realized_parameter_count: int | None = None,
         static_preflight_evidence: StaticPreflightEvidence | None = None,
+        static_preflight_bypass: StaticPreflightBypass | None = None,
         estimated_gb: float | None = None,
         inference_batch: int | None = None,
         schema_field: str | None = None,
@@ -644,6 +655,7 @@ def run_isolated_preflight(
             vram_cap_gb=spec.effective_cap_gb(),
             realized_parameter_count=realized_parameter_count,
             static_preflight_evidence=static_preflight_evidence,
+            static_preflight_bypass=static_preflight_bypass,
             estimated_gb=estimated_gb,
             inference_batch=inference_batch,
             schema_field=schema_field,
@@ -736,11 +748,34 @@ def run_isolated_preflight(
             else None
         )
 
+        bypass = (
+            StaticPreflightBypass.model_validate(payload["static_preflight_bypass"])
+            if payload.get("static_preflight_bypass") is not None
+            else None
+        )
+        if evidence is None and outcome == "COMPLETED_MEASUREMENT" and bypass is None:
+            raise ValueError(
+                "Completed worker result is missing estimator evidence or a CPU bypass"
+            )
+        if bypass is not None:
+            if spec.hardware is not None and spec.hardware.device_available:
+                raise ValueError("CPU bypass contradicts the dispatched device-available snapshot")
+            if bypass.estimator_identity != spec.preflight_estimator_identity:
+                raise ValueError("CPU bypass does not match the dispatched estimator identity")
+        if (
+            evidence is not None
+            and evidence.estimator_identity != spec.preflight_estimator_identity
+        ):
+            raise ValueError(
+                "Worker preflight evidence does not match the dispatched estimator identity"
+            )
+
         return _result(
             outcome,  # type: ignore[arg-type]  - narrowed against the Literal above
             _str_or_none(payload.get("detail")) or "",
             _str_or_none(payload.get("phase")) or "complete",
             static_preflight_evidence=evidence,
+            static_preflight_bypass=bypass,
             realized_parameter_count=_int_or_none(payload.get("realized_parameter_count")),
             estimated_gb=_float_or_none(payload.get("estimated_gb")),
             inference_batch=_int_or_none(payload.get("inference_batch")),

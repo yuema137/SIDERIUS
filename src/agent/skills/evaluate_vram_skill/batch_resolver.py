@@ -6,7 +6,7 @@ batch sizes from largest to smallest; accept the first that satisfies every
 applicable Phase 6.6 cap:
 
   (1) Predicted peak VRAM ≤ ``cap_bytes`` — from the structural probe plus
-      the calibrated CUDA-context term (``overhead.cuda_context_bytes``).
+      the selected estimation provider and its declared residual terms.
   (2) ``compute_intensity.passes(B, segmentation_size)`` — §3.10's CUDA
       kernel-watchdog heuristic, only when a temporal size is declared.
       A concrete task-owned probe with no temporal dimension is still
@@ -23,8 +23,8 @@ Activation memory is linear in B for most layers but quadratic for attention
 (``B × nhead × T² × 4``). A closed-form solver would need to know the
 dominant term, which is exactly the model-name branching Phase 6.6
 eliminates. A 7-point probe is ~7× cheap CPU forward passes on a mock
-input — the resulting choice is provably correct against the torchinfo
-model for whatever architecture the Proposer hands us.
+input. Selection follows the chosen structural estimate; it does not establish
+an actual GPU peak or guarantee that an accepted model fits.
 
 Principle 2 invariant
 ---------------------
@@ -38,24 +38,24 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn as nn
 
 from agent.schemas.preflight import StaticPhaseDecision
 from agent.skills.evaluate_vram_skill import compute_intensity
+from agent.skills.evaluate_vram_skill.estimation_inputs import observe_phase
 from agent.skills.evaluate_vram_skill.evidence import phase_decision
-from agent.skills.evaluate_vram_skill.overhead import cuda_context_bytes
 from agent.skills.evaluate_vram_skill.probe_budgets import (
     ProbeBudgets,
     ProbeTimeoutRecord,
     is_memory_exception,
 )
 from agent.skills.evaluate_vram_skill.structural_probe import (
-    ProbeResult,
     probe_activation_footprint,
 )
+from core.preflight_estimation import estimate_phase, preflight_estimation_scope
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.model_io_contract import ModelIOContract
@@ -66,24 +66,6 @@ _DEFAULT_CANDIDATE_BATCHES: tuple[int, ...] = (64, 32, 16, 8, 4, 2, 1)
 
 
 # ── Peak prediction ─────────────────────────────────────────────────────────
-
-
-def _predict_inference_peak_bytes(probe: ProbeResult) -> int:
-    """Sum the inference-mode peak components per §3.5.
-
-    ``peak = params_bytes + forward_activation_bytes + cuda_context_bytes()``
-
-    ``forward_output_bytes_sum`` is the conservative upper bound on transient
-    activation memory — the allocator does reuse buffers under
-    ``torch.no_grad``, so the true peak is typically lower. We prefer
-    refusals to false accepts for a pre-flight gate; the looser (max-only)
-    bound would risk approving a config that OOMs in the sandbox.
-    """
-    return (
-        probe.model_forward.total_param_bytes
-        + probe.model_forward.forward_output_bytes_sum
-        + cuda_context_bytes()
-    )
 
 
 def _build_probe_input(
@@ -170,6 +152,7 @@ def resolve_inference_batch(
     model_io_contract: ModelIOContract | None = None,
     max_batch_size: int | None = None,
     supplied_probe: torch.Tensor | None = None,
+    training_config: dict[str, Any] | None = None,
 ) -> int:
     """Compatibility entry point returning the selected batch as an integer.
 
@@ -186,9 +169,11 @@ def resolve_inference_batch(
         model_io_contract=model_io_contract,
         max_batch_size=max_batch_size,
         supplied_probe=supplied_probe,
+        training_config=training_config,
     ).batch_size
 
 
+@preflight_estimation_scope
 def resolve_inference_decision(
     model: nn.Module,
     segmentation_size: int | None,
@@ -200,6 +185,7 @@ def resolve_inference_decision(
     model_io_contract: ModelIOContract | None = None,
     max_batch_size: int | None = None,
     supplied_probe: torch.Tensor | None = None,
+    training_config: dict[str, Any] | None = None,
 ) -> StaticPhaseDecision:
     """Return the largest candidate batch that clears both caps.
 
@@ -349,7 +335,10 @@ def resolve_inference_decision(
                 f"The measurement COMPLETED and is used; elapsed wall time is "
                 f"host-load-dependent and is not capacity evidence (F-12a-G2)."
             )
-        peak = _predict_inference_peak_bytes(probe)
+        estimate = estimate_phase(
+            observe_phase(probe, model=model, batch_size=B, training_config=training_config)
+        )
+        peak = estimate.admission_bytes
         vram_ok = peak <= cap_bytes
         intensity_ok = (
             True if segmentation_size is None else compute_intensity.passes(B, segmentation_size)
@@ -360,6 +349,7 @@ def resolve_inference_decision(
             batch_size=B,
             cap_bytes=cap_bytes,
             estimate_bytes=peak,
+            estimator=estimate.estimator,
             segmentation_size=segmentation_size,
         )
         last_allocation_failure = None

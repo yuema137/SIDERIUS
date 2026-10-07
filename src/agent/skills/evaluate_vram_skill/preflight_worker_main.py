@@ -245,51 +245,59 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
         from agent.skills.evaluate_vram_skill.wrapper import run_skill
-
-        print(f"[worker] pre-flight for {spec['model_type']}", flush=True)
-        probe_input_sample = None
-        probe_target_sample = None
-        inference_probe_input = None
-        if spec.get("task_probe_data") is not None and (
-            hardware is None or hardware.device_available
-        ):
-            probe_input_sample, probe_target_sample = _task_probe_batch(
-                spec["task_probe_data"],
-                int((spec.get("train_config") or {}).get("batch_size", 1)),
-            )
-        if (spec.get("task_probe_data") or {}).get("evaluation_scope_payload") is not None:
-            from execute_tools.task_probe_batch import load_task_inference_probe_input
-
-            inference_probe_input = load_task_inference_probe_input(spec["task_probe_data"])
-        outcome = run_skill(
-            None,
-            model_type=spec["model_type"],
-            model_config=dict(spec.get("model_config_payload") or {}),
-            train_config=dict(spec.get("train_config") or {}),
-            loss_config=dict(spec.get("loss_config") or {}),
-            expected_custom_loss_snapshot=expected_custom_loss_snapshot,
-            vram_budget_gb=budget,
-            model_io_contract=model_io_contract,
-            # HardwareSnapshot intentionally satisfies the audited
-            # read-only HardwareContext surface used by run_skill:
-            # usable_cap_bytes, usable_cap_gb, total_memory_bytes,
-            # total_memory_gb, device_name, and device_available.
-            # This is audited structural compatibility, not a blanket
-            # escape from type checking — the cast is deliberately local
-            # and must not spread to the adapter or the production caller.
-            # test_hardware_snapshot_satisfies_run_skill_surface locks the
-            # six attributes, so a seventh read by run_skill fails a test
-            # rather than running silently. Widening the shared wrapper
-            # type to a Protocol belongs to FU-A-3.
-            hardware_context=cast("Any", hardware),
-            probe_input_sample=probe_input_sample,
-            probe_target_sample=probe_target_sample,
-            inference_probe_input=inference_probe_input,
-            max_inference_batch_size=(
-                (spec.get("task_probe_data") or {}).get("max_inference_batch_size")
-            ),
-            probe_budgets=ProbeBudgets.model_validate(spec.get("probe_budgets") or {}),
+        from core.preflight_estimation import (
+            PreflightEstimatorIdentity,
+            bind_preflight_estimator,
+            resolve_preflight_estimator,
         )
+
+        identity = PreflightEstimatorIdentity.model_validate(spec["preflight_estimator_identity"])
+        profile = resolve_preflight_estimator(identity.name)
+        with bind_preflight_estimator(profile, expected=identity):
+            print(f"[worker] pre-flight for {spec['model_type']}", flush=True)
+            probe_input_sample = None
+            probe_target_sample = None
+            inference_probe_input = None
+            if spec.get("task_probe_data") is not None and (
+                hardware is None or hardware.device_available
+            ):
+                probe_input_sample, probe_target_sample = _task_probe_batch(
+                    spec["task_probe_data"],
+                    int((spec.get("train_config") or {}).get("batch_size", 1)),
+                )
+            if (spec.get("task_probe_data") or {}).get("evaluation_scope_payload") is not None:
+                from execute_tools.task_probe_batch import load_task_inference_probe_input
+
+                inference_probe_input = load_task_inference_probe_input(spec["task_probe_data"])
+            outcome = run_skill(
+                None,
+                model_type=spec["model_type"],
+                model_config=dict(spec.get("model_config_payload") or {}),
+                train_config=dict(spec.get("train_config") or {}),
+                loss_config=dict(spec.get("loss_config") or {}),
+                expected_custom_loss_snapshot=expected_custom_loss_snapshot,
+                vram_budget_gb=budget,
+                model_io_contract=model_io_contract,
+                # HardwareSnapshot intentionally satisfies the audited
+                # read-only HardwareContext surface used by run_skill:
+                # usable_cap_bytes, usable_cap_gb, total_memory_bytes,
+                # total_memory_gb, device_name, and device_available.
+                # This is audited structural compatibility, not a blanket
+                # escape from type checking — the cast is deliberately local
+                # and must not spread to the adapter or the production caller.
+                # test_hardware_snapshot_satisfies_run_skill_surface locks the
+                # six attributes, so a seventh read by run_skill fails a test
+                # rather than running silently. Widening the shared wrapper
+                # type to a Protocol belongs to FU-A-3.
+                hardware_context=cast("Any", hardware),
+                probe_input_sample=probe_input_sample,
+                probe_target_sample=probe_target_sample,
+                inference_probe_input=inference_probe_input,
+                max_inference_batch_size=(
+                    (spec.get("task_probe_data") or {}).get("max_inference_batch_size")
+                ),
+                probe_budgets=ProbeBudgets.model_validate(spec.get("probe_budgets") or {}),
+            )
     except BaseException as exc:
         raise_if_code_package_failure(exc)
         from agent.skills.evaluate_vram_skill.probe_budgets import (
@@ -424,7 +432,7 @@ def _classify(outcome: dict) -> dict:
             "phase": "skill_error",
         }
 
-    from agent.schemas.preflight import StaticPreflightEvidence
+    from agent.schemas.preflight import StaticPreflightBypass, StaticPreflightEvidence
 
     if status != "success" or type(outcome.get("feasible")) is not bool:
         return {
@@ -438,6 +446,13 @@ def _classify(outcome: dict) -> dict:
             if outcome.get("static_preflight_evidence") is not None
             else None
         )
+        bypass = (
+            StaticPreflightBypass.model_validate(outcome["static_preflight_bypass"])
+            if outcome.get("static_preflight_bypass") is not None
+            else None
+        )
+        if bypass is not None and (evidence is not None or outcome["feasible"] is not True):
+            raise ValueError("CPU bypass contradicts structural decisions or refusal")
         if outcome["feasible"] is False and (evidence is None or not evidence.binding_caps):
             raise ValueError("Static refusal requires the original rejecting evidence")
         if outcome["feasible"] is True and evidence is not None and evidence.binding_caps:
@@ -450,6 +465,7 @@ def _classify(outcome: dict) -> dict:
         }
 
     common = {
+        "static_preflight_bypass": bypass.model_dump(mode="json") if bypass is not None else None,
         "static_preflight_evidence": evidence.model_dump(mode="json")
         if evidence is not None
         else None,

@@ -141,7 +141,10 @@ def test_single_file_composition_and_effective_health_match_base_receipt(
     from core.generated_library import bind_generated_library_to_workspace
     from execute_tools.health_checks import _plugin_binding
     from execute_tools.health_checks.config import materialize_effective_config
+    from tests.helpers.preflight_fingerprint import capture_pre_estimator_fingerprints
     from workflows.task_composition import bind_run_task_composition
+
+    legacy_fingerprints = capture_pre_estimator_fingerprints(monkeypatch)
 
     env: dict[str, str] = {}
     bind_generated_library_to_workspace(str(tmp_path), environ=env)
@@ -154,10 +157,10 @@ def test_single_file_composition_and_effective_health_match_base_receipt(
             composition = compose_run_task_bindings(
                 str(REPO_ROOT / "configs/task_composition/synthetic_masked_regression.yaml")
             )
-            assert (
-                composition.semantic_fingerprint
-                == "3b55b025187f3d407c9f23d035570ef72a66d2de3eb4ef63eb0e663868c883ba"
-            )
+            assert legacy_fingerprints == [
+                "3b55b025187f3d407c9f23d035570ef72a66d2de3eb4ef63eb0e663868c883ba"
+            ]
+            assert composition.semantic_fingerprint != legacy_fingerprints[0]
             with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
                 materialize_effective_config(
                     None, None, str(tmp_path), task_health_binding=composition.task_health_binding

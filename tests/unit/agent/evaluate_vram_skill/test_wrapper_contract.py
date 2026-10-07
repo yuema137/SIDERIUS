@@ -26,14 +26,14 @@ level because that is the import surface the wrapper uses.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import torch
 from pydantic import BaseModel, ValidationError
 
 from agent.schemas.preflight import StaticPreflightEvidence
-from agent.skills.evaluate_vram_skill import wrapper
+from agent.skills.evaluate_vram_skill import native_estimation, wrapper
 from agent.skills.evaluate_vram_skill.batch_resolver import BatchSearchRefused
 from agent.skills.evaluate_vram_skill.evidence import (
     phase_decision,
@@ -138,8 +138,9 @@ class _Patches:
     override attributes after ``__enter__`` to steer into failure paths."""
 
     def __init__(self):
-        self.model_mock = MagicMock(name="model", parameters=lambda: iter([]))
-        self.loss_mock = MagicMock(name="loss_module")
+        self.model_mock = torch.nn.Module()
+        self.model_mock.register_parameter("weight", torch.nn.Parameter(torch.zeros(25)))
+        self.loss_mock = torch.nn.Identity()
         self.training_probe = _probe(
             mode="training",
             saved_bytes=10,
@@ -169,9 +170,9 @@ class _Patches:
                 "resolve_inference_decision",
                 side_effect=self._resolve_side_effect,
             ),
-            patch.object(wrapper, "training_overhead_bytes", return_value=20),
-            patch.object(wrapper, "cuda_context_bytes", return_value=30),
-            patch.object(wrapper, "cudnn_backward_workspace_bytes", return_value=40),
+            patch.object(native_estimation, "training_overhead_bytes", return_value=20),
+            patch.object(native_estimation, "cuda_context_bytes", return_value=30),
+            patch.object(native_estimation, "cudnn_backward_workspace_bytes", return_value=40),
             patch.object(wrapper.compute_intensity, "passes", return_value=True),
         ]
         self._mocks = [p.start() for p in self._stack]
@@ -594,7 +595,6 @@ def actual_inference_refusal(monkeypatch):
         return inference_probe
 
     monkeypatch.setattr(batch_resolver, "probe_activation_footprint", probe)
-    monkeypatch.setattr(batch_resolver, "cuda_context_bytes", lambda: 30)
     with _Patches() as patches:
         patches.resolve.side_effect = partial(
             batch_resolver.resolve_inference_decision, candidate_batches=(7, 3)
@@ -613,8 +613,11 @@ def test_actual_inference_decision_reaches_wrapper_without_max_proxy_or_reprobe(
     assert out["feasible"] is False
     assert out["dominant_phase"] == "inference"
     assert out["estimated_gb"] == 8.0
-    assert out["static_preflight_evidence"]["phases"][1]["vram_estimate_bytes"] == 8_589_935_646
-    assert "8,589,935,646 bytes" in out["verdict"]
+    assert (
+        out["static_preflight_evidence"]["phases"][1]["vram_estimate_bytes"]
+        == 8 * 1024**3 + 100 + 30
+    )
+    assert "8,589,934,722 bytes" in out["verdict"]
     assert "5,368,709,120 bytes" in out["verdict"]
 
 

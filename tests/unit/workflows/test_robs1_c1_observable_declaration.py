@@ -272,7 +272,7 @@ class TestFingerprintAdditivity:
         assert "dynamic_observables" not in raw
         assert "static_observables" not in raw
 
-    def test_quickstarts_no_observables_fingerprint_receipt(self):
+    def test_quickstarts_no_observables_fingerprint_receipt(self, monkeypatch):
         """Recorded at `origin/master` 3995400b, BEFORE this family existed.
 
         Hardcoded, never read back from the composition: the claim is that
@@ -282,9 +282,12 @@ class TestFingerprintAdditivity:
         output-artifact inventory, which legitimately changes plugin identity.
         """
         path = os.path.join(REPO_ROOT, "configs", "task_composition", "quickstart.yaml")
-        assert compose_run_task_bindings(path).semantic_fingerprint == (
-            "5afaff5876223154c1214d2d4b2b7ce90c603f729ac963c8c3907d8f48c6b21d"
-        )
+        from tests.helpers.preflight_fingerprint import capture_pre_estimator_fingerprints
+
+        legacy = capture_pre_estimator_fingerprints(monkeypatch)
+        current = compose_run_task_bindings(path)
+        assert legacy == ["5afaff5876223154c1214d2d4b2b7ce90c603f729ac963c8c3907d8f48c6b21d"]
+        assert current.semantic_fingerprint != legacy[0]
 
     def test_the_fingerprint_key_is_absent_for_none_and_for_an_empty_list(self):
         """The additive-when-non-empty idiom, at the authority itself.

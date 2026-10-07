@@ -47,6 +47,7 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `static_observables` | — | quantities read off the TRAINED model after training | the run observes none: no record key, no rendered bytes |
 | `parameter_rules` | — | deterministic constraints on configured parameter leaves | no task-declared parameter constraints |
 | `data_analysis` | — | optional analysis topology plus a caller-owned policy/config reference | no brief call, analysis node, report, or identity change |
+| `preflight_estimator` | — | installed, versioned structural-estimation provider | native `registered-state-v1`, always pinned |
 | `prompt_renderer` | — | installed, versioned rendering provider | native messages and existing identity serialization |
 | `code_package` | — | one finite, content-pinned set of task-local Python files | existing independent file loading and identities, without task-relative helper imports |
 
@@ -733,3 +734,24 @@ Preparation recovery is a separate declaration:
 These numbers are an explicit caller example, not a historical framework
 default. See the [data-analysis contract](../../src/nodes/data_analysis_agent/data_analysis_agent.md#caller-selected-preparation-recovery)
 for counting, deadlines, validation and identity semantics.
+
+
+## Structural preflight estimation
+
+The optional `preflight_estimator` selects arithmetic through the installed
+`siderius.preflight_estimators` entry-point group. Omission selects native
+`registered-state-v1`. Installing an external provider never changes the default.
+The resolved provider and framework estimation assembly enter every new semantic
+fingerprint, including when the manifest omits this section.
+
+```yaml
+preflight_estimator: my-qualified-estimator-v1
+```
+
+This name is an example; the user must install the package that declares it in
+both the launcher and worker environments. Missing, duplicate, changed or
+unqualified providers fail before the worker constructs a model or loads task
+probe data. The provider owns arithmetic only. The framework retains sampling,
+candidate batches, resource caps, intensity checks, admission and failure domains.
+See [the estimation contract](preflight-estimation.md) for source qualification,
+input/output schemas, known estimation limits and migration boundaries.

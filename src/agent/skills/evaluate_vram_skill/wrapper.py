@@ -4,22 +4,22 @@ Replaces the Phase K "empirical polling" wrapper with a deterministic
 forecast built from structural inspection and bounded inference search:
 
   * ``structural_probe.probe_activation_footprint``  (§3.2, A.2)
-  * ``overhead`` {``training_overhead_bytes``, ``cuda_context_bytes``,
-     ``cudnn_backward_workspace_bytes``}                (§3.3, A.3)
+  * ``estimation_inputs`` — forward observations and registered-state inventory
+  * ``core.preflight_estimation`` — explicit, pinned arithmetic provider
   * ``batch_resolver.resolve_inference_decision``    (§3.5, A.4)
   * ``compute_intensity.passes``                     (§3.10, A.4.5)
   * ``evidence`` — typed decision projection and refusal text
 
 The wrapper is the single consumer that glues them together. Training
 and inference run in isolated subprocesses (``core.sandbox_executor``),
-so the legacy success diagnostic takes the maximum of their reporting
-proxies, not their sum (§3.8). The inference search uses its own conservative
-leaf-sum decision formula. ``static_preflight_evidence`` identifies the exact
+so the success diagnostic takes the maximum of their reporting proxies,
+not their sum (§3.8). The native provider counts registered state separately
+from forward calls, while retaining the inference leaf-output-sum proxy. ``static_preflight_evidence`` identifies the exact
 admission formula and values separately from those legacy success diagnostics.
 
 Return contract (§3.7)
 ----------------------
-Legacy diagnostic fields (unchanged on success):
+Diagnostic fields (stable shape; values follow the selected estimator):
     status, feasible, verdict, suggestion, num_params,
     dominant_phase, phase_breakdown,
     estimated_gb, limit_gb, vram_budget_gb
@@ -51,22 +51,18 @@ import psutil
 import torch
 from pydantic import ValidationError
 
-from agent.schemas.preflight import StaticPreflightEvidence
+from agent.schemas.preflight import StaticPreflightBypass, StaticPreflightEvidence
 from agent.skills.evaluate_vram_skill import compute_intensity
 from agent.skills.evaluate_vram_skill.batch_resolver import (
     BatchSearchRefused,
     BatchSearchTimeout,
     resolve_inference_decision,
 )
+from agent.skills.evaluate_vram_skill.estimation_inputs import observe_phase
 from agent.skills.evaluate_vram_skill.evidence import (
     phase_decision,
     render_static_refusal,
     static_refusal_suggestion,
-)
-from agent.skills.evaluate_vram_skill.overhead import (
-    cuda_context_bytes,
-    cudnn_backward_workspace_bytes,
-    training_overhead_bytes,
 )
 from agent.skills.evaluate_vram_skill.probe_budgets import (
     ProbeBudgets,
@@ -90,6 +86,11 @@ from agent.skills.training_skill.estimator import (
 )
 from core.hardware_context import HardwareContext, discover
 from core.local_code.failure import raise_if_code_package_failure
+from core.preflight_estimation import (
+    active_preflight_identity,
+    estimate_phase,
+    preflight_estimation_scope,
+)
 from execute_tools.inference_forward import forward_inference_batch
 from execute_tools.model_input_dtype import (
     TRAINING_SITE_DTYPE,
@@ -110,11 +111,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # ── Constants ────────────────────────────────────────────────────────────────
 
 _GB: int = 1024**3
-# Training defaults mirror the project-wide pipeline: Adam-family. Proposer
-# configs that use a different optimizer populate ``train_config.optimizer``
-# explicitly; ``overhead.training_overhead_bytes`` hard-errors on anything
-# it does not recognise, so there is no silent fallback downstream.
-_DEFAULT_OPTIMIZER: str = "adam"
 # I14 — target dtype routing now reads from each loss plugin's
 # ``PLUGIN_LOSS_TARGET_DTYPE`` declaration via ``get_target_torch_dtype``
 # rather than a hardcoded float-target loss list. The probe's
@@ -515,68 +511,6 @@ def _build_probe_tensors(
 # ── Peak composition (§3.3) ──────────────────────────────────────────────────
 
 
-def _compose_training_peak(probe: ProbeResult, optimizer: str) -> tuple[int, dict]:
-    """``autograd_tape + input + output + params + training_overhead +
-    cuda_context + cudnn_backward_workspace``.
-
-    ``probe.autograd_tape`` is only populated when the probe ran in
-    training-mode (backward-capable). Composing the training peak when
-    it is ``None`` would silently drop the largest term — raise instead
-    so the caller catches the contract violation explicitly.
-    """
-    if probe.autograd_tape is None:
-        raise ValueError(
-            "_compose_training_peak requires probe.autograd_tape to be populated "
-            "(got None) — caller passed an inference-only probe."
-        )
-    params_bytes = probe.model_forward.total_param_bytes
-    saved_bytes = probe.autograd_tape.total_saved_bytes
-    overhead = training_overhead_bytes(params_bytes, optimizer)
-    ctx = cuda_context_bytes()
-    cudnn_bw = cudnn_backward_workspace_bytes()
-
-    total = (
-        saved_bytes
-        + probe.input_bytes
-        + probe.output_bytes
-        + params_bytes
-        + overhead
-        + ctx
-        + cudnn_bw
-    )
-    breakdown = {
-        "autograd_tape_bytes": saved_bytes,
-        "input_bytes": probe.input_bytes,
-        "output_bytes": probe.output_bytes,
-        "param_bytes": params_bytes,
-        "training_overhead_bytes": overhead,
-        "cuda_context_bytes": ctx,
-        "cudnn_backward_bytes": cudnn_bw,
-    }
-    return total, breakdown
-
-
-def _compose_inference_peak(probe: ProbeResult) -> tuple[int, dict]:
-    """``input + max(output_bytes, forward_output_bytes_max) + params +
-    cuda_context``. Uses ``max()`` on the two output-shape proxies
-    because for sequential models the last layer's output equals the
-    final ``output_bytes``; for branched models a mid-network layer may
-    be larger. Neither is a sum — the allocator reuses transient
-    buffers under ``no_grad``."""
-    params_bytes = probe.model_forward.total_param_bytes
-    peak_out = max(probe.output_bytes, probe.model_forward.forward_output_bytes_max)
-    ctx = cuda_context_bytes()
-
-    total = probe.input_bytes + peak_out + params_bytes + ctx
-    breakdown = {
-        "input_bytes": probe.input_bytes,
-        "max_output_bytes": peak_out,
-        "param_bytes": params_bytes,
-        "cuda_context_bytes": ctx,
-    }
-    return total, breakdown
-
-
 # ── Schema-violation helpers (preserved from Phase D.4) ─────────────────────
 
 
@@ -642,6 +576,7 @@ def _require_segmentation_size(seg_size: int | None, *, context: str) -> int:
 # ── Main entry ──────────────────────────────────────────────────────────────
 
 
+@preflight_estimation_scope
 def run_skill(sandbox, **kwargs):
     """Run the VRAM gate against the proposer's config.
 
@@ -732,7 +667,6 @@ def run_skill(sandbox, **kwargs):
     # Resolve only declarations here; never turn absent geometry into the
     # historical 40,000 value (or infer it from the probe tensor width).
     seg_size = resolve_optional_segmentation_size(model_type, model_cfg)
-    optimizer = str(train_cfg.get("optimizer") or _DEFAULT_OPTIMIZER).lower()
 
     print(
         f"\n>>> [Skill: VRAMEval] Pre-flight for {model_type.upper()} "
@@ -835,6 +769,9 @@ def run_skill(sandbox, **kwargs):
                 "vram_budget_gb": vram_budget_gb,
                 "inference_batch": 1,
                 "memory_killer": None,
+                "static_preflight_bypass": StaticPreflightBypass(
+                    estimator_identity=active_preflight_identity()
+                ).model_dump(mode="json"),
             }
 
         # 3. Training-phase probe ─────────────────────────────────────────
@@ -865,11 +802,18 @@ def run_skill(sandbox, **kwargs):
                 target_sample=y_train,
                 mode="training",
             )
-        training_peak, training_breakdown = _compose_training_peak(
-            training_probe,
-            optimizer,
+        training_estimate = estimate_phase(
+            observe_phase(
+                training_probe,
+                model=model_for_train,
+                loss_module=loss_module,
+                batch_size=batch_size,
+                training_config=train_cfg,
+            )
         )
-        training_vram_ok = training_peak <= cap_bytes
+        training_peak = training_estimate.diagnostic_bytes
+        training_breakdown = dict(training_estimate.breakdown)
+        training_vram_ok = training_estimate.admission_bytes <= cap_bytes
         training_intensity_ok = (
             True if seg_size is None else compute_intensity.passes(batch_size, seg_size)
         )
@@ -877,7 +821,8 @@ def run_skill(sandbox, **kwargs):
             phase="training",
             batch_size=batch_size,
             cap_bytes=cap_bytes,
-            estimate_bytes=training_peak,
+            estimate_bytes=training_estimate.admission_bytes,
+            estimator=training_estimate.estimator,
             segmentation_size=seg_size,
         )
 
@@ -920,6 +865,7 @@ def run_skill(sandbox, **kwargs):
                 model_identity=model_type,
                 model_io_contract=model_io_contract,
                 supplied_probe=probe_input_sample,
+                training_config=train_cfg,
             )
             inference_batch = inference_decision.batch_size
             del model_for_resolve
@@ -946,17 +892,30 @@ def run_skill(sandbox, **kwargs):
                     target_sample=None,
                     mode="inference",
                 )
+            inference_estimate = estimate_phase(
+                observe_phase(
+                    inference_probe,
+                    model=model_for_bd,
+                    batch_size=inference_batch,
+                    training_config=train_cfg,
+                )
+            )
             del model_for_bd
             gc.collect()
 
-            inference_peak, inference_breakdown = _compose_inference_peak(inference_probe)
+            inference_peak = inference_estimate.diagnostic_bytes
+            inference_breakdown = dict(inference_estimate.breakdown)
             inference_breakdown["inference_batch"] = inference_batch
         except BatchSearchRefused as exc:
             inference_decision = exc.decision
 
         inference_ok = inference_batch is not None
         feasible = training_vram_ok and training_intensity_ok and inference_ok
-        static_evidence = StaticPreflightEvidence(phases=(training_decision, inference_decision))
+        static_evidence = StaticPreflightEvidence(
+            version="static-preflight-v2",
+            estimator_identity=active_preflight_identity(),
+            phases=(training_decision, inference_decision),
+        )
 
         # 5. Phase breakdown + dominant phase ─────────────────────────────
         phase_breakdown: dict[str, dict] = {

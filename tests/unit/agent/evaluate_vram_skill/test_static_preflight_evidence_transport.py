@@ -14,18 +14,24 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from agent.schemas.preflight import StaticPhaseDecision, StaticPreflightEvidence
+from agent.schemas.preflight import (
+    StaticPhaseDecision,
+    StaticPreflightBypass,
+    StaticPreflightEvidence,
+)
 from agent.skills.evaluate_vram_skill.evidence import (
     preflight_memory_fields,
     render_static_refusal,
     static_refusal_suggestion,
 )
 from agent.skills.evaluate_vram_skill.isolated_probe import (
+    HardwareSnapshot,
     IsolatedProbeResult,
     IsolatedProbeSpec,
     run_isolated_preflight,
 )
 from agent.skills.evaluate_vram_skill.preflight_adapter import adapt_result
+from core.preflight_estimation import active_preflight_identity
 
 GIB = 1024**3
 
@@ -41,7 +47,11 @@ def structural_result(kind: str) -> dict:
         intensity_product=120 if kind in {"compute", "both"} else 60,
         intensity_limit=100,
     )
-    evidence = StaticPreflightEvidence(phases=(decision,))
+    evidence = StaticPreflightEvidence(
+        version="static-preflight-v2",
+        estimator_identity=active_preflight_identity(),
+        phases=(decision,),
+    )
     return {
         "status": "success",
         "feasible": not evidence.binding_caps,
@@ -58,7 +68,11 @@ def structural_result(kind: str) -> dict:
 
 
 def classified_roundtrip(
-    tmp_path: Path, inspection: dict, *, wire_override: dict | None = None
+    tmp_path: Path,
+    inspection: dict,
+    *,
+    wire_override: dict | None = None,
+    device_available: bool | None = None,
 ) -> tuple[IsolatedProbeResult, dict]:
     """Run the classifier in a child, then parse its file through the real IPC."""
     input_path = tmp_path / "inspection.json"
@@ -75,6 +89,17 @@ def classified_roundtrip(
         encoding="utf-8",
     )
     spec = IsolatedProbeSpec(
+        hardware=HardwareSnapshot(
+            usable_cap_bytes=5 * GIB,
+            usable_cap_gb=5.0,
+            total_memory_bytes=8 * GIB,
+            total_memory_gb=8.0,
+            device_name="synthetic",
+            device_available=device_available,
+            hardware_fingerprint="synthetic",
+        )
+        if device_available is not None
+        else None,
         label="static-evidence-transport",
         model_type="synthetic_candidate",
         vram_budget_gb=5.0,
@@ -208,3 +233,65 @@ def test_static_classification_does_not_erase_actual_failure_domain(
     assert probe.outcome == expected
     assert probe.has_capacity_authority is capacity_authority
     assert probe.static_preflight_evidence is None
+
+
+@pytest.mark.parametrize("available", [True, False, None])
+def test_evidence_free_success_requires_cpu_bypass(tmp_path, available):
+    result, _ = classified_roundtrip(
+        tmp_path, {"status": "success", "feasible": True}, device_available=available
+    )
+    assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
+    assert "missing estimator evidence" in result.detail
+
+
+@pytest.mark.parametrize("available", [True, False, None])
+def test_explicit_cpu_bypass_is_identity_checked_and_device_consistent(tmp_path, available):
+    inspection = {
+        "status": "success",
+        "feasible": True,
+        "static_preflight_bypass": StaticPreflightBypass(
+            estimator_identity=active_preflight_identity()
+        ).model_dump(mode="json"),
+    }
+    result, adapted = classified_roundtrip(tmp_path, inspection, device_available=available)
+    if available:
+        assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
+        assert "contradicts" in result.detail
+    else:
+        assert result.outcome == "COMPLETED_MEASUREMENT"
+        assert adapted["static_preflight_bypass"] == inspection["static_preflight_bypass"]
+    inspection["static_preflight_bypass"]["estimator_identity"]["content_sha256"] = "0" * 64
+    result, _ = classified_roundtrip(tmp_path, inspection, device_available=available)
+    assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
+
+
+def test_parent_rejects_different_estimator_identity(tmp_path):
+    inspection = structural_result("pass")
+    inspection["static_preflight_evidence"]["estimator_identity"]["content_sha256"] = "0" * 64
+    result, _ = classified_roundtrip(tmp_path, inspection, device_available=True)
+    assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
+    assert "dispatched estimator identity" in result.detail
+
+
+def test_parent_does_not_accept_archived_v1_as_new_worker_evidence(tmp_path):
+    inspection = structural_result("pass")
+    inspection["static_preflight_evidence"]["version"] = "static-preflight-v1"
+    inspection["static_preflight_evidence"].pop("estimator_identity")
+    result, _ = classified_roundtrip(tmp_path, inspection, device_available=True)
+    assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
+
+
+@pytest.mark.allow_real_subprocess
+def test_worker_checks_identity_before_model_or_task_data(tmp_path):
+    spec = IsolatedProbeSpec(
+        label="identity-first",
+        model_type="invalid-model-must-not-be-built",
+        result_path=str(tmp_path / "result.json"),
+        worker_memory_limit_bytes=2 * GIB,
+        preflight_estimator_identity=active_preflight_identity().model_copy(
+            update={"content_sha256": "0" * 64}
+        ),
+    )
+    result = run_isolated_preflight(spec, deadline_seconds=30)
+    assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
+    assert "changed after composition or worker dispatch" in result.detail

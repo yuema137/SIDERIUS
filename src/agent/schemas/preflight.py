@@ -6,6 +6,17 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from core.preflight_estimation import PreflightEstimatorIdentity
+
+
+class StaticPreflightBypass(BaseModel):
+    """Explicit CPU-only skip, retaining the resolved arithmetic identity."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: Literal["cpu_only"] = "cpu_only"
+    estimator_identity: PreflightEstimatorIdentity
+
 
 class StaticPhaseDecision(BaseModel):
     """The exact values used for one phase's static admission decision."""
@@ -16,7 +27,9 @@ class StaticPhaseDecision(BaseModel):
     batch_size: int = Field(gt=0)
     vram_cap_bytes: int = Field(ge=0)
     vram_estimate_bytes: int | None = Field(default=None, ge=0)
-    estimator: Literal["training_saved_tensors_v1", "inference_leaf_sum_v1"] | None = None
+    estimator: str | None = Field(
+        default=None, min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_.-]+$"
+    )
     intensity_product: int | None = Field(default=None, ge=0)
     intensity_limit: int | None = Field(default=None, ge=0)
 
@@ -28,7 +41,7 @@ class StaticPhaseDecision(BaseModel):
             raise ValueError("An intensity observation and its limit must be supplied together")
         if self.vram_estimate_bytes is None and self.intensity_product is None:
             raise ValueError("A static decision needs an observed estimate or intensity check")
-        if self.estimator is not None:
+        if self.estimator in {"training_saved_tensors_v1", "inference_leaf_sum_v1"}:
             expected = (
                 "training_saved_tensors_v1" if self.phase == "training" else "inference_leaf_sum_v1"
             )
@@ -64,11 +77,22 @@ class StaticPreflightEvidence(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    version: Literal["static-preflight-v1"] = "static-preflight-v1"
+    version: Literal["static-preflight-v1", "static-preflight-v2"] = "static-preflight-v1"
+    estimator_identity: PreflightEstimatorIdentity | None = None
     phases: tuple[StaticPhaseDecision, ...] = Field(min_length=1, max_length=2)
 
     @model_validator(mode="after")
     def unique_phases(self) -> StaticPreflightEvidence:
+        if self.version == "static-preflight-v2" and self.estimator_identity is None:
+            raise ValueError("Version 2 preflight evidence requires a pinned estimator identity")
+        if self.version == "static-preflight-v1":
+            if self.estimator_identity is not None:
+                raise ValueError("Version 1 evidence cannot carry an estimator identity")
+            if any(
+                p.estimator not in {None, "training_saved_tensors_v1", "inference_leaf_sum_v1"}
+                for p in self.phases
+            ):
+                raise ValueError("Version 1 evidence only describes its original estimators")
         if len({item.phase for item in self.phases}) != len(self.phases):
             raise ValueError("Static preflight evidence must contain each phase at most once")
         return self

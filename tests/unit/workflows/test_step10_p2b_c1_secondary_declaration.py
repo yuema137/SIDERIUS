@@ -230,21 +230,22 @@ class TestTheFailClosedBranches:
 
 class TestTheFingerprintRule:
     @pytest.mark.parametrize("task", ["fourth_task"])
-    def test_a_zero_secondary_manifest_hashes_to_its_PRE_P2B_value(self, task):
+    def test_a_zero_secondary_manifest_hashes_to_its_PRE_P2B_value(self, task, monkeypatch):
         """The whole point of the additive-when-non-empty rule.
 
         Compared against a literal captured at the freeze commit, so this
         cannot pass by hashing the same thing twice.
         """
-        assert _compose(task).semantic_fingerprint == PRE_P2B_FINGERPRINTS[task], (
-            f"the {task} composition declares no secondary, yet its semantic "
-            "fingerprint moved. Every existing composed run of this task now "
-            "fails its resume for a reason with no scientific content."
-        )
+        from tests.helpers.preflight_fingerprint import capture_pre_estimator_fingerprints
+
+        legacy = capture_pre_estimator_fingerprints(monkeypatch)
+        current = _compose(task)
+        assert legacy == [PRE_P2B_FINGERPRINTS[task]]
+        assert current.semantic_fingerprint != legacy[0]
 
     def test_declaring_a_secondary_DOES_change_the_fingerprint(self, tmp_path):
         declared = compose_run_task_bindings(str(_secondary_manifest(tmp_path, count=1)))
-        assert declared.semantic_fingerprint != PRE_P2B_FINGERPRINTS["fourth_task"]
+        assert declared.semantic_fingerprint != _compose("fourth_task").semantic_fingerprint
 
     def test_an_explicitly_empty_list_equals_the_section_being_absent(self, tmp_path):
         manifest = _copy_pack(tmp_path)

@@ -160,12 +160,17 @@ unknown layout refuses explicitly instead of reporting a partial estimate.
 On a CPU-only host it returns `feasible=True` with
 `estimated_gb=0.0` and a verdict naming the device — there is no VRAM
 constraint to evaluate, and that is not evidence that any model fits a
-GPU.
+GPU. The response carries `static_preflight_bypass` with reason `cpu_only`
+and the resolved estimator identity. The worker and parent validate this
+explicit skip separately from structural decisions, including standalone
+discovery without a parent hardware snapshot.
 
 ### Static decision evidence
 
 `agent.schemas.preflight.StaticPreflightEvidence` owns the additive
-`static-preflight-v1` contract. Each of its one or two unique phase entries
+`static-preflight-v2` contract for new results, including the exact estimator
+identity. Archived `static-preflight-v1` evidence remains readable. Each of its
+one or two unique phase entries
 contains `phase`, `batch_size`, `vram_cap_bytes`, optional
 `vram_estimate_bytes` and `estimator`, and optional paired
 `intensity_product` / `intensity_limit`. The estimate and estimator must be
@@ -173,8 +178,9 @@ present together. Unknown estimates remain `None`; an unobserved estimate
 cannot establish a passing decision. Binding constraints are derived from the
 recorded comparisons, not from diagnostic prose or layer attribution.
 
-Training uses `training_saved_tensors_v1`; inference admission uses
-`inference_leaf_sum_v1`. These identify the existing formulas, not measured
+Native training uses `training_registered_state_v1`; native inference admission
+uses `inference_registered_state_v1`. An explicitly selected installed provider
+may supply another qualified formula. These identify arithmetic, not measured
 GPU peaks. The separate successful inference diagnostic still uses its existing
 maximum-output proxy. A refusal reports the exact decision from the tested
 candidate, including a custom minimum batch, without running another probe to
@@ -206,7 +212,15 @@ policies remain separate.
 Stored observations are immutable inputs to any external historical prompt
 adapter: experiment-owned, explicitly selected adapters may restore a verified
 old presentation without altering infra defaults or inventing missing evidence.
-No new historical execution policy or corrected estimator is introduced here.
+Native accounting inventories registered model/loss state independently from
+forward invocation counts and uses the production `optimizer_type`. Explicit,
+versioned estimation providers can supply experiment-owned historical arithmetic;
+installing one does not change the native default. Every new composition and
+worker dispatch pins the selected provider and framework assembly. The worker
+verifies this before task-data probing, and the parent verifies the returned
+identity. A device-available successful inspection must include evidence.
+See the [estimation contract](../../../../docs/reference/preflight-estimation.md)
+for exact ownership, availability, formulas, migration and limitations.
 
 ---
 
