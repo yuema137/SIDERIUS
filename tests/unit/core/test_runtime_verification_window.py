@@ -61,11 +61,11 @@ def test_override_crosses_the_typed_launch_boundaries() -> None:
     assert FIELD in inspect.signature(local_validated_model).parameters
     assert FIELD in HyperparamTuningInput.model_fields
 
-    launcher_value = _call_keyword_value(
-        REPO_ROOT / "src" / "workflows" / "run_one_iteration.py",
-        "WorkflowLaunchConfig",
-        FIELD,
-    )
+    from tests.helpers.launcher_bindings import workflow_call_bindings
+
+    launcher_value = workflow_call_bindings(
+        REPO_ROOT / "src" / "workflows" / "run_one_iteration.py"
+    )[FIELD]
     assert launcher_value == "args.runtime_verification_max_wall_seconds"
 
     workflow_value = _call_keyword_value(

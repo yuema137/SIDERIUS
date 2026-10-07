@@ -77,31 +77,9 @@ def _call_kwargs(tree: ast.AST, func_name: str) -> list[set[str]]:
 def _cli_flags() -> set[str]:
     """All argparse flags of run_one_iteration.py, including the automatic
     ``--no-<name>`` negatives of BooleanOptionalAction arguments."""
-    tree = ast.parse(RUN_ONE_ITERATION.read_text())
-    flags: set[str] = set()
-    for node in ast.walk(tree):
-        if not (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "add_argument"
-        ):
-            continue
-        names = [
-            a.value
-            for a in node.args
-            if isinstance(a, ast.Constant) and str(a.value).startswith("--")
-        ]
-        flags.update(names)
-        is_bool_optional = any(
-            kw.arg == "action"
-            and isinstance(kw.value, ast.Attribute)
-            and kw.value.attr == "BooleanOptionalAction"
-            for kw in node.keywords
-        )
-        if is_bool_optional:
-            flags.update(f"--no-{n[2:]}" for n in names)
-    assert flags, "no argparse flags found — extraction broken"
-    return flags
+    from workflows.standard_cli import build_parser
+
+    return {flag for action in build_parser()._actions for flag in action.option_strings}
 
 
 def _shell_emitted_flags() -> set[str]:

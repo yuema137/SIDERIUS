@@ -39,6 +39,7 @@ from core.sandbox_executor import TidmadSandbox
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _build_admission_policy,
 )
+from tests.helpers.launcher_bindings import workflow_call_bindings
 from tests.helpers.tuner_source import tuner_node_source
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -161,9 +162,9 @@ class TestTheSchemaAndCliCarryIt:
         assert flag in options
 
     def test_the_runner_forwards_them_into_the_schema(self):
-        src = RUNNER.read_text()
-        assert "gpu_admission_measurement_source=args.gpu_admission_measurement_source" in src
-        assert "gpu_pair_ceiling_gib=args.gpu_pair_ceiling_gib" in src
+        bindings = workflow_call_bindings(RUNNER)
+        for field in ("gpu_admission_measurement_source", "gpu_pair_ceiling_gib"):
+            assert bindings[field] == f"args.{field}"
 
     def test_parsing_a_ceiling_yields_a_float(self):
         args = _runner_parser().parse_args([*REQUIRED_ARGS, "--gpu_pair_ceiling_gib", "6.0"])
@@ -185,7 +186,7 @@ class TestIsTrialCanExpressFalse:
     def test_the_consumer_no_longer_erases_false(self):
         src = code_only(RUNNER)
         assert "args.is_trial or True" not in src
-        assert "is_trial=args.is_trial" in src
+        assert workflow_call_bindings(RUNNER)["is_trial"] == "args.is_trial"
 
 
 class TestTheSandboxAndGateAcceptIt:
@@ -285,7 +286,6 @@ class TestReachabilityGuardrails:
                 "--gpu_pair_ceiling_gib",
                 "app args -> CLI",
             ),
-            (RUNNER.read_text(), "gpu_pair_ceiling_gib=args", "CLI -> schema"),
             (
                 tuner_node_source(),
                 "sandbox.admission_policy",
@@ -299,6 +299,9 @@ class TestReachabilityGuardrails:
         ]
         for src, needle, hop in chain:
             assert needle in src, f"broken hop: {hop}"
+        assert (
+            workflow_call_bindings(RUNNER)["gpu_pair_ceiling_gib"] == "args.gpu_pair_ceiling_gib"
+        ), "broken hop: CLI -> schema"
 
     def test_no_new_environment_reads_were_scattered(self):
         """The ceiling is resolved once, at a boundary. Re-reading the

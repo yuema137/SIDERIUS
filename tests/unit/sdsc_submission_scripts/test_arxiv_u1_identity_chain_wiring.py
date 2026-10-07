@@ -345,11 +345,11 @@ class TestManifestIdentityStamps:
 
 class TestMainWiring:
     def test_run_workflow_receives_the_identity_object_values(self):
-        src = LOCK_SITES["chain"].read_text(encoding="utf-8")
-        call = re.search(r"results = run_workflow\((.*?)\n            \)", src, re.DOTALL).group(1)
-        assert "experiment_arm=launch_identity.experiment_arm" in call
-        assert "lit_review_enabled=launch_identity.lit_review_enabled" in call
-        assert "lit_review_config_path=launch_identity.lit_review_config_path" in call
+        from tests.helpers.launcher_bindings import workflow_call_bindings
+
+        bindings = workflow_call_bindings(LOCK_SITES["chain"])
+        for field in ("experiment_arm", "lit_review_enabled", "lit_review_config_path"):
+            assert bindings[field] == f"launch_identity.{field}"
 
     def test_every_manifest_written_by_main_carries_the_identity(self):
         """Every `write_manifest(` call in `main()` passes `launch_identity=`,

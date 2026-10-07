@@ -241,22 +241,12 @@ class TestTheLauncherCallSite:
             / "workflows"
             / "run_one_iteration.py"
         ).read_text(encoding="utf-8")
-        # Step 09.5a C3: transit configuration is bound inside the
-        # WorkflowLaunchConfig the launcher constructs, one level below the
-        # run_workflow call. Both levels are collected, so this stays an AST
-        # walk of the call sites that matter — never a substring search, which
-        # is what mutations M-D1/M-D2 survived against.
-        found: dict[str, object] = {}
-        for node in ast.walk(ast.parse(source)):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id in ("run_workflow", "WorkflowLaunchConfig")
-            ):
-                found.update({kw.arg: kw.value for kw in node.keywords if kw.arg})
-        if not found:
-            raise AssertionError("no run_workflow(...) call found in run_one_iteration.py")
-        return found
+        from tests.helpers.launcher_bindings import workflow_call_bindings
+
+        return {
+            key: ast.parse(value, mode="eval").body
+            for key, value in workflow_call_bindings(source).items()
+        }
 
     @pytest.mark.parametrize("field", ["healthgate_mode", "result_authority"])
     def test_the_launcher_forwards_the_declaration_to_run_workflow(self, field):

@@ -412,10 +412,13 @@ class TestProbeRequirementIsExplicit:
     def test_the_real_launch_path_opts_in_explicitly(self):
         from pathlib import Path
 
-        source = (
-            Path(__file__).resolve().parents[3] / "src" / "workflows" / "run_one_iteration.py"
-        ).read_text(encoding="utf-8")
-        assert "require_probe_runner=not (args.is_pseudo_training or args.is_pseudo_llm)" in source
+        from tests.helpers.launcher_bindings import workflow_call_bindings
+
+        source = Path(__file__).resolve().parents[3] / "src" / "workflows" / "run_one_iteration.py"
+        assert (
+            workflow_call_bindings(source)["require_probe_runner"]
+            == "not (args.is_pseudo_training or args.is_pseudo_llm)"
+        )
 
     def test_the_guard_still_runs_every_behavioral_check_without_a_device(self, monkeypatch):
         """Not requiring a device must not mean skipping the checks."""

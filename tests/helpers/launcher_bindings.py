@@ -15,8 +15,9 @@ reads::
 
 Several source-level censuses assert "the launcher binds CLI value X to
 workflow input X". That invariant did not change — only where the keyword is
-written. This helper flattens both levels so those censuses keep testing the
-binding rather than the spelling.
+written. The standard runner now calls ``build_standard_launch_config``;
+follow that edge only when it supplies ``run_workflow(launch=...)``. This helper
+flattens those levels so censuses test a reachable binding, not dead declarations.
 
 Kept in one place deliberately: five test modules need it, and five private
 copies of an AST walk is how they drift apart.
@@ -53,6 +54,21 @@ def workflow_call_bindings(source: str | Path) -> dict[str, str]:
         for kw in node.keywords:
             if kw.arg is not None and kw.arg != "launch":
                 bindings[kw.arg] = ast.unparse(kw.value)
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "run_workflow"
+        ):
+            continue
+        launch = next((kw.value for kw in node.keywords if kw.arg == "launch"), None)
+        if (
+            isinstance(launch, ast.Call)
+            and isinstance(launch.func, ast.Name)
+            and launch.func.id == "build_standard_launch_config"
+        ):
+            owner = Path(__file__).resolve().parents[2] / "src/workflows/standard_launch.py"
+            bindings.update(workflow_call_bindings(owner))
     return bindings
 
 

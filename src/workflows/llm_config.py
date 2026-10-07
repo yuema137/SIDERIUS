@@ -23,12 +23,40 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import json
+import warnings
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
+
+
+def resolve_standard_llm_config(args: argparse.Namespace) -> WorkflowLLMConfig:
+    """Resolve standard CLI routing without constructing an LLM client.
+
+    Explicit JSON supersedes legacy model flags. Missing node blocks retain
+    their existing downstream defaults; this is not a complete node projection.
+    """
+    reflect_provider = args.reflect_provider
+    reflect_model_id = args.reflect_model_id
+    if reflect_model_id is None and reflect_provider is None:
+        reflect_model_id = "gemini-2.5-flash"
+    if args.llm_config:
+        return WorkflowLLMConfig.from_json(args.llm_config)
+    if args.llm_model != "gemini-3.1-pro-preview":
+        warnings.warn(
+            "--llm_model is deprecated; use --llm_config instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    return WorkflowLLMConfig.uniform(
+        "gemini",
+        args.llm_model,
+        reflect_provider=reflect_provider,
+        reflect_model_id=reflect_model_id,
+    )
 
 
 class NodeLLMConfig(BaseModel):

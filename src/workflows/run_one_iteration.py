@@ -49,12 +49,11 @@ import json
 import os
 import sys
 import traceback
-import warnings
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NoReturn, cast, get_args
+from typing import NoReturn
 
 # A direct one-iteration launch does not pass through run_chain.sh.  Establish
 # the same read-only-checkout policy before importing any SIDERIUS module, and
@@ -62,12 +61,10 @@ from typing import NoReturn, cast, get_args
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 sys.dont_write_bytecode = True
 
-import yaml
 from dotenv import load_dotenv
 
 from agent.data_analysis.source_scope import source_prompt_identity
 from agent.schemas.ordering import ResolvedOrdering
-from agent.schemas.proposal import OutputTypeName
 from agent.schemas.telemetry import LLMBridgeContextError
 from agent.skills.evaluate_vram_skill.preflight_adapter import PREFLIGHT_EXECUTION_MODE
 from core.iteration_manifest import (
@@ -129,9 +126,17 @@ from workflows.advice import (
 from workflows.advice import (
     resolve_advice_artifact as resolve_advice_artifact,
 )
-from workflows.llm_config import WorkflowLLMConfig
+from workflows.launch_identity import (
+    LaunchIdentity as LaunchIdentity,
+)
+from workflows.launch_identity import (
+    resolve_launch_identity as resolve_launch_identity,
+)
+from workflows.launch_identity import (
+    resolve_lit_review_enabled as resolve_lit_review_enabled,
+)
+from workflows.llm_config import WorkflowLLMConfig, resolve_standard_llm_config
 from workflows.run_config import WorkflowLaunchConfig, validate_launch_trial_overrides
-from workflows.scientific_evidence_stage import EvidenceStageOrder
 from workflows.standard_cli import (
     _experiment_arm_label as _experiment_arm_label,
 )
@@ -146,6 +151,12 @@ from workflows.standard_cli import (
 )
 from workflows.standard_cli import (
     normalize_args as normalize_args,
+)
+from workflows.standard_launch import (
+    build_standard_launch_config,
+)
+from workflows.standard_launch import (
+    parse_allowed_output_types as parse_allowed_output_types,
 )
 from workflows.task_composition import (
     RunTaskComposition,
@@ -528,44 +539,6 @@ def _ordering_by_experiment(tune_output) -> list[dict]:
         except Exception as exc:  # pragma: no cover - defensive
             print(f"[WARN] could not read ordering provenance for a record: {exc}")
     return entries
-
-
-@dataclass(frozen=True)
-class LaunchIdentity:
-    """The run-identity values this launch resolved ONCE (arXiv U1).
-
-    Built by :func:`resolve_launch_identity` before any manifest can be
-    written, and handed — as ONE object — to the invariants pre-flight, the
-    workflow launch config and every ``write_manifest`` call, so the three
-    cannot resolve the lit-review flag or the arm label differently (the W7
-    lesson, applied to identity instead of composition).
-
-    Attributes:
-        experiment_arm: The opaque arm label, or ``None`` (unlabelled).
-        lit_review_enabled: Resolved topology flag (CLI > YAML > ``False``).
-        lit_review_config_path: The operator's config path, as given.
-        lit_review_config_sha256: sha256 of the resolved config bytes when
-            enabled, else ``None``.
-        baseline_isolation: arXiv U3 — the WITHOUT arm's explicit isolation
-            flag, straight from ``--baseline_isolation``.
-        advice_path: Resolved absolute path of the advice artifact this
-            launch read, or ``None``. Recorded, never compared.
-        advice_sha256: The OBSERVED digest of that artifact's bytes, or
-            ``None``. This is the campaign's treatment identity and it is
-            CANONICAL in the workspace lock.
-    """
-
-    experiment_arm: str | None
-    lit_review_enabled: bool
-    lit_review_config_path: str | None
-    lit_review_config_sha256: str | None
-    data_analysis_enabled: bool | None = None
-    retain_model_outputs: bool = False
-    retain_training_checkpoints: bool = False
-    scientific_evidence_order: EvidenceStageOrder = "analysis_then_literature"
-    baseline_isolation: bool = False
-    advice_path: str | None = None
-    advice_sha256: str | None = None
 
 
 def write_manifest(
@@ -953,95 +926,6 @@ def prepare_iteration_dir(
         replacement = _auto_resume_replacement(iter_dir)
     classify_manifest_slot(iter_dir, replacement)
     return IterationDirPlan(run_name=run_name, iter_dir=iter_dir, manifest_replacement=replacement)
-
-
-def resolve_lit_review_enabled(cli_flag: bool | None, config_path: str | None) -> bool:
-    """Resolve the lit-review enable flag (Design Decisions 1 + 2, 2026-06-11).
-
-    Priority: CLI flag (when explicitly set) > the YAML's top-level
-    ``enabled`` key > ``False``. The workflow opens + parses the YAML
-    internally (only when enabled); this peeks at ``enabled`` only for the
-    CLI-fallback case. A missing or malformed YAML resolves to ``False``
-    (fail-safe: do not run lit-review). Pure — no side effects — so it can
-    run before the first manifest is written.
-    """
-    if cli_flag is not None:
-        return cli_flag
-    if config_path is None:
-        return False
-    from workflows.model_exploration import resolve_lit_review_config_path
-
-    yaml_path = resolve_lit_review_config_path(config_path)
-    try:
-        with open(yaml_path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        return bool(data.get("enabled", False))
-    except (FileNotFoundError, yaml.YAMLError):
-        return False
-
-
-def resolve_launch_identity(args: argparse.Namespace) -> LaunchIdentity:
-    """Resolve the launch's identity values from the parsed CLI (arXiv U1).
-
-    Raises:
-        ValueError: lit-review is enabled but its config cannot be read (the
-            lock must pin the config's sha256, so the launch is refused), or
-            the declared advice artifact cannot be certified
-            (:class:`AdviceArtifactError`).
-    """
-    from workflows.model_exploration import lit_review_config_sha256
-
-    retain_model_outputs = bool(getattr(args, "retain_model_outputs", False))
-    if getattr(args, "cleanup_denoised", False) and retain_model_outputs:
-        raise ValueError("--cleanup_denoised conflicts with --retain_model_outputs")
-
-    enabled = resolve_lit_review_enabled(args.ml_lit_review_enabled, args.ml_lit_review_config)
-    # The advice pin comes from the SAME single read the advice CONTENT does
-    # (`resolve_advice_artifact` is the one authority and caches on `args`),
-    # so the identity locked and the advice injected into the proposer are
-    # provably the same bytes.
-    advice = resolve_advice_artifact(args)
-    return LaunchIdentity(
-        experiment_arm=args.experiment_arm,
-        lit_review_enabled=enabled,
-        data_analysis_enabled=args.data_analysis_enabled,
-        retain_model_outputs=retain_model_outputs,
-        retain_training_checkpoints=bool(args.retain_training_checkpoints),
-        lit_review_config_path=args.ml_lit_review_config,
-        lit_review_config_sha256=lit_review_config_sha256(
-            args.ml_lit_review_config, enabled=enabled
-        ),
-        scientific_evidence_order=cast(EvidenceStageOrder, args.scientific_evidence_order),
-        baseline_isolation=bool(args.baseline_isolation),
-        advice_path=None if advice is None else advice.path,
-        advice_sha256=None if advice is None else advice.sha256,
-    )
-
-
-def parse_allowed_output_types(raw: str | None) -> "tuple[OutputTypeName, ...] | None":
-    """``--allowed_output_types`` "a,b" -> ("a","b"); None/"" -> None.
-
-    arXiv #259. Refuses unknown names HERE so a typo fails at launch, not as
-    a permanently-refusing proposer loop. The legal set mirrors
-    ``ProposalOutput.output_type``'s Literal.
-    """
-    if raw is None or raw.strip() == "":
-        return None
-    from typing import cast
-
-    parts = tuple(p.strip() for p in raw.split(",") if p.strip())
-    legal = set(get_args(OutputTypeName))
-    unknown = [p for p in parts if p not in legal]
-    if unknown:
-        raise SystemExit(
-            f"--allowed_output_types: unknown output type(s) {unknown!r}; "
-            f"legal values: {sorted(legal)}"
-        )
-    if not parts:
-        return None
-    # The refusal above proves every element is a member of the Literal
-    # vocabulary; the cast records that guarantee for the type checker.
-    return cast("tuple[OutputTypeName, ...]", parts)
 
 
 def build_required_profile_binding(
@@ -1656,38 +1540,12 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
     print(f"[TOKEN] run_id = {run_id}")
 
     print("=" * 60)
-    # --- Resolve reflect provider/model defaults ---
-    # The tuner's reflector sub-call does templated extraction (not
-    # reasoning), so it benefits from a faster/cheaper/higher-quota model
-    # than the planner. For the gemini provider, default the reflector to
-    # gemini-2.5-flash (GA model, unlimited daily quota, strong JSON-mode).
-    # The planner stays on the main --llm_model.
-    reflect_provider = args.reflect_provider
-    reflect_model_id = args.reflect_model_id
-    if reflect_model_id is None and reflect_provider is None:
-        # Apply gemini-specific default (the chain runner only supports gemini today)
-        reflect_model_id = "gemini-2.5-flash"
-
     print("  SIDERIUS PER-ITERATION RUNNER")
     print(f"  Workspace        : {args.workspace}")
     print(f"  Start iteration  : {args.start_iteration}")
     print(f"  Run name         : {run_name}")
     print(f"  Iter directory   : {iter_dir}")
-    if args.llm_config:
-        llm_config = WorkflowLLMConfig.from_json(args.llm_config)
-    else:
-        if args.llm_model != "gemini-3.1-pro-preview":
-            warnings.warn(
-                "--llm_model is deprecated; use --llm_config instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        llm_config = WorkflowLLMConfig.uniform(
-            "gemini",
-            args.llm_model,
-            reflect_provider=reflect_provider,
-            reflect_model_id=reflect_model_id,
-        )
+    llm_config = resolve_standard_llm_config(args)
 
     # Report what will actually run. `--llm_config` supersedes
     # `--llm_model` (deprecated) below, so printing the latter announced
@@ -1699,8 +1557,9 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
         print(f"  LLM config       : {args.llm_config} (supersedes --llm_model)")
     else:
         print(f"  LLM (planner)    : gemini / {args.llm_model}")
-        eff_reflect_provider = reflect_provider or "gemini"
-        eff_reflect_model_id = reflect_model_id or args.llm_model
+        resolved_tune_routing = llm_config.get("tune")
+        eff_reflect_provider = resolved_tune_routing["reflect_provider"]
+        eff_reflect_model_id = resolved_tune_routing["reflect_model_id"]
         print(f"  LLM (reflector)  : {eff_reflect_provider} / {eff_reflect_model_id}")
     print(f"  Seed source paths: {len(args.seed_paths)} entries")
     for p in args.seed_paths:
@@ -1975,109 +1834,11 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
         # second convention (R-11-7).
         with bind_run_task_composition(run_composition, physical_data_root=args.data_dir):
             results = run_workflow(
-                launch=WorkflowLaunchConfig(
-                    source_paths=resolved_paths,
-                    require_probe_runner=not (args.is_pseudo_training or args.is_pseudo_llm),
-                    healthgate_mode=args.healthgate_mode,
-                    result_authority=args.result_authority,
-                    max_iterations=1,
-                    start_iteration=args.start_iteration,
-                    max_rounds=args.max_rounds,
-                    max_proposal_attempts=args.max_proposal_attempts,
-                    is_trial=args.is_trial,
-                    trial_portion=args.trial_portion,
-                    train_portion=args.train_portion,
-                    eval_portion=args.eval_portion,
-                    sampling_seed=args.sampling_seed,
-                    formal_strategy=args.formal_strategy,
-                    formal_training_scope_source=args.formal_training_scope_source,
-                    formal_portion=args.formal_portion,
-                    formal_train_portion=args.formal_train_portion,
-                    formal_eval_portion=args.formal_eval_portion,
-                    force_formal_round=args.force_formal_round,
-                    formal_round_strategy=args.formal_round_strategy,
-                    degenerate_penalty_score=args.degenerate_penalty_score,
-                    cleanup_denoised=args.cleanup_denoised,
-                    retain_model_outputs=launch_identity.retain_model_outputs,
-                    retain_training_checkpoints=launch_identity.retain_training_checkpoints,
-                    max_epochs=args.max_epochs,
-                    # D-BUD-6 — per-mode epoch ceilings, forwarded including
-                    # `None` (None = mode-agnostic max_epochs governs).
-                    training_budget_reserve_fraction=args.training_budget_reserve_fraction,
-                    trial_max_epochs=args.trial_max_epochs,
-                    formal_max_epochs=args.formal_max_epochs,
-                    validation_max_portion=args.validation_max_portion,
-                    validation_max_train_samples=args.validation_max_train_samples,
-                    training_validation_portion=args.training_validation_portion,
-                    validation_max_samples=args.validation_max_samples,
-                    validation_max_phase_seconds=args.validation_max_phase_seconds,
-                    skip_formal_min_delta=args.skip_formal_min_delta,
-                    bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
-                    bypass_formal_time_budget_minutes=args.bypass_formal_time_budget_minutes,
-                    trial_time_budget_minutes=args.trial_time_budget_minutes,
-                    formal_time_budget_minutes=args.formal_time_budget_minutes,
-                    trial_time_admission_source=args.trial_time_admission_source,
-                    formal_time_admission_source=args.formal_time_admission_source,
-                    data_dir=args.data_dir,
-                    gpu_admission_measurement_source=args.gpu_admission_measurement_source,
-                    gpu_admission_enforcement=args.gpu_admission_enforcement,
-                    gpu_pair_ceiling_gib=args.gpu_pair_ceiling_gib,
-                    trial_vram_budget_gb=args.trial_vram_budget_gb,
-                    formal_vram_budget_gb=args.formal_vram_budget_gb,
-                    vram_probe_step_timeout_seconds=args.vram_probe_step_timeout_seconds,
-                    vram_preflight_total_timeout_seconds=(
-                        args.vram_preflight_total_timeout_seconds
-                    ),
-                    vram_preflight_host_memory_limit_gb=(args.vram_preflight_host_memory_limit_gb),
-                    attempts_per_round=args.attempts_per_round,
-                    attempts_per_formal_round=args.attempts_per_formal_round,
-                    max_fail_rounds=args.max_fail_rounds,
-                    max_steps_per_attempt=args.max_steps_per_attempt or None,
-                    min_formal_batch_size=args.min_formal_batch_size or None,
-                    allow_extreme_steps=args.allow_extreme_steps,
-                    runtime_watchdog_enabled=args.runtime_watchdog,
-                    runtime_safety_factor=args.runtime_safety_factor,
-                    runtime_trial_safety_factor=args.runtime_trial_safety_factor,
-                    runtime_formal_safety_factor=args.runtime_formal_safety_factor,
-                    runtime_watchdog_safety_factor=args.runtime_watchdog_safety_factor,
-                    runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
-                    runtime_verification_max_wall_seconds=(
-                        args.runtime_verification_max_wall_seconds
-                    ),
-                    human_advice_interpret=args.human_advice_interpret,
-                    human_advice_analysis=args.human_advice_analysis,
-                    analysis_source_prompt=args.analysis_source_prompt,
-                    data_analysis_enabled=launch_identity.data_analysis_enabled,
-                    human_advice_propose=args.human_advice_propose,
-                    human_advice_implement=args.human_advice_implement,
-                    human_advice_validate=args.human_advice_validate,
-                    human_advice_tune=args.human_advice_tune,
-                    human_advice_mindset=args.human_advice_mindset,
-                    plan_overrides=args.plan_overrides,
-                    workflow_parameter_rules=args.workflow_parameter_rules,
-                    exploration_mode=args.exploration_mode,
-                    minimum_boldness=args.minimum_boldness,
-                    max_impl_attempts=args.max_impl_attempts,
-                    debug_dump_prompts=args.debug_dump_prompts,
-                    validation_fixed_candidate_plan=fixed_candidate_plan,
-                    enable_chain_incumbent_formal_gates=args.enable_chain_incumbent_formal_gates,
-                    health_feedback_history_window_iterations=args.health_feedback_history_window_iterations,
-                    health_feedback_history_max_entries_per_model=args.health_feedback_history_max_entries_per_model,
-                    lit_review_enabled=launch_identity.lit_review_enabled,
-                    lit_review_config_path=launch_identity.lit_review_config_path,
-                    scientific_evidence_order=launch_identity.scientific_evidence_order,
-                    # arXiv U1 — opaque; locked + stamped, never interpreted.
-                    experiment_arm=launch_identity.experiment_arm,
-                    # arXiv U3 — the WITHOUT arm's explicit behaviour flag.
-                    baseline_isolation=launch_identity.baseline_isolation,
-                    # Gold campaign — the OBSERVED advice identity, from the
-                    # same resolution the pre-flight lock used, because
-                    # `run_workflow` locks the SAME workspace.
-                    advice_path=launch_identity.advice_path,
-                    advice_sha256=launch_identity.advice_sha256,
-                    # arXiv #259 — output-type constraint, transit to the
-                    # proposer's schema gate.
-                    allowed_output_types=parse_allowed_output_types(args.allowed_output_types),
+                launch=build_standard_launch_config(
+                    args,
+                    launch_identity,
+                    resolved_paths=resolved_paths,
+                    fixed_candidate_plan=fixed_candidate_plan,
                 ),
                 measurement_capability=measurement_capability,
                 workspace=args.workspace,
