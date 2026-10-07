@@ -9,8 +9,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 
-def test_external_cli_is_inert_and_outputs_exact_local_declaration(tmp_path):
+
+@pytest.mark.parametrize("check_environment", [False, True])
+def test_external_cli_is_inert_and_outputs_exact_local_declaration(tmp_path, check_environment):
     project = tmp_path / "user project <example>"
     project.mkdir()
     manifest = project / "task.yaml"
@@ -20,7 +23,7 @@ def test_external_cli_is_inert_and_outputs_exact_local_declaration(tmp_path):
     advice = project / "advice.json"
     advice.write_text(json.dumps({"propose": '<script>not markup</script> & "advice"'}))
     llm = project / "llm.json"
-    llm.write_text('{"implement":{"provider":"openai","model_id":"test-model"}}')
+    llm.write_text('{"implement":{"provider":"openai","model_id":"<script>model</script>"}}')
     args = [
         "--workspace",
         "runs",
@@ -76,16 +79,26 @@ def guarded_popen(argv, *args, **kwargs):
 subprocess.Popen = guarded_popen
 from core import hardware_context
 hardware_context.discover = forbidden
-sys.argv = ['tools.setup_review', '--request', 'request.json', '--output', sys.argv[1]]
+sys.argv = ['tools.setup_review', '--request', 'request.json', '--output', sys.argv[1], *sys.argv[2:]]
 runpy.run_module('tools.setup_review', run_name='__main__')
 """
     output = project / "review"
     environment = dict(
-        os.environ, PYTHONDONTWRITEBYTECODE="1", OPENAI_API_KEY="never-print-test-key"
+        os.environ,
+        PYTHONDONTWRITEBYTECODE="1",
+        OPENAI_API_KEY="never-print-test-key",
+        GEMINI_API_KEY="",
+        DEEPSEEK_API_KEY="",
     )
     environment.pop("PYTHONPATH", None)
     result = subprocess.run(
-        [sys.executable, "-c", script, str(output)],
+        [
+            sys.executable,
+            "-c",
+            script,
+            str(output),
+            *(["--check-environment"] if check_environment else []),
+        ],
         cwd=project,
         env=environment,
         capture_output=True,
@@ -99,9 +112,22 @@ runpy.run_module('tools.setup_review', run_name='__main__')
     assert report["launch_argv"] == [sys.executable, "-m", "workflows.run_one_iteration", *args]
     assert report["outcome"] == "declaration_inspected"
     assert report["llm_review"] == "not_performed"
+    assert report["schema_version"] == "siderius.setup-declaration/v2"
+    assert report["environment_check_requested"] is check_environment
+    checks = {item["name"]: item for item in report["credentials"]}
+    assert checks["OPENAI_API_KEY"]["status"] == (
+        "present_nonempty" if check_environment else "not_checked"
+    )
+    assert len(report["llm_routes"]) == 11
+    assert "Resolved static LLM routes" in html
+    if check_environment:
+        assert "export GEMINI_API_KEY=..." in html
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
-    assert "never-print-test-key" not in (output / "report.json").read_text() + html + result.stdout
+    assert (
+        "never-print-test-key"
+        not in (output / "report.json").read_text() + html + result.stdout + result.stderr
+    )
     assert set(project.iterdir()) == set(inputs) | {output}
     assert all(
         hashlib.sha256(path.read_bytes()).hexdigest() == digest for path, digest in inputs.items()

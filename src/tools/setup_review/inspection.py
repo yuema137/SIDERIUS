@@ -11,11 +11,13 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
 
 from core.layout import checkout_root, package_root
+from tools.setup_review.environment import credential_name_checks
 from tools.setup_review.models import (
     ParameterDeclaration,
     SetupDeclarationReport,
     SetupReviewRequest,
 )
+from tools.setup_review.routes import standard_llm_routes
 from workflows.launch_identity import resolve_launch_identity
 from workflows.llm_config import resolve_standard_llm_config
 from workflows.standard_cli import build_parser, normalize_args
@@ -31,9 +33,9 @@ _UNRESOLVED = [
     "Dataset existence, readability, split integrity and task compatibility are not checked.",
     "Hardware availability, memory requirements and effective watchdog settings are not "
     "resolved. Watchdog declarations below have not been applied to a device or profile.",
-    "LLM configuration below is declared routing, not complete effective node/provider "
-    "settings. Missing node blocks retain downstream defaults that this report does not resolve; "
-    "SDK/environment-selected endpoints, credentials and installed strategy plugins are unchecked.",
+    "Static LLM routes are resolved through the standard owners. They do not establish which "
+    "conditional nodes execute or how often. SDK/environment-selected endpoints, authentication "
+    "and installed strategy plugins remain unchecked.",
     "Task-dependent enablement and agent-selected training values remain unresolved. In "
     "particular, a null data_analysis_enabled or trial_portion is not equivalent to false or zero.",
     "This report does not enforce budgets or validate every downstream argument combination. "
@@ -127,7 +129,9 @@ def _check_locations(args: argparse.Namespace, output: Path) -> tuple[Path, Path
     return workspace, manifest, output
 
 
-def inspect_declaration(request: SetupReviewRequest, output: Path) -> SetupDeclarationReport:
+def inspect_declaration(
+    request: SetupReviewRequest, output: Path, *, check_environment: bool = False
+) -> SetupDeclarationReport:
     """Inspect in the caller's cwd, without changing cwd or initializing execution.
 
     Every call parses a fresh Namespace so advice/identity caches cannot outlive
@@ -147,6 +151,12 @@ def inspect_declaration(request: SetupReviewRequest, output: Path) -> SetupDecla
     workspace, manifest, output = _check_locations(args, output)
     identity = resolve_launch_identity(args)
     llm_config = resolve_standard_llm_config(args)
+    routes = standard_llm_routes(
+        llm_config,
+        literature_enabled=identity.lit_review_enabled,
+        analysis_enabled=identity.data_analysis_enabled,
+        pseudo_llm=args.is_pseudo_llm,
+    )
     return SetupDeclarationReport(
         request=request,
         # Resolving this symlink would silently replace a venv interpreter with
@@ -158,5 +168,8 @@ def inspect_declaration(request: SetupReviewRequest, output: Path) -> SetupDecla
         parameters=_parameter_rows(parser, args),
         launch_identity=asdict(identity),
         declared_llm_config=llm_config.model_dump(mode="json", by_alias=True),
+        llm_routes=routes,
+        environment_check_requested=check_environment,
+        credentials=credential_name_checks(routes, requested=check_environment),
         unresolved=_UNRESOLVED.copy(),
     )

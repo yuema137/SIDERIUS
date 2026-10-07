@@ -6,10 +6,11 @@ your settings after argument parsing and advice loading, and the command to run
 separately. You can use ordinary SIDERIUS launchers without this tool.
 
 **The preview is not a complete preflight.** It does not run task plugins, check
-your dataset, inspect credentials, discover a GPU, call an LLM or start training.
+your dataset, authenticate credentials, discover a GPU, call an LLM or start training.
 A report means the supported declarations were read; it does not mean the experiment
 will run successfully. Hardware-dependent watchdog settings, task implementation
-and complete effective LLM settings remain explicitly unchecked.
+and task-dependent node activation remain explicitly unchecked. Static model routes
+are resolved; endpoints selected by an SDK or its environment remain unknown.
 
 ## Prepare the request in your own directory
 
@@ -88,7 +89,8 @@ or enforcement rule has been checked by this preview.
 For example, `--max_rounds 5` leaves the CLI default column at `3` and displays `5`
 as your setting. A missing `trial_portion` stays `null`: this declaration has not
 fixed its value. It does not mean zero training data. A missing LLM node block
-also stays visibly absent; downstream node defaults have not been resolved here.
+also stays visibly absent in the declared configuration. The separate static-route
+table applies each node's own defaults.
 
 The report preserves the original argument list, including aliases and abbreviated
 flags. It does not guess which flags were explicitly written by comparing values
@@ -98,6 +100,40 @@ existing runner rules: ordinary input paths use the working directory, while
 relative literature configuration paths remain relative to the SIDERIUS checkout.
 Prefer an absolute literature configuration path for an external project.
 
+## Check model routes and optional key presence
+
+The static-route table shows the four individual nodes, three proposer stages,
+tuner planner and reflector, and literature main and search routes. It includes
+models, reasoning effort, retry settings, request timeouts and client reuse.
+For example, omitting `implement` uses the implementor's model default; writing
+`"implement": {}` uses the LLM configuration schema's default instead. The table
+shows that difference rather than treating an empty block as an absent block.
+
+`conditional` means execution must reach that step before it calls the model.
+`task_dependent` means task composition must first decide whether to enable it.
+`disabled` and `pseudo` routes do not need provider keys. These are possible
+routes, not a prediction of call counts or costs. Planner and reflector share
+the planner's transient-error retry setting; `null` means unbounded retries for
+those errors. A finite `max_retries` counts total attempts, including the first
+request; zero still permits the first request. Timeout attempts have a separate limit.
+
+By default, the report lists provider key names without reading their values.
+To check whether the current shell supplies nonempty values, request it explicitly:
+
+```bash
+cd /home/alex/siderius-project &&
+/path/to/SIDERIUS/.venv/bin/python -m tools.setup_review \
+  --request review-request.json \
+  --output /home/alex/siderius-project/review-002 \
+  --check-environment
+```
+
+This flag belongs to the inspector; it is not added to the saved launch command.
+The check reports `present_nonempty`, `missing`, `not_checked` or `not_required`.
+It never saves key values, lengths or hashes, loads dotenv/key files, or contacts
+a provider. A nonempty value does not prove that authentication will work. Set
+missing variables in the shell you will use to launch the experiment.
+
 ## Launch separately after checking the remaining requirements
 
 The page's **Command to run separately** section contains your current Python
@@ -105,15 +141,16 @@ interpreter, the standard module and the original arguments. Use that command on
 after preparing the task, data, environment, credentials and resource budgets.
 Launching can spend API credits and start training; previewing does neither.
 
-`report.json` contains the same inspection snapshot in a typed format. Its
+`report.json` contains the same inspection snapshot in the typed v2 format. Its
 `declaration_inspected` outcome means settings were read, and `llm_review` is
 `not_performed`. It is not an approval or an explicit user decision to skip a
 future LLM review. The ordinary launch command does not enforce this report or
 detect subsequent edits. Generate another preview after changing your inputs.
 
 Store API keys in the environment expected by your provider, not in the request,
-LLM config or advice text. The inspector never reads key files or environment
-values. It does show the declared arguments and advice in local reports, so do
+LLM config or advice text. The inspector never reads key files; it reads the named
+environment values only when you select `--check-environment`. It does show the
+declared arguments and advice in local reports, so do
 not paste secrets into those fields or publish reports without reading them.
 
 ## Supported scope and errors
