@@ -1,6 +1,6 @@
 ---
 name: siderius-toolkit
-description: Discover and invoke the existing SIDERIUS scientific ML agents using their typed Python interfaces and documented CLI limits. Use when orchestrating the provided toolkit for a frozen research task, including selecting capabilities, preparing inputs, and passing outputs between calls.
+description: Discover and invoke the existing SIDERIUS scientific ML agents using their typed Python interfaces and documented CLI limits. Use when preparing an external project or orchestrating a declared research task, including selecting capabilities, preparing inputs, and passing outputs between calls.
 ---
 
 # Use the existing SIDERIUS toolkit
@@ -16,12 +16,18 @@ a saved native output or relocating its artifact paths. Inspect source
 for a specific unresolved question. A catalog review may require every guide;
 an ordinary call does not require rereading the whole toolkit.
 
-The supplied task package is frozen input. Preserve all of it, including task
+The run declaration owns the preparation/execution phase. During preparation,
+help the user author their project-owned task and experiment, record missing
+inputs and obtain the required execution configuration and authorization. Do
+not edit the installed infra or supplied source examples. Installed instructions
+do not establish readiness or grant a budget.
+
+During execution, the selected task package is frozen input. Preserve all of it, including task
 instructions, manifests, schemas, plugins, budgets and access rules. Put caller
 code, derived requests and outputs outside the infra installation and frozen
 task package. The toolkit imposes no additional single-directory scratch or
 cache restriction; preserve any locations required by the task itself.
-Missing bindings are a setup question, not permission to rewrite the package;
+Missing execution bindings are a setup question, not permission to rewrite the frozen package;
 use the [task binding guidance](references/invocation.md#task-binding).
 
 Before each native invocation, apply the short
