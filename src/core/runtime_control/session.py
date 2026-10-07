@@ -44,8 +44,8 @@ from core.runtime_control.adaptive import (
 )
 from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.provenance import (
+    assess_cache_state,
     capture_environment_provenance,
-    classify_cache_state,
     read_process_read_bytes,
     read_process_rss_bytes,
 )
@@ -347,15 +347,19 @@ class RuntimeVerificationSession:
             if (io_after is not None and self._io_bytes_at_start is not None)
             else None
         )
-        cache_state = classify_cache_state(
+        cache_assessment = assess_cache_state(
             bytes_read,
-            storage_provenance.get("expected_raw_bytes"),
-            filesystem_type=storage_provenance.get("filesystem_type"),
+            storage_provenance.get(
+                "expected_on_disk_bytes", storage_provenance.get("expected_raw_bytes")
+            ),
+            process_read_bytes_scope=storage_provenance.get("process_read_bytes_scope", "unknown"),
+            process_read_bytes_reason=storage_provenance.get("process_read_bytes_reason"),
         )
         self._storage = {
             **storage_provenance,
             "bytes_read_from_storage": bytes_read,
-            "cache_state": cache_state,
+            "cache_state": cache_assessment.state,
+            "cache_state_unknown_reason": cache_assessment.unknown_reason,
             "rss_bytes_before_setup": self._rss_at_start,
             "rss_bytes_after_setup": read_process_rss_bytes(),
         }

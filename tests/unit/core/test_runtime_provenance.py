@@ -8,7 +8,10 @@ classification.
 
 from __future__ import annotations
 
+import pytest
+
 from core.runtime_control.provenance import (
+    assess_cache_state,
     capture_environment_provenance,
     capture_storage_provenance,
     classify_cache_state,
@@ -98,13 +101,39 @@ class TestCacheStateClassification:
         assert classify_cache_state(100, 0) == "unknown"
 
     def test_cold_when_read_dominates(self):
-        assert classify_cache_state(90, 100) == "cold_first_access"
-        assert classify_cache_state(50, 100) == "cold_first_access"  # boundary inclusive
+        assert (
+            classify_cache_state(90, 100, process_read_bytes_scope="complete")
+            == "cold_first_access"
+        )
+        assert (
+            classify_cache_state(50, 100, process_read_bytes_scope="complete")
+            == "cold_first_access"
+        )  # boundary inclusive
 
     def test_warm_when_read_negligible(self):
-        assert classify_cache_state(0, 100) == "warm_page_cache"
-        assert classify_cache_state(10, 100) == "warm_page_cache"
+        assert (
+            classify_cache_state(0, 100, process_read_bytes_scope="complete") == "warm_page_cache"
+        )
+        assert (
+            classify_cache_state(10, 100, process_read_bytes_scope="complete") == "warm_page_cache"
+        )
 
-    def test_unknown_when_process_counter_cannot_observe_backing_reads(self):
-        assert classify_cache_state(0, 100, filesystem_type="fuse.s3fs") == "unknown"
-        assert classify_cache_state(0, 100, filesystem_type="virtiofs") == "unknown"
+    @pytest.mark.parametrize("filesystem", ["ext4", "fuse.s3fs", "virtiofs", "unknown"])
+    def test_filesystem_identity_cannot_prove_counter_coverage(self, filesystem):
+        """A local-looking filesystem must not turn an undeclared zero into warm."""
+        assert classify_cache_state(0, 100, filesystem_type=filesystem) == "unknown"
+
+    @pytest.mark.parametrize(
+        ("counter", "expected", "reason"),
+        [
+            (None, 100, "process_read_counter_unavailable"),
+            (-1, 100, "process_read_counter_decreased"),
+            (0, None, "scoped_on_disk_bytes_unavailable"),
+            (0, 0, "scoped_on_disk_bytes_unavailable"),
+        ],
+    )
+    def test_invalid_evidence_cannot_become_warm(self, counter, expected, reason):
+        """Even declared coverage cannot turn absent/reset evidence into warm."""
+        assessment = assess_cache_state(counter, expected, process_read_bytes_scope="complete")
+        assert assessment.state == "unknown"
+        assert assessment.unknown_reason == reason

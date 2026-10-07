@@ -14,6 +14,7 @@ is structural genericity evidence, not a hardware qualification.
 
 from __future__ import annotations
 
+import gzip
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,12 +33,15 @@ from agent.schemas.model_io_contract import (
     TensorAxis,
     TensorContract,
 )
+from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from execute_tools.dataset_config import DatasetProfile
+from execute_tools.scope_artifact import load_transported_scope, write_scope_artifact
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
     EpochSamplingParams,
     EvalMaterializationParams,
     EvaluationReadRequest,
+    StorageReadScope,
     TaskDataPathResolutionError,
     bind_task_data_path,
 )
@@ -304,3 +308,110 @@ class TestSyntheticEndToEnd:
                 profile=SYNTHETIC_PROFILE,
             )
         assert list(Path(sandbox_dirs["models"]).glob("*.pth")) == []
+
+
+@pytest.mark.parametrize(
+    ("coverage", "delta_kind", "task_reason", "expected_state", "expected_reason"),
+    [
+        ("complete", "cold", None, "cold_first_access", None),
+        ("complete", "warm", None, "warm_page_cache", None),
+        ("complete", "missing", None, "unknown", "process_read_counter_unavailable"),
+        (
+            "incomplete",
+            "warm",
+            "reader runs in another process",
+            "unknown",
+            "reader runs in another process",
+        ),
+        ("unknown", "warm", None, "unknown", "process_counter_coverage_unknown"),
+    ],
+)
+def test_transported_scope_storage_reaches_setup_observation(
+    synthetic_engine_setup,
+    monkeypatch,
+    coverage,
+    delta_kind,
+    task_reason,
+    expected_state,
+    expected_reason,
+):
+    """#419: production setup must preserve scoped physical bytes and counter coverage.
+
+    The engine is stopped at post-setup admission before any optimizer step.
+    A highly compressed file distinguishes the physical basis from decoded
+    bytes. Injected counter deltas avoid cache eviction, privileges and host
+    filesystem assumptions; real gzip reading and scope transport still run.
+    """
+    model_cfg, train_cfg, loss_cfg, sandbox_dirs, tmp_path = synthetic_engine_setup
+    source = tmp_path / "observed.gz"
+    decoded = b"x" * 100_000
+    source.write_bytes(gzip.compress(decoded))
+    physical_bytes = source.stat().st_size
+    assert physical_bytes < len(decoded) / 100
+
+    class ObservedDataPath(SyntheticE2ETaskDataPath):
+        def build_training_scope(self, request):
+            return list(SCOPE_IDS)
+
+        def build_eval_scope(self, request):
+            return list(SCOPE_IDS)
+
+        def serialize_scope(self, scope):
+            return json.dumps(scope)
+
+        def deserialize_scope(self, payload):
+            return json.loads(payload)
+
+        def training_dataset(self, scope, params):
+            assert gzip.decompress(source.read_bytes()) == decoded
+            return super().training_dataset(scope, params)
+
+        def storage_read_scope(self, data_dir, scope):
+            assert scope == SCOPE_IDS
+            assert data_dir == str(tmp_path)
+            return StorageReadScope(
+                file_paths=(str(source),),
+                expected_on_disk_bytes=physical_bytes,
+                process_read_bytes_scope=coverage,
+                process_read_bytes_reason=task_reason,
+            )
+
+    ending_counter = {"cold": physical_bytes, "warm": 0, "missing": None}[delta_kind]
+    counters = iter([0, ending_counter])
+    monkeypatch.setattr(
+        "core.runtime_control.session.read_process_read_bytes", lambda: next(counters)
+    )
+    session = RuntimeVerificationSession(
+        str(tmp_path / "runtime.json"),
+        policy=RuntimeControlPolicy(operator_budget_seconds=1e-9),
+    )
+    impl = ObservedDataPath()
+    artifact = str(tmp_path / "scope.json")
+    digest = write_scope_artifact(artifact, impl.serialize_scope(list(SCOPE_IDS)))
+    with bind_task_data_path(impl):
+        transported = load_transported_scope(artifact, digest, leg="training")
+        result = tes.run_experiment_streaming(
+            model_cfg,
+            train_cfg,
+            loss_cfg,
+            sample_set=None,
+            data_dir=str(tmp_path),
+            sandbox_dirs=sandbox_dirs,
+            exp_id="scoped_storage_setup",
+            train_base_seed=7,
+            model_io=_synthetic_contract(),
+            task_scope=transported,
+            profile=SYNTHETIC_PROFILE,
+            runtime_session=session,
+        )
+    assert result is None
+    persisted = json.loads((tmp_path / "runtime.json").read_text())
+    assert persisted["admission"]["decision"] == "rejected"
+    assert not list(Path(sandbox_dirs["models"]).glob("*.pth"))
+    storage = persisted["storage"]
+    assert storage["file_count"] == storage["files_present"] == 1
+    assert storage["expected_on_disk_bytes"] == storage["expected_raw_bytes"] == physical_bytes
+    assert storage["process_read_bytes_scope"] == coverage
+    assert storage["bytes_read_from_storage"] == ending_counter
+    assert storage["cache_state"] == expected_state
+    assert storage["cache_state_unknown_reason"] == expected_reason

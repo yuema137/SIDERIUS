@@ -77,3 +77,21 @@ def test_other_task_without_epoch_configuration_keeps_existing_timing_render():
     prompt = get_planner_user_prompt([record])
     assert "Measured training phase:" not in prompt
     assert "train=13.0 min" in prompt
+
+
+def test_current_cache_provenance_remains_visible_in_planner_history():
+    """#419: the native planner must see honest evidence; paper projection is external."""
+    record = _record()
+    record["runtime_verification"]["storage"] = {"cache_state": "warm_page_cache"}
+    before = get_planner_user_prompt([record])
+    record["runtime_verification"]["storage"] = {
+        "cache_state": "unknown",
+        "process_read_bytes_scope": "incomplete",
+        "cache_state_unknown_reason": "loader service reads the source",
+    }
+    after = get_planner_user_prompt([record])
+    assert after != before
+    assert '"cache_state": "unknown"' in after
+    assert "loader service reads the source" in after
+    phase_evidence = "Measured training phase: 2 epoch(s), 50 steps/epoch, 2.00 min actual"
+    assert phase_evidence in before and phase_evidence in after

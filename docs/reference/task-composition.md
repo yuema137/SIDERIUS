@@ -66,6 +66,68 @@ task_health:
 
 Declaring both `none: true` and `config:` is refused.
 
+### Optional scoped storage provenance
+
+The bound `task_data_path` may implement
+`TaskStorageReadScope.storage_read_scope(data_dir, scope) -> StorageReadScope`
+from `execute_tools.task_data_path`. This is an optional Python capability;
+it adds no manifest key and leaves the four-method `TaskDataPath` unchanged.
+The training engine calls it with the transported opaque training scope when
+closing the epoch-zero setup window, after constructing the dataset and loader.
+The task describes reads performed during that window, not later lazy reads.
+The framework validates the result before recording it.
+
+| `StorageReadScope` field | contract |
+|---|---|
+| `file_paths` | Tuple of absolute paths to the scoped source files. |
+| `expected_on_disk_bytes` | Nonnegative physical/on-disk byte estimate for the scoped setup read, including compression and partial reads; never the decoded array size. |
+| `process_read_bytes_scope` | `complete`, `incomplete`, or `unknown`; defaults to `unknown`. |
+| `process_read_bytes_reason` | Optional nonempty explanation of incomplete/unknown coverage; defaults to `None`. |
+
+`complete` is an attestation that the calling process's `/proc/self/io`
+`read_bytes` counter covers the declared setup reads on the active storage
+backend. A readable counter, local-looking path, or filesystem name alone
+cannot establish this. Reads performed by another worker or storage service
+are `incomplete`; a task without evidence must leave coverage `unknown`.
+For example, a task that delegates reads can return:
+
+```python
+return StorageReadScope(
+    file_paths=tuple(str(path.resolve()) for path in scoped_source_paths),
+    expected_on_disk_bytes=scoped_physical_bytes,
+    process_read_bytes_scope="incomplete",
+    process_read_bytes_reason="Storage reads are performed by the loader service.",
+)
+```
+
+The session records the raw process-counter delta in
+`bytes_read_from_storage`; its historical field name does not imply complete
+coverage. Only declared `complete` coverage, an available nonnegative delta
+and positive scoped on-disk bytes permit classification: a delta at least
+`0.5 * expected_on_disk_bytes` means `cold_first_access`, otherwise
+`warm_page_cache`. Missing or decreasing counters and unknown byte bases yield
+`unknown`. No task-name or filesystem-name switch chooses this result.
+
+`RuntimeObservation.storage` persists `process_read_bytes_scope`, the task's
+`process_read_bytes_reason`, `cache_state`, and `cache_state_unknown_reason`.
+The unknown reason preserves the task explanation for incomplete/unknown
+coverage, or identifies undeclared coverage, an unavailable/decreasing counter,
+or an unavailable scoped byte basis. New records retain `expected_raw_bytes`
+as an alias of `expected_on_disk_bytes` for older readers; `total_file_bytes`
+continues to describe whole-file sizes, not the scoped read estimate.
+
+Without the capability, the composed path records an empty file claim and
+unknown coverage. Existing capability implementations that only provide files
+and bytes remain valid and now explicitly record unknown coverage. Legacy
+scopes without a coverage declaration are also unknown. This changes cache
+provenance without changing current admission, calibration identity or prior
+lookup. The native planner includes recent records in its history JSON, so it
+sees the corrected metadata even though the measured training-phase summary
+is unchanged. Historical prompt reproduction requires an explicitly qualified
+consumer-owned rendering profile. Historical observations are not rewritten. The process counter remains
+aggregate evidence and can include unrelated reads; this capability does not
+provide per-file tracing or a counter for remote workers.
+
 ### Optional Data Analysis capability
 
 Enable the reference workflow edge with one explicit config reference:

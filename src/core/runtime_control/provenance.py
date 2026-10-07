@@ -24,6 +24,10 @@ import sys
 import time
 from typing import Any, Literal
 
+from pydantic import BaseModel, ConfigDict
+
+ProcessReadBytesScope = Literal["complete", "incomplete", "unknown"]
+
 CacheState = Literal["cold_first_access", "warm_page_cache", "already_materialized", "unknown"]
 
 #: Fraction of the expected bytes that must be read from storage for the
@@ -109,7 +113,7 @@ def read_process_read_bytes() -> int | None:
             for line in f:
                 if line.startswith("read_bytes:"):
                     return int(line.split(":", 1)[1].strip())
-    except OSError:
+    except (OSError, ValueError):
         return None
     return None
 
@@ -130,7 +134,12 @@ def read_process_rss_bytes() -> int | None:
 
 
 def capture_storage_provenance(
-    data_dir: str, file_paths: list[str], *, scoped_bytes: int | None = None
+    data_dir: str,
+    file_paths: list[str],
+    *,
+    scoped_bytes: int | None = None,
+    process_read_bytes_scope: ProcessReadBytesScope = "unknown",
+    process_read_bytes_reason: str | None = None,
 ) -> dict[str, Any]:
     """Snapshot the dataset's storage identity (§2.2).
 
@@ -139,13 +148,18 @@ def capture_storage_provenance(
         file_paths:   Absolute paths of the files the setup will read.
                       Missing files are counted, not raised — the engine
                       itself decides how to treat absent files.
-        scoped_bytes: The bytes the setup will ACTUALLY read (sparse /
+        scoped_bytes: On-disk bytes the setup will read (sparse /
                       scoped slices). When provided it becomes
                       ``expected_raw_bytes`` — pre-Gate finding F2:
                       whole-file sizes misclassify a genuinely cold
                       sparse read as warm because the read counter never
                       approaches the full file size. Whole-file sizes
                       stay available as ``total_file_bytes``.
+        process_read_bytes_scope: Whether this process's counter covers the
+                      setup reads, including the storage backend. Merely having
+                      a readable counter is not evidence of complete coverage.
+        process_read_bytes_reason: Task-owned explanation of incomplete or
+                      unknown coverage, preserved in the observation.
 
     Returns:
         Dict with dataset root, file counts, expected raw bytes (scoped
@@ -160,7 +174,10 @@ def capture_storage_provenance(
         "file_count": len(file_paths),
         "files_present": len(existing),
         "expected_raw_bytes": scoped_bytes if scoped_bytes is not None else total_bytes,
+        "expected_on_disk_bytes": scoped_bytes if scoped_bytes is not None else total_bytes,
         "total_file_bytes": total_bytes,
+        "process_read_bytes_scope": process_read_bytes_scope,
+        "process_read_bytes_reason": process_read_bytes_reason,
         "filesystem_type": _filesystem_type(os.path.abspath(data_dir)),
     }
 
@@ -186,42 +203,66 @@ def _filesystem_type(path: str) -> str:
         return "unknown"
 
 
+class CacheStateAssessment(BaseModel):
+    """Cache classification and the reason evidence could not support one."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    state: CacheState
+    unknown_reason: str | None = None
+
+
+def assess_cache_state(
+    bytes_read: int | None,
+    expected_bytes: int | None,
+    *,
+    process_read_bytes_scope: ProcessReadBytesScope = "unknown",
+    process_read_bytes_reason: str | None = None,
+    cold_read_fraction: float = COLD_READ_FRACTION,
+) -> CacheStateAssessment:
+    """Compare physical bytes only when process-counter coverage is declared.
+
+    Filesystem names cannot prove counter coverage: loaders may delegate reads
+    to workers or services on any filesystem. Tasks declare coverage through
+    their public storage capability. Unknown coverage never implies warm cache.
+    """
+    if process_read_bytes_scope != "complete":
+        reason = process_read_bytes_reason or f"process_counter_coverage_{process_read_bytes_scope}"
+    elif bytes_read is None:
+        reason = "process_read_counter_unavailable"
+    elif bytes_read < 0:
+        reason = "process_read_counter_decreased"
+    elif expected_bytes is None or expected_bytes <= 0:
+        reason = "scoped_on_disk_bytes_unavailable"
+    else:
+        return CacheStateAssessment(
+            state=(
+                "cold_first_access"
+                if bytes_read >= cold_read_fraction * expected_bytes
+                else "warm_page_cache"
+            )
+        )
+    return CacheStateAssessment(state="unknown", unknown_reason=reason)
+
+
 def classify_cache_state(
     bytes_read: int | None,
     expected_bytes: int | None,
     *,
     cold_read_fraction: float = COLD_READ_FRACTION,
     filesystem_type: str | None = None,
+    process_read_bytes_scope: ProcessReadBytesScope = "unknown",
 ) -> CacheState:
-    """Classify the cache state of a completed setup read (§2.2).
+    """Return the cache state; use ``assess_cache_state`` to preserve the reason.
 
-    The classification is measured, not assumed: ``bytes_read`` is the
-    storage-layer read counter delta across the setup window and
-    ``expected_bytes`` the on-disk size of what was read. A warm-cache
-    measurement must never be presented as a cold-start prediction, so
-    any missing counter yields ``"unknown"``.
-
-    Args:
-        bytes_read:         Storage-layer bytes read during setup
-                            (``read_process_read_bytes`` delta), or
-                            ``None`` when the counter was unavailable.
-        expected_bytes:     On-disk bytes of the files the setup read,
-                            or ``None`` when unknown.
-        cold_read_fraction: Fraction of ``expected_bytes`` above which
-                            the access counts as cold.
+    ``filesystem_type`` remains an accepted compatibility keyword, but is
+    descriptive metadata only. Complete counter coverage must be declared;
+    a filesystem name alone cannot establish it. ``expected_bytes`` is scoped
+    on-disk bytes, never the decoded size. The cold threshold remains 0.5.
     """
-    normalized_fs = (filesystem_type or "").lower()
-    if normalized_fs == "virtiofs" or "fuse" in normalized_fs:
-        # /proc/self/io observes reads performed by this process. FUSE and
-        # virtiofs may perform the backing read in another process, so a zero
-        # delta is not evidence of a warm cache.
-        return "unknown"
-    if bytes_read is None or expected_bytes is None:
-        return "unknown"
-    if expected_bytes <= 0:
-        return "unknown"
-    return (
-        "cold_first_access"
-        if bytes_read >= cold_read_fraction * expected_bytes
-        else "warm_page_cache"
-    )
+    return assess_cache_state(
+        bytes_read,
+        expected_bytes,
+        cold_read_fraction=cold_read_fraction,
+        process_read_bytes_scope=process_read_bytes_scope,
+    ).state

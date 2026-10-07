@@ -1242,13 +1242,10 @@ def _setup_storage_provenance(
     costs ``run_experiment_streaming`` no branch nodes, and because "what did
     the setup read" is its own question.
 
-    Under TIDMAD the answer is unchanged: the per-file paths the scope names,
-    and the scoped byte volume (pre-Gate F2 — whole-file sizes misclassify a
-    sparse read as warm). A task that declares no TIDMAD topology has neither
-    a file-name template nor a PSD segment length, so it reports the dataset
-    ROOT and no per-file claim — which is exactly true, and honest in the way
-    ``F-12-2`` already made the runtime ESTIMATE honest: skip the term, never
-    guess it.
+    The task owns the opaque scope and declares physical byte volume plus
+    process-counter coverage. Undeclared coverage remains unknown, including
+    legacy scopes whose files can be enumerated but whose backend accounting
+    cannot be inferred from their dataset geometry.
     """
     if sample_set is None:
         task_read_scope = (
@@ -1261,6 +1258,8 @@ def _setup_storage_provenance(
                 data_dir,
                 list(task_read_scope.file_paths),
                 scoped_bytes=task_read_scope.expected_on_disk_bytes,
+                process_read_bytes_scope=task_read_scope.process_read_bytes_scope,
+                process_read_bytes_reason=task_read_scope.process_read_bytes_reason,
             )
         return capture_storage_provenance(data_dir, [])
     if not declares_tidmad_topology(profile):

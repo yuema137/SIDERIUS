@@ -17,6 +17,10 @@ import time
 
 import pytest
 
+from core.runtime_control.calibration_derivation import (
+    IdentityContext,
+    derive_duration_calibration_record,
+)
 from core.runtime_control.observation_store import (
     ObservationStore,
     PriorPolicy,
@@ -310,3 +314,38 @@ class TestPriorDerivation:
         strict = PriorPolicy(contract_factor=1.2)
         assert store.lookup_prior(_KEY, "training", policy=strict).status == "evicted_drift"
         assert math.log(40.0 / 30.0) > math.log(1.2)  # scenario sanity
+
+
+def test_storage_evidence_does_not_change_prior_or_calibration_identity(tmp_path):
+    """#419: unknown cache provenance must not fork or suppress throughput reuse."""
+    original = _observation(actual_seconds=40.0).model_copy(
+        update={"storage": {"cache_state": "warm_page_cache"}}
+    )
+    changed = original.model_copy(
+        update={
+            "storage": {
+                "cache_state": "unknown",
+                "process_read_bytes_scope": "incomplete",
+                "cache_state_unknown_reason": "reader runs elsewhere",
+            }
+        }
+    )
+    identity = IdentityContext(
+        task_identity="synthetic",
+        data_shape_class="vector",
+        hardware_uuid="fixture-device",
+        runtime_stack_identity="fixture-stack",
+    )
+    assert observation_calibration_key(original, "training") == _KEY
+    assert observation_calibration_key(changed, "training") == _KEY
+    assert component_calibration_eligible(changed, "training")
+    assert derive_duration_calibration_record(original, "training", identity=identity) == (
+        derive_duration_calibration_record(changed, "training", identity=identity)
+    )
+    priors = []
+    for name, observation in (("before", original), ("after", changed)):
+        store = ObservationStore(str(tmp_path / name))
+        store.append(observation, writer_id="fixture")
+        priors.append(store.lookup_prior(_KEY, "training", now=1784811600.0))
+    assert priors[0] == priors[1]
+    assert priors[1].prior_unit_ms == 40.0

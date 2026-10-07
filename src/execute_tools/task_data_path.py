@@ -70,6 +70,8 @@ from typing import (
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
+from core.runtime_control.provenance import ProcessReadBytesScope
+
 if TYPE_CHECKING:  # torch is heavyweight; the seam only names the type
     from torch.utils.data import Dataset
 
@@ -716,13 +718,18 @@ class StorageReadScope(BaseModel):
     Paths and byte volume are physical provenance, not scientific semantics.
     The task computes them because only the task can interpret its opaque
     scope; the framework records the validated result without inspecting the
-    scope itself.
+    scope itself. ``process_read_bytes_scope="complete"`` additionally attests
+    that this process's storage counter covers these setup reads on the active
+    backend. Worker/daemon reads are incomplete; absent evidence is unknown.
+    A readable counter or a filesystem name alone does not establish coverage.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     file_paths: tuple[str, ...]
     expected_on_disk_bytes: int = Field(ge=0)
+    process_read_bytes_scope: ProcessReadBytesScope = "unknown"
+    process_read_bytes_reason: str | None = Field(default=None, min_length=1)
 
     @field_validator("file_paths")
     @classmethod
