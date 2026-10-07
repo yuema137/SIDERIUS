@@ -45,6 +45,7 @@ An entry point is a zero-argument factory returning
 | `uses_timing_context` | Whether the renderer accepts the new `timing_context` keyword |
 | `task_renderer` | Optional transformation of task description using supplied timing context |
 | `system_renderer` | Optional `(system_template, TunerTaskRender) -> str` transformation before shared fact substitution |
+| `config_manual_renderer` | Optional `(dict[str, Any]) -> str` renderer for the configuration-manual section; receives a deep copy |
 
 The compatibility provider uses `task_renderer` to preserve the original
 agent-owned Formal appendix. It must not add the new timing section and claim
@@ -55,6 +56,17 @@ helper is owned and fingerprinted by exp; the framework supplies only native
 loss eligibility text and does not carry legacy search or recovery advice.
 The bridge calls the provider transformation before substituting task/metric
 facts; a non-string result refuses before the provider request.
+
+Configuration manuals normally render as `json.dumps(manual, indent=2)`.
+An explicit experiment provider can preserve a qualified historical manual
+through `config_manual_renderer`; the bridge retains section ordering and
+headings. The hook runs only for a nonempty supplied manual. It does not change
+the schema used to validate or execute a plan. Qualification of accepted input
+schemas and historical text belongs to the provider, which must fingerprint
+its evidence assets as well as its code. Unrecognized schemas should refuse
+rather than silently discard new configuration facts. Provider exceptions and
+non-string results stop before a model request. No manual is inferred when a
+direct caller omits it.
 
 Providers fingerprint their implementation and helper sources. The framework
 adds `assembly_sha256` for the shared planner assembly and rendering source

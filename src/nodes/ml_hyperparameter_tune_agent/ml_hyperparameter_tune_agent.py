@@ -38,6 +38,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.task_config import ForwardContract
 from core.hardware_context import get_or_create
 from core.layout import checkout_root
+from core.record_role import observed_attempt_role
 from core.run_invariants import (
     LockLaunchIdentity,
     RunHealthMaterialization,
@@ -89,6 +90,7 @@ from nodes.ml_hyperparameter_tune_agent.cli import (
 from nodes.ml_hyperparameter_tune_agent.contracts import (
     AttemptIdentity,
     AttemptOrdering,
+    AttemptRoleState,
     AttemptSignal,
     AttemptStage,
     RunBindings,
@@ -598,6 +600,8 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
         # it is threaded explicitly here rather than read ambiently.
         training_validation_portion=agent_input.training_validation_portion,
         formal_eval_portion=agent_input.formal_eval_portion,
+        validation_max_portion=agent_input.validation_max_portion,
+        validation_max_samples=agent_input.validation_max_samples,
         trial_time_admission_source=agent_input.trial_time_admission_source,
         formal_time_admission_source=agent_input.formal_time_admission_source,
     )
@@ -1474,6 +1478,7 @@ class HyperparamTuningAgent:
                 iteration = round_index  # legacy alias for prints + brain.plan(current_round=...)
                 stage = AttemptStage("planning")
                 attempt_ordering = AttemptOrdering()
+                attempt_role = AttemptRoleState()
                 exp_id = f"{model_type_setting}_{run_name}_{total_attempts:03d}"
                 model_type = model_type_setting
                 record_params: dict[str, Any] = {}
@@ -1485,6 +1490,7 @@ class HyperparamTuningAgent:
                     prepared = prepare_attempt(
                         run_bindings,
                         attempt_ordering=attempt_ordering,
+                        attempt_role=attempt_role,
                         iteration=iteration,
                         attempt_in_round=attempt_in_round,
                         total_attempts=total_attempts,
@@ -1636,7 +1642,11 @@ class HyperparamTuningAgent:
                     )
 
                     _emit_attempt_record(
-                        sandbox, final_record, agent_input, ordering=prepared.ordering
+                        sandbox,
+                        final_record,
+                        agent_input,
+                        ordering=prepared.ordering,
+                        attempt_role=observed_attempt_role(prepared.plan.is_trial),
                     )
                     certified_ref = final_record.get("trained_model_artifact_ref")
                     _append_runtime_observation(
@@ -1757,7 +1767,11 @@ class HyperparamTuningAgent:
                         # the serializer): model_dump() drops extra keys, which
                         # would silently lose the §4 watchdog provenance.
                         _emit_attempt_record(
-                            sandbox, failure_record, agent_input, ordering=attempt_ordering.selected
+                            sandbox,
+                            failure_record,
+                            agent_input,
+                            ordering=attempt_ordering.selected,
+                            attempt_role=observed_attempt_role(attempt_role.is_trial),
                         )
                         print(f"  Saved structured attempt failure: {exp_id}")
                     except Exception as persist_error:

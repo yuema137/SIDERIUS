@@ -1966,3 +1966,34 @@ owners as execution; it supplies facts without selecting a search schedule.
 See [the planner strategy contract](../../../docs/reference/planner-strategies.md)
 for provider selection, installation defaults, missing-context behavior and
 historical-workspace migration limits.
+
+## Attempt role and validation-limit identity (#369)
+
+Current producers stamp `ExperimentRecord.attempt_role` as `trial`, `formal`, or
+`unresolved` through `records._emit_record`. A resolved role comes from the
+validated plan after override/parameter resolution, including preflight skips,
+phase admission refusals, training/inference/scoring failures and completed
+records. The exception carrier is reset before each attempt. Before resolution,
+an outer failure is explicitly `unresolved`; it must not inherit a previous
+attempt's role or infer one from `memory.time_mode`, score or round number.
+`is_trial` agrees with a resolved observation. The schema refuses contradictions.
+
+`core.record_role.is_formal_role` remains the role authority. An explicitly
+unresolved attempt contributes to total records but not formal attempts.
+Failed formal attempts still contribute to `formal_record_count`, while
+`formal_success_count` requires success. Historical records without
+`attempt_role` retain their existing interpretation; no archive is rewritten.
+Newly correct role facts may change subsequent planner history. An experiment
+may explicitly select a historical input renderer through the existing planner
+strategy interface; the framework does not restore old role mistakes by default.
+
+`validation_max_portion` and `validation_max_samples` travel through
+`LockLaunchIdentity` and the shared invariant builder at all three launch paths.
+The former limits resolved workload portions; the latter limits the training
+validation pass, not the final metric's evaluation scope. New locks record both
+values, including explicit null for disabled, with `validation_limits_recorded`.
+Resume refuses any changed limit. A legacy lock lacking this evidence stays
+readable but cannot certify continuation under the new builder. Retain the old
+workspace/revision or start a new workspace using verified experiment settings.
+Copying or editing the old lock does not constitute verification. No training,
+scoring, Health, scheduling or scientific defaults are changed by locking them.

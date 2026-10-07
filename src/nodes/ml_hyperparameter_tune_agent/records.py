@@ -30,6 +30,7 @@ from agent.schemas.ordering import OrderingObservation, ResolvedOrdering
 from agent.skills.evaluate_time_skill.wrapper import _aggregate_inference_file_timings
 from core.checkpoint_selection import CheckpointSelection
 from core.durable_io import publish_json_atomically
+from core.record_role import AttemptRole
 from core.run_invariants import (
     RunInvariants,
     ensure_run_invariants,
@@ -716,6 +717,7 @@ def _emit_record(
     experiment_arm: str | None = None,
     ordering: ResolvedOrdering | None = None,
     ordering_observation: OrderingObservation | None = None,
+    attempt_role: AttemptRole | None = None,
 ) -> None:
     """Stamp evidence, validate, persist — in that order (B-C4a0 E3/E4).
 
@@ -735,6 +737,10 @@ def _emit_record(
     including refusals. Older direct callers may omit both. This seam neither
     resolves selection nor interprets a missing argument as current absence.
     """
+    if attempt_role is not None:
+        record["attempt_role"] = attempt_role
+        if attempt_role != "unresolved":
+            record["is_trial"] = attempt_role == "trial"
     if status is not None:
         _attach_runtime_evidence(record, status)
     if ordering is not None:

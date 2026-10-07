@@ -1988,6 +1988,8 @@ def _workflow_lock_identity(launch, llm_config: WorkflowLLMConfig) -> LockLaunch
         # and the tuner sub-workspace lock cannot disagree.
         training_validation_portion=launch.training_validation_portion,
         formal_eval_portion=launch.formal_eval_portion,
+        validation_max_portion=launch.validation_max_portion,
+        validation_max_samples=launch.validation_max_samples,
         formal_training_scope_source=launch.formal_training_scope_source,
         workflow_parameter_rules=(
             None

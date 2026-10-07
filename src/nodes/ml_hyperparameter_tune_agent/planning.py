@@ -38,6 +38,7 @@ from execute_tools.health_checks.candidate_eligibility import (
 from execute_tools.sample_set_builder import build_sample_set
 from nodes.ml_hyperparameter_tune_agent.contracts import (
     AttemptOrdering,
+    AttemptRoleState,
     PreparedAttempt,
     RunBindings,
 )
@@ -302,6 +303,7 @@ def prepare_attempt(
     bindings: RunBindings,
     *,
     attempt_ordering: AttemptOrdering,
+    attempt_role: AttemptRoleState | None = None,
     iteration: int,
     attempt_in_round: int,
     total_attempts: int,
@@ -565,6 +567,8 @@ def prepare_attempt(
         epoch_cap=epoch_cap,
     )
     resolution.record(plan, "parameter_rules")
+    if attempt_role is not None:
+        attempt_role.is_trial = plan.is_trial
 
     # Build and validate TrialConfig from plan + overrides
     if plan.is_trial:

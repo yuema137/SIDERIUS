@@ -1230,7 +1230,10 @@ class LLMBridge:
         if model_description:
             manual_context += f"\n\n[MODEL ARCHITECTURE DESCRIPTION]:\n{model_description}"
         if config_manual:
-            manual_context += f"\n\n[STRICT PHYSICAL CONSTRAINTS / CONFIG MANUAL]:\n{json.dumps(config_manual, indent=2)}"
+            manual_context += (
+                "\n\n[STRICT PHYSICAL CONSTRAINTS / CONFIG MANUAL]:\n"
+                + selected_strategy.render_config_manual(config_manual)
+            )
 
         # Pass the new arguments to the prompt generator
         user_prompt = selected_strategy.render_user(

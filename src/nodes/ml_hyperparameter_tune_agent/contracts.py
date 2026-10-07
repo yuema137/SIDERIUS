@@ -367,6 +367,13 @@ class AttemptStage:
 
 
 @dataclass
+class AttemptRoleState:
+    """Resolved role retained if preparation raises; reset for every attempt."""
+
+    is_trial: bool | None = None
+
+
+@dataclass
 class AttemptOrdering:
     """Selected configuration retained when preparation raises instead of returning.
 

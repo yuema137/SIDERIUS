@@ -110,6 +110,7 @@ def _joined(phase, sandbox=None):
         round_index=2,
         attempt_in_round=1,
         ordering=resolve_ordering(resolved_scope=[0]),
+        is_trial=False,
     )
     return status, handled, sandbox, popen, run
 

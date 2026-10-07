@@ -1,7 +1,8 @@
 """Classify persisted experiment records by trial or formal role.
 
 One framework authority interprets the persisted ``is_trial`` field. A record
-is formal when ``is_trial`` is absent or ``False``. Keeping the predicate here
+is formal when ``is_trial`` is absent or ``False``, except a current attempt
+explicitly marked unresolved. Keeping the predicate here
 ensures manifests, result scanners, and operator views classify the same
 serialized record identically.
 
@@ -12,12 +13,22 @@ formal evidence without mixing trial-only scores into that answer.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, computed_field
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+
+
+AttemptRole = Literal["trial", "formal", "unresolved"]
+
+
+def observed_attempt_role(is_trial: bool | None) -> AttemptRole:
+    """Describe a resolved role without inventing one before planning finishes."""
+    if is_trial is None:
+        return "unresolved"
+    return "trial" if is_trial else "formal"
 
 
 class RecordRoleError(RuntimeError):
@@ -33,7 +44,8 @@ def is_formal_role(record: Mapping[str, Any], where: str) -> bool:
     """Return whether ``record`` has a formal persisted role.
 
     ``True`` means trial and is excluded. ``False`` or an absent field means
-    formal. Any other value, or a formal-shaped record with ``trial_portion``,
+    formal for historical records. Explicitly unresolved current attempts are
+    neither trial nor formal. Any other value, or a formal-shaped record with ``trial_portion``,
     is refused because production does not write that shape.
 
     Args:
@@ -48,7 +60,22 @@ def is_formal_role(record: Mapping[str, Any], where: str) -> bool:
             ``is_trial``, or a non-``None`` ``trial_portion`` on a record
             whose ``is_trial`` is not ``True``.
     """
+    observed = record.get("attempt_role")
+    if observed == "unresolved":
+        if (
+            record.get("status") == "success"
+            or record.get("is_trial") is True
+            or record.get("trial_portion") is not None
+        ):
+            raise RecordRoleError(
+                f"record {where} has unresolved role with scored or trial evidence"
+            )
+        return False
     role = record.get("is_trial")
+    if observed is not None and (
+        observed not in ("trial", "formal") or role is not (observed == "trial")
+    ):
+        raise RecordRoleError(f"record {where} has inconsistent attempt_role/is_trial")
     if role is True:
         return False
     if role is not None and role is not False:
