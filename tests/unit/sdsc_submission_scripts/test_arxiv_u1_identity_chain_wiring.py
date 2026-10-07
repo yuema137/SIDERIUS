@@ -254,7 +254,7 @@ class TestLaunchIdentityResolution:
             explicit = roi.compute_expected_invariants(
                 args,
                 run_composition=composition,
-                launch_identity=roi.resolve_launch_identity(args),
+                launch=roi._InvariantLaunchInputs(identity=roi.resolve_launch_identity(args)),
             )
             implicit = roi.compute_expected_invariants(args, run_composition=composition)
         assert explicit.experiment_arm == "with-prior-art"

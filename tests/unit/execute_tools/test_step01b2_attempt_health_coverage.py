@@ -275,7 +275,7 @@ def test_prepare_attempt_reachability_guard_keeps_coverage_before_persistence():
 
 def test_prepare_attempt_refuses_uncovered_scope_before_any_execution_effect(tmp_path):
     """The named refusal precedes config persistence and all execution effects."""
-    from nodes.ml_hyperparameter_tune_agent.contracts import AttemptOrdering
+    from nodes.ml_hyperparameter_tune_agent.contracts import AttemptIdentity, AttemptOrdering
     from nodes.ml_hyperparameter_tune_agent.planning import prepare_attempt
     from tests.unit.nodes.ml_hyperparameter_tune_agent.test_c12p_b11_composed_seg_size_authoring import (
         _bindings,
@@ -327,11 +327,9 @@ def test_prepare_attempt_refuses_uncovered_scope_before_any_execution_effect(tmp
             prepare_attempt(
                 bindings,
                 attempt_ordering=AttemptOrdering(),
-                iteration=1,
-                attempt_in_round=1,
+                identity=AttemptIdentity(round_index=1, attempt_in_round=1, is_formal_round=False),
                 total_attempts=1,
                 attempts_this_round=1,
-                is_formal_round=False,
                 formal_trial_winner=None,
             )
     assert task.calls == ["build_training_scope", "build_eval_scope", "validate_health_coverage"]

@@ -125,7 +125,7 @@ def test_all_launch_paths_transport_limits_to_the_shared_builder(tmp_path):
     composition = compose_run_task_bindings(args.task_composition)
     with bind_run_task_composition(composition, physical_data_root=args.data_dir):
         expected = roi.compute_expected_invariants(
-            args, run_composition=composition, llm_config=llm
+            args, run_composition=composition, launch=roi._InvariantLaunchInputs(llm_config=llm)
         )
     assert expected.validation_max_portion == 0.25
     assert expected.validation_max_samples == 100

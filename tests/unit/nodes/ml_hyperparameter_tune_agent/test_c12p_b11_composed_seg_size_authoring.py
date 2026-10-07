@@ -64,7 +64,11 @@ import pytest
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, TaskCompositionRef
 from execute_tools.dataset_config import TIDMAD_PROFILE
 from execute_tools.task_data_path import bind_task_data_path
-from nodes.ml_hyperparameter_tune_agent.contracts import AttemptOrdering, RunBindings
+from nodes.ml_hyperparameter_tune_agent.contracts import (
+    AttemptIdentity,
+    AttemptOrdering,
+    RunBindings,
+)
 from nodes.ml_hyperparameter_tune_agent.planning import prepare_attempt
 
 #: What ``WaveNetConfig`` DECLARES (`ml_models/models_format_sandbox.py:25`).
@@ -265,11 +269,9 @@ def _prepare(impl, configs_dir):
         return prepare_attempt(
             _bindings(agent_input, configs_dir, impl),
             attempt_ordering=AttemptOrdering(),
-            iteration=1,
-            attempt_in_round=1,
+            identity=AttemptIdentity(round_index=1, attempt_in_round=1, is_formal_round=False),
             total_attempts=1,
             attempts_this_round=1,
-            is_formal_round=False,
             formal_trial_winner=None,
         )
 
@@ -333,11 +335,9 @@ def test_planner_history_uses_the_run_scientific_gate_set(tmp_path, monkeypatch)
         prepare_attempt(
             bindings,
             attempt_ordering=AttemptOrdering(),
-            iteration=1,
-            attempt_in_round=1,
+            identity=AttemptIdentity(round_index=1, attempt_in_round=1, is_formal_round=False),
             total_attempts=1,
             attempts_this_round=1,
-            is_formal_round=False,
             formal_trial_winner=None,
         )
 
@@ -401,11 +401,9 @@ class TestTheFrameworkNeverAuthorsTaskVocabulary:
             prepare_attempt(
                 bindings,
                 attempt_ordering=AttemptOrdering(),
-                iteration=1,
-                attempt_in_round=1,
+                identity=AttemptIdentity(round_index=1, attempt_in_round=1, is_formal_round=False),
                 total_attempts=1,
                 attempts_this_round=1,
-                is_formal_round=False,
                 formal_trial_winner=None,
             )
 
@@ -474,11 +472,9 @@ class TestTheTaskRefusalIsReachable:
             prepare_attempt(
                 bindings,
                 attempt_ordering=AttemptOrdering(),
-                iteration=1,
-                attempt_in_round=1,
+                identity=AttemptIdentity(round_index=1, attempt_in_round=1, is_formal_round=False),
                 total_attempts=1,
                 attempts_this_round=1,
-                is_formal_round=False,
                 formal_trial_winner=None,
             )
 
@@ -555,11 +551,9 @@ class TestOnlyTheStatedSizeIsValidated:
             prepare_attempt(
                 bindings,
                 attempt_ordering=AttemptOrdering(),
-                iteration=1,
-                attempt_in_round=1,
+                identity=AttemptIdentity(round_index=1, attempt_in_round=1, is_formal_round=False),
                 total_attempts=1,
                 attempts_this_round=1,
-                is_formal_round=False,
                 formal_trial_winner=None,
             )
         return seen

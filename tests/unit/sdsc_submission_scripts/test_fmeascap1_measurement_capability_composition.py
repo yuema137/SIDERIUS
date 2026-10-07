@@ -37,6 +37,7 @@ thing the defect actually got wrong.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 from unittest.mock import patch
@@ -128,7 +129,7 @@ class _StubResult:
         self.resolved_bypass_formal_threshold = None
 
 
-def _capability_reaching_the_workflow(argv: list[str]) -> object:
+def _capability_reaching_the_workflow(argv: list[str], llm_config: pathlib.Path) -> object:
     """Drive the launcher's REAL ``main()`` and return what the workflow got.
 
     Deliberately the production entry point rather than a direct call to the
@@ -137,6 +138,8 @@ def _capability_reaching_the_workflow(argv: list[str]) -> object:
     against the unfixed launcher.
     """
     argv = [
+        "--llm_config",
+        str(llm_config),
         "--run_name",
         "iter_001",
         "--healthgate_mode",
@@ -172,6 +175,14 @@ def _capability_reaching_the_workflow(argv: list[str]) -> object:
 
 
 @pytest.fixture
+def explicit_llm_config(tmp_path):
+    """Keep launcher witnesses independent of installed experiment defaults."""
+    path = tmp_path / "llm_config.json"
+    path.write_text(json.dumps({"tune": {"planner_strategy": "native-timing-v1"}}))
+    return path
+
+
+@pytest.fixture
 def two_distinct_roots(tmp_path):
     """A TIDMAD root and a composed root that are BOTH real and NOT each other.
 
@@ -191,7 +202,7 @@ class TestComposedRunsCarryTheirOwnMeasurementIdentity:
     """Witnesses (a) and (b) — asserted at the workflow boundary."""
 
     def test_a_composed_non_tidmad_run_resolves_its_own_capability(
-        self, tmp_path, two_distinct_roots
+        self, tmp_path, two_distinct_roots, explicit_llm_config
     ):
         """(a) MUTATION TARGET: restoring the hardwired call.
 
@@ -211,7 +222,8 @@ class TestComposedRunsCarryTheirOwnMeasurementIdentity:
                 str(COMPOSED_MANIFEST),
                 "--data_dir",
                 str(composed_root),
-            ]
+            ],
+            explicit_llm_config,
         )
 
         assert capability is not None, (
@@ -228,7 +240,7 @@ class TestComposedRunsCarryTheirOwnMeasurementIdentity:
         )
 
     def test_an_unrelated_dataset_does_not_change_the_composed_identity(
-        self, tmp_path, two_distinct_roots
+        self, tmp_path, two_distinct_roots, explicit_llm_config
     ):
         """(b) THE DANGEROUS MANIFESTATION — the test that would have caught it.
 
@@ -252,7 +264,8 @@ class TestComposedRunsCarryTheirOwnMeasurementIdentity:
                 str(COMPOSED_MANIFEST),
                 "--data_dir",
                 str(composed_root),
-            ]
+            ],
+            explicit_llm_config,
         )
 
         assert capability.task_identity != TIDMAD_TASK_IDENTITY, (

@@ -182,8 +182,9 @@ def _expected_invariants(args, *, launch_identity=None):
     return roi.compute_expected_invariants(
         args,
         run_composition=COMPOSITION,
-        launch_identity=launch_identity,
-        llm_config=_llm_config_pseudo(),
+        launch=roi._InvariantLaunchInputs(
+            identity=launch_identity, llm_config=_llm_config_pseudo()
+        ),
     )
 
 

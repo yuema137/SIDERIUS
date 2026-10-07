@@ -83,6 +83,7 @@ from core.iteration_manifest import (
     publish_iteration_manifest,
 )
 from core.layout import checkout_root
+from core.planner_strategy_identity import PlannerStrategyIdentity
 from core.record_role import formal_evidence_of
 from core.run_invariants import (
     LockLaunchIdentity,
@@ -2590,12 +2591,36 @@ def resolve_watchdog_policy(args: argparse.Namespace) -> ResolvedWatchdogSetting
     return resolved
 
 
+@dataclass(frozen=True)
+class _InvariantLaunchInputs:
+    """Already resolved launch inputs, reused by the workspace-lock preflight."""
+
+    identity: LaunchIdentity | None = None
+    llm_config: WorkflowLLMConfig | None = None
+
+
+_UNRESOLVED_LAUNCH_INPUTS = _InvariantLaunchInputs()
+
+
+def _resolve_launch_planner_identity(
+    args: argparse.Namespace, llm_config: WorkflowLLMConfig | None
+) -> PlannerStrategyIdentity:
+    """Resolve the configured strategy before computing or mutating run locks."""
+    from agent.planner_strategy import resolve_planner_strategy
+
+    if llm_config is None:
+        config_path = getattr(args, "llm_config", None)
+        llm_config = (
+            WorkflowLLMConfig.from_json(config_path) if config_path else WorkflowLLMConfig()
+        )
+    return resolve_planner_strategy(llm_config.get("tune").get("planner_strategy")).identity
+
+
 def compute_expected_invariants(
     args: argparse.Namespace,
     *,
     run_composition: RunTaskComposition | None = None,
-    launch_identity: LaunchIdentity | None = None,
-    llm_config: WorkflowLLMConfig | None = None,
+    launch: _InvariantLaunchInputs = _UNRESOLVED_LAUNCH_INPUTS,
 ) -> RunInvariants:
     """DS6c — compute this run's invariants via the ONE shared path.
 
@@ -2626,22 +2651,13 @@ def compute_expected_invariants(
     ``None`` reproduces the pre-W7 behaviour exactly, which is what every
     un-composed run gets.
 
-    arXiv U1: ``launch_identity`` follows the same rule — ``main`` resolves
-    it once and passes the OBJECT; ``None`` resolves it from ``args`` through
-    the same function, so a caller that predates the parameter still locks
-    the values the workflow will lock.
+    The private ``launch`` carrier reuses the identity and LLM configuration
+    already resolved by ``main``. Missing values resolve from ``args`` through
+    their existing authorities, so direct callers lock the same values as the
+    workflow; an undeclared planner still requires an installed default provider.
     """
-    from agent.planner_strategy import resolve_planner_strategy
-
-    if llm_config is None:
-        config_path = getattr(args, "llm_config", None)
-        llm_config = (
-            WorkflowLLMConfig.from_json(config_path) if config_path else WorkflowLLMConfig()
-        )
-    planner_identity = resolve_planner_strategy(
-        llm_config.get("tune").get("planner_strategy")
-    ).identity
-    identity = launch_identity if launch_identity is not None else resolve_launch_identity(args)
+    planner_identity = _resolve_launch_planner_identity(args, launch.llm_config)
+    identity = launch.identity if launch.identity is not None else resolve_launch_identity(args)
     run_scope = args.data_scope if args.data_scope is not None else DataScope.default()
     # Step 12 / PR-12a **F-12-1** — resolve against the RUN's topology.
     #
@@ -3415,8 +3431,7 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
         expected_invariants = compute_expected_invariants(
             args,
             run_composition=run_composition,
-            launch_identity=launch_identity,
-            llm_config=llm_config,
+            launch=_InvariantLaunchInputs(identity=launch_identity, llm_config=llm_config),
         )
     except ValueError as e:
         print(f"FAIL: run-invariants computation refused to start: {e}")

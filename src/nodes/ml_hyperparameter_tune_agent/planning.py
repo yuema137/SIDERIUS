@@ -37,6 +37,7 @@ from execute_tools.health_checks.candidate_eligibility import (
 )
 from execute_tools.sample_set_builder import build_sample_set
 from nodes.ml_hyperparameter_tune_agent.contracts import (
+    AttemptIdentity,
     AttemptOrdering,
     AttemptRoleState,
     PreparedAttempt,
@@ -304,11 +305,9 @@ def prepare_attempt(
     *,
     attempt_ordering: AttemptOrdering,
     attempt_role: AttemptRoleState | None = None,
-    iteration: int,
-    attempt_in_round: int,
+    identity: AttemptIdentity,
     total_attempts: int,
     attempts_this_round: int,
-    is_formal_round: bool,
     formal_trial_winner: dict | None,
 ) -> PreparedAttempt:
     """Plan one attempt: observe -> think -> resolve the round's data.
@@ -319,6 +318,9 @@ def prepare_attempt(
     ``run()`` — a rename here would be a second change riding along with a
     move, and only one of them would be provable.
     """
+    iteration = identity.round_index
+    attempt_in_round = identity.attempt_in_round
+    is_formal_round = identity.is_formal_round
     agent_input = bindings.agent_input
     sandbox = bindings.sandbox
     brain = bindings.brain

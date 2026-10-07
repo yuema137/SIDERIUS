@@ -729,10 +729,16 @@ class TestCensusDLegacyLockKeySet:
             "training_validation_portion",
             # F-SCANF-1 — the declared delta documented above.
             "formal_eval_portion",
+            # Validation limits and their recorded presence govern resume (#369).
+            "validation_max_portion",
+            "validation_max_samples",
+            "validation_limits_recorded",
             # Formal training scope ownership is part of resume identity.
             "formal_training_scope_source",
             # Workflow rules determine the executed plan and are compared.
             "workflow_parameter_rules",
             "trial_time_admission_source",
             "formal_time_admission_source",
+            # Explicit planner policy must remain identical across resume (#372).
+            "planner_strategy_identity",
         )

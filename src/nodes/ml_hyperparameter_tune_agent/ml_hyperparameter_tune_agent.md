@@ -1791,7 +1791,8 @@ reverse.
 run_bindings = RunBindings(...)          # authorities + services, resolved once
 while completed_rounds < max_rounds:
     for attempt_in_round in ...:
-        prepared  = prepare_attempt(bindings, ...)          # planning.py
+        identity = AttemptIdentity(round_index, attempt_in_round, is_formal_round)
+        prepared  = prepare_attempt(bindings, identity=identity, ...)  # planning.py
         admission = run_admission_preflight(...)            # execution.py
         trained   = run_training(...)                       # execution.py
         executed  = run_inference_scoring_health(...)       # execution.py
@@ -1822,9 +1823,12 @@ termination flags. That is enforced at construction by
 exactly the thing a future change adds a field to "just this once". The
 end-of-loop values travel separately, in `RunExitSnapshot`.
 
-`AttemptStage` is the one mutable carrier, holding one field. It exists because
-the exception handler must know which phase was executing, and on the raising
-path there is no return value.
+`AttemptIdentity` is immutable and carries the round index, attempt index and
+formal-round flag through preparation and execution. It does not decide the
+resolved trial/formal role. `AttemptStage`, `AttemptRoleState` and
+`AttemptOrdering` retain separate phase, resolved-role and selected-ordering
+evidence for exception handling: a raising preparation call has no return
+value. Each mutable carrier is created anew for each attempt.
 
 ### Extending the node
 

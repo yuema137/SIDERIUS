@@ -624,6 +624,45 @@ def _bridge_kwargs_from_input(agent_input: HyperparamTuningInput) -> dict[str, A
     return kwargs
 
 
+def _load_run_model_description(
+    agent_input: HyperparamTuningInput, model_type_setting: str
+) -> str | None:
+    """Load the run-authorized description and retain absence diagnostics."""
+    model_description = None
+    try:
+        from ml_models.model_descriptions import (
+            DescriptionSourcePolicy,
+            get_model_description,
+        )
+
+        # arXiv U3 (#260): the loader refuses a BUNDLED baseline under
+        # isolation (a built-in candidate never reaches the tuner there).
+        source_policy = (
+            agent_input.task_composition_ref.description_source_policy
+            if agent_input.task_composition_ref is not None
+            else DescriptionSourcePolicy.LEGACY
+        )
+        model_description = get_model_description(
+            model_type_setting,
+            baseline_isolation=agent_input.baseline_isolation,
+            source_policy=source_policy,
+        )
+        if model_description is None:
+            print(
+                f"No authorized model description for '{model_type_setting}' "
+                "(composed source absence)"
+            )
+        else:
+            print(
+                f"Loaded model description for '{model_type_setting}' "
+                f"({len(model_description)} chars)"
+            )
+    except FileNotFoundError as e:
+        print(f"No model description found for '{model_type_setting}': {e}")
+
+    return model_description
+
+
 class HyperparamTuningAgent:
     """
     Hyperparameter tuning agent — optimizes model configs over N rounds.
@@ -1246,37 +1285,7 @@ class HyperparamTuningAgent:
             raise ValueError("Config Manual not provided.")
 
         # --- Load model description (architecture explanation for the LLM) ---
-        model_description = None
-        try:
-            from ml_models.model_descriptions import (
-                DescriptionSourcePolicy,
-                get_model_description,
-            )
-
-            # arXiv U3 (#260): the loader refuses a BUNDLED baseline under
-            # isolation (a built-in candidate never reaches the tuner there).
-            source_policy = (
-                agent_input.task_composition_ref.description_source_policy
-                if agent_input.task_composition_ref is not None
-                else DescriptionSourcePolicy.LEGACY
-            )
-            model_description = get_model_description(
-                model_type_setting,
-                baseline_isolation=agent_input.baseline_isolation,
-                source_policy=source_policy,
-            )
-            if model_description is None:
-                print(
-                    f"No authorized model description for '{model_type_setting}' "
-                    "(composed source absence)"
-                )
-            else:
-                print(
-                    f"Loaded model description for '{model_type_setting}' "
-                    f"({len(model_description)} chars)"
-                )
-        except FileNotFoundError as e:
-            print(f"No model description found for '{model_type_setting}': {e}")
+        model_description = _load_run_model_description(agent_input, model_type_setting)
 
         # --- Autonomous Research Loop ---
         # Phase L (§11) — success-counted outer loop with per-round inner
@@ -1475,7 +1484,6 @@ class HyperparamTuningAgent:
 
             for attempt_in_round in range(1, N + 1):
                 total_attempts += 1
-                iteration = round_index  # legacy alias for prints + brain.plan(current_round=...)
                 stage = AttemptStage("planning")
                 attempt_ordering = AttemptOrdering()
                 attempt_role = AttemptRoleState()
@@ -1487,15 +1495,18 @@ class HyperparamTuningAgent:
                 scored = False
                 certified_ref = None
                 try:
+                    identity = AttemptIdentity(
+                        round_index=round_index,
+                        attempt_in_round=attempt_in_round,
+                        is_formal_round=is_formal_round,
+                    )
                     prepared = prepare_attempt(
                         run_bindings,
                         attempt_ordering=attempt_ordering,
                         attempt_role=attempt_role,
-                        iteration=iteration,
-                        attempt_in_round=attempt_in_round,
+                        identity=identity,
                         total_attempts=total_attempts,
                         attempts_this_round=N,
-                        is_formal_round=is_formal_round,
                         formal_trial_winner=formal_trial_winner,
                     )
                     plan = prepared.plan
@@ -1513,11 +1524,6 @@ class HyperparamTuningAgent:
                     # RT5 §5 guardrails — cheapest pre-flight check, before
                     # any VRAM/time probe. Defense-in-depth only; the primary
                     # criterion stays the in-subprocess runtime verification.
-                    identity = AttemptIdentity(
-                        round_index=round_index,
-                        attempt_in_round=attempt_in_round,
-                        is_formal_round=is_formal_round,
-                    )
                     admission = run_admission_preflight(
                         run_bindings,
                         prepared,
