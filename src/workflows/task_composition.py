@@ -72,6 +72,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 
+from agent.prompt_rendering import (
+    PromptRenderingIdentity,
+    PromptRenderingProfile,
+    active_prompt_identity,
+    bind_prompt_profile,
+    resolve_prompt_profile,
+)
 from agent.schemas.hyperparam_tuning import TaskCompositionRef
 from agent.schemas.parameter_rules import ParameterRules
 from core.local_code import (
@@ -126,6 +133,7 @@ _MANIFEST_KEYS = frozenset(
         "dynamic_observables",
         "static_observables",
         "data_analysis",
+        "prompt_renderer",
         "code_package",
     }
 )
@@ -332,6 +340,8 @@ class RunTaskComposition:
     """
 
     data_analysis: Any = None
+    prompt_renderer: PromptRenderingProfile | None = None
+    prompt_renderer_identity: PromptRenderingIdentity | None = None
     """Optional edge-owned Data Analysis workflow policy, resolved and pinned."""
 
     def __post_init__(self) -> None:
@@ -2052,6 +2062,7 @@ def compute_semantic_fingerprint(
     scoreability_bindings: dict[str, Any] | None = None,
     code_package: PackageIdentity | None = None,
     data_analysis: Any = None,
+    prompt_renderer_identity: PromptRenderingIdentity | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -2129,6 +2140,8 @@ def compute_semantic_fingerprint(
     # differs are not the same run. ADDITIVE WHEN DECLARED, on the same
     # precedent as the two above, so every existing composed manifest's
     # fingerprint is byte-unchanged and its resume still validates.
+    if prompt_renderer_identity is not None:
+        payload["prompt_renderer"] = prompt_renderer_identity.model_dump(mode="json")
     if proposal_blocks is not None:
         payload["proposal_blocks"] = proposal_blocks.model_dump(mode="json")
     # Step 12 / PR-12a C7-4 — same rule, same reason: declared implementor
@@ -2746,6 +2759,15 @@ def _compose_resolved_task_bindings(
             "composing an unpinned fingerprint (arXiv #255)."
         )
 
+    prompt_renderer = None
+    prompt_renderer_identity = None
+    if "prompt_renderer" in raw:
+        selection = raw["prompt_renderer"]
+        if not isinstance(selection, str) or not selection:
+            raise TaskCompositionError("prompt_renderer must name an installed versioned provider")
+        prompt_renderer = resolve_prompt_profile(selection)
+        prompt_renderer_identity = prompt_renderer.identity()
+
     fingerprint = compute_semantic_fingerprint(
         task_data_path_id=impl.task_data_path_id,
         dataset_profile=profile,
@@ -2776,6 +2798,7 @@ def _compose_resolved_task_bindings(
         scoreability_bindings=_scoreability_binding_identity(raw),
         code_package=package.identity if package is not None else None,
         data_analysis=data_analysis,
+        prompt_renderer_identity=prompt_renderer_identity,
     )
 
     return RunTaskComposition(
@@ -2804,6 +2827,8 @@ def _compose_resolved_task_bindings(
         parameter_rules=parameter_rules,
         observables=observables or None,
         data_analysis=data_analysis,
+        prompt_renderer=prompt_renderer,
+        prompt_renderer_identity=prompt_renderer_identity,
     )
 
 
@@ -3038,6 +3063,11 @@ def bind_run_task_composition(
         # is the same value an un-composed run resolves.
         stack.enter_context(bind_run_secondary_metrics(composition.secondary_metrics))
         stack.enter_context(bind_task_config(composition.task_config_values()))
+        stack.enter_context(
+            bind_prompt_profile(
+                composition.prompt_renderer, expected=composition.prompt_renderer_identity
+            )
+        )
         yield composition
 
 
@@ -3072,6 +3102,8 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
     from workflows.task_config import resolve_bound_task_config
 
     unbound: list[str] = []
+    if active_prompt_identity() != composition.prompt_renderer_identity:
+        unbound.append("prompt_renderer")
     if active_task_data_path() is not composition.task_data_path:
         unbound.append("task_data_path")
     # Step 11 C4 — the root is not ON the composition (a host path is

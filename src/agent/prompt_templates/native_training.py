@@ -4,6 +4,8 @@ This describes the shipped trainer, not scientific advice or a new lifecycle
 hook. Keep it aligned with train_engine_sandbox and TrainingBudgetReceipt.
 """
 
+from agent.prompt_rendering import prompt_boundary
+
 NATIVE_TRAINING_CONTRACT = """\
 ## Native training execution boundary
 
@@ -42,3 +44,9 @@ naming a model or buffer after a training intervention does not implement it.
   was tested. Reviewers must keep trainability and specification alignment
   separate: runnable code may still fail to implement the causal hypothesis.
 """
+
+
+@prompt_boundary("native_training.appendix")
+def render_native_training_appendix() -> str:
+    """Return the execution appendix including its original separator."""
+    return "\n\n" + NATIVE_TRAINING_CONTRACT
