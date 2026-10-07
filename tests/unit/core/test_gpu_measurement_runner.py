@@ -686,3 +686,121 @@ class TestObservationEvidenceReachesTheJoinedRecord:
         """Not from the worker: the worker cannot know how many landed."""
         training = _run(tmp_path, _GOOD_WORKER, [1000]).phase("training")
         assert training.observed_in_phase_samples == training.coverage.samples_taken
+
+
+def _bound_inference_spec(tmp_path, *, deadline=3):
+    from core.runtime_control.inference_measurement_binding import InferenceMeasurementBinding
+
+    base = _spec(tmp_path)
+    request = base.request.model_copy(
+        update={
+            "phase": "inference",
+            "deadline_seconds": deadline,
+            "planned_identity": build_planned_identity(
+                model_type="punet", model_config={}, train_config={}, inference_batch_size=1
+            ),
+        }
+    )
+    return base.model_copy(
+        update={
+            "request": request,
+            "inference_batch_size": 1,
+            "inference_binding": InferenceMeasurementBinding(
+                assembly_sha256="a" * 64,
+                plugin_sources_sha256="b" * 64,
+                runtime_sha256="c" * 64,
+                request_sha256="d" * 64,
+            ),
+        }
+    )
+
+
+_BOUND_REPORT = """
+report({'label': spec['label'], 'request': spec['request'], 'status': 'COMPLETED',
+        'device': spec['device'], 'worker_pid': os.getpid(),
+        'request_id': spec['request']['request_id'],
+        'inference_binding': spec['inference_binding'],
+        'phases': [{'phase': 'inference', 'status': 'COMPLETED',
+                    'started_at': time.time(), 'ended_at': time.time(), 'elapsed_seconds': 0}]})
+"""
+
+
+def test_bound_worker_report_does_not_hide_shutdown_timeout(tmp_path):
+    """A completed report may be written before a stuck interpreter exits."""
+    import time
+
+    spec = _bound_inference_spec(tmp_path, deadline=10)
+
+    def elapsed_clock():
+        # Advance only after the child published its report, independent of startup speed.
+        return time.monotonic() + (20 if Path(spec.result_path).exists() else 0)
+    run = run_prephase_measurement(
+        spec,
+        device=DEVICE,
+        command=_fake_worker(tmp_path, _BOUND_REPORT + "time.sleep(60)"),
+        elapsed_clock=elapsed_clock,
+        device_sampler=_Driver([800]),
+        poll_seconds=0.01,
+        grace_seconds=0.05,
+    )
+    assert run.worker_status == "COMPLETED"
+    assert run.process.term_sent
+    assert run.process.exit_code != 0
+    assert run.deadline.reached_deadline
+
+
+def test_bound_worker_cleans_child_after_leader_exits(tmp_path):
+    """A TERM-ignoring descendant must not survive a completed measurement leader."""
+    import ctypes
+    import os
+    import signal
+    import time
+
+    # Own the otherwise orphaned grandchild so the witness does not race PID 1's reaper.
+    libc = ctypes.CDLL(None, use_errno=True)
+    previous = ctypes.c_int()
+    assert libc.prctl(37, ctypes.byref(previous), 0, 0, 0) == 0  # PR_GET_CHILD_SUBREAPER
+    assert libc.prctl(36, 1, 0, 0, 0) == 0  # PR_SET_CHILD_SUBREAPER
+    pid = None
+    body = (
+        """
+import subprocess
+from pathlib import Path
+pid_path = Path(spec['result_path']).with_suffix('.child')
+child = subprocess.Popen([sys.executable, '-c',
+    'import os,signal,time; from pathlib import Path; '
+    'signal.signal(signal.SIGTERM, signal.SIG_IGN); '
+    'Path(' + repr(str(pid_path)) + ').write_text(str(os.getpid())); time.sleep(60)'])
+while not pid_path.exists():
+    time.sleep(0.005)
+"""
+        + _BOUND_REPORT
+    )
+    try:
+        spec = _bound_inference_spec(tmp_path)
+        run = run_prephase_measurement(
+            spec,
+            device=DEVICE,
+            command=_fake_worker(tmp_path, body),
+            device_sampler=_Driver([800]),
+            poll_seconds=0.01,
+            grace_seconds=0.05,
+        )
+        pid = int(Path(spec.result_path).with_suffix(".child").read_text())
+        assert run.process.exit_code == 0
+        assert run.process.group_cleanup_required
+        assert run.process.term_sent and run.process.kill_sent
+        until = time.monotonic() + 2
+        while time.monotonic() < until:
+            reaped, status = os.waitpid(pid, os.WNOHANG)
+            if reaped:
+                pid = None
+                assert os.waitstatus_to_exitcode(status) == -signal.SIGKILL
+                break
+            time.sleep(0.01)
+        assert pid is None, "descendant survived bounded cleanup"
+    finally:
+        if pid is not None:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+        assert libc.prctl(36, previous.value, 0, 0, 0) == 0

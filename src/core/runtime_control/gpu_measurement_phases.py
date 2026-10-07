@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from execute_tools.task_probe_batch import InferenceProbeBatches
 
 from core.local_code.failure import raise_if_code_package_failure
+from core.runtime_control.gpu_measurement_hold import ObservedReservation, reservation_peak_bytes
 from core.runtime_control.gpu_measurement_spec import (
     PhaseCompletion,
     PhaseExecutionReport,
@@ -167,8 +168,8 @@ def _reset_peaks(device: str) -> None:
         return
     import torch
 
-    torch.cuda.synchronize()
-    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize(device)
+    torch.cuda.reset_peak_memory_stats(device)
 
 
 def _read_peaks(device: str) -> tuple[int | None, int | None]:
@@ -182,10 +183,10 @@ def _read_peaks(device: str) -> tuple[int | None, int | None]:
     try:
         import torch
 
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(device)
         return (
-            int(torch.cuda.max_memory_allocated() // _MIB),
-            int(torch.cuda.max_memory_reserved() // _MIB),
+            int(torch.cuda.max_memory_allocated(device) // _MIB),
+            int(torch.cuda.max_memory_reserved(device) // _MIB),
         )
     except Exception:
         # A peak that cannot be read is unknown, not zero.
@@ -221,7 +222,7 @@ def _synchronize_device(tensor: Any) -> None:
         if getattr(tensor, "is_cuda", False):
             import torch
 
-            torch.cuda.synchronize()
+            torch.cuda.synchronize(tensor.device)
     except Exception:  # pragma: no cover - driver-shape guard
         pass
 
@@ -258,6 +259,9 @@ def run_measured_phases(
     min_authoritative_samples: int = 3,
     max_phase_seconds: float = 60.0,
     await_sampler_ready: Callable[[], bool] | None = None,
+    await_setup_sampler_ready: Callable[[], bool] | None = None,
+    setup_reservation_observer: Callable[[], ObservedReservation] | None = None,
+    inference_reservation_observer: Callable[[], ObservedReservation] | None = None,
     phase_observed_enough: Callable[[], bool] | None = None,
     trace: Any = None,
     wall_clock: Callable[[], float] = time.time,
@@ -289,6 +293,8 @@ def run_measured_phases(
     journal = journal or PhaseJournal(None, clock=wall_clock)
     started_elapsed = elapsed_clock()
     reports: list[PhaseExecutionReport] = []
+    setup_reservations: list[ObservedReservation] = []
+    inference_reservations: list[ObservedReservation] = []
     counters: dict[str, Any] = {
         "forward_calls": 0,
         "backward_calls": 0,
@@ -347,11 +353,21 @@ def run_measured_phases(
         )
 
     # ── setup ────────────────────────────────────────────────────────────
+    if await_setup_sampler_ready is not None and not await_setup_sampler_ready():
+        return _finish(
+            "WORKER_FAILURE",
+            "driver sampler was unavailable before setup",
+            pending=("setup", phase),
+        )
     journal.record("phase_start", "setup")
     setup_started = wall_clock()
     _reset_peaks(device)
     try:
         components = build_components()
+        if setup_reservation_observer is not None:
+            setup_reservations.append(setup_reservation_observer())
+            if not setup_reservations[-1].acknowledged:
+                raise RuntimeError("driver sampling did not acknowledge the setup reservation")
     except BaseException as exc:  # classified below, never swallowed
         raise_if_code_package_failure(exc)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
@@ -368,6 +384,7 @@ def run_measured_phases(
                 elapsed_seconds=round(setup_ended - setup_started, 6),
                 allocator_peak_mib=allocated,
                 allocator_reserved_peak_mib=reserved,
+                observed_reservations=tuple(setup_reservations),
                 detail=f"{type(exc).__name__}: {exc}"[:400],
             )
         )
@@ -388,6 +405,9 @@ def run_measured_phases(
     identity_slot["realized_identity"] = components.realized_identity
 
     setup_allocated, setup_reserved = _read_peaks(device)
+    setup_reserved_bytes = (
+        reservation_peak_bytes(device) if setup_reservation_observer is not None else None
+    )
     setup_ended = wall_clock()
     reports.append(
         PhaseExecutionReport(
@@ -398,6 +418,8 @@ def run_measured_phases(
             elapsed_seconds=round(setup_ended - setup_started, 6),
             allocator_peak_mib=setup_allocated,
             allocator_reserved_peak_mib=setup_reserved,
+            allocator_reserved_peak_bytes=setup_reserved_bytes,
+            observed_reservations=tuple(setup_reservations),
             units_executed=1,
             units_requested=1,
         )
@@ -439,7 +461,12 @@ def run_measured_phases(
         # Inference observes a held real state instead of repeating the
         # workload, so the parent's completion signal becomes the hold's
         # release condition rather than a repeat-again condition.
-        else {"hold_peak_state": phase_observed_enough, "trace": trace}
+        else {
+            "hold_peak_state": phase_observed_enough,
+            "reservation_observer": inference_reservation_observer,
+            "observed_reservations": inference_reservations,
+            "trace": trace,
+        }
     )
     executed, status, detail = runner(
         components=components,
@@ -488,6 +515,9 @@ def run_measured_phases(
         else:
             completion = "sample_target_reached"
     allocated, reserved = _read_peaks(device)
+    reserved_bytes = (
+        reservation_peak_bytes(device) if inference_reservation_observer is not None else None
+    )
     work_ended = wall_clock()
     reports.append(
         PhaseExecutionReport(
@@ -498,6 +528,8 @@ def run_measured_phases(
             elapsed_seconds=round(work_ended - work_started, 6),
             allocator_peak_mib=allocated,
             allocator_reserved_peak_mib=reserved,
+            allocator_reserved_peak_bytes=reserved_bytes,
+            observed_reservations=tuple(inference_reservations),
             units_executed=executed,
             units_requested=requested,
             repetitions=repetitions,
@@ -595,6 +627,8 @@ def _run_inference(
     counters: dict[str, Any],
     out_of_time: Callable[[], bool],
     hold_peak_state: Callable[[], bool] | None = None,
+    reservation_observer: Callable[[], ObservedReservation] | None = None,
+    observed_reservations: list[ObservedReservation] | None = None,
     trace: Any = None,
 ) -> tuple[int, PhaseStatus, str]:
     """Consume bounded evaluation predictions through the production stream."""
@@ -625,7 +659,7 @@ def _run_inference(
                 output_shape=tuple(output.shape),
             )
         )
-        if hold_peak_state is not None:
+        if hold_peak_state is not None or reservation_observer is not None:
             _synchronize_device(output)
             if trace is not None:
                 trace.record(
@@ -638,7 +672,16 @@ def _run_inference(
                     detail="model_input is the storage batch; conversion is owned by the forward boundary",
                 )
             counters["peak_state_holds"] += 1
-            if hold_peak_state():
+            if reservation_observer is not None:
+                observation = reservation_observer()
+                if observed_reservations is not None:
+                    observed_reservations.append(observation)
+                if not observation.acknowledged:
+                    raise RuntimeError(
+                        "driver sampling did not acknowledge an inference reservation"
+                    )
+                counters["peak_state_observed"] = True
+            elif hold_peak_state is not None and hold_peak_state():
                 counters["peak_state_observed"] = True
 
     try:

@@ -769,7 +769,8 @@ It creates no loss criterion, optimizer or device-resident target.
 batches at the declared inference batch size, preserving incomplete tail batches
 and the task's batch ceiling. Missing or empty evaluation scope, a changed task
 binding/fingerprint or a changed batch ceiling refuses; training data are never
-substituted. Binding a reply to the complete request is a separate integration.
+substituted. Bounded refusal verification additionally binds the complete request,
+source assembly, plugin sources, runtime and explicit device identity.
 
 `execute_tools.inference_stream.prediction_stream` owns the forward, dtype
 conversion, ordered CPU consumption and tensor lifetimes in both the measurement
@@ -783,10 +784,28 @@ coverage.
 
 This bounded, pretraining measurement does not certify all data-dependent
 branches or trained-weight behavior. Driver samples and allocator high-water
-marks remain different instruments. These primitives do not themselves clear a
-static preflight refusal: the production tuner still calls the training
-measurement path, and bounded inference admission is a separate integration.
-Training measurement construction, identity and repetition are unchanged.
+marks remain different instruments. Native `inference_preflight` policy now
+measures the final refused inference batch when training passed and only the
+inference VRAM estimate refused. Trial and Formal use the same adapter. The
+original static evidence is immutable; a separate `inference_verification`
+observation decides whether bounded evidence permits execution. Unknown evidence
+stops as inconclusive; measured capacity refusal permits another attempt.
+
+Setup and every evaluation forward use a synchronized reservation hold,
+acknowledged by driver samples identified by request, phase and hold sequence.
+Byte-exact peak reserved memory must still be resident during an acknowledged
+hold; driver context overhead cannot mask an allocator peak released before
+sampling. This cannot exclude arbitrary non-allocator transients or unseen
+inputs. Source continuity is checked before/after structural inspection and
+before/after measurement; trusted plugin mutation invalidates the observation.
+Raw observations remain in the workspace, compact evidence in typed records.
+The single extra worker consumes remaining preflight time, uses existing
+RSS/cleanup bounds, and never overwrites the training requirement table.
+
+Historical exp configurations explicitly select `mode: static_only`; there is
+no task-name or provider-name fallback in infra. Training measurement identity
+and repetition are unchanged. CUDA statistics and synchronization select the
+actual device in both phases.
 
 **Validation-only lifecycle trace (V20 PR C2).** The measurement worker and
 the formal inference process can each record a set of named lifecycle

@@ -24,8 +24,7 @@ from agent.schemas.health_feedback import (
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
 )
-from agent.schemas.preflight import StaticPreflightEvidence
-from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields, render_static_refusal
+from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from agent.utils.architectural_pattern_tagger import (
     TIME_FACTOR_THRESHOLD,
     VRAM_FACTOR_THRESHOLD,
@@ -513,8 +512,14 @@ def _build_gate_exhaustion(
     for record in report_records:
         fields = preflight_memory_fields(record.get("memory") or {})
         if fields.get("preflight_outcome") == "STATIC_PREFLIGHT_REFUSAL":
-            evidence = StaticPreflightEvidence.model_validate(fields["static_preflight_evidence"])
-            static_refusals.add(render_static_refusal(evidence))
+            from core.runtime_control.inference_refusal_verification import (
+                preflight_refusal_detail,
+                verification_from_result,
+            )
+
+            verification = verification_from_result(fields)
+            if verification is None or verification.assessment[0] != "admitted":
+                static_refusals.add(preflight_refusal_detail(fields))
     if static_refusals:
         summary += " " + " ".join(sorted(static_refusals))
 

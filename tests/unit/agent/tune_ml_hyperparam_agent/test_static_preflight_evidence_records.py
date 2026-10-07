@@ -200,3 +200,60 @@ def test_actual_resolver_wrapper_refusal_reaches_tuner_and_next_prompts(
         assert "5,368,709,120 bytes" in message
         assert "not a measured GPU peak or CUDA OOM" in message
         assert "too heavy" not in message
+
+
+@pytest.mark.parametrize("disposition", ["admitted", "capacity_refused", "unavailable"])
+def test_bounded_inference_decision_reaches_tuner_records_and_proposer(
+    tmp_path, agent_with_scripted_skill, disposition
+):
+    """A separate measured decision must survive actual tuner serialization and control flow."""
+    from tests.helpers.inference_verification import _verification
+
+    verification = _verification(driver_mib=1000 if disposition == "capacity_refused" else 800)
+    if disposition == "unavailable":
+        verification = verification.model_copy(
+            update={"measurement": None, "unavailable_reason": "Missing driver samples"}
+        )
+    adapted = {
+        "status": "success",
+        "feasible": False,
+        "preflight_outcome": "STATIC_PREFLIGHT_REFUSAL",
+        "static_preflight_evidence": verification.static_evidence.model_dump(mode="json"),
+        "inference_verification": verification.model_dump(mode="json"),
+        "estimated_gb": 2.0,
+        "limit_gb": 900 / 1024,
+        "verdict": "STRUCTURAL ONLY",
+        "suggestion": "STATIC ONLY",
+    }
+    agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, [adapted])
+    try:
+        output = agent.run(_make_input(tmp_path, max_rounds=1))
+    finally:
+        cleanup()
+    assert counter["i"] == 1
+    if disposition == "unavailable":
+        assert not output.physical_rejections
+        assert all(record["status"] != "success" for record in saved)
+        failure = next(record for record in saved if record.get("record_type") == "attempt_failure")
+        assert failure["memory"]["inference_verification"] == verification.model_dump(mode="json")
+        assert failure["memory"][
+            "static_preflight_evidence"
+        ] == verification.static_evidence.model_dump(mode="json")
+    else:
+        record = next(
+            item
+            for item in saved
+            if item["status"] == ("success" if disposition == "admitted" else "skipped_oom_risk")
+        )
+        typed = ExperimentRecord.model_validate(record)
+        assert typed.memory.inference_verification == verification
+        assert typed.memory.preflight_outcome == "STATIC_PREFLIGHT_REFUSAL"
+        if disposition == "admitted":
+            assert not output.physical_rejections
+        else:
+            rejection = output.physical_rejections[0]
+            assert rejection.inference_verification == verification
+            prompt = _render_physical_rejection(rejection, n_rejections=1)
+            assert "measured 1000 MiB" in prompt
+            assert "not a measured GPU peak" not in prompt
+            assert "STATIC ONLY" not in prompt

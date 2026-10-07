@@ -660,3 +660,45 @@ class TestOwnershipGuard:
                 semantic_fingerprint=composition.semantic_fingerprint,
                 provenance=composition.provenance,
             )
+
+
+def test_inference_policy_is_bound_and_pinned_in_composition_identity(tmp_path):
+    """Changing admission policy must prevent an apparently identical resume."""
+    import yaml
+
+    from core.inference_preflight_policy import (
+        InferencePreflightPolicy,
+        active_inference_preflight_policy,
+        bind_inference_preflight_policy,
+    )
+    from workflows.task_composition import (
+        CompositionNotBoundError,
+        bind_run_task_composition,
+        verify_composition_is_bound,
+    )
+
+    target = tmp_path / "task"
+    shutil.copytree(FOURTH_MANIFEST.parent, target)
+    manifest = target / "composition.yaml"
+    native = compose_run_task_bindings(str(manifest))
+    declaration = yaml.safe_load(manifest.read_text())
+    declaration["inference_preflight"] = {"mode": "static_only", "max_batches": 7}
+    manifest.write_text(yaml.safe_dump(declaration))
+    historical = compose_run_task_bindings(str(manifest))
+    assert historical.semantic_fingerprint != native.semantic_fingerprint
+    assert active_inference_preflight_policy().mode == "bounded_measurement"
+    with bind_run_task_composition(historical, physical_data_root=str(tmp_path)):
+        assert active_inference_preflight_policy().mode == "static_only"
+        assert active_inference_preflight_policy().max_batches == 7
+        verify_composition_is_bound(historical)
+        with bind_inference_preflight_policy(InferencePreflightPolicy()):
+            with pytest.raises(CompositionNotBoundError, match="inference_preflight"):
+                verify_composition_is_bound(historical)
+    assert active_inference_preflight_policy().mode == "bounded_measurement"
+    declaration["inference_preflight"] = {"mode": "bounded_measurement", "max_batches": 7}
+    manifest.write_text(yaml.safe_dump(declaration))
+    enlarged = compose_run_task_bindings(str(manifest))
+    assert enlarged.semantic_fingerprint not in {
+        native.semantic_fingerprint,
+        historical.semantic_fingerprint,
+    }

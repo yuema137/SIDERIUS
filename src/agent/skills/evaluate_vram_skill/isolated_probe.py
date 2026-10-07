@@ -54,6 +54,7 @@ from agent.schemas.preflight import StaticPreflightBypass, StaticPreflightEviden
 from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
 from core.capability_registry import CapabilityContractSnapshot
 from core.preflight_estimation import PreflightEstimatorIdentity, active_preflight_identity
+from core.runtime_control.inference_measurement_binding import MeasurementSources
 from core.runtime_control.process_group import (
     process_group_alive,
     signal_group,
@@ -171,6 +172,7 @@ class IsolatedProbeSpec(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     label: str = Field(min_length=1)
+    candidate_sources: MeasurementSources | None = None
     model_type: str = Field(min_length=1)
     model_config_payload: dict[str, Any] = Field(default_factory=dict)
     train_config: dict[str, Any] = Field(default_factory=dict)
@@ -304,6 +306,7 @@ class IsolatedProbeResult(BaseModel):
 
     label: str
     outcome: PreflightOutcome
+    candidate_sources: MeasurementSources | None = None
     detail: str = ""
     realized_parameter_count: int | None = Field(default=None, ge=0)
     trainable_parameter_count: int | None = Field(default=None, ge=0)
@@ -617,6 +620,7 @@ def run_isolated_preflight(
         detail: str,
         phase: str,
         *,
+        candidate_sources: MeasurementSources | None = None,
         realized_parameter_count: int | None = None,
         static_preflight_evidence: StaticPreflightEvidence | None = None,
         static_preflight_bypass: StaticPreflightBypass | None = None,
@@ -643,6 +647,7 @@ def run_isolated_preflight(
         return IsolatedProbeResult(
             label=spec.label,
             outcome=outcome,
+            candidate_sources=candidate_sources,
             detail=detail,
             phase=phase,
             elapsed_seconds=elapsed,
@@ -742,6 +747,17 @@ def run_isolated_preflight(
     if outcome not in get_args(PreflightOutcome):
         outcome = "PROBE_INFRASTRUCTURE_FAILURE"
     try:
+        sources = (
+            MeasurementSources.model_validate(payload["candidate_sources"])
+            if payload.get("candidate_sources") is not None
+            else None
+        )
+        if (
+            spec.candidate_sources is not None
+            and outcome in {"STATIC_PREFLIGHT_REFUSAL", "COMPLETED_MEASUREMENT"}
+            and sources != spec.candidate_sources
+        ):
+            raise ValueError("Worker source continuity does not match the dispatched candidate")
         evidence = (
             StaticPreflightEvidence.model_validate(payload["static_preflight_evidence"])
             if payload.get("static_preflight_evidence") is not None
@@ -774,6 +790,7 @@ def run_isolated_preflight(
             outcome,  # type: ignore[arg-type]  - narrowed against the Literal above
             _str_or_none(payload.get("detail")) or "",
             _str_or_none(payload.get("phase")) or "complete",
+            candidate_sources=sources,
             static_preflight_evidence=evidence,
             static_preflight_bypass=bypass,
             realized_parameter_count=_int_or_none(payload.get("realized_parameter_count")),

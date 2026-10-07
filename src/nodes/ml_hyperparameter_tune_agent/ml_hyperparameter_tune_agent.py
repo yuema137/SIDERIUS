@@ -193,6 +193,7 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     WallClockTimeoutError,
     _append_runtime_observation,
     _apply_epoch_bound,
+    _apply_preflight_failure_fields,
     _apply_watchdog_failure_fields,
     _attach_realized_memory,
     _build_admission_policy,
@@ -307,6 +308,7 @@ _COMPATIBILITY_REEXPORTS = (
     _apply_epoch_bound,
     _apply_mode_override_chain,
     _apply_plan_overrides,
+    _apply_preflight_failure_fields,
     _apply_watchdog_failure_fields,
     _attach_realized_memory,
     _attach_runtime_evidence,
@@ -1767,6 +1769,7 @@ class HyperparamTuningAgent:
                             "attempt_in_round": attempt_in_round,
                         },
                     }
+                    _apply_preflight_failure_fields(failure_record, e)
                     _apply_watchdog_failure_fields(failure_record, e)
                     try:
                         # The RAW dict is saved (validation is the gate, not

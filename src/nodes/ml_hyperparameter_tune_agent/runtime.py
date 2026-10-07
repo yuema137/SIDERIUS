@@ -536,6 +536,15 @@ def _raise_if_preflight_blocks(resource_check: dict) -> str:
     bug, and the failure mode this function exists to remove is exactly
     the one where such a status silently means "go ahead".
     """
+    from core.runtime_control.inference_refusal_verification import verification_from_result
+
+    verification = verification_from_result(resource_check)
+    if verification is not None and verification.assessment[0] == "unavailable":
+        raise InconclusivePreflight(
+            verification.assessment[1],
+            record={"inference_verification": verification.model_dump(mode="json")},
+            kind="inconclusive",
+        )
     status = str(resource_check.get("status", ""))
     action = PREFLIGHT_CONSUMER_ACTIONS.get(status)
     if action is None:
@@ -1593,6 +1602,27 @@ def _raise_if_wall_clock_timeout(status: dict, sandbox, run_name: str) -> None:
         status.get("message", "watchdog wall-clock timeout"),
         status.get("watchdog") or {},
         rv_block,
+    )
+
+
+def _apply_preflight_failure_fields(record: dict, exc: Exception) -> None:
+    """Preserve inconclusive inference observations at the failure-record boundary."""
+    if not isinstance(exc, InconclusivePreflight):
+        return
+    raw = exc.record.get("inference_verification")
+    if raw is None:
+        return
+    from core.runtime_control.inference_verification_evidence import InferenceVerification
+
+    verification = InferenceVerification.model_validate(raw)
+    if verification.assessment[0] != "unavailable":
+        raise ValueError("Inconclusive preflight exception carries a conclusive inference verdict")
+    record["memory"].update(
+        {
+            "inference_verification": verification.model_dump(mode="json"),
+            "static_preflight_evidence": verification.static_evidence.model_dump(mode="json"),
+            "preflight_outcome": "STATIC_PREFLIGHT_REFUSAL",
+        }
     )
 
 

@@ -261,3 +261,39 @@ If no candidate passes, the diagnostic reports only the intensity refusal;
 VRAM remains unmeasured. Tasks without temporal geometry retain probe-based
 selection without an invented intensity constraint. Completed slow measurements
 remain usable; neither the capacity threshold nor timeout policy is changed.
+
+
+## Bounded inference verification in the production adapter
+
+`preflight_adapter.run_production_preflight` retains `wrapper.run_skill`'s static
+result and may attach a separate `inference_verification` evidence object.
+The resolved task `inference_preflight` policy is documented in the
+[composition reference](../../../../docs/reference/task-composition.md#inference-refusal-verification).
+`core.runtime_control.inference_verification_evidence` owns its typed decision;
+`inference_refusal_verification` owns dispatch and result accessors. Consumers
+must use `preflight_allows_execution` and `preflight_inference_batch` instead of
+inferring permission from the unchanged static `feasible` field.
+
+Only an ordered passing training decision followed by a sole inference VRAM
+refusal is eligible. One worker measures the final refused batch, reads bounded
+real evaluation batches and shares production construction/dtype/forward/output
+lifetimes. It uses remaining total preflight time and the same RSS/cap controls.
+Source identity is pinned before static dispatch, verified by both workers
+before/after execution, and checked in their replies. Device UUID, logical CUDA
+index, full request, realized identity and no remaining process group are
+required; wrong-device OOM is unavailable, not a capacity fact.
+
+Admission requires complete setup/work driver coverage and per-hold reservation
+acknowledgements bound to request/phase/sequence. Current reservation before and
+after each hold must match; its observed maximum must cover byte-exact phase
+reservation high-water. Driver/context and allocator bytes are not substituted
+for one another. Arbitrary non-allocator transients, other dataset values and
+trained-weight branches remain outside this bounded claim. Missing evidence
+raises the tuner's existing inconclusive-preflight path without shrink advice.
+
+`ExperimentMemory` and `PhysicalRejection` preserve the optional typed evidence;
+absent evidence is omitted from their serialization. Raw samples/journal remain
+in the external workspace, referenced by the compact record. The inference
+observation does not replace the subsequent training requirement-table entry.
+Historical consumers explicitly choose `static_only` in exp and qualify their
+arithmetic/rendering providers; native behavior does not infer historical mode.

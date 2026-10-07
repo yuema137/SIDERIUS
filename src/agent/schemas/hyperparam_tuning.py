@@ -44,6 +44,7 @@ from core.record_role import AttemptRole, RecordRoleError, is_formal_role
 # field did before. Same layering as proposal.py importing
 # core.hardware_context.
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.inference_verification_evidence import InferenceVerification
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from core.runtime_control.records import RuntimeObservation
 from core.runtime_control.training_budget import TrainingBudgetReceipt
@@ -201,6 +202,9 @@ class ExperimentTiming(BaseModel):
 
 
 class ExperimentMemory(BaseModel):
+    inference_verification: InferenceVerification | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
     static_preflight_evidence: StaticPreflightEvidence | None = Field(
         default=None, exclude_if=lambda v: v is None
     )
@@ -3402,6 +3406,9 @@ class PhysicalRejection(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    inference_verification: InferenceVerification | None = Field(
+        default=None, exclude_if=lambda v: v is None
+    )
     static_preflight_evidence: StaticPreflightEvidence | None = Field(
         default=None, exclude_if=lambda v: v is None
     )

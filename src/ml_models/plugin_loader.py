@@ -20,7 +20,7 @@ Plugin interface — each plugin file must define:
 import importlib.util
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from types import ModuleType
 from typing import get_args
@@ -227,7 +227,9 @@ def _plugin_attributes(module: ModuleType, path: str) -> dict | None:
     }
 
 
-def _resolve_plugin_dirs() -> list[str]:
+def _resolve_plugin_dirs(
+    *, environ: Mapping[str, str] | None = None, declared_roots: tuple[str, ...] | None = None
+) -> list[str]:
     """Return the ordered list of directories to scan for plugins.
 
     Priority:
@@ -263,15 +265,16 @@ def _resolve_plugin_dirs() -> list[str]:
     from core.generated_library import generated_library_is_workspace_bound, generated_models_dir
     from ml_models.plugin_binding import active_run_model_plugin_roots, union_plugin_roots
 
-    declared = active_run_model_plugin_roots()
-    env = os.environ.get(_PLUGIN_DIRS_ENV_VAR, "").strip()
+    environment = os.environ if environ is None else environ
+    declared = active_run_model_plugin_roots() if declared_roots is None else declared_roots
+    env = environment.get(_PLUGIN_DIRS_ENV_VAR, "").strip()
     if declared:
         return list(union_plugin_roots(declared, env))
     if env:
         return [p for p in env.split(os.pathsep) if p.strip()]
-    if generated_library_is_workspace_bound() or AGENT_GENERATED_DIR is None:
-        return [generated_models_dir()]
-    return [generated_models_dir(), AGENT_GENERATED_DIR]
+    if generated_library_is_workspace_bound(environ=environment) or AGENT_GENERATED_DIR is None:
+        return [generated_models_dir(environ=environment)]
+    return [generated_models_dir(environ=environment), AGENT_GENERATED_DIR]
 
 
 def _refuse_ambiguous_origins(origins: dict[str, list[str]], scanned: list[str]) -> None:

@@ -741,12 +741,23 @@ def run_skill(sandbox, **kwargs):
 
         inference_probe_input = kwargs.get("inference_probe_input")
         if inference_probe_input is not None:
+            from core.runtime_control.gpu_accounting import device_identity_from_hardware
+
+            identity = device_identity_from_hardware(hardware_context)
+            index = identity.logical_index if identity is not None else None
+            if index is None:
+                index = getattr(hardware_context, "device_index", None)
+            probe_device = (
+                (f"cuda:{index}" if index is not None else "cuda")
+                if hardware_context.device_available
+                else "cpu"
+            )
             _check_task_inference_input(
                 model_for_train,
                 inference_probe_input,
                 model_type=model_type,
                 contract=model_io_contract,
-                device=torch.device("cuda" if hardware_context.device_available else "cpu"),
+                device=torch.device(probe_device),
                 timeout_seconds=probe_budgets.single_probe_seconds,
             )
 

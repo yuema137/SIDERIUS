@@ -182,5 +182,5 @@ class TestTheProductionPathUsesTheTable:
         assert "_raise_if_preflight_blocks" in code
         # The capacity read may remain, but only downstream of the resolver.
         assert code.index("_raise_if_preflight_blocks(resource_check)") < code.index(
-            'resource_check.get("feasible"'
+            "preflight_allows_execution(resource_check)"
         )

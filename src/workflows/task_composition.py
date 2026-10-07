@@ -81,6 +81,11 @@ from agent.prompt_rendering import (
 )
 from agent.schemas.hyperparam_tuning import TaskCompositionRef
 from agent.schemas.parameter_rules import ParameterRules
+from core.inference_preflight_policy import (
+    InferencePreflightPolicy,
+    active_inference_preflight_policy,
+    bind_inference_preflight_policy,
+)
 from core.local_code import (
     CapturedCodePackage,
     MemberIdentity,
@@ -142,6 +147,7 @@ _MANIFEST_KEYS = frozenset(
         "data_analysis",
         "prompt_renderer",
         "preflight_estimator",
+        "inference_preflight",
         "code_package",
     }
 )
@@ -349,6 +355,8 @@ class RunTaskComposition:
 
     data_analysis: Any = None
     """Optional edge-owned Data Analysis workflow policy, resolved and pinned."""
+
+    inference_preflight: InferencePreflightPolicy = field(default_factory=InferencePreflightPolicy)
 
     preflight_estimator: PreflightEstimatorProfile = field(
         default_factory=resolve_preflight_estimator
@@ -2082,6 +2090,7 @@ def compute_semantic_fingerprint(
     data_analysis: Any = None,
     prompt_renderer_identity: PromptRenderingIdentity | None = None,
     preflight_estimator_identity: PreflightEstimatorIdentity | None = None,
+    inference_preflight: InferencePreflightPolicy | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -2157,6 +2166,9 @@ def compute_semantic_fingerprint(
     # Every new run pins estimation arithmetic, including the native default.
     # Historical locks remain readable, but cannot silently resume with a
     # different accounting policy; migration creates a new workspace.
+    payload["inference_preflight"] = (inference_preflight or InferencePreflightPolicy()).model_dump(
+        mode="json"
+    )
     payload["preflight_estimator"] = (
         preflight_estimator_identity or resolve_preflight_estimator().identity()
     ).model_dump(mode="json")
@@ -2779,6 +2791,9 @@ def _compose_resolved_task_bindings(
             "composing an unpinned fingerprint (arXiv #255)."
         )
 
+    inference_preflight = InferencePreflightPolicy.model_validate(
+        raw.get("inference_preflight", {})
+    )
     estimator_selection = raw.get("preflight_estimator")
     if "preflight_estimator" in raw and (
         not isinstance(estimator_selection, str) or not estimator_selection
@@ -2828,6 +2843,7 @@ def _compose_resolved_task_bindings(
         data_analysis=data_analysis,
         prompt_renderer_identity=prompt_renderer_identity,
         preflight_estimator_identity=preflight_estimator_identity,
+        inference_preflight=inference_preflight,
     )
 
     return RunTaskComposition(
@@ -2860,6 +2876,7 @@ def _compose_resolved_task_bindings(
         preflight_estimator=preflight_estimator,
         prompt_renderer_identity=prompt_renderer_identity,
         preflight_estimator_identity=preflight_estimator_identity,
+        inference_preflight=inference_preflight,
     )
 
 
@@ -3099,6 +3116,7 @@ def bind_run_task_composition(
                 composition.prompt_renderer, expected=composition.prompt_renderer_identity
             )
         )
+        stack.enter_context(bind_inference_preflight_policy(composition.inference_preflight))
         stack.enter_context(
             bind_preflight_estimator(
                 composition.preflight_estimator, expected=composition.preflight_estimator_identity
@@ -3138,6 +3156,8 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
     from workflows.task_config import resolve_bound_task_config
 
     unbound: list[str] = []
+    if active_inference_preflight_policy() != composition.inference_preflight:
+        unbound.append("inference_preflight")
     if active_preflight_identity() != composition.preflight_estimator_identity:
         unbound.append("preflight_estimator")
     if active_prompt_identity() != composition.prompt_renderer_identity:

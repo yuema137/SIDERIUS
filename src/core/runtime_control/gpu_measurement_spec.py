@@ -40,11 +40,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.model_io_contract import ModelIOContract
 from core.capability_registry import CapabilityContractSnapshot
+from core.runtime_control.gpu_measurement_hold import ObservedReservation
 from core.runtime_control.gpu_measurement_identity import RealizedCandidateIdentity
 from core.runtime_control.gpu_requirement import (
     CandidateMeasurementRequest,
     MeasuredPhase,
 )
+from core.runtime_control.inference_measurement_binding import InferenceMeasurementBinding
 from execute_tools.dataset_config import DatasetProfile
 from execute_tools.task_data_path import TaskProbeDataSpec
 
@@ -91,6 +93,7 @@ class GpuMeasurementSpec(BaseModel):
 
     label: str = Field(min_length=1)
     request: CandidateMeasurementRequest
+    inference_binding: InferenceMeasurementBinding | None = None
 
     #: The candidate exactly as production would construct it. These are
     #: the same three payloads the trainer receives.
@@ -202,6 +205,8 @@ class GpuMeasurementSpec(BaseModel):
     #: `min_authoritative_samples` valid in-phase samples. The worker
     #: leaves the phase when it appears.
     phase_complete_path: str | None = None
+    setup_complete_path: str | None = None
+    reservation_ack_path: str | None = None
     #: The parent touches this once it has taken a real sample. The worker
     #: waits for it before opening a timed phase, so a phase can never be
     #: measured before anything is watching.
@@ -386,6 +391,8 @@ class PhaseExecutionReport(BaseModel):
 
     allocator_peak_mib: int | None = Field(default=None, ge=0)
     allocator_reserved_peak_mib: int | None = Field(default=None, ge=0)
+    allocator_reserved_peak_bytes: int | None = Field(default=None, ge=0)
+    observed_reservations: tuple[ObservedReservation, ...] = ()
 
     #: What the phase actually completed, so a short phase is visible as
     #: short rather than being read as a full one.
@@ -436,6 +443,7 @@ class WorkerMeasurementReport(BaseModel):
 
     label: str = Field(min_length=1)
     request: CandidateMeasurementRequest
+    inference_binding: InferenceMeasurementBinding | None = None
     status: WorkerStatus
 
     device: str = Field(min_length=1)

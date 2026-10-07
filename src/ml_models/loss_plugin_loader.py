@@ -45,6 +45,7 @@ import ast
 import importlib.util
 import os
 import sys
+from collections.abc import Mapping
 from types import ModuleType
 from typing import Any
 
@@ -307,7 +308,7 @@ def _loss_attributes(module: ModuleType, path: str) -> dict[str, Any] | None:
     }
 
 
-def _resolve_loss_dirs() -> list[str]:
+def _resolve_loss_dirs(*, environ: Mapping[str, str] | None = None) -> list[str]:
     """Return the ordered list of directories to scan for loss plugins.
 
     L6c — **union mode**. When ``SIDERIUS_LOSS_DIRS`` is set, returns the
@@ -338,10 +339,11 @@ def _resolve_loss_dirs() -> list[str]:
     # loader must stay importable in trimmed contexts exactly as before).
     from core.generated_library import generated_library_is_workspace_bound, generated_losses_dir
 
-    library_dirs = [generated_losses_dir()]
-    if not generated_library_is_workspace_bound() and LOSSES_DIR is not None:
+    environment = os.environ if environ is None else environ
+    library_dirs = [generated_losses_dir(environ=environment)]
+    if not generated_library_is_workspace_bound(environ=environment) and LOSSES_DIR is not None:
         library_dirs.append(LOSSES_DIR)
-    env = os.environ.get(_LOSS_DIRS_ENV_VAR, "").strip()
+    env = environment.get(_LOSS_DIRS_ENV_VAR, "").strip()
     if env:
         env_dirs = [p for p in env.split(os.pathsep) if p.strip()]
         # L6c union: workspace dirs first, library dirs last. The library is

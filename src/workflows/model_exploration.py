@@ -603,6 +603,13 @@ def _render_physical_rejection(rej: PhysicalRejection, n_rejections: int) -> str
     """
     model_type = str(rej.attempt_config.get("model_type", "unknown"))
     plural = "s" if n_rejections != 1 else ""
+    if rej.inference_verification is not None:
+        return (
+            f"[PHYSICAL REJECTION] {model_type}: rejected {n_rejections} attempt{plural}.\n"
+            f"  {rej.inference_verification.assessment[1]}\n"
+            f"  Attempted config: {rej.attempt_config}.\n"
+            f"  Suggestion: {rej.suggestion}"
+        )
     if rej.static_preflight_evidence is not None:
         return (
             f"[PHYSICAL REJECTION] {model_type}: rejected {n_rejections} attempt{plural}.\n"

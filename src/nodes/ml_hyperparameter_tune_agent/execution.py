@@ -39,7 +39,6 @@ from agent.schemas.ordering import OrderingObservation, OrderingRefusalPhase, Re
 from agent.schemas.preflight import StaticPreflightEvidence
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.training_diagnosis import derive_training_diagnosis
-from agent.skills.evaluate_vram_skill.evidence import render_static_refusal
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from core.layout import checkout_root
 from core.record_role import AttemptRole, observed_attempt_role
@@ -528,10 +527,18 @@ def run_admission_preflight(
         )
         return AdmissionOutcome.next_attempt()
 
-    if not resource_check.get("feasible", True):
+    from core.runtime_control.inference_refusal_verification import (
+        preflight_allows_execution,
+        preflight_inference_batch,
+        preflight_refusal_detail,
+        preflight_refusal_suggestion,
+        verification_from_result,
+    )
+
+    if not preflight_allows_execution(resource_check):
         print("Resource check FAILED — this attempt does NOT count as a round.")
-        print(f"   Verdict   : {resource_check.get('verdict', '')}")
-        print(f"   Suggestion: {resource_check.get('suggestion', '')}")
+        print(f"   Verdict   : {preflight_refusal_detail(resource_check)}")
+        print(f"   Suggestion: {preflight_refusal_suggestion(resource_check)}")
 
         # Phase 6.6 WS-B B.3 Hop 2 — capture this rejection
         # into the per-run buffer so the orchestrator can
@@ -575,6 +582,7 @@ def run_admission_preflight(
                 PhysicalRejection.model_validate(
                     {
                         "static_preflight_evidence": _evidence,
+                        "inference_verification": verification_from_result(resource_check),
                         "attempt_config": _attempt_snapshot,
                         "binding_cap": _binding,
                         "dominant_layer": _killer.get("dominant_layer") or "",
@@ -582,7 +590,7 @@ def run_admission_preflight(
                         "dominant_fraction": _killer.get("dominant_fraction") or 0.0,
                         "budget_gb": float(resource_check.get("limit_gb") or 0.0),
                         "estimated_gb": resource_check.get("estimated_gb"),
-                        "suggestion": resource_check.get("suggestion", ""),
+                        "suggestion": preflight_refusal_suggestion(resource_check),
                     }
                 )
             )
@@ -603,16 +611,9 @@ def run_admission_preflight(
             hypothesis=hypothesis,
             round_index=round_index,
             attempt_in_round=attempt_in_round,
-            conclusion=(
-                "Skipped: " + render_static_refusal(_evidence)
-                if _evidence is not None
-                else "Skipped by resource preflight: "
-                + str(resource_check.get("verdict", "No decision evidence recorded."))
-            ),
-            discovery=resource_check.get("verdict", ""),
-            memory_update=resource_check.get(
-                "suggestion", "Inspect the recorded refusal evidence before changing the candidate."
-            ),
+            conclusion="Skipped: " + preflight_refusal_detail(resource_check),
+            discovery=preflight_refusal_detail(resource_check),
+            memory_update=preflight_refusal_suggestion(resource_check),
             memory_extra=_vram_skip_memory_extra(resource_check, chosen_vram_budget),
         )
         _emit_attempt_record(
@@ -633,7 +634,7 @@ def run_admission_preflight(
     # registry default). ``inference_batch`` is always present on
     # a feasible resource_check; fall back to None (executor's
     # back-compat path) if the wrapper somehow omits it.
-    chosen_inference_batch = resource_check.get("inference_batch")
+    chosen_inference_batch = preflight_inference_batch(resource_check)
     active_params["inference_batch"] = chosen_inference_batch
     record_params["inference_batch"] = chosen_inference_batch
 

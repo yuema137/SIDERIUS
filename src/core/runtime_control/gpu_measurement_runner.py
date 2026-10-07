@@ -51,6 +51,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.runtime_control.gpu_accounting import DeviceIdentity, GpuAccountingSnapshot
 from core.runtime_control.gpu_accounting import sample as sample_device
+from core.runtime_control.gpu_measurement_hold import (
+    ObservedReservation,
+    acknowledge_reservation,
+    bind_reservation_samples,
+)
 from core.runtime_control.gpu_measurement_identity import RealizedCandidateIdentity
 from core.runtime_control.gpu_measurement_sampler import GpuTreeSampler, TreeMemorySample
 from core.runtime_control.gpu_measurement_spec import (
@@ -67,9 +72,11 @@ from core.runtime_control.gpu_requirement import (
     MeasurementDeadline,
     SamplingCoverage,
 )
+from core.runtime_control.inference_measurement_binding import InferenceMeasurementBinding
 from core.runtime_control.process_group import (
     process_group_alive,
     signal_group,
+    terminate_remaining_group,
     tree_rss_bytes,
 )
 
@@ -93,6 +100,7 @@ class ProcessEvidence(BaseModel):
     #: Something in the group outlived the reap. It may still hold the
     #: device, so this is never silently ignored.
     orphans_remaining: bool = False
+    group_cleanup_required: bool = False
 
 
 class HostMemoryBound(BaseModel):
@@ -127,6 +135,8 @@ class PhaseMeasurement(BaseModel):
     #: Diagnostics. Per-process and allocator-visible; never the authority.
     allocator_peak_mib: int | None = Field(default=None, ge=0)
     allocator_reserved_peak_mib: int | None = Field(default=None, ge=0)
+    allocator_reserved_peak_bytes: int | None = Field(default=None, ge=0)
+    observed_reservations: tuple[ObservedReservation, ...] = ()
     allocator_source: str = ALLOCATOR_SOURCE
 
     coverage: SamplingCoverage
@@ -164,6 +174,7 @@ class PrephaseMeasurementRun(BaseModel):
 
     label: str
     request: CandidateMeasurementRequest
+    inference_binding: InferenceMeasurementBinding | None = None
 
     #: `None` when the worker produced no structured report at all.
     worker_status: WorkerStatus | None = None
@@ -220,6 +231,7 @@ def run_prephase_measurement(
     device_sampler: Callable[..., GpuAccountingSnapshot] = sample_device,
     clock: Callable[[], float] = time.time,
     elapsed_clock: Callable[[], float] = time.monotonic,
+    deadline_at: float | None = None,
 ) -> PrephaseMeasurementRun:
     """Run one bounded measurement and return what it established.
 
@@ -237,6 +249,17 @@ def run_prephase_measurement(
     Never raises for anything it can observe. A launch failure, a hung
     worker and a crashed worker are all recorded outcomes.
     """
+    started = elapsed_clock()
+    deadline_seconds = spec.request.deadline_seconds
+    if deadline_at is not None:
+        remaining = deadline_at - started
+        if remaining <= 0:
+            return _launch_failure(
+                spec,
+                deadline_seconds,
+                TimeoutError("total preflight budget expired before measurement dispatch"),
+            )
+        deadline_seconds = min(deadline_seconds, remaining)
     result_path = Path(spec.result_path)
     spec_path = result_path.with_suffix(".spec.json")
     log_path = result_path.with_suffix(".worker.log")
@@ -255,17 +278,25 @@ def run_prephase_measurement(
         ready_path.unlink()
     # D-C2-14. The parent ends the phase, because the parent is the only
     # component that knows how many valid in-phase samples actually landed.
-    complete_path = Path(spec.phase_complete_path) if spec.phase_complete_path else None
-    if complete_path is not None and complete_path.exists():
-        complete_path.unlink()
+    completion_paths = {
+        phase: Path(path)
+        for phase, path in (
+            (spec.phase, spec.phase_complete_path),
+            ("setup", spec.setup_complete_path),
+        )
+        if path is not None
+    }
+    for marker in completion_paths.values():
+        marker.unlink(missing_ok=True)
     journal_path = Path(spec.journal_path)
+    reservation_ack = Path(spec.reservation_ack_path) if spec.reservation_ack_path else None
+    if reservation_ack is not None:
+        reservation_ack.unlink(missing_ok=True)
 
     argv = [
         *(command or [sys.executable, "-m", "core.runtime_control.gpu_measurement_worker_main"]),
         str(spec_path),
     ]
-    deadline_seconds = spec.request.deadline_seconds
-    started = elapsed_clock()
     log_handle = log_path.open("w", encoding="utf-8")
     try:
         # The worker is a CLEAN process: it rebuilds the plugin registry
@@ -294,6 +325,9 @@ def run_prephase_measurement(
         raise_if_code_package_failure(exc)
         return _launch_failure(spec, deadline_seconds, exc)
 
+    if deadline_at is None:
+        # Preserve the existing training measurement clock boundary.
+        started = elapsed_clock()
     pgid = process.pid  # session leader, so pgid == pid
     sampler = GpuTreeSampler(
         pgid,
@@ -315,6 +349,14 @@ def run_prephase_measurement(
         rss = tree_rss_bytes(pgid)
         peak_rss = max(peak_rss, rss)
         taken = sampler.poll()
+        if reservation_ack is not None:
+            acknowledge_reservation(
+                journal_path=journal_path,
+                ack_path=reservation_ack,
+                samples=sampler.samples,
+                minimum_samples=spec.min_authoritative_samples,
+                request_id=spec.request.request_id,
+            )
         if (
             ready_path is not None
             and not ready_path.exists()
@@ -326,16 +368,17 @@ def run_prephase_measurement(
             ready_path.parent.mkdir(parents=True, exist_ok=True)
             ready_path.touch()
 
-        if complete_path is not None and not complete_path.exists():
-            # Count only samples inside the OPEN phase window, read from
-            # the journal the worker flushes as it crosses the boundary.
-            # Samples before the phase opened describe a different phase.
-            opened_at = _phase_opened_at(journal_path, spec.phase)
+        for measured_phase, complete_path in completion_paths.items():
+            if complete_path.exists():
+                continue
+            opened_at = _phase_opened_at(journal_path, measured_phase)
             if opened_at is not None:
                 in_phase = sum(
                     1
-                    for s in sampler.samples
-                    if s.at >= opened_at and s.telemetry_available and s.own_tree_mib is not None
+                    for sample in sampler.samples
+                    if sample.at >= opened_at
+                    and sample.telemetry_available
+                    and sample.own_tree_mib is not None
                 )
                 if in_phase >= spec.min_authoritative_samples:
                     complete_path.parent.mkdir(parents=True, exist_ok=True)
@@ -359,6 +402,19 @@ def run_prephase_measurement(
             break
         time.sleep(poll_seconds)
 
+    group_cleanup_required = False
+    if spec.inference_binding is not None and process_group_alive(pgid):
+        group_cleanup_required = True
+        cleanup_term, cleanup_kill = terminate_remaining_group(
+            pgid,
+            grace_seconds=grace_seconds,
+            poll_seconds=poll_seconds,
+        )
+        term_sent = term_sent or cleanup_term
+        kill_sent = kill_sent or cleanup_kill
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=grace_seconds)
+
     # One last look before the tree is gone: memory held at the very end
     # would otherwise fall outside the watch.
     sampler.poll(force=True)
@@ -369,6 +425,18 @@ def run_prephase_measurement(
     returncode = process.returncode
     invocation.check(returncode)
     report = _load_report(result_path)
+    if (
+        report is not None
+        and spec.inference_binding is not None
+        and (report.request != spec.request or report.inference_binding != spec.inference_binding)
+    ):
+        report = report.model_copy(
+            update={
+                "status": "WORKER_FAILURE",
+                "inference_binding": None,
+                "detail": "inference measurement reply does not match its full dispatched request",
+            }
+        )
     journal = _load_journal(Path(spec.journal_path))
 
     phases: list[PhaseMeasurement] = []
@@ -385,6 +453,13 @@ def run_prephase_measurement(
                     driver_tree_peak_mib=window.driver_tree_peak_mib,
                     allocator_peak_mib=phase_report.allocator_peak_mib,
                     allocator_reserved_peak_mib=phase_report.allocator_reserved_peak_mib,
+                    allocator_reserved_peak_bytes=phase_report.allocator_reserved_peak_bytes,
+                    observed_reservations=tuple(
+                        bind_reservation_samples(
+                            hold, sampler.samples, minimum_samples=spec.min_authoritative_samples
+                        )
+                        for hold in phase_report.observed_reservations
+                    ),
                     coverage=window.coverage,
                     own_pids=window.own_pids,
                     max_concurrent_own_processes=window.max_concurrent_own_processes,
@@ -406,6 +481,7 @@ def run_prephase_measurement(
         label=spec.label,
         request=spec.request,
         worker_status=report.status if report is not None else None,
+        inference_binding=report.inference_binding if report is not None else None,
         report_present=report is not None,
         observed_device_uuid=report.observed_device_uuid if report is not None else None,
         device_name=report.device_name if report is not None else None,
@@ -429,6 +505,7 @@ def run_prephase_measurement(
             term_sent=term_sent,
             kill_sent=kill_sent,
             orphans_remaining=process_group_alive(pgid),
+            group_cleanup_required=group_cleanup_required,
         ),
         samples=sampler.samples,
         journal=journal,

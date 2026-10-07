@@ -24,6 +24,8 @@ itself become the memory problem.
 from __future__ import annotations
 
 import os
+import signal
+import time
 
 
 def tree_rss_bytes(pgid: int) -> int:
@@ -78,3 +80,26 @@ def signal_group(pgid: int, sig: int) -> bool:
     except (ProcessLookupError, PermissionError):
         return False
     return True
+
+
+def terminate_remaining_group(
+    pgid: int,
+    *,
+    grace_seconds: float,
+    poll_seconds: float,
+) -> tuple[bool, bool]:
+    """Bound cleanup by group liveness, even after its leader has exited.
+
+    The caller owns/reaps its direct child. Grandchildren may need the host's
+    reaper; final group presence remains separately recorded as uncertainty.
+    """
+    if not process_group_alive(pgid):
+        return False, False
+    term_sent = signal_group(pgid, signal.SIGTERM)
+    until = time.monotonic() + grace_seconds
+    while process_group_alive(pgid) and time.monotonic() < until:
+        time.sleep(min(poll_seconds, max(0.0, until - time.monotonic())))
+    kill_sent = False
+    if process_group_alive(pgid):
+        kill_sent = signal_group(pgid, signal.SIGKILL)
+    return term_sent, kill_sent

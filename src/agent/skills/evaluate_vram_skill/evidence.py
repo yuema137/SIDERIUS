@@ -85,7 +85,13 @@ def preflight_memory_fields(resource_check: dict[str, Any]) -> dict[str, Any]:
     expected = "STATIC_PREFLIGHT_REFUSAL" if evidence.binding_caps else "COMPLETED_MEASUREMENT"
     if outcome != expected:
         raise ValueError("Static preflight outcome contradicts its decision evidence")
-    return {
+    result = {
         "static_preflight_evidence": evidence.model_dump(mode="json"),
         "preflight_outcome": outcome,
     }
+    from core.runtime_control.inference_refusal_verification import verification_from_result
+
+    verification = verification_from_result(resource_check)
+    if verification is not None:
+        result["inference_verification"] = verification.model_dump(mode="json")
+    return result

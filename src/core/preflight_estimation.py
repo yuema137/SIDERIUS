@@ -38,10 +38,42 @@ def estimation_assembly_digest() -> str:
     """Bind observation production, transport and decision consumption."""
     root = Path(__file__).resolve().parents[1]
     paths = list((root / "agent/skills/evaluate_vram_skill").glob("*.py"))
+    paths += list((root / "ml_models").rglob("*.py"))
     paths += [
         root / name
         for name in (
             "core/preflight_observations.py",
+            "core/runtime_control/gpu_measurement_hold.py",
+            "core/inference_preflight_policy.py",
+            "core/runtime_control/inference_measurement_binding.py",
+            "core/runtime_control/inference_refusal_verification.py",
+            "core/runtime_control/inference_verification_evidence.py",
+            "core/runtime_control/gpu_inference_components.py",
+            "core/runtime_control/gpu_measurement_spec.py",
+            "core/runtime_control/gpu_measurement_identity.py",
+            "core/runtime_control/gpu_measurement_worker_main.py",
+            "core/runtime_control/gpu_measurement_phases.py",
+            "core/runtime_control/gpu_measurement_runner.py",
+            "core/runtime_control/gpu_measurement_sampler.py",
+            "core/runtime_control/gpu_measurement_classifier.py",
+            "core/runtime_control/gpu_requirement.py",
+            "core/runtime_control/gpu_accounting.py",
+            "core/runtime_control/process_group.py",
+            "core/subprocess_env.py",
+            "execute_tools/inference_model.py",
+            "execute_tools/inference_stream.py",
+            "execute_tools/inference_forward.py",
+            "execute_tools/model_input_dtype.py",
+            "execute_tools/generic_inference.py",
+            "execute_tools/inference_single.py",
+            "ml_models/plugin_loader.py",
+            "ml_models/loss_plugin_loader.py",
+            "nodes/ml_hyperparameter_tune_agent/execution.py",
+            "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+            "nodes/ml_hyperparameter_tune_agent/runtime.py",
+            "nodes/ml_hyperparameter_tune_agent/feedback.py",
+            "agent/schemas/hyperparam_tuning.py",
+            "workflows/model_exploration.py",
             "core/preflight_estimation.py",
             "core/planner_strategy_identity.py",
             "agent/schemas/preflight.py",

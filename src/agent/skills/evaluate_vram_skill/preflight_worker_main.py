@@ -243,6 +243,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[worker] effective VRAM limit {budget} GB (source: {limit_source})", flush=True)
 
     try:
+        from core.runtime_control.inference_measurement_binding import (
+            MeasurementSources,
+            verify_measurement_sources,
+        )
+
+        sources = (
+            MeasurementSources.model_validate(spec["candidate_sources"])
+            if spec.get("candidate_sources") is not None
+            else None
+        )
+        if sources is not None:
+            verify_measurement_sources(sources)
         from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets
         from agent.skills.evaluate_vram_skill.wrapper import run_skill
         from core.preflight_estimation import (
@@ -298,6 +310,8 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 probe_budgets=ProbeBudgets.model_validate(spec.get("probe_budgets") or {}),
             )
+        if sources is not None:
+            verify_measurement_sources(sources)
     except BaseException as exc:
         raise_if_code_package_failure(exc)
         from agent.skills.evaluate_vram_skill.probe_budgets import (
@@ -342,7 +356,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    _write(result_path, _classify(outcome))
+    result = _classify(outcome)
+    if sources is not None:
+        result["candidate_sources"] = sources.model_dump(mode="json")
+    _write(result_path, result)
     return 0
 
 

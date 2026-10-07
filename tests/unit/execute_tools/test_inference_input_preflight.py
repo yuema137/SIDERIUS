@@ -157,3 +157,52 @@ def test_worker_wrapper_rejects_bad_validation_forward_before_training_probe(rej
         assert outcome["status"] == "success"
     training_probe.assert_not_called()
     assert model.training
+
+
+@pytest.mark.parametrize("transported", [False, True])
+def test_initial_input_check_targets_the_declared_device(transported):
+    """A CUDA-1 run must not inspect its real input on implicit CUDA-0."""
+    from agent.skills.evaluate_vram_skill.preflight_adapter import build_hardware_snapshot
+    from core.hardware_context import GpuDeviceProvenance
+    from tests.unit.agent.evaluate_vram_skill.test_wrapper_contract import _gpu_ctx
+
+    hardware = _gpu_ctx().model_copy(
+        update={
+            "active_device_uuid": "GPU-target",
+            "devices": [
+                GpuDeviceProvenance(
+                    logical_index=1,
+                    name="synthetic",
+                    total_memory_bytes=2**30,
+                    compute_capability=(9, 0),
+                    uuid="GPU-target",
+                    physical_index=1,
+                )
+            ],
+        }
+    )
+    if transported:
+        hardware = build_hardware_snapshot(hardware)
+    seen = []
+
+    def observe(*args, **kwargs):
+        seen.append(str(kwargs["device"]))
+        raise RuntimeError("stop after observing device; no GPU work")
+
+    with (
+        patch.object(wrapper, "_build_model", return_value=torch.nn.Linear(4, 1)),
+        patch.object(wrapper, "get_criterion", return_value=torch.nn.MSELoss()),
+        patch.object(wrapper, "_check_task_inference_input", side_effect=observe),
+        pytest.raises(RuntimeError, match="stop after observing device"),
+    ):
+        wrapper.run_skill(
+            None,
+            model_type="strict_fixture",
+            model_config={"segmentation_size": 4},
+            train_config={"batch_size": 1},
+            loss_config={"loss_type": "smooth_l1"},
+            model_io_contract=regressor_model_io(),
+            hardware_context=hardware,
+            inference_probe_input=torch.zeros(1, 4, dtype=torch.int16),
+        )
+    assert seen == ["cuda:1"]

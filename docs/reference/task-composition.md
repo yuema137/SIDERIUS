@@ -47,6 +47,7 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `static_observables` | — | quantities read off the TRAINED model after training | the run observes none: no record key, no rendered bytes |
 | `parameter_rules` | — | deterministic constraints on configured parameter leaves | no task-declared parameter constraints |
 | `data_analysis` | — | optional analysis topology plus a caller-owned policy/config reference | no brief call, analysis node, report, or identity change |
+| `inference_preflight` | — | bounded verification after an inference-only structural refusal | `mode: bounded_measurement`, `max_batches: 3`; resolved policy is pinned |
 | `preflight_estimator` | — | installed, versioned structural-estimation provider | native `registered-state-v1`, always pinned |
 | `prompt_renderer` | — | installed, versioned rendering provider | native messages and existing identity serialization |
 | `code_package` | — | one finite, content-pinned set of task-local Python files | existing independent file loading and identities, without task-relative helper imports |
@@ -755,3 +756,39 @@ probe data. The provider owns arithmetic only. The framework retains sampling,
 candidate batches, resource caps, intensity checks, admission and failure domains.
 See [the estimation contract](preflight-estimation.md) for source qualification,
 input/output schemas, known estimation limits and migration boundaries.
+
+
+### Inference refusal verification
+
+The independent `inference_preflight` declaration chooses how to handle an
+inference VRAM estimate that refuses after training checks passed:
+
+```yaml
+inference_preflight:
+  mode: bounded_measurement
+  max_batches: 3
+```
+
+These are the resolved native defaults. The adapter measures at most this many
+real evaluation batches at the final refused batch size, in one isolated worker.
+It does not search for another batch or override training, compute-intensity,
+schema or missing-evidence failures. The worker spends the remaining preflight
+time and uses the same host-memory and VRAM limits. Empty or absent evaluation
+data, changed source/device identity, incomplete telemetry or cleanup failures
+cannot clear the refusal. A dataset constructor may read beyond the selected
+batches; the existing process memory and time limits still bound that work.
+
+`mode: static_only` explicitly preserves structural refusal without the extra
+worker. Historical experiment packages own selecting this mode together with
+their qualified estimation/rendering plugins. Installing a plugin alone never
+selects this policy. Both fields enter task identity, so changing either needs a
+new workspace; archived records remain unchanged. The standalone native adapter
+uses the same default unless the caller explicitly binds a policy.
+
+The separate `memory.inference_verification` record describes the observed
+evaluation coverage, request/source/device identity and resulting decision.
+The original static evidence remains a refused estimate even when bounded
+verification permits execution. Raw driver samples and the journal are stored
+under the workspace's `preflight_workers/inference_verification/` directory.
+An admitted sample does not certify every later input, trained weight or
+non-allocator transient; normal execution safeguards remain necessary.

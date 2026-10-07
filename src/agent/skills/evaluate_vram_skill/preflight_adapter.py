@@ -16,13 +16,11 @@ Division of responsibility, deliberately strict:
 
 * the **worker** inspects or measures, and forwards the agent-facing text the skill
   already produced (`KillerReport.verdict` / `.suggestion`);
-* this **adapter** maps and forwards. It composes no operator-facing
-  prose, decides no policy, and derives no downsizing recommendation.
-
-That split matters more than it looks. Two text generators — one in the
-skill, one here — would drift, and they would drift in the feedback the
-agent acts on, where nobody is reading. So the rule is: **if a string
-reaches the agent, it came from the worker.**
+* this **adapter** maps and forwards structural results, then dispatches the
+  task-bound inference verification policy for an eligible refusal;
+* `inference_verification_evidence` owns the separate measured admission
+  decision. Structural observations are retained unchanged, and unavailable
+  measurements never become downsizing recommendations.
 
 Two invariants this module exists to hold:
 
@@ -36,6 +34,7 @@ Two invariants this module exists to hold:
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
@@ -117,6 +116,9 @@ def build_hardware_snapshot(hardware_context: Any) -> HardwareSnapshot:
         or getattr(hardware_context, "fingerprint", None)
         or f"{hardware_context.device_name}|{hardware_context.total_memory_bytes}"
     )
+    from core.runtime_control.gpu_accounting import device_identity_from_hardware
+
+    device = device_identity_from_hardware(hardware_context)
     return HardwareSnapshot(
         usable_cap_bytes=int(hardware_context.usable_cap_bytes),
         usable_cap_gb=float(hardware_context.usable_cap_gb),
@@ -125,7 +127,11 @@ def build_hardware_snapshot(hardware_context: Any) -> HardwareSnapshot:
         device_name=str(hardware_context.device_name),
         device_available=bool(hardware_context.device_available),
         hardware_fingerprint=str(fingerprint),
-        device_index=int(getattr(hardware_context, "logical_index", 0) or 0),
+        device_index=(
+            device.logical_index
+            if device is not None and device.logical_index is not None
+            else int(getattr(hardware_context, "logical_index", 0) or 0)
+        ),
         cuda_visible_devices=os.environ.get("CUDA_VISIBLE_DEVICES"),
     )
 
@@ -277,6 +283,17 @@ def run_production_preflight(
     It is independent of the GPU VRAM ceiling and a breach remains inconclusive
     rather than evidence that the model is too large for the GPU.
     """
+    from core.inference_preflight_policy import active_inference_preflight_policy
+    from core.runtime_control.inference_measurement_binding import measurement_sources
+    from core.subprocess_env import subprocess_env
+
+    started = time.monotonic()
+    policy = active_inference_preflight_policy()
+    sources = (
+        measurement_sources(environ=subprocess_env(plugin_dir=plugin_dir, loss_dir=loss_dir))
+        if policy.mode == "bounded_measurement"
+        else None
+    )
     snapshot = build_hardware_snapshot(hardware_context)
     workdir = Path(workspace) / "preflight_workers"
     budgets = ProbeBudgets(
@@ -285,6 +302,7 @@ def run_production_preflight(
     )
     spec = IsolatedProbeSpec(
         label=label,
+        candidate_sources=sources,
         model_type=model_type,
         model_config_payload=dict(model_config or {}),
         train_config=dict(train_config or {}),
@@ -315,6 +333,22 @@ def run_production_preflight(
     result["effective_vram_limit_gb"] = spec.effective_cap_gb()
     result["effective_limit_source"] = spec.effective_limit_source()
     result["operator_vram_budget_gb"] = vram_budget_gb
+    from core.runtime_control.inference_refusal_verification import (
+        eligible_inference_refusal,
+        verify_inference_refusal,
+    )
+
+    if policy.mode == "bounded_measurement" and probe.outcome == "STATIC_PREFLIGHT_REFUSAL":
+        evidence = probe.static_preflight_evidence
+        if evidence is not None and eligible_inference_refusal(evidence) is not None:
+            verification = verify_inference_refusal(
+                static_evidence=evidence,
+                static_spec=spec,
+                hardware_context=hardware_context,
+                policy=policy,
+                deadline_at=started + budgets.preflight_total_seconds,
+            )
+            result["inference_verification"] = verification.model_dump(mode="json")
     return result
 
 

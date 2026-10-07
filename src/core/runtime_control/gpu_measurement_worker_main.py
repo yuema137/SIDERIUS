@@ -515,6 +515,7 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
     `trace` is an optional `MilestoneTracer` (V20 PR C2, validation only).
     `None` in production; nothing here calls it when absent.
     """
+    worker_deadline = time.monotonic() + spec.request.deadline_seconds
     base: dict[str, Any] = {
         "label": spec.label,
         "request": spec.request,
@@ -522,6 +523,15 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
         "worker_pid": os.getpid(),
         "request_id": spec.request.request_id,
     }
+    if spec.inference_binding is not None:
+        from core.runtime_control.inference_measurement_binding import inference_measurement_binding
+
+        actual_binding = inference_measurement_binding(spec)
+        if spec.phase != "inference" or actual_binding != spec.inference_binding:
+            raise ValueError(
+                "inference measurement request/source binding mismatch before execution"
+            )
+        base["inference_binding"] = actual_binding
 
     resolution = resolve_device(spec)
     if resolution.status is not None:
@@ -553,29 +563,71 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
             detail=rejection[:400],
         )
 
+    journal = PhaseJournal(spec.journal_path)
+    setup_reservation = inference_reservation = None
+    if spec.inference_binding is not None:
+        from core.runtime_control.gpu_measurement_hold import reservation_observer
+
+        if spec.reservation_ack_path is None:
+            raise ValueError(
+                "Bound inference measurement requires a reservation acknowledgement path"
+            )
+        setup_reservation = reservation_observer(
+            device=spec.device,
+            journal=journal,
+            phase="setup",
+            request_id=spec.request.request_id,
+            ack_path=spec.reservation_ack_path,
+            timeout_seconds=spec.max_phase_seconds,
+            deadline_at=worker_deadline,
+        )
+        inference_reservation = reservation_observer(
+            device=spec.device,
+            journal=journal,
+            phase="inference",
+            request_id=spec.request.request_id,
+            ack_path=spec.reservation_ack_path,
+            timeout_seconds=spec.max_phase_seconds,
+            deadline_at=worker_deadline,
+        )
+
     outcome = run_measured_phases(
         build_components=build_production_components(spec, trace),
         phase=spec.phase,
         device=spec.device,
         training_steps=spec.training_steps,
         inference_batches=spec.inference_batches,
-        journal=PhaseJournal(spec.journal_path),
+        journal=journal,
         soft_deadline_seconds=spec.soft_deadline_seconds,
         min_authoritative_samples=spec.min_authoritative_samples,
         max_phase_seconds=spec.max_phase_seconds,
         await_sampler_ready=_marker_waiter(
             spec.sampler_ready_path, spec.sampler_ready_timeout_seconds
         ),
+        await_setup_sampler_ready=(
+            _marker_waiter(spec.sampler_ready_path, spec.sampler_ready_timeout_seconds)
+            if spec.inference_binding is not None
+            else None
+        ),
+        setup_reservation_observer=setup_reservation,
+        inference_reservation_observer=inference_reservation,
         # Training polls (repeat until enough); inference BLOCKS (hold the
         # real state open until enough). A non-blocking probe here released
         # the hold instantly and only one sample landed.
         phase_observed_enough=(
-            _marker_waiter(spec.phase_complete_path, spec.max_phase_seconds)
+            None
+            if spec.inference_binding is not None
+            else _marker_waiter(spec.phase_complete_path, spec.max_phase_seconds)
             if spec.phase == "inference"
             else _marker_probe(spec.phase_complete_path)
         ),
         trace=trace,
     )
+    if (
+        spec.inference_binding is not None
+        and inference_measurement_binding(spec) != spec.inference_binding
+    ):
+        raise ValueError("inference measurement request/source binding changed during execution")
     return WorkerMeasurementReport(
         **base,
         status=outcome.status,
