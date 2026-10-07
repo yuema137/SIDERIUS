@@ -46,15 +46,19 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from core.scientific_authority import ScientificAuthority, resolve_record_authority
 from execute_tools.scientific_aggregation import partition_for_aggregation
+from tests.helpers.formal_evidence import disabled_formal_evidence
 from tests.helpers.tuner_source import tuner_node_source
 
 
 class _Summary:
-    """The shape `partition_for_aggregation` consumes."""
+    """A Health-disabled fixture with evidence independent of its verdict."""
 
-    def __init__(self, model_type: str, verdict) -> None:
+    def __init__(self, model_type: str, verdict, score: float) -> None:
         self.model_type = model_type
         self.scientific_authority = verdict
+        self.run_name = "v1"
+        self.formal_score = score
+        self.formal_evidence = disabled_formal_evidence(model_type, score)
 
 
 def _tuning_input(tmp_path, **declaration):
@@ -136,7 +140,9 @@ class TestTheWholeChainFromDeclarationToConsumer:
         assert resolution.authoritative is True
         assert resolution.verdict.enters_incumbent_selection is True
 
-        scope = partition_for_aggregation([_Summary("punet", record["scientific_authority"])])
+        scope = partition_for_aggregation(
+            [_Summary("punet", record["scientific_authority"], record["denoising_score"])]
+        )
         assert scope.included_count == 1
         assert scope.excluded_count == 0
 
@@ -157,7 +163,9 @@ class TestTheWholeChainFromDeclarationToConsumer:
         )
         assert resolution.authoritative is False
 
-        scope = partition_for_aggregation([_Summary("punet", record["scientific_authority"])])
+        scope = partition_for_aggregation(
+            [_Summary("punet", record["scientific_authority"], record["denoising_score"])]
+        )
         assert scope.included_count == 0
         assert scope.all_excluded is True
 

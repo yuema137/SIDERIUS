@@ -47,17 +47,18 @@ import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from core.scientific_authority import ScientificAuthority, resolve_record_authority
+from tests.helpers.formal_evidence import disabled_formal_evidence
 
 
 class _Summary:
-    """The shape `partition_for_aggregation` consumes: an object exposing
-    `scientific_authority` plus the identity attribute. Read from the real
-    signature rather than assumed — an earlier version of this module passed
-    dicts and failed."""
+    """A Health-disabled fixture with matched formal score and evidence."""
 
-    def __init__(self, model_type: str, verdict: dict | None):
+    def __init__(self, model_type: str, verdict: dict | None, score: float):
         self.model_type = model_type
         self.scientific_authority = verdict
+        self.run_name = "v1"
+        self.formal_score = score
+        self.formal_evidence = disabled_formal_evidence(model_type, score)
 
 
 def _valid_formal_record(exp_id: str = "f1", score: float = 4.2) -> dict:
@@ -201,7 +202,9 @@ class TestTheTwoConsumersAdmitIt:
         from execute_tools.scientific_aggregation import partition_for_aggregation
 
         rec = _valid_formal_record()
-        scope = partition_for_aggregation([_Summary("punet", rec["scientific_authority"])])
+        scope = partition_for_aggregation(
+            [_Summary("punet", rec["scientific_authority"], rec["denoising_score"])]
+        )
         assert len(scope.included) == 1
         assert scope.excluded == []
 
@@ -220,7 +223,7 @@ class TestTheTwoConsumersAdmitIt:
             formal_validity="valid",
         ).model_dump(mode="json")
 
-        scope = partition_for_aggregation([_Summary("punet", verdict)])
+        scope = partition_for_aggregation([_Summary("punet", verdict, 4.2)])
         assert scope.included == []
         assert len(scope.excluded) == 1
         assert scope.provenance_lines(), "an exclusion must be stated"
@@ -275,7 +278,7 @@ class TestTheFullPositivePathInOneAssertion:
 
         # 4. aggregation admits it
         assert partition_for_aggregation(
-            [_Summary("punet", restored["scientific_authority"])]
+            [_Summary("punet", restored["scientific_authority"], restored["denoising_score"])]
         ).included
 
         # 5. and the same record, made diagnostic, is refused at BOTH
@@ -296,6 +299,8 @@ class TestTheFullPositivePathInOneAssertion:
         assert refused_verdict.verdict is not None
         assert refused_verdict.verdict.enters_incumbent_selection is False
         assert (
-            partition_for_aggregation([_Summary("punet", refused["scientific_authority"])]).included
+            partition_for_aggregation(
+                [_Summary("punet", refused["scientific_authority"], refused["denoising_score"])]
+            ).included
             == []
         )

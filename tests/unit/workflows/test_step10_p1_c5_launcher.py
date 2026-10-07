@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import ast
 import inspect
+from importlib import import_module
 from pathlib import Path
 
 import pytest
@@ -219,52 +220,52 @@ class TestSignatureAndCallers:
         assert keywords["task_composition"] == "run_composition"
 
 
-class TestTheCompositionFlag:
-    def test_both_edges_require_an_explicit_task_composition(self):
-        """Both supported composition edges refuse an undeclared task."""
-        for path in (LAUNCHER, WORKFLOW):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            declared = [
-                node
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "add_argument"
-                and node.args
-                and isinstance(node.args[0], ast.Constant)
-                and node.args[0].value == "--task_composition"
-            ]
-            assert len(declared) == 1, (
-                f"{path.name} does not declare --task_composition exactly once"
-            )
-            required = {
-                kw.arg: ast.literal_eval(kw.value)
-                for kw in declared[0].keywords
-                if kw.arg == "required"
-            }
-            assert required == {"required": True}
+@pytest.fixture(params=["run_one_iteration", "model_exploration"])
+def entrypoint_parser(request, monkeypatch):
+    """Observe the parser used by main, stopping before launch effects."""
+    module = import_module(f"workflows.{request.param}")
+    captured = []
 
-    def test_the_transport_flag_is_NOT_an_operator_surface(self):
-        """`--task_data_path_id` is emitted from a RESOLVED binding by
-        construction (the `transport_argv` signature takes the implementation,
-        not a string). Exposing it as an operator flag would let a run declare
-        a data path its composition never resolved — precisely the ambiguity
-        the composition removes."""
+    class ParserReached(Exception):
+        pass
+
+    def capture(parser, *args, **kwargs):
+        captured.append(parser)
+        raise ParserReached
+
+    with monkeypatch.context() as patch:
+        patch.setattr(argparse.ArgumentParser, "parse_args", capture)
+        with pytest.raises(ParserReached):
+            module.main()
+    assert len(captured) == 1
+    argv = ["--workspace", "runs", "--run_name", "probe", "--data_dir", "data"]
+    if request.param == "model_exploration":
+        argv += ["--models", "synthetic", "--source_run_name", "previous"]
+    return captured[0], argv
+
+
+class TestTheCompositionFlag:
+    def test_both_edges_require_an_explicit_task_composition(self, entrypoint_parser, capsys):
+        """Both supported CLI edges refuse an undeclared task."""
+        parser, argv = entrypoint_parser
+        with pytest.raises(SystemExit) as refusal:
+            parser.parse_args(argv)
+        assert refusal.value.code == 2
+        assert "required: --task_composition" in capsys.readouterr().err
+        parsed = parser.parse_args([*argv, "--task_composition", "external/task.yaml"])
+        assert parsed.task_composition == "external/task.yaml"
+
+    def test_the_transport_flag_is_NOT_an_operator_surface(self, entrypoint_parser, capsys):
+        """Only a resolved binding can emit the internal transport flag."""
         from execute_tools.task_data_path import TASK_DATA_PATH_ARGV_FLAG
 
-        for path in (LAUNCHER, WORKFLOW):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "add_argument"
-                    and node.args
-                    and isinstance(node.args[0], ast.Constant)
-                ):
-                    assert node.args[0].value != TASK_DATA_PATH_ARGV_FLAG, (
-                        f"{path.name} exposes the internal transport flag to operators"
-                    )
+        parser, argv = entrypoint_parser
+        with pytest.raises(SystemExit) as refusal:
+            parser.parse_args(
+                [*argv, "--task_composition", "external/task.yaml", TASK_DATA_PATH_ARGV_FLAG, "x"]
+            )
+        assert refusal.value.code == 2
+        assert f"unrecognized arguments: {TASK_DATA_PATH_ARGV_FLAG}" in capsys.readouterr().err
 
     def test_the_launcher_resolves_the_composition_before_the_workflow(self):
         """§5.1: the workflow receives the resolved VALUE, never a path, so it

@@ -653,7 +653,7 @@ def test_the_workflow_delta_stayed_sibling_shaped():
 
     The permitted delta is seed / input pass / state closure / consumer read.
     A new phase, branch family or task dispatch would show up as branch growth;
-    the baseline is §12's measured 130 branch-ish nodes.
+    the current ceiling is the audited 129 branch-ish nodes below.
     """
     tree = ast.parse(MODEL_EXPLORATION.read_text(encoding="utf-8"))
     fn = next(
@@ -749,8 +749,12 @@ def test_the_workflow_delta_stayed_sibling_shaped():
     # task dispatch, no new mutable local accumulator, no new semantic owner.
     # PR #546: +2 IfExp forwarding caller-owned access/resource context when
     # analysis is enabled. No new loop, phase, policy decision or task dispatch.
-    assert branchish == 130, (
-        f"run_workflow branch-ish count is {branchish}, expected 130 "
+    # Proposer routing (29e9b3a2): 130 -> 129. _bind_iter_context now
+    # delegates to set_run_context whenever available; its redundant
+    # `and not hasattr(agent, "bridge")` BoolOp was removed. A reduction
+    # is welcome: guard growth rather than pinning an exact minimum.
+    assert branchish <= 129, (
+        f"run_workflow branch-ish count is {branchish}, exceeds ceiling 129 "
         "(130 at C0 + 1 C2 unpack IfExp + 1 C5/W6 binding-selection IfExp "
         "- 1 arXiv-U1 extraction of the lit-review path-resolution If "
         "+ 1 arXiv-#259 constraint-forwarding If - 4 after extracting "
@@ -758,7 +762,8 @@ def test_the_workflow_delta_stayed_sibling_shaped():
         "caller-owned literature-config use-site assertion; "
         "+ 1 #313 composed description-source selection; "
         "- 2 PR04F post-admission publication extraction; "
-        "+ 2 #546 optional analysis context carriers; "
+        "+ 2 #546 optional analysis context carriers "
+        "- 1 proposer stage-context routing BoolOp; "
         "C3's union closure costs ZERO because the merge rule lives in "
         "core.resume.union_key_findings and this closure only calls it). "
         "If this grew further, the §12.1 tripwire requires re-running the "
