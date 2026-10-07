@@ -321,6 +321,8 @@ def run_prephase_measurement(
         invocation = prepare_child(
             argv, subprocess_env(plugin_dir=spec.plugin_dir, loss_dir=spec.loss_dir)
         )
+        if deadline_at is not None and elapsed_clock() - started >= deadline_seconds:
+            raise TimeoutError("measurement deadline expired during launch preparation")
         process = subprocess.Popen(
             invocation.argv,
             stdout=log_handle,
