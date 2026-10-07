@@ -1095,6 +1095,7 @@ class HyperparamTuningAgent:
             file_index=file_index,
             data_scope=agent_input.data_scope,
             device_identity=device_identity,
+            device_available=hardware_context.device_available,
             deliverable_naming=run_deliverable_naming,
         )
 

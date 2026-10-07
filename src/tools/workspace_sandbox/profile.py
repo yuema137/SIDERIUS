@@ -9,6 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from core.layout import checkout_root, package_root
+from core.runtime_control.process_visibility import PROCESS_VISIBILITY_ENV
 
 # These are Linux runtime locations, not scientific or hardware policy.
 SYSTEM_DIRECTORIES = tuple(Path(p) for p in ("/usr", "/bin", "/sbin", "/lib", "/lib64"))
@@ -17,6 +18,7 @@ NETWORK_FILES = tuple(
     Path(p) for p in ("/etc/resolv.conf", "/etc/hosts", "/etc/nsswitch.conf", "/etc/ssl/certs")
 )
 _RESERVED_ENV = {
+    PROCESS_VISIBILITY_ENV,
     "HOME",
     "USER",
     "LOGNAME",

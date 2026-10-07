@@ -8,6 +8,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from core.runtime_control.process_visibility import PROCESS_VISIBILITY_ENV
 from tools.workspace_sandbox.profile import (
     NETWORK_FILES,
     SYSTEM_DIRECTORIES,
@@ -29,6 +30,7 @@ def child_environment(profile: SandboxProfile, source: Mapping[str, str]) -> dic
     env.update(
         {
             "HOME": "/sandbox-home",
+            PROCESS_VISIBILITY_ENV: "namespace_limited",
             # getpass users (including PyTorch cache setup) need an identity
             # without exposing the host's account database.
             "USER": "siderius",

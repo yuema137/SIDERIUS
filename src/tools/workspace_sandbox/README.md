@@ -109,6 +109,50 @@ training qualification. Host `/proc` and its subtrees remain unavailable as
 profile mounts; the sandbox retains its private PID view. Do not call a failed
 environment check a model failure.
 
+### GPU headroom and current execution limits
+
+The private PID namespace can hide other GPU processes while the device still
+reports their memory usage. The launcher therefore supplies the reserved
+`SIDERIUS_GPU_PROCESS_VISIBILITY=namespace_limited` declaration to its children.
+Do not forward or override this variable in `environment_names`.
+
+For native GPU phase admission, SIDERIUS counts known external memory **plus
+unattributed memory** as a conservative upper bound on outside occupancy. The
+new worker's authoritative measured requirement plus **all current device
+occupancy**, including retained parent-process memory, must fit both the
+configured aggregate ceiling and the device capacity. For example, if the
+existing parent process tree holds 516 MiB and device usage is 2779 MiB, the outside bound is
+2263 MiB even when the process list reports no outsiders. Admission adds the
+new worker requirement to the full 2779 MiB: the existing parent memory does
+not disappear when that worker starts. Those residual bytes remain
+unattributed in the saved evidence; the calculation does not invent owners.
+
+This explicitly selected isolation condition takes precedence over
+`observe_only`, `enforce_resource_limits`, and `enforce`, for both trial and
+formal phases. Missing, inconsistent, or insufficient headroom evidence stops
+the phase with `environment_headroom_unproven`. The saved decision records
+`effective_execution_conditions`, raw accounting, and the derived bound.
+Repair the missing evidence or retry when the environment has enough headroom;
+this refusal is not advice to shrink the model or batch. Ordinary launches
+outside this declared isolation condition retain their existing policies.
+
+**End-to-end GPU onboarding is not yet supported by this change.** The current
+default trial path supplies no authoritative requirement, and the normal
+measurement table supplies training evidence only. Native trial training and
+inference therefore stop when their own phase evidence is absent. Training
+measurements cannot substitute for inference measurements. Completing those
+measurement paths is separate work; exposing GPU device nodes does not make
+them available. Bounded measurement bootstrap retains its existing limits so
+that evidence can be obtained without requiring that same evidence first.
+A direct native CPU caller inside the selected sandbox must pass the validated
+`HardwareContext.device_available=False` fact as `device_available` when
+constructing its executor. The tuner transports this fact automatically. Missing
+GPU identity plus unknown, malformed, or true availability stops before launch;
+the executor never guesses a device or repeats hardware discovery. Pseudo
+executors that launch no process retain their override behavior.
+Own-process memory measurements and conservative OOM attribution remain usable;
+hidden external processes cannot establish an idle-device claim.
+
 ## What is inside the boundary
 
 The command after `--` and its descendants run inside the sandbox. A caller

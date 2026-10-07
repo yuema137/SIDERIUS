@@ -86,7 +86,9 @@ _OUTCOME_DISPOSITION: dict[str, PrephaseDisposition] = {
 
 #: PR B refusal statuses that mean "no requirement could be established"
 #: rather than "the device cannot hold this".
-_UNAVAILABLE_REFUSALS = frozenset({"policy_unavailable", "measurement_unavailable"})
+_UNAVAILABLE_REFUSALS = frozenset(
+    {"policy_unavailable", "measurement_unavailable", "environment_headroom_unproven"}
+)
 
 
 class PrephaseAdmissionOutcome(BaseModel):

@@ -39,6 +39,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from core.runtime_control.process_visibility import ProcessVisibility, declared_visibility
+
 #: How far up the ppid chain ownership is traced. Deep enough for the
 #: parent -> executor -> child shapes here, bounded so a cycle or a
 #: pathological tree cannot spin.
@@ -108,6 +110,9 @@ class DeviceBaselineSnapshot(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    process_visibility: ProcessVisibility | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     device: DeviceIdentity
     telemetry_available: bool
     sampled_at: float = Field(ge=0.0)
@@ -155,6 +160,9 @@ class GpuAccountingSnapshot(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    process_visibility: ProcessVisibility | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     device: DeviceIdentity
     #: False when the sample could not be taken. Every quantity below is
     #: then ``None``, and the caller must not read that as "nothing".
@@ -292,7 +300,9 @@ def is_descendant_of(pid: int, root_pid: int, *, proc_reader: Any = None) -> boo
 
 
 def _unavailable(device: DeviceIdentity) -> GpuAccountingSnapshot:
-    return GpuAccountingSnapshot(device=device, telemetry_available=False)
+    return GpuAccountingSnapshot(
+        device=device, telemetry_available=False, process_visibility=declared_visibility()
+    )
 
 
 def sample(
@@ -367,6 +377,7 @@ def sample(
     skew = device_used_mib - per_pid_total
 
     return GpuAccountingSnapshot(
+        process_visibility=declared_visibility(),
         device=device,
         telemetry_available=True,
         device_used_mib=device_used_mib,
@@ -396,25 +407,29 @@ def sample_device_baseline(
     import time as _time
 
     now = float((clock or _time.time)())
+    visibility = declared_visibility()
+    unavailable = DeviceBaselineSnapshot(
+        device=device, telemetry_available=False, sampled_at=now, process_visibility=visibility
+    )
 
     gpu_rows = _run_query("index,uuid,memory.used,memory.total", "gpu", runner=runner)
     if gpu_rows is None:
-        return DeviceBaselineSnapshot(device=device, telemetry_available=False, sampled_at=now)
+        return unavailable
 
     matched = next((r for r in gpu_rows if len(r) >= 4 and r[1] == device.uuid), None)
     if matched is None:
         # Never fall back to the first row: on a multi-GPU host that is a
         # different device wearing the right shape.
-        return DeviceBaselineSnapshot(device=device, telemetry_available=False, sampled_at=now)
+        return unavailable
     try:
         used = int(float(matched[2]))
         total = int(float(matched[3]))
     except (ValueError, IndexError):
-        return DeviceBaselineSnapshot(device=device, telemetry_available=False, sampled_at=now)
+        return unavailable
 
     app_rows = _run_query("pid,used_gpu_memory,gpu_uuid", "compute-apps", runner=runner)
     if app_rows is None:
-        return DeviceBaselineSnapshot(device=device, telemetry_available=False, sampled_at=now)
+        return unavailable
 
     present: list[ProcessOccupancy] = []
     for row in app_rows:
@@ -428,6 +443,7 @@ def sample_device_baseline(
             present.append(ProcessOccupancy(pid=pid, used_mib=mib))
 
     return DeviceBaselineSnapshot(
+        process_visibility=visibility,
         device=device,
         telemetry_available=True,
         sampled_at=now,

@@ -77,6 +77,14 @@ import os
 assert os.environ['DEMO_ACCESS_KEY'] == 'fake-key-only'
 assert 'DO_NOT_FORWARD' not in os.environ
 assert os.readlink('/proc/self/ns/net') != {parent_namespace!r}
+from core.runtime_control.process_visibility import declared_visibility
+from core.subprocess_env import subprocess_env
+import subprocess, sys
+assert declared_visibility() == 'namespace_limited'
+child = subprocess.run(
+    [sys.executable, '-c', 'from core.runtime_control.process_visibility import declared_visibility; print(declared_visibility())'],
+    env=subprocess_env(), check=True, capture_output=True, text=True, timeout=5)
+assert child.stdout.strip() == 'namespace_limited'
 """
     assert run(config, [sys.executable, "-c", code]).status == "completed"
     enabled = _profile(tmp_path, network=True)

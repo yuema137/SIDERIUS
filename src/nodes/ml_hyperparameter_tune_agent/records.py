@@ -430,6 +430,7 @@ RESOURCE_ADMISSION_REASONS = (
     "insufficient_headroom",
     "measurement_unavailable",
     "policy_unavailable",
+    "environment_headroom_unproven",
 )
 #: F-SCANF-2 — the LLM PROVIDER channel failed: an API/network/timeout error
 #: reaching the planner or the reflector. NOT an admission reason (it is
@@ -444,6 +445,7 @@ _STATUS_FOR_REASON = {
     "insufficient_headroom": RESOURCE_ADMISSION_STATUS,
     "measurement_unavailable": INFRASTRUCTURE_FAILURE_STATUS,
     "policy_unavailable": INFRASTRUCTURE_FAILURE_STATUS,
+    "environment_headroom_unproven": INFRASTRUCTURE_FAILURE_STATUS,
     LLM_PROVIDER_FAILURE_REASON: INFRASTRUCTURE_FAILURE_STATUS,
 }
 
@@ -658,7 +660,9 @@ def _build_resource_admission_record(
         round_index=round_index,
         attempt_in_round=attempt_in_round,
         conclusion=(
-            (
+            f"Not started: the environment could not demonstrate headroom for this {resource_type} phase. {detail}"
+            if reason_code == "environment_headroom_unproven"
+            else (
                 f"Not started: the {resource_type} MEASUREMENT could not be "
                 f"established ({reason_code}), so no admission decision was "
                 f"possible. This is an infrastructure condition and says "

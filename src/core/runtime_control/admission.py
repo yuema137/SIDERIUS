@@ -58,6 +58,7 @@ AdmissionReason = Literal[
     "insufficient_headroom",
     "measurement_unavailable",
     "policy_unavailable",
+    "environment_headroom_unproven",
 ]
 
 #: The refusals that are a RESOURCE verdict rather than an evidence gap
@@ -183,6 +184,9 @@ def stops_phase(enforcement: str, reason_code: str | None) -> bool:
             is not a resource rejection, and `enforce`'s "stop on any
             adverse decision" already has an adverse decision in hand.
     """
+    # Explicit isolation conditions precede the ordinary observation policy.
+    if reason_code == "environment_headroom_unproven":
+        return True
     if enforcement == "enforce":
         return True
     if enforcement == "enforce_resource_limits":
@@ -389,6 +393,20 @@ def evaluate_gpu_admission(
     occupancy is measured and the requirement does not fit, both refuse:
     headroom is a fact, not a posture.
     """
+    from core.runtime_control.process_visibility import requires_isolated_admission
+
+    if requires_isolated_admission(snapshot):
+        from core.runtime_control.isolated_admission import evaluate_isolated_admission
+
+        return evaluate_isolated_admission(
+            snapshot=snapshot,
+            requirement_mib=requirement_mib,
+            requirement_provenance=requirement_provenance,
+            mode=mode,
+            ceiling_gib=ceiling_gib,
+            sampling_error=sampling_error,
+        )
+
     if mode not in ACCEPTED_MODES:
         # An invalid posture refuses, like formal — but the record must
         # not SAY formal. Conflating a configuration error with a

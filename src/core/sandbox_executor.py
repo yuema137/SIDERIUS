@@ -11,6 +11,8 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from pydantic import StrictBool
+
 # V21 PR C2 — imported for its SIDE EFFECT, deliberately.
 #
 # This module reads ``PLUGIN_CONFIG_REGISTRY`` directly at two sites
@@ -467,10 +469,14 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
     branch, so both launch paths sit behind one gate — a branch outside
     it would be a hole that looks like coverage.
 
-    **Never raises, but never fails open in formal mode.** An error is
-    converted into "no measurement was obtained" and handed to the
-    admission policy, which decides by mode: trial proceeds with a
-    recorded warning, formal refuses. Swallowing the error here into an
+    Explicit namespace-limited execution requires provable headroom for
+    both trial and formal phases, regardless of the observation posture.
+    Missing GPU identity may bypass this check only with a validated CPU
+    availability fact. Its policy errors also stop rather than taking the
+    legacy trial fallback.
+
+    In ordinary execution an error is converted into "no measurement was
+    obtained" and handed to the existing mode/enforcement policy. Swallowing the error here into an
     unconditional `return None` would make the guard silently permissive
     exactly when it is supposed to protect — the fail-open posture this
     commit exists to remove.
@@ -484,13 +490,17 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
     The requirement is whatever the run was given. PR B does not produce
     or promote one (D-B5), so in the default `trial` mode this admits and
     records that it asserted nothing; formal mode refuses until PR C
-    supplies a measurement. No default moves in this commit.
+    supplies a measurement. Those defaults remain unchanged outside the
+    explicitly selected isolation condition. Inside it, current parent-tree
+    occupancy remains additional to the new worker's measured requirement.
     """
     identity = getattr(sandbox, "device_identity", None)
     if identity is None:
-        # No device identity means there is no device to decide about —
-        # the pre-PR-B path. Unchanged behaviour, not a refusal.
-        return None
+        from core.runtime_control.isolated_admission import missing_device_identity_result
+
+        return missing_device_identity_result(
+            getattr(sandbox, "device_available", None), phase=phase
+        )
 
     # B-G3: the typed policy is the production channel. The `getattr`
     # fallbacks below are the pre-B-G3 path and the validation harness's
@@ -541,6 +551,11 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
         # Only an explicitly `trial` posture may proceed: formal must not
         # fall through to a launch, and an unrecognised mode is a
         # misconfiguration, which is also not permission.
+        from core.runtime_control.isolated_admission import isolated_policy_error_result
+
+        isolated_refusal = isolated_policy_error_result(snapshot, phase=phase, mode=mode, error=exc)
+        if isolated_refusal is not None:
+            return isolated_refusal
         if mode == "trial":
             return None
         reason = f"the admission decision could not be evaluated ({type(exc).__name__}: {exc})"
@@ -1027,6 +1042,7 @@ class TidmadSandbox:
         observation_policy: Any = None,
         admission_policy: Any = None,
         deliverable_naming: DeliverableNaming | None = None,
+        device_available: StrictBool | None = None,
     ):
         # Step 05c — the run's deliverable naming authority. The tuner resolves
         # it ONCE from the run profile and passes it here, so the parent-side
@@ -1047,6 +1063,7 @@ class TidmadSandbox:
         # unavailable, and this class must never discover a device of its
         # own — implicit rediscovery is how "GPU 0" gets assumed.
         self.device_identity = device_identity
+        self.device_available = device_available
         self.observation_policy = observation_policy
         # V20 B-G3. The typed admission boundary. `None` preserves
         # pre-B-G3 behaviour exactly: the gate falls back to the
@@ -2263,6 +2280,7 @@ class StubSandbox(TidmadSandbox):
         data_scope: DataScope | None = None,
         device_identity: Any = None,
         deliverable_naming: DeliverableNaming | None = None,
+        device_available: StrictBool | None = None,
     ):
         # `deliverable_naming` mirrors the parent for exactly the reason given
         # below for `device_identity`: the tuner resolves the run's naming once
@@ -2285,6 +2303,7 @@ class StubSandbox(TidmadSandbox):
             file_index=file_index,
             data_scope=data_scope,
             device_identity=device_identity,
+            device_available=device_available,
             deliverable_naming=deliverable_naming,
         )
         self._run_id: str = run_id or run_name
