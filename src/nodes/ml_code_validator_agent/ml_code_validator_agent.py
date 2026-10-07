@@ -53,7 +53,7 @@ import sys
 import torch
 
 from agent.llm_bridge import LLMBridge
-from agent.prompt_templates.native_training import NATIVE_TRAINING_CONTRACT
+from agent.prompt_templates.native_training import render_native_training_appendix
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
@@ -189,8 +189,7 @@ def _build_review_system_prompt(model_io_contract: ModelIOContract | None) -> st
         VALIDATOR_REVIEW_SYSTEM_PROMPT.replace("{CLASSIFIER_SHAPE}", shapes["classifier"]).replace(
             "{REGRESSOR_SHAPE}", shapes["regressor"]
         )
-        + "\n\n"
-        + NATIVE_TRAINING_CONTRACT
+        + render_native_training_appendix()
     )
 
 

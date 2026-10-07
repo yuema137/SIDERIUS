@@ -44,6 +44,7 @@ def rendering_assembly_digest() -> str:
     paths += list((root / "data_analysis").glob("*.py"))
     for node in (
         "ml_model_implementor",
+        "ml_code_validator_agent",
         "ml_model_proposal_agent",
         "result_interpretation_agent",
         "data_analysis_agent",

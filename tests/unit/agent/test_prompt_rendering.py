@@ -123,3 +123,17 @@ def test_boundary_declaration_changes_identity(tmp_path):
         profile.sources,
     )
     assert profile.identity().content_sha256 != other.identity().content_sha256
+
+
+def test_validator_consumes_scoped_appendix_provider(tmp_path):
+    """The review node must share the appendix seam without changing its validator."""
+    from nodes.ml_code_validator_agent.ml_code_validator_agent import _build_review_system_prompt
+
+    native = _build_review_system_prompt(None)
+    profile = _profile(tmp_path, {"native_training.appendix": lambda: "\nCUSTOM APPENDIX"})
+    with bind_prompt_profile(profile):
+        overridden = _build_review_system_prompt(None)
+    assert overridden.endswith("\nCUSTOM APPENDIX")
+    assert overridden.removesuffix("\nCUSTOM APPENDIX") == native.removesuffix(
+        render_native_training_appendix()
+    )

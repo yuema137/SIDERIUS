@@ -642,7 +642,8 @@ They cannot replace the node's validated response, saved record, or execution
 decision through this interface. Installed plugins are trusted Python code;
 this contract is not a sandbox.
 
-Supported boundaries are `native_training.appendix`, `proposal.template`,
+The implementor, code validator and proposer share the native training
+appendix boundary. Supported boundaries are `native_training.appendix`, `proposal.template`,
 `interpretation.model_system`, `interpretation.model_user`, and the
 `data_analysis.` stages `skill_selection`, `analysis_plan`,
 `generated_program`, `report_synthesis`, `generated_skill_promotion`,
