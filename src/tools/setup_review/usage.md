@@ -480,15 +480,15 @@ snapshot; do not substitute a different command and claim it was reviewed.
 
 An assistant can invoke the same typed callable or inspect its `SKILL_SPEC`;
 see the [semantic review API contract](semantic-review.md). This is an optional
-review building block, not completed Professional/Assistant onboarding or proof
-that the four independent onboarding trials have run.
+review building block. Invoking it does not by itself complete onboarding or
+prove that a task has executed successfully.
 
 ## Choose direct or reviewed launch
 
 | Route | What you do |
 | --- | --- |
-| Professional, standard workflow | Author your task and experiment, then use the ordinary `workflows.run_one_iteration` command. Review reports are optional. Native validation still applies. |
-| Assistant, standard workflow | Ask the assistant to prepare the declaration, task-settings check and environment report; review that snapshot or explicitly skip, then optionally launch with the checked receipt below. |
+| Professional, standard workflow | Lead the scientific and configuration decisions while your coding agent helps author the task and experiment. Use ordinary `workflows.run_one_iteration` or choose the optional reviewed route. Native validation still applies. |
+| Assistant, standard workflow | Ask your coding agent to follow the setup skill, gather missing decisions and prepare the task, experiment and launch instructions. Direct launch remains available; if you choose reviewed launch, follow the check/review-or-skip sequence below. |
 | Either role, custom orchestration | Use the [external-project assembler](../orchestration_setup/README.md) and native toolkit. A standard snapshot does not review your custom caller's control flow. |
 
 To make an environment report usable by the optional launch, add `--bind-launch`
