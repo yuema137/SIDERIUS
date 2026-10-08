@@ -113,8 +113,9 @@ campaigns and historical paper evidence are owned by
 [siderius-exp](https://github.com/yuema137/siderius-exp), which pins its compatible
 framework revision independently of this repository's latest development head.
 
-## Availability and license
+## License
 
-SIDERIUS is currently shared in a closed beta with invited collaborators. It is
-not licensed for redistribution or reuse outside that collaboration; all rights
-are reserved until a public license is chosen.
+Original SIDERIUS software and documentation are available under the
+[MIT License](LICENSE). Third-party portions retain their own terms and
+attribution; see [NOTICE](NOTICE). External datasets and dependencies have
+separate licenses. This repository's license does not replace them.
