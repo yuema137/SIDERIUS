@@ -136,14 +136,22 @@ Repair the missing evidence or retry when the environment has enough headroom;
 this refusal is not advice to shrink the model or batch. Ordinary launches
 outside this declared isolation condition retain their existing policies.
 
-**End-to-end GPU onboarding is not yet supported by this change.** The current
-default trial path supplies no authoritative requirement, and the normal
-measurement table supplies training evidence only. Native trial training and
-inference therefore stop when their own phase evidence is absent. Training
-measurements cannot substitute for inference measurements. Completing those
-measurement paths is separate work; exposing GPU device nodes does not make
-them available. Bounded measurement bootstrap retains its existing limits so
-that evidence can be obtained without requiring that same evidence first.
+**GPU device access alone is not enough to run a native experiment here.**
+Select the [measured GPU execution policy](../../core/runtime_control/README.md#protecting-a-native-gpu-attempt)
+to obtain separate training and inference measurements and enable runtime
+protection. The native tuner accepts this policy in its typed input; the standard
+single-iteration CLI accepts `--gpu_execution_policy_json`. Choose its measurement
+budget and other limits for your task and hardware; the sandbox profile does not
+choose them for you.
+
+Without the required phase evidence, native trial training and inference stop.
+Training measurements cannot substitute for inference measurements. The selected
+policy uses bounded preparation to obtain evidence before the corresponding
+phase; it does not prove an upper bound for unmeasured data or guarantee that
+memory can never exceed a sampled limit. See the
+[execution contract](../../core/runtime_control/native-gpu-execution.md) for the
+supported native scopes and checkpoint path. Actual GPU onboarding qualification
+is separate from configuration or a successful device query.
 A direct native CPU caller inside the selected sandbox must pass the validated
 `HardwareContext.device_available=False` fact as `device_available` when
 constructing its executor. The tuner transports this fact automatically. Missing
