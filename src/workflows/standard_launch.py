@@ -98,6 +98,7 @@ def build_standard_launch_config(
         trial_time_admission_source=args.trial_time_admission_source,
         formal_time_admission_source=args.formal_time_admission_source,
         data_dir=args.data_dir,
+        gpu_execution_policy=launch_identity.gpu_execution_policy,
         gpu_admission_measurement_source=args.gpu_admission_measurement_source,
         gpu_admission_enforcement=args.gpu_admission_enforcement,
         gpu_pair_ceiling_gib=args.gpu_pair_ceiling_gib,

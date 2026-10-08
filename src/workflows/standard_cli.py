@@ -911,6 +911,11 @@ def build_parser() -> argparse.ArgumentParser:
         "real-dataset warmup AND the pre-phase GPU measurement.",
     )
     parser.add_argument(
+        "--gpu_execution_policy_json",
+        default=None,
+        help="Explicit JSON policy for measured and protected native GPU execution.",
+    )
+    parser.add_argument(
         "--gpu_admission_measurement_source",
         type=str,
         default=None,

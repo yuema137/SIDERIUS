@@ -892,24 +892,29 @@ def run_admission_preflight(
     # identity check, classification, authority validation,
     # PR B admission — lives behind one call; nothing about
     # it is reimplemented here.
-    _prephase = _handle_prephase_gpu_measurement(
-        ordering=prepared.ordering,
-        agent_input=agent_input,
-        sandbox=sandbox,
-        is_trial=plan.is_trial,
-        active_params=active_params,
-        exp_id=exp_id,
-        model_type=model_type,
-        file_index=file_index,
-        record_params=record_params,
-        expert_advice_str=expert_advice_str,
-        hypothesis=hypothesis,
-        round_index=round_index,
-        attempt_in_round=attempt_in_round,
-        run_profile=run_profile,
-        run_model_io=run_model_io,
-        task_probe_data=task_probe_data,
-    )
+    from nodes.ml_hyperparameter_tune_agent.gpu_execution import prepare_phase
+
+    _prephase = prepare_phase(bindings, prepared, identity, phase="training")
+    if _prephase is None:
+        _prephase = _handle_prephase_gpu_measurement(
+            ordering=prepared.ordering,
+            agent_input=agent_input,
+            sandbox=sandbox,
+            is_trial=plan.is_trial,
+            active_params=active_params,
+            exp_id=exp_id,
+            model_type=model_type,
+            file_index=file_index,
+            record_params=record_params,
+            expert_advice_str=expert_advice_str,
+            hypothesis=hypothesis,
+            round_index=round_index,
+            attempt_in_round=attempt_in_round,
+            run_profile=run_profile,
+            run_model_io=run_model_io,
+            task_probe_data=task_probe_data,
+        )
+
     if _prephase is PrephaseOutcome.TERMINAL_INFRASTRUCTURE_FAILURE:
         # The measurement could not be established. Retrying
         # re-enters the identical deterministic condition —
@@ -1229,6 +1234,13 @@ def _run_local_evaluation_phase(
     attempt_in_round = identity.attempt_in_round
     round_index = identity.round_index
 
+    from nodes.ml_hyperparameter_tune_agent.gpu_execution import prepare_phase
+
+    if (
+        prepare_phase(bindings, prepared, identity, phase="inference")
+        is PrephaseOutcome.TERMINAL_RESOURCE_REFUSAL
+    ):
+        return AttemptExecution.next_attempt()
     stage.name = "inference"
     print("[Step 2/3] Inference...")
     t0 = time.time()

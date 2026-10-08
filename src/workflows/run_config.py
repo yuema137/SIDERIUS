@@ -43,7 +43,7 @@ ownership.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Literal
 
@@ -56,6 +56,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import OutputTypeName
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.pair_admission import PositiveGpuGiB
 from workflows.scientific_evidence_stage import EvidenceStageOrder
 from workflows.strategy_modes import ExplorationMode, FormalRoundStrategy, StrategyMode
@@ -136,6 +137,9 @@ class WorkflowLaunchConfig:
     formal_time_budget_minutes: float | None = None
     trial_time_admission_source: TimeAdmissionSource = "measured"
     formal_time_admission_source: TimeAdmissionSource = "measured"
+    gpu_execution_policy: GpuExecutionPolicy | None = field(
+        default=None, metadata={"omit_if_none": True}
+    )
     gpu_admission_measurement_source: str | None = None
     gpu_admission_enforcement: AdmissionEnforcement = "observe_only"
     gpu_pair_ceiling_gib: PositiveGpuGiB | None = None

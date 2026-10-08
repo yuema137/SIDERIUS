@@ -44,6 +44,8 @@ from core.record_role import AttemptRole, RecordRoleError, is_formal_role
 # field did before. Same layering as proposal.py importing
 # core.hardware_context.
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.gpu_execution_evidence import GpuExecutionReceipt
+from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.inference_verification_evidence import InferenceVerification
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from core.runtime_control.pair_admission import PositiveGpuGiB
@@ -393,6 +395,9 @@ class ExperimentRecord(BaseModel):
         # size, speed or capacity, and carries no authority to shrink it.
         "skipped_infrastructure_failure",
     ]
+    gpu_execution: list[GpuExecutionReceipt] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     model_type: str
     #: V21 PR E — observational candidate identity (O-E-4/O-E-5), stamped by
     #: ``_emit_record`` from the tuner input. None on records written before
@@ -2379,6 +2384,9 @@ class HyperparamTuningInput(BaseModel):
     # and vice versa. The budget here acts as an operator-defined ceiling; the
     # skill compares vram_estimate against min(defensive_floor, budget).
     # See docs/resource_estimator_implement.md §10.4 / §10.5.
+    gpu_execution_policy: GpuExecutionPolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     gpu_admission_measurement_source: str | None = Field(
         default=None,
         description=(

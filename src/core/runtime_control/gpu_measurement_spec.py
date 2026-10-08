@@ -96,6 +96,7 @@ class GpuMeasurementSpec(BaseModel):
 
     label: str = Field(min_length=1)
     request: CandidateMeasurementRequest
+    strict_lifecycle: bool = Field(default=False, exclude_if=lambda value: value is False)
     inference_binding: InferenceMeasurementBinding | None = None
     training_binding: TrainingMeasurementBinding | None = Field(
         default=None, exclude_if=lambda value: value is None

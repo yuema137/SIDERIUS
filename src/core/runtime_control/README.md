@@ -134,9 +134,9 @@ bounded evaluation workload observed, not what arbitrary later inputs will use.
 Two file checks detect ordinary mutation; they do not provide an immutable
 snapshot against a hostile concurrent writer.
 
-This interface does **not** dispatch measurements for trial or post-training
-inference, produce missing checkpoint identities, or populate runtime admission
-tables. Those integrations remain required before isolated GPU onboarding works.
+This low-level interface does not dispatch a complete attempt by itself. The
+[optional native execution policy](#protecting-a-native-gpu-attempt) connects it
+to trial/formal training and post-training inference.
 Fresh-model request serialization remains unchanged when the optional reference
 is absent. The implementation's source identity changes, so externally selected
 preflight estimators must qualify the new assembly explicitly.
@@ -182,8 +182,8 @@ checks the deadline before its first wait. This deliberately includes startup
 time that the old path excluded; thresholds remain unchanged. Startup time counts
 toward the work deadline, but the synchronous callback itself cannot be interrupted
 by this loop. Cleanup may extend beyond that work deadline. No GPU memory stop,
-measurement-budget sharing, checkpoint handshake or complete isolated onboarding
-is provided by this change. Successful ordinary output and launch semantics remain
+measurement-budget sharing or checkpoint handshake is implied by ordinary
+supervision. The optional policy below selects those additional mechanisms. Successful ordinary output and launch semantics remain
 unchanged; exception/orphan cleanup deliberately improves. The shared supervision
 source identity changes, including the existing estimation assembly digest, so
 external historical estimator qualifications must be refreshed explicitly.
@@ -191,8 +191,9 @@ external historical estimator qualifications must be refreshed explicitly.
 ### Testing optional GPU runtime protection
 
 Framework integrators can test the protected observer through the Python API.
-It is not yet connected to the training/inference launcher, and there is no CLI
-switch that enables it. Existing runs retain ordinary observation behavior.
+The optional native execution policy below connects this mechanism to the
+training/inference launcher. Calls without that policy retain ordinary observation
+behavior. This section describes the lower-level API for framework integrators.
 
 Before calling it, obtain a typed `GpuProtectionBinding` and
 `TimedGpuObservation` from your admission boundary and explicitly choose a
@@ -281,7 +282,7 @@ package or filesystem operations. If parent preparation returns late, it refuses
 instead of granting the child a fresh allowance; necessary cleanup may overrun
 the work deadline and is reported. This interface does not connect trial/formal
 phase measurement, shared attempt budgets, inference authorization or GPU memory
-stopping. Those remain separate prerequisites for isolated onboarding. Shared
+stopping by itself. The optional native execution policy below connects them. Shared
 file-verification code participates in the estimator assembly identity, so source
 qualification must be updated even though absent-checkpoint request bytes and
 ordinary inference loading remain unchanged.
@@ -298,6 +299,78 @@ Callers preparing this measurement use `bind_training_measurement(spec)` and
 check the result with `assess_training_measurement(spec, run, cap_mib=...)`.
 Missing sampling, preprocessing or cleanup evidence yields `unavailable`; it
 does not establish that a smaller model would work. A successful result describes
-the bounded probe, not every future input. This API is not yet selected by the
-trial/inference launch driver. See the [training measurement contract](training-measurement.md)
+the bounded probe, not every future input. The optional native execution policy
+selects this API for both trial and formal attempts. See the [training measurement contract](training-measurement.md)
 for required inputs, evidence and remaining integration work.
+
+
+## Protecting a native GPU attempt
+
+For a composed task using the native trainer and inference executable, you can
+request a measurement before each phase and sampled GPU protection while it runs.
+Both trial and formal attempts follow the same sequence:
+
+1. Measure a bounded training workload using the selected task scope and settings.
+2. Check current GPU headroom, then train under sampled protection.
+3. Identify the saved checkpoint and measure inference with those weights.
+4. Load and verify that checkpoint in the inference child. The parent authorizes
+   inference only after verifying the child's receipt and startup memory evidence.
+5. Record the measurement, admission decision, protection outcome and child cleanup.
+
+Save an explicit policy outside this repository, for example at
+`/home/me/experiment/gpu-execution.json`:
+
+```json
+{
+  "phase_measurement_budget_seconds": 120.0,
+  "worker_rss_limit_bytes": 8589934592,
+  "startup_ack_timeout_seconds": 5.0,
+  "startup_receipt_limit_bytes": 1048576,
+  "protection": {
+    "observation": {
+      "fast_interval_ms": 20,
+      "fast_window_ms": 1000,
+      "steady_interval_ms": 100,
+      "join_timeout_ms": 500
+    },
+    "max_sample_age_seconds": 2.0,
+    "control": {
+      "poll_seconds": 0.05,
+      "grace_seconds": 1.0,
+      "reap_seconds": 2.0
+    }
+  }
+}
+```
+
+These are example choices, not defaults or a hardware recommendation. The 120-second
+allowance is shared by preparation and both measurements; actual training is outside
+it. The 8 GiB RSS limit applies to measurement/checkpoint/startup preparation, not to
+all later training. Choose values that fit your task and machine. The GPU aggregate
+ceiling remains configured through the existing [ceiling settings](gpu-ceilings.md).
+
+Add this argument to your existing single-iteration launch command:
+
+```bash
+--gpu_execution_policy_json /home/me/experiment/gpu-execution.json
+```
+
+The resolved policy becomes part of the workspace lock. Changing it requires a new
+workspace. Without this argument, ordinary launches keep their existing behavior;
+CPU and pseudo execution do not launch these GPU measurements.
+
+Inspect `gpu_execution/<attempt-token>/training-terminal.json` and
+`inference-terminal.json` inside the executor's run directory. Measurement details
+are in the corresponding `training/measurement.json` and `inference/measurement.json`.
+Completed experiment records also carry the attempt's typed `gpu_execution` evidence.
+A missing measurement, changed source/checkpoint, unavailable monitoring or failed
+cleanup stops the run as an infrastructure error. It is not evidence that the model
+should be smaller. A complete capacity refusal retains its resource refusal status.
+
+This option currently requires task-owned training/evaluation scopes and the native
+checkpoint path. External evaluation executors are refused before training. GPU
+telemetry must be available and usable; selecting a policy does not add a vendor
+telemetry adapter. Sampled protection can miss spikes between samples and is not a
+hard GPU partition. Parent filesystem operations are cooperative, and cleanup may
+extend past the work deadline. See the [execution contract](native-gpu-execution.md)
+for interfaces, record semantics and compatibility boundaries.

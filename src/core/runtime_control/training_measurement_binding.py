@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
@@ -50,14 +51,22 @@ def validate_training_measurement_request(spec: GpuMeasurementSpec) -> None:
         raise ValueError("bound training requires sampler, setup, work and reservation channels")
 
 
-def training_measurement_binding(spec: GpuMeasurementSpec) -> TrainingMeasurementBinding:
+def training_measurement_binding(
+    spec: GpuMeasurementSpec, *, environ: Mapping[str, str] | None = None
+) -> TrainingMeasurementBinding:
     validate_training_measurement_request(spec)
     return TrainingMeasurementBinding(
-        **measurement_sources().model_dump(),
+        **(
+            measurement_sources() if environ is None else measurement_sources(environ=environ)
+        ).model_dump(),
         request_sha256=measurement_request_digest(spec, binding_field="training_binding"),
     )
 
 
-def bind_training_measurement(spec: GpuMeasurementSpec) -> GpuMeasurementSpec:
+def bind_training_measurement(
+    spec: GpuMeasurementSpec, *, environ: Mapping[str, str] | None = None
+) -> GpuMeasurementSpec:
     """Bind a fully prepared request without introducing a validation deadlock."""
-    return spec.model_copy(update={"training_binding": training_measurement_binding(spec)})
+    return spec.model_copy(
+        update={"training_binding": training_measurement_binding(spec, environ=environ)}
+    )
