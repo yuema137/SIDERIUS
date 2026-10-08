@@ -6,8 +6,8 @@ live outside the framework; the companion repository owns their qualification.
 The [repository map](repository-map.md) describes that version boundary.
 
 Earlier architecture prose mixed current implementation, TIDMAD-specific
-examples and future proposals. That text remains available in the
-[pre-refresh source revision](https://github.com/Galileo-Sandbox/SIDERIUS/blob/69d20786e4f36f3426c240c598e99c8c0abb1bb5/docs/architecture.md).
+examples and future proposals. Read that preserved version from this checkout
+with `git show 69d20786e4f36f3426c240c598e99c8c0abb1bb5:docs/architecture.md`.
 Treat it as historical context, not an additional current contract. The
 [design index](design/README.md) owns other historical proposals.
 
