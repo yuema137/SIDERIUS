@@ -125,3 +125,12 @@ The inventory records initial file hashes, Python, source HEAD and whether the
 source tree was dirty. It is not a complete environment lock or a stale-review
 gate. Changing your own files after installation is expected. Keep experiment
 version pins and run provenance in the experiment and resulting records.
+
+## Professional and Assistant routes
+
+Professional users may write their native caller directly; Assistant users may ask
+an agent to read the installed toolkit and help author it. Neither route requires
+a review receipt. The [optional setup review](../setup_review/README.md) can inspect
+supported standard-workflow snapshots, but it does not review arbitrary Python
+caller control flow or grant a caller-wide launch approval. Keep the caller and
+run declaration explicit, and inspect the actual run outputs and status.

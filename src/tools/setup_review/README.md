@@ -473,3 +473,42 @@ An assistant can invoke the same typed callable or inspect its `SKILL_SPEC`;
 see the [semantic review API contract](semantic-review.md). This is an optional
 review building block, not completed Professional/Assistant onboarding or proof
 that the four independent onboarding trials have run.
+
+## Choose direct or reviewed launch
+
+| Route | What you do |
+| --- | --- |
+| Professional, standard workflow | Author your task and experiment, then use the ordinary `workflows.run_one_iteration` command. Review reports are optional. Native validation still applies. |
+| Assistant, standard workflow | Ask the assistant to prepare the declaration, task-settings check and environment report; review that snapshot or explicitly skip, then optionally launch with the checked receipt below. |
+| Either role, custom orchestration | Use the [external-project assembler](../orchestration_setup/README.md) and native toolkit. A standard snapshot does not review your custom caller's control flow. |
+
+To make an environment report usable by the optional launch, add `--bind-launch`
+to the environment-preview command. This explicitly checks a **clean source
+checkout**, records the exact interpreter and pins selected configuration files.
+It does not modify those files. Without the flag, the report remains advisory;
+a dirty checkout still supports advisory preview and ordinary direct launch.
+The same `--input-max-bytes` bounds each selected configuration file.
+
+Pass this environment `report.json` to the existing review/skip command, with its
+SHA-256 and a new output directory. Environment reports use packet version v3:
+selected effective settings and hardware observations join the earlier task facts.
+The packet still omits arbitrary advice/configuration and does not prove data,
+authentication, runtime resource enforcement or successful execution.
+
+Create the request and finding acknowledgements using the
+[reviewed launch request recipe](reviewed-launch.md#request-recipe). Run its command
+from the declaration's recorded working directory, with the same checkout interpreter.
+
+This command **starts the actual standard iteration** when checks match; it is
+not another preview. Obtain the run's API/GPU/time authorization first. A
+`launch-check.json` outcome of `matched` means the selected launch checks matched,
+not that execution succeeded. Inspect normal workflow outputs for that result.
+Early invalid requests can produce no output directory; later refusals preserve
+an explicit refusal receipt and may leave ordinary initialization files.
+
+For example, if you change the task contract after review, this launch refuses
+before workflow execution. Acknowledging a finding cannot override that change.
+Regenerate the affected task/environment reports and review or explicitly skip
+the new snapshot. Choose a new output directory and, if initialization occurred,
+a fresh run workspace. The [technical contract](reviewed-launch.md) defines the
+identity coverage and limits. Direct launch remains available without this gate.

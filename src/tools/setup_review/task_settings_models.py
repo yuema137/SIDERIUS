@@ -1,31 +1,24 @@
 """Typed task-settings observations; no task, hardware or provider execution."""
 
-import math
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from execute_tools.dataset_config import DataScope
 from tools.setup_review.route_models import LLMRoute
-from workflows.llm_config import WorkflowLLMConfig
-
-FormalDelta = (
-    Annotated[float, Field(strict=True, allow_inf_nan=False)] | Literal["nan", "+inf", "-inf"]
+from workflows.formal_delta import (
+    FORMAL_DELTA_FIELDS as FORMAL_DELTA_FIELDS,
 )
-FORMAL_DELTA_FIELDS = frozenset({"skip_formal_min_delta", "bypass_formal_time_budget_min_delta"})
-
-
-def encode_formal_delta(value: float) -> FormalDelta:
-    """Preserve even unused nonfinite values without nonstandard JSON numbers."""
-    if math.isnan(value):
-        return "nan"
-    if math.isinf(value):
-        return "+inf" if value > 0 else "-inf"
-    return value
-
-
-def decode_formal_delta(value: FormalDelta) -> float:
-    return float(value)
+from workflows.formal_delta import (
+    FormalDelta as FormalDelta,
+)
+from workflows.formal_delta import (
+    decode_formal_delta as decode_formal_delta,
+)
+from workflows.formal_delta import (
+    encode_formal_delta as encode_formal_delta,
+)
+from workflows.llm_config import WorkflowLLMConfig
 
 
 class SettingsModel(BaseModel):
