@@ -1,75 +1,22 @@
 # Paper illustrations
 
-The root README uses the current paper's infrastructure overview (Figure 1,
-`figure1.png`) and evaluation protocol (Figure 2, `figure2.png`). The older framework composition,
-reference loop, evaluation-role, and human-participation illustrations remain
-available below for documentation that specifically links them.
-The original PDFs are copied unchanged where available; PNG previews render them
-for Markdown. The current paper build supplies `figure1.png` and `figure2.png`
-as rendered submission figures.
-The root README embeds PNGs; it does not link those previews to vector PDFs.
+The root README shows Figure 1 (infrastructure) and Figure 2 (evaluation) from
+[the SIDERIUS paper](https://zenodo.org/records/23071121).
 
-These are conceptual illustrations. The current `figure1.png` includes Data
-Analysis and literature capabilities. The older `fig_loop` and `fig_composition`
-illustrations omit Data Analysis. Use the framework guides for executable
-interfaces and configuration.
-
-## Earlier framework illustrations: source and reproduction
-
-- Source repository: `git@github.com:yuema137/SIDERIUS-Paper.git`
-- Legacy source checkout revision: `1c21c64fe37b4dbd47372ea443e768b90a1ca009`
-- Source directory: `shared/figures/` (read-only during this update)
-- Copy date: 2026-09-18
-- Source manifest: `shared/figures/MANIFEST.md`
-- Original figure sources: `tools/figures/fig_{composition,evaluation,loop,human}.html`
-- PDF renderer recorded by the source manifest: `tools/figures/render.sh`
-- PNG conversion: Poppler `pdftoppm` 0.86.1
-
-```bash
-for name in fig_composition fig_evaluation fig_loop fig_human; do
-  pdftoppm -singlefile -scale-to 2000 -png \
-    "docs/assets/paper/$name.pdf" "docs/assets/paper/$name"
-done
-```
-
-The source manifest dates composition, evaluation, and loop figures to
-2026-08-25, and the human figure to 2026-08-21. The human figure retains its
-original visual style. Figures are reused at the operator's request; the source
-does not state a separate figure license, and no license is inferred.
-
-## Current paper-build figures
-
-| Asset | Meaning | Source |
+| Figure | Zoomable vector image | High-resolution preview |
 | --- | --- | --- |
-| [`figure1.png`](figure1.png) | Paper Figure 1: caller-owned composition and typed scientific capabilities (infra) | `SIDERIUS-Paper/iclr/build/submission_audit/figure_0.png` |
-| [`figure2.png`](figure2.png) | Paper Figure 2: task specification, evaluation roles, scoreability, Health, and offline review (eval) | `SIDERIUS-Paper/iclr/build/submission_audit/figure_1.png` |
+| 1 — Scientific capabilities and caller-owned workflows | [SVG](figure1.svg) | [PNG](figure1.png) |
+| 2 — Task specification and scientific evaluation | [SVG](figure2.svg) | [PNG](figure2.png) |
 
-Current paper-build source checkout revision used for these two files:
-`8ef64a181e5b8e606ff6bdb88433c4ecdd7ab31f`.
-The files were copied read-only from the paper checkout on 2026-09-29.
-The audit export filenames are **zero-indexed**, unlike the paper's figure
-numbers. The paper's `iclr/build/main.aux` assigns `fig:overview` to Figure 1
-and `fig:evaluation` to Figure 2; their TeX sources are
-`iclr/figures/overview.tex` and `iclr/figures/evaluation.tex`. The research-loop
-export `figure_2.png` is not one of the two root README illustrations.
+The SVG images stay sharp when enlarged; the PNGs are 3200 pixels wide. These
+are exports of the paper figures, with their content and layout unchanged.
+They illustrate the design; use the [framework guides](../../README.md) for
+current executable interfaces.
 
-```text
-42ce1a9bc6296269e5c1b125b605054e2de5f24ad29d5c0044fd19e94737b42a  figure1.png
-f39ed5c2ba1ea860434bf540902648540efe16692b6d7ecf23bb0f3d3ac5839a  figure2.png
-```
+Earlier illustrations remain available for documents that reference them:
+[composition](fig_composition.png), [evaluation](fig_evaluation.png),
+[research loop](fig_loop.png), and [human participation](fig_human.png).
+The earlier composition and loop diagrams omit Data Analysis.
 
-## SHA-256 checksums for the earlier illustrations
-
-PDF hashes below also match the source files byte for byte.
-
-```text
-07249b59e603aacf843435be187dd5595b5fa3fcf82809d00511ee5b17c93c51  fig_composition.pdf
-0800f8f17b45f2b0a8004d62f903934ad510c3e3702e876b7789f78b55d802de  fig_evaluation.pdf
-19f9e182092b3c8fdbe49407fcac46df30e9ec3c87a37d7274616770fb95f00e  fig_human.pdf
-0b97611a2c5c79db1175fcf8c15ac914fc1fd467394f28847d90bfd78d941b02  fig_loop.pdf
-d6691674de1c6c3a6aefd3d95d4aa035ce0b51043e834bd53da966ada1cef511  fig_composition.png
-6b2b20d3b20f3acb6d914b7173fcd81539cdb42da6b30b4650c10368110dd600  fig_evaluation.png
-cfaec79b15a9bfe60e74a21fb9b9c87fe47cf751f40c26e5c910273c5296547e  fig_human.png
-f70b7c06d10007c0bfb4ed07c95501719ab14bb664dcf939016392c94a61168f  fig_loop.png
-
-```
+For source identity, crop coordinates, export commands, and checksums, see
+[figure provenance](figure-provenance.md).

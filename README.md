@@ -13,6 +13,14 @@ The task owns the scientific meaning. The caller owns the workflow composition
 and run settings. SIDERIUS supplies the typed interfaces and execution core
 that connect them.
 
+## Paper
+
+Read [Beyond a Better Score: Long-Horizon Agentic ML Development and Evaluation Protocol for Physics Time Series](https://zenodo.org/records/23071121).
+The paper studies how LLM agents can develop scientifically valid models,
+combining reusable research capabilities, multiple layers of scientific
+evaluation, and exploration within compute budgets. Experiments on TIDMAD,
+TESS, Project8, and LIGO evaluate both model performance and scientific validity.
+
 ## Try a scientific task with siderius-exp
 
 This repository provides the framework. Its companion,
@@ -39,7 +47,9 @@ and incur API charges.
 
 ## How the pieces fit together
 
-![Paper Figure 1: SIDERIUS infrastructure and typed capability contracts](docs/assets/paper/figure1.png)
+[![Paper Figure 1: SIDERIUS infrastructure and typed capability contracts](docs/assets/paper/figure1.svg)](docs/assets/paper/figure1.svg)
+
+[Open Figure 1 to zoom](docs/assets/paper/figure1.svg) · [High-resolution PNG](docs/assets/paper/figure1.png)
 
 **Figure 1 — Infrastructure.** A human scientist, a fixed workflow, or an LLM
 orchestrator can call the same scientific capabilities through typed contracts.
@@ -47,7 +57,9 @@ The caller chooses the calls, assembles their inputs, and owns control and
 history. Each capability owns its reasoning and tools, including executable
 Data Analysis.
 
-![Paper Figure 2: task specification and multilayer evaluation](docs/assets/paper/figure2.png)
+[![Paper Figure 2: task specification and multilayer evaluation](docs/assets/paper/figure2.svg)](docs/assets/paper/figure2.svg)
+
+[Open Figure 2 to zoom](docs/assets/paper/figure2.svg) · [High-resolution PNG](docs/assets/paper/figure2.png)
 
 **Figure 2 — Evaluation.** The task package separates training objectives,
 validation monitoring, scientific ranking, and supporting evidence.
@@ -56,8 +68,8 @@ records applicable model/output checks and follows their configured blocking
 or observational policy. Offline behavioral review adds evidence for scientific
 acceptance without feeding its judgments back into search.
 
-These figures are reproduced from the current SIDERIUS paper build. Their
-source and checksums are recorded in
+These figures are exported from the [paper on Zenodo](https://zenodo.org/records/23071121).
+Their source and export details are recorded in
 [`docs/assets/paper/README.md`](docs/assets/paper/README.md).
 
 ## Quickstart
