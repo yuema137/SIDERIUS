@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from tools.setup_review.models import SetupDeclarationReport, SetupReviewRequest
+from tools.setup_review.task_settings_models import TaskSettingsInputs, TaskSettingsSummary
 from tools.workspace_sandbox.profile import SandboxProfile
 from tools.workspace_sandbox.runner import ExecutionResult
 
@@ -17,7 +18,9 @@ Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 CHILD_REQUEST_NAME = "check-request.json"
 CHILD_RESULT_NAME = "check-result.json"
 FAILURE_MESSAGE_MAX_CHARS = 4096
-FailureStage = Literal["composition", "planner_strategy", "transport", "sandbox", "stale_manifest"]
+FailureStage = Literal[
+    "composition", "planner_strategy", "task_settings", "transport", "sandbox", "stale_manifest"
+]
 
 
 class CheckModel(BaseModel):
@@ -35,6 +38,7 @@ class TaskCheckRequest(CheckModel):
     output: Path
     read_only: tuple[Path, ...]
     settings: TaskCheckSettings
+    resolve_task_settings: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class CompositionJob(CheckModel):
@@ -45,6 +49,9 @@ class CompositionJob(CheckModel):
     planner_strategy: str | None
     scratch: str
     settings: TaskCheckSettings
+    task_settings: TaskSettingsInputs | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @property
     def digest(self) -> str:
@@ -89,6 +96,9 @@ class CompositionResult(CheckModel):
     task: TaskCompositionSummary | None = None
     planner_strategy_identity: dict[str, JsonValue] | None = None
     failure: CheckFailure | None = None
+    task_settings: TaskSettingsSummary | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @classmethod
     def failed(

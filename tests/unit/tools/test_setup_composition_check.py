@@ -217,3 +217,64 @@ def test_child_returned_paths_remain_display_only(check_request, monkeypatch):
     html = (check_request.output / "index.html").read_text()
     assert str(private) in saved + html
     assert "private-content-must-not-be-read" not in saved + html
+
+
+def test_task_settings_use_one_parse_and_explicit_health_source_mount(check_request, monkeypatch):
+    from tools.setup_review import inspection
+
+    config = check_request.read_only[0] / "health.yaml"
+    config.write_text("unexecuted: health config\n")
+    argv = [*check_request.setup.argv, "--health_checks_config", "task/health.yaml"]
+    request = check_request.model_copy(
+        update={
+            "setup": check_request.setup.model_copy(update={"argv": argv}),
+            "resolve_task_settings": True,
+        }
+    )
+    original = inspection.normalize_args
+    parsed = []
+
+    def once(args):
+        parsed.append(args)
+        assert len(parsed) == 1, "configuration was parsed twice"
+        return original(args)
+
+    captured = []
+
+    def child(profile, argv):
+        job = CompositionJob.model_validate_json(
+            (profile.workspace / CHILD_REQUEST_NAME).read_bytes()
+        )
+        captured.append(job)
+        return _failed_child(profile, argv)
+
+    monkeypatch.setattr(inspection, "normalize_args", once)
+    monkeypatch.setattr(parent, "run", child)
+    parent.check_task(request)
+    assert captured[0].task_settings.health_checks_config == str(config)
+    assert captured[0].task_settings.health_gate_enabled is True
+    assert len(parsed) == 1
+
+
+def test_unmounted_external_health_file_refuses_before_child(check_request, monkeypatch):
+    extra = check_request.scratch.parent / "other-config"
+    extra.mkdir()
+    (extra / "health.yaml").write_text("unexecuted: config\n")
+    request = check_request.model_copy(
+        update={
+            "setup": check_request.setup.model_copy(
+                update={
+                    "argv": [
+                        *check_request.setup.argv,
+                        "--health_checks_config",
+                        "other-config/health.yaml",
+                    ],
+                }
+            ),
+            "resolve_task_settings": True,
+        }
+    )
+    monkeypatch.setattr(parent, "run", lambda *args: pytest.fail("unmounted config started child"))
+    with pytest.raises(ValueError, match="Expose the selected Health configuration"):
+        parent.check_task(request)
+    assert not request.scratch.exists()

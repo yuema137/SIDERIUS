@@ -124,6 +124,17 @@ def review_snapshot(request: SemanticReviewRequest) -> SemanticReviewReceipt:
             packet_sha256=_digest(user.encode()),
             limitations=list(_LIMITATIONS),
         )
+        if (
+            isinstance(snapshot, SavedTaskCheckSnapshot)
+            and snapshot.result.task_settings is not None
+        ):
+            common["prompt_version"] = "setup-review/v2"
+            common["limitations"] = [
+                _LIMITATIONS[0],
+                "Saved task-dependent settings were resolved; data, hardware, actual Health "
+                "evaluations, authentication and successful execution remain unchecked.",
+                *_LIMITATIONS[2:],
+            ]
         if not isinstance(operation, ReviewSnapshotRequest):
             receipt = SemanticReviewReceipt(
                 **common, outcome="skipped", skip_reason=operation.reason

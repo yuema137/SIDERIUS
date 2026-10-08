@@ -146,6 +146,104 @@ else:
     assert hidden.read_text() == "not-for-the-child"
 
 
+@pytest.mark.parametrize("contradiction", [False, True])
+def test_real_task_settings_materialize_owner_defaults_without_running_health(
+    tmp_path, monkeypatch, contradiction
+):
+    request = _external_hook_request(tmp_path, monkeypatch, "")
+    task = request.read_only[0]
+    (task / "health_plugin.py").write_text("""
+from execute_tools.health_checks import register
+from execute_tools.health_checks.schemas import CheckInputDeclaration
+class Check:
+    name = "setup_fixture_check"
+    declaration = CheckInputDeclaration(consumes_view="setup.fixture_view")
+    def run(self, ctx, config=None):
+        raise AssertionError("setup inspection executed a Health check")
+register(Check())
+""")
+    (task / "health.yaml").write_text("""
+facts: {encoding_family: setup_fixture}
+plugins:
+  - {kind: file, ref: health_plugin.py}
+roster:
+  - gate_id: inspect_distribution
+    check: setup_fixture_check
+    disposition: recording
+    reason: "<script>display as text</script>"
+""")
+    manifest = task / "task.yaml"
+    payload = yaml.safe_load(manifest.read_text())
+    payload["task_health"] = {"config": "health.yaml"}
+    manifest.write_text(yaml.safe_dump(payload))
+    argv = [
+        *request.setup.argv,
+        "--health_gate_files",
+        "1",
+        "--healthgate_mode",
+        "observe_only",
+        "--result_authority",
+        "scientific" if contradiction else "diagnostic",
+    ]
+    request = request.model_copy(
+        update={
+            "setup": request.setup.model_copy(update={"argv": argv}),
+            "resolve_task_settings": True,
+        }
+    )
+    report = check_task(request)
+    assert not (tmp_path / "real-run").exists()
+    assert not (tmp_path / "unmounted-data").exists()
+    assert report.sandbox.devices == report.sandbox.environment_names == ()
+    if contradiction:
+        assert report.result.failure.stage == "task_settings"
+        assert report.result.failure.exception_type == "FormalLaunchPolicyError"
+        assert report.result.task_settings is None
+        assert not (request.scratch / "task-settings").exists()
+        return
+    assert report.result.outcome == "passed", report.result.failure
+    settings = report.result.task_settings
+    assert settings.resolved_data_scope == [0, 1, 2, 3]
+    assert settings.analysis_enabled is False
+    assert settings.formal_policy == "passed"
+    gate = settings.health_config["health_gates"][0]
+    assert gate["gate_role"] == "observational"
+    assert gate["after_round"] == "every" and gate["short_circuit"] is False
+    assert gate["on_fail"] == {"action": "continue"}
+    assert gate["checks"][0]["config"]["peek_file_indices"] == [1]
+    assert len(settings.health_config["resolved_plugins"]) == 1
+    assert (request.scratch / "task-settings/health_checks_effective.yaml").is_file()
+    html = (request.output / "index.html").read_text()
+    assert "Selected data scope" in html and "Health gate 1" in html
+    assert "&lt;script&gt;" in html and "<script>display" not in html
+    assert "no Health materialization" not in html
+    # The saved semantic boundary consumes facts, never the deleted execution paths.
+    from tools.setup_review.semantic_models import SemanticReviewRequest
+    from tools.setup_review.semantic_review import review_snapshot
+
+    shutil.rmtree(request.scratch)
+    shutil.rmtree(task)
+    source = request.output / "report.json"
+    receipt = review_snapshot(
+        SemanticReviewRequest.model_validate(
+            {
+                "operation": {
+                    "kind": "skip",
+                    "report": str(source),
+                    "expected_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                    "output": str(tmp_path / "skip-review"),
+                    "input_max_bytes": 1024 * 1024,
+                    "reason": "I will review these settings myself.",
+                }
+            }
+        )
+    )
+    assert receipt.outcome == "skipped" and receipt.prompt_version == "setup-review/v2"
+    packet = json.loads((tmp_path / "skip-review/packet.json").read_text())
+    assert packet["resolved_task_settings"]["health_gates"][0]["on_fail"] == {"action": "continue"}
+    assert "display as text" not in json.dumps(packet)
+
+
 def test_factory_cannot_connect_to_host_loopback(tmp_path, monkeypatch):
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))

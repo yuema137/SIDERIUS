@@ -36,6 +36,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Positive finite wall-clock budget for this child check",
     )
     parser.add_argument(
+        "--resolve-task-settings",
+        action="store_true",
+        help="Also resolve task-dependent scope, analysis and Health settings; no data or hardware checks",
+    )
+    parser.add_argument(
         "--result-max-bytes",
         type=int,
         default=TaskCheckSettings.model_fields["result_max_bytes"].default,
@@ -51,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
             settings=TaskCheckSettings(
                 timeout_seconds=args.timeout_seconds, result_max_bytes=args.result_max_bytes
             ),
+            resolve_task_settings=args.resolve_task_settings,
         )
         report = check_task(request)
     except (OSError, ValueError) as error:

@@ -18,6 +18,7 @@ from tools.setup_review.models import (
     SetupReviewRequest,
 )
 from tools.setup_review.routes import standard_llm_routes
+from tools.setup_review.task_settings_models import FORMAL_DELTA_FIELDS, encode_formal_delta
 from workflows.launch_identity import resolve_launch_identity
 from workflows.llm_config import resolve_standard_llm_config
 from workflows.standard_cli import build_parser, normalize_args
@@ -69,7 +70,11 @@ def _parameter_rows(
                 description=action.help or "No additional help is declared by the CLI.",
                 cli_default=_json_value(action.default),
                 normalized_name=normalized_name,
-                declared_value=_json_value(getattr(args, normalized_name)),
+                declared_value=(
+                    encode_formal_delta(getattr(args, normalized_name))
+                    if normalized_name in FORMAL_DELTA_FIELDS
+                    else _json_value(getattr(args, normalized_name))
+                ),
                 owner="standard_cli.build_parser",
             )
         )
@@ -132,6 +137,13 @@ def _check_locations(args: argparse.Namespace, output: Path) -> tuple[Path, Path
 def inspect_declaration(
     request: SetupReviewRequest, output: Path, *, check_environment: bool = False
 ) -> SetupDeclarationReport:
+    """Inspect once, preserving the public declaration-only result."""
+    return inspect_parsed_declaration(request, output, check_environment=check_environment)[0]
+
+
+def inspect_parsed_declaration(
+    request: SetupReviewRequest, output: Path, *, check_environment: bool = False
+) -> tuple[SetupDeclarationReport, argparse.Namespace]:
     """Inspect in the caller's cwd, without changing cwd or initializing execution.
 
     Every call parses a fresh Namespace so advice/identity caches cannot outlive
@@ -157,7 +169,7 @@ def inspect_declaration(
         analysis_enabled=identity.data_analysis_enabled,
         pseudo_llm=args.is_pseudo_llm,
     )
-    return SetupDeclarationReport(
+    report = SetupDeclarationReport(
         request=request,
         # Resolving this symlink would silently replace a venv interpreter with
         # its base interpreter and could launch against a different installation.
@@ -173,3 +185,4 @@ def inspect_declaration(
         credentials=credential_name_checks(routes, requested=check_environment),
         unresolved=_UNRESOLVED.copy(),
     )
+    return report, args

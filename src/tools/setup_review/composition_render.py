@@ -4,6 +4,7 @@ import html
 import json
 
 from tools.setup_review.composition_models import TaskCheckReport
+from tools.setup_review.task_settings_models import TaskSettingsSummary
 
 
 def _json(value: object) -> str:
@@ -15,15 +16,75 @@ def _section(title: str, explanation: str, values: dict) -> str:
         f"<tr><th>{html.escape(str(name))}</th><td><pre>{_json(value)}</pre></td></tr>"
         for name, value in values.items()
     )
+
     return f"<h3>{html.escape(title)}</h3><p>{html.escape(explanation)}</p>" + (
         f"<table>{rows}</table>" if rows else "<p>No entries are declared.</p>"
+    )
+
+
+def _task_settings(settings: TaskSettingsSummary) -> str:
+    sections = _section(
+        "Selected data scope",
+        "Resolved against the task's declared partitions; dataset contents were not read.",
+        {
+            "partition indices": settings.resolved_data_scope,
+            "partial scope": settings.scope_is_partial,
+        },
+    )
+    sections += _section(
+        "Analysis and model routes",
+        "Analysis enablement now includes the task binding. Conditional routes still depend on execution.",
+        {
+            "analysis enabled": settings.analysis_enabled,
+            **{
+                route.name: {
+                    "applicability": route.applicability,
+                    "provider": route.transport.provider if route.transport else None,
+                    "model": route.transport.model_id if route.transport else None,
+                    "issue": route.issue,
+                }
+                for route in settings.llm_routes
+            },
+        },
+    )
+    sections += _section(
+        "Health evaluation settings",
+        "Formal launch policy was checked. Materialized settings do not mean the checks were executed.",
+        {
+            "evaluation enabled": settings.health_gate_enabled,
+            "formal policy check": settings.formal_policy,
+        },
+    )
+    gates = settings.health_config.get("health_gates", []) if settings.health_config else []
+    if isinstance(gates, list):
+        for index, gate in enumerate(gates, 1):
+            if isinstance(gate, dict):
+                sections += _section(
+                    f"Health gate {index}: {gate.get('id', '')}",
+                    "after_round selects when this gate runs; on_fail describes its effect on validity.",
+                    gate,
+                )
+    if not gates:
+        sections += "<p>No effective Health gates are present.</p>"
+    sections += (
+        "<h3>Still unresolved</h3><ul>"
+        + "".join(f"<li>{html.escape(item)}</li>" for item in settings.unresolved)
+        + "</ul>"
+    )
+    return sections + (
+        "<details><summary>Complete resolved task-settings snapshot and Health digest</summary>"
+        f"<pre>{_json(settings.model_dump(mode='json'))}</pre></details>"
     )
 
 
 def render_task_check(report: TaskCheckReport) -> str:
     result = report.result
     outcome = (
-        "Task and planner provider composed"
+        (
+            "Task and requested settings checks passed"
+            if report.request.resolve_task_settings
+            else "Task and planner provider composed"
+        )
         if result.outcome == "passed"
         else "Task check did not pass"
     )
@@ -73,7 +134,11 @@ def render_task_check(report: TaskCheckReport) -> str:
             )
             + _section(
                 "Task-owned Health declaration",
-                "The task's Health binding only. The effective Health roster and execution checks remain unresolved.",
+                (
+                    "The task's Health binding. Resolved settings are shown below; actual Health evaluations remain unchecked."
+                    if result.task_settings is not None
+                    else "The task's Health binding only. The effective Health roster and execution checks remain unresolved."
+                ),
                 {"declaration": facts.task_health_declaration},
             )
             + "<details><summary>Technical source identities and complete task snapshot</summary>"
@@ -85,6 +150,13 @@ def render_task_check(report: TaskCheckReport) -> str:
         else "No sandbox execution result is available."
     )
     limits = "".join(f"<li>{html.escape(item)}</li>" for item in report.limitations)
+    resolved_settings = ""
+    if report.request.resolve_task_settings:
+        resolved_settings = "<h2>Task-dependent settings</h2>" + (
+            _task_settings(result.task_settings)
+            if result.task_settings is not None
+            else "<p>Requested settings resolution did not complete; see the failure above.</p>"
+        )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -106,6 +178,7 @@ this page records the additional task-code check. Recheck after changing inputs.
 <dt>Check limits</dt><dd><pre>{_json(report.request.settings.model_dump(mode="json"))}</pre></dd></dl>
 {failure}
 <h2>Composed task facts</h2>{task}
+{resolved_settings}
 <h2>Planner strategy identity</h2><pre>{_json(result.planner_strategy_identity)}</pre>
 <h2>Sandbox execution</h2><pre>{execution}</pre>
 <p>The runner reports status, return code and elapsed time. This is not an independently

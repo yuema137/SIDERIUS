@@ -5,7 +5,9 @@ import json
 from pydantic import JsonValue
 
 from tools.setup_review.models import SetupDeclarationReport
+from tools.setup_review.route_models import LLMRoute
 from tools.setup_review.semantic_models import SavedTaskCheckSnapshot
+from tools.setup_review.task_settings_models import TaskSettingsSummary
 
 Snapshot = SetupDeclarationReport | SavedTaskCheckSnapshot
 
@@ -79,6 +81,46 @@ def _parameter_rules(values: dict[str, JsonValue]) -> list[JsonValue]:
     return selected
 
 
+def _route_packet(routes: list[LLMRoute]) -> list[JsonValue]:
+    return [
+        {
+            "name": route.name,
+            "applicability": route.applicability,
+            "transport": route.transport.model_dump(mode="json") if route.transport else None,
+            "shares_client_with": route.shares_client_with,
+            "issue": route.issue,
+        }
+        for route in routes
+    ]
+
+
+def _settings_packet(settings: TaskSettingsSummary) -> dict[str, JsonValue]:
+    gates = settings.health_config.get("health_gates", []) if settings.health_config else []
+    selected: list[JsonValue] = []
+    for gate in gates if isinstance(gates, list) else []:
+        if not isinstance(gate, dict):
+            continue
+        item = _scalars(gate, ("id", "gate_role", "after_round", "short_circuit"))
+        # Round lists are a declared cadence, not arbitrary plugin configuration.
+        cadence = gate.get("after_round")
+        if isinstance(cadence, list) and all(isinstance(value, int) for value in cadence):
+            item["after_round"] = cadence
+        for key in ("on_pass", "on_fail"):
+            action = gate.get(key)
+            if isinstance(action, dict):
+                item[key] = _scalars(action, ("action",))
+        selected.append(item)
+    return {
+        "resolved_data_scope": [value for value in settings.resolved_data_scope],
+        "scope_is_partial": settings.scope_is_partial,
+        "analysis_enabled": settings.analysis_enabled,
+        "formal_policy": settings.formal_policy,
+        "health_gate_enabled": settings.health_gate_enabled,
+        "health_gates": selected,
+        "unresolved": [value for value in settings.unresolved],
+    }
+
+
 def build_packet(snapshot: Snapshot) -> dict[str, JsonValue]:
     """Project facts already saved; never follow a source path or import task code."""
     declaration = declaration_of(snapshot)
@@ -95,16 +137,7 @@ def build_packet(snapshot: Snapshot) -> dict[str, JsonValue]:
             and not isinstance(row.declared_value, (dict, list))
             and not isinstance(row.cli_default, (dict, list))
         ],
-        "routes": [
-            {
-                "name": route.name,
-                "applicability": route.applicability,
-                "transport": route.transport.model_dump(mode="json") if route.transport else None,
-                "shares_client_with": route.shares_client_with,
-                "issue": route.issue,
-            }
-            for route in declaration.llm_routes
-        ],
+        "routes": _route_packet(declaration.llm_routes),
         "credentials": [item.model_dump(mode="json") for item in declaration.credentials],
         "unresolved": list(declaration.unresolved),
         "deterministic_outcome": declaration.outcome,
@@ -122,6 +155,10 @@ def build_packet(snapshot: Snapshot) -> dict[str, JsonValue]:
                 "stage": snapshot.result.failure.stage,
                 "exception_type": snapshot.result.failure.exception_type,
             }
+        settings = snapshot.result.task_settings
+        if settings is not None:
+            packet["resolved_task_settings"] = _settings_packet(settings)
+            packet["routes"] = _route_packet(settings.llm_routes)
         task = snapshot.result.task
         if task:
             packet["task"] = {

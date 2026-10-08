@@ -89,12 +89,22 @@ def compose_in_child(job: CompositionJob) -> CompositionResult:
             )
         except Exception as error:
             return CompositionResult.failed(job, "planner_strategy", error, task=task)
+        settings = None
+        if job.task_settings is not None:
+            try:
+                from tools.setup_review.task_settings_child import resolve_task_settings
+
+                with bind_code_package(composition.code_package):
+                    settings = resolve_task_settings(job.task_settings, composition, job.scratch)
+            except Exception as error:
+                return CompositionResult.failed(job, "task_settings", error, task=task)
         return CompositionResult(
             request_sha256=job.digest,
             manifest_sha256=job.manifest_sha256,
             outcome="passed",
             task=task,
             planner_strategy_identity=identity,
+            task_settings=settings,
         )
 
 
