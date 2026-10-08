@@ -1083,6 +1083,7 @@ def compute_expected_invariants(
             trial_time_admission_source=args.trial_time_admission_source,
             formal_time_admission_source=args.formal_time_admission_source,
             runtime_completion_policy=args.runtime_completion_policy,
+            runtime_verifier_identity=identity.runtime_verifier_identity,
         ),
     )
     return invariants

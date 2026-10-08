@@ -33,6 +33,8 @@ _SETTINGS = frozenset(
         "healthgate_mode",
         "result_authority",
         "runtime_completion_policy",
+        "runtime_verifier",
+        "runtime_verifier_identity",
         "runtime_watchdog",
         "runtime_watchdog_safety_factor",
         "runtime_watchdog_floor_seconds",

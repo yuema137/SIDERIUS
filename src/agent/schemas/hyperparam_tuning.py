@@ -53,6 +53,10 @@ from core.runtime_control.pair_admission import PositiveGpuGiB
 from core.runtime_control.records import RuntimeObservation
 from core.runtime_control.training_budget import TrainingBudgetReceipt
 from core.runtime_control.validation_limits import validate_phase_deadline
+from core.runtime_control.verifier_provider import (
+    RuntimeVerifierIdentity,
+    resolve_runtime_verifier_identity,
+)
 from core.target_standardization import TargetStandardizationReceipt
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_execution import CandidateEvaluationResult
@@ -2251,6 +2255,18 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
     runtime_completion_policy: RuntimeCompletionPolicy = "completed-workload-v1"
+    runtime_verifier: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    runtime_verifier_identity: RuntimeVerifierIdentity | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def _bind_runtime_verifier(self) -> HyperparamTuningInput:
+        self.runtime_verifier_identity = resolve_runtime_verifier_identity(
+            self.runtime_verifier, self.runtime_verifier_identity
+        )
+        return self
+
     formal_time_admission_source: TimeAdmissionSource = Field(
         default="measured",
         description=(

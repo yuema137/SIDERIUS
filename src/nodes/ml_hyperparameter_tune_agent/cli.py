@@ -317,6 +317,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--runtime_verifier",
+        default=None,
+        help="Explicit installed runtime-verifier provider; omitted uses the native implementation.",
+    )
+    parser.add_argument(
         "--runtime_completion_policy",
         choices=("completed-workload-v1", "verified-prediction-v1"),
         default="completed-workload-v1",
@@ -735,6 +740,7 @@ def build_agent_input(
     input_dict["trial_time_admission_source"] = args.trial_time_admission_source
     input_dict["formal_time_admission_source"] = args.formal_time_admission_source
     input_dict["runtime_completion_policy"] = args.runtime_completion_policy
+    input_dict["runtime_verifier"] = args.runtime_verifier
     if args.max_epochs is not None:
         input_dict["max_epochs"] = args.max_epochs
     # D-BUD-6 — forwarded only when set, so an unset per-mode cap leaves the

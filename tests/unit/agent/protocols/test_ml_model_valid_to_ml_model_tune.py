@@ -915,3 +915,36 @@ def test_completion_policy_reaches_real_tuner_and_child_policy(
         RuntimeControlPolicy.model_validate(payload).runtime_completion_policy
         == "verified-prediction-v1"
     )
+
+
+@pytest.fixture
+def runtime_provider(tmp_path, monkeypatch):
+    from tests.unit.core.test_runtime_verifier_provider import installed_provider
+
+    return installed_provider.__wrapped__(tmp_path, monkeypatch)
+
+
+def test_selected_verifier_identity_survives_protocol_and_child_policy(
+    runtime_provider, validator_output, proposal_output, storage, tmp_path
+):
+    from core.runtime_control.session import RuntimeControlPolicy
+    from nodes.ml_hyperparameter_tune_agent.runtime import _build_runtime_policy
+
+    profile, _, calls = runtime_provider
+    tuner = local_validated_model(
+        validator_output,
+        proposal_output,
+        storage,
+        runtime_verifier=profile.name,
+        runtime_completion_policy="verified-prediction-v1",
+    )
+    assert tuner.runtime_verifier_identity == profile.identity()
+    payload = _build_runtime_policy(
+        tuner, chosen_time_budget=3, is_trial=False, base_dir=str(tmp_path)
+    )
+    child = RuntimeControlPolicy.model_validate_json(
+        RuntimeControlPolicy.model_validate(payload).model_dump_json()
+    )
+    assert child.runtime_verifier == profile.name
+    assert child.runtime_verifier_identity == tuner.runtime_verifier_identity
+    assert not calls  # Identity discovery performs no phase work.

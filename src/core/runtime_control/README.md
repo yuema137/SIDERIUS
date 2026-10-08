@@ -63,6 +63,14 @@ requirement for a verified prediction. Use a new workspace when changing policy;
 old records are never silently relabeled. The [technical timing contract](../../../docs/design/runtime_estimation_and_watchdog.md)
 describes the accounting and compatibility boundary.
 
+An experiment may also select an installed timing-verifier provider when its
+historical algorithm differs from today's default. This is optional; ordinary
+runs need no plugin. The framework checks the selected implementation in both
+the launcher and execution environment, and keeps its calibration records apart
+from other implementations. Follow the experiment's installation and selection
+instructions; a missing or changed provider is an error, never a silent fallback.
+See the [provider contract](verifier_provider_contract.md) for integration details.
+
 ## Measurement dimensions
 
 Measurement identity records whether temporal segmentation is applicable. The

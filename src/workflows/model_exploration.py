@@ -1937,6 +1937,7 @@ def _workflow_lock_identity(launch, llm_config: WorkflowLLMConfig) -> LockLaunch
         trial_time_admission_source=launch.trial_time_admission_source,
         formal_time_admission_source=launch.formal_time_admission_source,
         runtime_completion_policy=launch.runtime_completion_policy,
+        runtime_verifier_identity=launch.runtime_verifier_identity,
     )
 
 
@@ -2084,6 +2085,9 @@ def run_workflow(
     # parameters carried before; the carrier restates none of them.
     if launch is None:
         launch = WorkflowLaunchConfig()
+    from workflows.run_config import bind_runtime_verifier_launch
+
+    launch = bind_runtime_verifier_launch(launch)
 
     validate_launch_trial_overrides(launch)
 
@@ -3382,6 +3386,8 @@ def run_workflow(
             trial_time_admission_source=launch.trial_time_admission_source,
             formal_time_admission_source=launch.formal_time_admission_source,
             runtime_completion_policy=launch.runtime_completion_policy,
+            runtime_verifier=launch.runtime_verifier,
+            runtime_verifier_identity=launch.runtime_verifier_identity,
             data_dir=launch.data_dir,
             gpu_execution_policy=launch.gpu_execution_policy,
             gpu_admission_measurement_source=launch.gpu_admission_measurement_source,

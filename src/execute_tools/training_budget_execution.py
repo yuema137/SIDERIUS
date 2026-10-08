@@ -8,7 +8,6 @@ from functools import wraps
 from typing import Literal
 
 from core.checkpoint_selection import CheckpointSelection
-from core.runtime_control.adaptive import AdaptiveUnitVerification
 from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.records import RuntimePrediction
 from core.runtime_control.session import RuntimeVerificationSession
@@ -18,6 +17,7 @@ from core.runtime_control.training_budget import (
     TrainingBudgetReceipt,
     decide_training_budget,
 )
+from core.runtime_control.verifier_provider import RuntimeVerifier
 from core.runtime_control.workload import ResolvedPhaseWorkload
 
 
@@ -172,8 +172,8 @@ def complete_training_workload(
     session: RuntimeVerificationSession,
     *,
     budget_execution: TrainingBudgetExecution | None,
-    training_verifier: AdaptiveUnitVerification | None,
-    validation_verifier: AdaptiveUnitVerification | None,
+    training_verifier: RuntimeVerifier | None,
+    validation_verifier: RuntimeVerifier | None,
     optimizer_steps: int,
     completed_epochs: int,
     epoch_limit: int,

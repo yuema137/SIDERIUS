@@ -120,7 +120,7 @@ def observation_calibration_key(obs: RuntimeObservation, phase: RuntimePhase) ->
     required = ("precision", "optimizer_type", "model_family", "param_count", "seg_size")
     if not ctx or any(k not in ctx for k in required):
         return None
-    return calibration_key(
+    key = calibration_key(
         phase,
         gpu_name=obs.hardware.get("gpu_name"),
         torch_version=obs.software.get("torch_version"),
@@ -131,6 +131,13 @@ def observation_calibration_key(obs: RuntimeObservation, phase: RuntimePhase) ->
         seg_size=int(ctx["seg_size"]),
         batch_size=int(ctx.get("batch_size", 0)),
     )
+    provider = obs.runtime_policy.get("runtime_verifier_identity")
+    if provider is not None:
+        from core.runtime_control.verifier_provider import RuntimeVerifierIdentity
+
+        identity = RuntimeVerifierIdentity.model_validate(provider)
+        key += "|verifier=" + identity.model_dump_json()
+    return key
 
 
 def component_calibration_eligible(obs: RuntimeObservation, phase: RuntimePhase) -> bool:

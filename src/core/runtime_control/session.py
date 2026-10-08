@@ -18,15 +18,12 @@ Stage progression (``RuntimeObservation.final_status``):
                   → verifying_<phase> → verified_<phase> | verification_failed_<phase>
                   → admitted | rejected → completed
 
-Admission semantics (RT2-B/C): the KNOWN-COST lower bound — the sum of
-every component prediction present (setup's prediction equals its
-measured actual; verified phases contribute measurement-backed
-predictions) — can only grow as more phases verify, so exceeding the
-operator budget at any stage is a final rejection (§3). With a budget
-in force a failed verification rejects (fail closed, §2.11); without
-one the session is record-only and always admits. Later stages'
-decisions supersede earlier ones (``AdmissionRecord.stage`` records
-where the final decision was made).
+Admission uses completed actual costs and conservatively adjusted estimates for
+remaining work. The explicit historical strict policy retains its original
+all-prediction sum. A completion-only measurement never becomes a throughput
+prediction or calibration prior. Failed verification refuses budgeted execution;
+record-only timing retains the evidence without enforcing a budget. Evidence
+channel failures always refuse. Later decisions record newly available costs.
 """
 
 from __future__ import annotations
@@ -37,10 +34,9 @@ import os
 import time
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.runtime_control.adaptive import (
-    AdaptiveUnitVerification,
     AdaptiveVerificationConfig,
 )
 from core.runtime_control.completion import RuntimeCompletionPolicy
@@ -69,6 +65,12 @@ from core.runtime_control.total_assembly import (
     assemble_total,
 )
 from core.runtime_control.training_budget import TrainingBudgetEnvelope
+from core.runtime_control.verifier_provider import (
+    RuntimeVerifier,
+    RuntimeVerifierIdentity,
+    create_runtime_verifier,
+    resolve_runtime_verifier_identity,
+)
 from core.runtime_control.workload import ResolvedPhaseWorkload
 
 ADMISSION_STAGE_POST_SETUP = "post_setup_runtime_verification"
@@ -157,6 +159,18 @@ class RuntimeControlPolicy(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     runtime_completion_policy: RuntimeCompletionPolicy = "completed-workload-v1"
+    runtime_verifier: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    runtime_verifier_identity: RuntimeVerifierIdentity | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def _bind_runtime_verifier(self) -> RuntimeControlPolicy:
+        identity = resolve_runtime_verifier_identity(
+            self.runtime_verifier, self.runtime_verifier_identity
+        )
+        object.__setattr__(self, "runtime_verifier_identity", identity)
+        return self
 
     training_budget: TrainingBudgetEnvelope | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -179,8 +193,9 @@ class RuntimeControlPolicy(BaseModel):
         default=1.0,
         ge=1.0,
         description=(
-            "Multiplier applied to the known-cost sum at admission time "
-            "(§2.10 — revised from the error ledger once RT2-F lands). "
+            "Multiplier applied to remaining runtime estimates; completed actual "
+            "cost is unmultiplied. Explicit verified-prediction-v1 retains the "
+            "historical all-prediction sum. "
             "This is the EFFECTIVE per-attempt value: callers resolve any "
             "trial/formal phase split before constructing the policy; "
             "enforcement (admission + watchdog) reads this field only."
@@ -296,6 +311,9 @@ class RuntimeVerificationSession:
     ):
         self.observation_path = observation_path
         self.policy = policy or RuntimeControlPolicy()
+        resolve_runtime_verifier_identity(
+            self.policy.runtime_verifier, self.policy.runtime_verifier_identity
+        )
         self._chain_id = chain_id
         self._attempt_id = attempt_id
         self._environment = capture_environment_provenance()
@@ -437,6 +455,19 @@ class RuntimeVerificationSession:
             pass
         except Exception as exc:
             print(f"[runtime_control] resume failed ({observation_path}): {exc} — starting fresh")
+        if previous is not None:
+            old_identity = previous.runtime_policy.get("runtime_verifier_identity")
+            new_identity = None if policy is None else policy.runtime_verifier_identity
+            if old_identity is not None or new_identity is not None:
+                parsed_identity = (
+                    RuntimeVerifierIdentity.model_validate(old_identity)
+                    if old_identity is not None
+                    else None
+                )
+                if parsed_identity != new_identity:
+                    raise ValueError(
+                        "Runtime verifier identity changed while resuming an observation"
+                    )
         session = cls(observation_path, policy=policy, chain_id=chain_id, attempt_id=attempt_id)
         if previous is None:
             # Fresh start still carries the caller's stage label — a
@@ -574,7 +605,7 @@ class RuntimeVerificationSession:
         phase: RuntimePhase,
         unit: str,
         prior_expected_unit_ms: float | None = None,
-    ) -> AdaptiveUnitVerification:
+    ) -> RuntimeVerifier:
         """Begin adaptive verification of one phase (RT2-C, §2.5).
 
         Returns the incremental driver the production loop feeds unit
@@ -584,7 +615,10 @@ class RuntimeVerificationSession:
         """
         self._final_status = f"verifying_{phase}"
         self._write_sidecar()
-        return AdaptiveUnitVerification(
+        return create_runtime_verifier(
+            selection=self.policy.runtime_verifier,
+            expected=self.policy.runtime_verifier_identity,
+            completion_policy=self.policy.runtime_completion_policy,
             unit=unit,
             config=self.policy.verification,
             prior_expected_unit_ms=prior_expected_unit_ms,
@@ -593,7 +627,7 @@ class RuntimeVerificationSession:
     def complete_phase_verification(
         self,
         phase: RuntimePhase,
-        verifier: AdaptiveUnitVerification,
+        verifier: RuntimeVerifier,
         *,
         source: PredictionSource,
         extra_predicted_seconds: float = 0.0,
@@ -612,6 +646,9 @@ class RuntimeVerificationSession:
                 trainer must record it at ``complete_setup``) while the
                 verifier verified — a prediction cannot be assembled.
         """
+        resolve_runtime_verifier_identity(
+            self.policy.runtime_verifier, self.policy.runtime_verifier_identity
+        )
         if not verifier.is_terminal:
             verifier.finalize()
         self._verification_seconds += verifier.verification_seconds
@@ -624,12 +661,14 @@ class RuntimeVerificationSession:
                     f"phase {phase!r} verified but has no recorded workload — "
                     "record it at complete_setup before verification."
                 )
-            prediction = verifier.prediction(
-                existing.workload,
-                source,
-                safety_factor=self.policy.safety_factor,
-                extra_predicted_seconds=extra_predicted_seconds,
-                extra_detail=extra_detail,
+            prediction = RuntimePrediction.model_validate(
+                verifier.prediction(
+                    existing.workload,
+                    source,
+                    safety_factor=self.policy.safety_factor,
+                    extra_predicted_seconds=extra_predicted_seconds,
+                    extra_detail=extra_detail,
+                )
             )
         else:
             self._verification_failures[str(phase)] = (
@@ -656,7 +695,7 @@ class RuntimeVerificationSession:
         actual_seconds: float,
         executed_unit_count: int,
         reason: Literal["requested_horizon", "cooperative_epoch_stop"] = "requested_horizon",
-        verifier: AdaptiveUnitVerification | None = None,
+        verifier: RuntimeVerifier | None = None,
         source: PredictionSource | None = None,
     ) -> None:
         """Close successful production work, without inventing a rate prediction.

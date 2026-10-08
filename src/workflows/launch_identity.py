@@ -9,6 +9,10 @@ from typing import cast
 import yaml
 
 from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
+from core.runtime_control.verifier_provider import (
+    RuntimeVerifierIdentity,
+    resolve_runtime_verifier_identity,
+)
 from workflows.advice import resolve_advice_artifact
 from workflows.scientific_evidence_stage import EvidenceStageOrder
 
@@ -49,6 +53,9 @@ class LaunchIdentity:
     baseline_isolation: bool = False
     advice_path: str | None = None
     advice_sha256: str | None = None
+    runtime_verifier_identity: RuntimeVerifierIdentity | None = field(
+        default=None, metadata={"omit_if_none": True}
+    )
     gpu_execution_policy: GpuExecutionPolicy | None = field(
         default=None, metadata={"omit_if_none": True}
     )
@@ -103,6 +110,9 @@ def resolve_launch_identity(args: argparse.Namespace) -> LaunchIdentity:
     from core.runtime_control.gpu_execution_policy import load_gpu_execution_policy
 
     return LaunchIdentity(
+        runtime_verifier_identity=resolve_runtime_verifier_identity(
+            getattr(args, "runtime_verifier", None)
+        ),
         gpu_execution_policy=load_gpu_execution_policy(
             getattr(args, "gpu_execution_policy_json", None)
         ),

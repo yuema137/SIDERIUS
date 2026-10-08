@@ -760,6 +760,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--runtime_verifier",
+        default=None,
+        help="Explicit installed runtime-verifier provider; omitted uses the native implementation.",
+    )
+    parser.add_argument(
         "--runtime_completion_policy",
         choices=("completed-workload-v1", "verified-prediction-v1"),
         default="completed-workload-v1",

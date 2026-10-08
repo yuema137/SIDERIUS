@@ -1403,6 +1403,16 @@ def _build_runtime_policy(
             "max_phase_seconds": agent_input.validation_max_phase_seconds,
         },
     }
+    selection = getattr(agent_input, "runtime_verifier", None)
+    if selection is not None:
+        from core.runtime_control.verifier_provider import resolve_runtime_verifier_identity
+
+        identity = resolve_runtime_verifier_identity(
+            selection, agent_input.runtime_verifier_identity
+        )
+        assert identity is not None
+        policy["runtime_verifier"] = selection
+        policy["runtime_verifier_identity"] = identity.model_dump(mode="json")
     if allocation is not None:
         policy["training_budget"] = allocation.model_dump()
     verification_window_seconds = getattr(
