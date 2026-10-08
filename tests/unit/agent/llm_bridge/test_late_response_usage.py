@@ -9,6 +9,7 @@ import pytest
 from openai import APIStatusError
 
 from agent.llm_bridge import LLMBridge
+from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.telemetry import LLMBridgeContextError
 from core.execution_deadline import ExecutionDeadlineExceeded, execution_deadline
 from tests.helpers.metric_fixtures import accuracy_like_spec
@@ -192,3 +193,37 @@ def test_late_receipt_failure_cannot_restart_transport(call_context, monkeypatch
     assert caught.value is recorder_error
     assert create.call_count == recorder.call_count == 1
     assert not path.exists()
+
+
+@pytest.mark.parametrize("reflector_limit", [1, 2])
+def test_reflector_retry_override_and_late_receipt_work_together(
+    call_context, monkeypatch, reflector_limit
+):
+    """The two fixes must preserve both call-specific limits and late usage."""
+    bridge, create, now, path = call_context
+    bridge.max_retries = 1
+    bridge.reflect_retry_policy = RetryPolicy(max_retries=reflector_limit)
+    monkeypatch.setattr("agent.llm_bridge.deadline_sleep", lambda *args: None)
+    request = httpx.Request("POST", "https://example.invalid")
+    transient = APIStatusError("fixture", response=httpx.Response(503, request=request), body=None)
+
+    def replies(**kwargs):
+        if create.call_count == 1:
+            raise transient
+        now[0] = 11
+        return response()
+
+    create.side_effect = replies
+    expected = APIStatusError if reflector_limit == 1 else ExecutionDeadlineExceeded
+    with execution_deadline(10), pytest.raises(expected):
+        invoke(bridge, "reflect")
+    assert create.call_count == reflector_limit
+    assert bridge.max_retries == 1
+    if reflector_limit == 1:
+        assert not path.exists()
+    else:
+        recorded = rows(path)
+        assert len(recorded) == 1
+        assert recorded[0]["label"] == "tuner.reflector"
+        assert recorded[0]["extra"]["status"] == "deadline_exceeded"
+        assert recorded[0]["tokens"]["total"] == 26
