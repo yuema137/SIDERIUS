@@ -32,9 +32,10 @@ from core.runtime_control.gpu_accounting import GpuAccountingSnapshot, Occupancy
 from core.runtime_control.gpu_requirement_evidence import GpuRequirementOwnership
 from core.runtime_control.pair_admission import (
     PairMember,
-    evaluate_pair_admission,
+    PositiveGpuGiB,
+    evaluate_resolved_pair_admission,
     gib_from_mib,
-    pair_ceiling_gib,
+    resolve_gpu_ceiling,
 )
 
 #: How a run treats an unproven situation. Not a severity — two
@@ -243,16 +244,11 @@ class GpuAdmissionPolicy(BaseModel):
             "source is configured, which in formal mode is refused."
         ),
     )
-    ceiling_gib: float | None = Field(
+    ceiling_gib: PositiveGpuGiB | None = Field(
         default=None,
-        # `gt=0`, not `gt=0.0`: an int bound keeps this module free of
-        # float literals, which the genericity test enforces so a
-        # capacity constant like 12 or 28 GiB cannot arrive unnoticed.
-        # This bound means "positive", not a capacity.
-        gt=0,
         description=(
-            "Resolved aggregate ceiling. `None` defers to the environment "
-            "resolver, preserving pre-B-G3 behaviour."
+            "Operator aggregate ceiling. None selects the environment declaration "
+            "or measured device capacity; host quota independently constrains both."
         ),
     )
     device_uuid: str | None = Field(
@@ -523,11 +519,14 @@ def evaluate_gpu_admission(
             detail="inconsistent_accounting",
         )
 
-    configured = pair_ceiling_gib() if ceiling_gib is None else ceiling_gib
-    if isinstance(configured, bool) or not math.isfinite(configured) or configured <= 0:
+    try:
+        limits = resolve_gpu_ceiling(
+            ceiling_gib=ceiling_gib, measured_capacity_gib=gib_from_mib(bound.device_total_mib)
+        )
+    except (TypeError, ValueError) as error:
         return _refuse(
             "policy_unavailable",
-            "the aggregate GPU ceiling must be positive and finite",
+            f"the aggregate GPU ceiling could not be resolved: {error}",
             source="unavailable",
             evidence=evidence,
         )
@@ -541,12 +540,10 @@ def evaluate_gpu_admission(
     # fields, because "the operator asked for 6 GiB" and "the card holds
     # 31.8 GiB" are different facts and the effective value is derived.
     evidence |= {
-        "configured_ceiling_gib": configured,
+        "configured_ceiling_gib": limits.operator_ceiling_gib,
+        "ceiling_resolution": limits.model_dump(mode="json"),
         "measured_device_capacity_gib": gib_from_mib(total_mib),
-        "effective_ceiling_gib": min(
-            configured,
-            gib_from_mib(total_mib),
-        ),
+        "effective_ceiling_gib": limits.effective_gib,
     }
 
     # --- requirement -------------------------------------------------
@@ -608,23 +605,26 @@ def evaluate_gpu_admission(
     # The measured worker has ended and the phase worker does not exist yet.
     # Every currently used byte is retained occupancy, including parent memory
     # and unattributed device usage. Never subtract either as if already included.
-    effective_ceiling = min(configured, gib_from_mib(bound.device_total_mib))
-    members = [
-        PairMember(
-            run_name=run_name,
-            predicted_peak_vram_gb=gib_from_mib(authoritative_requirement),
-            provenance=str(requirement_provenance),
-        )
-    ]
-    if bound.device_used_mib > 0:
-        members.append(
+    effective_ceiling = limits.effective_gib
+    try:
+        members = [
             PairMember(
-                run_name="current_device_occupancy",
-                predicted_peak_vram_gb=gib_from_mib(bound.device_used_mib),
-                provenance="measured",
+                run_name=run_name,
+                predicted_peak_vram_gb=gib_from_mib(authoritative_requirement),
+                provenance=str(requirement_provenance),
             )
-        )
-    pair = evaluate_pair_admission(members, ceiling_gib=effective_ceiling)
+        ]
+        if bound.device_used_mib > 0:
+            members.append(
+                PairMember(
+                    run_name="current_device_occupancy",
+                    predicted_peak_vram_gb=gib_from_mib(bound.device_used_mib),
+                    provenance="measured",
+                )
+            )
+        pair = evaluate_resolved_pair_admission(members, limits=limits)
+    except ValueError as error:
+        return _refuse("policy_unavailable", str(error), source="unavailable", evidence=evidence)
     evidence |= {
         "retained_own_tree_mib": bound.own_tree_mib,
         "known_other_mib": bound.other_mib,

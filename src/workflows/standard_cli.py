@@ -946,7 +946,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "V20 B-G3. Aggregate GPU ceiling (GiB) passed explicitly to the "
             "admission gate. Omitted = defer to SIDERIUS_PAIR_VRAM_CEILING_GIB "
-            "and the compatibility default, i.e. pre-B-G3 behaviour."
+            "or measured device capacity. Host quota independently constrains "
+            "the result; no machine-specific ceiling is assumed."
         ),
     )
     parser.add_argument(

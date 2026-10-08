@@ -24,6 +24,14 @@ Parent memory is additional because the measurement did not include the parent.
 Unattributed device bytes remain unattributed, but still consume headroom.
 Decision evidence preserves the own/other/residual split and the worker receipt.
 
+The ceiling comes from the current device and your configuration. With no
+operator limit, admission uses the measured device capacity. You can set a lower
+aggregate ceiling with `--gpu_pair_ceiling_gib`; a declared host quota also
+constrains it. Moving to a larger GPU no longer silently inherits a 28 GiB
+setting from another machine. For example, a caller ceiling of 24 GiB on an
+80 GiB device still becomes 20 GiB if the host quota is 20 GiB. See
+[GPU ceiling configuration](gpu-ceilings.md) for precedence, units and errors.
+
 Ordinary `GpuAdmissionPolicy.enforcement` still determines whether a refusal
 stops execution or is recorded as an observation. Explicit namespace-limited
 execution continues to stop whenever headroom evidence is insufficient.

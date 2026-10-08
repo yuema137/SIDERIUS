@@ -46,6 +46,7 @@ from core.record_role import AttemptRole, RecordRoleError, is_formal_role
 from core.runtime_control.admission import AdmissionEnforcement
 from core.runtime_control.inference_verification_evidence import InferenceVerification
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
+from core.runtime_control.pair_admission import PositiveGpuGiB
 from core.runtime_control.records import RuntimeObservation
 from core.runtime_control.training_budget import TrainingBudgetReceipt
 from core.runtime_control.validation_limits import validate_phase_deadline
@@ -2406,14 +2407,12 @@ class HyperparamTuningInput(BaseModel):
             "campaign posture. The phase is never relabelled."
         ),
     )
-    gpu_pair_ceiling_gib: float | None = Field(
+    gpu_pair_ceiling_gib: PositiveGpuGiB | None = Field(
         default=None,
-        gt=0.0,
         description=(
-            "V20 B-G3. Aggregate GPU ceiling in GiB passed explicitly to "
-            "the admission gate. None = defer to the environment resolver "
-            "(SIDERIUS_PAIR_VRAM_CEILING_GIB, then the compatibility "
-            "default), which is exactly the pre-B-G3 behaviour."
+            "Aggregate GPU ceiling in GiB passed explicitly to admission. None "
+            "selects SIDERIUS_PAIR_VRAM_CEILING_GIB or measured device capacity. "
+            "The declared host quota independently constrains the result."
         ),
     )
     trial_vram_budget_gb: float | None = Field(

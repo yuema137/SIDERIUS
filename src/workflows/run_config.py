@@ -56,6 +56,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import OutputTypeName
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.pair_admission import PositiveGpuGiB
 from workflows.scientific_evidence_stage import EvidenceStageOrder
 from workflows.strategy_modes import ExplorationMode, FormalRoundStrategy, StrategyMode
 
@@ -137,7 +138,7 @@ class WorkflowLaunchConfig:
     formal_time_admission_source: TimeAdmissionSource = "measured"
     gpu_admission_measurement_source: str | None = None
     gpu_admission_enforcement: AdmissionEnforcement = "observe_only"
-    gpu_pair_ceiling_gib: float | None = None
+    gpu_pair_ceiling_gib: PositiveGpuGiB | None = None
     trial_vram_budget_gb: float | None = None
     formal_vram_budget_gb: float | None = None
     vram_probe_step_timeout_seconds: float = 180.0

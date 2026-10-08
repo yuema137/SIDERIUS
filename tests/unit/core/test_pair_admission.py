@@ -20,7 +20,6 @@ from core.execution_calibration import MalformedCeilingOverride
 from core.runtime_control.pair_admission import (
     BYTES_PER_GIB,
     BYTES_PER_MIB,
-    DEFAULT_PAIR_CEILING_GIB,
     HOST_VRAM_QUOTA_MIB_ENV,
     MIB_PER_GIB,
     PAIR_CEILING_GIB_ENV,
@@ -42,6 +41,12 @@ def _clean_env(monkeypatch):
     """Every test states its own deployment; none inherits the shell's."""
     monkeypatch.delenv(HOST_VRAM_QUOTA_MIB_ENV, raising=False)
     monkeypatch.delenv(PAIR_CEILING_GIB_ENV, raising=False)
+
+
+@pytest.fixture
+def historical_ceiling(_clean_env, monkeypatch):
+    """Existing incident witnesses explicitly declare their historical deployment."""
+    monkeypatch.setenv(PAIR_CEILING_GIB_ENV, "28")
 
 
 def _member(name: str, gb: float) -> PairMember:
@@ -82,13 +87,14 @@ class TestUnitConversion:
 
 
 class TestCeilingResolution:
-    def test_the_default_is_the_operator_value(self):
-        assert DEFAULT_PAIR_CEILING_GIB == 28.0
-        assert pair_ceiling_gib() == 28.0
+    def test_an_undeclared_ceiling_requires_capacity_or_explicit_configuration(self):
+        with pytest.raises(ValueError, match="No aggregate GPU limit"):
+            pair_ceiling_gib()
+        assert pair_ceiling_gib(measured_capacity_gib=96) == 96
 
     def test_an_undeclared_quota_is_unknown_not_unlimited(self):
         assert host_quota_gib() is None
-        assert pair_ceiling_gib() == DEFAULT_PAIR_CEILING_GIB  # not raised
+        assert pair_ceiling_gib(measured_capacity_gib=12) == 12
 
     def test_a_declared_quota_is_read_in_mib(self, monkeypatch):
         monkeypatch.setenv(HOST_VRAM_QUOTA_MIB_ENV, "30000")
@@ -97,11 +103,13 @@ class TestCeilingResolution:
     def test_a_tighter_quota_wins_over_the_operator_ceiling(self, monkeypatch):
         """A ceiling above the enforced limit is no ceiling at all."""
         monkeypatch.setenv(HOST_VRAM_QUOTA_MIB_ENV, "20480")  # 20 GiB
+        monkeypatch.setenv(PAIR_CEILING_GIB_ENV, "28")
         assert pair_ceiling_gib() == pytest.approx(20.0)
 
     def test_a_looser_quota_does_not_relax_the_operator_ceiling(self, monkeypatch):
         monkeypatch.setenv(HOST_VRAM_QUOTA_MIB_ENV, "81920")  # 80 GiB
-        assert pair_ceiling_gib() == DEFAULT_PAIR_CEILING_GIB
+        monkeypatch.setenv(PAIR_CEILING_GIB_ENV, "28")
+        assert pair_ceiling_gib() == 28
 
     def test_the_ceiling_is_configurable(self, monkeypatch):
         monkeypatch.setenv(PAIR_CEILING_GIB_ENV, "24")
@@ -114,7 +122,7 @@ class TestCeilingResolution:
         refuses ""."""
         monkeypatch.setenv(PAIR_CEILING_GIB_ENV, "")
         monkeypatch.setenv(HOST_VRAM_QUOTA_MIB_ENV, "")
-        assert pair_ceiling_gib() == DEFAULT_PAIR_CEILING_GIB
+        assert pair_ceiling_gib(measured_capacity_gib=48) == 48
         assert host_quota_gib() is None
 
     @pytest.mark.parametrize("bad", ["not-a-number", "0", "-5"])
@@ -134,6 +142,7 @@ class TestCeilingResolution:
             host_quota_gib()
 
 
+@pytest.mark.usefixtures("historical_ceiling")
 class TestPairDecision:
     def test_a_pair_that_fits_is_feasible(self):
         decision = evaluate_pair_admission([_member("arch", 10.0), _member("loss", 12.0)])
@@ -146,8 +155,8 @@ class TestPairDecision:
         assert decision.feasible is False
         assert decision.aggregate_gib == 32.0
         assert decision.headroom_gib == pytest.approx(-4.0)
-        assert any("INFEASIBLE under the host quota" in r for r in decision.reasons)
-        assert any("watchdog" in r for r in decision.reasons)
+        assert any("INFEASIBLE under the resolved aggregate ceiling" in r for r in decision.reasons)
+        assert any("actual device and deployment constraints" in r for r in decision.reasons)
 
     def test_exactly_at_the_ceiling_is_allowed(self):
         decision = evaluate_pair_admission([_member("a", 14.0), _member("b", 14.0)])
@@ -206,6 +215,7 @@ class TestDecisionIntegrity:
             )
 
 
+@pytest.mark.usefixtures("historical_ceiling")
 class TestConfiguredCaps:
     """The pre-launch question: can this CONFIGURATION exceed the ceiling?"""
 

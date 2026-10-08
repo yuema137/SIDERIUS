@@ -16,7 +16,7 @@ from core.runtime_control.admission import AdmissionDecision
 from core.runtime_control.gpu_accounting import GpuAccountingSnapshot
 from core.runtime_control.gpu_accounting import OccupancyBound as OccupancyBound
 from core.runtime_control.gpu_requirement_evidence import GpuRequirementOwnership
-from core.runtime_control.pair_admission import gib_from_mib, pair_ceiling_gib
+from core.runtime_control.pair_admission import gib_from_mib, resolve_gpu_ceiling
 from core.runtime_control.process_visibility import (
     GpuExecutionConditions,
     IsolatedHeadroomPolicy,
@@ -122,19 +122,22 @@ def evaluate_isolated_admission(
         return environment_refusal(ownership_issue, evidence)
 
     try:
-        configured = pair_ceiling_gib() if ceiling_gib is None else ceiling_gib
-        if isinstance(configured, bool) or not math.isfinite(configured) or configured <= 0:
-            raise ValueError("invalid ceiling")
-    except (TypeError, ValueError):
+        limits = resolve_gpu_ceiling(
+            ceiling_gib=ceiling_gib, measured_capacity_gib=gib_from_mib(bound.device_total_mib)
+        )
+    except (TypeError, ValueError) as error:
         return environment_refusal(
-            "The configured aggregate GPU ceiling is invalid.",
+            f"The aggregate GPU ceiling could not be resolved: {error}",
             evidence,
             requirement_source=str(requirement_provenance),
         )
-    effective = min(configured, gib_from_mib(bound.device_total_mib))
+    effective = limits.effective_gib
     aggregate = gib_from_mib(requirement_mib + bound.device_used_mib)
+    if not math.isfinite(aggregate):
+        return environment_refusal("Aggregate GPU demand must be finite.", evidence)
     evidence.update(
-        configured_ceiling_gib=configured,
+        configured_ceiling_gib=limits.operator_ceiling_gib,
+        ceiling_resolution=limits.model_dump(mode="json"),
         effective_ceiling_gib=effective,
         retained_own_tree_mib=bound.own_tree_mib,
         current_device_used_mib=bound.device_used_mib,
