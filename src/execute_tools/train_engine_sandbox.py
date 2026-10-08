@@ -1427,12 +1427,13 @@ def run_experiment_streaming(
     checkpoint_selector = CheckpointSelector(
         train_cfg.checkpoint_selection, has_validation=task_eval_scope is not None
     )
-    if train_cfg.target_standardization != "none" and (
-        get_output_type(model_cfg.model_type) not in {"regressor", "hybrid"}
-        or not get_target_torch_dtype(loss_cfg).is_floating_point
-    ):
-        raise ValueError(
-            "target standardization requires a regressor with continuous floating targets"
+    if train_cfg.target_standardization != "none":
+        from execute_tools.target_standardization import validate_target_standardization
+
+        validate_target_standardization(
+            enabled=True,
+            output_type=get_output_type(model_cfg.model_type),
+            target_dtype=lambda: get_target_torch_dtype(loss_cfg),
         )
     budget_execution = (
         TrainingBudgetExecution(

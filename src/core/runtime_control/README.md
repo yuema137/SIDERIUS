@@ -285,3 +285,19 @@ stopping. Those remain separate prerequisites for isolated onboarding. Shared
 file-verification code participates in the estimator assembly identity, so source
 qualification must be updated even though absent-checkpoint request bytes and
 ordinary inference loading remain unchanged.
+
+## Training measurement with complete evidence
+
+A bound training measurement records setup and training separately, then uses
+whichever observed peak is larger. It loads a real task batch and preserves a
+short tail when the task permits one. If target standardization is enabled, it
+fits the authorized training pool using the same rule as native training before
+loading the measured batch.
+
+Callers preparing this measurement use `bind_training_measurement(spec)` and
+check the result with `assess_training_measurement(spec, run, cap_mib=...)`.
+Missing sampling, preprocessing or cleanup evidence yields `unavailable`; it
+does not establish that a smaller model would work. A successful result describes
+the bounded probe, not every future input. This API is not yet selected by the
+trial/inference launch driver. See the [training measurement contract](training-measurement.md)
+for required inputs, evidence and remaining integration work.

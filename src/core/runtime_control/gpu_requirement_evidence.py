@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from core.runtime_control.process_group import GroupObservation
+
 if TYPE_CHECKING:
     from core.runtime_control.gpu_accounting import GpuAccountingSnapshot
 
@@ -31,6 +33,9 @@ class ProcessEvidence(BaseModel):
     #: device, so this is never silently ignored.
     orphans_remaining: bool = False
     group_cleanup_required: bool = False
+    final_group_observation: GroupObservation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class GpuRequirementOwnership(BaseModel):
@@ -55,6 +60,10 @@ class GpuRequirementOwnership(BaseModel):
             or process.kill_sent
             or process.group_cleanup_required
             or process.orphans_remaining
+            or (
+                process.final_group_observation is not None
+                and process.final_group_observation.status != "absent"
+            )
         ):
             return "measurement worker did not establish a clean completed lifecycle"
         return None
