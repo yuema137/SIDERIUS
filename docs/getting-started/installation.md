@@ -126,6 +126,18 @@ the framework does not recover them from a task-specific machine config.
 Choose the task with `--task_composition`. See [Your first run](first-run.md)
 for a complete Quickstart command.
 
+Child training, inference and scoring processes inherit the operating system's
+existing address-space limits by default. Infra does not add a machine-specific
+memory cap. This does not mean unlimited memory or protection from physical-RAM
+exhaustion. Optional `SIDERIUS_SUBPROCESS_RSS_GB` retains its historical name but
+sets **virtual address space (`RLIMIT_AS`), not resident RAM (`RSS`)**. Choose a
+cap only when you know the execution environment's requirements; CUDA mappings
+alone can reserve substantial address space. Use one nonnegative integer for all
+roles or a complete `training=N,inference=N,scoring=N` mapping. Explicit `0` adds
+no cap and leaves inherited OS restrictions intact. Never infer a universal cap
+from another machine's RAM/GPU size. Configuration and provenance are described
+in the [execution contract](../../src/core/core-contract.md).
+
 The optional dashboard has its own gitignored path configuration:
 
 ```bash

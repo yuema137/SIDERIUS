@@ -58,26 +58,24 @@ for the write → digest → verify → deserialize discipline.
 
 ## Resource ceilings
 
-Host-RAM ceilings per role, declared with provenance in
-`core/execution_calibration.py::ROLE_CEILINGS`:
+`core/execution_calibration.resolve_role_ceiling` is the authority for optional
+additional subprocess address-space caps. It returns the role, GiB declaration
+and source. With no `SIDERIUS_SUBPROCESS_RSS_GB`, every role inherits existing OS
+soft/hard limits; infra installs no extra preexec hook. Explicit `0` also installs
+no hook but is recorded as a deliberate environment declaration. Positive integer
+caps retain the existing RLIMIT_AS setter. This is not physical RAM/RSS monitoring.
 
-| role | GiB | derivation |
-|---|---:|---|
-| training | 40 | measured |
-| inference | **60** | ⚠ empirical, unverified |
-| scoring | 24 | incident-derived |
+The legacy variable accepts one integer or a complete unique
+`training=N,inference=N,scoring=N` mapping. Malformed configuration refuses; no
+host/task/hardware fallback is inferred. The run-invariants lock records the
+configured values and sources as noncanonical provenance, without claiming to
+measure OS limits. Older records load unchanged and different host limits do not
+prohibit resume. See the [core contract](../../../src/core/core-contract.md).
 
-Resolution is **exactly two layers** — declared default, then an environment
-override — with no third. `0` disables the ceiling; a malformed override
-**refuses loudly**. The invariants lock *records* the ceilings and never compares
-them.
-
-The inference declaration explicitly retires its old four-array arithmetic:
-task-declared storage and agent-mode writes changed that path. The 60 GiB value
-remains because the historical full-scope baseline failed under 40 GiB;
-re-measurement is still debt. These are recorded host/process ceilings, not a
-portable claim about every task's current memory use. Follow the declaration's
-calibration evidence before changing them.
+The former 60 GiB inference setting is historical context: the full-scope
+baseline failed under 40 GiB. Explicit reproduction settings belong in exp with
+verified run provenance; an old source fallback does not prove which environment
+a paper run used. Do not substitute guessed lower historical limits.
 
 ## Deliverables
 
