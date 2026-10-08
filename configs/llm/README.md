@@ -8,8 +8,18 @@ Use a separate configuration when you start evaluating scientific ideas.
 | --- | --- | --- |
 | Offline setup check | Installation checks and the launcher's `--dry-run`; no API key or model call needed | Configuration and command preparation; no real model or training calls |
 | First real run / tutorial demo | [`openai_smoke_luna.json`](openai_smoke_luna.json) | All workflow LLM routes use GPT-6 Luna, with `medium` reasoning; use a small dataset and short workflow |
-| Everyday experiments | Your own reviewed copy of a routing file | Choose models for your task and budget; upgrade selected stages only when needed |
+| Production / scientific research | Start from the paper's LLM routing in [siderius-exp](https://github.com/yuema137/siderius-exp/tree/main/tutorials/shared#move-from-a-demo-to-research) | Our recommended starting point after the flow check; plan API costs separately |
+| Custom model choices | Your own reviewed copy of a routing file | Select supported providers/models for each stage and your own budget |
 | Paper history | The experiment's frozen config and compatibility packages in [siderius-exp](https://github.com/yuema137/siderius-exp) | Preserve the recorded experiment's information flow; this is a separate purpose, not a higher-quality tier |
+
+The Luna profile is for functional testing, not our recommended production
+configuration or a promise of scientific quality. For research, the paper's
+model choices are a starting point, not a guarantee of the same results on a
+new task. You may replace them with your own supported model choices.
+
+Choosing the paper's **LLM routes** does not require historical compatibility
+mode. Keep model/provider selection separate from planner strategies, runtime
+policies, and archived experiment settings; those belong to the experiment.
 
 ## Start with the smoke profile
 

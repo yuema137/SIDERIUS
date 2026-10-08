@@ -45,6 +45,12 @@ show how to inspect the saved files and adjust iterations, data fractions,
 splits, and time/VRAM budgets before running again. Real runs use GPU resources
 and incur API charges.
 
+Use the [Luna test configuration](configs/llm/README.md) for an inexpensive
+first flow check. For production research, we recommend starting with the
+paper's LLM configuration; you can also choose your own supported models.
+The configuration guide explains these choices and the separate historical
+reproduction mode.
+
 ## How the pieces fit together
 
 [![Paper Figure 1: SIDERIUS infrastructure and typed capability contracts](docs/assets/paper/figure1.svg)](docs/assets/paper/figure1.svg)
