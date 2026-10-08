@@ -12,6 +12,18 @@ from execute_tools.task_data_path import EpochSamplingParams, TaskDataPath
 from ml_models.target_standardization import StandardizedTargetLoss, StandardizedTargetModel
 
 
+def validate_target_standardization(
+    *, enabled: bool, output_type: str, target_dtype: Callable[[], torch.dtype]
+) -> None:
+    """Use the same eligibility rule in native training and its measurement."""
+    if enabled and (
+        output_type not in {"regressor", "hybrid"} or not target_dtype().is_floating_point
+    ):
+        raise ValueError(
+            "target standardization requires a regressor with continuous floating targets"
+        )
+
+
 def prepare_training_target_standardization(
     model: torch.nn.Module,
     criterion: torch.nn.Module,

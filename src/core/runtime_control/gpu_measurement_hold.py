@@ -45,7 +45,7 @@ def reservation_observer(
     *,
     device: str,
     journal: PhaseJournal,
-    phase: Literal["setup", "inference"],
+    phase: Literal["setup", "training", "inference"],
     request_id: str,
     ack_path: str,
     timeout_seconds: float,

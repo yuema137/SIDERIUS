@@ -10,7 +10,9 @@ from typing import Any
 from torch.utils.data import DataLoader, Subset
 
 from execute_tools.task_data_path import (
+    EpochSamplingParams,
     EvalMaterializationParams,
+    TaskDataPath,
     TaskProbeDataSpec,
     resolve_max_inference_batch_size,
     resolve_task_scope_capability,
@@ -74,10 +76,24 @@ def task_inference_probe_batches(
         )
 
 
-def load_task_probe_batch(
-    reference: TaskProbeDataSpec | dict[str, Any], batch_size: int, *, drop_last: bool = True
-) -> tuple[Any, Any]:
-    """Return one real training batch under the resolved tail policy."""
+@dataclass(frozen=True)
+class TrainingProbeSource:
+    """Authorized values valid only inside task_training_probe_source's context."""
+
+    data_path: TaskDataPath
+    scope: object
+    sampling: EpochSamplingParams
+
+    def first_batch(self, batch_size: int, *, drop_last: bool) -> tuple[Any, Any]:
+        dataset = self.data_path.training_dataset(self.scope, self.sampling)
+        return _first_training_batch(dataset, batch_size, drop_last=drop_last)
+
+
+@contextmanager
+def task_training_probe_source(
+    reference: TaskProbeDataSpec | dict[str, Any],
+) -> Iterator[TrainingProbeSource]:
+    """Keep task authorization active throughout fitting and batch materialization."""
     ref = TaskProbeDataSpec.model_validate(reference)
     composition = compose_run_task_bindings(ref.manifest_path)
     if composition.semantic_fingerprint != ref.semantic_fingerprint:
@@ -89,27 +105,29 @@ def load_task_probe_batch(
     with bind_run_task_composition(composition, physical_data_root=ref.sampling.data_dir):
         capability = resolve_task_scope_capability(composition.task_data_path)
         scope = capability.deserialize_scope(ref.training_scope_payload)
-        dataset = composition.task_data_path.training_dataset(scope, ref.sampling)
-        try:
-            return next(
-                iter(
-                    DataLoader(
-                        dataset,
-                        batch_size=batch_size,
-                        shuffle=False,
-                        drop_last=drop_last,
-                    )
-                )
-            )
-        except StopIteration as exc:
-            if not drop_last:
-                raise ValueError(
-                    "the task-owned training scope contains no training samples"
-                ) from exc
-            raise ValueError(
-                "the task-owned training scope cannot produce one full resource "
-                f"probe batch of size {batch_size}"
-            ) from exc
+        yield TrainingProbeSource(composition.task_data_path, scope, ref.sampling)
+
+
+def _first_training_batch(dataset: Any, batch_size: int, *, drop_last: bool) -> tuple[Any, Any]:
+    try:
+        return next(
+            iter(DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=drop_last))
+        )
+    except StopIteration as exc:
+        if not drop_last:
+            raise ValueError("the task-owned training scope contains no training samples") from exc
+        raise ValueError(
+            "the task-owned training scope cannot produce one full resource "
+            f"probe batch of size {batch_size}"
+        ) from exc
+
+
+def load_task_probe_batch(
+    reference: TaskProbeDataSpec | dict[str, Any], batch_size: int, *, drop_last: bool = True
+) -> tuple[Any, Any]:
+    """Return one real training batch under the resolved tail policy."""
+    with task_training_probe_source(reference) as source:
+        return source.first_batch(batch_size, drop_last=drop_last)
 
 
 def load_task_inference_probe_input(reference: TaskProbeDataSpec | dict[str, Any]) -> Any:
