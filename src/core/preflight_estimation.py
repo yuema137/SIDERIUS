@@ -74,6 +74,7 @@ def estimation_assembly_digest() -> str:
             "core/runtime_control/admission.py",
             "core/runtime_control/isolated_admission.py",
             "core/runtime_control/prephase_admission.py",
+            "core/runtime_control/phase_launch.py",
             "core/runtime_control/pair_admission.py",
             "core/runtime_control/gpu_accounting.py",
             "core/runtime_control/process_group.py",

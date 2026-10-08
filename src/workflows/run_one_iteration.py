@@ -55,14 +55,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
-if TYPE_CHECKING:
-    from workflows.reviewed_launch import ReviewedLaunchContext
-
 # A direct one-iteration launch does not pass through run_chain.sh.  Establish
 # the same read-only-checkout policy before importing any SIDERIUS module, and
 # transport it to every training, inference, scoring, and probe subprocess.
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 sys.dont_write_bytecode = True
+
+if TYPE_CHECKING:
+    from workflows.reviewed_launch import ReviewedLaunchContext
 
 from dotenv import load_dotenv
 

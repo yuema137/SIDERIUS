@@ -63,6 +63,19 @@ STRUCTURAL_BASELINE: dict[str, tuple[int, int, int, int]] = {
     "TidmadSandbox.__init__": (22, 6, 87, 12),
 }
 
+# Issue 672: the historical subprocess monolith became a compatibility facade
+# in observed_subprocess.py. Do not pretend its 31-line forwarder is the real
+# supervision implementation, or change the frozen historical measurement.
+_EXECUTOR_NAMES = frozenset(STRUCTURAL_BASELINE) - {"_run_observed_subprocess"}
+_SUPERVISION = REPO_ROOT / "src/core/runtime_control/observed_subprocess.py"
+# Explicit migration measurement at 46ee9920: ZERO growth allowance. These are
+# existing protected-process responsibilities, not a claim that the old monolith
+# stayed within its former budget. The complexity remains visible and bounded.
+SUPERVISION_BASELINE = {
+    "supervise_process": (148, 95, 277, 13),
+    "supervise_subprocess": (25, 16, 63, 13),
+}
+
 FILE_LOC_BASELINE = 2456
 
 #: Growth beyond these deltas means "extract the responsibility first".
@@ -142,7 +155,7 @@ def _qualified_functions(path: pathlib.Path) -> dict[str, ast.FunctionDef | ast.
 def current_structure() -> dict[str, tuple[int, int, int, int]]:
     """The live measurement, for C9's recorded comparison."""
     fns = _qualified_functions(_SANDBOX)
-    return {name: measure(fns[name]) for name in STRUCTURAL_BASELINE}
+    return {name: measure(fns[name]) for name in _EXECUTOR_NAMES}
 
 
 class TestStructuralBudget:
@@ -162,7 +175,7 @@ class TestStructuralBudget:
             f"sibling module instead of growing the launch consumer."
         )
 
-    @pytest.mark.parametrize("name", sorted(STRUCTURAL_BASELINE))
+    @pytest.mark.parametrize("name", sorted(_EXECUTOR_NAMES))
     def test_no_function_grew_past_its_budget(self, name):
         # `stmts` is measured and reported by `current_structure()` for
         # C9's recorded comparison; the BUDGET is expressed over branch,
@@ -197,7 +210,49 @@ class TestStructuralBudget:
         """A budget over a function that was renamed away would pass by
         vacuously measuring nothing.
         """
-        assert set(current_structure()) == set(STRUCTURAL_BASELINE)
+        assert set(current_structure()) == _EXECUTOR_NAMES
+        assert {"run_observed_subprocess", *SUPERVISION_BASELINE} <= set(
+            _qualified_functions(_SUPERVISION)
+        )
+
+    @pytest.mark.parametrize("name", sorted(SUPERVISION_BASELINE))
+    def test_the_relocated_supervision_implementation_does_not_grow(self, name):
+        actual = measure(_qualified_functions(_SUPERVISION)[name])
+        assert all(
+            value <= limit for value, limit in zip(actual, SUPERVISION_BASELINE[name], strict=True)
+        ), (
+            f"{name} grew from {SUPERVISION_BASELINE[name]} to {actual}; "
+            "extract the actual supervision responsibility before extending it"
+        )
+
+    def test_compatibility_facade_only_forwards_and_projects_the_typed_result(self):
+        """The expanded compatible signature must not hide new orchestration."""
+        fn = _qualified_functions(_SUPERVISION)["run_observed_subprocess"]
+        assert [arg.arg for arg in [*fn.args.args, *fn.args.kwonlyargs]] == [
+            "cmd",
+            "env",
+            "preexec_fn",
+            "capture_stdout",
+            "deadline_provider",
+            "grace_seconds",
+            "poll_seconds",
+            "label",
+            "observer",
+            "limits",
+            "control",
+            "startup",
+            "launch_measurement",
+        ]
+        assert measure(fn)[1] == 0
+        # Exactly a docstring, a call to the real owner, and tuple projection.
+        assert len(fn.body) == 3
+        assignment, projection = fn.body[1:]
+        assert isinstance(assignment, ast.Assign)
+        assert isinstance(assignment.value, ast.Call)
+        assert isinstance(assignment.value.func, ast.Name)
+        assert assignment.value.func.id == "supervise_subprocess"
+        assert isinstance(projection, ast.Return)
+        assert ast.unparse(projection.value) == "(result.completed, result.timeout)"
 
 
 # ----------------------------------------------------------------------

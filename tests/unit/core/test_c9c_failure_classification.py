@@ -190,17 +190,13 @@ class TestExecutorStatusRouting:
     one consumes an attempt, the other stops the chain."""
 
     def _classify(self, admission: dict) -> str:
-        import core.sandbox_executor as se
+        from core.runtime_control.execution_status import runtime_refusal_status
 
-        block = {"admission": admission}
-        # Mirror of the branch in execute_training: the routing rule under
-        # test is which status an admission block maps to.
-        if (block.get("admission") or {}).get("decision") == "rejected":
-            if (block.get("admission") or {}).get("failure_class") == "infrastructure":
-                return "aborted_infrastructure"
-            return "rejected_time_risk"
-        assert se is not None
-        return "ok"
+        observation = RuntimeObservation(
+            timestamp="fixture", admission=AdmissionRecord(stage="fixture", **admission)
+        )
+        result = runtime_refusal_status(observation.model_dump(mode="json"))
+        return result["status"] if result is not None else "ok"
 
     def test_candidate_rejection_consumes_an_attempt(self):
         assert self._classify({"decision": "rejected", "failure_class": "candidate"}) == (
@@ -215,10 +211,23 @@ class TestExecutorStatusRouting:
     def test_legacy_rejection_keeps_the_historical_path(self):
         assert self._classify({"decision": "rejected"}) == "rejected_time_risk"
 
-    def test_the_production_branch_exists_verbatim(self):
-        """Guard the real routing code, not only this mirror of it."""
+    def test_each_executor_phase_reaches_the_status_authority(self):
+        """A correct projection is insufficient if the real phase bypasses it."""
+        import ast
         from pathlib import Path
 
-        source = Path("src/core/sandbox_executor.py").read_text(encoding="utf-8")
-        assert 'admission_block.get("failure_class") == "infrastructure"' in source
-        assert '"status": "aborted_infrastructure"' in source
+        source = Path(__file__).resolve().parents[3] / "src/core/sandbox_executor.py"
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        owner = next(
+            n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "TidmadSandbox"
+        )
+        for name in ("execute_training", "execute_inference"):
+            function = next(
+                n for n in owner.body if isinstance(n, ast.FunctionDef) and n.name == name
+            )
+            assert any(
+                isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name)
+                and n.func.id == "runtime_refusal_status"
+                for n in ast.walk(function)
+            )

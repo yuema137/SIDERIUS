@@ -117,7 +117,7 @@ launch seam and role sites; `resume.py`'s union/projection authorities.
 
 ```python
 from core.execution_calibration import resolve_role_ceiling_gb
-resolve_role_ceiling_gb("training")   # -> 40, or the caller override
+resolve_role_ceiling_gb("training")   # -> None (inherit OS limits), or explicit override
 ```
 
 ## Related tests
@@ -125,3 +125,25 @@ resolve_role_ceiling_gb("training")   # -> 40, or the caller override
 `tests/unit/core/` (lock partition guard, calibration refusal, resume
 projections, replay integrity) and the tuner/workflow suites that exercise the
 sandbox seam in pseudo mode.
+
+
+## Phase launch and supervision structure (issue 672)
+
+`runtime_control/phase_launch.py::run_phase_subprocess` is the shared selector
+for armed-watchdog versus ordinary training/inference launches. The executor
+retains admission, native input validation, task/config transport, timing,
+timeout artifact cleanup and result classification. Both paths preserve the
+runner's keyword contract; ordinary launches discard timeout metadata exactly
+as before. Training bindings and inference batch size are each resolved once
+for validation and child transport. The launch selector participates in runtime
+verifier and preflight assembly identities.
+
+The Step-11 structural guard retains the original executor budgets. The removed
+subprocess monolith's historical measurements remain recorded separately from
+its current compatibility facade. The facade retains all 13 existing parameters
+and may only forward to `supervise_subprocess` and project the typed result.
+Both real supervision functions are independently bounded against their
+`46ee9920` measurements with no growth allowance. `supervise_process` still has
+95 AST branch nodes / 277 lines: this change does not claim to reduce that
+existing protected-process complexity. Further supervision features require
+responsibility extraction; the facade cannot hide growth in its implementation.

@@ -186,28 +186,36 @@ class TestSeamReachability:
     """Removing any production call site must fail a test, not go
     unnoticed — the guardrail pattern PR A established."""
 
-    @staticmethod
-    def _seam_call_lines() -> list[int]:
+    def test_both_phases_bind_the_observed_seam_into_shared_launch_selection(self):
+        """The shared plain/watchdog selector must receive each real GPU seam."""
         tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
-        return [
-            node.lineno
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "run_native_subprocess"
-            and len(node.args) >= 2
-            and isinstance(node.args[1], ast.Name)
-            and node.args[1].id == "_run_observed_subprocess"
-        ]
-
-    def test_all_four_gpu_launches_go_through_the_seam(self):
-        calls = self._seam_call_lines()
-        assert len(calls) == 4, (
-            f"expected 4 GPU launch sites through the seam, found {len(calls)} "
-            f"at lines {calls}. training and inference each have a watchdog "
-            "and a plain branch; a branch that bypasses the seam would "
-            "silently lose telemetry in B-C2b."
+        owner = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "TidmadSandbox"
         )
+        for name in ("execute_training", "execute_inference"):
+            function = next(
+                node
+                for node in owner.body
+                if isinstance(node, ast.FunctionDef) and node.name == name
+            )
+            calls = [
+                node
+                for node in ast.walk(function)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "run_phase_subprocess"
+            ]
+            assert len(calls) == 1
+            binding = calls[0].args[0]
+            assert isinstance(binding, ast.Call)
+            assert ast.unparse(binding.func) == "functools.partial"
+            assert [ast.unparse(arg) for arg in binding.args] == [
+                "run_native_subprocess",
+                "self",
+                "_run_observed_subprocess",
+            ]
 
     def test_only_cpu_scoring_still_calls_subprocess_run(self):
         """After B-C2a2 the seam no longer delegates, so scoring is the

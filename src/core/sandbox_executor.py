@@ -1,5 +1,6 @@
 # core/sandbox_executor.py
 import contextlib
+import functools
 import json
 import os
 import random
@@ -71,6 +72,7 @@ from core.runtime_control.observed_subprocess import (
 from core.runtime_control.observed_subprocess import (
     run_observed_subprocess as _run_observed_subprocess,
 )
+from core.runtime_control.phase_launch import run_phase_subprocess
 from core.runtime_control.records import RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
 from core.runtime_control.watchdog_deadline import (
@@ -1066,6 +1068,7 @@ class TidmadSandbox:
                 RuntimeControlPolicy(**runtime_policy) if runtime_policy is not None else None
             )
             vm, vt, vl = self._validate_configs(model_type, m_cfg, t_cfg, l_cfg, exp_id, run_name)
+            bindings = execution_bindings or TrainingExecutionBindings()
             validate_native_inputs(
                 self,
                 "training",
@@ -1074,16 +1077,10 @@ class TidmadSandbox:
                 model_config=vm,
                 train_config=vt,
                 loss_config=vl,
-                task_scopes=execution_bindings.task_scopes
-                if execution_bindings is not None
-                else None,
+                task_scopes=bindings.task_scopes,
                 train_portion=train_portion,
                 train_base_seed=train_base_seed,
-                custom_loss_snapshot=(
-                    execution_bindings.expected_custom_loss_snapshot
-                    if execution_bindings is not None
-                    else None
-                ),
+                custom_loss_snapshot=bindings.expected_custom_loss_snapshot,
             )
 
             paths = {
@@ -1108,7 +1105,6 @@ class TidmadSandbox:
             # empty string, because "flag present but broken" fails closed
             # there and must not be triggered by an absent declaration.
             mio_path = self._write_model_io_config(exp_id)
-            bindings = execution_bindings or TrainingExecutionBindings()
             task_scopes = bindings.task_scopes
             loss_contract_path = None
             expected_custom_loss_snapshot = bindings.expected_custom_loss_snapshot
@@ -1278,64 +1274,44 @@ class TidmadSandbox:
             env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
             preexec = _limited_preexec(_subprocess_rss_gb("training"))
             cmd = validation_training_command(cmd)
-            if policy_obj is not None and policy_obj.watchdog.enabled and armed:
-                # RT4 (§4): process-group launch + deadline kill. The
-                # deadline tightens mid-flight from the live observation
-                # sidecar (component-deadline interface).
-                result, kill_info = run_native_subprocess(
-                    self,
-                    _run_observed_subprocess,
-                    cmd,
-                    env=env,
-                    preexec_fn=preexec,
-                    capture_stdout=not self.progress_bar,
-                    deadline_provider=_watchdog_deadline_provider(
-                        policy_obj, rv_sidecar_path, phase="training"
+            result, kill_info = run_phase_subprocess(
+                functools.partial(run_native_subprocess, self, _run_observed_subprocess),
+                cmd,
+                policy=policy_obj,
+                armed=armed,
+                phase="training",
+                observation_path=rv_sidecar_path,
+                deadline_factory=_watchdog_deadline_provider,
+                env=env,
+                preexec_fn=preexec,
+                capture_stdout=not self.progress_bar,
+                observer=_observer,
+                **control_kwargs(self),
+            )
+            if kill_info is not None:
+                # §4 partial-artifact cleanup: the killed attempt's
+                # checkpoint/sentinel/results must not survive.
+                for partial in (
+                    os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth"),
+                    os.path.join(self.dirs["models"], f"_OK_{exp_id}"),
+                    os.path.join(
+                        self.dirs["records"],
+                        run_name,
+                        f"experiment_results_{model_type}_{exp_id}.json",
                     ),
-                    grace_seconds=policy_obj.watchdog.grace_seconds,
-                    poll_seconds=policy_obj.watchdog.poll_seconds,
-                    observer=_observer,
-                    **control_kwargs(self),
-                    label="training",
-                )
-                if kill_info is not None:
-                    # §4 partial-artifact cleanup: the killed attempt's
-                    # checkpoint/sentinel/results must not survive.
-                    for partial in (
-                        os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth"),
-                        os.path.join(self.dirs["models"], f"_OK_{exp_id}"),
-                        os.path.join(
-                            self.dirs["records"],
-                            run_name,
-                            f"experiment_results_{model_type}_{exp_id}.json",
-                        ),
-                    ):
-                        if os.path.isfile(partial):
-                            os.remove(partial)
-                    return {
-                        "status": "wall_clock_timeout",
-                        "message": (
-                            f"watchdog killed training after {kill_info['elapsed_s']}s "
-                            f"(deadline {kill_info['deadline_s']}s, "
-                            f"source={kill_info['estimate_source']})"
-                        ),
-                        "watchdog": kill_info,
-                        "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
-                    }
-            else:
-                # B-C2a: same seam as the deadline branch above, so
-                # telemetry attaches once. deadline_provider=None keeps
-                # subprocess.run's semantics, session behaviour included.
-                result, _ = run_native_subprocess(
-                    self,
-                    _run_observed_subprocess,
-                    cmd,
-                    env=env,
-                    preexec_fn=preexec,
-                    capture_stdout=not self.progress_bar,
-                    observer=_observer,
-                    **control_kwargs(self),
-                )
+                ):
+                    if os.path.isfile(partial):
+                        os.remove(partial)
+                return {
+                    "status": "wall_clock_timeout",
+                    "message": (
+                        f"watchdog killed training after {kill_info['elapsed_s']}s "
+                        f"(deadline {kill_info['deadline_s']}s, "
+                        f"source={kill_info['estimate_source']})"
+                    ),
+                    "watchdog": kill_info,
+                    "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
+                }
             assert result is not None
 
             if not self.progress_bar and result.stdout:
@@ -1507,6 +1483,9 @@ class TidmadSandbox:
         """
         policy_obj = RuntimeControlPolicy(**runtime_policy) if runtime_policy is not None else None
         validated_m, validated_l = self._validate_model_and_loss(model_type, m_cfg, l_cfg)
+        selected_batch = (
+            inference_batch if inference_batch is not None else inference_batch_for(model_type)
+        )
         validate_native_inputs(
             self,
             "inference",
@@ -1515,9 +1494,7 @@ class TidmadSandbox:
             model_config=validated_m,
             loss_config=validated_l,
             task_scopes=task_scopes,
-            inference_batch=inference_batch
-            if inference_batch is not None
-            else inference_batch_for(model_type),
+            inference_batch=selected_batch,
         )
         m_path = os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json"))
         l_path = os.path.abspath(os.path.join(self.dirs["configs"], f"loss_config_{exp_id}.json"))
@@ -1528,9 +1505,7 @@ class TidmadSandbox:
         model_path = str(
             training_checkpoint_path(self.dirs["models"], model_type, exp_id).resolve()
         )
-        inf_bs = str(
-            inference_batch if inference_batch is not None else inference_batch_for(model_type)
-        )
+        inf_bs = str(selected_batch)
 
         # Per-iter sidecar path. Iteration scoping comes from ``run_name`` (the
         # configs dir is already iter-keyed); ``exp_id`` makes it unique within
@@ -1648,64 +1623,47 @@ class TidmadSandbox:
             t_subprocess_start = time.perf_counter()
             env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
             preexec = _limited_preexec(_subprocess_rss_gb("inference"))
-            if policy_obj is not None and policy_obj.watchdog.enabled and armed:
-                result, kill_info = run_native_subprocess(
-                    self,
-                    _run_observed_subprocess,
-                    cmd,
-                    env=env,
-                    preexec_fn=preexec,
-                    capture_stdout=not self.progress_bar,
-                    deadline_provider=_watchdog_deadline_provider(
-                        policy_obj, rv_sidecar_path, phase="inference"
-                    ),
-                    grace_seconds=policy_obj.watchdog.grace_seconds,
-                    poll_seconds=policy_obj.watchdog.poll_seconds,
-                    observer=_observer,
-                    **control_kwargs(self),
-                    label="inference",
-                )
-                if kill_info is not None:
-                    # §4 partial-artifact cleanup — the killed attempt's
-                    # denoised outputs (mirrors --cleanup_denoised).
-                    import glob as _glob
+            result, kill_info = run_phase_subprocess(
+                functools.partial(run_native_subprocess, self, _run_observed_subprocess),
+                cmd,
+                policy=policy_obj,
+                armed=armed,
+                phase="inference",
+                observation_path=rv_sidecar_path,
+                deadline_factory=_watchdog_deadline_provider,
+                env=env,
+                preexec_fn=preexec,
+                capture_stdout=not self.progress_bar,
+                observer=_observer,
+                **control_kwargs(self),
+            )
+            if kill_info is not None:
+                # §4 partial-artifact cleanup — the killed attempt's
+                # denoised outputs (mirrors --cleanup_denoised).
+                import glob as _glob
 
-                    if self.deliverable_naming is not None:
-                        pattern = os.path.join(
-                            self.base_dir,
-                            self.deliverable_naming.attempt_glob(
-                                model_type=model_type, run_name=run_name, exp_id=exp_id
-                            ),
-                        )
-                        for partial in _glob.glob(pattern):
-                            os.remove(partial)
-                    return {
-                        "status": "wall_clock_timeout",
-                        "message": (
-                            f"watchdog killed inference after {kill_info['elapsed_s']}s "
-                            f"(deadline {kill_info['deadline_s']}s, "
-                            f"source={kill_info['estimate_source']})"
+                if self.deliverable_naming is not None:
+                    pattern = os.path.join(
+                        self.base_dir,
+                        self.deliverable_naming.attempt_glob(
+                            model_type=model_type, run_name=run_name, exp_id=exp_id
                         ),
-                        "watchdog": kill_info,
-                        "per_file_timings_ms": [],
-                        "process_startup_ms": None,
-                        "subprocess_wall_ms": None,
-                        "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
-                    }
-            else:
-                # B-C2a: same seam as the deadline branch above, so
-                # telemetry attaches once. deadline_provider=None keeps
-                # subprocess.run's semantics, session behaviour included.
-                result, _ = run_native_subprocess(
-                    self,
-                    _run_observed_subprocess,
-                    cmd,
-                    env=env,
-                    preexec_fn=preexec,
-                    capture_stdout=not self.progress_bar,
-                    observer=_observer,
-                    **control_kwargs(self),
-                )
+                    )
+                    for partial in _glob.glob(pattern):
+                        os.remove(partial)
+                return {
+                    "status": "wall_clock_timeout",
+                    "message": (
+                        f"watchdog killed inference after {kill_info['elapsed_s']}s "
+                        f"(deadline {kill_info['deadline_s']}s, "
+                        f"source={kill_info['estimate_source']})"
+                    ),
+                    "watchdog": kill_info,
+                    "per_file_timings_ms": [],
+                    "process_startup_ms": None,
+                    "subprocess_wall_ms": None,
+                    "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
+                }
             assert result is not None
             subprocess_wall_ms = (time.perf_counter() - t_subprocess_start) * 1000.0
             if not self.progress_bar and result.stdout:

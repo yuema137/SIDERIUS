@@ -68,6 +68,8 @@ EXPERIMENT_RECORD_FIELDS = [
     "record_type",
     "exp_id",
     "status",
+    # Protected native execution receipts; absent selection remains omitted.
+    "gpu_execution",
     "model_type",
     "candidate_id",
     "timestamp",

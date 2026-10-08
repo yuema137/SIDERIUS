@@ -86,6 +86,7 @@ def verifier_assembly_digest() -> str:
         "core/runtime_control/execution_status.py",
         "core/run_invariants.py",
         "core/sandbox_executor.py",
+        "core/runtime_control/phase_launch.py",
         "nodes/ml_hyperparameter_tune_agent/runtime.py",
         "core/runtime_control/observation_store.py",
         "execute_tools/train_engine_sandbox.py",
