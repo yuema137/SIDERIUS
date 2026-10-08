@@ -39,6 +39,7 @@ from core.sandbox_executor import TidmadSandbox
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _build_admission_policy,
 )
+from tests.helpers.gpu_requirement import ended_worker_ownership
 from tests.helpers.launcher_bindings import workflow_call_bindings
 from tests.helpers.tuner_source import tuner_node_source
 
@@ -515,7 +516,13 @@ class TestEnforcementIsSeparateFromPosture:
         "nothing was checked"."""
         _, sandbox, _ = self._decide(
             "observe_only",
-            requirements={"training": {"requirement_mib": 100, "provenance": "measured"}},
+            requirements={
+                "training": {
+                    "requirement_mib": 100,
+                    "provenance": "measured",
+                    "ownership": ended_worker_ownership("GPU-e-0").model_dump(),
+                }
+            },
         )
         assert sandbox.admission_observations == []
 
@@ -625,6 +632,7 @@ class TestCeilingIsAuditable:
             snapshot=_crowded_or_empty(31_500),
             requirement_mib=1476,
             requirement_provenance="measured",
+            requirement_ownership=ended_worker_ownership("GPU-e-0"),
             mode="formal",
             ceiling_gib=6.0,
         )

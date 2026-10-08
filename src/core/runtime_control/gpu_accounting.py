@@ -79,6 +79,35 @@ class DeviceIdentity(BaseModel):
     telemetry_backend: str = Field(default="nvidia-smi", min_length=1)
 
 
+class OccupancyBound(BaseModel):
+    """A coherent accounting split, not a guessed attribution of residual bytes."""
+
+    model_config = ConfigDict(frozen=True, strict=True)
+
+    device_total_mib: int = Field(gt=0)
+    device_used_mib: int = Field(ge=0)
+    own_tree_mib: int = Field(ge=0)
+    other_mib: int = Field(ge=0)
+    unattributed_mib: int = Field(ge=0)
+    per_pid_total_mib: int = Field(ge=0)
+    accounting_skew_mib: int
+
+    @model_validator(mode="after")
+    def coherent_accounting(self) -> OccupancyBound:
+        if (
+            self.device_used_mib > self.device_total_mib
+            or self.own_tree_mib + self.other_mib != self.per_pid_total_mib
+            or self.per_pid_total_mib + self.unattributed_mib != self.device_used_mib
+            or self.accounting_skew_mib != self.unattributed_mib
+        ):
+            raise ValueError("GPU ownership and device readings do not form a coherent bound")
+        return self
+
+    @property
+    def outside_upper_bound_mib(self) -> int:
+        return self.other_mib + self.unattributed_mib
+
+
 class ProcessOccupancy(BaseModel):
     """One compute process's driver-visible memory on one device."""
 

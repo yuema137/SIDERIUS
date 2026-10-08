@@ -29,6 +29,7 @@ from core.runtime_control.gpu_requirement import (
     MeasurementDeadline,
     SamplingCoverage,
 )
+from tests.helpers.gpu_requirement import ended_worker_ownership
 
 REQUEST = CandidateMeasurementRequest(
     model_type="punet",
@@ -58,6 +59,7 @@ def _measurement(**over) -> MeasuredGpuRequirement:
         driver_tree_peak_mib=9_312,
         allocator_peak_mib=6_004,
         observed_device_uuid=REQUEST.device_uuid,
+        ownership=ended_worker_ownership(REQUEST.device_uuid),
         owned_pids=(4242, 4243),
         realized_identity=REALIZED,
         coverage=COMPLETE,

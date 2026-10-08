@@ -29,6 +29,7 @@ from core.runtime_control.measurement_validity import (
 )
 from core.runtime_control.probe import ContentionSnapshot, capture_contention_snapshot
 from core.runtime_control.process_visibility import PROCESS_VISIBILITY_ENV
+from tests.helpers.gpu_requirement import ended_worker_ownership
 
 DEVICE = DeviceIdentity(uuid="GPU-synthetic-633", physical_index=0)
 ROOT = Path(__file__).resolve().parents[3]
@@ -59,6 +60,7 @@ def decide(snapshot=None, **updates):
         snapshot=accounting() if snapshot is None else snapshot,
         requirement_mib=27 * 1024,
         requirement_provenance="measured",
+        requirement_ownership=ended_worker_ownership(DEVICE.uuid),
         mode="formal",
         ceiling_gib=28,
     )
@@ -89,7 +91,7 @@ def test_recorded_hidden_bytes_change_admission_without_relabeling_them():
     assert not decision.admitted
     assert decision.reason_code == "environment_headroom_unproven"
     assert decision.evidence["outside_upper_bound_mib"] == 2263
-    assert decision.evidence["aggregate_upper_bound_gib"] == (27648 + 2779) / 1024
+    assert decision.evidence["aggregate_gib"] == (27648 + 2779) / 1024
     raw = decision.evidence["observed_accounting"]
     assert raw["other_mib"] == 0 and raw["own_tree_mib"] == 516
     assert "not evidence that the model is too large" in decision.reason
@@ -503,4 +505,4 @@ def test_retained_parent_cuda_bytes_are_additional_to_new_worker_requirement():
     assert not decision.admitted
     assert decision.evidence["outside_upper_bound_mib"] == 0
     assert decision.evidence["retained_own_tree_mib"] == 2048
-    assert decision.evidence["aggregate_upper_bound_gib"] == 5
+    assert decision.evidence["aggregate_gib"] == 5

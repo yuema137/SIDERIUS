@@ -9,6 +9,31 @@ forecasts and blocking measurements are distinct authorities.
 
 See [the parent guide](../README.md) for child ownership and the focused validation route.
 
+## GPU admission before a new phase
+
+A successful measurement describes the GPU memory held by its isolated worker.
+That worker must have completed cleanly before its result can size a new worker.
+The requirement carries its GPU UUID and original process receipt; missing
+ownership, a different UUID, or a measured PID still visible on the device does
+not establish an applicable requirement.
+
+The admission check adds the new worker's measured demand to **all memory already
+used on that device**. For example, a 1000 MiB worker beside a parent holding
+500 MiB needs 1500 MiB of headroom accounting, so a 1200 MiB ceiling refuses it.
+Parent memory is additional because the measurement did not include the parent.
+Unattributed device bytes remain unattributed, but still consume headroom.
+Decision evidence preserves the own/other/residual split and the worker receipt.
+
+Ordinary `GpuAdmissionPolicy.enforcement` still determines whether a refusal
+stops execution or is recorded as an observation. Explicit namespace-limited
+execution continues to stop whenever headroom evidence is insufficient.
+These are environment decisions; they do not justify shrinking the model.
+The measured demand is an empirical estimate, not a bound on every later input.
+This check does not add runtime GPU monitoring or supply missing trial/inference
+measurements. Historical unlabelled requirements remain readable but cannot
+silently acquire new-worker ownership. External estimator profiles must qualify
+the changed observation/decision source identity before reuse.
+
 ## Measurement dimensions
 
 Measurement identity records whether temporal segmentation is applicable. The

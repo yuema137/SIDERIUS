@@ -223,11 +223,13 @@ def decide_prephase_admission(
     # candidate that fits the card may still not fit beside what is
     # already on it.
     table = MeasuredRequirementTable.from_measurements(requirement)
-    requirement_mib, provenance = table.for_phase(run.request.phase)
+    evidence = table.for_phase_evidence(run.request.phase)
     decision = evaluate_gpu_admission(
         snapshot=snapshot,
-        requirement_mib=requirement_mib,
-        requirement_provenance=provenance,
+        requirement_mib=evidence.requirement_mib,
+        requirement_provenance=evidence.provenance,
+        requirement_ownership=evidence.ownership,
+        requirement_error=evidence.validation_error,
         mode=mode,
         run_name=run_name,
         ceiling_gib=ceiling_gib,

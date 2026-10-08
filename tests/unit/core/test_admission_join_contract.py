@@ -33,6 +33,7 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _handle_admission_refusal,
     _may_advise_resource_reduction,
 )
+from tests.helpers.gpu_requirement import ended_worker_ownership
 
 DEV = DeviceIdentity(uuid="GPU-aaaa-0000", physical_index=0)
 PHASES = ["training", "inference"]
@@ -66,8 +67,16 @@ class _Sandbox:
         self.run_name = "join_contract"
         self.admission_mode = "trial"
         self.measured_requirements = {
-            "training": {"requirement_mib": 20_000, "provenance": "measured"},
-            "inference": {"requirement_mib": 20_000, "provenance": "measured"},
+            "training": {
+                "requirement_mib": 20_000,
+                "provenance": "measured",
+                "ownership": ended_worker_ownership(DEV.uuid).model_dump(),
+            },
+            "inference": {
+                "requirement_mib": 20_000,
+                "provenance": "measured",
+                "ownership": ended_worker_ownership(DEV.uuid).model_dump(),
+            },
         }
         self.saved: list[dict] = []
         for k, v in kw.items():
@@ -220,8 +229,16 @@ def _measured() -> dict:
     them.
     """
     return {
-        "training": {"requirement_mib": 1_476, "provenance": "measured"},
-        "inference": {"requirement_mib": 2_716, "provenance": "measured"},
+        "training": {
+            "requirement_mib": 1_476,
+            "provenance": "measured",
+            "ownership": ended_worker_ownership(DEV.uuid).model_dump(),
+        },
+        "inference": {
+            "requirement_mib": 2_716,
+            "provenance": "measured",
+            "ownership": ended_worker_ownership(DEV.uuid).model_dump(),
+        },
     }
 
 

@@ -49,6 +49,7 @@ from core.runtime_control.prephase_admission import (
     attach_measured_requirements,
     decide_prephase_admission,
 )
+from tests.helpers.gpu_requirement import ended_worker_ownership
 
 UUID = "GPU-c30b6678"
 DEVICE = DeviceIdentity(uuid=UUID, physical_index=0)
@@ -158,6 +159,7 @@ def _authoritative(**over) -> MeasuredGpuRequirement:
     payload = dict(
         request=REQUEST,
         outcome="COMPLETED_MEASUREMENT",
+        ownership=ended_worker_ownership(UUID),
         driver_tree_peak_mib=4_096,
         allocator_peak_mib=3_000,
         observed_device_uuid=UUID,

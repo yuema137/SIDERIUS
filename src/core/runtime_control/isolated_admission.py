@@ -10,45 +10,18 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import ValidationError
 
 from core.runtime_control.admission import AdmissionDecision
 from core.runtime_control.gpu_accounting import GpuAccountingSnapshot
+from core.runtime_control.gpu_accounting import OccupancyBound as OccupancyBound
+from core.runtime_control.gpu_requirement_evidence import GpuRequirementOwnership
 from core.runtime_control.pair_admission import gib_from_mib, pair_ceiling_gib
 from core.runtime_control.process_visibility import (
     GpuExecutionConditions,
     IsolatedHeadroomPolicy,
     declared_visibility,
 )
-
-
-class OccupancyBound(BaseModel):
-    """A coherent accounting split, not a guessed attribution of residual bytes."""
-
-    model_config = ConfigDict(frozen=True, strict=True)
-
-    device_total_mib: int = Field(gt=0)
-    device_used_mib: int = Field(ge=0)
-    own_tree_mib: int = Field(ge=0)
-    other_mib: int = Field(ge=0)
-    unattributed_mib: int = Field(ge=0)
-    per_pid_total_mib: int = Field(ge=0)
-    accounting_skew_mib: int
-
-    @model_validator(mode="after")
-    def coherent_accounting(self) -> OccupancyBound:
-        if (
-            self.device_used_mib > self.device_total_mib
-            or self.own_tree_mib + self.other_mib != self.per_pid_total_mib
-            or self.per_pid_total_mib + self.unattributed_mib != self.device_used_mib
-            or self.accounting_skew_mib != self.unattributed_mib
-        ):
-            raise ValueError("GPU ownership and device readings do not form a coherent bound")
-        return self
-
-    @property
-    def outside_upper_bound_mib(self) -> int:
-        return self.other_mib + self.unattributed_mib
 
 
 def environment_refusal(
@@ -76,6 +49,8 @@ def evaluate_isolated_admission(
     mode: str,
     ceiling_gib: float | None,
     sampling_error: str | None,
+    requirement_ownership: GpuRequirementOwnership | None = None,
+    requirement_error: str | None = None,
 ) -> AdmissionDecision:
     """Require new-worker demand plus all retained pre-spawn occupancy to fit.
 
@@ -130,6 +105,22 @@ def evaluate_isolated_admission(
             evidence,
         )
     evidence.update(requirement_mib=requirement_mib, requirement_provenance=requirement_provenance)
+    evidence["requirement_ownership"] = (
+        requirement_ownership.model_dump(mode="json")
+        if isinstance(requirement_ownership, GpuRequirementOwnership)
+        else None
+    )
+    ownership_issue = requirement_error
+    if not isinstance(requirement_ownership, GpuRequirementOwnership):
+        ownership_issue = ownership_issue or "Requirement ownership is missing or invalid."
+    elif requirement_ownership.device_uuid != snapshot.device.uuid:
+        ownership_issue = "Requirement and current occupancy describe different GPU UUIDs."
+    else:
+        ownership_issue = ownership_issue or requirement_ownership.applicability_refusal(snapshot)
+    if ownership_issue is not None:
+        evidence["requirement_error"] = ownership_issue
+        return environment_refusal(ownership_issue, evidence)
+
     try:
         configured = pair_ceiling_gib() if ceiling_gib is None else ceiling_gib
         if isinstance(configured, bool) or not math.isfinite(configured) or configured <= 0:
@@ -146,13 +137,13 @@ def evaluate_isolated_admission(
         configured_ceiling_gib=configured,
         effective_ceiling_gib=effective,
         retained_own_tree_mib=bound.own_tree_mib,
-        current_occupancy_upper_bound_mib=bound.device_used_mib,
-        aggregate_upper_bound_gib=aggregate,
-        headroom_lower_bound_gib=effective - aggregate,
+        current_device_used_mib=bound.device_used_mib,
+        aggregate_gib=aggregate,
+        headroom_gib=effective - aggregate,
     )
     if aggregate > effective:
         return environment_refusal(
-            f"The conservative aggregate upper bound is {aggregate:.2f} GiB against "
+            f"Measured demand plus current occupancy is {aggregate:.2f} GiB against "
             f"a {effective:.2f} GiB ceiling. Retry when environment evidence establishes sufficient headroom.",
             evidence,
             requirement_source=str(requirement_provenance),
@@ -161,7 +152,7 @@ def evaluate_isolated_admission(
         admitted=True,
         requirement_source=str(requirement_provenance),
         reason=(
-            f"Conservative aggregate upper bound {aggregate:.2f} GiB fits the "
+            f"Measured demand plus current occupancy {aggregate:.2f} GiB fits the "
             f"{effective:.2f} GiB ceiling under namespace-limited visibility."
         ),
         evidence=evidence,

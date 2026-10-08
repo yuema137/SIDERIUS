@@ -72,6 +72,7 @@ from core.runtime_control.gpu_requirement import (
     MeasurementDeadline,
     SamplingCoverage,
 )
+from core.runtime_control.gpu_requirement_evidence import ProcessEvidence as ProcessEvidence
 from core.runtime_control.inference_checkpoint_reference import InferenceCheckpointReference
 from core.runtime_control.inference_measurement_binding import InferenceMeasurementBinding
 from core.runtime_control.process_group import (
@@ -85,23 +86,6 @@ from core.runtime_control.process_group import (
 #: two can never be read as interchangeable.
 DRIVER_SOURCE = "gpu_accounting.sample(nvidia-smi):own_tree_mib"
 ALLOCATOR_SOURCE = "torch.cuda.max_memory_allocated(in-worker)"
-
-
-class ProcessEvidence(BaseModel):
-    """How the worker process ended. Facts, not a verdict."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    worker_pid: int = Field(gt=0)
-    worker_pgid: int = Field(gt=0)
-    exit_code: int | None = None
-    signal_number: int | None = None
-    term_sent: bool = False
-    kill_sent: bool = False
-    #: Something in the group outlived the reap. It may still hold the
-    #: device, so this is never silently ignored.
-    orphans_remaining: bool = False
-    group_cleanup_required: bool = False
 
 
 class HostMemoryBound(BaseModel):

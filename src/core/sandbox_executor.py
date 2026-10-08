@@ -8,7 +8,10 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from core.runtime_control.gpu_requirement_evidence import AdmissionRequirementEvidence
 
 from pydantic import StrictBool
 
@@ -415,57 +418,22 @@ def _watchdog_deadline_provider(
 
 
 def _phase_requirement(sandbox: Any, phase: str) -> tuple[float | None, str | None]:
-    """The measured requirement for **this** phase, or `(None, None)`.
+    """Compatibility projection; production consumes the complete typed evidence."""
+    evidence = _phase_requirement_evidence(sandbox, phase)
+    return evidence.requirement_mib, evidence.provenance
 
-    B-G0 measured the same PUNet candidate at 1,476 MiB for training and
-    2,716 MiB for inference — 1.8x apart on one card, in one run. A
-    single figure shared by both gates therefore judges one phase by a
-    measurement of the other, which is the applicability conflation the
-    attribution rules exist to prevent, arriving through the requirement
-    instead of through the verdict.
 
-    So the requirement is a mapping keyed by phase:
-
-        measured_requirements = {
-            "training":  {"requirement_mib": ..., "provenance": ...},
-            "inference": {"requirement_mib": ..., "provenance": ...},
-        }
-
-    A phase with no entry returns `(None, None)` and is refused in
-    formal mode. There is deliberately **no fallback** — not to the other
-    phase, not to the larger of the two, not to a model-name match. A
-    substituted figure would be an assumption wearing a measurement's
-    provenance.
-    """
-    # V20 PR C2 / C2-6. The TYPED table is the production channel. §8.A
-    # names the duck-typed read below as the gap that "survived PR B and
-    # its whole test suite" — a read no production code satisfied — so a
-    # typed object now carries the requirement, and only an authoritative
-    # measurement can be assembled into one.
-    #
-    # The `getattr` path is kept for the B-G validation harness, which
-    # injects a plain dict and whose runs are evidence about this gate's
-    # behaviour. Same shape as `admission_policy` / `admission_mode`
-    # above: typed first, and when a typed table is present it is
-    # authoritative, so the requirement cannot be read from two
-    # disagreeing places.
+def _phase_requirement_evidence(sandbox: Any, phase: str) -> "AdmissionRequirementEvidence":
+    """Read one phase, preserving typed-table precedence and explicit ownership."""
     from core.runtime_control.gpu_requirement import MeasuredRequirementTable
+    from core.runtime_control.gpu_requirement_evidence import AdmissionRequirementEvidence
 
     typed = getattr(sandbox, "measured_requirement_table", None)
     if isinstance(typed, MeasuredRequirementTable):
-        return typed.for_phase(phase)
-
+        return typed.for_phase_evidence(phase)
     table = getattr(sandbox, "measured_requirements", None)
-    if not isinstance(table, Mapping):
-        return None, None
-    entry = table.get(phase)
-    if not isinstance(entry, Mapping):
-        return None, None
-    requirement = entry.get("requirement_mib")
-    provenance = entry.get("provenance")
-    return (
-        requirement if isinstance(requirement, int | float) else None,
-        provenance if isinstance(provenance, str) else None,
+    return AdmissionRequirementEvidence.from_entry(
+        table.get(phase) if isinstance(table, Mapping) else None
     )
 
 
@@ -527,7 +495,7 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
     # Production always supplies a policy, so production gets the
     # `observe_only` compatibility default from the field itself.
     enforcement = policy.enforcement if policy is not None else "enforce"
-    requirement_mib, requirement_provenance = _phase_requirement(sandbox, phase)
+    requirement = _phase_requirement_evidence(sandbox, phase)
     snapshot = None
     sampling_error = None
     try:
@@ -547,8 +515,10 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
 
         decision = evaluate_gpu_admission(
             snapshot=snapshot,
-            requirement_mib=requirement_mib,
-            requirement_provenance=requirement_provenance,
+            requirement_mib=requirement.requirement_mib,
+            requirement_provenance=requirement.provenance,
+            requirement_ownership=requirement.ownership,
+            requirement_error=requirement.validation_error,
             mode=mode,
             run_name=getattr(sandbox, "run_name", None) or "candidate",
             ceiling_gib=ceiling_gib,

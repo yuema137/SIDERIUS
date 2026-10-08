@@ -56,6 +56,7 @@ from core.runtime_control.gpu_requirement import (
     MeasurementDeadline,
     SamplingCoverage,
 )
+from core.runtime_control.gpu_requirement_evidence import GpuRequirementOwnership
 
 
 def classify_measurement(
@@ -95,6 +96,12 @@ def classify_measurement(
         allocator_peak_mib=target.allocator_peak_mib if target is not None else None,
         observed_device_uuid=run.observed_device_uuid,
         owned_pids=target.own_pids if target is not None else (),
+        ownership=GpuRequirementOwnership(
+            domain="new_worker_process_tree",
+            device_uuid=run.observed_device_uuid,
+            process=run.process,
+            owned_pids=target.own_pids if target is not None else (),
+        ),
         coverage=target.coverage if target is not None else _no_coverage(run),
         realized_identity=run.realized_identity,
         identity_mismatch=mismatch,
