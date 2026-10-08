@@ -83,7 +83,9 @@ def build_required_profile_binding(
         ) from exc
 
 
-def resolve_watchdog_policy(args: argparse.Namespace) -> ResolvedWatchdogSettings:
+def resolve_watchdog_policy(
+    args: argparse.Namespace, *, device_name: str | None = None
+) -> ResolvedWatchdogSettings:
     """arXiv #261 / Q-07c-6 — resolve the launch's watchdog policy ONCE.
 
     Merges the operator's tri-state flags with the ``(device, regime)``
@@ -91,6 +93,9 @@ def resolve_watchdog_policy(args: argparse.Namespace) -> ResolvedWatchdogSetting
     authority; flags always win) and writes the FINAL values back onto
     ``args``, so the single ``WorkflowLaunchConfig`` construction site and
     the ``--print_resolved_launch_config`` view both read resolved truth.
+
+    An explicit device_name reuses a caller-owned observation. Omission preserves
+    the normal resolver discovery path; no hardware is discovered by this wrapper.
 
     Idempotent by construction: the resolved settings are cached on
     ``args.runtime_watchdog_policy`` and returned verbatim on a second
@@ -108,6 +113,7 @@ def resolve_watchdog_policy(args: argparse.Namespace) -> ResolvedWatchdogSetting
             cli_floor_seconds=args.runtime_watchdog_floor_seconds,
             execution_regime=args.execution_regime,
             required_binding=required_binding,
+            **({"device_name": device_name} if device_name is not None else {}),
         )
     except RequiredProfileBindingError as exc:
         # The declared requirement could not be certified. Refuse the launch

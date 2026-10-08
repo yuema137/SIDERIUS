@@ -302,6 +302,71 @@ retain `setup-review/v1`. Read the saved packet before sending it to a model.
 The [task-settings contract](task-settings.md) describes the callable input,
 shared rule owners, transport and source-identity boundary.
 
+## Preview local hardware and launch settings
+
+After a successful task check with `--resolve-task-settings`, you can inspect the
+local hardware properties, watchdog configuration and all values passed to the
+standard workflow. The watchdog is the runtime timer that can stop an attempt
+when its configured time limit is exceeded. This preview resolves its configuration;
+it does not test whether that configuration is suitable for your model.
+
+Run this step from the **same project directory and Python environment** used for
+the saved task check. It explicitly queries hardware properties and reads the
+selected runtime profile. It does not allocate a model, load data, run task code,
+start training, load dotenv or contact an LLM provider.
+
+```bash
+cd /home/alex/siderius-project &&
+/path/to/SIDERIUS/.venv/bin/python -m tools.setup_review.inspect_environment \
+  --report /home/alex/siderius-project/task-check-001/report.json \
+  --expected-sha256 '<SHA-256 of that exact report.json>' \
+  --output /home/alex/siderius-project/environment-preview-001
+```
+
+Use `sha256sum` on the saved report to obtain the digest. `--input-max-bytes`
+defaults to 1048576 (1 MiB); increase it explicitly only after inspecting an
+expected larger report. Add `--check-environment` to check configured credential
+names for nonempty values. The report records names and presence statuses, never
+reads key files or tests authentication. Set keys as environment variables before
+launching; do not put keys in task files or reports.
+
+Open **`environment-preview-001/index.html`**. Start with the remaining checks,
+then read the paths, data/budget summary, saved task settings, hardware properties
+and watchdog provenance. The GPU section separately shows the installed backend,
+visible device and implemented accounting adapter. Its memory table distinguishes
+the per-candidate model cap from the aggregate device limit, which combines actual
+capacity with declared operator/host limits. Neither number is current free memory
+or proof that a model fits. The complete launch table includes every field in the
+standard workflow's launch configuration, including defaults. For example, an
+explicit `--max_rounds 4` appears as `max_rounds: 4`; a missing training parameter
+may remain `null` because a task or agent chooses it later. No number is invented
+to fill such a gap. `report.json` holds the same typed observation for tools.
+
+The page separates **saved task facts** from **environment facts observed now**.
+It reparses your original arguments and compares their selected identities and
+manifest bytes with the saved report. If these changed, regenerate the task
+check. It does not reload task plugins or prove that every source file is current.
+The data directory must exist, but its read permissions, contents and splits are
+not validated. Hardware availability is not proof of working memory accounting,
+adequate memory, a suitable time budget or successful training. Hardware that has
+not been tested and a backend that lacks an accounting adapter are separate gaps.
+
+The output directory must be new, external to the installation and separate from
+the run workspace. This step creates only `report.json` and `index.html`; it does
+not create or modify the run workspace. An interrupted write can leave a partial
+report directory. Inspect it and choose a new output name; existing files are
+never overwritten. Configuration and advice may contain sensitive text, so inspect
+a report before sharing it even though credential values are not collected.
+
+**Settings observed does not mean ready to run.** The displayed ordinary launch
+command is unchanged and does not enforce this report. LLM review/skip receipts
+for older reports do not automatically cover the environment observation. The
+optional review below still accepts declaration/task-check snapshots; this new
+report is not yet an input to that reviewer or a reviewed-launch gate. This step
+covers a fresh standard single iteration, not arbitrary orchestration or resume.
+The [environment preview contract](environment-settings.md) records the exact
+API, owners and limitations.
+
 ## Ask for an optional LLM review, or explicitly skip it
 
 After reading a saved declaration or task-check report, you can record a separate
