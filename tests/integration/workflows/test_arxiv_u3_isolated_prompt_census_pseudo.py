@@ -16,16 +16,16 @@ carry a KNOWN, separately-pinned built-in roster).
 Non-vacuity: the SAME drive without isolation must contain ``wavenet``
 and ``5.57`` — a census green on both arms would be measuring nothing.
 
-Environmental note: the proposer renders the live capability index
-(``agent_generated/_capability_index.json``). On a machine whose index
-carries a plugin whose description names a bundled architecture, this
-census goes RED — correctly: that text would reach the isolated prompt.
+The capability index is an explicit empty fixture. Production rendering still
+runs; unrelated capabilities installed on a developer's machine cannot change
+which baseline-isolation behavior this witness measures.
 
 Pseudo only: no LLM call, no GPU, no training subprocess.
 """
 
 from __future__ import annotations
 
+import importlib
 import os
 import re
 from pathlib import Path
@@ -33,6 +33,7 @@ from unittest.mock import patch
 
 import pytest
 
+from core.capability_registry import CapabilityRegistry
 from tests.helpers.step12_pr12a_prompt_capture import capturing_bridge_class
 from tests.integration.workflows.test_chain_candidate_graduation import _llm_config_pseudo
 from tests.unit.workflows.test_model_exploration import (
@@ -57,7 +58,13 @@ BUNDLED_DESCRIPTION_HEADERS = (
 )
 
 
-def _drive(workspace: str, *, isolation: bool) -> tuple[list[dict], Path]:
+def _drive(workspace: str, composition, *, isolation: bool) -> tuple[list[dict], Path]:
+    index = Path(workspace) / "capability_index.json"
+    index.write_text("[]", encoding="utf-8")
+    registry = CapabilityRegistry(index_path=str(index))
+    proposer_module = importlib.import_module(
+        "nodes.ml_model_proposal_agent.ml_model_proposal_agent"
+    )
     bridges: list = []
     bridge_cls = capturing_bridge_class()
 
@@ -67,6 +74,7 @@ def _drive(workspace: str, *, isolation: bool) -> tuple[list[dict], Path]:
         return bridge
 
     with (
+        patch.object(proposer_module, "CapabilityRegistry", return_value=registry),
         patch("workflows.model_exploration.MLModelImplementor") as MockImpl,
         patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid,
         patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune,
@@ -76,9 +84,12 @@ def _drive(workspace: str, *, isolation: bool) -> tuple[list[dict], Path]:
         )
         MockValid.return_value.run.side_effect = lambda inp: _make_validator_output(passed=True)
         MockTune.return_value.run.side_effect = lambda inp: _make_tuning_output(
-            model_type=inp.model_type
+            model_type=inp.model_type,
+            fingerprint=composition.semantic_fingerprint,
+            metric_spec=composition.metric.spec,
         )
         run_workflow(
+            task_composition=composition,
             launch=WorkflowLaunchConfig(
                 source_paths=[],
                 max_iterations=1,
@@ -123,10 +134,10 @@ def _census(text: str, *, where: str) -> list[str]:
 
 
 @pytest.mark.dual_mode
-def test_isolated_chain_prompts_carry_no_baseline_literal(tmp_path):
+def test_isolated_chain_prompts_carry_no_baseline_literal(tmp_path, workflow_composition):
     ws = str(tmp_path / "isolated")
     os.makedirs(ws)
-    captures, dump_dir = _drive(ws, isolation=True)
+    captures, dump_dir = _drive(ws, workflow_composition, isolation=True)
     assert captures, "the pseudo chain rendered no prompt — the census is vacuous"
 
     problems: list[str] = []
@@ -144,13 +155,15 @@ def test_isolated_chain_prompts_carry_no_baseline_literal(tmp_path):
 
 
 @pytest.mark.dual_mode
-def test_the_census_is_not_vacuous_the_legacy_surface_does_name_the_baseline(tmp_path):
+def test_the_census_is_not_vacuous_the_legacy_surface_does_name_the_baseline(
+    tmp_path, workflow_composition
+):
     """Same drive, isolation OFF: the stage examples name wavenet / 5.57.
     If this stops being true the census above could go green by measuring
     nothing — this is the counterfactual that keeps it honest."""
     ws = str(tmp_path / "legacy")
     os.makedirs(ws)
-    captures, _ = _drive(ws, isolation=False)
+    captures, _ = _drive(ws, workflow_composition, isolation=False)
     joined = "\n".join(c.get("system", "") + "\n" + c.get("user", "") for c in captures)
     assert re.search(r"\bwavenet\b", joined, re.IGNORECASE)
     assert "5.57" in joined

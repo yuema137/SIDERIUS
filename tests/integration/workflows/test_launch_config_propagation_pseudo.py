@@ -16,9 +16,10 @@ tests/integration/workflows/test_chain_incumbent_pseudo.py) — the
 propagation layers under audit are NOT mocked. No LLM, no training,
 no GPU.
 
-This test fails with a TypeError under the Gate 0 attempt-1 defect
-(run_workflow missing ``runtime_watchdog_safety_factor``): it passes
-that kwarg explicitly.
+The workflow receives transit settings through WorkflowLaunchConfig and run
+scope/Health authorities as direct arguments. The test binds a complete synthetic
+20-partition task so exact descending scope sentinels exercise supported input.
+The recorded boundary and lock assertions remain independent of that fixture.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -39,8 +41,32 @@ from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ExpertAdvice, ProposalOutput
 from agent.schemas.validator import ValidatorOutput
 from execute_tools.dataset_config import DataScope
+from tests.helpers.tuner_composed_fixture import make_tuner_composition
+from tests.helpers.two_family_profile import make_two_family_profile
+from tests.integration.workflows.test_chain_candidate_graduation import _llm_config_pseudo
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+
+
+@pytest.fixture
+def propagation_composition(tmp_path, offline_workflow):
+    """Explicit 20-partition task for indexed-scope transport; no dataset reads."""
+    pack = tmp_path / "task"
+    pack.mkdir()
+    initial = make_tuner_composition(pack)
+    # This witness targets the still-supported indexed-file scope contract.
+    # Both the synthetic data-path fixture and this profile declare 20 partitions.
+    profile = make_two_family_profile(num_files=20)
+    Path(initial.provenance.source_paths["dataset_profile"]).write_text(
+        json.dumps(profile.to_wire())
+    )
+    composition = compose_run_task_bindings(initial.provenance.manifest_path)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    with bind_run_task_composition(composition, physical_data_root=str(data_root)):
+        yield composition
+
 
 # --------------------------------------------------------------------------
 # Sentinels — one distinctive value per launch-critical setting. None of
@@ -159,14 +185,19 @@ _VALID_OUT = ValidatorOutput(
 )
 
 
-def _run_with_sentinels(workspace: str):
+def _run_with_sentinels(workspace: str, composition):
     """Returns (tune_input, interp_input, propose_input) captured at the
     three agent boundaries."""
     captured: list[HyperparamTuningInput] = []
 
     def _capture(inp):
         captured.append(inp)
-        return _MINIMAL_TUNE_OUT
+        return _MINIMAL_TUNE_OUT.model_copy(
+            update={
+                "task_composition_fingerprint": composition.semantic_fingerprint,
+                "metric_spec": composition.metric.spec,
+            }
+        )
 
     with contextlib.ExitStack() as stack:
         MockInterp = stack.enter_context(
@@ -192,6 +223,8 @@ def _run_with_sentinels(workspace: str):
         MockTune.return_value.run.side_effect = _capture
 
         run_workflow(
+            task_composition=composition,
+            llm_config=_llm_config_pseudo(),
             launch=WorkflowLaunchConfig(
                 data_dir="/tmp/data",
                 model_types=["punet"],
@@ -202,6 +235,11 @@ def _run_with_sentinels(workspace: str):
                 human_advice_tune=ADVICE_TUNE_SENTINEL,
                 human_advice_interpret=ADVICE_INTERP_SENTINEL,
                 human_advice_propose=ADVICE_PROPOSE_SENTINEL,
+                **{
+                    key: value
+                    for key, value in SENTINELS.items()
+                    if key != "enable_structured_health_feedback"
+                },
             ),
             workspace=workspace,
             run_name="iter_001",
@@ -210,7 +248,7 @@ def _run_with_sentinels(workspace: str):
             health_gate_enabled=True,
             order_strategy_override="sequential",
             file_order_override=list(ORDER_SENTINEL),
-            **SENTINELS,
+            enable_structured_health_feedback=SENTINELS["enable_structured_health_feedback"],
         )
         interp_input = MockInterp.return_value.run.call_args[0][0]
         propose_input = MockPropose.return_value.run.call_args[0][0]
@@ -219,10 +257,10 @@ def _run_with_sentinels(workspace: str):
 
 
 @pytest.mark.dual_mode
-def test_every_sentinel_reaches_the_tuner_input_and_the_lock(tmp_path):
+def test_every_sentinel_reaches_the_tuner_input_and_the_lock(tmp_path, propagation_composition):
     ws = str(tmp_path / "sentinel_ws")
     os.makedirs(ws)
-    tune_input, interp_input, propose_input = _run_with_sentinels(ws)
+    tune_input, interp_input, propose_input = _run_with_sentinels(ws, propagation_composition)
 
     # -- typed tuner input: exact sentinel equality, field by field -------
     for name, expected in SENTINELS.items():
@@ -281,17 +319,23 @@ def test_every_sentinel_reaches_the_tuner_input_and_the_lock(tmp_path):
 
 
 @pytest.mark.dual_mode
-def test_off_default_parity_no_silent_activation(tmp_path):
+def test_off_default_parity_no_silent_activation(tmp_path, propagation_composition):
     """OFF/default parity (audit spec §4.3): omitting every V19 flag gives
     feedback OFF with 3/8 retention and no watchdog override at the tuner
     boundary — a legacy-style invocation is NOT silently upgraded."""
+    composition = propagation_composition
     ws = str(tmp_path / "default_ws")
     os.makedirs(ws)
     captured: list[HyperparamTuningInput] = []
 
     def _capture(inp):
         captured.append(inp)
-        return _MINIMAL_TUNE_OUT
+        return _MINIMAL_TUNE_OUT.model_copy(
+            update={
+                "task_composition_fingerprint": composition.semantic_fingerprint,
+                "metric_spec": composition.metric.spec,
+            }
+        )
 
     with contextlib.ExitStack() as stack:
         MockInterp = stack.enter_context(
@@ -317,6 +361,8 @@ def test_off_default_parity_no_silent_activation(tmp_path):
         MockTune.return_value.run.side_effect = _capture
 
         run_workflow(
+            task_composition=composition,
+            llm_config=_llm_config_pseudo(),
             launch=WorkflowLaunchConfig(
                 data_dir="/tmp/data",
                 model_types=["punet"],
