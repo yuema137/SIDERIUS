@@ -894,3 +894,24 @@ def test_cooperative_budget_reaches_validated_tuner(validator_output, proposal_o
             training_budget_reserve_fraction=0.2,
             max_epochs=100,
         )
+
+
+def test_completion_policy_reaches_real_tuner_and_child_policy(
+    validator_output, proposal_output, storage, tmp_path
+):
+    from core.runtime_control.session import RuntimeControlPolicy
+    from nodes.ml_hyperparameter_tune_agent.runtime import _build_runtime_policy
+
+    tuner = local_validated_model(
+        validator_output,
+        proposal_output,
+        storage,
+        runtime_completion_policy="verified-prediction-v1",
+    )
+    payload = _build_runtime_policy(
+        tuner, chosen_time_budget=3, is_trial=False, base_dir=str(tmp_path)
+    )
+    assert (
+        RuntimeControlPolicy.model_validate(payload).runtime_completion_policy
+        == "verified-prediction-v1"
+    )

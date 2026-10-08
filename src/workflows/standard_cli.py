@@ -760,6 +760,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--runtime_completion_policy",
+        choices=("completed-workload-v1", "verified-prediction-v1"),
+        default="completed-workload-v1",
+        help="Use actual completed-phase cost, or explicitly select historical strict verification.",
+    )
+    parser.add_argument(
         "--formal_time_admission_source",
         choices=("forecast", "measured"),
         default="measured",

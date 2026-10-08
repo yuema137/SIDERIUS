@@ -138,3 +138,29 @@ class TestStubParity:
 
 
 pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+@pytest.mark.parametrize("infrastructure", [False, True])
+def test_completed_inference_refusal_is_not_success_or_generic_error(
+    sandbox, monkeypatch, exit_code, infrastructure
+):
+    from core.runtime_control.session import RuntimeControlPolicy
+
+    def run(cmd, **kwargs):
+        session = RuntimeVerificationSession(
+            _argv_value(cmd, "--runtime_observation_out"),
+            policy=RuntimeControlPolicy(operator_budget_seconds=1e-12),
+        )
+        session.complete_setup(storage_provenance={})
+        if infrastructure:
+            session.record_evidence_channel_failure("lost writer receipt")
+        session.decide_admission(stage="completed_inference_workload")
+        if exit_code:
+            raise subprocess.CalledProcessError(exit_code, cmd, stderr="refused")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""), None
+
+    monkeypatch.setattr("core.sandbox_executor._run_observed_subprocess", run)
+    out = _execute(sandbox)
+    assert out["status"] == ("aborted_infrastructure" if infrastructure else "rejected_time_risk")
+    assert out["runtime_verification"]["admission"]["decision"] == "rejected"

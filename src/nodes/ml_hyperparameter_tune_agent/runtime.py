@@ -1370,6 +1370,9 @@ def _build_runtime_policy(
             else None
         ),
         "time_admission_source": admission_source,
+        "runtime_completion_policy": getattr(
+            agent_input, "runtime_completion_policy", "completed-workload-v1"
+        ),
         # VALIDATION POSTURE, None in every campaign. The Gate workload
         # envelope: the trainer builds a smaller epoch, so the bound is
         # spent before execution rather than enforced by killing a run.

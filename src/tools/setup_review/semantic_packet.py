@@ -32,6 +32,7 @@ _SETTINGS = frozenset(
         "training_validation_portion",
         "healthgate_mode",
         "result_authority",
+        "runtime_completion_policy",
         "runtime_watchdog",
         "runtime_watchdog_safety_factor",
         "runtime_watchdog_floor_seconds",

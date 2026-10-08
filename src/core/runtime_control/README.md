@@ -42,6 +42,27 @@ measurements. Historical unlabelled requirements remain readable but cannot
 silently acquire new-worker ownership. External estimator profiles must qualify
 the changed observation/decision source identity before reuse.
 
+## When a short task finishes before timing stabilizes
+
+A task that has finished its selected work does not need a prediction of how
+long that same work would take. The default `completed-workload-v1` policy checks
+its actual elapsed time against the budget. Remaining work still needs the
+existing conservative checks. A completed training stage includes its required
+validation; inference must finish writing every prediction before it can pass.
+
+This does not make a few fast batches a reliable speed estimate. Their timing
+record remains unsuitable for future calibration. Partial work cannot claim
+completion. With a timing budget enforced, exceeded measurement limits or a
+real budget overrun still refuse execution; without one, timing stays record-only.
+A broken evidence channel always refuses execution. The framework does not add
+epochs or change batch sizes to make timing pass.
+
+For historical runs, the experiment repository can explicitly select
+`--runtime_completion_policy verified-prediction-v1`. That keeps the earlier
+requirement for a verified prediction. Use a new workspace when changing policy;
+old records are never silently relabeled. The [technical timing contract](../../../docs/design/runtime_estimation_and_watchdog.md)
+describes the accounting and compatibility boundary.
+
 ## Measurement dimensions
 
 Measurement identity records whether temporal segmentation is applicable. The

@@ -1936,6 +1936,7 @@ def _workflow_lock_identity(launch, llm_config: WorkflowLLMConfig) -> LockLaunch
         ),
         trial_time_admission_source=launch.trial_time_admission_source,
         formal_time_admission_source=launch.formal_time_admission_source,
+        runtime_completion_policy=launch.runtime_completion_policy,
     )
 
 
@@ -3380,6 +3381,7 @@ def run_workflow(
             formal_time_budget_minutes=launch.formal_time_budget_minutes,
             trial_time_admission_source=launch.trial_time_admission_source,
             formal_time_admission_source=launch.formal_time_admission_source,
+            runtime_completion_policy=launch.runtime_completion_policy,
             data_dir=launch.data_dir,
             gpu_execution_policy=launch.gpu_execution_policy,
             gpu_admission_measurement_source=launch.gpu_admission_measurement_source,

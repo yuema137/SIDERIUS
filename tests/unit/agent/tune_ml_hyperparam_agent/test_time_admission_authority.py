@@ -167,3 +167,19 @@ def test_resume_refuses_a_changed_time_admission_authority(tmp_path):
     changed = locked.model_copy(update={"trial_time_admission_source": "forecast"})
     with pytest.raises(RunInvariantsViolation, match="trial_time_admission_source"):
         validate_run_invariants(str(tmp_path), changed)
+
+
+@pytest.mark.parametrize("previous", [None, "verified-prediction-v1"])
+def test_completion_policy_mismatch_never_restamps_old_workspace(tmp_path, previous):
+    locked = RunInvariants(
+        resolved_data_scope=[0],
+        health_gate_enabled=False,
+        health_config_sha256=None,
+        runtime_completion_policy=previous,
+    )
+    path = write_run_invariants(str(tmp_path), locked)
+    before = open(path, "rb").read()
+    changed = locked.model_copy(update={"runtime_completion_policy": "completed-workload-v1"})
+    with pytest.raises(RunInvariantsViolation, match="runtime_completion_policy"):
+        validate_run_invariants(str(tmp_path), changed)
+    assert open(path, "rb").read() == before

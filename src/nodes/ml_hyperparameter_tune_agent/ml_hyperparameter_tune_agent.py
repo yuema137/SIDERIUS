@@ -611,6 +611,7 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
         validation_max_samples=agent_input.validation_max_samples,
         trial_time_admission_source=agent_input.trial_time_admission_source,
         formal_time_admission_source=agent_input.formal_time_admission_source,
+        runtime_completion_policy=agent_input.runtime_completion_policy,
     )
 
 

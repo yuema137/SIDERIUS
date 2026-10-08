@@ -494,6 +494,19 @@ class TestDryRunSmoke:
         # contract is that it stays absent.
         return tmp_path / "dryrun_ws"
 
+    def test_selected_completion_policy_reaches_python_argv(self, workspace, seed_path):
+        rc, stdout, stderr = _run_dry(
+            "lilab",
+            workspace,
+            1,
+            seed_path,
+            "--runtime_completion_policy",
+            "verified-prediction-v1",
+        )
+        assert rc == 0, stderr
+        assert "--runtime_completion_policy verified-prediction-v1" in stdout
+        assert not workspace.exists()
+
     def test_lilab_three_iters_emits_correct_start_iteration(self, workspace, seed_path):
         rc, stdout, stderr = _run_dry("lilab", workspace, 3, seed_path)
         assert rc == 0, f"non-zero exit: stdout={stdout!r}\nstderr={stderr!r}"

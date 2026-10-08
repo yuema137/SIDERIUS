@@ -56,6 +56,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import OutputTypeName
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.completion import RuntimeCompletionPolicy
 from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.pair_admission import PositiveGpuGiB
 from workflows.scientific_evidence_stage import EvidenceStageOrder
@@ -137,6 +138,7 @@ class WorkflowLaunchConfig:
     formal_time_budget_minutes: float | None = None
     trial_time_admission_source: TimeAdmissionSource = "measured"
     formal_time_admission_source: TimeAdmissionSource = "measured"
+    runtime_completion_policy: RuntimeCompletionPolicy = "completed-workload-v1"
     gpu_execution_policy: GpuExecutionPolicy | None = field(
         default=None, metadata={"omit_if_none": True}
     )

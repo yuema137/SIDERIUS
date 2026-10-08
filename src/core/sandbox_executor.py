@@ -51,6 +51,7 @@ from core.layout import package_root
 from core.recorders import BaseRecorder as BaseRecorder
 from core.recorders import LocalRecorder as LocalRecorder
 from core.recorders import MongoRecorder as MongoRecorder
+from core.runtime_control.execution_status import runtime_refusal_status
 from core.runtime_control.launch_argv import has_scope_to_launch_from, runtime_control_argv
 from core.runtime_control.native_gpu_execution import (
     active_attempt,
@@ -1346,31 +1347,15 @@ class TidmadSandbox:
             # misclassified as a crash. Distinguishable by the sidecar's
             # admission decision.
             runtime_verification = _read_runtime_observation_sidecar(rv_sidecar_path)
-            if (
-                runtime_verification is not None
-                and (runtime_verification.get("admission") or {}).get("decision") == "rejected"
-            ):
-                admission_block = runtime_verification.get("admission") or {}
-                reason = admission_block.get("reason", "")
-                # C9c: an infrastructure-class refusal is NOT a verdict on
-                # this candidate — it says the evidence channel is broken.
-                # Surfacing it as a candidate rejection would send the chain
-                # to the next candidate and straight back into the same
-                # failure. Legacy records carry no failure_class and keep the
-                # historical (conservative) candidate-rejection path.
-                if admission_block.get("failure_class") == "infrastructure":
+            refusal = runtime_refusal_status(runtime_verification)
+            if refusal is not None:
+                assert runtime_verification is not None
+                reason = (runtime_verification.get("admission") or {}).get("reason", "")
+                if refusal["status"] == "aborted_infrastructure":
                     print(f"--- Runtime Evidence-Channel Failure (ABORT) ---\n{reason}")
-                    return {
-                        "status": "aborted_infrastructure",
-                        "message": f"runtime evidence channel failed: {reason}",
-                        "runtime_verification": runtime_verification,
-                    }
-                print(f"--- Runtime Verification Rejected ---\n{reason}")
-                return {
-                    "status": "rejected_time_risk",
-                    "message": f"runtime verification rejected the attempt: {reason}",
-                    "runtime_verification": runtime_verification,
-                }
+                else:
+                    print(f"--- Runtime Verification Rejected ---\n{reason}")
+                return refusal
 
             # Phase 6.7 Fix 3 — silent-crash detection. The trainer-side
             # ``_save_with_sentinel`` (Commit 3) writes ``_OK_<exp_id>`` only
@@ -1743,6 +1728,12 @@ class TidmadSandbox:
                 except Exception as exc:
                     print(f"[execute_inference] sidecar parse failed: {exc}")
 
+            refusal = runtime_refusal_status(
+                _read_runtime_observation_sidecar(rv_sidecar_path), completed_policy_only=True
+            )
+            if refusal is not None:
+                return refusal
+
             return {
                 "status": "success",
                 "message": "Inference finished.",
@@ -1752,6 +1743,11 @@ class TidmadSandbox:
                 "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
             }
         except subprocess.CalledProcessError as e:
+            refusal = runtime_refusal_status(
+                _read_runtime_observation_sidecar(rv_sidecar_path), completed_policy_only=True
+            )
+            if refusal is not None:
+                return refusal
             error_msg = _format_subprocess_error(e, "Inference")
             print(f"--- Inference Error ---\n{error_msg}")
             status = "oom_host_ram" if _is_oom_failure(e) else "error"

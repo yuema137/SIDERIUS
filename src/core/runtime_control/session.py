@@ -32,6 +32,7 @@ where the final decision was made).
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from typing import Any, Literal
@@ -42,6 +43,7 @@ from core.runtime_control.adaptive import (
     AdaptiveUnitVerification,
     AdaptiveVerificationConfig,
 )
+from core.runtime_control.completion import RuntimeCompletionPolicy
 from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.provenance import (
     assess_cache_state,
@@ -52,6 +54,7 @@ from core.runtime_control.provenance import (
 from core.runtime_control.records import (
     AdmissionRecord,
     MemoryCompleteness,
+    PhaseCompletion,
     PhaseComponentRecord,
     PhaseMeasurement,
     PredictionSource,
@@ -152,6 +155,8 @@ class RuntimeControlPolicy(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True)
+
+    runtime_completion_policy: RuntimeCompletionPolicy = "completed-workload-v1"
 
     training_budget: TrainingBudgetEnvelope | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -644,17 +649,63 @@ class RuntimeVerificationSession:
         self._write_sidecar()
         return prediction
 
+    def complete_phase_workload(
+        self,
+        phase: RuntimePhase,
+        *,
+        actual_seconds: float,
+        executed_unit_count: int,
+        reason: Literal["requested_horizon", "cooperative_epoch_stop"] = "requested_horizon",
+        verifier: AdaptiveUnitVerification | None = None,
+        source: PredictionSource | None = None,
+    ) -> None:
+        """Close successful production work, without inventing a rate prediction.
+
+        The caller owns successful full execution (including required writer or
+        validation completion). Plain ``record_phase_actual`` cannot grant this
+        authority. Already terminal failures are never erased.
+        """
+        if self.policy.runtime_completion_policy != "completed-workload-v1":
+            raise ValueError("completed workload admission is disabled by the selected policy")
+        if not math.isfinite(actual_seconds) or actual_seconds <= 0:
+            raise ValueError("completion requires a finite positive actual duration")
+        existing = self._components.get(phase)
+        if existing is None or existing.workload is None:
+            raise ValueError("completion requires a resolved workload")
+        if executed_unit_count != existing.workload.unit_count:
+            raise ValueError("completed count must equal the resolved execution workload")
+        exhausted = verifier is not None and verifier.permits_workload_completion
+        if verifier is not None:
+            if source is None:
+                raise ValueError("verification source is required with a verifier")
+            self.complete_phase_verification(phase, verifier, source=source)
+            existing = self._components[phase]
+        verified = existing.prediction is not None and str(phase) not in self._verification_failures
+        if exhausted or verified:
+            component = existing.with_actual(actual_seconds)
+            self._components[phase] = PhaseComponentRecord.model_validate(
+                {
+                    **component.model_dump(),
+                    "completion": PhaseCompletion(
+                        reason=reason,
+                        verification_basis="workload_exhausted" if exhausted else "verified",
+                    ),
+                }
+            )
+            self._verification_failures.pop(str(phase), None)
+        else:
+            self.record_phase_actual(phase, actual_seconds)
+        self._write_sidecar()
+
     def decide_admission(self, stage: str = ADMISSION_STAGE_POST_SETUP) -> AdmissionRecord:
         """Admission decision from the evidence available at ``stage``.
 
-        Conservative §3 lower-bound rule: the KNOWN-COST sum (every
-        component prediction present — setup's prediction equals its
-        measured actual) can only grow as more phases verify, so
-        exceeding the budget at any stage is final. With a budget in
-        force, a failed verification rejects (fail closed §2.11);
-        without one the session is record-only and always admits. The
-        LATEST decision is the authoritative one (stage records where
-        it was made).
+        Completed-workload policy uses incurred actual costs once and applies
+        the safety factor only to remaining estimates. Strict historical policy
+        retains the original all-prediction sum. Failed verification rejects
+        under a budget unless successful complete work explicitly resolved that
+        phase's exhaustion; evidence-channel failures always reject. The latest
+        decision records the stage at which these costs became known.
 
         Raises:
             RuntimeError: called before ``complete_setup``.
@@ -669,6 +720,30 @@ class RuntimeVerificationSession:
             if c.prediction is not None
         )
         adjusted = known_cost * safety
+        completed_cost = 0.0
+        avoidable_cost: float | None = adjusted
+        if self.policy.runtime_completion_policy == "completed-workload-v1":
+            completed_cost = sum(
+                c.actual_seconds
+                for phase, c in self._components.items()
+                if (phase == "setup" or c.completion is not None) and c.actual_seconds is not None
+            )
+            estimated_cost = sum(
+                c.prediction.predicted_seconds
+                for phase, c in self._components.items()
+                if phase != "setup" and c.completion is None and c.prediction is not None
+            )
+            known_cost = completed_cost + estimated_cost
+            adjusted = completed_cost + estimated_cost * safety
+            avoidable_cost = estimated_cost * safety or None
+        cost_description = (
+            f"known-cost lower bound {known_cost:.1f}s (safety x{safety:g} -> {adjusted:.1f}s)"
+            if self.policy.runtime_completion_policy == "verified-prediction-v1"
+            else (
+                f"known cost {adjusted:.1f}s: completed actual {completed_cost:.1f}s plus "
+                f"remaining estimates with safety x{safety:g}"
+            )
+        )
         cost_fields = {
             "setup_cost_seconds": self._setup_seconds,
             "verification_cost_seconds": self._verification_seconds,
@@ -684,7 +759,7 @@ class RuntimeVerificationSession:
                 reason_code="evidence_channel_failure",
                 failure_class="infrastructure",
                 stage=stage,
-                avoided_predicted_runtime_seconds=adjusted or None,
+                avoided_predicted_runtime_seconds=avoidable_cost or None,
                 reason=(
                     f"evidence-channel failure (infrastructure): {self._evidence_channel_failure}"
                 ),
@@ -728,7 +803,7 @@ class RuntimeVerificationSession:
                 # record_evidence_channel_failure instead.
                 failure_class="candidate",
                 stage=stage,
-                avoided_predicted_runtime_seconds=adjusted,
+                avoided_predicted_runtime_seconds=avoidable_cost,
                 reason=f"verification failed — fail closed for formal (§2.11): {failures}",
                 **cost_fields,
             )
@@ -739,10 +814,9 @@ class RuntimeVerificationSession:
                 reason_code="budget_exceeded",
                 failure_class="candidate",  # measured over budget (C9c)
                 stage=stage,
-                avoided_predicted_runtime_seconds=adjusted,
+                avoided_predicted_runtime_seconds=avoidable_cost,
                 reason=(
-                    f"known-cost lower bound {known_cost:.1f}s (safety x{safety:g} -> "
-                    f"{adjusted:.1f}s) exceeds the operator budget {budget:.1f}s — "
+                    f"{cost_description} exceeds the operator budget {budget:.1f}s — "
                     "the full total can only be larger."
                 ),
                 **cost_fields,
@@ -755,8 +829,7 @@ class RuntimeVerificationSession:
                 failure_class=None,
                 stage=stage,
                 reason=(
-                    f"known-cost lower bound {known_cost:.1f}s (safety x{safety:g} -> "
-                    f"{adjusted:.1f}s) within budget {budget:.1f}s; unverified phases "
+                    f"{cost_description} within budget {budget:.1f}s; unverified phases "
                     "remain pending"
                 ),
                 **cost_fields,

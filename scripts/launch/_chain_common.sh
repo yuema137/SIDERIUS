@@ -118,6 +118,7 @@ TRIAL_TIME_BUDGET_MINUTES=""        # §3.2: empty == omit == Python None
 FORMAL_TIME_BUDGET_MINUTES=""       # §3.2: empty == omit == Python None
 TRIAL_TIME_ADMISSION_SOURCE="measured"
 FORMAL_TIME_ADMISSION_SOURCE="measured"
+RUNTIME_COMPLETION_POLICY="completed-workload-v1"
 FORMAL_EVAL_PORTION=1.0             # Phase R §13: eval-side scope for formal training; default 1.0 = production full-clone (lower for smoke/CI)
 GPU_ADMISSION_MEASUREMENT_SOURCE="" # B-G3: reference, never a figure; empty == omit
 GPU_ADMISSION_ENFORCEMENT=""        # B-G3/D-B4: empty == omit == observe_only
@@ -339,6 +340,7 @@ parse_chain_args() {
         --formal_time_budget_minutes) FORMAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
         --trial_time_admission_source) TRIAL_TIME_ADMISSION_SOURCE="$2"; shift 2 ;;
         --formal_time_admission_source) FORMAL_TIME_ADMISSION_SOURCE="$2"; shift 2 ;;
+        --runtime_completion_policy) RUNTIME_COMPLETION_POLICY="$2"; shift 2 ;;
         --max_steps_per_attempt)  MAX_STEPS_PER_ATTEMPT="$2"; shift 2 ;;
         --min_formal_batch_size)  MIN_FORMAL_BATCH_SIZE="$2"; shift 2 ;;
         --allow_extreme_steps)    ALLOW_EXTREME_STEPS=1; shift ;;
@@ -646,6 +648,7 @@ build_app_args() {
     fi
     APP_ARGS+=(--trial_time_admission_source "$TRIAL_TIME_ADMISSION_SOURCE")
     APP_ARGS+=(--formal_time_admission_source "$FORMAL_TIME_ADMISSION_SOURCE")
+    APP_ARGS+=(--runtime_completion_policy "$RUNTIME_COMPLETION_POLICY")
     # RT6 runtime-control surface: numeric flags always cross explicitly.
     # The Formal-only batch floor defaults to 0 (disabled), preserving
     # Trial/Formal parity unless a task or campaign opts in.

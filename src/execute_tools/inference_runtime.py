@@ -30,6 +30,7 @@ class InferenceRuntimeEvidence:
         self.started = started
         self.setup_seconds = time.perf_counter() - started
         self.finished_verification = False
+        self.executed_samples = 0
         session.record_phase_workload(
             "inference",
             ResolvedPhaseWorkload(
@@ -47,6 +48,7 @@ class InferenceRuntimeEvidence:
         return time.perf_counter()
 
     def finish_batch(self, started: float, samples: int) -> None:
+        self.executed_samples += samples
         if self.finished_verification:
             return
         if self.device.type == "cuda":
@@ -79,8 +81,18 @@ class InferenceRuntimeEvidence:
 
     def finish(self) -> None:
         """Called only after successful, complete deliverable consumption."""
-        self._complete_verification()
-        self.session.record_phase_actual("inference", time.perf_counter() - self.started)
+        if self.session.policy.runtime_completion_policy == "completed-workload-v1":
+            self.session.complete_phase_workload(
+                "inference",
+                actual_seconds=time.perf_counter() - self.started,
+                executed_unit_count=self.executed_samples,
+                verifier=None if self.finished_verification else self.verifier,
+                source="real_inference_verification",
+            )
+            self.finished_verification = True
+        else:
+            self._complete_verification()
+            self.session.record_phase_actual("inference", time.perf_counter() - self.started)
         from core.runtime_control.realized_memory import read_process_peak_mib
 
         allocated, reserved, device_index = read_process_peak_mib()
@@ -93,4 +105,8 @@ class InferenceRuntimeEvidence:
             else "unavailable",
             device_index=device_index,
         )
+        if self.session.policy.runtime_completion_policy == "completed-workload-v1":
+            admission = self.session.decide_admission(stage="completed_inference_workload")
+            if admission.decision == "rejected":
+                raise RuntimeError(f"runtime admission refused inference: {admission.reason}")
         self.session.finalize("inference_complete")

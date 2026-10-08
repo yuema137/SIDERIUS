@@ -153,6 +153,11 @@ def component_calibration_eligible(obs: RuntimeObservation, phase: RuntimePhase)
     component = obs.components.get(phase)
     if component is None or component.measurement is None:
         return False
+    if (
+        component.completion is not None
+        and component.completion.verification_basis == "workload_exhausted"
+    ):
+        return False
     return component.measurement.steady_state_reached
 
 

@@ -339,10 +339,26 @@ validation intervals between passes. The initial dataset/loader construction
 remains setup. Total execution-budget accounting still includes all phases.
 No additional epoch is requested solely to satisfy verification. At the true
 end of the allocated workload, including a cooperative epoch stop, pending
-evidence is finalized once: insufficient evidence yields no prediction and
-is rejected when admission enforces a budget; record-only execution retains
-the failure and may complete. A terminal decision is published immediately.
-This lifecycle does not relax detector thresholds or late-stability rules.
+evidence is finalized once. With `runtime_completion_policy=completed-workload-v1`
+(the current default), successfully completed phases use their actual elapsed
+cost for admission even when insufficient observations yield no prediction.
+Completion is production-owned and requires exact resolved or cooperatively
+reconciled counts. Training completion follows successful required validation;
+inference completion follows full deliverable consumption. Completed actuals,
+including setup, are charged once without the safety multiplier; estimates for
+remaining phases retain it. Completion-only evidence is excluded from calibration.
+Terminal verification failures, active wall caps and incomplete evidence remain
+refusals when a timing budget is enforced; no-budget timing stays record-only.
+Evidence-channel failures always refuse execution. Finishing work cannot erase
+any of these recorded failures. A prediction reached
+on the last successful unit is recorded but its obsolete estimate cannot reject
+the completed phase before actual accounting. Intermediate epochs retain immediate
+conservative admission. `verified-prediction-v1` explicitly preserves the prior
+strict behavior: insufficient evidence is rejected under a budget, with record-only
+execution retaining the failure. The selected policy is a run invariant, so older
+workspaces without it require explicit migration to a new workspace. Historical
+experiment selection belongs to the consumer repository. Neither policy changes
+detector thresholds or adds training to manufacture observations.
 
 **Historical prior comparison** — outcomes: `verified_match` (early
 exit permitted) | `verified_drift` (keep measuring within budget, use

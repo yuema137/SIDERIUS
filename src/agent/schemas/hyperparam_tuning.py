@@ -44,6 +44,7 @@ from core.record_role import AttemptRole, RecordRoleError, is_formal_role
 # field did before. Same layering as proposal.py importing
 # core.hardware_context.
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.completion import RuntimeCompletionPolicy
 from core.runtime_control.gpu_execution_evidence import GpuExecutionReceipt
 from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.inference_verification_evidence import InferenceVerification
@@ -2249,6 +2250,7 @@ class HyperparamTuningInput(BaseModel):
             "full dataset and have a wall-time scale 50-100× longer."
         ),
     )
+    runtime_completion_policy: RuntimeCompletionPolicy = "completed-workload-v1"
     formal_time_admission_source: TimeAdmissionSource = Field(
         default="measured",
         description=(
