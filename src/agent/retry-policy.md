@@ -19,6 +19,12 @@ carrier whose value is None means explicitly unbounded status retries. A present
 integer means that route's own limit. Pydantic validates the carrier at schema
 boundaries; the bridge also validates JSON-projected constructor input.
 
+`NodeLLMConfig` serialization omits only `max_retries` when the leaf field was
+not supplied; other resolved defaults remain serialized. Explicit null remains
+present. This preserves retry intent across Python/JSON round trips, saved setup
+review snapshots and reviewed-launch identity comparisons. Effective route reports
+separately show the inherited limit even when the declaration omits the field.
+
 `WorkflowLLMConfig.get` creates an override only if the leaf field was supplied.
 The tuner workflow, validator-to-tuner protocol and input schema retain it as
 `reflect_retry_policy`. The bridge passes the selected policy directly into the
@@ -27,7 +33,9 @@ The main and reflector may share a provider client while retaining separate limi
 
 Literature input carries `search_llm_retry_policy`. A search override alone creates
 a separate bridge even if provider/model/effort have no override; explicit None
-must not accidentally reuse a finitely limited main bridge. If the complete
+must not accidentally reuse a finitely limited main bridge. A retry-only split
+retains the main reasoning effort; explicit search routing keeps its existing
+independent reasoning defaults. If the complete
 literature block is omitted, its existing interpretation fallback now forwards
 an explicitly supplied interpretation retry limit too. No provider discovery,
 installation or effect is added during projection.

@@ -594,3 +594,55 @@ with pytest.MonkeyPatch.context() as patch:
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("override", [{}, {"max_retries": None}, {"max_retries": 2}])
+def test_reviewed_launch_preserves_retry_intent(setup, tmp_path, monkeypatch, override):
+    from tools.setup_review.routes import standard_llm_routes
+    from workflows.launch_identity import resolve_launch_identity
+    from workflows.llm_config import WorkflowLLMConfig, resolve_standard_llm_config
+
+    llm_file = tmp_path / "llm.json"
+    llm_file.write_text(
+        json.dumps(
+            {
+                "tune": {
+                    "planner": {"provider": "openai", "max_retries": 1},
+                    "reflector": {"provider": "openai", **override},
+                }
+            }
+        )
+    )
+    prepare, calls = setup
+
+    def configured(*extra):
+        return prepare(*extra, "--llm_config", str(llm_file))
+
+    _, _, request, args = reviewed((configured, calls), tmp_path, monkeypatch)
+    context, _ = prepare_reviewed_launch(request)
+    context.check_entry(args)
+    original = resolve_standard_llm_config(args)
+    # This is the saved declaration consumed by composition checks and launch.
+    restored = WorkflowLLMConfig.model_validate(context.llm_config)
+    restored_leaf = context.llm_config["tune"]["reflector"]
+    assert ("max_retries" in restored_leaf) == ("max_retries" in override)
+    assert "model_id" in restored_leaf and "reasoning_effort" in restored_leaf
+    route_options = dict(literature_enabled=True, analysis_enabled=False, pseudo_llm=False)
+    expected_routes = standard_llm_routes(original, **route_options)
+    assert standard_llm_routes(restored, **route_options) == expected_routes
+    reflector = next(route for route in expected_routes if route.name == "tune.reflector")
+    assert reflector.transport.max_retries == override.get("max_retries", 1)
+    identity = resolve_launch_identity(args)
+    invariants = SimpleNamespace(
+        planner_strategy_identity=SimpleNamespace(model_dump=lambda **kw: {}),
+        health_config_sha256=None,
+    )
+    context.check_invariants(invariants, restored, identity)
+    changed = restored.model_dump(mode="json", by_alias=True)
+    leaf = changed["tune"]["reflector"]
+    if "max_retries" in leaf:
+        leaf.pop("max_retries")
+    else:
+        leaf["max_retries"] = None
+    with pytest.raises(ReviewedLaunchRefusal, match="llm_settings_changed"):
+        context.check_invariants(invariants, WorkflowLLMConfig.model_validate(changed), identity)

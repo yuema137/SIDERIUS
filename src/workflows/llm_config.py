@@ -29,7 +29,13 @@ import warnings
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from agent.schemas.llm_retry import RetryPolicy
 
@@ -102,6 +108,14 @@ class NodeLLMConfig(BaseModel):
             "use (e.g. 6 for ~77s, 20 for ~15min)."
         ),
     )
+
+    @model_serializer(mode="wrap")
+    def serialize_retry_intent(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Keep retry inheritance distinct from an explicitly unbounded limit."""
+        result = handler(self)
+        if "max_retries" not in self.model_fields_set:
+            result.pop("max_retries", None)
+        return result
 
     @model_validator(mode="after")
     def validate_reasoning_effort(self) -> NodeLLMConfig:

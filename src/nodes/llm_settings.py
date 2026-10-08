@@ -73,19 +73,17 @@ def literature_bridge_arguments(
         omit_unset_retries=True,
     )
     search = None
-    if (
-        search_provider
-        or search_model_id
-        or search_reasoning_effort
-        or search_retry_policy is not None
-    ):
+    search_routing_override = bool(search_provider or search_model_id or search_reasoning_effort)
+    if search_routing_override or search_retry_policy is not None:
         search = node_bridge_kwargs(
             provider=search_provider or provider,
             model_id=search_model_id or model_id,
             max_retries=(
                 search_retry_policy.max_retries if search_retry_policy is not None else max_retries
             ),
-            reasoning_effort=search_reasoning_effort,
+            reasoning_effort=(
+                search_reasoning_effort if search_routing_override else reasoning_effort
+            ),
             omit_unset_retries=True,
         )
     return LiteratureBridgeArguments(main, search)

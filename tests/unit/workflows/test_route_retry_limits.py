@@ -175,14 +175,15 @@ def test_omitted_settings_preserve_prior_constructor_arguments(provider):
     assert "max_retries" not in report["lit_review.search"].bridge_arguments
 
 
-def test_search_retry_override_alone_splits_client_and_preserves_null(provider, tmp_path):
+@pytest.mark.parametrize("limit", [None, 2])
+def test_search_retry_override_alone_preserves_other_settings(provider, limit):
     from agent.schemas.llm_retry import RetryPolicy
     from nodes.llm_settings import literature_bridge_arguments
 
     common = dict(
         provider="openai",
         model_id="same",
-        reasoning_effort=None,
+        reasoning_effort="high",
         search_provider=None,
         search_model_id=None,
         search_reasoning_effort=None,
@@ -191,9 +192,44 @@ def test_search_retry_override_alone_splits_client_and_preserves_null(provider, 
     inherited = literature_bridge_arguments(**common)
     assert inherited.search is None
     explicit = literature_bridge_arguments(
-        **common, search_retry_policy=RetryPolicy(max_retries=None)
+        **common, search_retry_policy=RetryPolicy(max_retries=limit)
     )
     assert explicit.main["max_retries"] == 1
     assert explicit.search is not None
     bridge = LLMBridge(**explicit.search)
-    assert bridge.max_retries is None
+    assert bridge.max_retries == limit
+    assert explicit.search["reasoning_effort"] == explicit.main["reasoning_effort"] == "high"
+
+
+@pytest.mark.parametrize("override", [{}, {"max_retries": None}, {"max_retries": 2}])
+@pytest.mark.parametrize("wire_format", ["python", "json"])
+def test_retry_presence_survives_workflow_serialization(override, wire_format):
+    config = WorkflowLLMConfig.model_validate(
+        {
+            "tune": {
+                "planner": {"provider": "openai", "max_retries": 1},
+                "reflector": {"provider": "openai", **override},
+            },
+            "lit_review": {
+                "main": {"provider": "openai", "max_retries": 1},
+                "search": {"provider": "openai", **override},
+            },
+        }
+    )
+    before = routes(config)
+    if wire_format == "json":
+        encoded = config.model_dump_json(by_alias=True)
+        restored = WorkflowLLMConfig.model_validate_json(encoded)
+        payload = json.loads(encoded)
+    else:
+        payload = config.model_dump(by_alias=True)
+        restored = WorkflowLLMConfig.model_validate(payload)
+    for leaf in (payload["tune"]["reflector"], payload["lit_review"]["search"]):
+        assert ("max_retries" in leaf) == ("max_retries" in override)
+        # Only retry presence is special; human-facing resolved defaults remain.
+        assert leaf["model_id"] == "gemini-3.1-flash-lite-preview"
+        assert leaf["reasoning_effort"] is None
+    assert routes(restored) == before
+    expected = override.get("max_retries", 1)
+    assert before["tune.reflector"].transport.max_retries == expected
+    assert before["lit_review.search"].transport.max_retries == expected
