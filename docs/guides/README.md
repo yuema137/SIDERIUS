@@ -1,10 +1,18 @@
-# docs/guides
+# Task and run guides
 
-Start with [`operating-a-run.md`](operating-a-run.md), then use
-[`define-a-task.md`](define-a-task.md), [`custom-workflow.md`](custom-workflow.md),
-[`bring-your-own-metric.md`](bring-your-own-metric.md), and
-[`bring-your-own-health-checks.md`](bring-your-own-health-checks.md). Advice,
-dashboard, troubleshooting, and workspace recovery guides are linked from the
-same directory.
+Choose the operation you want to perform. Each linked technical guide identifies
+the declarations, source owners and validation needed for that operation.
 
-See [the parent guide](../README.md) for child ownership and the focused validation route.
+| Goal | Guide |
+| --- | --- |
+| Build a task package | [Define a task](define-a-task.md) |
+| Add scientific evaluation | [Metric](bring-your-own-metric.md), [Health checks](bring-your-own-health-checks.md) |
+| Change data membership | [Train/validation split](bring-your-own-split.md) |
+| Choose another research sequence | [Custom workflow](custom-workflow.md) |
+| Supply expert instructions | [Advice](advice.md) |
+| Launch and inspect a run | [Operating a run](operating-a-run.md), [dashboard](dashboard.md) |
+| Continue earlier work | [Workspaces and resume](workspaces-and-resume.md) |
+| Diagnose a refusal | [Troubleshooting](troubleshooting.md) |
+
+Start with [getting started](../getting-started/README.md) if this is your first
+checkout. Use the [reference index](../reference/README.md) for exact fields.

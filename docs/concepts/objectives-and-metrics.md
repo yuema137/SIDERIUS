@@ -1,6 +1,5 @@
 # Objectives, metrics, and what "better" means
 
-**Audience**: a scientist deciding how their task should be scored.
 **Answers**: why there are several numbers, and which one actually decides anything.
 
 ---
@@ -92,11 +91,11 @@ refusal.
 | **declared secondaries** | — | macro-F1 (higher), `log_loss` (lower) | PSNR (higher, `data_range=1.0`), MAE (lower) |
 | status of those secondaries | — | ✅ **implemented pack-locally and evaluated** | ✅ **implemented pack-locally and evaluated** |
 
-The last row earned its ✅ the honest way: the implementations live in the packs
-themselves (`examples/oxford_iiit_pet/plugins/_pets_metrics.py`,
-`examples/davis_future_prediction/plugins/_davis_metrics.py`), are resolved
-through the same manifest mechanism as the primary, and were evaluated on the
-real composed `G-12d` runs — each `ExperimentRecord` carries their values in
+The last row records the historical composed `G-12d` runs. Scientific metric
+implementations now live in siderius-exp under
+`tasks/oxford_iiit_pet/plugins/_pets_metrics.py` and
+`tasks/davis_future_prediction/plugins/_davis_metrics.py`; they resolve through
+the same manifest mechanism as the primary. In those historical runs — each `ExperimentRecord` carries their values in
 `secondary_metric_results`, in both directions at once (Pets records a
 higher-is-better `macro_f1` beside a lower-is-better `log_loss`). Declared *and*
 evaluated — the earlier state, declarations with no production implementation,

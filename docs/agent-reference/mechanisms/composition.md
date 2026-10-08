@@ -35,13 +35,14 @@ run_one_iteration.py: compose_run_task_bindings(manifest)
       → verify_composition_is_bound(task_composition)   # first thing
 ```
 
-`composition is None` is a **total no-op** — no ContextVar is set and the run
-takes the ⚠ legacy un-composed path with byte-identical child argv.
+Passing `None` to the binding context creates no task binding. It does not
+make production execution usable without a composition: task-data and metric
+resolvers refuse missing authority rather than selecting a scientific default.
 
 ## Inputs
 
-A manifest path. Thirteen possible sections, five required; unknown keys refused
-by set difference. See the [composition reference](../../reference/task-composition.md)
+A manifest path. The typed manifest declares required and optional sections;
+unknown keys are refused. See the [composition reference](../../reference/task-composition.md)
 for the table.
 
 ## Outputs
@@ -78,12 +79,15 @@ A half-composed run is fatal (`CompositionNotBoundError`), never degraded.
   are relocatable.
 - **Absolute paths are never hashed** into the fingerprint, so the same package at
   two locations has one identity.
-- **`task_health` may not be omitted.** Omission is `LEGACY_OMITTED`, which
-  resolves TIDMAD's family; a composition may only express `EXPLICIT_NONE`
+- **`task_health` may not be omitted.** The uncomposed
+  `LEGACY_OMITTED` state is neutral and is not valid in a manifest; a composition
+  may only express `EXPLICIT_NONE`
   (`none: true`) or a path.
 - **`secondary_metrics` order is semantic** — it participates in the fingerprint
   and the record stamp.
-- **One error type** — `TaskCompositionError` — for every fail-closed branch.
+- Invalid composition declarations raise `TaskCompositionError`. Missing
+  physical roots and inactive binding postconditions have their own error
+  types, listed below.
 
 ## Fail-closed behaviour
 
@@ -93,7 +97,7 @@ A half-composed run is fatal (`CompositionNotBoundError`), never degraded.
 | missing required section | `TaskCompositionError` |
 | both `module:` and `file:`, or neither | `TaskCompositionError` |
 | `task_data_path.id` ≠ implementation id | `TaskCompositionError` |
-| metric implementation is not an `EvaluationMetric`, or rewrites the declared id | `TaskCompositionError` |
+| metric implementation is neither `EvaluationMetric` nor `CandidateEvaluationMetric`, or rewrites the declared id | `TaskCompositionError` |
 | duplicate secondary id, or collision with the primary | `TaskCompositionError` |
 | `task_health` declaring both `none: true` and `config:` | `TaskCompositionError` |
 | composed run without `--data_dir` | `CompositionDataRootMissing`, before any LLM/GPU work |
@@ -107,31 +111,30 @@ the same file-plugin contents, since those hashes are folded in.
 
 ## Deliverable-absence semantics
 
-Omitting `deliverable` is resolved by declared **capability**
-(`resolve_deliverable_naming`, `execute_tools/deliverable_spec.py:380` —
-PR-12d seam E, closing F-A4-1): a composed task that names its own artifacts
-through its data path is **refused** an indexed template (so no cleanup glob can
-address files the run never wrote); a composed task that does not — TIDMAD's own
-manifest — still resolves the shipped naming; the un-composed path is
-byte-unchanged. Four states, keyed on capability, never on task identity.
+A manifest either declares indexed `deliverable` naming or supplies a task
+data path with its own `deliverable_name`. Omitting both is refused during
+composition. Own-naming tasks may use their codec without an indexed template;
+`resolve_deliverable_naming` refuses that inapplicable capability, while
+`active_deliverable_naming` returns `None`. These decisions are based on declared
+capability, never task identity.
 
 ## Source map
 
-| concern | location |
-|---|---|
-| key sets | `workflows/task_composition.py:96-121` |
-| resolved carrier (`RunTaskComposition`) | `:183` |
-| manifest read / validate | `:340-383` |
-| path resolution | `:402` |
-| symbol loading (`module:` / `file:`) | `:451-600` |
-| companion-symbol refusal (`_require_companion_symbols`) | `:602` |
-| per-section resolvers | `:787-1786` |
-| declared model/loss roots + objective | `:1089` / `:1165` / `:1301` |
-| semantic fingerprint | `:1595` |
-| compose entrypoint | `:1970` |
-| run-scoped binding | `:2237` |
-| post-condition guard | `:2333` |
-| shipped manifests | `configs/task_composition/{tidmad,pets,davis,quickstart}.yaml` |
+All composition symbols below belong to `src/workflows/task_composition.py`.
+
+| Concern | Symbol |
+| --- | --- |
+| Section inventory | `_MANIFEST_KEYS`, `_REQUIRED_KEYS` |
+| Resolved carrier | `RunTaskComposition` |
+| Manifest read / validation | `_read_manifest` |
+| Relative path resolution | `_resolve_path` |
+| Symbol loading and companion validation | `_load_symbol`, `_require_companion_symbols` |
+| Metric and candidate-evaluator composition | `_compose_metric`; [metric contract](metrics.md) |
+| Content identity | `compute_semantic_fingerprint` |
+| Compose entrypoint | `compose_run_task_bindings` |
+| Binding lifetime | `bind_run_task_composition` |
+| Binding postcondition | `verify_composition_is_bound` |
+| Shipped manifests | `configs/task_composition/{quickstart,synthetic_masked_regression}.yaml` |
 
 ## Related
 

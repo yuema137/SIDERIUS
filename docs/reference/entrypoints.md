@@ -1,5 +1,11 @@
 # Entrypoints and CLI
 
+**Authority**: `scripts/launch/run_chain.sh`,
+`scripts/launch/_chain_common.sh`,
+`src/workflows/run_one_iteration.py`,
+`src/workflows/model_exploration.py`. Scientific comparison launchers live in
+the external task repository.
+
 ## Independent training-validation snapshot
 
 Chain and one-iteration entrypoints accept `--training_validation_portion`
@@ -10,13 +16,6 @@ inference/scoring and Health keep their original evaluation scope, including
 setting on resume is refused. See the [tuner contract](../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md#optional-snapshot-for-training-validation)
 for selection, provenance and supported routes. This is an experimental policy,
 not the test-only `--validation_max_samples` workload ceiling.
-
-**Audience**: operators and anyone trying to find the right command.
-**Authority**: `scripts/launch/run_chain.sh`,
-`scripts/launch/_chain_common.sh`,
-`src/workflows/run_one_iteration.py`,
-`src/workflows/model_exploration.py`. Scientific comparison launchers live in
-the external task repository.
 
 For exhaustive flag lists, run each entrypoint with `--help`. This page covers
 the flags that decide *what a run is*.

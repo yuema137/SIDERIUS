@@ -1,7 +1,5 @@
 # Plugins and generated code
 
-**Audience**: anyone supplying their own code to a run — or wondering where
-the code the agents *wrote* actually lives.
 **Answers**: the plugin families, how each is declared and loaded, what pins
 their identity, and where generated artifacts go (spoiler: never into the
 repository checkout).

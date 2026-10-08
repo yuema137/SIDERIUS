@@ -1,9 +1,14 @@
 # Framework and Experiment Repository Separation
 
-**Status:** ACTIVE DESIGN AND WORK LEDGER
+**Status:** HISTORICAL DESIGN AND WORK LEDGER
 **Decision date:** 2026-08-29
-**Implementation status:** In progress
-**Repositories:** `SIDERIUS` (framework) and proposed private `siderius-exp` (experiments)
+**Implementation status:** The entries below record their own revisions; they are not a current migration checklist.
+**Repositories:** `SIDERIUS` (framework) and `siderius-exp` (experiments)
+
+Current ownership and entrypoints are described in the
+[repository map](../repository-map.md). Active local planning follows
+[CLAUDE.md](../../CLAUDE.md#planning-documents). Preserve the dated decisions
+below as evidence; verify capability from landed source and tests before acting.
 
 ## 1. Purpose
 
@@ -15,7 +20,7 @@ This document defines the boundary between:
 2. minimal examples that specify and test that infrastructure; and
 3. real task packages, campaigns, deployments, and scientific results maintained in a separate private experiment repository.
 
-It is also the work ledger for the separation. Design intent recorded here is not evidence that a migration has landed. Current capability must always be verified from source, tests, git ancestry, and published repository state.
+It preserves the historical work ledger for the separation. Design intent recorded here is not evidence that a migration has landed. Current capability must always be verified from source, tests, git ancestry, and published repository state.
 
 ## 2. Governing decision
 

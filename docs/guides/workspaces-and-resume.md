@@ -1,7 +1,5 @@
 # Workspaces and resume
 
-**Audience**: anyone about to re-run a command against an existing run directory,
-or wondering what the files in one are.
 **Answers**: what a workspace contains, what happens when you launch into an
 existing one, and when you need a new one.
 

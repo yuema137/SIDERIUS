@@ -8,7 +8,7 @@ Imports keep their names: `from core.layout import package_root`, never
 | Package | Responsibility / entry documentation |
 | --- | --- |
 | [agent](agent/README.md) | LLM gateway, schemas, typed protocols, prompts and atomic skills |
-| [nodes](nodes/README.md) | Six capabilities with adjacent contract documents; [node index](../docs/agent-reference/index.md#nodes) |
+| [nodes](nodes/README.md) | Research capabilities with adjacent contract documents; [node index](../docs/agent-reference/index.md#nodes) |
 | [workflows](workflows/README.md) | Deterministic node sequencing, task composition and carried state |
 | [core](core/README.md) | Subprocess isolation, workspace state, resources and recovery |
 | [execute_tools](execute_tools/README.md) | Training, inference, scoring and [Health](execute_tools/health_checks/README.md) |
@@ -34,8 +34,8 @@ checkout resources. Optional legacy reads retain their absence behavior;
 checkout-required operations refuse when no checkout or explicit input exists.
 A wheel does not discover a surrounding unrelated Git repository.
 
-Task manifests, data, generated plugins and results belong to the caller's
-workspace. Low-level consumers must bind the generated library before importing
+The caller owns task-manifest and physical-data paths; these may be external
+read-only inputs. Generated plugins and results belong to the run workspace. Low-level consumers must bind the generated library before importing
 its readers; see [workspace guidance](../docs/guides/workspaces-and-resume.md).
 No writable run state belongs under `src/` or `site-packages`.
 

@@ -1,56 +1,17 @@
-# `examples/quickstart/` — the minimal new-task onboarding example
+# Quickstart: a small synthetic classification task
 
-The smallest useful first-user experience: a complete SIDERIUS **task
-package** for a tiny synthetic problem (binary classification of 4-feature
-vectors, 256 rows, seeded generator, CPU-only, no downloads), built to be
-read in twenty minutes and adapted in an afternoon. The executable tutorial
-is **`quickstart.ipynb`** (rendered read-only as `quickstart.html`); this
-README is the boundary statement — what ships, what you prepare, what runs
-today, and the one thing still pending.
+This example shows how a task package supplies data access, a model contract
+and a metric to SIDERIUS. It classifies 256 seeded four-feature vectors into two
+classes. Data preparation and component checks run on CPU without downloads or
+API keys. A real research-chain launch makes provider calls.
 
-Governance: this pack lives under the example-pack rules of the roadmap
-(`docs/design/siderius_generic_framework_upgrade.md` §22.23; track context
-§22.9a) and under `tests/unit/examples/test_pack_governance.py`. Its own
-tests are `tests/unit/examples/test_quickstart_pack.py`. The task itself is
-demonstration-only — **the tiny model does not need to train well, and no
-scientific claim rides on it.**
+Browse [quickstart.ipynb](quickstart.ipynb) or its [HTML rendering](quickstart.html)
+for the worked example. Saved live-run excerpts are dated historical evidence;
+your current checkout and a new run can produce different results.
 
----
+## Prepare the synthetic data
 
-## 1. Repo-shipped assets
-
-| file | what it is |
-|---|---|
-| `quickstart.ipynb` | the executable tutorial (14 sections; every executed cell shows real output from the landed post-PR-12d source — the launch/artifact-inspection/resume sections carry verbatim excerpts from the 2026-08-25 bounded live run) |
-| `quickstart.html` | self-contained static rendering of the notebook (kept in sync by test) |
-| `declared/dataset_profile.json` | the dataset's generic identity (4 partitions, anchors `[0]`, health peeks `[0]`) + opaque `topology` (roles, generator identity) |
-| `declared/task_config.yaml` | the task description + **structured `model_io` forward contract** (`[B,4] f32 → [B,2] f32`) — legitimate under governance guard (a) exactly because the shipped manifest binds it |
-| `declared/metric_accuracy.json` | the primary metric declaration: `accuracy`, **higher** is better, `deliverable_presence` scoreability |
-| `declared/data_manifest.json` | identity pins of the generated data (seed `20260824`, per-shard sha256) |
-| `plugins/_quickstart_task.py` | the task's executable behaviour: seeded generator, `TaskDataPath` (4 methods), optional `TaskScopeCapability` (4 methods), data materializer |
-| `plugins/_quickstart_metrics.py` | `QuickstartAccuracyMetric` — the metric implementation, in the composed scoring child's calling vocabulary |
-| `plugins/quickstart_reference_mlp.py` | reference model plugin (`PLUGIN_MODEL_TYPE` / `PLUGIN_CONFIG_CLASS` / `PLUGIN_MODEL_CLASS`), `[B,4] f32 → [B,2] f32`, 114 parameters — routed into composed runs by the manifest's `model_plugins:` section |
-
-**THE manifest ships at `configs/task_composition/quickstart.yaml`** (beside
-`tidmad.yaml` / `pets.yaml` / `davis.yaml`): seam-A `config:`
-(`train_shards`/`eval_shard` — plain values, so no `{ref: ...}` envelope is
-needed; the envelope exists for path-valued config, see `pets.yaml`),
-`model_plugins: {dir, require: [quickstart_reference_mlp]}`, health
-`none: true` (a NAMED absence), the declared `deliverable:` naming, and a
-framework-provided `ce` objective selected through `objective.config`. A task
-with its own objective uses `objective.implementation`; the synthetic masked
-regression example demonstrates that sibling route.
-
-## 2. External data dependency
-
-**None.** The dataset is synthetic and regenerated bit-identically from the
-pinned seed; the materializer verifies every shard's sha256 against
-`declared/data_manifest.json` and refuses to write a drifted bundle.
-
-## 3. Preparation
-
-From a SIDERIUS checkout, with the project venv — regenerate the DATA (the
-only non-committed artifact):
+Install the exact checkout with `uv sync --group dev --frozen`. From its root:
 
 ```bash
 cd examples/quickstart
@@ -65,36 +26,16 @@ print(qs.materialize_run_bundle(Path.cwd(), ws))
 "
 ```
 
-(or just run notebook sections 2–3, which do the same). This writes
-`data/shard_000{0..3}.csv` under the workspace.
+This writes four hash-checked CSV shards under
+`$SIDERIUS_QUICKSTART_WORKSPACE/data`, or under
+`$HOME/siderius_quickstart_workspace/data` when that variable is unset.
+Return to the repository root before the next command:
 
-## 4. Run command
+```bash
+cd ../..
+```
 
-Everything up to and including real chain TRAINING executes on the landed
-source: the shipped manifest composes fail-closed (model plugins required
-and content-pinned), every component crossing (scope construction, dataset
-materialization, deliverable codec under the declared naming, metric
-scoring) runs for real — notebook sections 5–8 and 10–11 show each with
-real output — and the chain launch below (the operator surface from
-`docs/guides/define-a-task.md`, step 10; bounded to 1 iteration × 1 round)
-**was executed as the operator-authorized bounded live witness on
-2026-08-25** (`--llm_config` swapped to `llm_configs/certify_minimal.json`
-per §7 step 5 — plumbing, not intelligence). Witnessed live across the
-authorized launches (notebook §9/§10/§12 carry the real outputs): the
-composition + invariants lock, the cold-start propose→implement→validate
-ladder passing a generated model through the contract-aware validator, the
-tuner leg with typed structured-failure records, REAL TRAINING on the
-pack's data inside the composed training child, the #258 recovery resume,
-and the P1 generated-library provenance (`{root, source: env}`, promotion
-outside the checkout). **No scored result exists in those historical live
-runs**: the training
-attempt's inference was refused by this pack's own pre-convention codec
-(fixed since, with a deterministic production-handoff regression test), and the remaining attempts
-were burned by an agent-selected focal loss that is incompatible with the
-declared `[B,2]` output plus weak-certify-model architecture choices. The
-current manifest now selects the framework-provided `ce` objective as a typed
-authority, so a fresh run cannot repeat that loss mismatch. Start with
-`--dry-run` (prints every child command, no side effects).
+## Preview a research run
 
 ```bash
 WS="${SIDERIUS_QUICKSTART_WORKSPACE:-$HOME/siderius_quickstart_workspace}"
@@ -109,140 +50,39 @@ bash scripts/launch/run_chain.sh \
     --data_dir "$WS/data" \
     --healthgate_mode blocking \
     --result_authority diagnostic \
-    --llm_config configs/llm/openai_tiered_pro.json
+    --llm_config configs/llm/openai_tiered_pro.json \
+    --dry-run
 ```
 
-Notes pinned to source: a composed run **requires** `--data_dir`
-(`CompositionDataRootMissing` otherwise); omitting `--llm_config` silently
-resolves a deprecated all-Gemini default, so never launch without it;
-`--result_authority diagnostic` is the honest value for a workflow-mechanics
-demo. This example explicitly declares `task_health: {none: true}`, so it
-intentionally fires zero gates and makes no health-enforcement claim; composed
-tasks that declare a Health family now execute it at every scored round.
+The preview prints child commands. It does not execute or qualify training.
+Before removing `--dry-run`, follow the
+[credential and launch procedure](../../docs/getting-started/first-run.md).
+The example declares no Health family, so it demonstrates workflow mechanics
+without claiming scientific validity or useful model quality.
 
-## 5. Expected outputs
+## What to inspect
 
-- **Now (notebook, real):** a composed `RunTaskComposition` from the SHIPPED
-  manifest — health `explicit_none`, `model_plugins` requiring
-  `quickstart_reference_mlp`, THREE plugin content hashes pinned into the
-  semantic fingerprint (task, metric, and the reference model); scopes of
-  128 train / 64 eval rows; torch samples `[4] float32 → int64`; a
-  deliverable named by the declared template
-  (`quickstart_predictions_<model>_<run>_<exp>_0000.json`); metric outcomes
-  `MetricResult 1.0` (oracle), `0.0` (all-wrong), and a structured
-  `NotScoreableResult(completeness)` for a missing artifact.
-- **Now (deterministic test, real production handoff):** the generic inference
-  unit evaluates all 64 final-eval rows in 10 batches, the task writer persists
-  the declared artifact, the task reader decodes it, and the composed accuracy
-  metric returns the hand-computed `37/64 = 0.578125` for a constant class-zero
-  model. This closes the executable inference-to-scoring handoff; it does not
-  claim a live agent-generated tuner `metric_result`.
-- **From the live runs (witnessed 2026-08-25):** a chain workspace with
-  `run_invariants_lock.json` carrying that run's composition fingerprint
-  (`9645c218…`, pinning the three plugin content hashes; editing the codec
-  had moved it `ede74e70…` → `9645c218…`, exactly as the fingerprint
-  discipline promises). It is NOT equal to what §8 composes today — the
-  pack's model plugin has changed since that run, and the fingerprint had
-  already drifted before that; `PROVENANCE.md`'s fourth exception carries
-  the attribution. The lock records what the run saw, which is the point of
-  a lock. Also the task-owned
-  `resolved_data_scope [0,1,2,3]`, the P1 `generated_library
-  {root, source: env}` provenance with promoted capabilities landing under
-  that root (the repo checkout byte-identical before/after),
-  `health_checks_effective.yaml`, `iter_001/task_config_snapshot.yaml`,
-  per-attempt proposal/implementor/validation records, a saved training
-  checkpoint, the honest `no_records` manifests, and (on the recovery leg)
-  the #258 replacement provenance. Still unwitnessed: a SCORED tuner
-  record (`metric_result` for `accuracy`) and a persisted deliverable
-  under the declared naming — the §4 batch blocked both. Those are historical
-  run facts, distinct from the deterministic handoff witness above.
+The task uses 128 training rows and 64 evaluation rows. The model input is
+four floating-point values; its output contains two class scores. Inference
+writes the declared prediction artifact and the metric computes accuracy.
 
-## 6. The landed boundary (pinned by tests)
+The deterministic inference-to-scoring test produces the expected
+`37/64 = 0.578125` for its constant predictor. Earlier live chains demonstrated
+training and recovery but did not produce a scored tuner record. The
+[status reference](STATUS.md) distinguishes those witnesses from current
+capability; [provenance](PROVENANCE.md) records their revisions and limitations.
 
-PR-12d landed and the pack's three pre-12d boundary pins flipped exactly as
-designed; each row below is the RE-SCOPED landed pin in
-`tests/unit/examples/test_quickstart_pack.py`, with a non-vacuity plant.
+## Understand and adapt the package
 
-| landed behaviour | pin |
-|---|---|
-| `model_plugins:` composes; `require:` is enforced (a missing type REFUSES at composition, by name) | `test_landed_pin_model_plugins_section_composes_and_requires` |
-| a composed non-TIDMAD `model_io:` task config composes (F-12d-4 fixed); the contradiction check is still alive | `test_landed_pin_model_io_task_config_composes_f12d4_fixed` |
-| unknown SECTION keys refuse by name (`configs:` for `config:`), and the seam-A `config:` mapping REACHES the constructor (counterfactual `train_shards: [0]` → scope over shard 0) | `test_landed_pin_section_keys_refused_and_config_reaches_constructor` |
+| Part | Read next |
+| --- | --- |
+| Scientific declarations | [declared/](declared/README.md) |
+| Data, metric and model implementations | [plugins/](plugins/README.md) |
+| Manifest selecting them | [quickstart.yaml](../../configs/task_composition/quickstart.yaml) |
+| Your own task | [Task definition reference](../../docs/guides/define-a-task.md) |
 
-A fourth landed pin from the live runs:
-`test_deliverable_codec_accepts_the_composed_childs_positional_outputs`
-regresses the 2026-08-25 batch item A — the codec now accepts the composed
-inference child's positional outputs (seam C/B7) and still refuses a
-mis-paired length (mutation-proven against the live failure).
-
-The deterministic production-handoff pin
-`test_composed_generic_inference_persists_a_scoreable_metric_result` catches a
-different defect class: independently working codec and metric components that
-fail when joined by generic inference. It asserts the declared filename exists
-and the composed metric returns the external expectation `37/64 = 0.578125`.
-
-Still true and worth knowing: this pack declares no Health family, and **the
-quickstart live chain runs happened on 2026-08-25** —
-bounded 1×1 arms: the implementor-test-template debt from the first arm is
-FIXED in the landed source (validation now passes generated models), REAL
-TRAINING was witnessed on the final arm. A deterministic composed
-inference-to-scoring handoff is now witnessed, while a live agent-chain scored
-tuner record remains unwitnessed; the current typed `ce` selection closes the
-specific focal-loss configuration gap but has not been rerun live yet.
-
-## 7. After PR-12d lands (finalization checklist) — EXECUTED, all steps
-
-Executed on the landed integration source (branch
-`arxiv/quickstart-post12d`); evidence in the pack tests and the notebook:
-
-1. ~~Re-run the pack tests; record which pins flipped~~ — all three flipped
-   (3 failed / 10 passed on the landed tree), re-scoped as §6.
-2. ~~Move the task config into `declared/task_config.yaml` with `model_io:`;
-   add `configs/task_composition/quickstart.yaml` binding it; retire config
-   generation from the materializer~~ — done; guard (a)'s manifest-bound
-   exemption verified (`test_pack_satisfies_the_examples_governance_guards`
-   asserts the file IS in the guard's bound set).
-3. ~~Promote the post-12d manifest content; drop `SIDERIUS_PLUGIN_DIRS`~~ —
-   done (the shipped manifest is THE manifest; §4's command has no export).
-4. ~~Drop the `file_index` fallback~~ — done (`deliverable_name` calls the
-   landed `input_identity` keyword only).
-5. ~~The live bounded run~~ — **EXECUTED 2026-08-25** under explicit
-   operator authorization, as bounded 1×1 arms with `--dry-run` first and
-   `certify_minimal.json` throughout: the initial arm + the #258 recovery
-   resume (first head), then the final-witness arm on the integrated
-   candidate (implementor-geometry fix + P1) whose real outputs sections
-   9–10 now carry, plus the ONE sanctioned corrective relaunch after this
-   pack's codec fix. The `⏳ pending live-run authorization` markers are
-   gone. Outcome, honestly: composition / lock / manifest / resume /
-   validation-of-generated-models / REAL TRAINING / P1 library provenance
-   all witnessed; a SCORED record and a persisted deliverable remain
-   unwitnessed (§4 batch: the pack codec and typed built-in objective selection
-   are fixed in current source but have not been rerun live).
-6. ~~Re-sync `quickstart.html`; update `STATUS.md` maturity~~ — done.
-
-## 8. Adapt to your own task
-
-Notebook section 14 maps every quickstart file to the corresponding step of
-`docs/guides/define-a-task.md`. The short version: copy the pack's shape,
-replace the science, commit your `task_config.yaml` (out-of-tree packages
-are exempt from the `examples/` governance; in-tree packs bind it from a
-shipped manifest), point every manifest section at your files, declare your
-model plugins with `require:`, compose (the fail-closed refusals are your
-checklist), launch bounded.
-
-Two extension boundaries are intentional. `training_dataset(scope, params)`
-owns the scientific meaning of `train_portion`; this quickstart implements a
-seeded row draw, while a grouped task may implement a different rule or refuse
-fractions. Health providers consume `ctx.load_evaluation_payload()` so the
-task's one codec owns artifact naming and decoding; they never rebuild a
-filename convention inside Health.
-
-**One place where copying this pack's shape is the wrong move.** This pack
-declares a `deliverable:` template in its manifest, so its `deliverable_name`
-is an ordinary `@staticmethod` that its own codec calls — correct here, and
-*not* a demonstration of the other route. If your task names its own artifacts
-and you therefore omit `deliverable:`, the framework looks for a callable
-`deliverable_name` **on the module**, not on the class
-(`execute_tools/deliverable_spec.py::task_names_its_own_deliverables`). A
-`@staticmethod` copied from here does not satisfy it. See
-[step 7 of the task guide](../../docs/guides/define-a-task.md).
+Indexed artifact naming and task-owned artifact naming are different contracts;
+follow the task reference rather than copying a plugin method blindly.
+The historical example-governance design is
+[siderius_generic_framework_upgrade.md](../../docs/design/siderius_generic_framework_upgrade.md)
+§22.23. Current checks live in `tests/unit/examples/test_quickstart_pack.py`.
