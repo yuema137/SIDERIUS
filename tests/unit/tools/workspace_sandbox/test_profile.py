@@ -39,6 +39,9 @@ def test_read_only_task_can_be_nested_inside_workspace(tmp_path):
 
 
 def test_environment_is_explicit_and_never_embedded_in_command(tmp_path, monkeypatch):
+    # This tests command construction; real tool availability has its own
+    # fail-closed test below and is not required to inspect the argv contract.
+    monkeypatch.setattr("tools.workspace_sandbox.command.shutil.which", lambda _: "/usr/bin/bwrap")
     monkeypatch.setenv("DEMO_ACCESS_KEY", "secret-for-test")
     monkeypatch.setenv("UNDECLARED_SECRET", "not-forwarded")
     value = profile(tmp_path, environment_names=("DEMO_ACCESS_KEY",))

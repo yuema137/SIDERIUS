@@ -92,6 +92,7 @@ def run_generic_inference(
     write_request: DeliverableWriteRequest,
     input_dtype: torch.dtype | None = None,
     runtime_session: RuntimeVerificationSession | None = None,
+    preparation_seconds: float = 0.0,
 ) -> GenericInferenceOutcome:
     """Iterate a task's own evaluation scope and persist its own deliverable.
 
@@ -109,6 +110,8 @@ def run_generic_inference(
             ``task_scope`` field is populated HERE, from ``task_scope``, so a
             caller cannot pass one and iterate another.
         input_dtype: cast for the model input when the run declares one.
+        preparation_seconds: measured child preparation owned by a resumed
+            inference component; fresh-child setup is recorded separately.
 
     Returns:
         The pass's own accounting.
@@ -136,7 +139,11 @@ def run_generic_inference(
 
     evidence = (
         InferenceRuntimeEvidence(
-            runtime_session, samples=dataset_size, device=device, started=started
+            runtime_session,
+            samples=dataset_size,
+            device=device,
+            started=started,
+            preparation_seconds=preparation_seconds,
         )
         if runtime_session is not None
         else None

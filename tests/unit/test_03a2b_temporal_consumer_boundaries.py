@@ -113,6 +113,8 @@ def test_worker_legacy_temporal_branch_refuses_but_task_probe_branch_is_separate
         task_probe_data=None,
         request=SimpleNamespace(model_type="wavenet"),
         model_config_payload={},
+        model_io_contract=None,
+        training_binding=None,
         train_config={"batch_size": 1},
         loss_config={"loss_type": "ce"},
         phase="training",

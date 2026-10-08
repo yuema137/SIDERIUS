@@ -105,7 +105,8 @@ class TestAdmissionParity:
         assert record.decision == "admitted"
         assert record.avoided_predicted_runtime_seconds is None
         # 100 s × 2.0 = 200 s ≤ 7200 s
-        assert "known-cost lower bound 100.0s (safety x2 -> 200.0s)" in record.reason
+        assert "known cost 200.0s: completed actual 0.0s" in record.reason
+        assert "remaining estimates with safety x2 within budget 7200.0s" in record.reason
 
     def test_formal_over_budget_is_rejected_with_pinned_avoided_cost(self, tmp_path):
         session = _session_with(tmp_path, policy=_formal_policy(), training_seconds=3700.0)

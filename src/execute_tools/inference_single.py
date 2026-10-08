@@ -40,6 +40,7 @@ from execute_tools.inference_checkpoint import (
     assert_training_sentinel,
     load_inference_checkpoint,
 )
+from execute_tools.inference_runtime import InferenceRuntimePreparation
 from execute_tools.model_input_dtype import (
     INFERENCE_SITE_DTYPE,
     resolve_inference_input_dtype,
@@ -422,7 +423,9 @@ def _child_tidmad_facts(dataset_profile) -> _ChildTidmadFacts:
     )
 
 
-def _emit_generic_inference(args, data_path, model, task_eval_scope) -> None:
+def _emit_generic_inference(
+    args, data_path, model, task_eval_scope, runtime_preparation: InferenceRuntimePreparation | None
+) -> None:
     """Run the generic route and write the child's result JSON.
 
     Kept OUT of ``main`` for the reason §E H1 states: ``main`` is this PR's
@@ -441,7 +444,10 @@ def _emit_generic_inference(args, data_path, model, task_eval_scope) -> None:
         data_dir=args.data_dir,
         batch_size=args.inference_batch_size,
         input_dtype=resolve_inference_input_dtype(args.denoising_model, args._model_io),
-        runtime_session=_resume_runtime_session(args, task_eval_scope),
+        runtime_session=runtime_preparation.session if runtime_preparation is not None else None,
+        preparation_seconds=runtime_preparation.finish()
+        if runtime_preparation is not None
+        else 0.0,
         write_request=DeliverableWriteRequest(
             output_dir=args.output_dir if args.output_dir else args.data_dir,
             exp_id=args.exp_id,
@@ -533,6 +539,24 @@ def _derive_spec_under_declared_naming(
         return derive_run_deliverable_spec(dataset_profile)
 
 
+def _runtime_policy(args) -> RuntimeControlPolicy | None:
+    if args.runtime_policy_json:
+        with open(args.runtime_policy_json) as handle:
+            return RuntimeControlPolicy.model_validate_json(handle.read())
+    return None
+
+
+def _start_generic_runtime_preparation(args) -> InferenceRuntimePreparation | None:
+    """Start the generic child's clock before constructing or loading its model."""
+    if not (args.runtime_observation_out and args.task_eval_scope_ref):
+        return None
+    return InferenceRuntimePreparation(
+        args.runtime_observation_out,
+        policy=_runtime_policy(args),
+        attempt_id=args.exp_id,
+    )
+
+
 def _resume_runtime_session(args, sample_set):
     """RT2-D: resume the attempt's observation sidecar, or return ``None``.
 
@@ -545,13 +569,9 @@ def _resume_runtime_session(args, sample_set):
     """
     if not (args.runtime_observation_out and sample_set is not None):
         return None
-    policy = None
-    if args.runtime_policy_json:
-        with open(args.runtime_policy_json) as f:
-            policy = RuntimeControlPolicy(**json.load(f))
     return RuntimeVerificationSession.resume_or_start(
         args.runtime_observation_out,
-        policy=policy,
+        policy=_runtime_policy(args),
         attempt_id=args.exp_id,
         resumed_status="inference_started",
     )
@@ -569,6 +589,7 @@ def main():
         load_model_io_contract(args.model_io_json) if args.model_io_json is not None else None
     )
     t_process_start = time.perf_counter()
+    runtime_preparation = _start_generic_runtime_preparation(args)
 
     # Dataset Profile: supplied-but-broken fails closed; absent keeps the
     # Regime-A adapter (§5c). Same contract as the training engine.
@@ -805,7 +826,7 @@ def main():
             args.task_eval_scope_ref, args.task_eval_scope_digest, leg="evaluation"
         )
         if task_eval_scope is not None:
-            _emit_generic_inference(args, data_path, model, task_eval_scope)
+            _emit_generic_inference(args, data_path, model, task_eval_scope, runtime_preparation)
             return
 
     # RT2-D: resume the attempt's observation (trial mode only).

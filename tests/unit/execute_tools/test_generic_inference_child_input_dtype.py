@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -38,11 +39,18 @@ def test_child_converts_storage_input_using_transported_contract(
 ):
     """Fails before the fix for every declared dtype; absent contract preserves storage."""
     seen = []
+    real_counter = time.perf_counter
+    preparation = {"seconds": 0.0}
+    monkeypatch.setattr("time.perf_counter", lambda: real_counter() + preparation["seconds"])
 
     class StrictModel(torch.nn.Module):
         def __init__(self, config=None):
             super().__init__()
             self.weight = torch.nn.Parameter(torch.ones(()))
+            if config is not None:
+                # A clock advance proves the child starts setup before model
+                # construction without sleeping or requiring a slow host.
+                preparation["seconds"] += 20.0
 
         def forward(self, x):
             assert x.dtype == expected, f"expected {expected}, got {x.dtype}"
@@ -126,6 +134,7 @@ def test_child_converts_storage_input_using_transported_contract(
     # The composed route must persist evidence even when a short scope cannot
     # establish steady state. Previously it returned before session creation.
     observation = json.loads((tmp_path / "runtime.json").read_text())
+    assert observation["components"]["setup"]["actual_seconds"] >= 20.0
     component = observation["components"]["inference"]
     assert component["actual_seconds"] > 0
     assert component["workload"]["unit_count"] == 3

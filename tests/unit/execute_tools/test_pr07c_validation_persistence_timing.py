@@ -256,7 +256,7 @@ class TestThePredictionIsPersistedDuringThePass:
         # 4. Validation calibration now reaches admission; this record-only run stays admitted.
         admission = block.get("admission")
         assert admission["decision"] == "admitted"
-        assert admission["stage"] == "post_validation_verification"
+        assert admission["stage"] == "completed_training_workload"
 
 
 @pytest.mark.parametrize("observed_run", [True], indirect=True)

@@ -18,6 +18,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from core.runtime_control.records import PhaseComponentRecord
 from core.runtime_control.session import (
     RuntimeControlPolicy,
     RuntimeVerificationSession,
@@ -91,10 +92,20 @@ def _trial_policy(watchdog_factor: float | None) -> RuntimeControlPolicy:
 def _admission(tmp_path: Path, policy: RuntimeControlPolicy, predicted_seconds: float):
     session = RuntimeVerificationSession(str(tmp_path / "obs.json"), policy=policy)
     session.complete_setup(storage_provenance={})
-    # Overwrite the setup component's prediction with the scenario value so
-    # the known-cost sum is exactly `predicted_seconds`.
+    # Setup is already incurred; only a remaining phase estimate receives
+    # admission's safety factor under completed-workload-v1.
     (setup_record,) = session._components.values()
-    object.__setattr__(setup_record.prediction, "predicted_seconds", predicted_seconds)
+    # Include measured setup in the fixture's requested adjusted total so
+    # the exact 7200s boundary is not exceeded by an incidental setup epsilon.
+    remaining_seconds = predicted_seconds - setup_record.actual_seconds / policy.safety_factor
+    session._components["training"] = PhaseComponentRecord(
+        prediction=setup_record.prediction.model_copy(
+            update={
+                "predicted_seconds": remaining_seconds,
+                "source": "real_training_verification",
+            }
+        )
+    )
     return session.decide_admission()
 
 
