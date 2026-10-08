@@ -1008,7 +1008,7 @@ class ProposalInput(BaseModel):
         default=None,
         description=(
             "Live hardware manifest from core.hardware_context. "
-            "Populated by the workflow via HardwareContext.get_or_create(). "
+            "Populated by the workflow via core.hardware_context.get_or_create(). "
             "None for CPU-only / test stubs and for standalone proposer "
             "invocations that bypass the workflow. When present and "
             "device_available=True, the Proposer's [HARDWARE CONTEXT] "

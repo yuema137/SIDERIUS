@@ -2225,7 +2225,7 @@ def run_workflow(
     # Discover once per workflow run and thread into every ProposalInput
     # via post-hoc assignment after local_full_context returns (pattern
     # mirrors previous_failures and mindset below at the propose call site).
-    # The tuner's own HardwareContext.get_or_create call in its run() init
+    # The tuner's own core.hardware_context.get_or_create call in its run() init
     # reads the same manifest path — first-caller-writes, later-callers-read.
     # See docs/phase66_ws_b_proposer_hardening.md §4.1.
     from pathlib import Path as _Path

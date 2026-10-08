@@ -20,6 +20,23 @@ validation verdict does not certify its submission format or every device used
 by the evaluator. Use any run-provided compatibility check with the actual
 source/configuration and deployment requirements.
 
+## Hand off a candidate generated in this run
+
+Validation checks a candidate; it does not guarantee that a separate caller
+process has registered the candidate's executable plugin. Before invoking the
+tuner, bind the model source explicitly. For a candidate just implemented and
+validated in the current run, set `HyperparamTuningInput.seed_plugin_path` to
+that implementation's `model_file_path`, with the matching `model_type` and
+configuration. The tuner stages those source bytes into its workspace and fills
+missing parent-process registration before planning. The schema checks the
+file's declared model type; execution still checks its actual registration.
+
+Pass the typed implementation and validation outputs through the caller's
+handoff; do not rediscover an arbitrary file from another run's storage. An
+already registered candidate may use the existing registration path instead.
+Neither route imports an old checkpoint, skips validation or authorizes reuse
+of an earlier experiment's model. Declare any historical reuse separately.
+
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent.HyperparamTuningAgent`.
