@@ -33,7 +33,7 @@ Choose how you want to work with the agent:
 
 | Way of working | Who leads the setup? | Where to start |
 | --- | --- | --- |
-| **Assistant — recommended for a first task** | Your agent follows the repository's setup guidance, asks for missing decisions, prepares the files and explains what to check before running. | Ask it to read the [setup skill](docs/agent-reference/siderius-setup-review/SKILL.md). |
+| **Assistant — recommended for a first task** | Describe your problem and data. Your agent handles setup and guides you through designing the task and experiment. | Start with the one-sentence example below. |
 | **Professional** | You direct the task, workflow and experiment choices, working closely with your agent to inspect the code and implement your setup. | Give it your plan and the [task contract](docs/reference/task-composition.md). |
 
 These are ways of collaborating, not software mode switches. Either can use the
@@ -41,20 +41,35 @@ same optional [configuration review and HTML report](src/tools/setup_review/READ
 You can also launch directly without that review. Choosing a fixed workflow or
 an external orchestrator is a separate [execution choice](src/tools/orchestration_setup/README.md).
 
-Clone this repository and open it in your coding agent. For a first task, paste:
+### Assistant example: start with one sentence
+
+Clone this repository and open it in your coding agent, then say:
 
 ```text
-Help me set up a SIDERIUS experiment using the Assistant approach.
-Read AGENTS.md and docs/agent-reference/siderius-setup-review/SKILL.md.
-My task is [what to predict], and my data is at [local path].
-Ask me for missing scientific choices, environment details and budgets.
-Create the task and experiment in a new external project; keep this repo unchanged.
-Start with the Luna test configuration for a small process check.
-Show me the saved files, effective settings, exact launch command and where
-results will appear before starting any paid API or GPU work.
+I have MNIST images and labels in /data/mnist; help me build and evaluate a digit classifier.
 ```
 
-The skill is a file your agent reads; no global skill installation is required.
+Replace the task and path with your own. You do not need to know the configuration
+format or write a task package first. The agent follows the repository's
+[setup guidance](docs/agent-reference/siderius-setup-review/SKILL.md) and takes
+you through the whole preparation:
+
+1. **Set up the environment:** inspect the data layout and available hardware,
+   prepare the correct Python environment and explain which API keys to set.
+2. **Design the task with you:** agree on inputs, labels, training/validation/test
+   splits and the score. For this example, the task maps an image to a digit.
+3. **Prepare the experiment:** help choose the model routing, data amount,
+   iterations and time/memory budgets, then save the files in your own project.
+4. **Show how to run and inspect results:** give you the exact saved script,
+   settings and output paths; optionally produce a configuration-review HTML page.
+
+The agent does the setup work and asks when a consequential choice is missing;
+it should not hand you a list of unexplained files to author. You retain control
+of the scientific choices and paid execution. Training starts once the required
+environment, data and execution authorization are in place. This is guidance for
+your coding agent, not a separate automatic service or a guarantee of model quality.
+
+No global skill installation is required: the agent reads the linked repository file.
 The [getting-started guide](docs/getting-started/README.md) links installation
 and the next setup steps. Your coding agent's own model and the models called
 inside a SIDERIUS experiment are separate choices. Use the
