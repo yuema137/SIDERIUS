@@ -8,6 +8,7 @@ import shlex
 
 from tools.setup_review.models import SetupDeclarationReport
 from tools.setup_review.render_routes import render_route_sections
+from tools.setup_review.task_settings_models import FORMAL_DELTA_FIELDS
 
 
 def _display(value: object) -> str:
@@ -27,6 +28,9 @@ def render_html(report: SetupDeclarationReport) -> str:
             if parameter.owner == "standard_cli.normalize_args"
             else _display(parameter.cli_default)
         )
+        value = _display(parameter.declared_value)
+        if parameter.name in FORMAL_DELTA_FIELDS and isinstance(parameter.declared_value, str):
+            value += " (nonfinite numeric declaration; retained only when unused by formal gates)"
         rows.append(
             f"<tr id='{html.escape(parameter.name)}'>"
             f"<th scope='row'>{html.escape(label)}"
@@ -34,7 +38,7 @@ def render_html(report: SetupDeclarationReport) -> str:
             f"<details><summary>CLI help</summary>{html.escape(parameter.description)}"
             "</details></th>"
             f"<td><pre>{default}</pre></td>"
-            f"<td><pre>{_display(parameter.declared_value)}</pre>"
+            f"<td><pre>{value}</pre>"
             f"<small>{html.escape(parameter.normalized_name)}</small></td></tr>"
         )
     limitations = "".join(f"<li>{html.escape(item)}</li>" for item in report.unresolved)

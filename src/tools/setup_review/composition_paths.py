@@ -47,6 +47,18 @@ def validate_check_locations(
         raise ValueError(
             "Expose the selected task manifest using --read-only on its task source directory"
         )
+    if request.resolve_task_settings:
+        health_path = next(
+            row.declared_value
+            for row in declaration.parameters
+            if row.name == "health_checks_config"
+        )
+        if isinstance(health_path, str) and health_path:
+            selected = (Path(request.setup.working_directory) / health_path).resolve()
+            if not any(selected.is_relative_to(root) for root in (*runtime, *sources)):
+                raise ValueError(
+                    "Expose the selected Health configuration using --read-only on its source directory"
+                )
     data = next(row.declared_value for row in declaration.parameters if row.name == "data_dir")
     if isinstance(data, str):
         data_path = (Path(request.setup.working_directory) / data).resolve()

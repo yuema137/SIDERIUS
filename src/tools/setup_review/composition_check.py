@@ -15,8 +15,9 @@ from tools.setup_review.composition_models import (
 from tools.setup_review.composition_paths import validate_check_locations
 from tools.setup_review.composition_render import render_task_check
 from tools.setup_review.composition_transport import manifest_digest, read_composition_result
-from tools.setup_review.inspection import inspect_declaration
+from tools.setup_review.inspection import inspect_parsed_declaration
 from tools.setup_review.render import render_html
+from tools.setup_review.task_settings_inputs import project_task_settings
 from tools.workspace_sandbox.profile import SandboxProfile, runtime_roots
 from tools.workspace_sandbox.runner import ExecutionResult, run
 from workflows.llm_config import WorkflowLLMConfig
@@ -35,6 +36,18 @@ _LIMITATIONS = (
     "This is a setup observation, not immutable provenance, per-run orphan-free attestation, "
     "LLM review, launch approval or a receipt enforced by the ordinary launch command.",
 )
+
+
+def _limitations(resolve_settings: bool) -> tuple[str, ...]:
+    if not resolve_settings:
+        return _LIMITATIONS
+    return (
+        _LIMITATIONS[0],
+        "Task-dependent scope, formal-launch policy, analysis routing and Health configuration "
+        "resolution were requested. Consult the result for completion or failure; no actual "
+        "Health evaluations, dataset loading, training or LLM call was requested.",
+        *_LIMITATIONS[2:],
+    )
 
 
 def _execute(
@@ -70,7 +83,7 @@ def _execute(
 
 def check_task(request: TaskCheckRequest) -> TaskCheckReport:
     """Compose in a bounded child and publish new local diagnostic artifacts."""
-    declaration = inspect_declaration(request.setup, request.output)
+    declaration, args = inspect_parsed_declaration(request.setup, request.output)
     validate_check_locations(request, declaration)
     config = WorkflowLLMConfig.model_validate(declaration.declared_llm_config)
     job = CompositionJob(
@@ -79,6 +92,9 @@ def check_task(request: TaskCheckRequest) -> TaskCheckReport:
         planner_strategy=config.get("tune").get("planner_strategy"),
         scratch=str(request.scratch),
         settings=request.settings,
+        task_settings=project_task_settings(args, declaration, config)
+        if request.resolve_task_settings
+        else None,
     )
     request.scratch.mkdir(mode=0o700)
     request.output.mkdir(mode=0o700)
@@ -108,7 +124,7 @@ def check_task(request: TaskCheckRequest) -> TaskCheckReport:
         runtime_read_only_roots=tuple(str(path) for path in runtime_roots()),
         execution=execution,
         result=result,
-        limitations=_LIMITATIONS,
+        limitations=_limitations(request.resolve_task_settings),
     )
     for name, payload in (
         ("report.json", report.model_dump_json(indent=2) + "\n"),

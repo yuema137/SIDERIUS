@@ -160,8 +160,12 @@ This first version supports only a fresh standard iteration 1. It refuses seed
 evidence, resume/replacement flags, fixed-candidate plans and the runner's
 print-only flag. Multi-iteration launchers and custom Python workflows are outside
 its scope. `--help` belongs on the inspector command, not inside a saved run argv.
-Non-finite numeric declarations such as `NaN` or `Infinity` are rejected rather
-than silently converted to JSON `null`.
+Non-finite numeric declarations such as `NaN` or `Infinity` are generally rejected
+rather than silently converted to JSON `null`. The two formal delta fields are an
+exception: the runner deliberately ignores them when its formal gates are off.
+The preview preserves those values as explicit `nan`, `+inf` or `-inf` numeric
+labels; the optional task-settings check below applies the actual formal policy
+and rejects nonfinite deltas when those gates are enabled.
 
 Invalid requests, unreadable selected configuration files and unsupported modes
 exit nonzero with a message. A failed or interrupted write may leave an incomplete
@@ -170,7 +174,7 @@ choose a new output name; the tool does not delete report contents. Each file is
 published atomically and without overwriting, but the two-file pair is not one
 atomic transaction. Success is printed only after both files have been written.
 
-This tool leaves existing execution behavior, prompts and defaults unchanged.
+This tool leaves existing execution behavior, experiment prompts and runtime defaults unchanged.
 It is one part of optional setup assistance, not a completed onboarding workflow
 or paper-artifact reproduction check.
 
@@ -221,7 +225,7 @@ workspace. The report directory contains:
 | `settings.html` | CLI defaults, static model routes, original arguments and the ordinary command to run later. This is the declaration-only preview, linked from the task-check page. |
 | `report.json` | Typed task-check result, including the original v2 declaration snapshot, selected limits, actual sandbox profile, source identities and runner status. |
 
-**Passed means the task and selected planner provider composed.** It does not mean
+**Without extra options, passed means the task and selected planner provider composed.** It does not mean
 the data is valid, a model trains, Health checks pass, credentials work, or hardware
 fits the budget. The checker does not invoke data loaders, construct training
 models, materialize Health or call an LLM. Task imports/factories are executable
@@ -247,6 +251,56 @@ Each output file is published without overwriting; the page is published last.
 An interruption can leave partial report/scratch directories. Inspect them yourself
 before removing them, or choose new names. They are diagnostic artifacts, not
 experimental results. This command does not create the actual run workspace.
+
+## Resolve settings that depend on your task
+
+Add `--resolve-task-settings` when you also want to see the selected data
+partitions, whether analysis is enabled, and the effective Health configuration.
+Health configuration describes which checks would run and what they would do;
+this command does not run those checks against data or model results.
+
+Declare `--healthgate_mode` and `--result_authority` in the saved run arguments,
+as the standard runner requires. The checker uses the same validator and reports
+contradictions instead of choosing these values for you. For example,
+`observe_only` with `scientific` fails because observation alone cannot certify
+a scientific result. Use the combination appropriate for your experiment.
+
+```bash
+cd /home/alex/siderius-project &&
+/path/to/SIDERIUS/.venv/bin/python -m tools.setup_review.check_task \
+  --request review-request.json \
+  --read-only /home/alex/siderius-project/tasks/my-task \
+  --resolve-task-settings \
+  --scratch /home/alex/siderius-project/check-scratch-002 \
+  --output /home/alex/siderius-project/task-check-002 \
+  --timeout-seconds 30
+```
+
+Open `task-check-002/index.html` and read **Task-dependent settings**. For a task
+with four partitions, an omitted `--data_scope` resolves to `[0, 1, 2, 3]`.
+Analysis becomes enabled or disabled according to the actual task binding and
+your override. Health gates list their cadence, checks and actions. Disabled
+Health stays visibly disabled; it does not produce a pretend empty enabled run.
+
+If your saved arguments select an external `--health_checks_config`, expose its
+source directory with another `--read-only`. Relative Health paths use the saved
+working directory. Keep datasets outside exposed roots. Generated Health YAML
+lives in `check-scratch-002/task-settings/health_checks_effective.yaml`; the report
+saves its resolved fields and body digest, so you can inspect it after removing
+scratch. Neither directory is your future experiment workspace.
+
+This option checks configuration relationships only. It does not inspect dataset
+contents, measure memory/time, authenticate keys, resolve hardware-dependent
+watchdog profiles, or choose future training parameters for the agent. Those
+unknowns remain on the page. The ordinary command in `settings.html` still does
+not compare current inputs with this report. After changing inputs, make a new
+check before using that command.
+
+The optional review below can read these additional saved facts. Its packet uses
+`setup-review/v2` when resolved task settings are present; older report packets
+retain `setup-review/v1`. Read the saved packet before sending it to a model.
+The [task-settings contract](task-settings.md) describes the callable input,
+shared rule owners, transport and source-identity boundary.
 
 ## Ask for an optional LLM review, or explicitly skip it
 

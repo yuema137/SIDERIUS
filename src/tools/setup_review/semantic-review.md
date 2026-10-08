@@ -84,6 +84,12 @@ Named scalar CLI rows retain saved default/declared values. Typed model routes,
 key-name statuses and unresolved checks are projected without raw argv or raw
 declared_llm_config. Task snapshots project named metric/forward-contract fields,
 partition count, named rule values, inference policy and Health declaration.
+When a task check explicitly resolved task settings, the packet additionally
+includes concrete partition indices, partial/full status, analysis enablement,
+formal-policy outcome, Health enablement and named gate role/cadence/action
+fields. It uses the task-resolved typed routes instead of the unresolved static
+analysis route. Arbitrary Health check configuration, plugin identities, reasons
+and source contents are not transmitted by this additional branch.
 Nested rule values or arbitrary task/config fields not handled by the allowlist
 are omitted, not interpreted. Packet coverage explicitly names exclusions.
 
@@ -96,7 +102,13 @@ publishing reports. Ambient credential values are never serialized by this API.
 
 The review writes exact system/user prompt bytes before calling the provider.
 Receipt hashes bind source report, packet and prompts; prompt version is
-`setup-review/v1`. Prepared prompt files do not establish that a request was sent.
+`setup-review/v1` for declaration/composition-only packets, or `setup-review/v2`
+when resolved task settings are included. The v1 packet projection stays unchanged
+for previously accepted finite inputs. Two formal delta rows may now preserve
+previously rejected unused nonfinite values as explicit JSON string tokens; they
+never become null or a substituted finite value. This inspection-boundary change
+does not alter the runtime's formal-gate policy.
+Prepared prompt files do not establish that a request was sent.
 The bridge writes available usage/served-model evidence to its normal token log;
 telemetry absence does not prove zero usage. The receipt records its filename
 only if present, never fabricates a served-model identity or total cost.

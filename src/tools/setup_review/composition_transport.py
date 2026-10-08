@@ -48,4 +48,8 @@ def read_composition_result(job: CompositionJob) -> CompositionResult:
     result = CompositionResult.model_validate_json(payload)
     if result.request_sha256 != job.digest or result.manifest_sha256 != job.manifest_sha256:
         raise ValueError("Child result does not match the selected check request/manifest")
+    if result.outcome == "passed" and (result.task_settings is not None) != (
+        job.task_settings is not None
+    ):
+        raise ValueError("Child result does not match the requested task-settings checks")
     return result
