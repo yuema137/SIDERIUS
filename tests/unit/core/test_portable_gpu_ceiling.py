@@ -109,8 +109,8 @@ def test_finite_member_demands_cannot_overflow_into_a_decision():
 def test_public_limits_and_policy_do_not_coerce_invalid_values_into_permission(value):
     with pytest.raises(ValueError):
         resolve_gpu_ceiling(ceiling_gib=value, measured_capacity_gib=80)
-    with pytest.raises(ValidationError):
-        GpuAdmissionPolicy(ceiling_gib=value)
+    with pytest.raises(ValidationError, match="ceiling_gib"):
+        GpuAdmissionPolicy(mode="formal", ceiling_gib=value)
     with pytest.raises(ValidationError):
         PairMember(run_name="one", predicted_peak_vram_gb=value, provenance="test")
     # The transit dataclass preserves the supplied value; the existing tuner
