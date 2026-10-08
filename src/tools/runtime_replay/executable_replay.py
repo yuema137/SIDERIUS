@@ -19,7 +19,10 @@ what WOULD run without touching a device.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from tools.runtime_replay.probe_config import ReplayProbeConfig
 
 from tools.runtime_replay.schemas import (
     MeasuredRuntime,
@@ -96,43 +99,73 @@ def run_executable_replay(
 
 
 def production_probe(
-    *,
-    model_config: dict[str, Any],
-    train_config: dict[str, Any],
-    loss_config: dict[str, Any],
-    data_dir: str | None = None,
+    *, config: ReplayProbeConfig, output_dir: str
 ) -> Callable[[ReplayCandidate], MeasuredRuntime]:
-    """The REAL probe (operator-gated: this touches the GPU)."""
+    """Run real workers with caller-owned artifacts and explicit task semantics."""
+    from pathlib import Path
+    from tempfile import mkdtemp
+    from typing import cast
+
+    from core.runtime_control.probe_production import probe_device_vram_gb
+    from core.runtime_control.probe_subprocess import (
+        ProbeInfrastructureFailure,
+        ProbeWorkerSpec,
+        run_worker,
+    )
+    from core.runtime_control.probe_task import StandaloneProbeDevice, bind_probe_task
+
+    # Validate binding and objective before creating output or touching CUDA.
+    with bind_probe_task(config.task_probe_data) as composition:
+        loss = config.loss_config or composition.objective
+        if loss is None:
+            raise ValueError("replay requires loss_config or a task-declared objective")
+        if composition.objective is not None and loss != composition.objective:
+            raise ValueError("replay loss_config disagrees with the task-declared objective")
+    vram = config.device_vram_gb
+    if vram is None:
+        if not config.train_config.device.startswith("cuda"):
+            raise ValueError("CPU replay requires an explicit device_vram_gb classifier threshold")
+        vram = probe_device_vram_gb()
+    root = Path(output_dir).resolve()
+    root.mkdir(parents=True, exist_ok=True)
 
     def _probe(candidate: ReplayCandidate) -> MeasuredRuntime:
-        from core.runtime_control.probe import ProbeCaps, run_bounded_probe
-        from core.runtime_control.probe_production import (
-            probe_device_vram_gb,
-            production_probe_executors,
-        )
-
         assert candidate.model_name  # eligibility already established
-        executors = production_probe_executors(
-            model_type=candidate.model_name,
-            model_config=model_config,
-            train_config=train_config,
-            loss_config=loss_config,
-            data_dir=data_dir,
+        # Unique directories prevent a failed invocation reading a stale result.
+        result_path = Path(mkdtemp(prefix="probe-", dir=root)) / "result.json"
+        outcome = run_worker(
+            ProbeWorkerSpec(
+                model_type=candidate.model_name,
+                model_config_payload=config.model_config_payload,
+                train_config=config.train_config.model_dump(mode="json"),
+                loss_config=loss.model_dump(mode="json"),
+                task_probe_data=config.task_probe_data,
+                device=cast(StandaloneProbeDevice, config.train_config.device),
+                caps=config.caps.model_dump(mode="json"),
+                device_vram_gb=vram,
+                result_path=str(result_path),
+            ),
+            hard_cap_seconds=config.caps.max_wall_seconds,
         )
-        result = run_bounded_probe(
-            model_identity=candidate.model_name,
-            executors=executors,
-            caps=ProbeCaps(max_wall_seconds=90.0),
-            device_vram_gb=probe_device_vram_gb(),
-        )
+        if outcome.classification == "infrastructure_failure":
+            raise ProbeInfrastructureFailure(outcome.detail)
+        result = outcome.result
         return MeasuredRuntime(
-            train_ms_per_step=result.train_ms_per_step,
-            inference_ms_per_batch=result.inference_ms_per_batch,
-            setup_seconds=result.setup_seconds,
-            peak_vram_gb=result.peak_vram_gb,
-            realized_parameter_count=(result.realized.parameter_count if result.realized else None),
-            concurrency_identity=result.concurrency_identity,
-            probe_status=result.status,
+            train_ms_per_step=result.train_ms_per_step if result else None,
+            inference_ms_per_batch=result.inference_ms_per_batch if result else None,
+            setup_seconds=result.setup_seconds if result else None,
+            peak_vram_gb=result.peak_vram_gb if result else None,
+            realized_parameter_count=(
+                result.realized["parameter_count"] if result and result.realized else None
+            ),
+            concurrency_identity=result.concurrency_identity if result else None,
+            probe_status=(
+                result.status
+                if result is not None
+                else "wall_cap"
+                if outcome.termination.timed_out
+                else "measured_failure"
+            ),
         )
 
     return _probe
