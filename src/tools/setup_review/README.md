@@ -76,6 +76,14 @@ defaults. Inspect them in the report rather than assuming every limit is one.
 The example's Health/result settings select a diagnostic run; choose settings
 appropriate to your experiment.
 
+With the default `formal_training_scope_source="operator"`, check both training
+fractions: `formal_portion` selects the formal training
+scope (default `0.1`), while `formal_train_portion` selects how much of that
+scope each epoch uses (default `1.0`). For example, with 2,000 available rows,
+those defaults select 200 rows before batching; the second `1.0` does not restore
+the other 1,800. Set both to `1.0` if you intend to use the full training scope,
+and inspect the saved scope and loader settings to confirm the actual rows used.
+
 For a quick declaration preview, run from the saved working directory:
 
 ```bash
