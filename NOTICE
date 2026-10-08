@@ -1,0 +1,58 @@
+SIDERIUS licensing and third-party notices
+========================================
+
+Original SIDERIUS contributions are licensed under the MIT License in LICENSE.
+This grant does not replace the terms of the third-party portions below.
+The combined Python distribution declares MIT AND CC-BY-4.0 because it contains
+both original project contributions and adapted upstream material. This does
+not apply both licenses indiscriminately to every file.
+
+TIDMAD adaptations (CC BY 4.0)
+-----------------------------
+
+SIDERIUS includes modified model, loss and scoring implementations from TIDMAD:
+https://github.com/jessicafry/TIDMAD
+
+Credit: TIDMAD Team. Upstream source history credits Aobo Li for network.py and
+Jessica Fry and Aobo Li for benchmark.py and its predecessor. These are source
+history credits, not an assertion of an exhaustive copyright-holder list.
+
+The upstream README applies Creative Commons Attribution 4.0 International
+(CC BY 4.0) to its software and data. The full upstream license, including its
+disclaimer, is preserved in LICENSES/CC-BY-4.0.txt. License information:
+https://creativecommons.org/licenses/by/4.0/
+
+Reviewed upstream revision: 7e46f97de9c9fde371036eb09d18bdae1e8d480d.
+Source and license references:
+https://github.com/jessicafry/TIDMAD/blob/7e46f97de9c9fde371036eb09d18bdae1e8d480d/network.py
+https://github.com/jessicafry/TIDMAD/blob/7e46f97de9c9fde371036eb09d18bdae1e8d480d/benchmark.py
+https://github.com/jessicafry/TIDMAD/blob/7e46f97de9c9fde371036eb09d18bdae1e8d480d/README.md#license
+https://github.com/jessicafry/TIDMAD/blob/7e46f97de9c9fde371036eb09d18bdae1e8d480d/LICENSE
+
+Affected portions and modifications:
+
+* src/ml_models/models_sandbox.py: U-Net helpers (DoubleConv, Down, Up,
+  OutConv), PositionalEncoding, PositionalUNet, TransformerModel, CausalConv1d,
+  WaveNetBlock, SimpleWaveNet, Seq2SeqEncoder, Seq2SeqDecoder, RNNSeq2Seq and
+  the accompanying AE baseline adaptation. SIDERIUS changed configuration,
+  dimensions, dtype handling, construction and implementation details. These
+  are adaptations, not byte-identical copies of the reviewed upstream version.
+* src/ml_models/loss_models_sandbox.py: FocalLoss1D and its FocalLoss1DCW
+  extension. SIDERIUS changed constructor/configuration handling and added
+  class weighting.
+* src/execute_tools/scoring_utils.py: get_one_sec_psd, find_peak, get_snr,
+  process_segment and legacy normalized score arithmetic derived from the
+  upstream benchmark/denoising score implementation. SIDERIUS changed typed
+  configuration, FFT precision, noise-floor/nonfinite handling, rounding,
+  scope aggregation and parallel execution.
+
+These acknowledgments identify adapted portions; they do not characterize
+the complete modules or the generic framework as upstream copies.
+
+External materials
+------------------
+
+Installed dependencies and externally acquired datasets retain their own
+licenses. The SIDERIUS MIT License does not grant additional rights to those
+materials. Scientific task and dataset provenance is maintained by the
+corresponding task package in siderius-exp.
