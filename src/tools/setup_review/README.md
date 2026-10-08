@@ -247,3 +247,110 @@ Each output file is published without overwriting; the page is published last.
 An interruption can leave partial report/scratch directories. Inspect them yourself
 before removing them, or choose new names. They are diagnostic artifacts, not
 experimental results. This command does not create the actual run workspace.
+
+## Ask for an optional LLM review, or explicitly skip it
+
+After reading a saved declaration or task-check report, you can record a separate
+decision about LLM review. This step reads the saved JSON snapshot; it does not
+reload your task or prove that the original files are still unchanged. It never
+starts the experiment. Ordinary launchers remain usable without this step.
+For a saved task check, it validates only the declaration, task/provider result
+and recorded limitations used for review. Old sandbox/request/execution wrappers
+are discarded, so cleaning up the earlier scratch directory does not prevent
+reviewing its saved facts. This does not certify that the old sandbox can launch now.
+
+To **skip LLM review explicitly**, create `skip-review.json` in your project:
+
+```json
+{
+  "operation": {
+    "kind": "skip",
+    "report": "/home/alex/siderius-project/task-check-001/report.json",
+    "expected_sha256": "<SHA-256 of that exact report.json>",
+    "output": "/home/alex/siderius-project/semantic-review-001",
+    "input_max_bytes": 1048576,
+    "reason": "I will inspect the settings and remaining requirements myself."
+  }
+}
+```
+
+Replace the placeholder with the result from
+`sha256sum /home/alex/siderius-project/task-check-001/report.json`. Use the
+declaration report path instead if you have not run the task check. The new output
+directory must not exist; its parent must exist. Report/output paths are absolute,
+and the output must be separate from the installation, source report and run workspace.
+
+```bash
+/path/to/SIDERIUS/.venv/bin/python -m tools.setup_review.review \
+  --request /home/alex/siderius-project/skip-review.json
+```
+
+Open `semantic-review-001/index.html`. It records **skipped**, your reason and the
+exact source digest. This is different from the original report's **not_performed**:
+the original report stays unchanged. Skipping imports no provider gateway and
+does not read provider credentials, authenticate, or make an LLM request.
+
+For an **actual LLM review**, copy the operation into another request file, use a
+new output directory, replace `kind` with `"review"`, remove `reason` and add:
+
+```json
+"llm": {
+  "provider": "openai",
+  "model_id": "<your supported reviewer model>",
+  "max_retries": 1
+},
+"total_review_seconds": 120,
+"request_timeout_seconds": 60
+```
+
+These numbers are examples for this optional review, not experiment budgets or
+new framework defaults. Set the provider's key in your launching environment;
+never put a key in either JSON file. Explicit review uses the existing gateway's
+environment/dotenv loading behavior. Running the command with `kind: review`
+contacts that provider and can incur charges. Use it only after choosing an
+appropriate model, limits and permission to send the report's selected text.
+
+The review sends selected scalar settings, static model routes, key-name statuses
+and unresolved checks. A task-check snapshot also contributes selected task,
+metric, forward-contract, parameter-rule and inference-policy declarations.
+It omits raw argv, arbitrary configuration extras, advice, source-code files and
+data. This deliberately limited packet may miss relevant settings; the page is
+not a complete effective-configuration review. Text in an included field can
+still contain secrets: inspect your source report before sending, and inspect
+the saved packet before sharing it. There is no automatic guarantee that all
+human or model text is safe to publish.
+
+The total review deadline starts before report reading and continues through
+gateway construction, requests/retries and response validation. It is cooperative:
+a blocked file read or constructor cannot be forcibly interrupted, but an expired
+operation cannot send a new request or accept a late answer at a checked boundary.
+It is neither a hard wall-clock watchdog nor a dollar/token cap. `max_retries`
+retains the gateway's existing total-attempt semantics; content-level retries are
+separate, so one review can send multiple API requests.
+
+| Saved file | What it means |
+| --- | --- |
+| `index.html` | Start here: reviewed/skipped/failed, findings and remaining limits. |
+| `receipt.json` | Typed decision, source/prompt digests, reviewer settings and timing evidence when available. |
+| `packet.json` | Exact selected semantic facts. Skips also save this local packet. |
+| `system.txt`, `user.txt` | Exact prompts prepared before a review request; absent for a skip. Their existence alone does not prove a request was sent. |
+| `token_usage.jsonl` | Existing gateway telemetry when responses were recorded; absence is not proof that no request reached the provider. |
+
+**Reviewed means a schema-valid model answer was accepted.** It does not mean
+the task passed deterministic checks or the experiment is ready. A failed task
+check remains visible even if the model reports no findings. Review errors return
+a nonzero exit and save a failed receipt when the output can be prepared safely.
+Early input errors may produce no directory; interrupted writes can leave a
+partial directory. Existing files are never overwritten or deleted automatically.
+Use a new output name for each attempt.
+
+To change settings, edit your original task/experiment files, regenerate the
+appropriate preview/check, and choose a new review output. This operation neither
+checks stale source files at launch nor imposes a receipt gate. Custom Python
+orchestration and multi-iteration runners are not represented by this standard
+snapshot; do not substitute a different command and claim it was reviewed.
+
+An assistant can invoke the same typed callable or inspect its `SKILL_SPEC`;
+see the [semantic review API contract](semantic-review.md). This is an optional
+review building block, not completed Professional/Assistant onboarding or proof
+that the four independent onboarding trials have run.
