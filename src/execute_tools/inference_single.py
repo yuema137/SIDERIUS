@@ -436,6 +436,8 @@ def _emit_generic_inference(
     from execute_tools.generic_inference import run_generic_inference
     from execute_tools.task_data_path import DeliverableWriteRequest
 
+    if runtime_preparation is not None:
+        runtime_preparation.finish()
     outcome = run_generic_inference(
         data_path=data_path,
         task_scope=task_eval_scope,
@@ -445,9 +447,6 @@ def _emit_generic_inference(
         batch_size=args.inference_batch_size,
         input_dtype=resolve_inference_input_dtype(args.denoising_model, args._model_io),
         runtime_session=runtime_preparation.session if runtime_preparation is not None else None,
-        preparation_seconds=runtime_preparation.finish()
-        if runtime_preparation is not None
-        else 0.0,
         write_request=DeliverableWriteRequest(
             output_dir=args.output_dir if args.output_dir else args.data_dir,
             exp_id=args.exp_id,

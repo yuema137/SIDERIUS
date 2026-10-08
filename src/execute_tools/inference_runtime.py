@@ -17,9 +17,9 @@ from core.runtime_control.workload import ResolvedPhaseWorkload
 class InferenceRuntimePreparation:
     """Measure child preparation without replacing an earlier training setup.
 
-    A standalone child owns its first setup component. A resumed attempt has
-    already paid for training setup; its inference component owns this child's
-    additional preparation instead. Both clocks start before model loading.
+    A standalone child owns its first setup component, measured before model
+    loading. A resumed attempt retains its existing setup and inference timing
+    boundaries. Including its child preparation is a separate accounting change.
     """
 
     def __init__(
@@ -29,7 +29,6 @@ class InferenceRuntimePreparation:
         policy: RuntimeControlPolicy | None,
         attempt_id: str,
     ) -> None:
-        self.started = time.perf_counter()
         self.session = RuntimeVerificationSession.resume_or_start(
             observation_path,
             policy=policy,
@@ -37,15 +36,13 @@ class InferenceRuntimePreparation:
             resumed_status="inference_started",
         )
 
-    def finish(self) -> float:
-        """Close fresh setup, or return preparation charged to resumed inference."""
+    def finish(self) -> None:
+        """Close measured standalone setup without changing a resumed observation."""
         if "setup" not in self.session.observation.components:
             self.session.complete_setup(
                 storage_provenance={},
                 detail={"owner": "standalone_inference_child"},
             )
-            return 0.0
-        return time.perf_counter() - self.started
 
 
 class InferenceRuntimeEvidence:
@@ -58,13 +55,11 @@ class InferenceRuntimeEvidence:
         samples: int,
         device: torch.device,
         started: float,
-        preparation_seconds: float = 0.0,
     ) -> None:
         self.session = session
         self.device = device
         self.started = started
-        self.preparation_seconds = preparation_seconds
-        self.setup_seconds = preparation_seconds + time.perf_counter() - started
+        self.setup_seconds = time.perf_counter() - started
         self.finished_verification = False
         self.executed_samples = 0
         session.record_phase_workload(
@@ -120,7 +115,7 @@ class InferenceRuntimeEvidence:
         if self.session.policy.runtime_completion_policy == "completed-workload-v1":
             self.session.complete_phase_workload(
                 "inference",
-                actual_seconds=self.preparation_seconds + time.perf_counter() - self.started,
+                actual_seconds=time.perf_counter() - self.started,
                 executed_unit_count=self.executed_samples,
                 verifier=None if self.finished_verification else self.verifier,
                 source="real_inference_verification",
@@ -128,9 +123,7 @@ class InferenceRuntimeEvidence:
             self.finished_verification = True
         else:
             self._complete_verification()
-            self.session.record_phase_actual(
-                "inference", self.preparation_seconds + time.perf_counter() - self.started
-            )
+            self.session.record_phase_actual("inference", time.perf_counter() - self.started)
         from core.runtime_control.realized_memory import read_process_peak_mib
 
         allocated, reserved, device_index = read_process_peak_mib()
