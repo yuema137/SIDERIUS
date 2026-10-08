@@ -22,6 +22,11 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.runtime_control.probe_subprocess import ProbeWorkerSpec
+    from workflows.task_composition import RunTaskComposition
 
 from core.local_code.failure import raise_if_code_package_failure
 
@@ -64,6 +69,87 @@ def _run_sustained_load(spec, executors, paths) -> int:
     return 0
 
 
+def _execute_bound_probe(
+    spec: ProbeWorkerSpec, paths: dict[str, Path], composition: RunTaskComposition
+) -> int:
+    """Execute one probe while the transported task and plugins remain bound."""
+    from core.runtime_control.calibration_policy import sample_contention_window
+    from core.runtime_control.probe import ProbeCaps, run_bounded_probe
+    from core.runtime_control.probe_production import production_probe_executors
+    from core.runtime_control.probe_subprocess import ProbeWorkerResult, dump_result, write_progress
+
+    assert spec.task_probe_data is not None  # bind_probe_task has refused absence
+    from ml_models.models_format_sandbox import LossConfig
+
+    loss = LossConfig.model_validate(spec.loss_config)
+    if composition.objective is not None and loss != composition.objective:
+        raise ValueError("probe loss_config disagrees with the task-declared objective")
+    if (
+        spec.data_dir is not None
+        and Path(spec.data_dir).resolve() != Path(spec.task_probe_data.sampling.data_dir).resolve()
+    ):
+        raise ValueError("probe data_dir disagrees with task_probe_data.sampling.data_dir")
+    task_loss = composition.task_owned_custom_loss
+    expected_loss = spec.expected_custom_loss_snapshot
+    if task_loss is not None:
+        if expected_loss is not None and expected_loss != task_loss.contract_snapshot:
+            raise ValueError("probe custom-loss snapshot disagrees with the task declaration")
+        expected_loss = task_loss.contract_snapshot
+    executors = production_probe_executors(
+        model_type=spec.model_type,
+        model_config=spec.model_config_payload,
+        train_config=spec.train_config,
+        loss_config=spec.loss_config,
+        data_dir=spec.data_dir,
+        task_probe_data=spec.task_probe_data,
+        device=spec.device,
+        expected_custom_loss_snapshot=expected_loss,
+    )
+
+    def _window(**kwargs):
+        write_progress(paths["progress"], "setup")
+        return sample_contention_window(**kwargs)
+
+    if spec.sustained_seconds > 0.0:
+        # Background-load mode (C12-C): no probe, no measurement of
+        # record — this worker exists so that the OTHER member of the
+        # pair has a peer that is actually computing.
+        return _run_sustained_load(spec, executors, paths)
+
+    # Phase announcements bracket the real work so a stall is
+    # attributable. run_bounded_probe owns the between-operation caps;
+    # the parent owns the hard one.
+    write_progress(paths["progress"], "training")
+    result = run_bounded_probe(
+        model_identity=spec.model_type,
+        executors=executors,
+        caps=ProbeCaps(**spec.caps) if spec.caps else ProbeCaps(),
+        device_vram_gb=spec.device_vram_gb,
+        expected_peer_pids=spec.expected_peer_pids,
+        contention_window=_window,
+    )
+    write_progress(paths["progress"], "complete")
+    dump_result(
+        ProbeWorkerResult(
+            status=result.status,
+            phase="complete",
+            model_identity=result.model_identity,
+            realized=result.realized.model_dump(mode="json") if result.realized else None,
+            setup_seconds=result.setup_seconds,
+            train_ms_per_step=result.train_ms_per_step,
+            train_ms_spread=result.train_ms_spread,
+            inference_ms_per_batch=result.inference_ms_per_batch,
+            inference_ms_spread=result.inference_ms_spread,
+            peak_vram_gb=result.peak_vram_gb,
+            concurrency_identity=result.concurrency_identity,
+            contention_telemetry=result.contention_telemetry,
+            error=result.error,
+        ),
+        paths["result"],
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if len(args) != 1:
@@ -84,62 +170,10 @@ def main(argv: list[str] | None = None) -> int:
 
     write_progress(paths["progress"], "setup")
     try:
-        from core.runtime_control.calibration_policy import sample_contention_window
-        from core.runtime_control.probe import ProbeCaps, run_bounded_probe
-        from core.runtime_control.probe_production import production_probe_executors
+        from core.runtime_control.probe_task import bind_probe_task
 
-        executors = production_probe_executors(
-            model_type=spec.model_type,
-            model_config=spec.model_config_payload,
-            train_config=spec.train_config,
-            loss_config=spec.loss_config,
-            data_dir=spec.data_dir,
-            device=spec.device,
-            expected_custom_loss_snapshot=spec.expected_custom_loss_snapshot,
-        )
-
-        def _window(**kwargs):
-            write_progress(paths["progress"], "setup")
-            return sample_contention_window(**kwargs)
-
-        if spec.sustained_seconds > 0.0:
-            # Background-load mode (C12-C): no probe, no measurement of
-            # record — this worker exists so that the OTHER member of the
-            # pair has a peer that is actually computing.
-            return _run_sustained_load(spec, executors, paths)
-
-        # Phase announcements bracket the real work so a stall is
-        # attributable. run_bounded_probe owns the between-operation caps;
-        # the parent owns the hard one.
-        write_progress(paths["progress"], "training")
-        result = run_bounded_probe(
-            model_identity=spec.model_type,
-            executors=executors,
-            caps=ProbeCaps(**spec.caps) if spec.caps else ProbeCaps(),
-            device_vram_gb=spec.device_vram_gb,
-            expected_peer_pids=spec.expected_peer_pids,
-            contention_window=_window,
-        )
-        write_progress(paths["progress"], "complete")
-        dump_result(
-            ProbeWorkerResult(
-                status=result.status,
-                phase="complete",
-                model_identity=result.model_identity,
-                realized=result.realized.model_dump(mode="json") if result.realized else None,
-                setup_seconds=result.setup_seconds,
-                train_ms_per_step=result.train_ms_per_step,
-                train_ms_spread=result.train_ms_spread,
-                inference_ms_per_batch=result.inference_ms_per_batch,
-                inference_ms_spread=result.inference_ms_spread,
-                peak_vram_gb=result.peak_vram_gb,
-                concurrency_identity=result.concurrency_identity,
-                contention_telemetry=result.contention_telemetry,
-                error=result.error,
-            ),
-            paths["result"],
-        )
-        return 0
+        with bind_probe_task(spec.task_probe_data) as composition:
+            return _execute_bound_probe(spec, paths, composition)
     except Exception as exc:  # the worker still reports, then exits
         raise_if_code_package_failure(exc)
         from core.runtime_control.probe import is_out_of_memory
