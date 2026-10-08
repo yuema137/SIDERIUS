@@ -734,6 +734,7 @@ def test_bound_worker_report_does_not_hide_shutdown_timeout(tmp_path):
     def elapsed_clock():
         # Advance only after the child published its report, independent of startup speed.
         return time.monotonic() + (20 if Path(spec.result_path).exists() else 0)
+
     run = run_prephase_measurement(
         spec,
         device=DEVICE,
