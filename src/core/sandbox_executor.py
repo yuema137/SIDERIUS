@@ -117,67 +117,26 @@ from ml_models.models_format_sandbox import (
 from ml_models.plugin_loader import UnknownOutputContractError
 
 # ---------------------------------------------------------------------------
-# Subprocess host-RAM hardening (Fix 1 of docs/optimize_inference_and_scoring.md)
+# Optional subprocess virtual-address-space limits
 # ---------------------------------------------------------------------------
-#
-# Context: on 2026-04-20 the orchestrator was terminated by the kernel's
-# global OOM-killer mid-scoring with a 36.9 GB anon-RSS. SIGKILL is silent
-# and irrecoverable — the parent had no chance to log or persist partial
-# records. Wiring RLIMIT_AS into every subprocess we spawn converts the
-# failure mode from "kernel kills the process" to "Python raises
-# MemoryError", which the orchestrator can catch, record as a structured
-# ``oom_host_ram`` failure, and skip past.
-#
-# The ceiling applies to virtual address space (RLIMIT_AS), not RSS, because
-# RSS is not a POSIX-enforceable limit. VMS is a superset of RSS, so an AS
-# cap transitively caps RSS — but the ratio is workload-dependent.
-#
-# VA-vs-RSS calibration (measured 2026-04-22 on RTX 5090, verified via
-# /proc/self/status in an isolated reproducer — see docs §Fix 1 addendum):
-#
-#   * CPU-only subprocess (e.g. scoring): VmSize ≈ RSS + ~1 GiB import
-#     overhead. 24 GiB VA cap gives ~23 GiB of real working memory.
-#   * CUDA subprocess (training / inference): `import torch` alone reserves
-#     ~5.8 GiB VA; `torch.cuda.is_available()` + context init reserves
-#     another ~12.5 GiB VA for unified-memory mappings; a single cached
-#     tensor adds another ~1.3 GiB. Total baseline ≈ 18-20 GiB VA with
-#     ~0.7 GiB RSS. Under a 24 GiB cap, CUDA workloads get only ~4-6 GiB
-#     of working VA — insufficient for PUNet-scale models plus AdamW
-#     state plus focal-loss intermediates.
-#
-# The per-role ceilings themselves — their VALUES, their PROVENANCE and
-# the resolution ladder — moved to `core/execution_calibration.py` in
-# Step 11 C3 (R-11-5, R-11-6, R-11-11). This file stays a launch CONSUMER:
-# the prose arithmetic that used to live here had gone stale without
-# anyone noticing (F-11-3), which is precisely the failure a bare comment
-# beside a bare dict cannot prevent.
-#
-# The measured VA-vs-RSS calibration above is retained here because it
-# explains why an AS cap is the instrument at all, which is a property of
-# THIS launch path.
+# Values and override parsing belong to core/execution_calibration.py. Without
+# an explicit declaration, children inherit OS limits without an additional cap.
+# RLIMIT_AS constrains virtual mappings; it is not a physical-RAM/RSS monitor.
+# Keep legacy helper names for import compatibility, not as semantic claims.
 
 _ROLE_DEFAULT_RSS_GB = ROLE_DEFAULT_RSS_GB
 
 
-def _subprocess_rss_gb(role: str) -> int:
-    """Host-RAM ceiling (GiB) applied to a sandboxed subprocess.
+def _subprocess_rss_gb(role: str) -> int | None:
+    """Additional address-space cap; None inherits OS, zero adds no cap.
 
-    A thin consumer of :func:`core.execution_calibration.resolve_role_ceiling_gb`
-    (Step 11 C3, R-11-11). The name is kept because it is what this launch
-    path and its tests have always called; the semantics — the two-layer
-    ladder, the ``0`` disable, and the LOUD refusal of a malformed
-    override — are declared there.
-
-    Raises:
-        ValueError: unknown role.
-        MalformedCeilingOverride: ``SIDERIUS_SUBPROCESS_RSS_GB`` is set to
-            something that is not a non-negative integer. Before C3 such a
-            value was silently ignored (R-11-5).
+    The legacy name is retained. Parsing, defaults and malformed-override
+    refusal belong to core.execution_calibration, never this consumer.
     """
     return resolve_role_ceiling_gb(role)
 
 
-def _limited_preexec(gb: int) -> Callable[[], None] | None:
+def _limited_preexec(gb: int | None) -> Callable[[], None] | None:
     """Return a ``preexec_fn`` that caps the child's virtual address space.
 
     The callable is invoked by ``subprocess`` after ``fork`` and before
@@ -185,14 +144,15 @@ def _limited_preexec(gb: int) -> Callable[[], None] | None:
     unaffected.
 
     Returns ``None`` when:
-      * ``gb <= 0`` — the caller (via env var) disabled the ceiling;
+      * ``gb is None`` — inherit existing OS limits without an extra cap;
+      * ``gb <= 0`` — preserve the legacy no-extra-hook behavior;
       * the POSIX ``resource`` module is unavailable (non-POSIX hosts such
         as Windows).
 
     ``subprocess.run`` treats ``preexec_fn=None`` as "no hook", so callers
     can thread the return value through unconditionally.
     """
-    if gb <= 0:
+    if gb is None or gb <= 0:
         return None
     try:
         import resource as _resource

@@ -1,29 +1,7 @@
-"""Step 11 C3 — declared resource calibration and its provenance.
+"""Address-space declaration, explicit historical settings and resume provenance.
 
-Owns three properties, one per ruling:
-
-**R-11-5 — the resolution ladder.** Exactly two layers, `0` still
-disables, and a malformed override REFUSES loudly instead of silently
-resolving to the role default. The last is the behaviour change: before
-C3, ``SIDERIUS_SUBPROCESS_RSS_GB=4O`` (letter O) produced a run that
-looked correctly configured and was not.
-
-**R-11-6 — recorded, never enforced, and structurally distinguishable.**
-The ceilings a run executed under are stamped on the invariants lock as
-PROVENANCE. The operator's added constraint is the interesting half: it is
-not enough for a validator to remember not to compare them, so the model
-declares ``_CANONICAL`` and ``_PROVENANCE`` and the two must PARTITION
-every field. The consequence that matters scientifically — the same run
-resumed on a differently-calibrated host stays legal — is asserted
-end-to-end against the real lock.
-
-**F-11-3 — a stale derivation is now visible.** The 60-GiB inference
-ceiling's recorded arithmetic cited ``inference_single.py:325-331``, which
-has been argmax code for some time. The value is retained (full-scope
-baseline inference genuinely fails under 40 GiB); the derivation is marked
-``empirical_unverified`` rather than restated, so the staleness is a
-machine-readable fact an auditor can filter on rather than prose nobody
-re-reads.
+The current default inherits OS limits. Historical host values remain executable
+only as explicit caller configuration; no scientific run is inferred from them.
 """
 
 from __future__ import annotations
@@ -38,6 +16,7 @@ from core.execution_calibration import (
     RSS_OVERRIDE_ENV_VAR,
     MalformedCeilingOverride,
     calibration_provenance,
+    resolve_role_ceiling,
     resolve_role_ceiling_gb,
 )
 from core.run_invariants import (
@@ -66,11 +45,9 @@ def _invariants(**overrides) -> RunInvariants:
 
 
 class TestTheResolutionLadder:
-    def test_the_declared_values_are_the_pre_c3_values(self):
-        """§9.3: the TIDMAD profile must resolve to the SAME numbers. C3
-        changes how they are declared, never what they are.
-        """
-        assert ROLE_DEFAULT_RSS_GB == {"training": 40, "inference": 60, "scoring": 24}
+    def test_all_three_defaults_declare_inheritance(self):
+        assert ROLE_DEFAULT_RSS_GB == {"training": None, "inference": None, "scoring": None}
+        assert set(ROLE_CEILINGS) == {"training", "inference", "scoring"}
 
     def test_no_override_resolves_the_declared_default(self, monkeypatch):
         monkeypatch.delenv(RSS_OVERRIDE_ENV_VAR, raising=False)
@@ -102,12 +79,12 @@ class TestTheResolutionLadder:
         third source may creep in.
 
         Asserted behaviourally: with the override unset, every role
-        resolves its declared number and nothing else can move it.
+        inherits the OS and nothing else can move it.
         """
         monkeypatch.delenv(RSS_OVERRIDE_ENV_VAR, raising=False)
         monkeypatch.setenv("SIDERIUS_TASK", "pets")
         monkeypatch.setenv("SIDERIUS_DATA_DIR", "/somewhere/else")
-        assert resolve_role_ceiling_gb("inference") == 60
+        assert resolve_role_ceiling_gb("inference") is None
 
     def test_an_explicit_environment_can_be_supplied(self, monkeypatch):
         """The resolver takes the mapping as a parameter so a caller can
@@ -115,7 +92,7 @@ class TestTheResolutionLadder:
         one — the same discipline C1 applied to the spawner.
         """
         monkeypatch.setenv(RSS_OVERRIDE_ENV_VAR, "99")
-        assert resolve_role_ceiling_gb("training", environ={}) == 40
+        assert resolve_role_ceiling_gb("training", environ={}) is None
 
     def test_unknown_role_raises(self):
         with pytest.raises(ValueError, match="unknown role"):
@@ -164,27 +141,24 @@ class TestMalformedOverridesRefuse:
 
 
 class TestDeclaredProvenance:
-    def test_every_role_carries_checkable_provenance(self):
-        for ceiling in ROLE_CEILINGS.values():
-            assert ceiling.set_on and ceiling.calibrated_for and ceiling.rationale
-            assert ceiling.derivation in {"measured", "incident", "empirical_unverified"}
+    def test_every_role_distinguishes_absence_and_explicit_zero(self):
+        for role in ("training", "inference", "scoring"):
+            inherited = resolve_role_ceiling(role, environ={})
+            zero = resolve_role_ceiling(role, environ={RSS_OVERRIDE_ENV_VAR: "0"})
+            assert inherited.gib is None and inherited.source == "inherited_os"
+            assert zero.gib == 0 and zero.source == "environment"
 
-    def test_the_stale_inference_derivation_is_marked_not_restated(self):
-        """F-11-3. The recorded arithmetic no longer describes the path it
-        governs, so the honest record is that the value is empirical and
-        unverified — NOT a re-worded version of the same stale sum.
-        """
-        inference = ROLE_CEILINGS["inference"]
-        assert inference.gib == 60
-        assert inference.derivation == "empirical_unverified"
-        assert "325-331" in inference.rationale, (
-            "the retired derivation must still be NAMED, so a future reader "
-            "can tell what was retired and why"
-        )
+    def test_historical_inference_cap_requires_explicit_configuration(self):
+        # The old 60-GiB inference value is retained as a caller declaration,
+        # not an assumption about every host or an assertion about paper runs.
+        environment = {RSS_OVERRIDE_ENV_VAR: "training=40,inference=60,scoring=24"}
+        assert resolve_role_ceiling_gb("inference", environ=environment) == 60
+        assert resolve_role_ceiling_gb("inference", environ={}) is None
 
-    def test_the_incident_pinned_ceiling_says_so(self):
-        assert ROLE_CEILINGS["scoring"].derivation == "incident"
-        assert "2026-04-20" in ROLE_CEILINGS["scoring"].rationale
+    def test_incident_scoring_cap_remains_explicitly_selectable(self):
+        environment = {RSS_OVERRIDE_ENV_VAR: "training=40,inference=60,scoring=24"}
+        assert resolve_role_ceiling_gb("scoring", environ=environment) == 24
+        assert resolve_role_ceiling("scoring", environ=environment).source == "environment"
 
     def test_the_stale_arithmetic_is_gone_from_the_launch_path(self):
         """R-11-11: `sandbox_executor.py` is a CONSUMER. The prose sum that
@@ -206,17 +180,16 @@ class TestDeclaredProvenance:
         payload = calibration_provenance(environ={})
         assert json.loads(json.dumps(payload)) == payload
         assert set(payload["roles"]) == set(ROLE_CEILINGS)
-        assert payload["roles"]["inference"]["gib"] == 60
+        assert payload["roles"]["inference"]["gib"] is None
+        assert payload["roles"]["inference"]["source"] == "inherited_os"
+        assert payload["limit_kind"] == "RLIMIT_AS" and payload["unit"] == "GiB"
         assert payload["override_env"] is None
 
     def test_the_payload_records_the_override_that_was_in_force(self):
         payload = calibration_provenance(environ={RSS_OVERRIDE_ENV_VAR: "8"})
         assert payload["override_env"] == "8"
         assert payload["roles"]["training"]["gib"] == 8
-        assert payload["roles"]["training"]["declared_gib"] == 40, (
-            "the DECLARED value must survive beside the effective one, or a "
-            "lock cannot say what was overridden"
-        )
+        assert payload["roles"]["training"]["source"] == "environment"
 
     def test_the_payload_records_role_specific_effective_values(self):
         raw = "training=0,inference=96,scoring=24"
@@ -311,18 +284,18 @@ class TestTheLockRecordsButDoesNotEnforce:
             str(workspace), _invariants(execution_calibration=calibration_provenance(environ={}))
         )
         payload = json.loads(open(path, encoding="utf-8").read())
-        assert payload["execution_calibration"]["roles"]["training"]["gib"] == 40
-        assert payload["execution_calibration"]["roles"]["inference"]["derivation"] == (
-            "empirical_unverified"
-        )
+        assert payload["execution_calibration"]["roles"]["training"]["gib"] is None
+        assert payload["execution_calibration"]["roles"]["inference"]["source"] == "inherited_os"
 
 
 class TestTheSharedBuilderStampsIt:
-    def test_build_run_invariants_populates_the_calibration(self, tmp_path):
+    def test_build_run_invariants_populates_the_calibration(self, tmp_path, monkeypatch):
         """C9d's lesson applied: stamped at the ONE shared builder, so every
         entry point records what its children ran under.
         """
         from core.run_invariants import build_run_invariants
+
+        monkeypatch.delenv(RSS_OVERRIDE_ENV_VAR, raising=False)
 
         invariants, _ = build_run_invariants(
             resolved_data_scope=[0, 1],
@@ -333,4 +306,54 @@ class TestTheSharedBuilderStampsIt:
             task_composition_fingerprint="synthetic-composition-for-calibration-test",
         )
         assert invariants.execution_calibration is not None
-        assert invariants.execution_calibration["roles"]["scoring"]["gib"] == 24
+        assert invariants.execution_calibration["roles"]["scoring"]["gib"] is None
+        assert invariants.execution_calibration["roles"]["scoring"]["source"] == "inherited_os"
+
+
+def test_selected_role_parser_semantics_are_unchanged():
+    environment = {RSS_OVERRIDE_ENV_VAR: "training=7,inference=-1,scoring=24"}
+    assert resolve_role_ceiling_gb("training", environ=environment) == 7
+    with pytest.raises(MalformedCeilingOverride, match="negative"):
+        resolve_role_ceiling_gb("inference", environ=environment)
+    with pytest.raises(MalformedCeilingOverride, match="negative"):
+        calibration_provenance(environ=environment)
+
+
+def test_historical_calibration_record_remains_readable_and_unmodified(tmp_path):
+    from pathlib import Path
+
+    historical = {
+        "override_env": None,
+        "roles": {
+            "training": {
+                "gib": 40,
+                "declared_gib": 40,
+                "derivation": "measured",
+                "set_on": "2026-04-20",
+            },
+            "inference": {
+                "gib": 60,
+                "declared_gib": 60,
+                "derivation": "empirical_unverified",
+                "set_on": "2026-07-13",
+            },
+            "scoring": {
+                "gib": 24,
+                "declared_gib": 24,
+                "derivation": "incident",
+                "set_on": "2026-04-20",
+            },
+        },
+    }
+    workspace = str(tmp_path / "old-run")
+    path = Path(write_run_invariants(workspace, _invariants(execution_calibration=historical)))
+    original = path.read_bytes()
+    loaded = load_run_invariants(workspace)
+    assert loaded is not None and loaded.execution_calibration == historical
+    assert (
+        ensure_run_invariants(
+            workspace, _invariants(execution_calibration=calibration_provenance(environ={}))
+        )
+        == "validated"
+    )
+    assert path.read_bytes() == original

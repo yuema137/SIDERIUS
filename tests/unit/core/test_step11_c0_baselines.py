@@ -22,12 +22,12 @@ class TestRoleCeilingBaseline:
 
     def test_resolved_role_ceilings(self, monkeypatch):
         monkeypatch.delenv("SIDERIUS_SUBPROCESS_RSS_GB", raising=False)
-        assert _subprocess_rss_gb("training") == 40
-        assert _subprocess_rss_gb("inference") == 60
-        assert _subprocess_rss_gb("scoring") == 24
+        assert _subprocess_rss_gb("training") is None
+        assert _subprocess_rss_gb("inference") is None
+        assert _subprocess_rss_gb("scoring") is None
 
     def test_declared_table_is_exactly_three_roles(self):
-        assert _ROLE_DEFAULT_RSS_GB == {"training": 40, "inference": 60, "scoring": 24}
+        assert _ROLE_DEFAULT_RSS_GB == {"training": None, "inference": None, "scoring": None}
 
     def test_env_override_wins_for_every_role(self, monkeypatch):
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "7")

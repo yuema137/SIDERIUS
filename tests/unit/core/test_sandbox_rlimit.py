@@ -1,11 +1,10 @@
 """
-Unit tests for subprocess host-RAM hardening (Fix 1).
+Subprocess address-space hook and retained failure-attribution tests.
 
 Covers the helpers introduced in ``core/sandbox_executor.py`` for
 docs/optimize_inference_and_scoring.md §3 Fix 1:
 
-  * ``_subprocess_rss_gb(role)`` — role-aware defaults (scoring=24 GiB,
-    training/inference=48 GiB) + env-var override.
+  * ``_subprocess_rss_gb(role)`` — inherited OS limits or explicit env cap.
   * ``_limited_preexec(gb)`` — returns a callable that caps RLIMIT_AS
     in the child; returns ``None`` when disabled.
   * ``_is_oom_failure(e)`` — recognises SIGKILL and Python ``MemoryError``
@@ -109,19 +108,13 @@ class TestSubprocessRssGb:
     @pytest.mark.parametrize(
         "role,expected_gb",
         [
-            pytest.param("scoring", 24, id="scoring_default_24gib"),
-            pytest.param("training", 40, id="training_default_40gib"),
-            pytest.param("inference", 60, id="inference_default_60gib"),
+            pytest.param("scoring", None, id="scoring_inherited_os"),
+            pytest.param("training", None, id="training_inherited_os"),
+            pytest.param("inference", None, id="inference_inherited_os"),
         ],
     )
     def test_role_default_ceiling(self, role, expected_gb, monkeypatch):
-        """Per-role default RSS ceiling, no env override.
-
-        Scoring (CPU-only) keeps the original 24 GiB — this is the codepath the
-        2026-04-20 incident hit, so we don't loosen it. Training remains capped
-        at 40 GiB, while inference gets 60 GiB for full-scope baseline inference.
-        See the VA-vs-RSS calibration note in sandbox_executor.py.
-        """
+        """No local host calibration is injected when the override is absent."""
         monkeypatch.delenv("SIDERIUS_SUBPROCESS_RSS_GB", raising=False)
         assert _subprocess_rss_gb(role) == expected_gb
         assert _ROLE_DEFAULT_RSS_GB[role] == expected_gb
@@ -382,10 +375,13 @@ class TestSandboxPreexecWiring:
         assert "preexec_fn" in kwargs
         assert callable(kwargs["preexec_fn"])
 
+    @pytest.mark.parametrize("override", [None, "0"])
     @patch("core.sandbox_executor._run_observed_subprocess")
-    def test_env_zero_disables_preexec(self, mock_run, sandbox, monkeypatch):
-        """SIDERIUS_SUBPROCESS_RSS_GB=0 → preexec_fn is None."""
-        monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "0")
+    def test_absent_or_zero_adds_no_preexec(self, mock_run, sandbox, monkeypatch, override):
+        if override is None:
+            monkeypatch.delenv("SIDERIUS_SUBPROCESS_RSS_GB", raising=False)
+        else:
+            monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", override)
         mock_run.side_effect = _train_success_side_effect(sandbox)
         sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
@@ -465,3 +461,52 @@ class TestSandboxOomStatus:
         )
         out = sandbox.execute_scoring(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         assert out["status"] == "oom_host_ram"
+
+
+@pytest.mark.parametrize("override", [None, "0"])
+def test_real_child_inherits_os_limits_without_changing_test_parent(override):
+    import json
+    import sys
+
+    resource = pytest.importorskip("resource")
+    before = resource.getrlimit(resource.RLIMIT_AS)
+    # A disposable first child installs a generous synthetic soft limit. Its
+    # grandchildren exercise the actual helper without allocating a workload.
+    code = """
+import json, resource, subprocess, sys
+from core.sandbox_executor import _limited_preexec, _subprocess_rss_gb
+soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+fixture_soft = 512 * 1024**3
+if hard != resource.RLIM_INFINITY:
+    fixture_soft = min(fixture_soft, hard)
+resource.setrlimit(resource.RLIMIT_AS, (fixture_soft, hard))
+expected = resource.getrlimit(resource.RLIMIT_AS)
+observed = {}
+for role in ("training", "inference", "scoring"):
+    hook = _limited_preexec(_subprocess_rss_gb(role))
+    assert hook is None, (role, "unexpected extra cap")
+    child = subprocess.run(
+        [sys.executable, '-I', '-c',
+         'import json,resource;print(json.dumps(resource.getrlimit(resource.RLIMIT_AS)))'],
+        preexec_fn=hook, capture_output=True, text=True, check=True, timeout=10,
+    )
+    observed[role] = json.loads(child.stdout)
+assert all(tuple(value) == expected for value in observed.values())
+print(json.dumps({'expected': expected, 'observed': observed}))
+"""
+    environment = dict(os.environ)
+    if override is None:
+        environment.pop("SIDERIUS_SUBPROCESS_RSS_GB", None)
+    else:
+        environment["SIDERIUS_SUBPROCESS_RSS_GB"] = override
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", code],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    receipt = json.loads(result.stdout)
+    assert set(receipt["observed"]) == {"training", "inference", "scoring"}
+    assert resource.getrlimit(resource.RLIMIT_AS) == before

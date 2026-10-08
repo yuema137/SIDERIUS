@@ -19,7 +19,7 @@ what a task means — task semantics live in
 | `resume.py` | `restore_prior_state(workspace, current_iter, seed_paths, …) -> RestoredState` · `union_key_findings` (THE findings-union authority) · the digest projections (`project_knowledge`, `project_prediction_memory`, `project_vocab_link_confirmations`, …) |
 | `chain_state.py` | `ChainState` — the chain's mutable cross-iteration state; `chain_state_field_names()` feeds the carriers' deny-lists |
 | `sandbox_executor.py` | `TidmadSandbox` / `StubSandbox` — the GPU child launch surface: `execute_training`, `execute_inference`, `evaluate_metric`, `execute_scoring`; every child goes through one observed-subprocess seam |
-| `execution_calibration.py` | `ROLE_CEILINGS` (training 40 · inference 60 · scoring 24 GiB, with derivation provenance) · `resolve_role_ceiling_gb(role)` (two layers: `SIDERIUS_SUBPROCESS_RSS_GB` caller override, else the declared default; the override is either one global integer or one complete role mapping; `0` disables the selected role; malformed **refuses**) · `calibration_provenance()` |
+| `execution_calibration.py` | `resolve_role_ceiling(role)` (typed role/value/source) · `resolve_role_ceiling_gb(role)` (compatibility projection: `None` inherits existing OS limits; explicit `0` adds no cap; positive GiB retains the child RLIMIT_AS setter) · `SIDERIUS_SUBPROCESS_RSS_GB` accepts one global integer or complete role mapping; malformed **refuses** · `calibration_provenance()` records configured policy, not measured OS limits |
 | `hardware_context.py` | `get_or_create(workspace, run_name)` — discovery + the per-run `{run_name}_hardware.json` manifest; `inspect_gpu_runtime()` — fresh backend/property facts without persistence, under the [accelerator contract](accelerator-runtime.md) |
 | `subprocess_env.py` | the one environment a child needs for generated plugin roots and optional captured task-code transport |
 | [`local_code/`](local_code/README.md) | finite captured package imports, whole-set identity, verified child transport and named integrity refusal |
@@ -70,10 +70,14 @@ workflow · calibration observations.
 
 - A new host: add `server_configs/{hostname}.py` (unknown hosts fall back with
   a one-time warning — only time forecasts are affected).
-- Host-RAM posture: `SIDERIUS_SUBPROCESS_RSS_GB`, an operator decision. Use
+- Additional address-space cap: `SIDERIUS_SUBPROCESS_RSS_GB`, an operator
+  decision. Its legacy name means RLIMIT_AS, not physical RAM/RSS. Omit it to
+  inherit OS limits without an additional cap. Use
   one non-negative integer to set every role, or one complete mapping such as
   `training=0,inference=96,scoring=24` when a host needs different ceilings.
-  A mapping must name all three roles exactly once; `0` disables that role.
+  A mapping must name all three roles exactly once; `0` adds no cap for that
+  role and does not remove inherited OS restrictions. Numeric validation applies
+  to the selected role; provenance resolves and checks all three.
 - There is deliberately **one caller-owned override layer**, not a hierarchy
   of global and per-role variables. The role mapping is a value carried by
   that existing layer; do not add another precedence level.
@@ -98,10 +102,10 @@ children. `StubSandbox` is the pseudo-training stub — no GPU, canned results.
 ## Files normally edited
 
 `server_configs/` (new host); `runtime_control/` policy modules under their own
-design docs. `execution_calibration.py` values only with re-verified evidence —
-the inference 60 GiB ceiling is marked `empirical_unverified`, and **lowering it
-without re-verifying full-scope baseline inference is a regression** (CLAUDE.md
-subsystem invariant).
+design docs. Additional address-space limits belong in caller environment
+configuration, not machine-specific defaults in `execution_calibration.py`.
+Historical experiment limits require verified provenance in exp; absence of an
+archived environment does not prove that the old fallback value was used.
 
 ## Files normally NOT edited
 
