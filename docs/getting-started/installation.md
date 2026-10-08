@@ -196,7 +196,7 @@ PY
     --run_name reviewed_run \
     --task_composition /path/to/task/composition.yaml \
     --data_dir /path/to/task/data \
-    --llm_config configs/llm/openai_tiered_pro.json \
+    --llm_config configs/llm/openai_smoke_luna.json \
     --no-ml_lit_review_enabled \
     --healthgate_mode blocking \
     --result_authority diagnostic \

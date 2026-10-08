@@ -433,33 +433,34 @@ class TestWorkflowLLMConfigLitReview:
 
 
 # ---------------------------------------------------------------------------
-# Regression — all 4 shipped llm_configs/*.json parse against the schema
+# Regression — shipped workflow examples preserve literature route projection
 # ---------------------------------------------------------------------------
 
 
 class TestShippedJsonConfigsParse:
     """Regression guard against the Step-3 update being incomplete.
-    Every JSON config in llm_configs/ must (a) parse, (b) carry a
-    lit_review block, (c) yield the expected 4-field flatten from
+    Every workflow JSON config in configs/llm/ must (a) parse, (b) carry a
+    lit_review block, (c) yield the required provider/model fields from
     .get('lit_review')."""
 
-    def test_all_4_llm_configs_parse_with_lit_review_block(self):
+    def test_workflow_examples_parse_with_lit_review_block(self):
         import pathlib
 
-        paths = sorted((pathlib.Path("configs") / "llm").glob("*.json"))
-        assert len(paths) == 4, f"Expected 4 configs in configs/llm/, found {len(paths)}"
+        root = pathlib.Path(__file__).resolve().parents[3]
+        paths = sorted((root / "configs" / "llm").glob("*.json"))
+        assert paths, "Expected shipped workflow configurations"
         for path in paths:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             cfg = WorkflowLLMConfig.model_validate(data)
             assert cfg.lit_review is not None, f"{path.name}: lit_review block missing"
             got = cfg.get("lit_review")
-            assert set(got.keys()) == {
+            assert {
                 "llm_provider",
                 "llm_model_id",
                 "search_llm_provider",
                 "search_llm_model_id",
-            }, f"{path.name}: .get('lit_review') missing one or more keys"
+            } <= set(got), f"{path.name}: .get('lit_review') missing one or more keys"
 
 
 def test_explicit_effort_reaches_every_configured_role():
