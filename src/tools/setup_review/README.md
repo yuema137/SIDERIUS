@@ -16,9 +16,12 @@ chain, or a resumed run. Those routes remain available through their own launche
 | Direct | Prepare your task and experiment, then use the ordinary launch command. | Normal framework validation applies; this optional review is not required. |
 | Reviewed | Save a request, check the task and environment, review or explicitly skip, then use the reviewed launcher. | The launcher compares the saved setup with current selected inputs and checks how review findings were handled. |
 
-Professional users can prepare either route themselves. Assistant users can ask
-their agent to read the optional
+Both Professional and Assistant users are encouraged to work with a coding
+agent. In Professional mode you lead the configuration decisions and direct the
+agent; in Assistant mode the agent guides setup using the
 [setup-review skill](../../../docs/agent-reference/siderius-setup-review/SKILL.md).
+Either can choose direct or reviewed launch; Assistant does not make review
+mandatory, and Professional does not mean writing everything by hand.
 This is a repository instruction file; reading it does not require a global
 skill installation or make review compulsory.
 The choice of route does not change your scientific task or select a historical

@@ -21,7 +21,48 @@ combining reusable research capabilities, multiple layers of scientific
 evaluation, and exploration within compute budgets. Experiments on TIDMAD,
 TESS, Project8, and LIGO evaluate both model performance and scientific validity.
 
-## Try a scientific task with siderius-exp
+## Start with your coding agent
+
+**We recommend using SIDERIUS together with your coding agent.** It can read the
+repository, help turn your research question into a task package and experiment,
+and prepare the files and launch command. You decide the scientific goal, data
+split, models and budgets. You can write everything by hand, but that is not our
+recommended starting path.
+
+Choose how you want to work with the agent:
+
+| Way of working | Who leads the setup? | Where to start |
+| --- | --- | --- |
+| **Assistant — recommended for a first task** | Your agent follows the repository's setup guidance, asks for missing decisions, prepares the files and explains what to check before running. | Ask it to read the [setup skill](docs/agent-reference/siderius-setup-review/SKILL.md). |
+| **Professional** | You direct the task, workflow and experiment choices, working closely with your agent to inspect the code and implement your setup. | Give it your plan and the [task contract](docs/reference/task-composition.md). |
+
+These are ways of collaborating, not software mode switches. Either can use the
+same optional [configuration review and HTML report](src/tools/setup_review/README.md).
+You can also launch directly without that review. Choosing a fixed workflow or
+an external orchestrator is a separate [execution choice](src/tools/orchestration_setup/README.md).
+
+Clone this repository and open it in your coding agent. For a first task, paste:
+
+```text
+Help me set up a SIDERIUS experiment using the Assistant approach.
+Read AGENTS.md and docs/agent-reference/siderius-setup-review/SKILL.md.
+My task is [what to predict], and my data is at [local path].
+Ask me for missing scientific choices, environment details and budgets.
+Create the task and experiment in a new external project; keep this repo unchanged.
+Start with the Luna test configuration for a small process check.
+Show me the saved files, effective settings, exact launch command and where
+results will appear before starting any paid API or GPU work.
+```
+
+The skill is a file your agent reads; no global skill installation is required.
+The [getting-started guide](docs/getting-started/README.md) links installation
+and the next setup steps. Your coding agent's own model and the models called
+inside a SIDERIUS experiment are separate choices. Use the
+[Luna test configuration](configs/llm/README.md) for the latter during a first
+flow check; for production research, start from the paper's LLM configuration
+or supply your own supported model choices.
+
+## Try an existing task with siderius-exp
 
 This repository provides the framework. Its companion,
 [`siderius-exp`](https://github.com/yuema137/siderius-exp), provides scientific
@@ -45,17 +86,9 @@ show how to inspect the saved files and adjust iterations, data fractions,
 splits, and time/VRAM budgets before running again. Real runs use GPU resources
 and incur API charges.
 
-Use the [Luna test configuration](configs/llm/README.md) for an inexpensive
-first flow check. For production research, we recommend starting with the
-paper's LLM configuration; you can also choose your own supported models.
-The configuration guide explains these choices and the separate historical
-reproduction mode.
-
 ## How the pieces fit together
 
 [![Paper Figure 1: SIDERIUS infrastructure and typed capability contracts](docs/assets/paper/figure1.svg)](docs/assets/paper/figure1.svg)
-
-[Open Figure 1 to zoom](docs/assets/paper/figure1.svg) · [High-resolution PNG](docs/assets/paper/figure1.png)
 
 **Figure 1 — Infrastructure.** A human scientist, a fixed workflow, or an LLM
 orchestrator can call the same scientific capabilities through typed contracts.
@@ -64,8 +97,6 @@ history. Each capability owns its reasoning and tools, including executable
 Data Analysis.
 
 [![Paper Figure 2: task specification and multilayer evaluation](docs/assets/paper/figure2.svg)](docs/assets/paper/figure2.svg)
-
-[Open Figure 2 to zoom](docs/assets/paper/figure2.svg) · [High-resolution PNG](docs/assets/paper/figure2.png)
 
 **Figure 2 — Evaluation.** The task package separates training objectives,
 validation monitoring, scientific ranking, and supporting evidence.

@@ -128,9 +128,11 @@ version pins and run provenance in the experiment and resulting records.
 
 ## Professional and Assistant routes
 
-Professional users may write their native caller directly; Assistant users may ask
-an agent to read the installed toolkit and help author it. Neither route requires
-a review receipt. The [optional setup review](../setup_review/README.md) can inspect
+Both routes recommend a coding agent. Professional users lead caller design and
+direct the agent's implementation; Assistant users ask the agent to read the
+installed toolkit and guide them through authoring the caller. Manual authoring
+is possible, but is not the recommended starting route. Neither requires a
+review receipt. The [optional setup review](../setup_review/README.md) can inspect
 supported standard-workflow snapshots, but it does not review arbitrary Python
 caller control flow or grant a caller-wide launch approval. Keep the caller and
 run declaration explicit, and inspect the actual run outputs and status.
