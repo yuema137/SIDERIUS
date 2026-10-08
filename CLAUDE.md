@@ -6,7 +6,7 @@ This rule applies at every directory depth, including source, tests, examples,
 deployments and archived documentation. Classify Markdown by filename,
 case-insensitively:
 
-- `README.md` files and Markdown files whose names contain `tutorial` are
+- Only files named `README.md` (case-insensitively) are
   **human-facing**. Assume a technically literate reader who is new to this
   project. Lead with purpose and prerequisites, then give ordered steps,
   concrete commands, expected outputs and effects, and where to change inputs.
@@ -18,6 +18,16 @@ case-insensitively:
   Use the same jargon and identifiers as the landed code. Be detailed and
   complete enough that an agent can implement or verify the contract without
   reconstructing missing decisions. Agent-facing does not mean opaque prose.
+
+Tutorial notebooks (`.ipynb`) remain learner-facing. A Markdown filename
+containing `tutorial` does not change its audience. Runtime prompt, skill and
+advice Markdown also carries executable input meaning: changing its wording
+requires the corresponding behavior and identity review, not only a prose review.
+
+Keep navigation hierarchical: a repository README introduces its major areas;
+each area's README introduces the next level and links to the owning technical
+reference. Keep detailed contracts in non-README documents. Do not duplicate a
+rule in several indexes or make a parent README enumerate every leaf document.
 
 Every new or modified human-facing page must receive a readability and logic
 review using the non-dialect parts of the

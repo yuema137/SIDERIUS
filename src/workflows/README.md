@@ -1,173 +1,21 @@
-# `workflows/` — deterministic graph traversals + task composition
+# Workflows and task composition
 
-**Start here if you need to run or extend a composed workflow.** **Authority**:
-the source. This README is a map; where they disagree, the
-module is right. Template:
-[`docs/agent-reference/MODULE_README_TEMPLATE.md`](../../docs/agent-reference/MODULE_README_TEMPLATE.md).
+This package connects the research steps in a fixed order: interpret earlier
+results, gather selected evidence, propose, implement, validate and tune a model.
+It also resolves the task manifest so every step uses the same declarations.
+The caller chooses settings and order; individual nodes own their reasoning.
 
-## Purpose
+## Find the right part
 
-The pre-designed, deterministic paths through the node graph, and the
-task-composition manifest that binds a whole run to one task's declarations.
-A workflow is a script with a fixed sequence — *"a workflow, not an
-orchestrator"* — never an agent choosing its own tools. This package contains
-no shell entrypoints: the chain launchers live in
-  [`scripts/launch/`](../../scripts/launch/README.md), which call
-into here one iteration at a time.
+| Need | Start here |
+| --- | --- |
+| Run a chain | [Launch scripts](../../scripts/launch/README.md) |
+| Build another workflow | [Custom workflow reference](../../docs/guides/custom-workflow.md) |
+| Declare a task | [Task composition](../../docs/reference/task-composition.md) |
+| Inspect startup settings | [Launch resolution](../../docs/agent-reference/standard-launch-resolution.md) |
 
-## Public interface
+## Technical detail
 
-| file | surface |
-|---|---|
-| `model_exploration.py` | `run_workflow(*, launch, workspace, run_name, …) -> list[HyperparamTuningOutput]` — THE workflow: per iteration interpret → workflow-selected scientific evidence stage → propose → implement → validate → tune. Also a module CLI (`python src/workflows/model_exploration.py --help`) accepting `--task_composition` |
-| `scientific_evidence_stage.py` | Workflow-owned optional traversal of the independent Data Analysis and Literature Review capabilities in either `analysis_then_literature` or `literature_then_analysis` order. Nodes never call each other. |
-| `task_composition.py` | `compose_run_task_bindings(manifest_path) -> RunTaskComposition` (resolve the manifest) · `bind_run_task_composition(composition, *, physical_data_root)` (the run-scoped binding contextmanager) · `verify_composition_is_bound` · `active_composition_fingerprint` / `active_task_manifest_path` |
-| `run_config.py` | `WorkflowLaunchConfig` — the pure-transit launch config |
-| `llm_config.py` | `WorkflowLLMConfig` — per-node LLM routing, loaded from a `--llm_config` JSON |
-| `run_bindings.py` | `WorkflowRunBindings` — run-scoped authorities settled at startup; refuses mutable chain state by construction |
-| `strategy_modes.py` | the `Literal` vocabularies for exploration/strategy/formal-round modes |
-
-## Inputs
-
-`workspace` + `run_name`; a `WorkflowLaunchConfig`; a required composition
-manifest (with a **mandatory** `--data_dir`); LLM routing
-JSON; a `RestoredState` when resuming; pseudo-mode factories for $0 smokes.
-
-## Outputs
-
-A list of `HyperparamTuningOutput`; the workspace record tree
-(`{workspace}/{run_name}/…` — layout in
-[workspaces and resume](../../docs/guides/workspaces-and-resume.md)); the run
-invariants lock and effective health config (written via `core` /
-`execute_tools.health_checks` authorities at startup).
-
-## Owned semantics
-
-- **The fixed iteration path** and its retry loop (proposal attempts, tuner
-  invocation, record persistence).
-- **Scientific-evidence composition**: `WorkflowLaunchConfig.scientific_evidence_order`
-  selects which independent capability runs first. Typed target-owned edges
-  carry bounded evidence to the second capability, and Proposal receives
-  Literature Review and Data Analysis through distinct fields. The order is
-  canonical run identity and changing it refuses resume into the same workspace.
-- **Data Analysis treatment transport**: `data_analysis_enabled=None` retains the
-  task composition's legacy behavior. Explicit `True` requires its existing
-  analysis binding; explicit `False` suppresses both AnalysisBrief generation
-  and the analysis stage. The launch value is canonical resume identity and
-  does not create asset authority or a second experiment treatment schema.
-- **Manifest resolution**: the typed composition schema owns section names and
-  requiredness; an unknown key is *refused, not ignored*; `file:` plugin refs
-  resolve against the manifest's own directory and their content sha joins the
-  semantic fingerprint.
-- **Run-scoped binding**: a composed run binds data path, profile, metric,
-  secondaries, deliverable naming, task config for the whole run; an
-  explicitly composed run **never falls back to TIDMAD**.
-- Plugin registration and generated sources are rooted in the caller-owned
-  workspace (`plugins/{run_name}/` and its generated-library paths); the
-  workflow does not make the checkout a hidden task workspace.
-
-## Non-owned semantics
-
-- Node internals → each node's `.md` under [`nodes/`](../nodes).
-- Subprocess execution, resource ceilings → `core/sandbox_executor.py`
-  ([execution mechanism](../../docs/agent-reference/mechanisms/execution.md)).
-- Health policy and gate actions →
-  [`execute_tools/health_checks/`](../execute_tools/health_checks/README.md).
-- Lock and resume mechanics → `core/run_invariants.py`, `core/resume.py`
-  ([persistence and resume](../../docs/agent-reference/mechanisms/persistence-and-resume.md)).
-- Metric direction → `execute_tools/metric_order.py` (one authority).
-
-## Extension points
-
-- **A new task never edits this package.** It authors a manifest + out-of-tree
-  plugins — see [define a task](../../docs/guides/define-a-task.md) and the
-  [composition mechanism](../../docs/agent-reference/mechanisms/composition.md).
-- Adding a *manifest section* is a framework change to `task_composition.py`
-  with its resolver, fingerprint entry and censuses — not routine.
-
-## State and filesystem effects
-
-Creates `run_dir = {workspace}/{run_name}` and the per-iteration tree; snapshots
-the resolved task declaration/effective configuration into the run dir (only if absent); writes the
-workflow summary; calls `ensure_run_invariants` (chain-level lock). Sets
-`SIDERIUS_CHAIN_WORKSPACE`; mirrors validated plugins into workspace dirs. The
-generated library is caller/workspace-owned and must be explicitly bound by
-low-level consumers; it is not an implicit inter-run checkout channel.
-
-The direct `run_one_iteration.py` entry (script or module CLI) binds its parsed
-workspace before importing the registry-bearing resume/workflow owners in a
-fresh process. That excludes implicit legacy checkout model discovery while
-preserving selected-workspace plugins and explicit plugin-directory overrides.
-Help and missing required arguments return before those imports. Direct
-low-level calls and registries already imported in the same process are outside
-this startup guarantee. Even configuration inspection can import plugins and
-emit their stdout; it is not a sandbox. See the
-[one-iteration entry contract](../../docs/reference/entrypoints.md#run_one_iterationpy--one-iteration).
-
-## Reading launch settings without starting the workflow
-
-Configuration tools can import `workflows.literature_config` to resolve a
-literature configuration path and hash its exact bytes. Absolute paths are
-used directly; relative paths refer to the SIDERIUS checkout, not your current
-directory. An installed package without a checkout requires an absolute path.
-Calling `lit_review_config_sha256(..., enabled=False)` does not read or hash
-that file. Resolving an omitted enable flag may still read YAML to determine
-whether literature review is enabled.
-
-`workflows.runtime_settings.resolve_watchdog_policy(args)` resolves the standard
-CLI's watchdog settings (the controls that stop work when it exceeds its time
-limit). It uses the same hardware/profile authority as the launcher, writes the
-resolved values back to `args`, and caches their provenance there. Pass a fresh
-parsed namespace to inspect changed settings; reusing one returns its cached
-result. An incomplete required-profile declaration or unenforceable phase limit
-still refuses the launch.
-
-Importing these modules does not load nodes or the workflow runner. Calling
-their helpers may read configuration files and inspect hardware. These helpers
-are configuration building blocks, not a complete setup review or a sandbox
-for task plugins. They add no review requirement to existing launch commands.
-
-## Failure modes
-
-| refusal | meaning |
-|---|---|
-| `TaskCompositionError` (unknown key, double ref, missing file) | the manifest is wrong — misspelled sections never silently resolve a default |
-| `CompositionDataRootMissing` | composed run without `--data_dir`, before any LLM/GPU work |
-| `CompositionNotBoundError` | a code path reached execution without the run-scoped binding — a wiring defect, not an operator error |
-| `RunInvariantsViolation` at startup | workspace lock mismatch — use a new workspace |
-| literature review enabled without an explicit config | refused by name (`require_lit_review_config_when_enabled`); a task- or experiment-owned config is accepted |
-
-## Files normally edited
-
-Adding a launch-config field (`run_config.py` + the launcher plumbing); LLM
-routing shapes (`llm_config.py`). Both are transit layers — validation lives
-with the consumer.
-
-## Files normally NOT edited
-
-`model_exploration.py`'s orchestration body: the responsibility-decomposition
-rule (CLAUDE.md) forbids adding new branching to it — extract a typed boundary
-instead. `task_composition.py`'s fail-closed resolvers and fingerprint: guarded;
-weakening a refusal into a fallback is the defect class the guards exist for.
-
-## Minimal example
-
-```bash
-# The module CLI is an effectful workflow entry: all of these required inputs
-# are supplied explicitly. For a credential-free view of the complete chain,
-# use the maintained launcher dry-run in the root README.
-.venv/bin/python src/workflows/model_exploration.py \
-    --task_composition configs/task_composition/quickstart.yaml \
-    --data_dir /tmp/quickstart-data --workspace /tmp/ws --run_name demo_v1 \
-    --models punet --source_run_name seed --max_iterations 1
-```
-
-For real runs use the chain launcher
-([entrypoints](../../docs/reference/entrypoints.md)); start with `--dry-run`.
-
-## Related tests
-
-`tests/unit/workflows/` (incl. the run-state/carrier oracles) and
-`tests/integration/workflows/` (pseudo-mode full-loop). The composition
-fail-closed behaviour and the findings-union single-authority rule carry
-dedicated structural guards.
+The [workflows and task composition contract](workflow-contract.md) records interfaces,
+inputs, outputs, state changes, refusal behavior and related tests. Cross-package
+rules remain with the mechanism references it links.

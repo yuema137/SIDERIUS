@@ -1,146 +1,117 @@
 # Evaluation metrics
 
-**Semantic owners**: `execute_tools/evaluation_metric.py`,
-`execute_tools/metric_order.py`
-**Status**: ✅ Current
+Semantic owners: `src/execute_tools/evaluation_metric.py` and
+`src/execute_tools/metric_order.py`. Composition ownership:
+`src/workflows/task_composition.py::_compose_metric` and
+`_compose_scoreability_contract_types`.
 
----
+## Scope
 
-## Purpose
+A metric evaluates a declared scientific result and supplies the scalar used
+for ranking. Training loss is a separate lifecycle role. Metric identity is
+opaque: a name such as `log_loss` does not make a metric a training objective.
+Health checks are separate validity evidence, not metric arithmetic.
 
-Own what "better" means: the metric declaration, the one interpretation of
-direction, the executable pre-arithmetic scoreability check, and the boundary
-between selection-driving and observational quantities.
+## Declaration and direction
 
-## Non-responsibilities
+`MetricSpec` is frozen and forbids extra fields. It requires `id`, `direction`
+(`higher` or `lower`), `aggregation`, and an executable `scoreability` contract.
+Optional transform parameters and reference identifiers retain their declared
+values. The composer validates the implementation against the declaration;
+a plugin cannot silently replace the declared metric identity.
 
-- Not the training objective. Losses are a different lifecycle role — and the
-  boundary is **typed, not lexical**: `MetricSpec.id` is an *opaque identity*, so
-  `log_loss` is as declarable as `accuracy`.
-- Not aggregation policy across runs.
-- Not health/validity. A metric refusal is not a health verdict.
+`MetricOrder` owns interpretation of metric direction. Ranking, best/worst
+sentinels and directional prompt language use it instead of guessing from a
+metric's name or sign. Same-loss `final_loss` comparisons are a different
+operation and do not become scientific metric ranking.
 
-## `MetricSpec`
+## Scoreability and extension
 
-Frozen, `extra="forbid"`.
+`ScoreabilityContract` is a frozen Pydantic abstract model. Its
+`check(deliverables: Mapping[int, str]) -> ScoreabilityVerdict` returns named
+failures instead of incidental filesystem exceptions. `scoreable` is derived
+from an empty failure tuple.
 
-| field | required | notes |
-|---|:---:|---|
-| `id` | ✅ | opaque identity, validated as a metric identifier |
-| `direction` | ✅ | `Literal["higher", "lower"]` — explicit, never inferred |
-| `aggregation` | ✅ | |
-| `scoreability` | ✅ | a `ScoreabilityContract` (`SerializeAsAny`) |
-| `transform`, `transform_params`, `references` | — | default `None` / `{}` / `()` |
+The framework supplies `PresenceScoreabilityContract` under
+`deliverable_presence`: at least one artifact must be named and every named
+path must be a file. This does not validate scientific content. Other acceptance
+rules belong to the task. A metric section's `scoreability_contracts` mapping
+resolves each contract id to a `ScoreabilityContract` subclass through a
+`file:` or `module:` reference. `metric_spec_from_declaration` uses that mapping
+to reconstruct the executable contract. Unknown ids and invalid subclasses
+refuse at composition. Primary and secondary metric sections use this same
+extension boundary.
 
-There is **no `higher_is_better` boolean anywhere in the repository.**
+Selected scoreability plugin bindings participate in the composition fingerprint;
+file-backed implementations contribute their captured content identity. Changing
+which contract a metric uses is a semantic change, including exchanging
+implementations between primary and secondary roles. The
+[manifest reference](../../reference/task-composition.md) owns the declaration
+format and fingerprint details.
 
-## `MetricOrder` — the one direction authority
+## Production ordering and failure behavior
 
-All ordering decisions ask `MetricOrder`; it is the only thing that reads
-`spec.direction`. Even prose shown to the agents ("higher is better", "best so
-far") is rendered via `direction_words()` rather than written by hand.
+For deliverable-based metrics, `EvaluationMetric.evaluate` calls the scoreability
+contract first. A refusal returns `NotScoreableResult`; `_compute` is not called.
+A success calls the task metric's arithmetic and creates `MetricResult`.
+The composed scoring child decodes the task payload with `TaskDataPath`, then
+passes `evaluation_payload`, `task_scope` and `data_dir` to the metric.
+`TaskEvaluationPayload` can explicitly name multiple artifacts for scoreability.
+There is no mandatory route through the legacy `score_vector` helper.
 
-A second direction field, or a second interpreter, is the defect this design
-exists to prevent. A metric that is negative-valued *and* higher-is-better —
-TIDMAD's — breaks every sign-based heuristic, which is why none exists.
+The tuner records a scoreability refusal as `error_scoring` with
+`failure_type="not_scoreable"` and `metric_refusal`. Successful scoring reaches
+the shared Health boundary; an earlier scoring failure does not establish a
+Health pass. The [Health mechanism](health-gates.md) owns enablement,
+applicability and candidate eligibility.
 
-The same-loss `final_loss` rank deliberately does **not** ask `MetricOrder`, and
-is pinned not to move.
-
-## Scoreability — refusal before arithmetic
-
-```python
-class ScoreabilityContract(BaseModel, ABC):
-    contract_id: str
-    def check(self, deliverables: Mapping[int, str]) -> ScoreabilityVerdict: ...
-```
-
-Abstract, frozen, `extra="forbid"`. The check must be **total** — it may never let
-a filesystem or HDF5 error escape. `ScoreabilityVerdict.scoreable` is *derived*:
-an empty `failures` tuple is the only way to be scoreable.
-
-A refusal produces `NotScoreableResult` (frozen, `extra="forbid"`, carrying
-`metric_id`, `direction`, `verdict`; a model validator refuses a *scoreable*
-verdict — "a scoreable verdict must yield a `MetricResult`"). Downstream that
-becomes an `error_scoring` record with `failure_type="not_scoreable"` and a
-`metric_refusal`.
-
-Built-ins: `PresenceScoreabilityContract`, `TidmadScoreabilityContract`.
-
-## Order of operations in production scoring
-
-Load-bearing, in both the in-process route and the scoring subprocess:
-
-```
-DataScope validation
-  → ScoreabilityContract.check          (structured NotScoreableResult on refusal)
-  → scoring_utils.score_vector          (pure arithmetic, untouched 2-tuple)
-```
-
-Never re-inline `score_vector` at a call site; never move the contract after the
-arithmetic.
+A separate `CandidateEvaluationMetric` supports declared candidate execution
+rather than persisted-deliverable scoring. Its executor, request/result types,
+transport and failure contracts are owned by
+[candidate evaluation](../../reference/candidate-evaluation-execution.md).
+Do not apply the deliverable `_compute` calling convention to that adapter.
 
 ## Primary versus secondary
 
-**Secondaries are observational.** The rule is stated on the carrier itself:
-*"nothing in this tuple may ever become an operand of an ordering expression"*.
+Primary metric direction determines scientific ordering. Secondary metrics
+are observational and cannot replace the primary ranking scalar. They are
+evaluated only after primary scoring succeeds. A secondary refusal or ordinary
+computation failure is recorded as diagnostic unavailability; scope violations
+and task-code integrity failures retain their fatal behavior.
 
-Enforcement is structural, not conventional:
+A task with no secondary declarations has no secondary evidence to project.
+No caller should infer a replacement primary from the order or availability of
+secondary results. `evaluate_declared_secondaries` owns common evaluation, while
+the scoring child and tuner own transport into persisted records.
 
-- `metric_order.py`, `persisted_ranking.py` and `per_file_best.py` contain **zero**
-  occurrences of `secondary`;
-- an AST census over the lifecycle keeps secondaries out of ordering expressions;
-- proposer consumption is frozen off
-  (`agent/schemas/proposer_evidence.py:92` — `NO_RAW_SECONDARY_CONSUMPTION`).
+## Persisted records and replay
 
-Evaluation happens only **after** a successful primary result, in
-`_evaluate_secondary_metrics`. A secondary refusal leaves the attempt successful.
+`metric_spec_from_persisted_record` reconstructs data needed to inspect recorded
+identity without implicitly importing external task code. Unknown external
+contracts become `PersistedScoreabilityContract`: their fields survive, but
+calling `check` raises a runtime refusal. Active scoring requires explicit task
+composition and the real executable subclass. Readability of a historical
+record is not permission to execute its declared contract.
 
-**The catch order is load-bearing**: `ScopeViolationError` subclasses `ValueError`,
-so it is caught **first and re-raised** to the outer handler. An ordinary crash in
-a secondary is diagnostic provenance that projects `unavailable` — never a fourth
-scientific state.
+Historical names such as `denoising_score`, `file_vector` and
+`TIDMAD_METRIC_ID` remain compatibility vocabulary. They do not select scientific
+arithmetic or task data. Scientific TIDMAD implementations belong to siderius-exp.
 
-A run declaring no secondaries writes **no** secondary record key, **no** `_stats`
-key and renders zero bytes.
+## Validation owners
 
-## Fail-closed behaviour
+- `tests/unit/workflows/test_metric_scoreability_extension.py`: task-owned
+  contract binding and metric extension.
+- `tests/unit/workflows/test_metric_scoreability_identity.py`: implementation
+  changes, primary/secondary selection and resume identity.
+- `tests/unit/workflows/test_external_metric_resume.py`: external metric
+  declarations survive record reading and resume boundaries.
+- `tests/unit/execute_tools/`: metric arithmetic, ordering and refusal cases.
 
-| condition | result |
-|---|---|
-| implementation is not an `EvaluationMetric` | composition refused |
-| implementation rewrites the declared `spec.id` | composition refused |
-| duplicate secondary id / collision with primary | composition refused |
-| deliverable not scoreable | `NotScoreableError` → `error_scoring` record |
-| a score-bearing tuner output carries no `MetricSpec` | interpretation input **fails closed** — a legacy output is a named refusal, never a re-derivation |
-
-## Invariants
-
-- `TIDMAD_METRIC_ID` and the direction vocabulary are declared **once**, in the
-  metric module, and guarded.
-- The frozen TIDMAD score formula is byte-identical and is never reweighted,
-  clipped, or renormalised. New metrics plug in beside it.
-- Record field names `denoising_score` / `file_vector` / `score_table` are frozen;
-  `metric_result` / `metric_refusal` are additive.
-
-## Source map
-
-| concern | location |
-|---|---|
-| `MetricDirection` | `execute_tools/evaluation_metric.py:116` |
-| `ScoreabilityContract` | `:198-227` |
-| built-in contracts | `:230-260+` |
-| `MetricSpec` | `:370-402` |
-| `MetricResult` | `:405-430` |
-| `NotScoreableResult` | `:433-458` |
-| `EvaluationMetric` ABC | `:495` |
-| `MetricOrder` | `execute_tools/metric_order.py:59-104` |
-| `direction_words()` | `:138-147` |
-| secondary evaluation | `nodes/ml_hyperparameter_tune_agent/execution.py:755-790`, called `:1030-1043` |
-| record transport | `nodes/ml_hyperparameter_tune_agent/records.py:1000-1002, 1163-1165` |
-| observational rule | `workflows/task_composition.py:246-249` |
+These are test locations, not a claim that a scientific run or the whole suite
+was executed for a documentation change.
 
 ## Related
 
-- [Objectives and metrics, for humans](../../concepts/objectives-and-metrics.md)
-- [Composition](composition.md) · [Plugins](plugins.md)
+[Metric extension](../../guides/bring-your-own-metric.md),
+[composition](composition.md), [plugins](plugins.md), and
+[objectives and metrics](../../concepts/objectives-and-metrics.md).

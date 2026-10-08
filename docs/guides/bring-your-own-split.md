@@ -1,9 +1,5 @@
 # Bring your own train/test split
 
-**Audience**: a collaborator whose task needs its own notion of "what trains"
-and "what evaluates" — different files, different windows, task-owned
-selection logic — without editing framework source.
-
 This is the third guide in the bring-your-own family
 ([metric](bring-your-own-metric.md) · [health
 checks](bring-your-own-health-checks.md)). It was deliberately written after
@@ -60,14 +56,15 @@ within one scope and one split implementation. If you change either,
 expect the old workspace to refuse its resume — that refusal is the
 comparability discipline working, and there is no bypass flag.
 
-## Fail-closed behaviors you will meet (verbatim from the landed source)
+## Fail-closed boundaries
 
 - A **partial scope** admits only `snapshot` sampling: an operator config
   requesting anything else errors at startup, and an LLM-planned strategy is
   normalized with recorded provenance (`docs/design/enable_partial_file_list.md`).
-- Scope membership is validated **at the sandbox boundary before all file
-  I/O** — training, inference, and scoring; a violation terminates the run
-  and is not retryable.
+- The legacy partition SampleSet route validates supplied membership with
+  `validate_sample_set` at sandbox execution boundaries. Opaque task-owned
+  scopes instead use the task's construction/materialization contract and
+  digest-verified transport; they are not parsed as SampleSets.
 - `health_gate_files` must be a subset of the resolved scope, validated at
   startup.
 - A scope artifact whose sha256 does not match its transport digest is

@@ -1,7 +1,5 @@
 # Persistence and records
 
-**Audience**: anyone reading a run directory, or wondering whether the
-numbers in it can be trusted after a crash, a rerun, or a resume.
 **Answers**: which copy of the history is true, what is append-only versus
 derived, and what the integrity machinery refuses.
 
@@ -71,7 +69,7 @@ The rules, frozen by operator ruling #258:
 
 Verification has **one definition**: `verify_iteration_manifest` is the
 predicate `core/resume.py`, `execute_tools/per_file_best.py` and
-`scripts/inspect_run_state.py` all call. A tampered field, a removed
+`scripts/launch/inspect_run_state.py` all call. A tampered field, a removed
 artifact hash on a completed iteration, or an artifact that no longer hashes
 to its manifest each produce a named problem; a genuinely pre-digest legacy
 manifest is admitted *visibly unverified* — "unverified" is a state, never

@@ -1,6 +1,5 @@
 # What SIDERIUS is
 
-**Audience**: anyone deciding whether SIDERIUS is the right tool.
 **Reading time**: ~5 minutes.
 
 ---

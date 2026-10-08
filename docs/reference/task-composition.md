@@ -1,6 +1,5 @@
 # Task composition reference
 
-**Audience**: anyone authoring or debugging a composition manifest.
 **Authority**: `workflows/task_composition.py` — `_MANIFEST_KEYS` /
 `_REQUIRED_KEYS`, resolvers, `compose_run_task_bindings` and
 `bind_run_task_composition`. The optional Python package's capture, import and
@@ -689,7 +688,6 @@ repository.
 - [Configuration map](configuration-map.md) — which file is owned by whom
 - [Composition mechanism reference](../agent-reference/mechanisms/composition.md) — for implementers
 
-
 ## Explicit prompt rendering providers
 
 The optional top-level `prompt_renderer` selects exactly one installed entry
@@ -736,7 +734,6 @@ These numbers are an explicit caller example, not a historical framework
 default. See the [data-analysis contract](../../src/nodes/data_analysis_agent/data_analysis_agent.md#caller-selected-preparation-recovery)
 for counting, deadlines, validation and identity semantics.
 
-
 ## Structural preflight estimation
 
 The optional `preflight_estimator` selects arithmetic through the installed
@@ -756,7 +753,6 @@ probe data. The provider owns arithmetic only. The framework retains sampling,
 candidate batches, resource caps, intensity checks, admission and failure domains.
 See [the estimation contract](preflight-estimation.md) for source qualification,
 input/output schemas, known estimation limits and migration boundaries.
-
 
 ### Inference refusal verification
 

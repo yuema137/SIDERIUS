@@ -1,11 +1,10 @@
 # What a task must provide
 
-**Audience**: a scientist or engineer bringing their own problem to SIDERIUS.
 **Answers**: "what do I actually have to write?"
 
-The short answer: **one YAML manifest with thirteen possible sections, five of
-which are required**, plus whatever small amount of Python the framework cannot
-supply generically for your data.
+A package supplies one YAML manifest with required and optional sections, plus
+explicitly selected data-path and metric implementations. Those implementations
+may be importable dependencies or task-local files.
 
 This page explains the concepts. The exact table — every section, required or
 optional, what absence means — is the
@@ -64,14 +63,16 @@ hashes authenticate transport, but do not prove training/evaluation independence
 
 ## 2. What a model reads and produces
 
-Your task config supplies two things in prose, which reach every LLM prompt:
+Your task config supplies scientific description and a forward contract to the
+consumers that render them:
 
 - **`task_description`** — what the scientific problem is;
 - **`forward_contract`** — the exact tensor contract a model must satisfy.
 
-These are what let the proposer and implementor write a model for *your* problem
-rather than a generic one. They are required — a composed run with an empty task
-description is refused.
+The resolved `forward_contract.model_io` is the typed input/output authority
+for model validation and probes; prose renders its task-specific meaning where
+the selected agent prompt needs it. This is not a promise that every LLM call
+contains the same fields. A composed run with an empty task description refuses.
 
 ## 3. The training objective
 
@@ -95,7 +96,9 @@ Direction is always declared explicitly and never inferred, because a metric tha
 is negative-valued and higher-is-better (TIDMAD's is both) breaks every heuristic
 guess.
 
-The primary metric is the only thing that selects models.
+The primary metric supplies scientific ordering among eligible candidates.
+Health eligibility, Trial/Formal roles and workflow policy remain separate
+selection constraints.
 
 You may also declare **secondary metrics**. These are *observational evidence*.
 They appear in records and in what the agents read, and they influence no
@@ -112,10 +115,11 @@ A refusal is a structured, recorded outcome, not a crash and not a bad score.
 A **health gate** answers "is this output structurally valid enough to trust?" —
 a completely different question from "is this output good?".
 
-You declare a roster of checks with their thresholds. For each you choose exactly
-one thing: whether it is **blocking** or **observational**. The framework derives
-everything else — when it runs, what a failure does, how severity resolves — so
-your task and the framework cannot disagree about policy.
+The task selects checks, thresholds and each check's disposition. Framework
+policy maps that disposition to an effective `gate_role`, execution positions
+and actions. These fields are validated when task and policy are composed;
+scientific eligibility and enforcement remain distinct decisions. Changing
+a check name is not a way to change its eligibility role.
 
 Several checks are generic and reusable across tasks (dispersion floors,
 categorical collapse detection). Others are yours. See
@@ -125,7 +129,9 @@ categorical collapse detection). Others are yours. See
 
 ## What you write, concretely
 
-For a task the framework can already serve generically, a package is:
+A package may keep its declaration files together as follows. Its manifest
+must also select executable data-path and metric implementations; this layout
+does not supply a scientific default:
 
 ```
 my_task/
@@ -137,7 +143,7 @@ my_task/
     └── task_health.yaml        # roster + thresholds
 ```
 
-For a task that needs its own data access or metric mathematics, add:
+If those implementations are task-local rather than installed modules, add:
 
 ```
 └── plugins/
@@ -174,20 +180,19 @@ detected rather than silently used.
 This is the part worth reading twice. In a composition manifest, an omitted
 optional section usually means **nothing is supplied** — not "use a default":
 
-- no `secondary_metrics` → no secondary evidence anywhere, zero record keys
-- no `proposal_blocks` → the proposer receives no task science
-- no `interpretation_blocks` → the interpreter renders no task blocks
+- no `secondary_metrics` → no secondary metric is declared
+- no `proposal_blocks` → no additional task proposal blocks are supplied
+- no `interpretation_blocks` → no additional task interpretation blocks are supplied
 
-There is **one nuance**, and it used to be a hazard: the `deliverable` section
+One capability-specific case is the `deliverable` section
 (an indexed file-naming template). If your task names its own artifacts through
 its data path — `write_deliverable` / `read_evaluation_payload` with a declared
 deliverable name, as Pets and DAVIS do — omit the section: a composed run then
 gets an **honest refusal** wherever an indexed template would be consulted,
 never TIDMAD's template. Declare the section only if your task genuinely names
-its artifacts by a zero-padded input index. (Before PR-12d landed, absence
-silently resolved to TIDMAD's naming — that fallback is gone for tasks that own
-their names; a composed task that declares neither, like TIDMAD's own manifest,
-still resolves the shipped template.)
+its artifacts by a zero-padded input index. A composition declaring neither
+indexed naming nor a task-owned `deliverable_name` is refused. There is no
+implicit scientific naming default for a freshly composed task.
 
 ---
 

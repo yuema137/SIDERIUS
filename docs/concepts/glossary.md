@@ -8,15 +8,17 @@ from the one here, the difference is stated.
 **Attempt** — one try at a tuning round. A round may consume several attempts if
 training fails or a plan is rejected; `--attempts_per_round` caps them.
 
-**Blocking / observational** — a health check's *disposition*: the only policy
-choice a task makes about a check. Blocking failures change what the run does;
-observational ones are recorded and change nothing.
+**Blocking / observational** — effective Health gate roles. A task selects a
+`blocking` or `recording` disposition; framework policy resolves the role and
+actions. Blocking-role failures affect scientific eligibility even when an
+observe-only policy does not enforce an action. Observational gates provide
+evidence without deciding eligibility.
 
 **Composition / composition manifest** — the YAML file that declares a task's
 semantics, and the act of resolving it. Composing a run binds the task's data
 path, dataset profile, metric, secondaries, health family and task config for the
-whole run. Pointing SIDERIUS at a manifest is what makes a run task-aware; without
-one it takes the legacy un-composed path.
+whole run. Production execution requires explicit task authority; absent
+bindings do not select a scientific default.
 
 **Deliverable** — what a model produces for evaluation: the artefact written by
 `write_deliverable` and read back by `read_evaluation_payload`. Naming is
@@ -33,7 +35,8 @@ declared, never inferred. Interpreted by exactly one authority (`MetricOrder`).
 Trials are cheap explorations; formal rounds produce the candidates that compete.
 
 **Forward contract** — the exact tensor contract a model must satisfy, declared in
-the task config and injected into every LLM prompt.
+the task config. Its resolved typed model I/O drives validation/probes; agent
+prompt consumers render the fields they need.
 
 **Golden metric** — a synonym for the *primary metric*.
 
@@ -49,7 +52,8 @@ a pass.
 implement → validate → tune. Contains many *rounds*.
 
 **Node** — one stage of the workflow with a typed input schema and output schema.
-Six are LLM-powered.
+The current node map includes seven research capabilities; see the
+[source node index](../../src/nodes/README.md).
 
 **Objective** — what training minimises. Distinct from the evaluation metric by
 *role*, even when the mathematics is the same.
@@ -59,11 +63,11 @@ metric, a health check or a view provider. May be declared by importable module 
 by file path; a file-declared plugin's content hash joins the run fingerprint.
 
 **Primary metric** — the single scalar that decides which model is better. The
-only quantity in the framework that drives selection.
+scientific ordering authority among eligible candidates.
 
 **Protocol** — a typed function that assembles one node's input from upstream node
-outputs. The only place field mapping happens; the only channel between nodes
-besides schemas and per-node storage.
+outputs. Protocols map typed schemas between nodes. Per-node storage records
+evidence and recovery state; it is not another communication channel.
 
 **Provenance** — the recorded identity of everything a result depended on: the
 composition fingerprint, plugin content hashes, the effective health config hash,

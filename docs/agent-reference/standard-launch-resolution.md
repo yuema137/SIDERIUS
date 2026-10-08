@@ -12,8 +12,8 @@ The standard CLI, configuration inspection and execution share these owners:
 | Execution lifecycle | `workflows.run_one_iteration` | Composition, restoration, invariants, environment, directories and invocation |
 
 The runner re-exports moved identity and output-type functions for existing
-callers. There is no second default table in the projection. Its 89 explicit
-keywords preserve the prior inline construction, including `0` to `None`
+callers. There is no second default table in the projection. Its explicit
+keywords preserve the caller-to-workflow projection, including `0` to `None`
 normalization where the CLI uses zero to disable a bound.
 
 ## Preconditions and effects
@@ -27,10 +27,10 @@ dataclass; downstream Pydantic schemas own their validation.
 
 Importing the shared modules does not import the effectful runner, read dotenv,
 create providers, modify environment variables or create run directories.
-Calling identity resolution still lazily imports `model_exploration` through
-the existing literature-config owner. That call is not an inert or sandboxed
-inspection boundary. Explicit JSON/advice/literature configuration reads also
-remain reads of caller-selected files.
+Identity resolution uses the focused `workflows.literature_config` owner; it
+does not import `model_exploration` for that lookup. Explicit JSON, advice and
+literature configuration reads remain reads of caller-selected files. This is
+not a sandbox for arbitrary task plugins.
 
 LLM routing resolution does not instantiate clients. Missing node blocks still
 use their existing downstream owners; a serialized `WorkflowLLMConfig` alone
