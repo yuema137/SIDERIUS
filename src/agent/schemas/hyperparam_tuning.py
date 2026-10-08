@@ -62,9 +62,11 @@ from core.target_standardization import TargetStandardizationReceipt
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_execution import CandidateEvaluationResult
 from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
+from execute_tools.health_checks._composition import TaskHealthBinding
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 from execute_tools.training_history import TrainingHistory
 from ml_models.model_descriptions import DescriptionSourcePolicy
+from ml_models.models_format_sandbox import LossConfig
 
 TrainingValidationPortion = Annotated[float, Field(gt=0, le=1)]
 
@@ -1501,17 +1503,19 @@ class TaskCompositionRef(BaseModel):
             "name what the run is bound to."
         )
     )
-    task_health_binding: Any = Field(
+    task_health_binding: TaskHealthBinding | None = Field(
+        # Enum-first validation restores sentinel identity after JSON transport;
+        # smart unions would keep the same value as an ordinary path string.
+        union_mode="left_to_right",
         description=(
             "The run's Health binding — a task-health config path, or a "
-            "``HealthBindingState`` naming an absence. Typed ``Any`` because "
-            "``TaskHealthBinding`` is ``HealthBindingState | str`` and this "
-            "schema must not import the health package to say so. Carried so "
+            "``HealthBindingState`` naming an absence. None preserves legacy "
+            "unspecified projections; composition supplies an enum or path. Carried so "
             "the tuner's per-model effective config is materialized under the "
             "SAME binding as the chain's, instead of re-resolving "
             "``LEGACY_OMITTED`` and stamping ``legacy_default`` on a document "
             "that carries the task's roster."
-        )
+        ),
     )
     segmentation_applicability: Literal["temporal", "not_applicable"] | None = Field(
         default=None,
@@ -1529,7 +1533,7 @@ class TaskCompositionRef(BaseModel):
         default=None,
         description="Exact custom-loss implementation selected by the composition edge.",
     )
-    objective: Any = Field(
+    objective: LossConfig | None = Field(
         default=None,
         description=(
             "The task's AUTHORITATIVE training objective as a validated "
@@ -1538,10 +1542,9 @@ class TaskCompositionRef(BaseModel):
             "depend on the planner choosing it — two real composed DAVIS runs "
             "trained with ``smooth_l1`` because the planner is told that is "
             "the only valid regressor loss and never learns the task declares "
-            "exact L1. Typed ``Any`` for the same reason "
-            "``task_health_binding`` is: this schema must not import "
-            "``ml_models`` to name ``LossConfig``. ``None`` is every run that "
-            "exists today and leaves the planner's choice standing."
+            "exact L1. The canonical ``LossConfig`` restores the validated "
+            "objective after Python or JSON transport. ``None`` leaves the "
+            "planner's choice standing."
         ),
     )
     parameter_rules: ParameterRules | None = Field(

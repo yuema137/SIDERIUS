@@ -247,8 +247,12 @@ def merge_task_owned_custom_loss(
 class CustomLossTaskProjection(Protocol):
     supervision_target: TensorContract | None
     custom_loss_applicability: CustomLossApplicability | None
-    objective: object | None
     task_owned_custom_loss: TaskOwnedCustomLoss | None
+
+    @property
+    def objective(self) -> object | None:
+        """The task objective is consumed without mutating the projection."""
+        ...
 
 
 def _apply_objective_lock(
