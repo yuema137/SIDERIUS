@@ -12,6 +12,7 @@ package; core code manages the execution and evidence around it.
 | Resume or inspect a run | [Workspace reference](../../docs/guides/workspaces-and-resume.md) |
 | Understand saved identity | [Persistence contract](../../docs/agent-reference/mechanisms/persistence-and-resume.md) |
 | Investigate execution limits | [Runtime controls](runtime_control/README.md) |
+| Understand detected GPU support | [Accelerator facts and limits](accelerator-runtime.md) |
 | Package local task code | [Local-code packages](local_code/README.md) |
 
 ## Technical detail
