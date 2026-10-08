@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from agent.llm_settings import KNOWN_PROVIDERS
-from core.hardware_context import HardwareContext
+from core.hardware_context import GpuRuntimeFacts, HardwareContext
 from execute_tools.data_paths import DatasetDirectoryUnavailable
 from tools.setup_review.composition_models import CompositionResult, TaskCompositionSummary
 from tools.setup_review.environment_models import EnvironmentPreviewRequest
@@ -42,6 +42,16 @@ def hardware(name="synthetic device", **changes):
     )
 
 
+def runtime(observed=None, backend="cuda"):
+    return GpuRuntimeFacts(
+        installed_backend=backend,
+        runtime_version="synthetic-version",
+        hardware=observed or hardware(),
+        implemented_accounting_adapter="nvidia-smi" if backend == "cuda" else None,
+        limitations=("Synthetic observation; hardware execution was not qualified",),
+    )
+
+
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -53,9 +63,9 @@ def setup(tmp_path, monkeypatch):
 
     def discover():
         calls.append("discover")
-        return hardware()
+        return runtime()
 
-    monkeypatch.setattr("tools.setup_review.environment_settings.discover", discover)
+    monkeypatch.setattr("tools.setup_review.environment_settings.inspect_gpu_runtime", discover)
     # A second observation hidden in watchdog resolution would break the one-view contract.
     monkeypatch.setattr("core.hardware_context.discover", lambda: pytest.fail("second discovery"))
 
@@ -154,7 +164,9 @@ def test_owner_projection_defaults_and_saved_task_current_environment_are_separa
     for name in report.launch_settings:
         assert name in page
     assert (
-        json.loads((operation.output / "report.json").read_text())["hardware"]["device_name"]
+        json.loads((operation.output / "report.json").read_text())["gpu_runtime"]["hardware"][
+            "device_name"
+        ]
         == "synthetic device"
     )
 
@@ -163,10 +175,12 @@ def test_owner_projection_defaults_and_saved_task_current_environment_are_separa
 def test_unknown_or_cpu_facts_never_borrow_profile_or_invent_identity(setup, monkeypatch, name):
     operation, _ = setup[0]()
     observed = hardware(name, collection_errors=["identity unavailable"])
-    monkeypatch.setattr("tools.setup_review.environment_settings.discover", lambda: observed)
+    monkeypatch.setattr(
+        "tools.setup_review.environment_settings.inspect_gpu_runtime", lambda: runtime(observed)
+    )
     report = inspect_environment(operation)
-    assert report.hardware == observed
-    assert report.hardware.active_device_uuid is None
+    assert report.gpu_runtime.hardware == observed
+    assert report.gpu_runtime.hardware.active_device_uuid is None
     assert report.watchdog.profile_calibrated is False
     assert report.watchdog.enabled is False
     assert "uncalibrated" in report.watchdog.provenance
@@ -237,7 +251,11 @@ class Reject(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, Reject())
 from tools.setup_review.inspection import inspect_declaration
 assert 'core.hardware_context' not in sys.modules
-from tools.setup_review.environment_settings import inspect_environment
+import tools.setup_review.environment_settings as observer
+from core.hardware_context import GpuRuntimeFacts
+observer.inspect_gpu_runtime = lambda: GpuRuntimeFacts.model_validate_json(sys.argv[1])
+from tools.setup_review.inspect_environment import main
+raise SystemExit(main(sys.argv[2:]))
 """
     result = subprocess.run(
         [
@@ -245,7 +263,7 @@ from tools.setup_review.environment_settings import inspect_environment
             "-I",
             "-c",
             code,
-            hardware().model_dump_json(),
+            runtime().model_dump_json(),
             "--report",
             str(operation.report),
             "--expected-sha256",
@@ -325,7 +343,7 @@ def test_failed_discovery_is_not_converted_to_a_cpu_success(setup, monkeypatch):
     def failed():
         raise RuntimeError("synthetic property discovery failure")
 
-    monkeypatch.setattr("tools.setup_review.environment_settings.discover", failed)
+    monkeypatch.setattr("tools.setup_review.environment_settings.inspect_gpu_runtime", failed)
     with pytest.raises(RuntimeError, match="property discovery failure"):
         inspect_environment(operation)
     assert not operation.output.exists()
@@ -387,3 +405,59 @@ def test_real_trial_schedule_validator_refuses_discarded_overrides(setup):
     with pytest.raises(ValueError, match="apply to zero"):
         inspect_environment(operation)
     assert not operation.output.exists()
+
+
+def test_aggregate_ceiling_uses_full_capacity_and_independent_quota(setup, monkeypatch):
+    from core.runtime_control.pair_admission import (
+        HOST_VRAM_QUOTA_MIB_ENV,
+        PAIR_CEILING_GIB_ENV,
+    )
+
+    operation, _ = setup[0]("--gpu_pair_ceiling_gib", "1.5")
+    observed = hardware().model_copy(update={"total_memory_bytes": 2 * 1024**3})
+    monkeypatch.setattr(
+        "tools.setup_review.environment_settings.inspect_gpu_runtime", lambda: runtime(observed)
+    )
+    monkeypatch.setenv(PAIR_CEILING_GIB_ENV, "0.25")  # Explicit caller overrides this one.
+    monkeypatch.setenv(HOST_VRAM_QUOTA_MIB_ENV, "1024")  # Independent quota still applies.
+    report = inspect_environment(operation)
+    assert report.aggregate_gpu_ceiling.operator_source == "caller"
+    assert report.aggregate_gpu_ceiling.operator_ceiling_gib == 1.5
+    assert report.aggregate_gpu_ceiling.measured_capacity_gib == 2.0
+    assert report.aggregate_gpu_ceiling.host_quota_gib == 1.0
+    assert report.aggregate_gpu_ceiling_gib == 1.0
+    assert report.per_candidate_usable_cap_bytes == observed.usable_cap_bytes
+    assert report.per_candidate_usable_cap_bytes != 1024**3
+
+
+def test_rocm_missing_adapter_is_separate_from_available_untested_hardware(setup, monkeypatch):
+    operation, _ = setup[0]()
+    facts = runtime(hardware("alternate accelerator"), backend="rocm").model_copy(
+        update={
+            "limitations": ("ROCm runtime untested", "Required accounting adapter unavailable"),
+        }
+    )
+    monkeypatch.setattr(
+        "tools.setup_review.environment_settings.inspect_gpu_runtime", lambda: facts
+    )
+    report = inspect_environment(operation)
+    assert report.gpu_runtime.hardware.device_available
+    assert report.gpu_runtime.implemented_accounting_adapter is None
+    page = (operation.output / "index.html").read_text()
+    assert "ROCm runtime untested" in page
+    assert "Required accounting adapter unavailable" in page
+    assert (
+        report.aggregate_gpu_ceiling is not None
+    )  # Arithmetic is vendor independent, not permission.
+
+
+def test_cpu_has_no_invented_gpu_ceiling(setup, monkeypatch):
+    operation, _ = setup[0]()
+    monkeypatch.setattr(
+        "tools.setup_review.environment_settings.inspect_gpu_runtime",
+        lambda: runtime(hardware("cpu"), backend="none"),
+    )
+    report = inspect_environment(operation)
+    assert report.aggregate_gpu_ceiling is None
+    assert report.aggregate_gpu_ceiling_gib is None
+    assert report.per_candidate_usable_cap_bytes is None

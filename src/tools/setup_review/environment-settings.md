@@ -30,9 +30,14 @@ must satisfy the existing saved-report reader/output-claim contracts.
    The existing `resolve_dataset_dir` validates directory existence; its return
    value, including relative spelling, is preserved in the launch projection.
    A separate absolute display path is recorded. No dataset contents are read.
-4. `core.hardware_context.discover` supplies one current typed property
-   observation. `get_or_create` is not called. Failures propagate; no synthetic
-   CPU success replaces a failed observation.
+4. `core.hardware_context.inspect_gpu_runtime` supplies installed backend,
+   implemented adapter, limitations and one fresh typed `HardwareContext` via
+   `discover`. `get_or_create` is not called. Failures propagate; no synthetic
+   CPU success replaces a failed observation. Available devices also use
+   `resolve_gpu_ceiling` with the CLI ceiling, full measured capacity and only
+   the two environment inputs owned by that resolver. Its typed resolution and
+   `effective_gib` are recorded. `HardwareContext.usable_cap_bytes` is separately
+   recorded as the per-candidate cap. CPU/no-device resolves neither GPU ceiling.
 5. `workflows.runtime_settings.resolve_watchdog_policy` receives the observed
    `device_name`, preserving profile precedence, required bindings, provenance
    and phase-deadline checks. Its optional keyword leaves ordinary omitted calls
@@ -56,16 +61,20 @@ snapshot parser, default table, task composer or scheduling authority is added.
 
 `EnvironmentPreviewReport` has schema `siderius.setup-environment/v1` and outcome
 `settings_observed`. It records source bytes/digest/bound, the inert saved task
-projection, the freshly parsed declaration, typed hardware/watchdog observations,
+projection, the freshly parsed declaration, typed GPU runtime/watchdog/aggregate-ceiling observations,
 absolute data-directory display path, complete standard launch transit fields and
 current limitations. Historical task/declared limitations remain historical;
 they are not substituted for the current observation summary.
 
 Task-dependent scope, Health configuration and model-route enablement remain saved
 facts. Physical device properties and watchdog provenance are current facts.
-Missing identity or collection errors remain explicit. An installed backend,
+Missing identity or collection errors remain explicit. Aggregate ceilings use
+full physical capacity and independent declared constraints, not the per-candidate
+usable cap or current free memory. Host address-space settings remain transit
+declarations; `RLIMIT_AS` is not physical RAM/RSS monitoring. An installed backend,
 available device, implemented accounting adapter and qualified execution are
-separate claims; this slice does not establish the latter two. In particular,
+separate claims; the first three come from the facts owner, while qualified
+execution remains unverified. In particular,
 there is no vendor ban or implicit NVIDIA/local-machine default in this API.
 
 The exact ordinary launch command is displayed with `cd ... && command` so a failed

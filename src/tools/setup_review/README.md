@@ -332,7 +332,11 @@ launching; do not put keys in task files or reports.
 
 Open **`environment-preview-001/index.html`**. Start with the remaining checks,
 then read the paths, data/budget summary, saved task settings, hardware properties
-and watchdog provenance. The complete launch table includes every field in the
+and watchdog provenance. The GPU section separately shows the installed backend,
+visible device and implemented accounting adapter. Its memory table distinguishes
+the per-candidate model cap from the aggregate device limit, which combines actual
+capacity with declared operator/host limits. Neither number is current free memory
+or proof that a model fits. The complete launch table includes every field in the
 standard workflow's launch configuration, including defaults. For example, an
 explicit `--max_rounds 4` appears as `max_rounds: 4`; a missing training parameter
 may remain `null` because a task or agent chooses it later. No number is invented

@@ -4,7 +4,8 @@ from typing import Literal
 
 from pydantic import JsonValue
 
-from core.hardware_context import HardwareContext
+from core.hardware_context import GpuRuntimeFacts
+from core.runtime_control.pair_admission import ResolvedGpuCeiling
 from core.runtime_control.watchdog_profile import ResolvedWatchdogSettings
 from tools.setup_review.models import SetupDeclarationReport
 from tools.setup_review.route_models import CredentialNameCheck
@@ -33,7 +34,10 @@ class EnvironmentPreviewReport(ReviewModel):
     current_declaration: SetupDeclarationReport
     environment_check_requested: bool
     credentials: list[CredentialNameCheck]
-    hardware: HardwareContext
+    gpu_runtime: GpuRuntimeFacts
+    aggregate_gpu_ceiling: ResolvedGpuCeiling | None
+    aggregate_gpu_ceiling_gib: float | None
+    per_candidate_usable_cap_bytes: int | None
     watchdog: ResolvedWatchdogSettings
     dataset_directory: str
     launch_settings: dict[str, JsonValue]

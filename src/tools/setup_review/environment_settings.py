@@ -1,10 +1,17 @@
 """Explicitly observe launch settings; never create a run or import its task."""
 
+import os
 from dataclasses import asdict
 from pathlib import Path
 
 from core.durable_io import publish_bytes_write_once
-from core.hardware_context import discover
+from core.hardware_context import inspect_gpu_runtime
+from core.runtime_control.pair_admission import (
+    HOST_VRAM_QUOTA_MIB_ENV,
+    PAIR_CEILING_GIB_ENV,
+    gib_from_bytes,
+    resolve_gpu_ceiling,
+)
 from execute_tools.data_paths import resolve_dataset_dir
 from tools.setup_review.composition_transport import manifest_digest
 from tools.setup_review.environment import credential_name_checks
@@ -69,7 +76,22 @@ def inspect_environment(request: EnvironmentPreviewRequest) -> EnvironmentPrevie
     if manifest_digest(current.task_manifest) != snapshot.result.manifest_sha256:
         raise SnapshotInputError("Task manifest changed; regenerate the task check")
     args.data_dir = resolve_dataset_dir(args.data_dir, purpose="setup environment preview")
-    hardware = discover()
+    gpu_runtime = inspect_gpu_runtime()
+    hardware = gpu_runtime.hardware
+    aggregate = None
+    if hardware.device_available:
+        # Read only the two environment inputs owned by the aggregate resolver.
+        # In particular, do not copy the complete credential-bearing environment.
+        limits = {
+            name: value
+            for name in (HOST_VRAM_QUOTA_MIB_ENV, PAIR_CEILING_GIB_ENV)
+            if (value := os.environ.get(name)) is not None
+        }
+        aggregate = resolve_gpu_ceiling(
+            ceiling_gib=args.gpu_pair_ceiling_gib,
+            measured_capacity_gib=gib_from_bytes(hardware.total_memory_bytes),
+            environ=limits,
+        )
     watchdog = resolve_watchdog_policy(args, device_name=hardware.device_name)
     launch = build_standard_launch_config(
         args, resolve_launch_identity(args), resolved_paths=[], fixed_candidate_plan=None
@@ -89,7 +111,12 @@ def inspect_environment(request: EnvironmentPreviewRequest) -> EnvironmentPrevie
         credentials=credential_name_checks(
             snapshot.result.task_settings.llm_routes, requested=request.check_environment
         ),
-        hardware=hardware,
+        gpu_runtime=gpu_runtime,
+        aggregate_gpu_ceiling=aggregate,
+        aggregate_gpu_ceiling_gib=aggregate.effective_gib if aggregate else None,
+        per_candidate_usable_cap_bytes=hardware.usable_cap_bytes
+        if hardware.device_available
+        else None,
         watchdog=watchdog,
         dataset_directory=str(Path(args.data_dir).resolve()),
         launch_settings={name: _json_value(value) for name, value in values.items()},

@@ -77,7 +77,28 @@ def render_environment_preview(report: EnvironmentPreviewReport) -> str:
     sections += _section(
         "Hardware observed now",
         "Property discovery did not allocate a model or run a kernel. Collection errors remain explicit gaps; an available device is not a readiness certificate.",
-        report.hardware.model_dump(mode="json"),
+        report.gpu_runtime.hardware.model_dump(mode="json"),
+    )
+    sections += _section(
+        "Installed GPU runtime and implemented accounting",
+        "Installed backend, available device and implemented adapter are separate facts. An adapter name does not prove that driver sampling or training works.",
+        {
+            "installed backend": report.gpu_runtime.installed_backend,
+            "runtime version": report.gpu_runtime.runtime_version,
+            "implemented accounting adapter": report.gpu_runtime.implemented_accounting_adapter,
+            "limitations": list(report.gpu_runtime.limitations),
+        },
+    )
+    sections += _section(
+        "GPU memory ceilings observed now",
+        "The per-candidate usable cap belongs to HardwareContext. Aggregate admission separately uses resolve_gpu_ceiling: operator limit, host quota and full measured capacity. Neither is current free memory or a measurement that this model fits. No device means these GPU observations remain unresolved.",
+        {
+            "per-candidate usable cap (bytes)": report.per_candidate_usable_cap_bytes,
+            "aggregate inputs and sources": report.aggregate_gpu_ceiling.model_dump(mode="json")
+            if report.aggregate_gpu_ceiling
+            else None,
+            "aggregate effective ceiling (GiB)": report.aggregate_gpu_ceiling_gib,
+        },
     )
     sections += _section(
         "Watchdog settings resolved now",
@@ -86,7 +107,7 @@ def render_environment_preview(report: EnvironmentPreviewReport) -> str:
     )
     sections += _section(
         "Complete standard launch projection",
-        "Owner: workflows.standard_launch.build_standard_launch_config. Every transit field is shown, including defaults. Null can leave a downstream decision unresolved. The two formal delta fields use nan/+inf/-inf strings only to preserve permitted unused numeric declarations.",
+        "Owner: workflows.standard_launch.build_standard_launch_config. Every transit field is shown, including defaults. Null can leave a downstream decision unresolved. The two formal delta fields use nan/+inf/-inf strings only to preserve permitted unused numeric declarations. Host address-space limits are RLIMIT_AS declarations, not physical RAM/RSS protection.",
         report.launch_settings,
     )
     limits = "".join(f"<li>{html.escape(item)}</li>" for item in report.limitations)
