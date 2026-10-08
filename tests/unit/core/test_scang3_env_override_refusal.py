@@ -33,7 +33,6 @@ import pytest
 
 from core.execution_calibration import MalformedCeilingOverride
 from core.runtime_control.pair_admission import (
-    DEFAULT_PAIR_CEILING_GIB,
     HOST_VRAM_QUOTA_MIB_ENV,
     PAIR_CEILING_GIB_ENV,
     host_quota_gib,
@@ -54,7 +53,7 @@ _PROBE_FRACTION_BOUND = 28.8
 #: One row per sibling so every parametrized case names its variable.
 SIBLINGS: list[tuple[str, Callable[[], float | None], float | None]] = [
     (HOST_VRAM_QUOTA_MIB_ENV, host_quota_gib, None),
-    (PAIR_CEILING_GIB_ENV, pair_ceiling_gib, DEFAULT_PAIR_CEILING_GIB),
+    (PAIR_CEILING_GIB_ENV, lambda: pair_ceiling_gib(measured_capacity_gib=96), 96),
     (
         VRAM_QUOTA_ENV,
         lambda: vram_attribution_threshold_gb(_PROBE_DEVICE_GB),

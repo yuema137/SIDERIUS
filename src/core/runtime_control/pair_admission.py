@@ -1,38 +1,22 @@
-"""Host-aware aggregate VRAM admission for concurrently-running chains.
+"""Aggregate GPU admission from declared limits and measured device capacity.
 
-Per-chain admission answers "does THIS attempt fit the device?". On a
-shared host that is not the binding constraint: this machine enforces a
-per-user quota over the SUM of every process the user owns, and when the
-sum is exceeded a root watchdog picks a process and signals it. During
-C12 that watchdog reaped a probe holding 31,266 MiB against a 30,000 MiB
-quota — the first component to notice was the watchdog, and what it
-produced was a kill, not a rejection.
+An explicit operator ceiling overrides the environment operator ceiling. Host
+quota and measured physical capacity constrain it independently. There is no
+deployment-specific fallback. This module never discovers hardware or reserves
+memory; callers supply capacity when making a device-backed decision.
 
-This module makes the pair the unit of admission, so the aggregate is
-checked BEFORE anything is launched or admitted:
-
-    Σ predicted peak VRAM over concurrent members  ≤  aggregate ceiling
-
-The ceiling is deliberately below the host quota. The gap absorbs what a
-prediction cannot see — allocator fragmentation, the CUDA context of each
-process, and the fact that a peak is an instant rather than a plateau.
-
-Units are the whole point of the exercise here, so they are explicit
-everywhere and never inferred:
-
-* the host watchdog and `nvidia-smi` report **MiB** while calling it MB;
-* torch reports **bytes**;
-* operator-facing configuration is in **GiB**.
-
-Every conversion goes through the helpers below, which are 1024-based and
-tested against exact values, so a factor-of-1000 error cannot survive.
+Driver quantities are MiB, allocator quantities are bytes, and operator limits
+are GiB. All conversions are binary and explicit.
 """
 
 from __future__ import annotations
 
+import math
 import os
+from collections.abc import Mapping
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter, model_validator
 
 from core.execution_calibration import MalformedCeilingOverride
 
@@ -41,10 +25,6 @@ BYTES_PER_KIB = 1024
 BYTES_PER_MIB = 1024**2
 BYTES_PER_GIB = 1024**3
 MIB_PER_GIB = 1024
-
-#: Operator-set aggregate ceiling for one concurrent pair, in GiB
-#: (operator decision 2026-07-31). Below the host quota on purpose.
-DEFAULT_PAIR_CEILING_GIB = 28.0
 
 #: The enforced per-user total, when the deployment declares one. A
 #: deployment property, so it comes from the environment — never from the
@@ -74,105 +54,101 @@ def bytes_from_gib(gib: float) -> float:
     return gib * BYTES_PER_GIB
 
 
-def host_quota_gib() -> float | None:
-    """The declared per-user total quota in GiB, or None if undeclared.
+def _reject_boolean(value: object) -> object:
+    if isinstance(value, bool):
+        raise ValueError("a GPU limit must be a positive finite number, not a boolean")
+    return value
 
-    Undeclared means unknown, not unlimited: callers must not treat None
-    as headroom.
 
-    F-SCANG-3: a value that is SET but unusable — non-numeric, zero, or
-    negative — is REFUSED via :class:`MalformedCeilingOverride` instead of
-    silently resolving to "undeclared". The silent shape let a typo'd
-    quota vanish, so every admission decision ran as if the host had
-    never declared one, with no diagnostic anywhere. There is no
-    0-disables semantics here (unlike ``SIDERIUS_SUBPROCESS_RSS_GB``):
-    unset the variable to mean undeclared.
+PositiveGpuGiB = Annotated[
+    float, BeforeValidator(_reject_boolean), Field(gt=0, allow_inf_nan=False)
+]
+_positive_limit = TypeAdapter(PositiveGpuGiB)
 
-    An EMPTY string ("") still behaves as unset — a deliberate,
-    preserved-behavior DIVERGENCE from ``SIDERIUS_SUBPROCESS_RSS_GB``,
-    which refuses "". An empty value is the shell-wrapper pass-through
-    pattern (``VAR="${VAR:-}"``), not a typo'd number; the class this
-    refusal repairs is silently-consumed TYPOS.
 
-    Raises:
-        MalformedCeilingOverride: the variable is set to a non-numeric
-            or non-positive value.
+class ResolvedGpuCeiling(BaseModel):
+    """One immutable resolution, consumed without reading the environment again."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    operator_ceiling_gib: PositiveGpuGiB | None
+    operator_source: Literal["caller", "environment", "none"]
+    host_quota_gib: PositiveGpuGiB | None
+    measured_capacity_gib: PositiveGpuGiB | None
+
+    @model_validator(mode="after")
+    def _consistent_sources(self) -> ResolvedGpuCeiling:
+        if (self.operator_ceiling_gib is None) != (self.operator_source == "none"):
+            raise ValueError("operator ceiling and source must describe the same declaration")
+        if all(value is None for value in self._limits()):
+            raise ValueError(
+                "No aggregate GPU limit is available. Supply measured device capacity, "
+                "an explicit ceiling, SIDERIUS_PAIR_VRAM_CEILING_GIB, or a declared "
+                "SIDERIUS_GPU_VRAM_QUOTA_MIB. No hardware is inferred."
+            )
+        return self
+
+    def _limits(self) -> tuple[float | None, ...]:
+        return self.operator_ceiling_gib, self.host_quota_gib, self.measured_capacity_gib
+
+    @property
+    def effective_gib(self) -> float:
+        return min(value for value in self._limits() if value is not None)
+
+
+def host_quota_gib(*, environ: Mapping[str, str] | None = None) -> float | None:
+    """Read an optional positive finite MiB quota; empty still means undeclared.
+
+    F-SCANG-3: a malformed declaration refuses rather than silently disappearing.
+    This environment variable has no zero-disables semantics.
     """
-    raw = os.environ.get(HOST_VRAM_QUOTA_MIB_ENV)
+    raw = (os.environ if environ is None else environ).get(HOST_VRAM_QUOTA_MIB_ENV)
     if not raw:
         return None
     try:
-        mib = float(raw)
+        mib = _positive_limit.validate_python(raw)
+        return _positive_limit.validate_python(gib_from_mib(mib))
     except ValueError:
         raise MalformedCeilingOverride(
-            f"{HOST_VRAM_QUOTA_MIB_ENV}={raw!r} is not a number of MiB. "
-            f"Set a positive number of MiB, or unset it to mean "
-            f"undeclared. It is NOT ignored: a silently-ignored override "
-            f"is how a run comes to execute under limits nobody chose."
+            f"{HOST_VRAM_QUOTA_MIB_ENV}={raw!r} must be positive finite MiB. "
+            "There is no 0-disables semantics; unset it to mean undeclared."
         ) from None
-    if mib <= 0:
-        raise MalformedCeilingOverride(
-            f"{HOST_VRAM_QUOTA_MIB_ENV}={raw!r} is not positive. There is "
-            f"NO 0-disables semantics for this variable (unlike "
-            f"SIDERIUS_SUBPROCESS_RSS_GB); unset it to mean "
-            f"undeclared/default."
-        )
-    return gib_from_mib(mib)
 
 
-def pair_ceiling_gib() -> float:
-    """The aggregate ceiling actually in force.
+def resolve_gpu_ceiling(
+    *,
+    ceiling_gib: float | None = None,
+    measured_capacity_gib: float | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> ResolvedGpuCeiling:
+    """Resolve the selected operator declaration, independent quota and capacity."""
+    env = dict(os.environ if environ is None else environ)
+    source: Literal["caller", "environment", "none"] = "none"
+    if ceiling_gib is not None:
+        source = "caller"
+    else:
+        raw = env.get(PAIR_CEILING_GIB_ENV)
+        if raw:
+            try:
+                ceiling_gib = _positive_limit.validate_python(raw)
+            except ValueError:
+                raise MalformedCeilingOverride(
+                    f"{PAIR_CEILING_GIB_ENV}={raw!r} must be positive finite GiB. "
+                    "There is no 0-disables semantics; unset it to use measured "
+                    "capacity or an independently declared host quota."
+                ) from None
+            source = "environment"
+    return ResolvedGpuCeiling(
+        operator_ceiling_gib=ceiling_gib,
+        operator_source=source,
+        host_quota_gib=host_quota_gib(environ=env),
+        measured_capacity_gib=measured_capacity_gib,
+    )
 
-    The operator ceiling stands unless the deployment declares a quota
-    that is tighter still, in which case the quota wins — a ceiling above
-    the enforced limit would be no ceiling at all.
 
-    F-SCANG-3: an override that is SET but unusable — non-numeric, zero,
-    or negative — is REFUSED via :class:`MalformedCeilingOverride`. The
-    silent shape was the named incident: a typo'd value silently capped
-    the arm at :data:`DEFAULT_PAIR_CEILING_GIB` (28.0 — the operator
-    default calibrated on the lilab RTX 5090 host) with no diagnostic —
-    no log line, no lock entry, no preflight row.
-    There is no 0-disables semantics here (unlike
-    ``SIDERIUS_SUBPROCESS_RSS_GB``): unset the variable to use the
-    operator default.
-
-    An EMPTY string ("") still behaves as unset — a deliberate,
-    preserved-behavior DIVERGENCE from ``SIDERIUS_SUBPROCESS_RSS_GB``,
-    which refuses "". An empty value is the shell-wrapper pass-through
-    pattern (``VAR="${VAR:-}"``), not a typo'd number; the class this
-    refusal repairs is silently-consumed TYPOS.
-
-    Raises:
-        MalformedCeilingOverride: this variable — or, transitively,
-            ``SIDERIUS_GPU_VRAM_QUOTA_MIB`` via :func:`host_quota_gib` —
-            is set to a non-numeric or non-positive value.
-    """
-    ceiling = DEFAULT_PAIR_CEILING_GIB
-    raw = os.environ.get(PAIR_CEILING_GIB_ENV)
-    if raw:
-        try:
-            configured = float(raw)
-        except ValueError:
-            raise MalformedCeilingOverride(
-                f"{PAIR_CEILING_GIB_ENV}={raw!r} is not a number of GiB. "
-                f"Set a positive number of GiB, or unset it to use the "
-                f"operator default ({DEFAULT_PAIR_CEILING_GIB} GiB). It "
-                f"is NOT ignored: before this refusal, a typo here "
-                f"silently capped the arm at the "
-                f"{DEFAULT_PAIR_CEILING_GIB} GiB default with no "
-                f"diagnostic."
-            ) from None
-        if configured <= 0:
-            raise MalformedCeilingOverride(
-                f"{PAIR_CEILING_GIB_ENV}={raw!r} is not positive. There "
-                f"is NO 0-disables semantics for this variable (unlike "
-                f"SIDERIUS_SUBPROCESS_RSS_GB); unset it to use the "
-                f"operator default ({DEFAULT_PAIR_CEILING_GIB} GiB)."
-            )
-        ceiling = configured
-    quota = host_quota_gib()
-    return min(ceiling, quota) if quota is not None else ceiling
+def pair_ceiling_gib(*, measured_capacity_gib: float | None = None) -> float:
+    """Resolve environment limits and optional capacity; never invent a default."""
+    return resolve_gpu_ceiling(measured_capacity_gib=measured_capacity_gib).effective_gib
 
 
 class PairMember(BaseModel):
@@ -181,7 +157,7 @@ class PairMember(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     run_name: str = Field(min_length=1)
-    predicted_peak_vram_gb: float = Field(gt=0.0)
+    predicted_peak_vram_gb: PositiveGpuGiB
     #: Where the number came from. A prediction with no provenance is not
     #: evidence, and the decision records it so a later audit can tell a
     #: measured peak from a configured cap.
@@ -194,11 +170,11 @@ class PairAdmissionDecision(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     feasible: bool
-    aggregate_gib: float = Field(ge=0.0)
-    ceiling_gib: float = Field(gt=0.0)
-    headroom_gib: float
+    aggregate_gib: float = Field(ge=0.0, allow_inf_nan=False)
+    ceiling_gib: PositiveGpuGiB
+    headroom_gib: float = Field(allow_inf_nan=False)
     members: tuple[PairMember, ...] = ()
-    host_quota_gib: float | None = None
+    host_quota_gib: PositiveGpuGiB | None = None
     reasons: tuple[str, ...] = ()
 
     @model_validator(mode="after")
@@ -219,21 +195,27 @@ def evaluate_pair_admission(
     *,
     ceiling_gib: float | None = None,
 ) -> PairAdmissionDecision:
-    """Decide whether these members may hold the device at the same time.
+    """Resolve declared limits once, then compare the aggregate requirement."""
+    return evaluate_resolved_pair_admission(
+        members, limits=resolve_gpu_ceiling(ceiling_gib=ceiling_gib)
+    )
 
-    Pure: every input is explicit, so the same inputs always give the
-    same decision and the decision can be recorded and re-checked.
-    """
+
+def evaluate_resolved_pair_admission(
+    members: list[PairMember] | tuple[PairMember, ...],
+    *,
+    limits: ResolvedGpuCeiling,
+) -> PairAdmissionDecision:
+    """Pure arithmetic over already resolved limits; no environment or driver I/O."""
     members = tuple(members)
     if not members:
         raise ValueError("a pair admission decision needs at least one member")
-    ceiling = ceiling_gib if ceiling_gib is not None else pair_ceiling_gib()
-    if ceiling <= 0:
-        raise ValueError(f"aggregate ceiling must be positive, got {ceiling}")
-
+    ceiling = limits.effective_gib
     aggregate = sum(m.predicted_peak_vram_gb for m in members)
+    if not math.isfinite(aggregate):
+        raise ValueError("aggregate GPU requirement overflowed; a finite demand is required")
     feasible = aggregate <= ceiling
-    quota = host_quota_gib()
+    quota = limits.host_quota_gib
 
     reasons = [
         f"{len(members)} concurrent member(s) predicted to hold "
@@ -245,10 +227,9 @@ def evaluate_pair_admission(
         )
     if not feasible:
         reasons.append(
-            f"INFEASIBLE under the host quota: over the ceiling by "
-            f"{aggregate - ceiling:.2f} GiB. Do not run these concurrently — "
-            "the alternative is letting the host watchdog discover it and "
-            "signal one of them."
+            f"INFEASIBLE under the resolved aggregate ceiling: over by "
+            f"{aggregate - ceiling:.2f} GiB. Reduce concurrent demand or revise "
+            "the declared limits within actual device and deployment constraints."
         )
     if quota is not None:
         reasons.append(
@@ -331,7 +312,10 @@ def _cli(argv: list[str] | None = None) -> int:
         except ValueError:
             parser.error(f"non-numeric cap in {item!r}")
 
-    decision = evaluate_configured_caps(caps, ceiling_gib=args.ceiling_gib)
+    try:
+        decision = evaluate_configured_caps(caps, ceiling_gib=args.ceiling_gib)
+    except ValueError as error:
+        parser.error(str(error))
     if args.json:
         print(json.dumps(decision.model_dump(mode="json"), indent=1))
     else:

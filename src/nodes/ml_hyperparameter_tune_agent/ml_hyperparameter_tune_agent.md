@@ -876,9 +876,11 @@ no authoritative measurement for any candidate. Consequences:
   exists. **This is the guard working, not a failure**, and it is not a
   statement about any candidate.
 - Getting to a working `formal` run means: resolve the new UUID,
-  configure the host's ceilings (the `28.0` GiB default suits a ~32 GiB
-  card and would badly under-serve a larger one), collect a bounded
-  driver-visible measurement, and have PR C validate and promote it.
+  obtain applicable phase-specific measurement evidence, and resolve the
+  aggregate ceiling against actual device capacity. An omitted operator ceiling
+  uses measured capacity; an explicit/environment ceiling and declared host
+  quota can tighten it. No local-machine numeric default is assumed. See
+  [the aggregate ceiling contract](../../core/runtime_control/gpu-ceilings.md).
   The operator sequence is [`docs/getting-started/installation.md`](../../../docs/getting-started/installation.md)
   → "Moving to a different machine or GPU".
 

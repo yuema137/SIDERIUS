@@ -1293,7 +1293,7 @@ def _build_admission_policy(agent_input, *, is_trial: bool, device_identity: Any
             "ceiling_source": (
                 "launcher"
                 if getattr(agent_input, "gpu_pair_ceiling_gib", None) is not None
-                else "environment_or_default"
+                else "environment_or_measured_capacity"
             ),
             "device_uuid_source": "hardware_discovery",
             "enforcement_source": (
