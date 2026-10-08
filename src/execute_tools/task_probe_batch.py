@@ -75,9 +75,9 @@ def task_inference_probe_batches(
 
 
 def load_task_probe_batch(
-    reference: TaskProbeDataSpec | dict[str, Any], batch_size: int
+    reference: TaskProbeDataSpec | dict[str, Any], batch_size: int, *, drop_last: bool = True
 ) -> tuple[Any, Any]:
-    """Return one full task-semantic training batch, failing closed."""
+    """Return one real training batch under the resolved tail policy."""
     ref = TaskProbeDataSpec.model_validate(reference)
     composition = compose_run_task_bindings(ref.manifest_path)
     if composition.semantic_fingerprint != ref.semantic_fingerprint:
@@ -97,11 +97,15 @@ def load_task_probe_batch(
                         dataset,
                         batch_size=batch_size,
                         shuffle=False,
-                        drop_last=True,
+                        drop_last=drop_last,
                     )
                 )
             )
         except StopIteration as exc:
+            if not drop_last:
+                raise ValueError(
+                    "the task-owned training scope contains no training samples"
+                ) from exc
             raise ValueError(
                 "the task-owned training scope cannot produce one full resource "
                 f"probe batch of size {batch_size}"
