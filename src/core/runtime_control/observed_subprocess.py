@@ -17,6 +17,11 @@ from typing import Any, Protocol, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
+from core.runtime_control.process_control import (
+    ProcessControl,
+    ProcessControlDecision,
+    effective_control_policy,
+)
 from core.runtime_control.process_group import (
     GroupCleanup,
     GroupObservation,
@@ -25,6 +30,8 @@ from core.runtime_control.process_group import (
     observe_tree_rss,
     terminate_observed_group,
 )
+
+_WATCHDOG_REAP_SECONDS = 2.0
 
 
 class _SessionOptions(TypedDict, total=False):
@@ -64,6 +71,9 @@ class ProcessLifecycle(BaseModel):
     returncode: int | None = None
     group_cleanup: GroupCleanup | None = None
     cleanup_errors: tuple[str, ...] = ()
+    control_decision: ProcessControlDecision | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class ProcessSupervisionError(RuntimeError):
@@ -72,6 +82,24 @@ class ProcessSupervisionError(RuntimeError):
     def __init__(self, message: str, lifecycle: ProcessLifecycle):
         super().__init__(message)
         self.lifecycle = lifecycle
+
+
+class ProcessControlError(ProcessSupervisionError):
+    """Explicit environment stop, retaining original child output and cleanup."""
+
+    def __init__(
+        self,
+        decision: ProcessControlDecision,
+        lifecycle: ProcessLifecycle,
+        *,
+        stdout: str = "",
+        stderr: str = "",
+        timeout: dict[str, Any] | None = None,
+    ):
+        super().__init__(decision.reason, lifecycle)
+        self.decision = decision
+        self.stdout, self.stderr = stdout, stderr
+        self.timeout = timeout
 
 
 class ObservedProcessResult(BaseModel):
@@ -175,6 +203,7 @@ def supervise_process(
     label: str = "",
     observer: ProcessObserver | None = None,
     limits: ProcessLimits | None = None,
+    control: ProcessControl | None = None,
 ) -> ObservedProcessResult:
     """Run one child, preserving primary exceptions with lifecycle evidence.
 
@@ -182,43 +211,83 @@ def supervise_process(
     A zero-exit leader that needed descendant termination is not clean success.
     Legacy deadline stops retain their existing timeout dictionary projection.
     """
-    strict_started = time.perf_counter() if limits is not None else None
-    if limits is not None:
-        assert strict_started is not None
-        baseline = observe_tree_rss(os.getpgrp())
-        if baseline.status != "complete":
-            raise ProcessSupervisionError(
-                "Process RSS monitoring unavailable before launch",
-                ProcessLifecycle(
-                    elapsed_seconds=time.perf_counter() - strict_started,
-                    stop_reason="monitoring_unavailable",
-                    last_rss_observation=baseline,
-                ),
+    try:
+        watchdog_bounds = (poll_seconds, grace_seconds) if deadline_provider is not None else None
+        strict_started = time.perf_counter() if limits is not None else None
+        if limits is not None:
+            assert strict_started is not None
+            baseline = observe_tree_rss(os.getpgrp())
+            if baseline.status != "complete":
+                raise ProcessSupervisionError(
+                    "Process RSS monitoring unavailable before launch",
+                    ProcessLifecycle(
+                        elapsed_seconds=time.perf_counter() - strict_started,
+                        stop_reason="monitoring_unavailable",
+                        last_rss_observation=baseline,
+                    ),
+                )
+            poll_seconds = limits.poll_seconds
+            grace_seconds = limits.grace_seconds
+        # Existing watchdog cleanup waits at most two seconds for the reap window.
+        reap_seconds = limits.reap_seconds if limits is not None else _WATCHDOG_REAP_SECONDS
+        if control is not None:
+            if control is not observer:
+                raise ValueError("process observer and control must be the same lifecycle owner")
+            active = deadline_provider is not None or limits is not None
+            effective = effective_control_policy(
+                control.control_policy,
+                existing_poll=poll_seconds if active else None,
+                existing_grace=grace_seconds if active else None,
+                existing_reap=reap_seconds if active else None,
             )
-        poll_seconds = limits.poll_seconds
-        grace_seconds = limits.grace_seconds
-    # Existing watchdog cleanup waits at most two seconds for the reap window.
-    reap_seconds = limits.reap_seconds if limits is not None else 2.0
-    cleanup_poll = poll_seconds if poll_seconds > 0 else 0.05
-    if observer is not None:
-        observer.capture_baseline()
-    started = strict_started if strict_started is not None else time.perf_counter()
-    if limits is not None:
-        # RSS and baseline preparation can block the parent. Once they return,
-        # expired work must refuse here rather than give a fresh child allowance.
-        remaining_process_limits(limits, time.perf_counter() - started)
-    owned = deadline_provider is not None or limits is not None
-    session_kwargs: _SessionOptions = {"start_new_session": True} if owned else {}
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE if capture_stdout else None,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd=os.getcwd(),
-        env=env,
-        preexec_fn=preexec_fn,
-        **session_kwargs,
-    )
+            if watchdog_bounds is not None:
+                effective = effective_control_policy(
+                    effective,
+                    existing_poll=watchdog_bounds[0],
+                    existing_grace=watchdog_bounds[1],
+                    existing_reap=_WATCHDOG_REAP_SECONDS,
+                )
+            control.configure_control(effective)
+            poll_seconds, grace_seconds, reap_seconds = (
+                effective.poll_seconds,
+                effective.grace_seconds,
+                effective.reap_seconds,
+            )
+        cleanup_poll = poll_seconds if poll_seconds > 0 else 0.05
+        if observer is not None:
+            observer.capture_baseline()
+        started = strict_started if strict_started is not None else time.perf_counter()
+        if limits is not None:
+            # RSS and baseline preparation can block the parent. Once they return,
+            # expired work must refuse here rather than give a fresh child allowance.
+            remaining_process_limits(limits, time.perf_counter() - started)
+        owned = deadline_provider is not None or limits is not None or control is not None
+        if control is not None:
+            initial_decision = control.check_control()
+            if initial_decision.status == "stop":
+                raise ProcessControlError(
+                    initial_decision,
+                    ProcessLifecycle(
+                        elapsed_seconds=time.perf_counter() - started,
+                        stop_reason="process_control",
+                        control_decision=initial_decision,
+                    ),
+                )
+        session_kwargs: _SessionOptions = {"start_new_session": True} if owned else {}
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE if capture_stdout else None,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=os.getcwd(),
+            env=env,
+            preexec_fn=preexec_fn,
+            **session_kwargs,
+        )
+    except BaseException as exc:
+        if control is not None:
+            control.abort_control(f"process launch did not complete: {type(exc).__name__}: {exc}")
+        raise
     # The owned group is established by Popen's new session, not rediscovered.
     owned_pgid = proc.pid if owned else None
     primary: BaseException | None = None
@@ -229,9 +298,14 @@ def supervise_process(
     peak_rss = 0
     rss = None
     try:
+        if control is not None:
+            control.attach_process(proc)
         if observer is not None:
             observer.start(proc.pid)
         while True:
+            if control is not None and control.check_control().status == "stop":
+                stop_reason = "process_control"
+                break
             elapsed = time.perf_counter() - started
             if limits is not None:
                 rss = observe_tree_rss(proc.pid)
@@ -269,6 +343,10 @@ def supervise_process(
                 if proc.poll() is not None:
                     break
                 continue
+        if control is not None:
+            control.mark_process_end()
+            if control.check_control().status == "stop":
+                stop_reason = stop_reason or "process_control"
         if stop_reason is None and proc.returncode != 0:
             child_error = subprocess.CalledProcessError(
                 proc.returncode, cmd, output=stdout, stderr=stderr
@@ -277,6 +355,14 @@ def supervise_process(
     except BaseException as exc:
         primary = exc
     finally:
+        if control is not None:
+            try:
+                control.mark_process_end()
+            except BaseException as exc:
+                if primary is None:
+                    primary = exc
+                else:
+                    primary.add_note(f"Control end: {type(exc).__name__}: {exc}")
         group, cleanup_errors = _finalize(
             proc,
             owned_pgid=owned_pgid,
@@ -305,6 +391,9 @@ def supervise_process(
         # the original exception object while attaching the now-drained output.
         child_error.output = stdout
         child_error.stderr = stderr
+    final_control = control.check_control() if control is not None else None
+    if final_control is not None and final_control.status == "stop":
+        stop_reason = stop_reason or "process_control"
     lifecycle = ProcessLifecycle(
         child_pid=proc.pid,
         owned_pgid=owned_pgid,
@@ -316,7 +405,16 @@ def supervise_process(
         returncode=proc.returncode,
         group_cleanup=group,
         cleanup_errors=cleanup_errors,
+        control_decision=final_control,
     )
+    if (
+        final_control is not None
+        and final_control.status == "stop"
+        and (primary is None or primary is child_error)
+    ):
+        raise ProcessControlError(
+            final_control, lifecycle, stdout=stdout, stderr=stderr, timeout=timeout
+        )
     if primary is not None:
         # Preserve exception type/identity/traceback, including KeyboardInterrupt.
         primary.add_note(f"Process lifecycle: {lifecycle.model_dump_json()}")
@@ -357,6 +455,7 @@ def run_observed_process(
     label: str = "",
     observer: ProcessObserver | None = None,
     limits: ProcessLimits | None = None,
+    control: ProcessControl | None = None,
 ) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
     """Compatibility projection: ordinary callers keep the original two values."""
     result = supervise_process(
@@ -370,6 +469,7 @@ def run_observed_process(
         label=label,
         observer=observer,
         limits=limits,
+        **({"control": control} if control is not None else {}),
     )
     return result.completed, result.timeout
 
@@ -386,14 +486,20 @@ def supervise_subprocess(
     label: str = "",
     observer: ProcessObserver | None = None,
     limits: ProcessLimits | None = None,
+    control: ProcessControl | None = None,
 ) -> ObservedProcessResult:
     """Retain package refusal checks around the process owner."""
     prepared_at = time.perf_counter() if limits is not None else None
     from core.local_code.child import prepare_child
 
-    invocation = prepare_child(cmd, env)
-    if limits is not None and prepared_at is not None:
-        limits = remaining_process_limits(limits, time.perf_counter() - prepared_at)
+    try:
+        invocation = prepare_child(cmd, env)
+        if limits is not None and prepared_at is not None:
+            limits = remaining_process_limits(limits, time.perf_counter() - prepared_at)
+    except BaseException as exc:
+        if control is not None:
+            control.abort_control(f"package preparation failed: {type(exc).__name__}: {exc}")
+        raise
     try:
         result = supervise_process(
             invocation.argv,
@@ -406,6 +512,7 @@ def supervise_subprocess(
             label=label,
             observer=observer,
             limits=limits,
+            **({"control": control} if control is not None else {}),
         )
     except Exception as exc:
         try:
@@ -442,6 +549,7 @@ def run_observed_subprocess(
     label: str = "",
     observer: ProcessObserver | None = None,
     limits: ProcessLimits | None = None,
+    control: ProcessControl | None = None,
 ) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
     """Keep the historical tuple facade over package-aware typed supervision."""
     result = supervise_subprocess(
@@ -455,5 +563,6 @@ def run_observed_subprocess(
         label=label,
         observer=observer,
         limits=limits,
+        **({"control": control} if control is not None else {}),
     )
     return result.completed, result.timeout
