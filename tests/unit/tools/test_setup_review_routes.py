@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from pydantic import TypeAdapter
 
 from core.layout import checkout_root
 from nodes.tuner_llm_settings import tuner_bridge_arguments
@@ -174,6 +175,7 @@ def test_actual_workflow_tuner_forwarding_and_protocol(tmp_path, planner_retries
         "max_retries",
         "reasoning_effort",
         "reflect_reasoning_effort",
+        "reflect_retry_policy",
     }
     forwarded = {
         keyword.arg: eval(
@@ -208,10 +210,13 @@ def test_actual_workflow_tuner_forwarding_and_protocol(tmp_path, planner_retries
     )
     actual = local_validated_model(validator, proposal, storage, **forwarded)
     routes = route_map(payload)
-    assert routes["tune.planner"].bridge_arguments == tuner_bridge_arguments(actual)
+    assert routes["tune.planner"].bridge_arguments == TypeAdapter(dict).dump_python(
+        tuner_bridge_arguments(actual), mode="json"
+    )
     planner, reflector = routes["tune.planner"].transport, routes["tune.reflector"].transport
     assert planner is not None and reflector is not None
-    assert planner.max_retries == reflector.max_retries == planner_retries
+    assert planner.max_retries == planner_retries
+    assert reflector.max_retries == 19
     assert reflector.model_id == "reflector"
     assert reflector.reasoning_effort == ("high" if reflect_provider == "openai" else None)
     assert routes["tune.reflector"].shares_client_with == (
@@ -238,7 +243,7 @@ def test_missing_blocks_and_literature_inheritance():
     )
     assert inherited["data_analysis"].bridge_arguments == inherited["interpret"].bridge_arguments
     assert inherited["lit_review.search"].shares_client_with == "lit_review.main"
-    assert inherited["lit_review.main"].transport.max_retries is None
+    assert inherited["lit_review.main"].transport.max_retries == 0
     assert inherited["data_analysis"].applicability == "task_dependent"
 
 

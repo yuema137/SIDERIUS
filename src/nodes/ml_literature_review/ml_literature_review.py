@@ -320,6 +320,8 @@ class MLLiteratureReviewAgent:
             search_provider=inp.search_llm_provider,
             search_model_id=inp.search_llm_model_id,
             search_reasoning_effort=inp.search_llm_reasoning_effort,
+            max_retries=inp.llm_max_retries,
+            search_retry_policy=inp.search_llm_retry_policy,
         )
         self.bridge = self._bridge_factory(**bridge_arguments.main)
         self.search_bridge = (

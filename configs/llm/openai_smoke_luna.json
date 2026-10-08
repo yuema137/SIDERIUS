@@ -62,12 +62,14 @@
     "main": {
       "provider": "openai",
       "model_id": "gpt-6-luna",
-      "reasoning_effort": "medium"
+      "reasoning_effort": "medium",
+      "max_retries": 1
     },
     "search": {
       "provider": "openai",
       "model_id": "gpt-6-luna",
-      "reasoning_effort": "medium"
+      "reasoning_effort": "medium",
+      "max_retries": 1
     }
   }
 }

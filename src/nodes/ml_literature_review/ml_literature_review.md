@@ -276,3 +276,12 @@ These run inside `_synthesize`'s for-loop and silently drop findings before they
 | Confidence clamp (`abstract_only_ceiling`) | `_clamp_abstract_only_confidence` | (clip, not drop) — v=0-cited finding's confidence is clipped to the ceiling |
 | Heading normalisation (`_normalize_finding_content_headings`) | `_synthesize` for-loop | (transform, not drop) — rewrites known heading variants to canonical form |
 | `ExpertContextItem` schema validation | constructor `try/except ValidationError` | Unexpected schema violation on the LLM payload |
+
+## Per-route transport attempts
+
+`llm_max_retries` now reaches the main bridge. `search_llm_retry_policy` optionally
+selects an independent search limit; omitted inherits main, a supplied policy
+with `max_retries: null` is unbounded. Workflow leaf JSON still uses `max_retries`.
+See the [shared retry contract](../../agent/retry-policy.md) for total-attempt
+semantics, nullable overrides and limits. Paper resolution and dynamic-search
+round budgets are separate owners and are unchanged.

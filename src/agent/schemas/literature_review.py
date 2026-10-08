@@ -21,6 +21,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from agent.schemas.external_agents import ExternalAgentOutput
+from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.storage import StorageConfig
 
 
@@ -507,6 +508,16 @@ class LiteratureReviewInput(BaseModel):
     llm_model_id: str = Field(description="LLMBridge model id (e.g. 'gpt-4o-mini').")
     llm_reasoning_effort: str | None = Field(
         default=None, description="Explicit OpenAI main-bridge reasoning effort."
+    )
+    llm_max_retries: int | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Total transient-error attempts; None leaves status retries unbounded.",
+    )
+    search_llm_retry_policy: RetryPolicy | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Explicit search retry limit; omitted inherits the main limit, a policy with None is unbounded.",
     )
     search_llm_provider: str | None = Field(
         default=None,

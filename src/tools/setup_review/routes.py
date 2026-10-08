@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
+from pydantic import TypeAdapter
+
 from agent.llm_settings import KNOWN_PROVIDERS, resolve_main_transport, resolve_reflect_transport
 from nodes.llm_settings import (
     ANALYZE,
@@ -34,14 +36,14 @@ def _route(name: str, kwargs: dict[str, Any], applicability: RouteApplicability)
         return LLMRoute(
             name=name,
             applicability=applicability,
-            bridge_arguments=kwargs,
+            bridge_arguments=TypeAdapter(dict[str, Any]).dump_python(kwargs, mode="json"),
             transport=None,
             issue=f"Inactive route settings are unresolved: {error}",
         )
     return LLMRoute(
         name=name,
         applicability=applicability,
-        bridge_arguments=kwargs,
+        bridge_arguments=TypeAdapter(dict[str, Any]).dump_python(kwargs, mode="json"),
         transport=RouteTransport(**asdict(main), max_retries=kwargs.get("max_retries")),
         issue=(
             "Credential name unresolved: this provider has no known key-name declaration."
@@ -63,6 +65,7 @@ def _tuner_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> list[
         max_retries=options.get("max_retries"),
         reasoning_effort=options.get("reasoning_effort"),
         reflect_reasoning_effort=options.get("reflect_reasoning_effort"),
+        reflect_retry_policy=options.get("reflect_retry_policy"),
     )
     planner = _route("tune.planner", kwargs, state)
     main = resolve_main_transport(
@@ -79,13 +82,17 @@ def _tuner_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> list[
     reflector = LLMRoute(
         name="tune.reflector",
         applicability=state,
-        bridge_arguments=kwargs,
+        bridge_arguments=TypeAdapter(dict[str, Any]).dump_python(kwargs, mode="json"),
         transport=RouteTransport(
             provider=reflect.provider,
             model_id=reflect.model_id,
             base_url=reflect.base_url,
             reasoning_effort=reflect.reasoning_effort,
-            max_retries=kwargs["max_retries"],
+            max_retries=(
+                kwargs["reflect_retry_policy"].max_retries
+                if "reflect_retry_policy" in kwargs
+                else kwargs["max_retries"]
+            ),
             request_timeout=main.request_timeout,
             timeout_retries=main.timeout_retries,
         ),
@@ -115,6 +122,8 @@ def _literature_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> 
         search_provider=options.get("search_llm_provider"),
         search_model_id=options.get("search_llm_model_id"),
         search_reasoning_effort=options.get("search_llm_reasoning_effort"),
+        max_retries=options.get("llm_max_retries"),
+        search_retry_policy=options.get("search_llm_retry_policy"),
     )
     main = _route("lit_review.main", arguments.main, state)
     search = _route("lit_review.search", arguments.search or arguments.main, state)

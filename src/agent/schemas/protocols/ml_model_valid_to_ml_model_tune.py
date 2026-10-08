@@ -29,6 +29,7 @@ from agent.schemas.hyperparam_tuning import (
     TimeAdmissionSource,
     serialize_expert_advice,
 )
+from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.ordering import OrderStrategy
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import ProposalOutput
@@ -75,6 +76,7 @@ def local_validated_model(
     reflect_provider: Literal["gemini", "openai", "deepseek"] | None = None,
     reflect_model_id: str | None = None,
     reflect_reasoning_effort: str | None = None,
+    reflect_retry_policy: RetryPolicy | None = None,
     # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
     # DS7 — trial_strategy / target_files / eval_strategy params deleted
     # alongside the dead HyperparamTuningInput fields they fed.
@@ -360,6 +362,7 @@ def local_validated_model(
         reflect_provider=reflect_provider,
         reflect_model_id=reflect_model_id,
         reflect_reasoning_effort=reflect_reasoning_effort,
+        reflect_retry_policy=reflect_retry_policy,
         storage=storage,
         is_trial=is_trial,
         trial_portion=trial_portion,

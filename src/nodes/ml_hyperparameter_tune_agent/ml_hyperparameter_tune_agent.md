@@ -2024,3 +2024,11 @@ readable but cannot certify continuation under the new builder. Retain the old
 workspace/revision or start a new workspace using verified experiment settings.
 Copying or editing the old lock does not constitute verification. No training,
 scoring, Health, scheduling or scientific defaults are changed by locking them.
+
+## Independent reflector retry selection
+
+`reflect_retry_policy` is an optional typed transport override. Its absence retains
+planner retry inheritance; its explicit `max_retries` value, including None,
+governs reflector requests independently. Workflow JSON uses the existing
+`tune.reflector.max_retries` leaf. This does not change tuning attempt/round counts.
+See the [shared retry contract](../../agent/retry-policy.md).

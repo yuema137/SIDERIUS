@@ -47,11 +47,15 @@ Inspect the resolved model routes in the optional
 [setup review](../../src/tools/setup_review/README.md) before launching.
 
 **Model routing is not a spending limit.** `max_retries: 1` means one transport
-attempt on routes that forward it. Literature calls currently do not forward
-that option. Content-repair attempts and workflow retries are separate, and
+attempt, including the initial request, on every configured workflow route.
+The planner, reflector and literature stages honor their own explicit limits.
+An omitted reflector limit inherits the planner's; an omitted literature-search
+limit inherits the main literature limit. Explicit `null` means unbounded
+retryable-status attempts for that route. Content-repair attempts and workflow retries are separate, and
 this JSON does not impose an output-token limit or a total API-cost ceiling.
 Use your provider/project controls and an external run limit for paid tests.
 Never switch to a stronger model automatically after a failed flow check.
+See the [retry contract](../../src/agent/retry-policy.md) for exact inheritance and limits.
 
 ## Optional review and orchestration agents
 

@@ -68,7 +68,9 @@ routes are listed even when a legacy pipeline may not invoke all three.</p>
 Null endpoints remain SDK/environment-controlled. Unbounded retries concern
 transient errors such as 429/5xx; a finite max_retries counts total attempts,
 including the first request (zero still permits the first request). Timeout attempts have a separate limit. Tuner
-planner and reflector share the planner's retry policy.</p>
+reflector inherits the planner's retry policy only when its own limit is omitted.
+Literature main/search limits are resolved separately. JSON content repair and
+workflow attempts are additional bounded layers, not included in these transport limits.</p>
 <table><thead><tr><th>Node / stage</th><th>Applicability</th><th>Resolved settings</th></tr></thead>
 <tbody>{"".join(rows)}</tbody></table>
 <h2>Provider key names</h2><p>{html.escape(checked)}</p>

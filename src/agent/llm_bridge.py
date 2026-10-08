@@ -71,6 +71,7 @@ from agent.prompts import (
     get_reflector_user_prompt,
     render_collapse_advice,
 )
+from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.planner_timing import PlannerTimingContext
 from agent.schemas.telemetry import (
     LLMBridgeContextError,
@@ -398,6 +399,7 @@ class LLMBridge:
         max_retries: int | None = None,
         request_timeout: float | None = None,
         timeout_retries: int | None = None,
+        reflect_retry_policy: RetryPolicy | None = None,
     ):
         """
         Unified LLM bridge — every provider is accessed through ``openai.OpenAI``.
@@ -456,6 +458,9 @@ class LLMBridge:
                       NOTE: this budget governs RETRYABLE STATUS errors
                       (429 / 5xx). Timeouts and connection errors have
                       their own bounded budget — see ``timeout_retries``.
+            reflect_retry_policy:
+                      Optional independent reflector transport policy. Omitted inherits
+                      max_retries; an explicit policy with None is unbounded.
             request_timeout:
                       Per-request wall-clock timeout in seconds, passed to
                       the OpenAI client. ``None`` uses
@@ -497,6 +502,11 @@ class LLMBridge:
         self.provider = main_settings.provider
         self.reasoning_effort = main_settings.reasoning_effort
         self.max_retries = max_retries
+        self.reflect_retry_policy = (
+            RetryPolicy.model_validate(reflect_retry_policy)
+            if reflect_retry_policy is not None
+            else None
+        )
         self.request_timeout = main_settings.request_timeout
         self.timeout_retries = main_settings.timeout_retries
 
@@ -1369,10 +1379,13 @@ class LLMBridge:
             pass
         return None
 
-    def _call_with_retry(self, fn, label: str = "api_call"):
+    def _call_with_retry(
+        self, fn, label: str = "api_call", *, retry_policy: RetryPolicy | None = None
+    ):
         """Call an OpenAI API function with the bridge's retry policy."""
         from openai import APIConnectionError, APIStatusError, APITimeoutError
 
+        max_retries = self.max_retries if retry_policy is None else retry_policy.max_retries
         last_exc = None
         attempt = 0
         timeout_attempts = 0
@@ -1420,7 +1433,7 @@ class LLMBridge:
                     )
                     raise last_exc
             # Check if we've exhausted the retryable-status budget
-            if self.max_retries is not None and attempt >= self.max_retries:
+            if max_retries is not None and attempt >= max_retries:
                 print(f"[LLMBridge.{label}] All {attempt} attempts failed; raising.", flush=True)
                 raise last_exc
             print(
@@ -1718,6 +1731,9 @@ class LLMBridge:
         )
         last_text = ""
         last_err_label = ""
+        retry_options = {}
+        if label == "tuner.reflector" and getattr(self, "reflect_retry_policy", None) is not None:
+            retry_options["retry_policy"] = self.reflect_retry_policy
         wait = self._CONTENT_RETRY_INITIAL_WAIT
         for attempt in range(self._CONTENT_RETRY_BUDGET + 1):
             response = self._call_with_retry(
@@ -1732,6 +1748,7 @@ class LLMBridge:
                     response_format={"type": "json_object"},
                 ),
                 label="_chat_json",
+                **retry_options,
             )
             raw = response.choices[0].message.content or ""
             text = self._sanitize_json_text(raw.strip())
@@ -2118,6 +2135,7 @@ class StubLLMBridge(LLMBridge):
         reasoning_effort: str | None = None,
         reflect_reasoning_effort: str | None = None,
         max_retries: int | None = 0,
+        reflect_retry_policy: RetryPolicy | None = None,
     ):
         """Initialise stub bridge state without any OpenAI client.
 
@@ -2161,6 +2179,7 @@ class StubLLMBridge(LLMBridge):
         self.model_name: str | None = "stub_model"
         self.api_key: str | None = None
         self.max_retries: int | None = max_retries
+        self.reflect_retry_policy = reflect_retry_policy
 
         # Reflect-side mirror — same provider/model so cross-provider
         # routing is a no-op in stub mode.

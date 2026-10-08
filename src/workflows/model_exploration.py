@@ -3343,6 +3343,7 @@ def run_workflow(
             reflect_provider=tune_llm.get("reflect_provider"),
             reflect_model_id=tune_llm.get("reflect_model_id"),
             reflect_reasoning_effort=tune_llm.get("reflect_reasoning_effort"),
+            reflect_retry_policy=tune_llm.get("reflect_retry_policy"),
             is_trial=launch.is_trial,
             # Lane F2 — TRANSIT-ONLY fields (no tuner consumer); a bare
             # launch restores the input-schema default so input bytes are

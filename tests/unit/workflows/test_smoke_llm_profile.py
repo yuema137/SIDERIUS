@@ -69,7 +69,7 @@ def test_smoke_routes_reach_only_luna_requests(monkeypatch, tmp_path):
         assert route.transport.provider == "openai"
         assert route.transport.model_id == "gpt-6-luna"
         assert route.transport.reasoning_effort == "medium"
-        assert route.transport.max_retries == (None if route.name.startswith("lit_review.") else 1)
+        assert route.transport.max_retries == 1
         bridge = LLMBridge(**route.bridge_arguments)
         bridge.set_run_context(
             workspace=tmp_path, iter=0, run_name=route.name, run_id="smoke-profile"
