@@ -70,6 +70,14 @@ SENSITIVE_FILES: MappingProxyType[str, str] = MappingProxyType(
             "process-tree witness never exists even though timeout cleanup is "
             "correct. This is an event-must-occur-within-T assertion."
         ),
+        "tests/unit/core/test_checkpoint_identity_preparation.py": (
+            "`test_blocked_worker_read_is_stopped_by_parent_cpu_deadline` must "
+            "import the worker and write `read_started` before its 0.8-second "
+            "deadline. Bulk contention on 52373be9 exhausted that deadline "
+            "during startup, before the injected blocking read was reached. "
+            "Run this event-must-occur-within-T witness serially; preserve its "
+            "deadline, blocked-read marker and process cleanup assertions."
+        ),
     }
 )
 

@@ -154,10 +154,9 @@ jobs:
             --workdir "$RUNNER_TEMP/ci_parity" \
             $CHANGED_ARG
 
-      # The sensitive lane runs AFTER the bulk lane and alone. Its four timing
-      # files assert that a preemption mechanism fired within a wall-clock
-      # bound, so they must not compete with the shards; the fifth reads the
-      # live working tree and needs an unmutated checkout.
+      # The sensitive lane runs AFTER the bulk lane and alone. Its reviewed
+      # files are declared in tools.ci.sensitive: deadline and scheduler-ordering
+      # witnesses must not compete with the bulk shards.
       # `if: always()` because a RED bulk lane must not HIDE the sensitive
       # lane's result. Run 32834492183 failed in bulk and skipped this step
       # entirely, so a whole class of evidence was silently absent from a run
