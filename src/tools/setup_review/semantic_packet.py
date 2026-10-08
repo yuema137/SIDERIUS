@@ -157,6 +157,13 @@ def build_packet(snapshot: Snapshot) -> dict[str, JsonValue]:
             }
         settings = snapshot.result.task_settings
         if settings is not None:
+            packet["historical_declaration_limitations"] = packet["unresolved"]
+            packet["unresolved"] = [
+                *settings.unresolved,
+                "SDK/environment-selected endpoints and credential authentication remain unchecked.",
+                "This observation does not enforce budgets or validate every downstream argument "
+                "combination; parsing and formal-launch validation do not prove runtime enforcement.",
+            ]
             packet["resolved_task_settings"] = _settings_packet(settings)
             packet["routes"] = _route_packet(settings.llm_routes)
         task = snapshot.result.task

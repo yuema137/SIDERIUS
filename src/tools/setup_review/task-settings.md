@@ -79,6 +79,10 @@ after scratch/source removal. Packets with task settings use setup-review/v2;
 previous composition-only packets retain v1. The allowlist includes scope,
 analysis, Health enablement, gate role/cadence/actions and typed routes. Arbitrary
 Health parameters, plugin source, reasons and wrappers are excluded.
+V2 keeps earlier declaration-stage limitations under
+`historical_declaration_limitations`. Its current `unresolved` list reflects the
+completed task-settings check while retaining hardware, data, authentication,
+budget and launch-freshness limitations. V1 packets remain unchanged.
 
 Hardware/watchdog resolution, data loading/split verification, authentication,
 resource measurement, future agent-selected values and report-to-launch freshness

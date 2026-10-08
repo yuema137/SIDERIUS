@@ -241,6 +241,22 @@ roster:
     assert receipt.outcome == "skipped" and receipt.prompt_version == "setup-review/v2"
     packet = json.loads((tmp_path / "skip-review/packet.json").read_text())
     assert packet["resolved_task_settings"]["health_gates"][0]["on_fail"] == {"action": "continue"}
+    assert packet["historical_declaration_limitations"] == report.declaration.unresolved
+    assert packet["resolved_task_settings"]["analysis_enabled"] is False
+    analysis = next(route for route in packet["routes"] if route["name"] == "data_analysis")
+    assert analysis["applicability"] == "disabled"
+    current_limits = " ".join(packet["unresolved"])
+    assert "Task-dependent enablement" not in current_limits
+    assert "task plugins" not in current_limits
+    for unresolved in (
+        "Hardware",
+        "Dataset",
+        "Agent-selected",
+        "later launch",
+        "authentication",
+        "budgets",
+    ):
+        assert unresolved in current_limits
     assert "display as text" not in json.dumps(packet)
 
 
