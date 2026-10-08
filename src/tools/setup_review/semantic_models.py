@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.skill_spec import SkillSpec
 from core.execution_deadline import ExecutionBudgetReceipt
+from tools.setup_review.composition_models import CompositionResult
+from tools.setup_review.models import SetupDeclarationReport
 from tools.setup_review.route_models import RouteTransport
 from workflows.llm_config import NodeLLMConfig
 
@@ -19,6 +21,22 @@ class SnapshotInputError(ValueError):
 
 class ReviewModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+
+class SavedTaskCheckSnapshot(BaseModel):
+    """Only consumed historical facts; never revalidate old sandbox paths.
+
+    Request, job, sandbox, runtime roots and execution wrappers are deliberately
+    discarded. The source file digest still binds their original bytes. This is
+    a typed projection, not validation that the earlier sandbox can launch now.
+    """
+
+    model_config = ConfigDict(extra="ignore", frozen=True, allow_inf_nan=False)
+
+    schema_version: Literal["siderius.task-composition-check/v1"]
+    declaration: SetupDeclarationReport
+    result: CompositionResult
+    limitations: tuple[str, ...]
 
 
 class SnapshotOperation(ReviewModel):

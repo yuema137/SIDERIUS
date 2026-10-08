@@ -254,6 +254,10 @@ After reading a saved declaration or task-check report, you can record a separat
 decision about LLM review. This step reads the saved JSON snapshot; it does not
 reload your task or prove that the original files are still unchanged. It never
 starts the experiment. Ordinary launchers remain usable without this step.
+For a saved task check, it validates only the declaration, task/provider result
+and recorded limitations used for review. Old sandbox/request/execution wrappers
+are discarded, so cleaning up the earlier scratch directory does not prevent
+reviewing its saved facts. This does not certify that the old sandbox can launch now.
 
 To **skip LLM review explicitly**, create `skip-review.json` in your project:
 

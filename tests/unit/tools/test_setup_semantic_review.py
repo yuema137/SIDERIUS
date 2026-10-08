@@ -238,7 +238,8 @@ def test_one_deadline_includes_preparation_and_gateway(snapshot, tmp_path, monke
             assert "user" not in captured
 
 
-def test_failed_composition_remains_failure_in_packet(snapshot, tmp_path, monkeypatch):
+@pytest.mark.parametrize("kind", ["review", "skip"])
+def test_saved_composition_never_revisits_old_paths(snapshot, tmp_path, monkeypatch, kind):
     from tools.setup_review.composition_models import (
         CompositionJob,
         CompositionResult,
@@ -270,7 +271,13 @@ def test_failed_composition_remains_failure_in_packet(snapshot, tmp_path, monkey
             settings=settings,
         ),
         job=job,
-        sandbox=SandboxProfile(workspace=tmp_path / "scratch", network=False, timeout_seconds=1),
+        sandbox=SandboxProfile(
+            workspace=tmp_path / "scratch",
+            network=False,
+            timeout_seconds=1,
+            read_only=(tmp_path / "task.yaml",),
+            devices=(Path("/dev/null"),),
+        ),
         runtime_read_only_roots=(),
         execution=None,
         result=CompositionResult.failed(
@@ -313,18 +320,85 @@ def test_failed_composition_remains_failure_in_packet(snapshot, tmp_path, monkey
     )
     payload = report.model_dump_json().encode()
     snapshot[0].write_bytes(payload)
+    (tmp_path / "scratch").rmdir()
+    (tmp_path / "task.yaml").unlink()
+    historical = {tmp_path / "scratch", tmp_path / "task.yaml", Path("/dev/null")}
+
+    def guard(original):
+        def guarded(path, *args, **kwargs):
+            assert Path(path) not in historical, f"Revisited historical path: {path}"
+            return original(path, *args, **kwargs)
+
+        return guarded
+
+    for name in ("resolve", "stat", "open"):
+        monkeypatch.setattr(Path, name, guard(getattr(Path, name)))
+    monkeypatch.setattr(os, "open", guard(os.open))
     captured = install_gateway(monkeypatch)
-    receipt = review_snapshot(operation((snapshot[0], payload), tmp_path, "review"))
-    assert receipt.outcome == "reviewed" and receipt.deterministic_outcome == "failed"
-    assert '"deterministic_outcome": "failed"' in captured["user"]
-    assert "PRIVATE_PATH_DETAIL" not in captured["user"]
-    assert "No hardware check" in captured["user"]
-    packet = json.loads(captured["user"])
+    receipt = review_snapshot(operation((snapshot[0], payload), tmp_path, kind))
+    assert receipt.outcome == ("reviewed" if kind == "review" else "skipped")
+    assert receipt.deterministic_outcome == "failed"
+    packet_string = (tmp_path / "review/packet.json").read_text()
+    if kind == "review":
+        assert captured["user"] == packet_string
+    else:
+        assert not captured
+    assert '"deterministic_outcome": "failed"' in packet_string
+    assert "PRIVATE_PATH_DETAIL" not in packet_string
+    assert "No hardware check" in packet_string
+    packet = json.loads(packet_string)
     assert packet["task"]["primary_metric"]["id"] == "accuracy"
     assert packet["task"]["parameter_rules"] == [{"path": "train_config.epochs", "exact": 1}]
     assert packet["forward_contract"]["num_classes"] == 10
-    assert "PRIVATE_" not in captured["user"]
+    assert "PRIVATE_" not in packet_string
     assert "<strong>failed</strong>" in (tmp_path / "review/index.html").read_text()
+
+
+@pytest.mark.parametrize(
+    "alteration", ["ignored_wrappers", "bad_consumed_field", "missing_version", "wrong_version"]
+)
+def test_task_snapshot_projection_is_typed_and_versioned(
+    snapshot, tmp_path, monkeypatch, alteration
+):
+    source, declaration_bytes = snapshot
+    payload = {
+        "schema_version": "siderius.task-composition-check/v1",
+        "declaration": json.loads(declaration_bytes),
+        "result": {
+            "request_sha256": "a" * 64,
+            "manifest_sha256": "b" * 64,
+            "outcome": "failed",
+            "failure": {
+                "stage": "composition",
+                "exception_type": "ValueError",
+                "message": "unavailable",
+            },
+        },
+        "limitations": ["Data remains unchecked"],
+        **{
+            key: "PRIVATE_IGNORED_WRAPPER"
+            for key in ("request", "job", "sandbox", "runtime_read_only_roots", "execution")
+        },
+    }
+    if alteration == "bad_consumed_field":
+        payload["result"]["failure"]["stage"] = "not a valid stage"
+    elif alteration == "missing_version":
+        del payload["schema_version"]
+    elif alteration == "wrong_version":
+        payload["schema_version"] = "siderius.setup-declaration/v2"
+    raw = json.dumps(payload).encode()
+    source.write_bytes(raw)
+    captured = install_gateway(monkeypatch)
+    request = operation((source, raw), tmp_path, "review")
+    if alteration == "ignored_wrappers":
+        receipt = review_snapshot(request)
+        assert receipt.outcome == "reviewed"
+        assert "PRIVATE_IGNORED_WRAPPER" not in captured["user"]
+        assert "PRIVATE_IGNORED_WRAPPER" not in (tmp_path / "review/index.html").read_text()
+    else:
+        with pytest.raises(ValueError):
+            review_snapshot(request)
+        assert not captured
 
 
 def test_skip_cold_process_has_no_provider_task_or_credential_access(snapshot, tmp_path):

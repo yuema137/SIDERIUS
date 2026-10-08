@@ -4,10 +4,10 @@ import json
 
 from pydantic import JsonValue
 
-from tools.setup_review.composition_models import TaskCheckReport
 from tools.setup_review.models import SetupDeclarationReport
+from tools.setup_review.semantic_models import SavedTaskCheckSnapshot
 
-Snapshot = SetupDeclarationReport | TaskCheckReport
+Snapshot = SetupDeclarationReport | SavedTaskCheckSnapshot
 
 # This is a transmission allowlist, not a second default/configuration owner.
 _SETTINGS = frozenset(
@@ -55,7 +55,7 @@ def _scalars(values: dict[str, JsonValue], names: tuple[str, ...]) -> dict[str, 
 
 
 def declaration_of(snapshot: Snapshot) -> SetupDeclarationReport:
-    return snapshot.declaration if isinstance(snapshot, TaskCheckReport) else snapshot
+    return snapshot.declaration if isinstance(snapshot, SavedTaskCheckSnapshot) else snapshot
 
 
 def _parameter_rules(values: dict[str, JsonValue]) -> list[JsonValue]:
@@ -114,7 +114,7 @@ def build_packet(snapshot: Snapshot) -> dict[str, JsonValue]:
             "Missing facts are unknown; do not infer effective defaults from their absence."
         ),
     }
-    if isinstance(snapshot, TaskCheckReport):
+    if isinstance(snapshot, SavedTaskCheckSnapshot):
         packet["deterministic_outcome"] = snapshot.result.outcome
         packet["composition_limitations"] = list(snapshot.limitations)
         if snapshot.result.failure:

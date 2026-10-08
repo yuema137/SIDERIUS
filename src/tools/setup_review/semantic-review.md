@@ -11,6 +11,14 @@ The CLI is `python -m tools.setup_review.review --request <operation.json>`.
 
 The accepted source schemas are `siderius.setup-declaration/v2` and
 `siderius.task-composition-check/v1`. Original reports remain untouched.
+For task checks, `SavedTaskCheckSnapshot` validates the exact schema discriminator,
+typed declaration, `CompositionResult` and limitations. It explicitly ignores
+unused historical request/job/sandbox/runtime/execution wrappers. The entire
+source file remains digest-bound, but those wrappers are neither used nor fully
+validated. In particular, it never constructs a live `SandboxProfile` or checks
+old scratch/source/device paths. This typed projection preserves its consumed
+facts without claiming the historical sandbox can still launch. Malformed consumed
+fields and missing/incorrect schema discriminators are refused.
 No task/plugin/data/model/Health/hardware execution occurs. The saved standard
 single-iteration scope cannot represent arbitrary orchestration or run_chain.
 Existing launchers, default routes and experiment prompts are unaffected.

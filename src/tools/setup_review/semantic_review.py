@@ -20,7 +20,6 @@ from core.execution_deadline import (
 )
 from core.file_identity import open_identity_file, regular_file_snapshot
 from core.layout import checkout_root, package_root
-from tools.setup_review.composition_models import TaskCheckReport
 from tools.setup_review.models import SetupDeclarationReport
 from tools.setup_review.route_models import RouteTransport
 from tools.setup_review.semantic_models import (
@@ -28,6 +27,7 @@ from tools.setup_review.semantic_models import (
 )
 from tools.setup_review.semantic_models import (
     ReviewSnapshotRequest,
+    SavedTaskCheckSnapshot,
     SemanticReviewReceipt,
     SemanticReviewRequest,
     SetupJudgement,
@@ -75,7 +75,7 @@ def _read_snapshot(operation: SnapshotOperation) -> Snapshot:
     if version == "siderius.setup-declaration/v2":
         return SetupDeclarationReport.model_validate(decoded)
     if version == "siderius.task-composition-check/v1":
-        return TaskCheckReport.model_validate(decoded)
+        return SavedTaskCheckSnapshot.model_validate(decoded)
     raise SnapshotInputError(
         "Unsupported report schema; provide a standard declaration or task check"
     )
