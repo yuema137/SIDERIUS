@@ -366,7 +366,7 @@ def run_prephase_measurement(
     try:
         while process.poll() is None:
             elapsed = elapsed_clock() - started
-            if spec.training_binding is not None:
+            if spec.training_binding is not None or spec.strict_lifecycle:
                 latest_rss = observe_tree_rss(pgid)
                 monitoring_complete = monitoring_complete and latest_rss.status == "complete"
                 rss = latest_rss.sampled_bytes
@@ -415,9 +415,13 @@ def run_prephase_measurement(
             if rss >= spec.worker_memory_limit_bytes:
                 host_exceeded = True
             if not monitoring_complete:
-                monitoring_detail = "training_host_monitoring_unavailable"
+                monitoring_detail = (
+                    "measurement_host_monitoring_unavailable"
+                    if spec.strict_lifecycle
+                    else "training_host_monitoring_unavailable"
+                )
             if host_exceeded or elapsed >= deadline_seconds or not monitoring_complete:
-                if spec.training_binding is not None:
+                if spec.training_binding is not None or spec.strict_lifecycle:
                     # The enclosing finalizer uses the existing owned-group termination owner.
                     break
                 term_sent = signal_group(pgid, signal.SIGTERM)
@@ -433,7 +437,7 @@ def run_prephase_measurement(
             time.sleep(poll_seconds)
 
     finally:
-        if spec.training_binding is not None:
+        if spec.training_binding is not None or spec.strict_lifecycle:
             from core.runtime_control.training_measurement_lifecycle import (
                 finish_training_measurement_group,
             )
@@ -482,7 +486,7 @@ def run_prephase_measurement(
 
     # One last look before the tree is gone: memory held at the very end
     # would otherwise fall outside the watch.
-    if spec.training_binding is None:
+    if spec.training_binding is None and not spec.strict_lifecycle:
         sampler.poll(force=True)
         sampler.stop()
     elapsed = round(elapsed_clock() - started, 3)
@@ -578,7 +582,7 @@ def run_prephase_measurement(
             exceeded=host_exceeded,
             latest_observation=latest_rss,
             observations_complete=(monitoring_complete and latest_rss is not None)
-            if spec.training_binding is not None
+            if spec.training_binding is not None or spec.strict_lifecycle
             else None,
         ),
         process=ProcessEvidence(

@@ -1896,6 +1896,7 @@ def _workflow_lock_identity(launch, llm_config: WorkflowLLMConfig) -> LockLaunch
     from agent.planner_strategy import resolve_planner_strategy
 
     return LockLaunchIdentity(
+        gpu_execution_policy=launch.gpu_execution_policy,
         planner_strategy_identity=resolve_planner_strategy(
             llm_config.get("tune").get("planner_strategy")
         ).identity,
@@ -3380,6 +3381,7 @@ def run_workflow(
             trial_time_admission_source=launch.trial_time_admission_source,
             formal_time_admission_source=launch.formal_time_admission_source,
             data_dir=launch.data_dir,
+            gpu_execution_policy=launch.gpu_execution_policy,
             gpu_admission_measurement_source=launch.gpu_admission_measurement_source,
             gpu_admission_enforcement=launch.gpu_admission_enforcement,
             gpu_pair_ceiling_gib=launch.gpu_pair_ceiling_gib,

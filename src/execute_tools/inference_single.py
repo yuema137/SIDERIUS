@@ -107,6 +107,7 @@ def _persisted_storage(args: Any) -> DeliverableStorage:
 def get_parser():
     """Defines the argument parser for both Fix and Agent modes."""
     parser = argparse.ArgumentParser(description="Inference with Fixed (Baseline) or Agent mode.")
+    parser.add_argument("--inference_startup_json", default=None)
     parser.add_argument("--mode", type=str, choices=["fix", "agent"], default="fix")
     parser.add_argument(
         "--task_data_path_id",
@@ -726,7 +727,17 @@ def main():
         # The shared loader checks the training marker, reads weights on the
         # host and preserves target-standardization state. Loading on CPU avoids
         # a second full GPU parameter set and its persistent allocator reserve.
-        model = load_inference_checkpoint(model, args.model_path, args.exp_id)
+        if args.inference_startup_json is None:
+            model = load_inference_checkpoint(model, args.model_path, args.exp_id)
+        else:
+            from core.runtime_control.inference_startup import load_and_wait_for_authorization
+
+            model = load_and_wait_for_authorization(
+                model,
+                args.inference_startup_json,
+                checkpoint_path=args.model_path,
+                exp_id=args.exp_id,
+            )
 
         # Record settled device state after releasing the temporary host copy.
         if trace is not None:

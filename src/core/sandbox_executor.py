@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from core.runtime_control.gpu_execution_evidence import AttemptGpuExecution
     from core.runtime_control.gpu_requirement_evidence import AdmissionRequirementEvidence
 
 from pydantic import StrictBool
@@ -51,6 +52,15 @@ from core.recorders import BaseRecorder as BaseRecorder
 from core.recorders import LocalRecorder as LocalRecorder
 from core.recorders import MongoRecorder as MongoRecorder
 from core.runtime_control.launch_argv import has_scope_to_launch_from, runtime_control_argv
+from core.runtime_control.native_gpu_execution import (
+    active_attempt,
+    admit_phase,
+    control_kwargs,
+    prepare_startup,
+    record_protected_phase,
+    run_native_subprocess,
+    validate_native_inputs,
+)
 
 # Foreground run_chain.sh:171 and install_chain_stop_traps depend on plain
 # children retaining the caller session; the extracted owner preserves the split.
@@ -430,6 +440,8 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
     explicitly selected isolation condition. Inside it, current parent-tree
     occupancy remains additional to the new worker's measured requirement.
     """
+    if active_attempt(sandbox) is not None:
+        return admit_phase(sandbox, phase)
     identity = getattr(sandbox, "device_identity", None)
     if identity is None:
         from core.runtime_control.isolated_admission import missing_device_identity_result
@@ -766,6 +778,7 @@ class TidmadSandbox:
         # own — implicit rediscovery is how "GPU 0" gets assumed.
         self.device_identity = device_identity
         self.device_available = device_available
+        self.gpu_execution: AttemptGpuExecution | None = None
         self.observation_policy = observation_policy
         # V20 B-G3. The typed admission boundary. `None` preserves
         # pre-B-G3 behaviour exactly: the gate falls back to the
@@ -985,6 +998,7 @@ class TidmadSandbox:
             json.dump(resolve_dataset_profile().to_wire(), handle)
         return path
 
+    @record_protected_phase("training")
     def execute_training(
         self,
         exp_id: str,
@@ -1051,6 +1065,25 @@ class TidmadSandbox:
                 RuntimeControlPolicy(**runtime_policy) if runtime_policy is not None else None
             )
             vm, vt, vl = self._validate_configs(model_type, m_cfg, t_cfg, l_cfg, exp_id, run_name)
+            validate_native_inputs(
+                self,
+                "training",
+                exp_id=exp_id,
+                model_type=model_type,
+                model_config=vm,
+                train_config=vt,
+                loss_config=vl,
+                task_scopes=execution_bindings.task_scopes
+                if execution_bindings is not None
+                else None,
+                train_portion=train_portion,
+                train_base_seed=train_base_seed,
+                custom_loss_snapshot=(
+                    execution_bindings.expected_custom_loss_snapshot
+                    if execution_bindings is not None
+                    else None
+                ),
+            )
 
             paths = {
                 "m": os.path.abspath(
@@ -1234,11 +1267,13 @@ class TidmadSandbox:
             )
 
             print(f">>> [Executor] Running training for {exp_id}...")
-            _observer = _make_phase_observer(self)
+            _observer = None if active_attempt(self) is not None else _make_phase_observer(self)
             # B-C4b: one gate before BOTH launch branches.
             _refusal = _admission_refusal(self, phase="training")
             if _refusal is not None:
                 return _refusal
+            if (selected_attempt := active_attempt(self)) is not None:
+                _observer = selected_attempt.current_observer
             env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
             preexec = _limited_preexec(_subprocess_rss_gb("training"))
             cmd = validation_training_command(cmd)
@@ -1246,7 +1281,9 @@ class TidmadSandbox:
                 # RT4 (§4): process-group launch + deadline kill. The
                 # deadline tightens mid-flight from the live observation
                 # sidecar (component-deadline interface).
-                result, kill_info = _run_observed_subprocess(
+                result, kill_info = run_native_subprocess(
+                    self,
+                    _run_observed_subprocess,
                     cmd,
                     env=env,
                     preexec_fn=preexec,
@@ -1257,6 +1294,7 @@ class TidmadSandbox:
                     grace_seconds=policy_obj.watchdog.grace_seconds,
                     poll_seconds=policy_obj.watchdog.poll_seconds,
                     observer=_observer,
+                    **control_kwargs(self),
                     label="training",
                 )
                 if kill_info is not None:
@@ -1287,12 +1325,15 @@ class TidmadSandbox:
                 # B-C2a: same seam as the deadline branch above, so
                 # telemetry attaches once. deadline_provider=None keeps
                 # subprocess.run's semantics, session behaviour included.
-                result, _ = _run_observed_subprocess(
+                result, _ = run_native_subprocess(
+                    self,
+                    _run_observed_subprocess,
                     cmd,
                     env=env,
                     preexec_fn=preexec,
                     capture_stdout=not self.progress_bar,
                     observer=_observer,
+                    **control_kwargs(self),
                 )
             assert result is not None
 
@@ -1411,6 +1452,8 @@ class TidmadSandbox:
             from core.local_code.failure import raise_if_code_package_failure
 
             raise_if_code_package_failure(e)
+            if active_attempt(self) is not None:
+                raise
             print(f"!!! [Executor Internal Error] !!!: {e!s}")
             return {"status": "error", "message": str(e)}
 
@@ -1427,6 +1470,7 @@ class TidmadSandbox:
         validated_l = LossConfig(**l_cfg).model_dump()
         return validated_m, validated_l
 
+    @record_protected_phase("inference")
     def execute_inference(
         self,
         exp_id: str,
@@ -1478,6 +1522,18 @@ class TidmadSandbox:
         """
         policy_obj = RuntimeControlPolicy(**runtime_policy) if runtime_policy is not None else None
         validated_m, validated_l = self._validate_model_and_loss(model_type, m_cfg, l_cfg)
+        validate_native_inputs(
+            self,
+            "inference",
+            exp_id=exp_id,
+            model_type=model_type,
+            model_config=validated_m,
+            loss_config=validated_l,
+            task_scopes=task_scopes,
+            inference_batch=inference_batch
+            if inference_batch is not None
+            else inference_batch_for(model_type),
+        )
         m_path = os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json"))
         l_path = os.path.abspath(os.path.join(self.dirs["configs"], f"loss_config_{exp_id}.json"))
         with open(m_path, "w") as f:
@@ -1595,16 +1651,22 @@ class TidmadSandbox:
 
         try:
             print(f">>> [Executor] Running inference for {exp_id}...")
-            _observer = _make_phase_observer(self)
+            _observer = None if active_attempt(self) is not None else _make_phase_observer(self)
             # B-C4b: one gate before BOTH launch branches.
             _refusal = _admission_refusal(self, phase="inference")
             if _refusal is not None:
                 return _refusal
+            if (selected_attempt := active_attempt(self)) is not None:
+                _observer = selected_attempt.current_observer
+            if active_attempt(self) is not None:
+                prepare_startup(self, cmd)
             t_subprocess_start = time.perf_counter()
             env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
             preexec = _limited_preexec(_subprocess_rss_gb("inference"))
             if policy_obj is not None and policy_obj.watchdog.enabled and armed:
-                result, kill_info = _run_observed_subprocess(
+                result, kill_info = run_native_subprocess(
+                    self,
+                    _run_observed_subprocess,
                     cmd,
                     env=env,
                     preexec_fn=preexec,
@@ -1615,6 +1677,7 @@ class TidmadSandbox:
                     grace_seconds=policy_obj.watchdog.grace_seconds,
                     poll_seconds=policy_obj.watchdog.poll_seconds,
                     observer=_observer,
+                    **control_kwargs(self),
                     label="inference",
                 )
                 if kill_info is not None:
@@ -1648,12 +1711,15 @@ class TidmadSandbox:
                 # B-C2a: same seam as the deadline branch above, so
                 # telemetry attaches once. deadline_provider=None keeps
                 # subprocess.run's semantics, session behaviour included.
-                result, _ = _run_observed_subprocess(
+                result, _ = run_native_subprocess(
+                    self,
+                    _run_observed_subprocess,
                     cmd,
                     env=env,
                     preexec_fn=preexec,
                     capture_stdout=not self.progress_bar,
                     observer=_observer,
+                    **control_kwargs(self),
                 )
             assert result is not None
             subprocess_wall_ms = (time.perf_counter() - t_subprocess_start) * 1000.0

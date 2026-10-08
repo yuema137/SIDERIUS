@@ -13,9 +13,13 @@ import os
 import subprocess
 import time
 from collections.abc import Callable
-from typing import Any, Protocol, TypedDict
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
+
+if TYPE_CHECKING:
+    from core.runtime_control.inference_startup import InferenceStartup
+    from core.runtime_control.measurement_allowance import MeasurementAllowance
 
 from core.runtime_control.process_control import (
     ProcessControl,
@@ -36,6 +40,23 @@ _WATCHDOG_REAP_SECONDS = 2.0
 
 class _SessionOptions(TypedDict, total=False):
     start_new_session: bool
+
+
+class _SelectedOptions(TypedDict, total=False):
+    control: ProcessControl
+    startup: InferenceStartup
+    launch_measurement: MeasurementAllowance
+
+
+def _selected_options(control, startup, launch_measurement) -> _SelectedOptions:
+    options: _SelectedOptions = {}
+    if control is not None:
+        options["control"] = control
+    if startup is not None:
+        options["startup"] = startup
+    if launch_measurement is not None:
+        options["launch_measurement"] = launch_measurement
+    return options
 
 
 class ProcessObserver(Protocol):
@@ -204,6 +225,8 @@ def supervise_process(
     observer: ProcessObserver | None = None,
     limits: ProcessLimits | None = None,
     control: ProcessControl | None = None,
+    startup: InferenceStartup | None = None,
+    launch_measurement: MeasurementAllowance | None = None,
 ) -> ObservedProcessResult:
     """Run one child, preserving primary exceptions with lifecycle evidence.
 
@@ -261,6 +284,10 @@ def supervise_process(
             # RSS and baseline preparation can block the parent. Once they return,
             # expired work must refuse here rather than give a fresh child allowance.
             remaining_process_limits(limits, time.perf_counter() - started)
+        if startup is not None:
+            startup.check(None)
+            if control is None:
+                raise ValueError("protected startup requires active process control")
         owned = deadline_provider is not None or limits is not None or control is not None
         if control is not None:
             initial_decision = control.check_control()
@@ -274,6 +301,10 @@ def supervise_process(
                     ),
                 )
         session_kwargs: _SessionOptions = {"start_new_session": True} if owned else {}
+        if launch_measurement is not None:
+            if time.monotonic() >= launch_measurement.deadline:
+                raise TimeoutError("native launch preparation exhausted the measurement allowance")
+            launch_measurement.finish("training authorized")
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE if capture_stdout else None,
@@ -307,6 +338,15 @@ def supervise_process(
                 stop_reason = "process_control"
                 break
             elapsed = time.perf_counter() - started
+            if startup is not None:
+                if startup.published_at is None:
+                    rss = observe_tree_rss(proc.pid)
+                    peak_rss = max(peak_rss, rss.sampled_bytes)
+                    if rss.status != "complete" or rss.sampled_bytes > startup.rss_limit_bytes:
+                        raise RuntimeError(
+                            "inference startup RSS evidence unavailable or over limit"
+                        )
+                startup.check(proc.pid)
             if limits is not None:
                 rss = observe_tree_rss(proc.pid)
                 peak_rss = max(peak_rss, rss.sampled_bytes)
@@ -319,8 +359,14 @@ def supervise_process(
                 if elapsed > limits.deadline_seconds:
                     stop_reason = "work_deadline_exceeded"
                     break
-            if deadline_provider is not None:
+            if deadline_provider is not None and (
+                startup is None or startup.published_at is not None
+            ):
                 deadline, source = deadline_provider()
+                if startup is not None:
+                    published_at = startup.published_at
+                    assert published_at is not None
+                    elapsed = time.monotonic() - published_at
                 if deadline is not None and elapsed > deadline:
                     stop_reason = "watchdog_deadline"
                     print(
@@ -352,6 +398,8 @@ def supervise_process(
                 proc.returncode, cmd, output=stdout, stderr=stderr
             )
             raise child_error
+        if stop_reason is None and startup is not None:
+            startup.check(proc.pid, terminal=True)
     except BaseException as exc:
         primary = exc
     finally:
@@ -456,6 +504,8 @@ def run_observed_process(
     observer: ProcessObserver | None = None,
     limits: ProcessLimits | None = None,
     control: ProcessControl | None = None,
+    startup: InferenceStartup | None = None,
+    launch_measurement: MeasurementAllowance | None = None,
 ) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
     """Compatibility projection: ordinary callers keep the original two values."""
     result = supervise_process(
@@ -469,7 +519,7 @@ def run_observed_process(
         label=label,
         observer=observer,
         limits=limits,
-        **({"control": control} if control is not None else {}),
+        **_selected_options(control, startup, launch_measurement),
     )
     return result.completed, result.timeout
 
@@ -487,6 +537,8 @@ def supervise_subprocess(
     observer: ProcessObserver | None = None,
     limits: ProcessLimits | None = None,
     control: ProcessControl | None = None,
+    startup: InferenceStartup | None = None,
+    launch_measurement: MeasurementAllowance | None = None,
 ) -> ObservedProcessResult:
     """Retain package refusal checks around the process owner."""
     prepared_at = time.perf_counter() if limits is not None else None
@@ -512,7 +564,7 @@ def supervise_subprocess(
             label=label,
             observer=observer,
             limits=limits,
-            **({"control": control} if control is not None else {}),
+            **_selected_options(control, startup, launch_measurement),
         )
     except Exception as exc:
         try:
@@ -550,6 +602,8 @@ def run_observed_subprocess(
     observer: ProcessObserver | None = None,
     limits: ProcessLimits | None = None,
     control: ProcessControl | None = None,
+    startup: InferenceStartup | None = None,
+    launch_measurement: MeasurementAllowance | None = None,
 ) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
     """Keep the historical tuple facade over package-aware typed supervision."""
     result = supervise_subprocess(
@@ -563,6 +617,6 @@ def run_observed_subprocess(
         label=label,
         observer=observer,
         limits=limits,
-        **({"control": control} if control is not None else {}),
+        **_selected_options(control, startup, launch_measurement),
     )
     return result.completed, result.timeout

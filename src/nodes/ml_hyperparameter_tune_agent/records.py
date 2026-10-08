@@ -746,6 +746,9 @@ def _emit_record(
         record["attempt_role"] = attempt_role
         if attempt_role != "unresolved":
             record["is_trial"] = attempt_role == "trial"
+    state = getattr(sandbox, "gpu_execution", None)
+    if state is not None and state.receipts:
+        record["gpu_execution"] = [receipt.model_dump(mode="json") for receipt in state.receipts]
     if status is not None:
         _attach_runtime_evidence(record, status)
     if ordering is not None:

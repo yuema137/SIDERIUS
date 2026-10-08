@@ -194,7 +194,10 @@ class TestSeamReachability:
             for node in ast.walk(tree)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id == "_run_observed_subprocess"
+            and node.func.id == "run_native_subprocess"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Name)
+            and node.args[1].id == "_run_observed_subprocess"
         ]
 
     def test_all_four_gpu_launches_go_through_the_seam(self):

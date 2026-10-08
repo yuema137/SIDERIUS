@@ -1049,6 +1049,7 @@ def compute_expected_invariants(
         ),
         # arXiv U1 — the identity the workflow's pre-flight will lock too.
         launch_identity=LockLaunchIdentity(
+            gpu_execution_policy=identity.gpu_execution_policy,
             planner_strategy_identity=planner_identity,
             lit_review_enabled=identity.lit_review_enabled,
             data_analysis_enabled=identity.data_analysis_enabled,

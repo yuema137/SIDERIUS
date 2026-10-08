@@ -36,6 +36,7 @@ from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from core.planner_strategy_identity import PlannerStrategyIdentity
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import DataScope
 
@@ -156,6 +157,7 @@ def local_validated_model(
     formal_time_admission_source: TimeAdmissionSource = "measured",
     data_dir: str | None = None,
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K two-budget split) ---
+    gpu_execution_policy: GpuExecutionPolicy | None = None,
     gpu_admission_measurement_source: str | None = None,
     gpu_admission_enforcement: AdmissionEnforcement = "observe_only",
     gpu_pair_ceiling_gib: float | None = None,
@@ -399,6 +401,7 @@ def local_validated_model(
         trial_time_admission_source=trial_time_admission_source,
         formal_time_admission_source=formal_time_admission_source,
         data_dir=data_dir,
+        gpu_execution_policy=gpu_execution_policy,
         gpu_admission_measurement_source=gpu_admission_measurement_source,
         gpu_admission_enforcement=gpu_admission_enforcement,
         gpu_pair_ceiling_gib=gpu_pair_ceiling_gib,

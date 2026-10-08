@@ -110,6 +110,7 @@ from nodes.ml_hyperparameter_tune_agent.feedback import (
     _render_gate_exhaustion_trigger_b_summary,
     invoke_reflection,
 )
+from nodes.ml_hyperparameter_tune_agent.gpu_execution import begin_attempt, end_attempt
 from nodes.ml_hyperparameter_tune_agent.loss_inventory import (
     resolve_run_custom_loss_inventory,
 )
@@ -590,6 +591,7 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
     from agent.planner_strategy import resolve_planner_strategy
 
     return LockLaunchIdentity(
+        gpu_execution_policy=agent_input.gpu_execution_policy,
         planner_strategy_identity=resolve_planner_strategy(
             agent_input.planner_strategy, expected=agent_input.expected_planner_strategy
         ).identity,
@@ -1510,6 +1512,8 @@ class HyperparamTuningAgent:
                     eval_psd_segments = prepared.eval_psd_segments
                     _planned_portions = prepared._planned_portions
 
+                    begin_attempt(sandbox, agent_input, exp_id)
+
                     # RT5 §5 guardrails — cheapest pre-flight check, before
                     # any VRAM/time probe. Defense-in-depth only; the primary
                     # criterion stays the in-subprocess runtime verification.
@@ -1775,6 +1779,7 @@ class HyperparamTuningAgent:
                     time.sleep(5)
 
                 finally:
+                    end_attempt(sandbox)
                     if training_started:
                         completed_training_attempts.append(
                             CompletedTrainingAttempt(
