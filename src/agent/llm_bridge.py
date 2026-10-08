@@ -1785,10 +1785,10 @@ class LLMBridge:
                     response_format={"type": "json_object"},
                 ),
                 label="_chat_json",
-                **retry_options,
                 on_late_response=lambda response, attempt=attempt: record_usage(
                     response=response, extra={"attempt": attempt, "status": "deadline_exceeded"}
                 ),
+                **retry_options,
             )
             raw = response.choices[0].message.content or ""
             text = self._sanitize_json_text(raw.strip())
