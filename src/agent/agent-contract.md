@@ -136,4 +136,4 @@ text = bridge.generate_text(system_prompt="…", user_prompt="say ok")
 `tests/unit/agent/` (per-node prompt and schema suites, bridge behaviour,
 skills); prompt-surface pin tests under the node suites; dual-mode
 integration tests exercise the stub bridge by default; see the
-[pseudo-full-loop testing guide](../../docs/architecture.md#pseudo-full-loop-tests-dual-mode).
+[workflow integration guide](../../tests/integration/workflows/README.md).

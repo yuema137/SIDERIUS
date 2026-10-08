@@ -1,6 +1,5 @@
 # Objectives, metrics, and what "better" means
 
-**Audience**: a scientist deciding how their task should be scored.
 **Answers**: why there are several numbers, and which one actually decides anything.
 
 ---

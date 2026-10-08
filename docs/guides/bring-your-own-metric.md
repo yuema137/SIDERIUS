@@ -1,6 +1,5 @@
 # Bring your own metric
 
-**Audience**: someone declaring how their task is scored.
 **Prerequisite**: [Objectives, metrics, and what "better" means](../concepts/objectives-and-metrics.md)
 — this guide is the *how*; that page is the *why*.
 

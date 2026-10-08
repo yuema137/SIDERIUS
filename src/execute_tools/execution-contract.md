@@ -23,7 +23,7 @@ The task-facing seams:
 | `metric_order.py` | `MetricOrder` — **the one authority interpreting metric direction** (`is_better`, `best`, `worst_sentinel`, `direction_words`, …) |
 | `dataset_config.py` | `DatasetProfile` (generic identity + opaque `topology` the framework never reads) · `DataScope` (`--data_scope "4-9"`) · `ChannelIdentity` / `ValueEncoding` |
 | `deliverable_spec.py` | `DeliverableNaming` — **the sole owner of deliverable file naming** — and `DeliverableStorage`/`DeliverableSpec` |
-| `sample_set_builder.py` / `scoring_utils.py` | `build_sample_set` (constructive scope enforcement) · `validate_sample_set` (the boundary guarantee before all file I/O) · `score_vector` (legacy compatibility helper; bound task metrics own current scoring semantics) |
+| `sample_set_builder.py` / `scoring_utils.py` | `build_sample_set` (partition SampleSet construction) · `validate_sample_set` (membership validation on the legacy SampleSet route) · `score_vector` (legacy compatibility helper; bound task metrics own current scoring semantics) |
 | `data_paths.py` | explicit physical data-root validation plus run-scoped bind/active/resolve transport |
 | `scope_artifact.py` | the hash-verified scope artifact ABI crossing the process boundary |
 | `spawned_file_callable.py` | content-pinned execution of a task-owned `file:` plugin callable in fresh `multiprocessing` spawn workers; use this instead of submitting a dynamically loaded function directly |
@@ -94,10 +94,13 @@ records (`metric_result` / `metric_refusal`), typed training results.
 
 ## State and filesystem effects
 
-Engines read the data root and write deliverables/records under the sandbox
-directories; `validate_sample_set` guards every file touch. Process-global
-state is limited to the data-path registry (run-scoped rollback via
-`task_registration_scope`); task data configuration is caller-bound.
+Engines read the bound data root and write deliverables/records under the
+sandbox directories. The legacy partition SampleSet route calls
+`validate_sample_set` at its execution boundaries. Opaque task-owned scopes
+instead cross the digest-verified scope transport and are materialized by the
+task data path; the framework does not parse them as SampleSets. Registry
+visibility has run-scoped rollback through `task_registration_scope`, and task
+data configuration is caller-bound.
 
 ## Failure modes
 

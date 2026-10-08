@@ -84,9 +84,10 @@ calibration evidence before changing them.
 `DeliverableNaming` is the sole owner of deliverable file naming: `prefix`,
 `extension`, `index_width`, `extra="forbid"`.
 
-`extra="forbid"` is load-bearing — a misspelled declaration key would otherwise
-yield the shipped TIDMAD template *and* a cleanup glob that deletes files the run
-never wrote.
+`DeliverableNaming` retains legacy defaults for individual fields; it is not
+the manifest-section presence rule. `extra="forbid"` rejects misspelled keys
+instead of silently ignoring them and selecting those defaults. All indexed
+names and matching patterns derive from the validated declaration.
 
 The composer requires indexed `deliverable` naming or a task-owned
 `deliverable_name`. It refuses a declaration with neither. A task that owns

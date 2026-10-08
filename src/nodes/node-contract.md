@@ -8,7 +8,7 @@ and landed source own the detailed behavior below.
 One directory per LLM-powered node of the SIDERIUS graph. Each node is one
 well-scoped agent — flexible *within* its task, never general-purpose; cross-
 node flexibility belongs to the workflow and the protocols, not to any agent.
-Nodes communicate **only** through schema, storage and protocols (CLAUDE.md);
+Nodes communicate through typed schemas and protocols; storage records their own state.
 nothing in this package reads a peer's output file as a channel.
 
 ## Public interface

@@ -1,7 +1,5 @@
 # The execution model
 
-**Audience**: anyone who wants to know what actually happens when SIDERIUS
-trains, infers or scores — and why a run was refused, killed, or capped.
 **Answers**: what runs in a subprocess, under what limits, and how a task's
 declarations reach it.
 
@@ -14,9 +12,9 @@ For implementer-depth detail (spawn sites, argv shapes, source map) see the
 
 The three heavy workloads — **training**, **inference**, **scoring** — never
 run inside the agent process. `core/sandbox_executor.py` launches each as a
-child subprocess with its own role-scoped memory ceiling, its own
-process group, and an argv that carries *everything the child needs*. A child
-infers nothing: what it was not told, it does not know.
+child subprocess with role-scoped address-space limits and explicit task
+transport. Watchdog-owned launches use process-group control; ordinary untimed
+subprocess launches do not promise a separate process group.
 
 | role | child entrypoint | what it does |
 |---|---|---|
@@ -24,10 +22,10 @@ infers nothing: what it was not told, it does not know.
 | inference | `execute_tools/inference_single.py` | produce the deliverables |
 | scoring | `execute_tools/denoising_score_single.py` | evaluate the declared metric over the deliverables |
 
-Two reasons for the process boundary: a CUDA OOM, allocator corruption or
-runaway allocation kills *the child*, not the run — the parent records a
-structured failure and continues; and the boundary forces every task binding
-to be **explicit transport** rather than shared in-process state.
+The boundary lets the parent capture child failures and apply its continuation
+policy. It also requires task bindings to cross through explicit transport.
+Process separation does not guarantee host survival, recovery from every CUDA
+failure, or security isolation of generated code.
 
 > One argv trap worth knowing even at this altitude: the scoring child's
 > `--data_dir` is the **deliverable** directory; its physical data root
@@ -49,13 +47,14 @@ rationale.
 | inference | 60 | ⚠ `empirical_unverified` — the value is known necessary (full-scope baseline inference fails under 40), but its recorded arithmetic no longer describes the current code; re-measuring is named debt. **Lowering it without re-verifying full-scope baseline inference is a regression.** |
 | scoring | 24 | incident — pinned by a real 2026-04-20 OOM-kill mid-scoring |
 
-The point of the ceiling is to convert a kernel OOM-kill into a catchable,
-recorded `MemoryError` inside the child — a structured `oom_host_ram`
-failure instead of a dead host.
+`RLIMIT_AS` limits process virtual address space. It can cause allocations to
+fail within the child and allow a structured host-memory failure record; it is
+not a guarantee against every kernel OOM event or host-wide memory problem.
 
 **Resolution is exactly two layers, and no third**:
-`SIDERIUS_SUBPROCESS_RSS_GB` (a global override — when set, it wins for
-every role), else the role's declared default. `0` disables the ceiling
+`SIDERIUS_SUBPROCESS_RSS_GB`, then the role's declared default. The override
+accepts one nonnegative integer for every role or a complete mapping such as
+`training=0,inference=96,scoring=24`. `0` disables that role's ceiling
 entirely (a deliberate operator escape hatch). A malformed override —
 `RSS_GB=4O` with a letter O — **refuses loudly**
 (`MalformedCeilingOverride`) instead of silently falling back: an ignored

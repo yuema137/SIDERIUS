@@ -35,7 +35,8 @@ declared, never inferred. Interpreted by exactly one authority (`MetricOrder`).
 Trials are cheap explorations; formal rounds produce the candidates that compete.
 
 **Forward contract** — the exact tensor contract a model must satisfy, declared in
-the task config and injected into every LLM prompt.
+the task config. Its resolved typed model I/O drives validation/probes; agent
+prompt consumers render the fields they need.
 
 **Golden metric** — a synonym for the *primary metric*.
 
@@ -62,11 +63,11 @@ metric, a health check or a view provider. May be declared by importable module 
 by file path; a file-declared plugin's content hash joins the run fingerprint.
 
 **Primary metric** — the single scalar that decides which model is better. The
-only quantity in the framework that drives selection.
+scientific ordering authority among eligible candidates.
 
 **Protocol** — a typed function that assembles one node's input from upstream node
-outputs. The only place field mapping happens; the only channel between nodes
-besides schemas and per-node storage.
+outputs. Protocols map typed schemas between nodes. Per-node storage records
+evidence and recovery state; it is not another communication channel.
 
 **Provenance** — the recorded identity of everything a result depended on: the
 composition fingerprint, plugin content hashes, the effective health config hash,

@@ -90,14 +90,20 @@ cross-field validator checks the declared file sets are legal for the topology.
 ## `DataScope` — the framework's partition-index form
 
 `--data_scope 4-9`, `4,5,6,7,8,9` and mixed `0-3,7` all canonicalise to one
-sorted, deduplicated list. Enforcement is layered and **never by prompt**:
+sorted, deduplicated list. For the legacy partition SampleSet route, enforcement
+is layered and **never by prompt**:
 
 1. **constructive** — `build_sample_set(scope=…)`
-2. **boundary** — `validate_sample_set` at the sandbox before *all* file I/O
-   (train, inference, scoring); a violation terminates the run, non-retryable
+2. **boundary** — `validate_sample_set` checks a supplied SampleSet before
+   the associated training, inference or scoring work
 3. **direct-access** — `health_gate_files ⊆ scope` validated at startup
 
-Under a partial scope only `snapshot` sampling is legal. Operator config errors
+Opaque task-owned scopes are a separate route: task construction and
+materialization own membership semantics, while the scope artifact contract
+below preserves transport identity. A matching digest does not prove scientific
+train/test disjointness.
+
+Under a partial partition scope only `snapshot` sampling is legal. Operator config errors
 fail at startup; LLM plans are normalised with recorded provenance.
 
 Aggregate scalars are comparable **only within one scope**. The resolved scope,

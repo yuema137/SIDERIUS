@@ -1,6 +1,5 @@
 # Troubleshooting
 
-**Audience**: something failed, refused, stalled or looks wrong.
 **Answers**: where to look, what the symptom means, and what actually fixes it.
 
 Two tables already cover deliberate refusals and are not repeated here:

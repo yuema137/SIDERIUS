@@ -1,6 +1,5 @@
 # Bring your own health checks
 
-**Audience**: someone declaring what makes *their* task's output invalid.
 **Prerequisite**: [Health gates](../concepts/health-gates.md) — the concept;
 this guide is the declaration surface.
 

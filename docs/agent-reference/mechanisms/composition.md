@@ -85,7 +85,9 @@ A half-composed run is fatal (`CompositionNotBoundError`), never degraded.
   (`none: true`) or a path.
 - **`secondary_metrics` order is semantic** — it participates in the fingerprint
   and the record stamp.
-- **One error type** — `TaskCompositionError` — for every fail-closed branch.
+- Invalid composition declarations raise `TaskCompositionError`. Missing
+  physical roots and inactive binding postconditions have their own error
+  types, listed below.
 
 ## Fail-closed behaviour
 
@@ -95,7 +97,7 @@ A half-composed run is fatal (`CompositionNotBoundError`), never degraded.
 | missing required section | `TaskCompositionError` |
 | both `module:` and `file:`, or neither | `TaskCompositionError` |
 | `task_data_path.id` ≠ implementation id | `TaskCompositionError` |
-| metric implementation is not an `EvaluationMetric`, or rewrites the declared id | `TaskCompositionError` |
+| metric implementation is neither `EvaluationMetric` nor `CandidateEvaluationMetric`, or rewrites the declared id | `TaskCompositionError` |
 | duplicate secondary id, or collision with the primary | `TaskCompositionError` |
 | `task_health` declaring both `none: true` and `config:` | `TaskCompositionError` |
 | composed run without `--data_dir` | `CompositionDataRootMissing`, before any LLM/GPU work |
@@ -118,21 +120,21 @@ capability, never task identity.
 
 ## Source map
 
-| concern | location |
-|---|---|
-| key sets | `workflows/task_composition.py:96-121` |
-| resolved carrier (`RunTaskComposition`) | `:183` |
-| manifest read / validate | `:340-383` |
-| path resolution | `:402` |
-| symbol loading (`module:` / `file:`) | `:451-600` |
-| companion-symbol refusal (`_require_companion_symbols`) | `:602` |
-| per-section resolvers | `:787-1786` |
-| declared model/loss roots + objective | `:1089` / `:1165` / `:1301` |
-| semantic fingerprint | `:1595` |
-| compose entrypoint | `:1970` |
-| run-scoped binding | `:2237` |
-| post-condition guard | `:2333` |
-| shipped manifests | `configs/task_composition/{quickstart,synthetic_masked_regression}.yaml` |
+All composition symbols below belong to `src/workflows/task_composition.py`.
+
+| Concern | Symbol |
+| --- | --- |
+| Section inventory | `_MANIFEST_KEYS`, `_REQUIRED_KEYS` |
+| Resolved carrier | `RunTaskComposition` |
+| Manifest read / validation | `_read_manifest` |
+| Relative path resolution | `_resolve_path` |
+| Symbol loading and companion validation | `_load_symbol`, `_require_companion_symbols` |
+| Metric and candidate-evaluator composition | `_compose_metric`; [metric contract](metrics.md) |
+| Content identity | `compute_semantic_fingerprint` |
+| Compose entrypoint | `compose_run_task_bindings` |
+| Binding lifetime | `bind_run_task_composition` |
+| Binding postcondition | `verify_composition_is_bound` |
+| Shipped manifests | `configs/task_composition/{quickstart,synthetic_masked_regression}.yaml` |
 
 ## Related
 

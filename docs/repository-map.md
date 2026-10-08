@@ -81,13 +81,11 @@ Each public implementation has a neighboring `.md` contract. The
 | [`MLCodeValidatorAgent`](../src/nodes/ml_code_validator_agent/ml_code_validator_agent.py) | `ValidatorInput` → `ValidatorOutput` | Check generated code |
 | [`HyperparamTuningAgent`](../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py) | `HyperparamTuningInput` → `HyperparamTuningOutput` | Plan, train, infer, score, check validity and reflect |
 
-[`agent/schemas/protocols/`](../src/agent/schemas/protocols/__init__.py) owns
-eight edge adapters: tune → interpret, interpret → analysis, interpret →
-propose, analysis → propose, literature → propose, propose → implement,
-implement → validate, and validate → tune. The last also consumes the proposal;
-literature and Data Analysis contribute separate typed projections to the
-proposal input. [Schemas](../src/agent/schemas/README.md) define the transported
-values. Each node's stored output is its log, not an inter-node channel.
+The [protocol directory](../src/agent/schemas/protocols/README.md) owns the
+current edge adapters, including both configured scientific-evidence orders.
+[Schemas](../src/agent/schemas/README.md) define transported values. Each node's
+stored output is its log, not an inter-node channel. Follow the protocol owner
+rather than copying an edge roster into workflow code.
 
 ## Deterministic owners
 

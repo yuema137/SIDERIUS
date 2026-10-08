@@ -1,8 +1,5 @@
 # Assemble a custom workflow boundary
 
-**Audience**: task authors who need to call an existing node boundary from a
-caller-owned workflow.
-
 SIDERIUS already provides typed adapters for the common node handoffs. The
 adapter below is deterministic: it validates a proposal, maps its model
 specification into `ImplementorInput`, and leaves the caller in control of the

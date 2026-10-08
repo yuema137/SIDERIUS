@@ -1,7 +1,5 @@
 # Configuration map
 
-**Audience**: anyone facing a directory of YAML files and wondering which ones
-are theirs.
 **Answers**: who owns each config, whether you may edit it, and what happens if
 you do.
 

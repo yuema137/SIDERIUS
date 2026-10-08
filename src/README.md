@@ -34,8 +34,8 @@ checkout resources. Optional legacy reads retain their absence behavior;
 checkout-required operations refuse when no checkout or explicit input exists.
 A wheel does not discover a surrounding unrelated Git repository.
 
-Task manifests, data, generated plugins and results belong to the caller's
-workspace. Low-level consumers must bind the generated library before importing
+The caller owns task-manifest and physical-data paths; these may be external
+read-only inputs. Generated plugins and results belong to the run workspace. Low-level consumers must bind the generated library before importing
 its readers; see [workspace guidance](../docs/guides/workspaces-and-resume.md).
 No writable run state belongs under `src/` or `site-packages`.
 

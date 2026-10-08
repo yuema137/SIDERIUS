@@ -1,7 +1,5 @@
 # Persistence and records
 
-**Audience**: anyone reading a run directory, or wondering whether the
-numbers in it can be trusted after a crash, a rerun, or a resume.
 **Answers**: which copy of the history is true, what is append-only versus
 derived, and what the integrity machinery refuses.
 

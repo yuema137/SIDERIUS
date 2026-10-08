@@ -1,6 +1,5 @@
 # Define your own task
 
-**Audience**: someone bringing a new scientific task to SIDERIUS.
 **Prerequisite**: [What a task must provide](../concepts/task-package.md).
 
 This guide walks the decisions in the order you actually face them. It does not

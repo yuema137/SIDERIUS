@@ -47,9 +47,9 @@ workflow · calibration observations.
   `_PROVENANCE` fields (e.g. the resolved role ceilings) are recorded and
   *never* compared — a resume on a differently-calibrated host stays legal. A
   guard test asserts the two partition every declared field.
-- **Role memory ceilings via `RLIMIT_AS`**, converting a kernel OOM-kill into
-  a catchable, recorded failure. Exactly three application sites (one per
-  role).
+- **Role memory ceilings via `RLIMIT_AS`** constrain process address space,
+  with one application per execution role. Allocation refusal can be recorded;
+  this is not universal protection from kernel OOM or host failure.
 - **The findings-union rule** has one authority (`union_key_findings`), called
   by both the digest projection and the loop closure; re-inlining it is the
   defect a mutation-proven structural guard exists to catch.
@@ -93,7 +93,7 @@ children. `StubSandbox` is the pseudo-training stub — no GPU, canned results.
 | `MalformedCeilingOverride` | a bad `SIDERIUS_SUBPROCESS_RSS_GB` refuses loudly instead of silently falling back |
 | `ResumeError` / `ReplayIntegrityError` | workspace state unreadable / tampered — fails closed |
 | `LocalCodeError` | declared task-code integrity/dependency refusal; the workflow halts the chain with its own diagnosis, not a scientific failure |
-| `MemoryError` in a child | the role ceiling working: structured `oom_host_ram`, not a dead host |
+| `MemoryError` in a child | may be classified as `oom_host_ram`; address-space limits do not prove host-wide OOM immunity |
 
 ## Files normally edited
 

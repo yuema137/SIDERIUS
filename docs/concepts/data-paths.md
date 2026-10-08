@@ -1,7 +1,5 @@
 # Data paths
 
-**Audience**: anyone connecting a dataset to SIDERIUS — or wondering how the
-framework can train on data whose shape it has never seen.
 **Answers**: the `TaskDataPath` contract, what stays task-owned, how a
 task-built scope crosses a process boundary intact, and how a binding is
 resolved.
@@ -51,8 +49,8 @@ clip identities. The framework passes it through untouched and deliberately
 has no scope-aware checker; exact materialization is each implementation's
 obligation in its own vocabulary.
 
-A task whose data is not shaped like "N partitions of M uniform units"
-declares the optional **`TaskScopeCapability`** sibling —
+The base protocol consumes supplied scopes. A composed workflow that constructs
+them requires the **`TaskScopeCapability`** sibling, regardless of data geometry —
 `build_training_scope`, `build_eval_scope` (separate methods, because the
 leg is a different question, not a parameter), `serialize_scope`,
 `deserialize_scope`. Serialization must be **canonical**, because the
@@ -73,9 +71,10 @@ scoring.
 A separate, framework-owned notion also called "scope" exists for
 partition-indexed tasks: the `--data_scope 4-9` CLI form, enforced in
 layers (constructively at the sample-set builder, again at the sandbox I/O
-boundary, never by prompts). For a composed non-TIDMAD task that flag is
-refused by name — such a task expresses coverage through its own
-`TaskScopeCapability`.
+boundary, never by prompts). In the standard composed workflow, a partial
+file-index scope is refused if `tidmad_topology` cannot resolve a compatible
+profile. This checks topology, not a task-name string. Other restrictions
+belong to the task's own `TaskScopeCapability`.
 
 Alongside the data path, a task declares a **`DatasetProfile`**: the few
 generic facts the framework does reason about (`partition_count`,

@@ -1,6 +1,5 @@
 # Health gates
 
-**Audience**: anyone about to trust a score.
 **Answers**: "how do I know this output is valid enough to evaluate at all?"
 
 ---

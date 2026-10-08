@@ -1,6 +1,5 @@
 # Agent reference — technical documentation index
 
-**Audience**: framework contributors and automated coding tools.
 **Purpose**: get from an implementation intent to the 1–3 documents that let
 you work safely,
 without reading the 170,000-line design archive.

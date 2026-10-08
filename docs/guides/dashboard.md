@@ -1,6 +1,5 @@
 # Browsing results with the dashboard
 
-**Audience**: anyone who ran something and wants to look at it.
 **Answers**: how to point the dashboard at your results, what it can and cannot
 show today, and why a page might be empty.
 
