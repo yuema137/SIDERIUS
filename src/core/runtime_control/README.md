@@ -188,6 +188,55 @@ unchanged; exception/orphan cleanup deliberately improves. The shared supervisio
 source identity changes, including the existing estimation assembly digest, so
 external historical estimator qualifications must be refreshed explicitly.
 
+### Testing optional GPU runtime protection
+
+Framework integrators can test the protected observer through the Python API.
+It is not yet connected to the training/inference launcher, and there is no CLI
+switch that enables it. Existing runs retain ordinary observation behavior.
+
+Before calling it, obtain a typed `GpuProtectionBinding` and
+`TimedGpuObservation` from your admission boundary and explicitly choose a
+`GpuRuntimeProtectionPolicy`. The binding carries the already resolved ceiling;
+the policy carries observation and cleanup timing. Do not substitute a GPU name,
+nominal capacity or a new environment lookup for those admitted facts.
+
+Pass one `GpuPhaseObserver` as both `observer` and `control` to
+`supervise_process` or its package-aware `supervise_subprocess` facade:
+
+```python
+from core.runtime_control.gpu_observer import GpuPhaseObserver
+from core.runtime_control.observed_subprocess import supervise_subprocess
+
+observer = GpuPhaseObserver(
+    binding.device,
+    protection_policy=policy,
+    protection_binding=binding,
+    initial_observation=initial_observation,
+)
+result = supervise_subprocess(
+    command,
+    env=child_environment,
+    preexec_fn=None,
+    capture_stdout=True,
+    observer=observer,
+    control=observer,
+)
+receipt = observer.protection_receipt()
+```
+
+Here `command` and `child_environment` are your explicit child inputs; the three
+protection objects must already be validated. A successful result has a frozen
+receipt with usable live samples. A ceiling breach or missing/stale telemetry
+raises `ProcessControlError`; inspect its lifecycle and the observer receipt.
+The supervisor stops only its owned child group. A stop is an environment result,
+not evidence that the model should shrink.
+
+For example, with a supplied 900 MiB ceiling, a sampled total of 950 MiB stops
+the child even if the next reading is 700 MiB. The total already includes the
+worker, so its measured demand is not added again. Samples can miss intervening
+spikes; this is not a hard GPU partition. See the [protection contract](gpu-protection.md)
+for coverage, shutdown, identity and the remaining production integration work.
+
 ### Preparing a checkpoint reference on CPU
 
 `checkpoint_identity_runner.prepare_checkpoint_identity` can produce the explicit

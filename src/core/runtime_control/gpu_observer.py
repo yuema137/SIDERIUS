@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,6 +33,19 @@ from core.runtime_control.gpu_accounting import (
     sample,
     sample_device_baseline,
 )
+
+if TYPE_CHECKING:
+    from core.runtime_control.gpu_protection import (
+        GpuProtectionBinding,
+        GpuProtectionReceipt,
+        GpuRuntimeProtectionPolicy,
+        TimedGpuObservation,
+    )
+    from core.runtime_control.process_control import (
+        ProcessControlDecision,
+        ProcessControlPolicy,
+        ProcessLiveness,
+    )
 
 
 class GpuObservationPolicy(BaseModel):
@@ -126,6 +139,9 @@ class GpuPhaseObserver:
         sampler: Any = None,
         baseline_sampler: Any = None,
         clock: Any = None,
+        protection_policy: GpuRuntimeProtectionPolicy | None = None,
+        protection_binding: GpuProtectionBinding | None = None,
+        initial_observation: TimedGpuObservation | None = None,
     ) -> None:
         self._device = device
         self._policy = policy or GpuObservationPolicy()
@@ -147,6 +163,29 @@ class GpuPhaseObserver:
         self._runtime_ms: float | None = None
         self._join_timed_out = False
         self._error: str | None = None
+        self._protection = None
+        if any(
+            value is not None
+            for value in (protection_policy, protection_binding, initial_observation)
+        ):
+            if (
+                protection_policy is None
+                or protection_binding is None
+                or initial_observation is None
+            ):
+                raise ValueError(
+                    "protected observation requires policy, binding and initial observation"
+                )
+            if device is None or device != protection_binding.device:
+                raise ValueError("observer device must match the protection binding")
+            if policy is not None and policy != protection_policy.observation:
+                raise ValueError("protected observation has one cadence policy")
+            from core.runtime_control.gpu_protection_state import ProtectedGpuObservation
+
+            self._policy = protection_policy.observation
+            self._protection = ProtectedGpuObservation(
+                protection_binding, protection_policy, initial_observation, self._clock
+            )
 
     @property
     def enabled(self) -> bool:
@@ -160,6 +199,12 @@ class GpuPhaseObserver:
 
     def capture_baseline(self) -> None:
         """Before ``Popen``. Claims nothing about the candidate."""
+        if self._protection is not None:
+            if self._protection.receipt().effective_control is None:
+                self._protection.abort("protected observation requires supervisor control")
+                raise ValueError("protected observation requires the same observer as control")
+            self.check_control()
+            return
         device = self._device
         if device is None:
             return
@@ -170,6 +215,8 @@ class GpuPhaseObserver:
 
     def start(self, child_pid: int) -> None:
         """After ``Popen``, once the child's PID exists."""
+        if self._protection is not None:
+            self._protection.start(child_pid)
         if not self.enabled or self._thread is not None:
             return
         self._started_at = self._clock()
@@ -200,8 +247,14 @@ class GpuPhaseObserver:
         try:
             while not self._stop.is_set():
                 try:
-                    self._record(self._sample(child_pid, device))
-                except Exception:
+                    if self._protection is not None:
+                        self._protection.sample_once(self._sample)
+                    else:
+                        self._record(self._sample(child_pid, device))
+                except Exception as exc:
+                    if self._protection is not None:
+                        self._protection.failed(f"GPU observer failed: {type(exc).__name__}: {exc}")
+                        break
                     self._failed += 1
                 elapsed_ms = (self._clock() - (self._started_at or 0.0)) * 1000.0
                 interval = self._policy.interval_ms_at(elapsed_ms) / 1000.0
@@ -209,14 +262,26 @@ class GpuPhaseObserver:
                     break
         except BaseException as exc:  # pragma: no cover - defensive
             self._error = f"{type(exc).__name__}: {exc}"
+            if self._protection is not None:
+                self._protection.failed(self._error)
 
     def stop(self, *, child_pid: int | None = None, failed: bool = False) -> None:
-        """Stop sampling. Never raises, never outlives the caller.
+        """Stop sampling with a bounded join; a pending driver call may outlive it.
 
         A join timeout is recorded as a telemetry failure rather than
         waited out: the child's cleanup must not be held up by the thread
         watching it.
         """
+        if self._protection is not None:
+            self._protection.end()
+            self._stop.set()
+            thread = self._thread
+            try:
+                if thread is not None and thread.ident is not None:
+                    thread.join(timeout=self._policy.join_timeout_ms / 1000.0)
+            finally:
+                self._protection.finish(join_timed_out=bool(thread and thread.is_alive()))
+            return
         if self._started_at is not None:
             self._runtime_ms = (self._clock() - self._started_at) * 1000.0
         self._stop.set()
@@ -248,3 +313,34 @@ class GpuPhaseObserver:
             observer_join_timed_out=self._join_timed_out,
             observer_error=self._error,
         )
+
+    def _protected(self):
+        if self._protection is None:
+            raise ValueError("observer has no explicitly selected GPU protection policy")
+        return self._protection
+
+    @property
+    def control_policy(self) -> ProcessControlPolicy:
+        return self._protected().policy.control
+
+    def configure_control(self, effective: ProcessControlPolicy) -> None:
+        self._protected().configure(effective)
+
+    def check_control(self) -> ProcessControlDecision:
+        thread = self._thread
+        return self._protected().check(thread_alive=bool(thread and thread.is_alive()))
+
+    def attach_process(self, process: ProcessLiveness) -> None:
+        self._protected().attach(process)
+
+    def mark_process_end(self) -> None:
+        self.check_control()
+        self._protected().end()
+        self._stop.set()
+
+    def abort_control(self, reason: str) -> None:
+        self._protected().abort(reason)
+        self._stop.set()
+
+    def protection_receipt(self) -> GpuProtectionReceipt:
+        return self._protected().receipt()

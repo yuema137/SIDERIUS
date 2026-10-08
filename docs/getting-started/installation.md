@@ -46,8 +46,19 @@ you plan to run the contributor gate (`make check`, see
 
 Supported interpreter and accelerator, today: **Python 3.12** (the version CI
 installs) and **CUDA GPUs** for the supported real scientific training path.
-Synthetic examples and focused tests can run on CPU; broader real-training
-accelerator support is outside this guide.
+Synthetic examples and focused tests can run on CPU. GPU discovery does not
+restrict NVIDIA devices to a model-name list; the installed PyTorch build,
+driver and selected execution path must actually support the device.
+
+AMD/ROCm compatibility is experimental and has not been hardware-tested.
+Discovery distinguishes ROCm from CUDA, but ROCm driver/process memory
+accounting is not implemented, so paths requiring that resource protection
+cannot run. The current frozen installation selects CUDA packages; it does not
+install a ROCm environment. Do not disable required protection or replace
+packages inside the frozen environment to bypass these limits. Intel GPU
+execution is not currently supported. See the
+[accelerator facts contract](../../src/core/accelerator-runtime.md) for the
+difference between detected properties and a successful runtime check.
 
 ### Installed packages and checkout resources
 
