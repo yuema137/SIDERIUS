@@ -20,6 +20,7 @@ from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
 from agent.schemas.custom_loss_contract import CustomLossApplicability, TaskOwnedCustomLoss
 from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
 from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
+from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.model_io_contract import TensorContract
 from agent.schemas.ordering import (
     OrderingObservation,
@@ -44,18 +45,28 @@ from core.record_role import AttemptRole, RecordRoleError, is_formal_role
 # field did before. Same layering as proposal.py importing
 # core.hardware_context.
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.completion import RuntimeCompletionPolicy
+from core.runtime_control.gpu_execution_evidence import GpuExecutionReceipt
+from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.inference_verification_evidence import InferenceVerification
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
+from core.runtime_control.pair_admission import PositiveGpuGiB
 from core.runtime_control.records import RuntimeObservation
 from core.runtime_control.training_budget import TrainingBudgetReceipt
 from core.runtime_control.validation_limits import validate_phase_deadline
+from core.runtime_control.verifier_provider import (
+    RuntimeVerifierIdentity,
+    resolve_runtime_verifier_identity,
+)
 from core.target_standardization import TargetStandardizationReceipt
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_execution import CandidateEvaluationResult
 from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
+from execute_tools.health_checks._composition import TaskHealthBinding
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 from execute_tools.training_history import TrainingHistory
 from ml_models.model_descriptions import DescriptionSourcePolicy
+from ml_models.models_format_sandbox import LossConfig
 
 TrainingValidationPortion = Annotated[float, Field(gt=0, le=1)]
 
@@ -392,6 +403,9 @@ class ExperimentRecord(BaseModel):
         # size, speed or capacity, and carries no authority to shrink it.
         "skipped_infrastructure_failure",
     ]
+    gpu_execution: list[GpuExecutionReceipt] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     model_type: str
     #: V21 PR E — observational candidate identity (O-E-4/O-E-5), stamped by
     #: ``_emit_record`` from the tuner input. None on records written before
@@ -1489,17 +1503,19 @@ class TaskCompositionRef(BaseModel):
             "name what the run is bound to."
         )
     )
-    task_health_binding: Any = Field(
+    task_health_binding: TaskHealthBinding | None = Field(
+        # Enum-first validation restores sentinel identity after JSON transport;
+        # smart unions would keep the same value as an ordinary path string.
+        union_mode="left_to_right",
         description=(
             "The run's Health binding — a task-health config path, or a "
-            "``HealthBindingState`` naming an absence. Typed ``Any`` because "
-            "``TaskHealthBinding`` is ``HealthBindingState | str`` and this "
-            "schema must not import the health package to say so. Carried so "
+            "``HealthBindingState`` naming an absence. None preserves legacy "
+            "unspecified projections; composition supplies an enum or path. Carried so "
             "the tuner's per-model effective config is materialized under the "
             "SAME binding as the chain's, instead of re-resolving "
             "``LEGACY_OMITTED`` and stamping ``legacy_default`` on a document "
             "that carries the task's roster."
-        )
+        ),
     )
     segmentation_applicability: Literal["temporal", "not_applicable"] | None = Field(
         default=None,
@@ -1517,7 +1533,7 @@ class TaskCompositionRef(BaseModel):
         default=None,
         description="Exact custom-loss implementation selected by the composition edge.",
     )
-    objective: Any = Field(
+    objective: LossConfig | None = Field(
         default=None,
         description=(
             "The task's AUTHORITATIVE training objective as a validated "
@@ -1526,10 +1542,9 @@ class TaskCompositionRef(BaseModel):
             "depend on the planner choosing it — two real composed DAVIS runs "
             "trained with ``smooth_l1`` because the planner is told that is "
             "the only valid regressor loss and never learns the task declares "
-            "exact L1. Typed ``Any`` for the same reason "
-            "``task_health_binding`` is: this schema must not import "
-            "``ml_models`` to name ``LossConfig``. ``None`` is every run that "
-            "exists today and leaves the planner's choice standing."
+            "exact L1. The canonical ``LossConfig`` restores the validated "
+            "objective after Python or JSON transport. ``None`` leaves the "
+            "planner's choice standing."
         ),
     )
     parameter_rules: ParameterRules | None = Field(
@@ -2243,6 +2258,19 @@ class HyperparamTuningInput(BaseModel):
             "full dataset and have a wall-time scale 50-100× longer."
         ),
     )
+    runtime_completion_policy: RuntimeCompletionPolicy = "completed-workload-v1"
+    runtime_verifier: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    runtime_verifier_identity: RuntimeVerifierIdentity | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def _bind_runtime_verifier(self) -> HyperparamTuningInput:
+        self.runtime_verifier_identity = resolve_runtime_verifier_identity(
+            self.runtime_verifier, self.runtime_verifier_identity
+        )
+        return self
+
     formal_time_admission_source: TimeAdmissionSource = Field(
         default="measured",
         description=(
@@ -2378,6 +2406,9 @@ class HyperparamTuningInput(BaseModel):
     # and vice versa. The budget here acts as an operator-defined ceiling; the
     # skill compares vram_estimate against min(defensive_floor, budget).
     # See docs/resource_estimator_implement.md §10.4 / §10.5.
+    gpu_execution_policy: GpuExecutionPolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     gpu_admission_measurement_source: str | None = Field(
         default=None,
         description=(
@@ -2406,14 +2437,12 @@ class HyperparamTuningInput(BaseModel):
             "campaign posture. The phase is never relabelled."
         ),
     )
-    gpu_pair_ceiling_gib: float | None = Field(
+    gpu_pair_ceiling_gib: PositiveGpuGiB | None = Field(
         default=None,
-        gt=0.0,
         description=(
-            "V20 B-G3. Aggregate GPU ceiling in GiB passed explicitly to "
-            "the admission gate. None = defer to the environment resolver "
-            "(SIDERIUS_PAIR_VRAM_CEILING_GIB, then the compatibility "
-            "default), which is exactly the pre-B-G3 behaviour."
+            "Aggregate GPU ceiling in GiB passed explicitly to admission. None "
+            "selects SIDERIUS_PAIR_VRAM_CEILING_GIB or measured device capacity. "
+            "The declared host quota independently constrains the result."
         ),
     )
     trial_vram_budget_gb: float | None = Field(
@@ -3035,6 +3064,11 @@ class HyperparamTuningInput(BaseModel):
             "cheaper / higher-quota model (e.g. 'gemini-2.5-flash') to free "
             "the main provider's quota for the reasoning-heavy planner."
         ),
+    )
+    reflect_retry_policy: RetryPolicy | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Explicit reflector retry limit; absent inherits planner, a policy with None is unbounded.",
     )
     reflect_reasoning_effort: str | None = Field(
         default=None, description="Explicit OpenAI reflector reasoning effort."

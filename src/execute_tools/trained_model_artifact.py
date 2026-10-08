@@ -39,6 +39,7 @@ from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.task_config import ForwardContract
 from core.durable_io import publish_bytes_write_once
 from core.runtime_control.gpu_milestone_trace import resolve_git_sha
+from core.stream_identity import stream_file_identity
 from ml_models.models_format_sandbox import LossTypeName
 from ml_models.models_sandbox import registered_model_construction_implementation_sha256
 
@@ -321,13 +322,9 @@ def verify_certified_artifact_file(root: Path, ref: CertifiedArtifactRef) -> Pat
     """Verify a large artifact by streaming it, without loading weights into RAM."""
 
     source = _certified_artifact_source(root, ref)
-    digest = hashlib.sha256()
-    size = 0
     with source.open("rb") as handle:
-        while chunk := handle.read(1024 * 1024):
-            digest.update(chunk)
-            size += len(chunk)
-    if digest.hexdigest() != ref.sha256 or (ref.byte_size is not None and size != ref.byte_size):
+        digest, size = stream_file_identity(handle)
+    if digest != ref.sha256 or (ref.byte_size is not None and size != ref.byte_size):
         raise ValueError("certified trained-model artifact file differs from its ref")
     return source
 

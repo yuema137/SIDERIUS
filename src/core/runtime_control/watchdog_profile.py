@@ -524,3 +524,25 @@ def resolve_watchdog_launch_settings(
         f"calibrated={profile.calibrated})",
         profile_calibrated=profile.calibrated,
     )
+
+
+def selected_profile_source(
+    settings: ResolvedWatchdogSettings,
+    *,
+    device_name: str,
+    required_binding: RequiredProfileBinding | None,
+) -> str | None:
+    """Locate only the selected profile for an explicit caller's source pin.
+
+    This performs no IO and changes no resolution. CLI/uncalibrated policies have
+    no selected profile file. Filename rules stay beside the profile resolver.
+    """
+    if settings.provenance.startswith("bound:"):
+        if required_binding is None:
+            raise ValueError("bound profile requires its declared source")
+        return required_binding.artifact_path
+    if settings.provenance.startswith("measured:"):
+        return _measured_overlay_path(device_name)
+    if settings.provenance.startswith("shipped:"):
+        return str(SHIPPED_PROFILES_PATH)
+    return None

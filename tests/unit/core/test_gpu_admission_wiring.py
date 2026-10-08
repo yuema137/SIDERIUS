@@ -39,6 +39,7 @@ from core.sandbox_executor import TidmadSandbox
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _build_admission_policy,
 )
+from tests.helpers.gpu_requirement import ended_worker_ownership
 from tests.helpers.launcher_bindings import workflow_call_bindings
 from tests.helpers.tuner_source import tuner_node_source
 
@@ -310,10 +311,18 @@ class TestReachabilityGuardrails:
         tuner = tuner_node_source()
         assert "SIDERIUS_PAIR_VRAM_CEILING_GIB" not in tuner
 
-    def test_the_compatibility_ceiling_default_is_unchanged(self):
-        """B-G3 wires the ceiling; it does not move it."""
-        src = Path(REPO_ROOT / "src/core" / "runtime_control" / "pair_admission.py").read_text()
-        assert re.search(r"DEFAULT_PAIR_CEILING_GIB\s*=\s*28\.0", src)
+    def test_omitted_ceiling_uses_supplied_capacity_without_a_machine_default(self, monkeypatch):
+        """A larger device must not silently inherit another deployment's ceiling."""
+        from core.runtime_control.pair_admission import (
+            HOST_VRAM_QUOTA_MIB_ENV,
+            PAIR_CEILING_GIB_ENV,
+            pair_ceiling_gib,
+        )
+
+        monkeypatch.delenv(HOST_VRAM_QUOTA_MIB_ENV, raising=False)
+        monkeypatch.delenv(PAIR_CEILING_GIB_ENV, raising=False)
+        for capacity in (12, 80, 192):
+            assert pair_ceiling_gib(measured_capacity_gib=capacity) == capacity
 
 
 class TestProvenanceCannotAbortAnAttempt:
@@ -515,7 +524,13 @@ class TestEnforcementIsSeparateFromPosture:
         "nothing was checked"."""
         _, sandbox, _ = self._decide(
             "observe_only",
-            requirements={"training": {"requirement_mib": 100, "provenance": "measured"}},
+            requirements={
+                "training": {
+                    "requirement_mib": 100,
+                    "provenance": "measured",
+                    "ownership": ended_worker_ownership("GPU-e-0").model_dump(),
+                }
+            },
         )
         assert sandbox.admission_observations == []
 
@@ -625,6 +640,7 @@ class TestCeilingIsAuditable:
             snapshot=_crowded_or_empty(31_500),
             requirement_mib=1476,
             requirement_provenance="measured",
+            requirement_ownership=ended_worker_ownership("GPU-e-0"),
             mode="formal",
             ceiling_gib=6.0,
         )

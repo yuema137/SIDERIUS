@@ -760,6 +760,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--runtime_verifier",
+        default=None,
+        help="Explicit installed runtime-verifier provider; omitted uses the native implementation.",
+    )
+    parser.add_argument(
+        "--runtime_completion_policy",
+        choices=("completed-workload-v1", "verified-prediction-v1"),
+        default="completed-workload-v1",
+        help="Use actual completed-phase cost, or explicitly select historical strict verification.",
+    )
+    parser.add_argument(
         "--formal_time_admission_source",
         choices=("forecast", "measured"),
         default="measured",
@@ -911,6 +922,11 @@ def build_parser() -> argparse.ArgumentParser:
         "real-dataset warmup AND the pre-phase GPU measurement.",
     )
     parser.add_argument(
+        "--gpu_execution_policy_json",
+        default=None,
+        help="Explicit JSON policy for measured and protected native GPU execution.",
+    )
+    parser.add_argument(
         "--gpu_admission_measurement_source",
         type=str,
         default=None,
@@ -946,7 +962,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "V20 B-G3. Aggregate GPU ceiling (GiB) passed explicitly to the "
             "admission gate. Omitted = defer to SIDERIUS_PAIR_VRAM_CEILING_GIB "
-            "and the compatibility default, i.e. pre-B-G3 behaviour."
+            "or measured device capacity. Host quota independently constrains "
+            "the result; no machine-specific ceiling is assumed."
         ),
     )
     parser.add_argument(

@@ -98,8 +98,13 @@ def inference_measurement_binding(
     sources = measurement_sources(environ=environ)
     return InferenceMeasurementBinding(
         **sources.model_dump(),
-        request_sha256=_digest(spec.model_dump(mode="json", exclude={"inference_binding"})),
+        request_sha256=measurement_request_digest(spec, binding_field="inference_binding"),
     )
+
+
+def measurement_request_digest(spec: GpuMeasurementSpec, *, binding_field: str) -> str:
+    """Hash the complete request using the existing canonical representation."""
+    return _digest(spec.model_dump(mode="json", exclude={binding_field}))
 
 
 def verify_measurement_sources(expected: MeasurementSources) -> None:

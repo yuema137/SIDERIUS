@@ -25,6 +25,7 @@ than on a cluster.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import subprocess
 from pathlib import Path
@@ -268,7 +269,12 @@ class TestPythonIsTheSingleValidator:
         further down."""
         src = RUNNER.read_text()
         assert "parse_known_args" not in src
-        assert "parse_args()" in src
+        calls = [
+            n.func.attr
+            for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        ]
+        assert "parse_args" in calls
 
     def test_an_unknown_flag_fails_the_runner_loudly(self):
         out = subprocess.run(

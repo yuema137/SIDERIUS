@@ -352,11 +352,24 @@ class RealizedPhaseMemory(BaseModel):
         return self
 
 
+class PhaseCompletion(BaseModel):
+    """Production-owned proof that the recorded workload finished successfully.
+
+    Counts and actual duration retain their existing component authorities.
+    Completion-only measurements cannot provide a reusable throughput prior.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    reason: Literal["requested_horizon", "cooperative_epoch_stop"]
+    verification_basis: Literal["verified", "workload_exhausted"]
+
+
 class PhaseComponentRecord(BaseModel):
     """One phase's {prediction, measurement, actual, error} quartet."""
 
     model_config = ConfigDict(frozen=True)
 
+    completion: PhaseCompletion | None = Field(default=None, exclude_if=lambda value: value is None)
     workload: ResolvedPhaseWorkload | None = None
     prediction: RuntimePrediction | None = None
     measurement: PhaseMeasurement | None = None
@@ -373,6 +386,12 @@ class PhaseComponentRecord(BaseModel):
 
     @model_validator(mode="after")
     def _error_requires_both(self) -> PhaseComponentRecord:
+        if self.completion is not None and (self.workload is None or self.actual_seconds is None):
+            raise ValueError("completion requires the resolved workload and actual duration")
+        if self.completion is not None:
+            verified = self.completion.verification_basis == "verified"
+            if verified != (self.prediction is not None):
+                raise ValueError("completion verification basis must match prediction evidence")
         if self.prediction_error is not None:
             if self.prediction is None or self.actual_seconds is None:
                 raise ValueError(

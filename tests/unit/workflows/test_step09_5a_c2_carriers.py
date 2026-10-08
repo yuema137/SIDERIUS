@@ -162,6 +162,10 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     # workflow-to-tuner transport; the runtime policy owns enforcement.
     "trial_time_admission_source": "measured",
     "formal_time_admission_source": "measured",
+    "runtime_completion_policy": "completed-workload-v1",
+    "runtime_verifier": None,
+    "runtime_verifier_identity": None,
+    "gpu_execution_policy": None,
     # PR #520 — caller-owned Formal training scope choice is transit to the
     # tuner; "operator" preserves the existing Formal training defaults.
     "formal_training_scope_source": "operator",

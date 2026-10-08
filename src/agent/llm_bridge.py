@@ -31,8 +31,10 @@ import json
 import os
 import sys
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
@@ -71,6 +73,7 @@ from agent.prompts import (
     get_reflector_user_prompt,
     render_collapse_advice,
 )
+from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.planner_timing import PlannerTimingContext
 from agent.schemas.telemetry import (
     LLMBridgeContextError,
@@ -78,7 +81,11 @@ from agent.schemas.telemetry import (
     TokenUsageChars,
     TokenUsageRow,
 )
-from core.execution_deadline import deadline_sleep, remaining_seconds
+from core.execution_deadline import (
+    ExecutionDeadlineExceeded,
+    deadline_sleep,
+    remaining_seconds,
+)
 from core.planner_strategy_identity import PlannerStrategyIdentity
 from execute_tools.evaluation_metric import MetricSpec
 
@@ -398,6 +405,7 @@ class LLMBridge:
         max_retries: int | None = None,
         request_timeout: float | None = None,
         timeout_retries: int | None = None,
+        reflect_retry_policy: RetryPolicy | None = None,
     ):
         """
         Unified LLM bridge — every provider is accessed through ``openai.OpenAI``.
@@ -456,6 +464,9 @@ class LLMBridge:
                       NOTE: this budget governs RETRYABLE STATUS errors
                       (429 / 5xx). Timeouts and connection errors have
                       their own bounded budget — see ``timeout_retries``.
+            reflect_retry_policy:
+                      Optional independent reflector transport policy. Omitted inherits
+                      max_retries; an explicit policy with None is unbounded.
             request_timeout:
                       Per-request wall-clock timeout in seconds, passed to
                       the OpenAI client. ``None`` uses
@@ -497,6 +508,11 @@ class LLMBridge:
         self.provider = main_settings.provider
         self.reasoning_effort = main_settings.reasoning_effort
         self.max_retries = max_retries
+        self.reflect_retry_policy = (
+            RetryPolicy.model_validate(reflect_retry_policy)
+            if reflect_retry_policy is not None
+            else None
+        )
         self.request_timeout = main_settings.request_timeout
         self.timeout_retries = main_settings.timeout_retries
 
@@ -1369,10 +1385,23 @@ class LLMBridge:
             pass
         return None
 
-    def _call_with_retry(self, fn, label: str = "api_call"):
-        """Call an OpenAI API function with the bridge's retry policy."""
+    def _call_with_retry(
+        self,
+        fn,
+        label: str = "api_call",
+        *,
+        retry_policy: RetryPolicy | None = None,
+        on_late_response: Callable[[Any], None] | None = None,
+    ):
+        """Retry transport failures; preserve a late response's usage before refusal.
+
+        The optional callback runs only after a response has returned successfully
+        but exceeded the continuing deadline. It cannot admit the late result.
+        Ordinary response recording stays with the caller's content classification.
+        """
         from openai import APIConnectionError, APIStatusError, APITimeoutError
 
+        max_retries = self.max_retries if retry_policy is None else retry_policy.max_retries
         last_exc = None
         attempt = 0
         timeout_attempts = 0
@@ -1382,8 +1411,6 @@ class LLMBridge:
             try:
                 remaining_seconds(label)
                 result = fn()
-                remaining_seconds(label)
-                return result
             except (APIConnectionError, APITimeoutError) as e:
                 last_exc = e
                 timed_out = True
@@ -1398,6 +1425,17 @@ class LLMBridge:
                     suggested = self._parse_retry_delay(e)
                     if suggested is not None:
                         wait = suggested
+            else:
+                # A returned response has finished transport. Recording a late
+                # receipt must never re-enter transport retries, even if logging
+                # itself raises an error.
+                try:
+                    remaining_seconds(label)
+                except ExecutionDeadlineExceeded:
+                    if on_late_response is not None:
+                        on_late_response(result)
+                    raise
+                return result
             attempt += 1
             # TIMEOUT / CONNECTION errors carry their OWN bounded budget.
             #
@@ -1420,7 +1458,7 @@ class LLMBridge:
                     )
                     raise last_exc
             # Check if we've exhausted the retryable-status budget
-            if self.max_retries is not None and attempt >= self.max_retries:
+            if max_retries is not None and attempt >= max_retries:
                 print(f"[LLMBridge.{label}] All {attempt} attempts failed; raising.", flush=True)
                 raise last_exc
             print(
@@ -1505,6 +1543,9 @@ class LLMBridge:
     #     to parse (Q1 confirmed 2026-05-04). The caller passes
     #     extra={"attempt": N, "status": "ok"|"json_decode_error"|...}
     #     to make the retry-cost visible.
+    #   - A successful response rejected by the continuing deadline is still
+    #     recorded once, with status="deadline_exceeded", before refusal.
+    #     The late content is never parsed or returned to the caller.
     #   - Graceful degradation when response.usage is missing: token
     #     counts written as None; char counts always populated.
     #
@@ -1716,8 +1757,20 @@ class LLMBridge:
         effort = (
             self.reflect_reasoning_effort if label == "tuner.reflector" else self.reasoning_effort
         )
+        record_usage = partial(
+            self._record_usage,
+            label=label,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model_name=model_name,
+            provider=provider,
+            components=components,
+        )
         last_text = ""
         last_err_label = ""
+        retry_options = {}
+        if label == "tuner.reflector" and getattr(self, "reflect_retry_policy", None) is not None:
+            retry_options["retry_policy"] = self.reflect_retry_policy
         wait = self._CONTENT_RETRY_INITIAL_WAIT
         for attempt in range(self._CONTENT_RETRY_BUDGET + 1):
             response = self._call_with_retry(
@@ -1732,6 +1785,10 @@ class LLMBridge:
                     response_format={"type": "json_object"},
                 ),
                 label="_chat_json",
+                on_late_response=lambda response, attempt=attempt: record_usage(
+                    response=response, extra={"attempt": attempt, "status": "deadline_exceeded"}
+                ),
+                **retry_options,
             )
             raw = response.choices[0].message.content or ""
             text = self._sanitize_json_text(raw.strip())
@@ -1765,14 +1822,8 @@ class LLMBridge:
 
             # Record one row per attempt, including content-retry failures.
             # No-op when run context is unset (Commit 2 wires the setter).
-            self._record_usage(
+            record_usage(
                 response=response,
-                label=label,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                model_name=model_name,
-                provider=provider,
-                components=components,
                 extra={"attempt": attempt, "status": attempt_status},
             )
 
@@ -1902,6 +1953,15 @@ class LLMBridge:
         """
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("generate_text")
+        record_usage = partial(
+            self._record_usage,
+            label=label,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model_name=self.model_name,
+            provider=self.provider,
+            components=components,
+        )
         response = self._call_with_retry(
             lambda: self._create_completion(
                 self.client,
@@ -1913,17 +1973,14 @@ class LLMBridge:
                 ],
             ),
             label="generate_text",
+            on_late_response=lambda response: record_usage(
+                response=response, extra={"attempt": 0, "status": "deadline_exceeded"}
+            ),
         )
         # Telemetry: one row per successful API response. Plain-text mode
         # has no content-retry, so attempt is always 0 and status "ok".
-        self._record_usage(
+        record_usage(
             response=response,
-            label=label,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            model_name=self.model_name,
-            provider=self.provider,
-            components=components,
             extra={"attempt": 0, "status": "ok"},
         )
         # Pure type-system shim. ``message.content`` is ``Optional[str]``
@@ -1968,6 +2025,15 @@ class LLMBridge:
         """
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("tool_call")
+        record_usage = partial(
+            self._record_usage,
+            label=label,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model_name=self.model_name,
+            provider=self.provider,
+            components=components,
+        )
         response = self._call_with_retry(
             lambda: self._create_completion(
                 self.client,
@@ -1985,6 +2051,9 @@ class LLMBridge:
                 tool_choice="auto",
             ),
             label="tool_call",
+            on_late_response=lambda response: record_usage(
+                response=response, extra={"attempt": 0, "status": "deadline_exceeded"}
+            ),
         )
 
         message = response.choices[0].message
@@ -1993,14 +2062,8 @@ class LLMBridge:
         # back. The API charged for the tokens either way; the response
         # shape is the caller's contract concern.
         tool_status = "ok" if message.tool_calls else "no_tool_call"
-        self._record_usage(
+        record_usage(
             response=response,
-            label=label,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            model_name=self.model_name,
-            provider=self.provider,
-            components=components,
             extra={"attempt": 0, "status": tool_status},
         )
 
@@ -2118,6 +2181,7 @@ class StubLLMBridge(LLMBridge):
         reasoning_effort: str | None = None,
         reflect_reasoning_effort: str | None = None,
         max_retries: int | None = 0,
+        reflect_retry_policy: RetryPolicy | None = None,
     ):
         """Initialise stub bridge state without any OpenAI client.
 
@@ -2161,6 +2225,7 @@ class StubLLMBridge(LLMBridge):
         self.model_name: str | None = "stub_model"
         self.api_key: str | None = None
         self.max_retries: int | None = max_retries
+        self.reflect_retry_policy = reflect_retry_policy
 
         # Reflect-side mirror — same provider/model so cross-provider
         # routing is a no-op in stub mode.

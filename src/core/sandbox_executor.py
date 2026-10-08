@@ -1,15 +1,21 @@
 # core/sandbox_executor.py
 import contextlib
+import functools
 import json
 import os
 import random
 import re
-import signal
 import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from core.runtime_control.gpu_execution_evidence import AttemptGpuExecution
+    from core.runtime_control.gpu_requirement_evidence import AdmissionRequirementEvidence
+
+from pydantic import StrictBool
 
 # V21 PR C2 — imported for its SIDE EFFECT, deliberately.
 #
@@ -46,7 +52,27 @@ from core.layout import package_root
 from core.recorders import BaseRecorder as BaseRecorder
 from core.recorders import LocalRecorder as LocalRecorder
 from core.recorders import MongoRecorder as MongoRecorder
+from core.runtime_control.execution_status import runtime_refusal_status
 from core.runtime_control.launch_argv import has_scope_to_launch_from, runtime_control_argv
+from core.runtime_control.native_gpu_execution import (
+    active_attempt,
+    admit_phase,
+    control_kwargs,
+    prepare_startup,
+    record_protected_phase,
+    run_native_subprocess,
+    validate_native_inputs,
+)
+
+# Foreground run_chain.sh:171 and install_chain_stop_traps depend on plain
+# children retaining the caller session; the extracted owner preserves the split.
+from core.runtime_control.observed_subprocess import (
+    run_observed_process as _run_observed_process,  # noqa: F401 (compatibility)
+)
+from core.runtime_control.observed_subprocess import (
+    run_observed_subprocess as _run_observed_subprocess,
+)
+from core.runtime_control.phase_launch import run_phase_subprocess
 from core.runtime_control.records import RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
 from core.runtime_control.watchdog_deadline import (
@@ -104,67 +130,26 @@ from ml_models.models_format_sandbox import (
 from ml_models.plugin_loader import UnknownOutputContractError
 
 # ---------------------------------------------------------------------------
-# Subprocess host-RAM hardening (Fix 1 of docs/optimize_inference_and_scoring.md)
+# Optional subprocess virtual-address-space limits
 # ---------------------------------------------------------------------------
-#
-# Context: on 2026-04-20 the orchestrator was terminated by the kernel's
-# global OOM-killer mid-scoring with a 36.9 GB anon-RSS. SIGKILL is silent
-# and irrecoverable — the parent had no chance to log or persist partial
-# records. Wiring RLIMIT_AS into every subprocess we spawn converts the
-# failure mode from "kernel kills the process" to "Python raises
-# MemoryError", which the orchestrator can catch, record as a structured
-# ``oom_host_ram`` failure, and skip past.
-#
-# The ceiling applies to virtual address space (RLIMIT_AS), not RSS, because
-# RSS is not a POSIX-enforceable limit. VMS is a superset of RSS, so an AS
-# cap transitively caps RSS — but the ratio is workload-dependent.
-#
-# VA-vs-RSS calibration (measured 2026-04-22 on RTX 5090, verified via
-# /proc/self/status in an isolated reproducer — see docs §Fix 1 addendum):
-#
-#   * CPU-only subprocess (e.g. scoring): VmSize ≈ RSS + ~1 GiB import
-#     overhead. 24 GiB VA cap gives ~23 GiB of real working memory.
-#   * CUDA subprocess (training / inference): `import torch` alone reserves
-#     ~5.8 GiB VA; `torch.cuda.is_available()` + context init reserves
-#     another ~12.5 GiB VA for unified-memory mappings; a single cached
-#     tensor adds another ~1.3 GiB. Total baseline ≈ 18-20 GiB VA with
-#     ~0.7 GiB RSS. Under a 24 GiB cap, CUDA workloads get only ~4-6 GiB
-#     of working VA — insufficient for PUNet-scale models plus AdamW
-#     state plus focal-loss intermediates.
-#
-# The per-role ceilings themselves — their VALUES, their PROVENANCE and
-# the resolution ladder — moved to `core/execution_calibration.py` in
-# Step 11 C3 (R-11-5, R-11-6, R-11-11). This file stays a launch CONSUMER:
-# the prose arithmetic that used to live here had gone stale without
-# anyone noticing (F-11-3), which is precisely the failure a bare comment
-# beside a bare dict cannot prevent.
-#
-# The measured VA-vs-RSS calibration above is retained here because it
-# explains why an AS cap is the instrument at all, which is a property of
-# THIS launch path.
+# Values and override parsing belong to core/execution_calibration.py. Without
+# an explicit declaration, children inherit OS limits without an additional cap.
+# RLIMIT_AS constrains virtual mappings; it is not a physical-RAM/RSS monitor.
+# Keep legacy helper names for import compatibility, not as semantic claims.
 
 _ROLE_DEFAULT_RSS_GB = ROLE_DEFAULT_RSS_GB
 
 
-def _subprocess_rss_gb(role: str) -> int:
-    """Host-RAM ceiling (GiB) applied to a sandboxed subprocess.
+def _subprocess_rss_gb(role: str) -> int | None:
+    """Additional address-space cap; None inherits OS, zero adds no cap.
 
-    A thin consumer of :func:`core.execution_calibration.resolve_role_ceiling_gb`
-    (Step 11 C3, R-11-11). The name is kept because it is what this launch
-    path and its tests have always called; the semantics — the two-layer
-    ladder, the ``0`` disable, and the LOUD refusal of a malformed
-    override — are declared there.
-
-    Raises:
-        ValueError: unknown role.
-        MalformedCeilingOverride: ``SIDERIUS_SUBPROCESS_RSS_GB`` is set to
-            something that is not a non-negative integer. Before C3 such a
-            value was silently ignored (R-11-5).
+    The legacy name is retained. Parsing, defaults and malformed-override
+    refusal belong to core.execution_calibration, never this consumer.
     """
     return resolve_role_ceiling_gb(role)
 
 
-def _limited_preexec(gb: int) -> Callable[[], None] | None:
+def _limited_preexec(gb: int | None) -> Callable[[], None] | None:
     """Return a ``preexec_fn`` that caps the child's virtual address space.
 
     The callable is invoked by ``subprocess`` after ``fork`` and before
@@ -172,14 +157,15 @@ def _limited_preexec(gb: int) -> Callable[[], None] | None:
     unaffected.
 
     Returns ``None`` when:
-      * ``gb <= 0`` — the caller (via env var) disabled the ceiling;
+      * ``gb is None`` — inherit existing OS limits without an extra cap;
+      * ``gb <= 0`` — preserve the legacy no-extra-hook behavior;
       * the POSIX ``resource`` module is unavailable (non-POSIX hosts such
         as Windows).
 
     ``subprocess.run`` treats ``preexec_fn=None`` as "no hook", so callers
     can thread the return value through unconditionally.
     """
-    if gb <= 0:
+    if gb is None or gb <= 0:
         return None
     try:
         import resource as _resource
@@ -405,57 +391,22 @@ def _watchdog_deadline_provider(
 
 
 def _phase_requirement(sandbox: Any, phase: str) -> tuple[float | None, str | None]:
-    """The measured requirement for **this** phase, or `(None, None)`.
+    """Compatibility projection; production consumes the complete typed evidence."""
+    evidence = _phase_requirement_evidence(sandbox, phase)
+    return evidence.requirement_mib, evidence.provenance
 
-    B-G0 measured the same PUNet candidate at 1,476 MiB for training and
-    2,716 MiB for inference — 1.8x apart on one card, in one run. A
-    single figure shared by both gates therefore judges one phase by a
-    measurement of the other, which is the applicability conflation the
-    attribution rules exist to prevent, arriving through the requirement
-    instead of through the verdict.
 
-    So the requirement is a mapping keyed by phase:
-
-        measured_requirements = {
-            "training":  {"requirement_mib": ..., "provenance": ...},
-            "inference": {"requirement_mib": ..., "provenance": ...},
-        }
-
-    A phase with no entry returns `(None, None)` and is refused in
-    formal mode. There is deliberately **no fallback** — not to the other
-    phase, not to the larger of the two, not to a model-name match. A
-    substituted figure would be an assumption wearing a measurement's
-    provenance.
-    """
-    # V20 PR C2 / C2-6. The TYPED table is the production channel. §8.A
-    # names the duck-typed read below as the gap that "survived PR B and
-    # its whole test suite" — a read no production code satisfied — so a
-    # typed object now carries the requirement, and only an authoritative
-    # measurement can be assembled into one.
-    #
-    # The `getattr` path is kept for the B-G validation harness, which
-    # injects a plain dict and whose runs are evidence about this gate's
-    # behaviour. Same shape as `admission_policy` / `admission_mode`
-    # above: typed first, and when a typed table is present it is
-    # authoritative, so the requirement cannot be read from two
-    # disagreeing places.
+def _phase_requirement_evidence(sandbox: Any, phase: str) -> "AdmissionRequirementEvidence":
+    """Read one phase, preserving typed-table precedence and explicit ownership."""
     from core.runtime_control.gpu_requirement import MeasuredRequirementTable
+    from core.runtime_control.gpu_requirement_evidence import AdmissionRequirementEvidence
 
     typed = getattr(sandbox, "measured_requirement_table", None)
     if isinstance(typed, MeasuredRequirementTable):
-        return typed.for_phase(phase)
-
+        return typed.for_phase_evidence(phase)
     table = getattr(sandbox, "measured_requirements", None)
-    if not isinstance(table, Mapping):
-        return None, None
-    entry = table.get(phase)
-    if not isinstance(entry, Mapping):
-        return None, None
-    requirement = entry.get("requirement_mib")
-    provenance = entry.get("provenance")
-    return (
-        requirement if isinstance(requirement, int | float) else None,
-        provenance if isinstance(provenance, str) else None,
+    return AdmissionRequirementEvidence.from_entry(
+        table.get(phase) if isinstance(table, Mapping) else None
     )
 
 
@@ -467,10 +418,14 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
     branch, so both launch paths sit behind one gate — a branch outside
     it would be a hole that looks like coverage.
 
-    **Never raises, but never fails open in formal mode.** An error is
-    converted into "no measurement was obtained" and handed to the
-    admission policy, which decides by mode: trial proceeds with a
-    recorded warning, formal refuses. Swallowing the error here into an
+    Explicit namespace-limited execution requires provable headroom for
+    both trial and formal phases, regardless of the observation posture.
+    Missing GPU identity may bypass this check only with a validated CPU
+    availability fact. Its policy errors also stop rather than taking the
+    legacy trial fallback.
+
+    In ordinary execution an error is converted into "no measurement was
+    obtained" and handed to the existing mode/enforcement policy. Swallowing the error here into an
     unconditional `return None` would make the guard silently permissive
     exactly when it is supposed to protect — the fail-open posture this
     commit exists to remove.
@@ -484,13 +439,19 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
     The requirement is whatever the run was given. PR B does not produce
     or promote one (D-B5), so in the default `trial` mode this admits and
     records that it asserted nothing; formal mode refuses until PR C
-    supplies a measurement. No default moves in this commit.
+    supplies a measurement. Those defaults remain unchanged outside the
+    explicitly selected isolation condition. Inside it, current parent-tree
+    occupancy remains additional to the new worker's measured requirement.
     """
+    if active_attempt(sandbox) is not None:
+        return admit_phase(sandbox, phase)
     identity = getattr(sandbox, "device_identity", None)
     if identity is None:
-        # No device identity means there is no device to decide about —
-        # the pre-PR-B path. Unchanged behaviour, not a refusal.
-        return None
+        from core.runtime_control.isolated_admission import missing_device_identity_result
+
+        return missing_device_identity_result(
+            getattr(sandbox, "device_available", None), phase=phase
+        )
 
     # B-G3: the typed policy is the production channel. The `getattr`
     # fallbacks below are the pre-B-G3 path and the validation harness's
@@ -509,7 +470,7 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
     # Production always supplies a policy, so production gets the
     # `observe_only` compatibility default from the field itself.
     enforcement = policy.enforcement if policy is not None else "enforce"
-    requirement_mib, requirement_provenance = _phase_requirement(sandbox, phase)
+    requirement = _phase_requirement_evidence(sandbox, phase)
     snapshot = None
     sampling_error = None
     try:
@@ -529,8 +490,10 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
 
         decision = evaluate_gpu_admission(
             snapshot=snapshot,
-            requirement_mib=requirement_mib,
-            requirement_provenance=requirement_provenance,
+            requirement_mib=requirement.requirement_mib,
+            requirement_provenance=requirement.provenance,
+            requirement_ownership=requirement.ownership,
+            requirement_error=requirement.validation_error,
             mode=mode,
             run_name=getattr(sandbox, "run_name", None) or "candidate",
             ceiling_gib=ceiling_gib,
@@ -541,6 +504,11 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
         # Only an explicitly `trial` posture may proceed: formal must not
         # fall through to a launch, and an unrecognised mode is a
         # misconfiguration, which is also not permission.
+        from core.runtime_control.isolated_admission import isolated_policy_error_result
+
+        isolated_refusal = isolated_policy_error_result(snapshot, phase=phase, mode=mode, error=exc)
+        if isolated_refusal is not None:
+            return isolated_refusal
         if mode == "trial":
             return None
         reason = f"the admission decision could not be evaluated ({type(exc).__name__}: {exc})"
@@ -742,242 +710,6 @@ def _with_gpu_evidence(result: dict, observer: Any) -> dict:
     return result
 
 
-def _run_observed_subprocess(
-    cmd: list[str],
-    *,
-    env: dict,
-    preexec_fn: Callable[[], None] | None,
-    capture_stdout: bool,
-    deadline_provider: Callable[[], tuple[float | None, str]] | None = None,
-    grace_seconds: float = 0.0,
-    poll_seconds: float = 0.0,
-    label: str = "",
-    observer: Any = None,
-) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
-    """Retain package refusals around the existing observed process owner."""
-    from core.local_code.child import prepare_child
-
-    invocation = prepare_child(cmd, env)
-    try:
-        result, kill_info = _run_observed_process(
-            invocation.argv,
-            env=invocation.env,
-            preexec_fn=preexec_fn,
-            capture_stdout=capture_stdout,
-            deadline_provider=deadline_provider,
-            grace_seconds=grace_seconds,
-            poll_seconds=poll_seconds,
-            label=label,
-            observer=observer,
-        )
-    except Exception as exc:
-        invocation.check(exc.returncode if isinstance(exc, subprocess.CalledProcessError) else None)
-        raise
-    invocation.check(result.returncode if result is not None else None)
-    return result, kill_info
-
-
-def _run_observed_process(
-    cmd: list[str],
-    *,
-    env: dict,
-    preexec_fn: Callable[[], None] | None,
-    capture_stdout: bool,
-    deadline_provider: Callable[[], tuple[float | None, str]] | None = None,
-    grace_seconds: float = 0.0,
-    poll_seconds: float = 0.0,
-    label: str = "",
-    observer: Any = None,
-) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
-    """The single seam every GPU child is launched through (V20 B-C2a1).
-
-    **Routing only.** This commit changes *where* the four GPU launches
-    are expressed, not *how* any of them runs. Both implementations below
-    are the pre-existing ones, moved behind one door so that the observer
-    in B-C2b attaches once instead of at four call sites, where one
-    branch could silently lose it.
-
-    ``deadline_provider=None`` — plain mode, delegating to the same
-    ``subprocess.run(..., check=True)`` these call sites used before.
-
-    ``deadline_provider`` supplied — deadline mode, the existing §4
-    watchdog: own process group, SIGTERM, ``grace_seconds``, SIGKILL,
-    then assert the group is gone. Returns ``(None, kill_info)`` when the
-    deadline fires.
-
-    **Why plain mode is not also on ``Popen`` yet.** B-C2b needs the child
-    PID while the child is alive, which ``subprocess.run`` cannot give.
-    But moving plain mode to ``Popen`` retires the launch point that 58
-    existing stubs across six test files are aimed at, and a stub that
-    stops intercepting does not fail — it lets the real thing run. That
-    was measured, not predicted: real ``train_engine_sandbox.py``
-    subprocesses launched out of the unit suite. The migration is
-    therefore its own checkpoint (B-C2a2), so a test-infrastructure
-    change, an execution-mechanism change and a telemetry change cannot
-    mask one another.
-
-    **Why the session behaviour is not unified, and will not be.**
-    ``killpg`` needs its own group, so deadline mode passes
-    ``start_new_session=True``. A child in its own session does *not*
-    receive a terminal SIGINT, while a child in the caller's group does,
-    and operator stop depends on that signal reaching the work. Unifying
-    the two would change operator stop semantics through a diff that looks
-    like a refactor.
-
-    **Correction (Step 11 C7 / §3.5): the mechanism named here was wrong.**
-    This paragraph used to justify the split with *"the chain runs under
-    ``timeout --signal=INT``"*. No launcher uses ``timeout`` — the string
-    appears in no shell script in the repository. The real anchor is
-    ``sdsc_submission_scripts/run_chain.sh:171``, which runs the iteration
-    as a FOREGROUND child in the caller's process group, together with the
-    ``INT``/``TERM``/``HUP`` traps ``_chain_common.sh::install_chain_stop_traps``
-    installs. The conclusion is unchanged and so is every line of behaviour;
-    only the cited mechanism is corrected. **Fix the reason, never the
-    behaviour** — a stale justification is how a future reader talks
-    themselves into "unifying" a split that operator stop depends on.
-
-    **The observer is an argument, not a third return value.** B-C2b
-    needs evidence out of this function, and the obvious shape is to
-    return it — but the return tuple is what 48 migrated test stubs
-    across six files were just reshaped around, and widening it would
-    re-break every one of them for a reason unrelated to what they test.
-    So the caller owns the observer, passes it in, and reads
-    ``observer.bundle()`` afterwards. The seam only drives its lifecycle.
-    """
-    if deadline_provider is None:
-        # Plain mode. Faithful to the `subprocess.run(..., check=True)`
-        # this replaced, but on `Popen` so B-C2b can hold the child PID
-        # while the child is alive — which is the whole reason for the
-        # migration, and something `subprocess.run` cannot give.
-        #
-        # `start_new_session` is NOT passed, matching `subprocess.run`'s
-        # default: a child in the caller's process group receives the
-        # terminal SIGINT that reaches the chain's foreground iteration
-        # (`run_chain.sh:171` + `_chain_common.sh::install_chain_stop_traps`).
-        # Only the deadline path below takes its own session, because
-        # `killpg` requires one. See the docstring's C7 correction: this
-        # used to cite `timeout --signal=INT`, which no launcher uses.
-        if observer is not None:
-            # Before the child exists, so it can claim nothing about it.
-            observer.capture_baseline()
-        plain = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE if capture_stdout else None,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=os.getcwd(),
-            env=env,
-            preexec_fn=preexec_fn,
-        )
-        if observer is not None:
-            observer.start(plain.pid)
-        failed = True
-        try:
-            stdout, stderr = plain.communicate()
-            failed = plain.returncode != 0
-        except BaseException:
-            # `subprocess.run` kills and reaps rather than leaking the
-            # child on any exception; reproduce that exactly.
-            plain.kill()
-            plain.wait()
-            raise
-        finally:
-            # In `finally`, so the observer stops on every path — success,
-            # non-zero exit, and any exception. It never affects the
-            # child's own result.
-            if observer is not None:
-                observer.stop(child_pid=plain.pid, failed=failed)
-        if plain.returncode != 0:
-            # `Popen` has no `check`. The property downstream handlers
-            # depend on is the exception, not the keyword.
-            raise subprocess.CalledProcessError(plain.returncode, cmd, output=stdout, stderr=stderr)
-        return (
-            subprocess.CompletedProcess(cmd, plain.returncode, stdout=stdout, stderr=stderr),
-            None,
-        )
-
-    if observer is not None:
-        observer.capture_baseline()
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE if capture_stdout else None,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd=os.getcwd(),
-        env=env,
-        preexec_fn=preexec_fn,
-        start_new_session=True,  # own process group — killpg reaches every child
-    )
-    if observer is not None:
-        observer.start(proc.pid)
-    t_start = time.perf_counter()
-    stdout, stderr = "", ""
-    while True:
-        try:
-            stdout, stderr = proc.communicate(timeout=poll_seconds)
-            break  # natural exit
-        except subprocess.TimeoutExpired:
-            elapsed = time.perf_counter() - t_start
-            deadline, source = deadline_provider()
-            if deadline is None or elapsed <= deadline:
-                continue
-            # §4 kill sequence: TERM the group → grace → KILL the group.
-            pgid = os.getpgid(proc.pid)
-            print(
-                f"--- Watchdog [{label}] deadline exceeded "
-                f"({elapsed:.1f}s > {deadline:.1f}s, source={source}) — "
-                f"killing process group {pgid} ---"
-            )
-            escalated = False
-            os.killpg(pgid, signal.SIGTERM)
-            try:
-                stdout, stderr = proc.communicate(timeout=grace_seconds)
-            except subprocess.TimeoutExpired:
-                escalated = True
-                os.killpg(pgid, signal.SIGKILL)
-                stdout, stderr = proc.communicate()
-            # Orphan check: the group must be gone (§4 "verify no
-            # surviving pids"). killpg(0) probes without sending.
-            # After SIGKILL the kernel needs a brief moment to reap PIDs;
-            # ``proc.communicate()`` above only waits for the TRACKED
-            # child, so children in the same process group can still be
-            # in the reap window when the probe runs. Poll briefly
-            # (bounded, ≤2 s at 50 ms intervals) so the fast path
-            # (already reaped) still returns on the first probe while
-            # ruling out reap-window races that used to false-positive
-            # under load (CI runners, busy dev boxes).
-            survivors = True
-            _survivor_probe_deadline = time.perf_counter() + 2.0
-            while time.perf_counter() < _survivor_probe_deadline:
-                try:
-                    os.killpg(pgid, 0)
-                except ProcessLookupError:
-                    survivors = False
-                    break
-                time.sleep(0.05)
-            if survivors:
-                print(f"--- Watchdog [{label}] WARNING: process group {pgid} survived ---")
-            if observer is not None:
-                observer.stop(child_pid=proc.pid, failed=True)
-            return None, {
-                "elapsed_s": round(elapsed, 3),
-                "deadline_s": round(deadline, 3),
-                "estimate_source": source,
-                "escalated_to_kill": escalated,
-                "survivors_detected": survivors,
-                "stdout_tail": (stdout or "")[-2000:],
-                "stderr_tail": (stderr or "")[-2000:],
-            }
-    if observer is not None:
-        observer.stop(child_pid=proc.pid, failed=proc.returncode != 0)
-    if proc.returncode != 0:
-        raise subprocess.CalledProcessError(proc.returncode, cmd, output=stdout, stderr=stderr)
-    return (
-        subprocess.CompletedProcess(cmd, proc.returncode, stdout=stdout, stderr=stderr),
-        None,
-    )
-
-
 def _read_runtime_observation_sidecar(path: str) -> dict[str, Any] | None:
     """Read + validate the subprocess's runtime-verification sidecar (RT2-B).
 
@@ -1027,6 +759,7 @@ class TidmadSandbox:
         observation_policy: Any = None,
         admission_policy: Any = None,
         deliverable_naming: DeliverableNaming | None = None,
+        device_available: StrictBool | None = None,
     ):
         # Step 05c — the run's deliverable naming authority. The tuner resolves
         # it ONCE from the run profile and passes it here, so the parent-side
@@ -1047,6 +780,8 @@ class TidmadSandbox:
         # unavailable, and this class must never discover a device of its
         # own — implicit rediscovery is how "GPU 0" gets assumed.
         self.device_identity = device_identity
+        self.device_available = device_available
+        self.gpu_execution: AttemptGpuExecution | None = None
         self.observation_policy = observation_policy
         # V20 B-G3. The typed admission boundary. `None` preserves
         # pre-B-G3 behaviour exactly: the gate falls back to the
@@ -1266,6 +1001,7 @@ class TidmadSandbox:
             json.dump(resolve_dataset_profile().to_wire(), handle)
         return path
 
+    @record_protected_phase("training")
     def execute_training(
         self,
         exp_id: str,
@@ -1332,6 +1068,20 @@ class TidmadSandbox:
                 RuntimeControlPolicy(**runtime_policy) if runtime_policy is not None else None
             )
             vm, vt, vl = self._validate_configs(model_type, m_cfg, t_cfg, l_cfg, exp_id, run_name)
+            bindings = execution_bindings or TrainingExecutionBindings()
+            validate_native_inputs(
+                self,
+                "training",
+                exp_id=exp_id,
+                model_type=model_type,
+                model_config=vm,
+                train_config=vt,
+                loss_config=vl,
+                task_scopes=bindings.task_scopes,
+                train_portion=train_portion,
+                train_base_seed=train_base_seed,
+                custom_loss_snapshot=bindings.expected_custom_loss_snapshot,
+            )
 
             paths = {
                 "m": os.path.abspath(
@@ -1355,7 +1105,6 @@ class TidmadSandbox:
             # empty string, because "flag present but broken" fails closed
             # there and must not be triggered by an absent declaration.
             mio_path = self._write_model_io_config(exp_id)
-            bindings = execution_bindings or TrainingExecutionBindings()
             task_scopes = bindings.task_scopes
             loss_contract_path = None
             expected_custom_loss_snapshot = bindings.expected_custom_loss_snapshot
@@ -1515,66 +1264,54 @@ class TidmadSandbox:
             )
 
             print(f">>> [Executor] Running training for {exp_id}...")
-            _observer = _make_phase_observer(self)
+            _observer = None if active_attempt(self) is not None else _make_phase_observer(self)
             # B-C4b: one gate before BOTH launch branches.
             _refusal = _admission_refusal(self, phase="training")
             if _refusal is not None:
                 return _refusal
+            if (selected_attempt := active_attempt(self)) is not None:
+                _observer = selected_attempt.current_observer
             env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
             preexec = _limited_preexec(_subprocess_rss_gb("training"))
             cmd = validation_training_command(cmd)
-            if policy_obj is not None and policy_obj.watchdog.enabled and armed:
-                # RT4 (§4): process-group launch + deadline kill. The
-                # deadline tightens mid-flight from the live observation
-                # sidecar (component-deadline interface).
-                result, kill_info = _run_observed_subprocess(
-                    cmd,
-                    env=env,
-                    preexec_fn=preexec,
-                    capture_stdout=not self.progress_bar,
-                    deadline_provider=_watchdog_deadline_provider(
-                        policy_obj, rv_sidecar_path, phase="training"
+            result, kill_info = run_phase_subprocess(
+                functools.partial(run_native_subprocess, self, _run_observed_subprocess),
+                cmd,
+                policy=policy_obj,
+                armed=armed,
+                phase="training",
+                observation_path=rv_sidecar_path,
+                deadline_factory=_watchdog_deadline_provider,
+                env=env,
+                preexec_fn=preexec,
+                capture_stdout=not self.progress_bar,
+                observer=_observer,
+                **control_kwargs(self),
+            )
+            if kill_info is not None:
+                # §4 partial-artifact cleanup: the killed attempt's
+                # checkpoint/sentinel/results must not survive.
+                for partial in (
+                    os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth"),
+                    os.path.join(self.dirs["models"], f"_OK_{exp_id}"),
+                    os.path.join(
+                        self.dirs["records"],
+                        run_name,
+                        f"experiment_results_{model_type}_{exp_id}.json",
                     ),
-                    grace_seconds=policy_obj.watchdog.grace_seconds,
-                    poll_seconds=policy_obj.watchdog.poll_seconds,
-                    observer=_observer,
-                    label="training",
-                )
-                if kill_info is not None:
-                    # §4 partial-artifact cleanup: the killed attempt's
-                    # checkpoint/sentinel/results must not survive.
-                    for partial in (
-                        os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth"),
-                        os.path.join(self.dirs["models"], f"_OK_{exp_id}"),
-                        os.path.join(
-                            self.dirs["records"],
-                            run_name,
-                            f"experiment_results_{model_type}_{exp_id}.json",
-                        ),
-                    ):
-                        if os.path.isfile(partial):
-                            os.remove(partial)
-                    return {
-                        "status": "wall_clock_timeout",
-                        "message": (
-                            f"watchdog killed training after {kill_info['elapsed_s']}s "
-                            f"(deadline {kill_info['deadline_s']}s, "
-                            f"source={kill_info['estimate_source']})"
-                        ),
-                        "watchdog": kill_info,
-                        "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
-                    }
-            else:
-                # B-C2a: same seam as the deadline branch above, so
-                # telemetry attaches once. deadline_provider=None keeps
-                # subprocess.run's semantics, session behaviour included.
-                result, _ = _run_observed_subprocess(
-                    cmd,
-                    env=env,
-                    preexec_fn=preexec,
-                    capture_stdout=not self.progress_bar,
-                    observer=_observer,
-                )
+                ):
+                    if os.path.isfile(partial):
+                        os.remove(partial)
+                return {
+                    "status": "wall_clock_timeout",
+                    "message": (
+                        f"watchdog killed training after {kill_info['elapsed_s']}s "
+                        f"(deadline {kill_info['deadline_s']}s, "
+                        f"source={kill_info['estimate_source']})"
+                    ),
+                    "watchdog": kill_info,
+                    "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
+                }
             assert result is not None
 
             if not self.progress_bar and result.stdout:
@@ -1586,31 +1323,15 @@ class TidmadSandbox:
             # misclassified as a crash. Distinguishable by the sidecar's
             # admission decision.
             runtime_verification = _read_runtime_observation_sidecar(rv_sidecar_path)
-            if (
-                runtime_verification is not None
-                and (runtime_verification.get("admission") or {}).get("decision") == "rejected"
-            ):
-                admission_block = runtime_verification.get("admission") or {}
-                reason = admission_block.get("reason", "")
-                # C9c: an infrastructure-class refusal is NOT a verdict on
-                # this candidate — it says the evidence channel is broken.
-                # Surfacing it as a candidate rejection would send the chain
-                # to the next candidate and straight back into the same
-                # failure. Legacy records carry no failure_class and keep the
-                # historical (conservative) candidate-rejection path.
-                if admission_block.get("failure_class") == "infrastructure":
+            refusal = runtime_refusal_status(runtime_verification)
+            if refusal is not None:
+                assert runtime_verification is not None
+                reason = (runtime_verification.get("admission") or {}).get("reason", "")
+                if refusal["status"] == "aborted_infrastructure":
                     print(f"--- Runtime Evidence-Channel Failure (ABORT) ---\n{reason}")
-                    return {
-                        "status": "aborted_infrastructure",
-                        "message": f"runtime evidence channel failed: {reason}",
-                        "runtime_verification": runtime_verification,
-                    }
-                print(f"--- Runtime Verification Rejected ---\n{reason}")
-                return {
-                    "status": "rejected_time_risk",
-                    "message": f"runtime verification rejected the attempt: {reason}",
-                    "runtime_verification": runtime_verification,
-                }
+                else:
+                    print(f"--- Runtime Verification Rejected ---\n{reason}")
+                return refusal
 
             # Phase 6.7 Fix 3 — silent-crash detection. The trainer-side
             # ``_save_with_sentinel`` (Commit 3) writes ``_OK_<exp_id>`` only
@@ -1692,6 +1413,8 @@ class TidmadSandbox:
             from core.local_code.failure import raise_if_code_package_failure
 
             raise_if_code_package_failure(e)
+            if active_attempt(self) is not None:
+                raise
             print(f"!!! [Executor Internal Error] !!!: {e!s}")
             return {"status": "error", "message": str(e)}
 
@@ -1708,6 +1431,7 @@ class TidmadSandbox:
         validated_l = LossConfig(**l_cfg).model_dump()
         return validated_m, validated_l
 
+    @record_protected_phase("inference")
     def execute_inference(
         self,
         exp_id: str,
@@ -1759,6 +1483,19 @@ class TidmadSandbox:
         """
         policy_obj = RuntimeControlPolicy(**runtime_policy) if runtime_policy is not None else None
         validated_m, validated_l = self._validate_model_and_loss(model_type, m_cfg, l_cfg)
+        selected_batch = (
+            inference_batch if inference_batch is not None else inference_batch_for(model_type)
+        )
+        validate_native_inputs(
+            self,
+            "inference",
+            exp_id=exp_id,
+            model_type=model_type,
+            model_config=validated_m,
+            loss_config=validated_l,
+            task_scopes=task_scopes,
+            inference_batch=selected_batch,
+        )
         m_path = os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json"))
         l_path = os.path.abspath(os.path.join(self.dirs["configs"], f"loss_config_{exp_id}.json"))
         with open(m_path, "w") as f:
@@ -1768,9 +1505,7 @@ class TidmadSandbox:
         model_path = str(
             training_checkpoint_path(self.dirs["models"], model_type, exp_id).resolve()
         )
-        inf_bs = str(
-            inference_batch if inference_batch is not None else inference_batch_for(model_type)
-        )
+        inf_bs = str(selected_batch)
 
         # Per-iter sidecar path. Iteration scoping comes from ``run_name`` (the
         # configs dir is already iter-keyed); ``exp_id`` makes it unique within
@@ -1876,66 +1611,59 @@ class TidmadSandbox:
 
         try:
             print(f">>> [Executor] Running inference for {exp_id}...")
-            _observer = _make_phase_observer(self)
+            _observer = None if active_attempt(self) is not None else _make_phase_observer(self)
             # B-C4b: one gate before BOTH launch branches.
             _refusal = _admission_refusal(self, phase="inference")
             if _refusal is not None:
                 return _refusal
+            if (selected_attempt := active_attempt(self)) is not None:
+                _observer = selected_attempt.current_observer
+            if active_attempt(self) is not None:
+                prepare_startup(self, cmd)
             t_subprocess_start = time.perf_counter()
             env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
             preexec = _limited_preexec(_subprocess_rss_gb("inference"))
-            if policy_obj is not None and policy_obj.watchdog.enabled and armed:
-                result, kill_info = _run_observed_subprocess(
-                    cmd,
-                    env=env,
-                    preexec_fn=preexec,
-                    capture_stdout=not self.progress_bar,
-                    deadline_provider=_watchdog_deadline_provider(
-                        policy_obj, rv_sidecar_path, phase="inference"
-                    ),
-                    grace_seconds=policy_obj.watchdog.grace_seconds,
-                    poll_seconds=policy_obj.watchdog.poll_seconds,
-                    observer=_observer,
-                    label="inference",
-                )
-                if kill_info is not None:
-                    # §4 partial-artifact cleanup — the killed attempt's
-                    # denoised outputs (mirrors --cleanup_denoised).
-                    import glob as _glob
+            result, kill_info = run_phase_subprocess(
+                functools.partial(run_native_subprocess, self, _run_observed_subprocess),
+                cmd,
+                policy=policy_obj,
+                armed=armed,
+                phase="inference",
+                observation_path=rv_sidecar_path,
+                deadline_factory=_watchdog_deadline_provider,
+                env=env,
+                preexec_fn=preexec,
+                capture_stdout=not self.progress_bar,
+                observer=_observer,
+                **control_kwargs(self),
+            )
+            if kill_info is not None:
+                # §4 partial-artifact cleanup — the killed attempt's
+                # denoised outputs (mirrors --cleanup_denoised).
+                import glob as _glob
 
-                    if self.deliverable_naming is not None:
-                        pattern = os.path.join(
-                            self.base_dir,
-                            self.deliverable_naming.attempt_glob(
-                                model_type=model_type, run_name=run_name, exp_id=exp_id
-                            ),
-                        )
-                        for partial in _glob.glob(pattern):
-                            os.remove(partial)
-                    return {
-                        "status": "wall_clock_timeout",
-                        "message": (
-                            f"watchdog killed inference after {kill_info['elapsed_s']}s "
-                            f"(deadline {kill_info['deadline_s']}s, "
-                            f"source={kill_info['estimate_source']})"
+                if self.deliverable_naming is not None:
+                    pattern = os.path.join(
+                        self.base_dir,
+                        self.deliverable_naming.attempt_glob(
+                            model_type=model_type, run_name=run_name, exp_id=exp_id
                         ),
-                        "watchdog": kill_info,
-                        "per_file_timings_ms": [],
-                        "process_startup_ms": None,
-                        "subprocess_wall_ms": None,
-                        "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
-                    }
-            else:
-                # B-C2a: same seam as the deadline branch above, so
-                # telemetry attaches once. deadline_provider=None keeps
-                # subprocess.run's semantics, session behaviour included.
-                result, _ = _run_observed_subprocess(
-                    cmd,
-                    env=env,
-                    preexec_fn=preexec,
-                    capture_stdout=not self.progress_bar,
-                    observer=_observer,
-                )
+                    )
+                    for partial in _glob.glob(pattern):
+                        os.remove(partial)
+                return {
+                    "status": "wall_clock_timeout",
+                    "message": (
+                        f"watchdog killed inference after {kill_info['elapsed_s']}s "
+                        f"(deadline {kill_info['deadline_s']}s, "
+                        f"source={kill_info['estimate_source']})"
+                    ),
+                    "watchdog": kill_info,
+                    "per_file_timings_ms": [],
+                    "process_startup_ms": None,
+                    "subprocess_wall_ms": None,
+                    "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
+                }
             assert result is not None
             subprocess_wall_ms = (time.perf_counter() - t_subprocess_start) * 1000.0
             if not self.progress_bar and result.stdout:
@@ -1958,6 +1686,12 @@ class TidmadSandbox:
                 except Exception as exc:
                     print(f"[execute_inference] sidecar parse failed: {exc}")
 
+            refusal = runtime_refusal_status(
+                _read_runtime_observation_sidecar(rv_sidecar_path), completed_policy_only=True
+            )
+            if refusal is not None:
+                return refusal
+
             return {
                 "status": "success",
                 "message": "Inference finished.",
@@ -1967,6 +1701,11 @@ class TidmadSandbox:
                 "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
             }
         except subprocess.CalledProcessError as e:
+            refusal = runtime_refusal_status(
+                _read_runtime_observation_sidecar(rv_sidecar_path), completed_policy_only=True
+            )
+            if refusal is not None:
+                return refusal
             error_msg = _format_subprocess_error(e, "Inference")
             print(f"--- Inference Error ---\n{error_msg}")
             status = "oom_host_ram" if _is_oom_failure(e) else "error"
@@ -2263,6 +2002,7 @@ class StubSandbox(TidmadSandbox):
         data_scope: DataScope | None = None,
         device_identity: Any = None,
         deliverable_naming: DeliverableNaming | None = None,
+        device_available: StrictBool | None = None,
     ):
         # `deliverable_naming` mirrors the parent for exactly the reason given
         # below for `device_identity`: the tuner resolves the run's naming once
@@ -2285,6 +2025,7 @@ class StubSandbox(TidmadSandbox):
             file_index=file_index,
             data_scope=data_scope,
             device_identity=device_identity,
+            device_available=device_available,
             deliverable_naming=deliverable_naming,
         )
         self._run_id: str = run_id or run_name

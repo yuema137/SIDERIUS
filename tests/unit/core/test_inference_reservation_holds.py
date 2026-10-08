@@ -231,7 +231,15 @@ def test_worker_routes_bound_inference_to_reservation_observers(tmp_path, monkey
     )
     monkeypatch.setattr(worker, "resolve_device", lambda spec: worker.DeviceResolution(None))
     monkeypatch.setattr(worker, "validate_candidate_configs", lambda spec: None)
-    monkeypatch.setattr(worker, "build_production_components", lambda spec, trace: lambda: None)
+    monkeypatch.setattr(worker.time, "monotonic", lambda: 100.0)
+    builder_deadlines = []
+
+    def build(measured_spec, trace, *, deadline_at):
+        assert measured_spec is spec
+        builder_deadlines.append(deadline_at)
+        return lambda: None
+
+    monkeypatch.setattr(worker, "build_production_components", build)
     monkeypatch.setattr(
         "core.runtime_control.inference_measurement_binding.inference_measurement_binding",
         lambda spec: binding,
@@ -256,13 +264,16 @@ def test_worker_routes_bound_inference_to_reservation_observers(tmp_path, monkey
 
     monkeypatch.setattr(worker, "run_measured_phases", run)
     worker.measure(spec)
+    assert builder_deadlines == [130.0]
     if bound:
         assert [options["phase"] for options, _ in factories] == ["setup", "inference"]
         assert received["setup_reservation_observer"] is factories[0][1]
         assert received["inference_reservation_observer"] is factories[1][1]
         assert received["phase_observed_enough"] is None
         assert all(options["journal"] is received["journal"] for options, _ in factories)
-        assert factories[0][0]["deadline_at"] == factories[1][0]["deadline_at"]
+        assert (
+            factories[0][0]["deadline_at"] == factories[1][0]["deadline_at"] == builder_deadlines[0]
+        )
         assert {options["request_id"] for options, _ in factories} == {"request"}
     else:
         assert factories == []

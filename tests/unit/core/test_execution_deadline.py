@@ -49,6 +49,7 @@ def test_gateway_rejects_a_late_success_and_does_not_retry(monkeypatch):
     now = [0.0]
     monkeypatch.setattr("core.execution_deadline.time.monotonic", lambda: now[0])
     bridge = object.__new__(LLMBridge)
+    bridge.max_retries = 1
 
     def late():
         now[0] = 11

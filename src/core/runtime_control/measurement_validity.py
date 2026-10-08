@@ -50,6 +50,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.runtime_control.gpu_accounting import GpuAccountingSnapshot
+from core.runtime_control.process_visibility import ProcessVisibility
 
 #: What was ELSE on the device. Context and provenance — never a validity
 #: criterion. `unknown` means telemetry could not say, which is itself a fact
@@ -217,6 +218,9 @@ class ExternalActivityObservation(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    process_visibility: ProcessVisibility | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     activity: ExternalActivity = "unknown"
     #: Peers the launcher explicitly declared. Labelling only.
     registered_pids: tuple[int, ...] = ()
@@ -247,8 +251,13 @@ def summarise_external_activity(
     """
     window = tuple(snapshots)
     usable = [s for s in window if s.telemetry_available]
+    visibility = (
+        "namespace_limited"
+        if any(s.process_visibility == "namespace_limited" for s in window)
+        else None
+    )
     if not usable:
-        return ExternalActivityObservation(activity="unknown")
+        return ExternalActivityObservation(activity="unknown", process_visibility=visibility)
 
     registered = set(registered_pids)
     per_sample_sets: list[frozenset[int]] = []
@@ -265,7 +274,9 @@ def summarise_external_activity(
             totals.append(snap.other_mib)
 
     if not seen_registered and not seen_unregistered and not any(totals):
-        return ExternalActivityObservation(activity="absent")
+        return ExternalActivityObservation(
+            activity="unknown" if visibility else "absent", process_visibility=visibility
+        )
 
     changed = len(set(per_sample_sets)) > 1
     varied = bool(totals) and min(totals) != max(totals)
@@ -273,7 +284,8 @@ def summarise_external_activity(
     return ExternalActivityObservation(
         # `variable` covers both a moving PID set and moving bytes. Both are
         # ordinary shared-device behaviour.
-        activity="variable" if (changed or varied) else "stable",
+        activity="unknown" if visibility else "variable" if (changed or varied) else "stable",
+        process_visibility=visibility,
         registered_pids=tuple(sorted(seen_registered)),
         unregistered_pids=tuple(sorted(seen_unregistered)),
         pid_set_changed=changed,

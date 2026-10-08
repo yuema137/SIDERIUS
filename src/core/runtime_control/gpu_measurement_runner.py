@@ -45,7 +45,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -72,35 +72,23 @@ from core.runtime_control.gpu_requirement import (
     MeasurementDeadline,
     SamplingCoverage,
 )
+from core.runtime_control.gpu_requirement_evidence import ProcessEvidence as ProcessEvidence
+from core.runtime_control.inference_checkpoint_reference import InferenceCheckpointReference
 from core.runtime_control.inference_measurement_binding import InferenceMeasurementBinding
 from core.runtime_control.process_group import (
+    RssObservation,
+    observe_tree_rss,
     process_group_alive,
     signal_group,
     terminate_remaining_group,
     tree_rss_bytes,
 )
+from core.runtime_control.training_measurement_binding import TrainingMeasurementBinding
 
 #: Named so a record says which instrument produced each figure, and so the
 #: two can never be read as interchangeable.
 DRIVER_SOURCE = "gpu_accounting.sample(nvidia-smi):own_tree_mib"
 ALLOCATOR_SOURCE = "torch.cuda.max_memory_allocated(in-worker)"
-
-
-class ProcessEvidence(BaseModel):
-    """How the worker process ended. Facts, not a verdict."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    worker_pid: int = Field(gt=0)
-    worker_pgid: int = Field(gt=0)
-    exit_code: int | None = None
-    signal_number: int | None = None
-    term_sent: bool = False
-    kill_sent: bool = False
-    #: Something in the group outlived the reap. It may still hold the
-    #: device, so this is never silently ignored.
-    orphans_remaining: bool = False
-    group_cleanup_required: bool = False
 
 
 class HostMemoryBound(BaseModel):
@@ -112,6 +100,10 @@ class HostMemoryBound(BaseModel):
     limit_bytes: int = Field(gt=0)
     peak_tree_rss_bytes: int = Field(default=0, ge=0)
     exceeded: bool = False
+    latest_observation: RssObservation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    observations_complete: bool | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @property
     def peak_tree_rss_gib(self) -> float:
@@ -175,6 +167,12 @@ class PrephaseMeasurementRun(BaseModel):
     label: str
     request: CandidateMeasurementRequest
     inference_binding: InferenceMeasurementBinding | None = None
+    training_binding: TrainingMeasurementBinding | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    verified_checkpoint: InferenceCheckpointReference | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     #: `None` when the worker produced no structured report at all.
     worker_status: WorkerStatus | None = None
@@ -249,6 +247,21 @@ def run_prephase_measurement(
     Never raises for anything it can observe. A launch failure, a hung
     worker and a crashed worker are all recorded outcomes.
     """
+    if spec.inference_checkpoint is not None and spec.inference_binding is None:
+        return _launch_failure(
+            spec,
+            spec.request.deadline_seconds,
+            ValueError("checkpoint measurement requires a full inference source binding"),
+        )
+    if spec.training_binding is not None:
+        from core.runtime_control.training_measurement_binding import (
+            validate_training_measurement_request,
+        )
+
+        try:
+            validate_training_measurement_request(spec)
+        except ValueError as error:
+            return _launch_failure(spec, spec.request.deadline_seconds, error)
     started = elapsed_clock()
     deadline_seconds = spec.request.deadline_seconds
     if deadline_at is not None:
@@ -311,6 +324,8 @@ def run_prephase_measurement(
         invocation = prepare_child(
             argv, subprocess_env(plugin_dir=spec.plugin_dir, loss_dir=spec.loss_dir)
         )
+        if deadline_at is not None and elapsed_clock() - started >= deadline_seconds:
+            raise TimeoutError("measurement deadline expired during launch preparation")
         process = subprocess.Popen(
             invocation.argv,
             stdout=log_handle,
@@ -344,65 +359,119 @@ def run_prephase_measurement(
     host_exceeded = False
     term_sent = kill_sent = False
 
-    while process.poll() is None:
-        elapsed = elapsed_clock() - started
-        rss = tree_rss_bytes(pgid)
-        peak_rss = max(peak_rss, rss)
-        taken = sampler.poll()
-        if reservation_ack is not None:
-            acknowledge_reservation(
-                journal_path=journal_path,
-                ack_path=reservation_ack,
-                samples=sampler.samples,
-                minimum_samples=spec.min_authoritative_samples,
-                request_id=spec.request.request_id,
-            )
-        if (
-            ready_path is not None
-            and not ready_path.exists()
-            and taken is not None
-            and taken.telemetry_available
-        ):
-            # A SUCCESSFUL sample, not merely an attempted one: a failing
-            # driver query proves nothing is being observed.
-            ready_path.parent.mkdir(parents=True, exist_ok=True)
-            ready_path.touch()
-
-        for measured_phase, complete_path in completion_paths.items():
-            if complete_path.exists():
-                continue
-            opened_at = _phase_opened_at(journal_path, measured_phase)
-            if opened_at is not None:
-                in_phase = sum(
-                    1
-                    for sample in sampler.samples
-                    if sample.at >= opened_at
-                    and sample.telemetry_available
-                    and sample.own_tree_mib is not None
+    latest_rss = None
+    monitoring_complete = True
+    monitoring_detail = ""
+    bound_cleanup = None
+    try:
+        while process.poll() is None:
+            elapsed = elapsed_clock() - started
+            if spec.training_binding is not None or spec.strict_lifecycle:
+                latest_rss = observe_tree_rss(pgid)
+                monitoring_complete = monitoring_complete and latest_rss.status == "complete"
+                rss = latest_rss.sampled_bytes
+            else:
+                rss = tree_rss_bytes(pgid)
+            peak_rss = max(peak_rss, rss)
+            taken = sampler.poll()
+            if reservation_ack is not None:
+                acknowledge_reservation(
+                    journal_path=journal_path,
+                    ack_path=reservation_ack,
+                    samples=sampler.samples,
+                    minimum_samples=spec.min_authoritative_samples,
+                    request_id=spec.request.request_id,
                 )
-                if in_phase >= spec.min_authoritative_samples:
-                    complete_path.parent.mkdir(parents=True, exist_ok=True)
-                    complete_path.touch()
+            if (
+                ready_path is not None
+                and not ready_path.exists()
+                and taken is not None
+                and taken.telemetry_available
+            ):
+                # A SUCCESSFUL sample, not merely an attempted one: a failing
+                # driver query proves nothing is being observed.
+                ready_path.parent.mkdir(parents=True, exist_ok=True)
+                ready_path.touch()
 
-        # RSS is bounded by the parent because the worker cannot bound
-        # itself: RLIMIT_AS caps ADDRESS SPACE, and torch plus CUDA reserve
-        # ~19 GiB of it while holding under 1 GiB resident.
-        if rss >= spec.worker_memory_limit_bytes:
-            host_exceeded = True
-        if host_exceeded or elapsed >= deadline_seconds:
-            term_sent = signal_group(pgid, signal.SIGTERM)
-            grace_until = elapsed_clock() + grace_seconds
-            while process.poll() is None and elapsed_clock() < grace_until:
-                sampler.poll()
-                time.sleep(poll_seconds)
-            if process.poll() is None:
-                kill_sent = signal_group(pgid, signal.SIGKILL)
-                with contextlib.suppress(subprocess.TimeoutExpired):
-                    process.wait(timeout=grace_seconds)
-            break
-        time.sleep(poll_seconds)
+            for measured_phase, complete_path in completion_paths.items():
+                if complete_path.exists():
+                    continue
+                opened_at = _phase_opened_at(journal_path, measured_phase)
+                if opened_at is not None:
+                    in_phase = sum(
+                        1
+                        for sample in sampler.samples
+                        if sample.at >= opened_at
+                        and sample.telemetry_available
+                        and sample.own_tree_mib is not None
+                    )
+                    if in_phase >= spec.min_authoritative_samples:
+                        complete_path.parent.mkdir(parents=True, exist_ok=True)
+                        complete_path.touch()
+
+            # RSS is bounded by the parent because the worker cannot bound
+            # itself: RLIMIT_AS caps ADDRESS SPACE, and torch plus CUDA reserve
+            # ~19 GiB of it while holding under 1 GiB resident.
+            if rss >= spec.worker_memory_limit_bytes:
+                host_exceeded = True
+            if not monitoring_complete:
+                monitoring_detail = (
+                    "measurement_host_monitoring_unavailable"
+                    if spec.strict_lifecycle
+                    else "training_host_monitoring_unavailable"
+                )
+            if host_exceeded or elapsed >= deadline_seconds or not monitoring_complete:
+                if spec.training_binding is not None or spec.strict_lifecycle:
+                    # The enclosing finalizer uses the existing owned-group termination owner.
+                    break
+                term_sent = signal_group(pgid, signal.SIGTERM)
+                grace_until = elapsed_clock() + grace_seconds
+                while process.poll() is None and elapsed_clock() < grace_until:
+                    sampler.poll()
+                    time.sleep(poll_seconds)
+                if process.poll() is None:
+                    kill_sent = signal_group(pgid, signal.SIGKILL)
+                    with contextlib.suppress(subprocess.TimeoutExpired):
+                        process.wait(timeout=grace_seconds)
+                break
+            time.sleep(poll_seconds)
+
+    finally:
+        if spec.training_binding is not None or spec.strict_lifecycle:
+            from core.runtime_control.training_measurement_lifecycle import (
+                finish_training_measurement_group,
+            )
+
+            primary_error = sys.exc_info()[1]
+            try:
+                bound_cleanup = finish_training_measurement_group(
+                    process, grace_seconds=grace_seconds, poll_seconds=poll_seconds
+                )
+            except BaseException as error:
+                if primary_error is None:
+                    primary_error = error
+                else:
+                    primary_error.add_note(f"Owned cleanup also failed: {type(error).__name__}")
+            for close in (sampler.stop, log_handle.close):
+                try:
+                    close()
+                except BaseException as error:
+                    if primary_error is None:
+                        primary_error = error
+                    else:
+                        primary_error.add_note(
+                            f"Measurement finalization also failed: {type(error).__name__}"
+                        )
+            if primary_error is not None:
+                cast(Any, primary_error).measurement_group_cleanup = bound_cleanup
+                cast(Any, primary_error).measurement_rss_observation = latest_rss
+                raise primary_error
 
     group_cleanup_required = False
+    if bound_cleanup is not None:
+        group_cleanup_required = bound_cleanup.required
+        term_sent = bound_cleanup.term is not None and bound_cleanup.term.status == "delivered"
+        kill_sent = bound_cleanup.kill is not None and bound_cleanup.kill.status == "delivered"
     if spec.inference_binding is not None and process_group_alive(pgid):
         group_cleanup_required = True
         cleanup_term, cleanup_kill = terminate_remaining_group(
@@ -417,8 +486,9 @@ def run_prephase_measurement(
 
     # One last look before the tree is gone: memory held at the very end
     # would otherwise fall outside the watch.
-    sampler.poll(force=True)
-    sampler.stop()
+    if spec.training_binding is None and not spec.strict_lifecycle:
+        sampler.poll(force=True)
+        sampler.stop()
     elapsed = round(elapsed_clock() - started, 3)
     log_handle.close()
 
@@ -435,6 +505,18 @@ def run_prephase_measurement(
                 "status": "WORKER_FAILURE",
                 "inference_binding": None,
                 "detail": "inference measurement reply does not match its full dispatched request",
+            }
+        )
+    if (
+        report is not None
+        and spec.training_binding is not None
+        and (report.request != spec.request or report.training_binding != spec.training_binding)
+    ):
+        report = report.model_copy(
+            update={
+                "status": "WORKER_FAILURE",
+                "training_binding": None,
+                "detail": "training measurement reply does not match its full dispatched request",
             }
         )
     journal = _load_journal(Path(spec.journal_path))
@@ -482,6 +564,8 @@ def run_prephase_measurement(
         request=spec.request,
         worker_status=report.status if report is not None else None,
         inference_binding=report.inference_binding if report is not None else None,
+        training_binding=report.training_binding if report is not None else None,
+        verified_checkpoint=report.verified_checkpoint if report is not None else None,
         report_present=report is not None,
         observed_device_uuid=report.observed_device_uuid if report is not None else None,
         device_name=report.device_name if report is not None else None,
@@ -496,6 +580,10 @@ def run_prephase_measurement(
             limit_bytes=spec.worker_memory_limit_bytes,
             peak_tree_rss_bytes=peak_rss,
             exceeded=host_exceeded,
+            latest_observation=latest_rss,
+            observations_complete=(monitoring_complete and latest_rss is not None)
+            if spec.training_binding is not None or spec.strict_lifecycle
+            else None,
         ),
         process=ProcessEvidence(
             worker_pid=process.pid,
@@ -504,12 +592,16 @@ def run_prephase_measurement(
             signal_number=-returncode if returncode is not None and returncode < 0 else None,
             term_sent=term_sent,
             kill_sent=kill_sent,
-            orphans_remaining=process_group_alive(pgid),
+            orphans_remaining=(bound_cleanup.final.status == "present")
+            if bound_cleanup is not None
+            else process_group_alive(pgid),
+            final_group_observation=bound_cleanup.final if bound_cleanup is not None else None,
             group_cleanup_required=group_cleanup_required,
         ),
         samples=sampler.samples,
         journal=journal,
-        detail=report.detail if report is not None else _log_tail(log_path),
+        detail=(monitoring_detail + ": " if monitoring_detail else "")
+        + (report.detail if report is not None else _log_tail(log_path)),
     )
 
 

@@ -341,6 +341,8 @@ class TestCensusBTransportEmissionSites:
             "src/agent/skills/evaluate_time_skill/wrapper.py": 1,
             # C1: the composition edge's own idempotent re-resolution.
             "src/workflows/task_composition.py": 1,
+            # Compare launch scopes with already measured bound-task scope identity.
+            "src/core/runtime_control/native_gpu_execution.py": 1,
             # Step 12 / PR-12bc. EXTENDED deliberately, never exempted by name
             # (the Step-11 C9 rule). Two parent-side resolves were added, and
             # both are asking the BOUND implementation for something only it
@@ -739,6 +741,10 @@ class TestCensusDLegacyLockKeySet:
             "workflow_parameter_rules",
             "trial_time_admission_source",
             "formal_time_admission_source",
+            # Runtime completion/verifier/protection selection alters treatment.
+            "runtime_completion_policy",
+            "runtime_verifier_identity",
+            "gpu_execution_policy",
             # Explicit planner policy must remain identical across resume (#372).
             "planner_strategy_identity",
         )

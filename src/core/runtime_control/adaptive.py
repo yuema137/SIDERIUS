@@ -248,6 +248,28 @@ class AdaptiveUnitVerification:
         """Cumulative measured verification time (§2.12 overhead term)."""
         return sum(self._elapsed_times_ms) / 1000.0
 
+    @property
+    def permits_workload_completion(self) -> bool:
+        """Only workload exhaustion, never a terminal failure, may use actual cost.
+
+        Paused production intervals exclude other phases; time spent after the
+        last feed inside an active interval still counts against the hard cap.
+        """
+        if self.is_terminal or not self._all_times_ms:
+            return False
+        if (
+            self.config.max_unit_ms is not None
+            and max(self._all_times_ms) > self.config.max_unit_ms
+        ):
+            return False
+        assert self._started_at is not None
+        ended = self._paused_at if self._paused_at is not None else time.monotonic()
+        wall_ms = max(
+            sum(self._elapsed_times_ms),
+            (ended - self._started_at - self._excluded_seconds) * 1000.0,
+        )
+        return wall_ms < self.config.max_wall_ms
+
     def _verification_wall_ms(self) -> float:
         assert self._started_at is not None
         return max(

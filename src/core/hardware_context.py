@@ -41,6 +41,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import torch
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -53,6 +54,19 @@ logger = logging.getLogger(__name__)
 _SAFETY_FRACTION: float = 0.80  # §3.9.1: single source of truth for the cap
 _CPU_DEVICE_NAME: str = "cpu"  # stable marker for ``device_available=False``
 _PROBE_TIMEOUT_S: float = 5.0  # O1a: bound on every external probe
+
+TorchGpuBackend = Literal["cuda", "rocm", "none"]
+
+
+def _installed_gpu_backend() -> TorchGpuBackend:
+    """Identify the installed torch build, not device or kernel availability.
+
+    ROCm exposes the torch.cuda API too. A build with neither CUDA nor HIP
+    is recorded as ``none``; that does not infer the host's physical hardware.
+    """
+    if torch.version.hip is not None:
+        return "rocm"
+    return "cuda" if torch.version.cuda is not None else "none"
 
 
 class GpuDeviceProvenance(BaseModel):
@@ -186,6 +200,47 @@ class HardwareContext(BaseModel):
         return min(vram_budget_gb, self.usable_cap_gb)
 
 
+class GpuRuntimeFacts(BaseModel):
+    """Fresh observation plus implemented capabilities, never launch permission."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    installed_backend: TorchGpuBackend
+    runtime_version: str | None
+    hardware: HardwareContext
+    implemented_accounting_adapter: Literal["nvidia-smi"] | None
+    limitations: tuple[str, ...]
+
+
+def inspect_gpu_runtime() -> GpuRuntimeFacts:
+    """Observe the current logical-device view without allocation or persistence.
+
+    An implemented adapter still requires actual driver sampling to succeed.
+    Discovery failures propagate; an old workspace manifest is never substituted.
+    No kernel, model, provider, credential or dataset operation is performed.
+    """
+    backend = _installed_gpu_backend()
+    limitations: tuple[str, ...] = ()
+    if backend == "rocm":
+        limitations = (
+            "AMD/ROCm compatibility is experimental and has not been hardware-tested.",
+            "ROCm driver/process GPU accounting is not implemented. Paths requiring "
+            "that accounting cannot run; do not disable required resource protection.",
+        )
+    elif backend == "none":
+        limitations = (
+            "This PyTorch build has neither CUDA nor ROCm. No GPU backend is inferred; "
+            "Intel GPU execution is not currently supported.",
+        )
+    return GpuRuntimeFacts(
+        installed_backend=backend,
+        runtime_version=torch.version.hip if backend == "rocm" else torch.version.cuda,
+        hardware=discover(),
+        implemented_accounting_adapter="nvidia-smi" if backend == "cuda" else None,
+        limitations=limitations,
+    )
+
+
 def _probe_driver_version(errors: list[str]) -> str | None:
     """NVIDIA driver version via a bounded ``nvidia-smi`` call (O1a).
 
@@ -293,11 +348,12 @@ def _probe_devices(errors: list[str]) -> tuple[int | None, list[GpuDeviceProvena
         errors.append(f"devices: device_count: {type(err).__name__}: {err}")
         return None, []
     devices: list[GpuDeviceProvenance] = []
-    physical_by_uuid = _physical_index_by_uuid(errors) if count else {}
+    nvidia_backend = _installed_gpu_backend() == "cuda"
+    physical_by_uuid = _physical_index_by_uuid(errors) if count and nvidia_backend else {}
     for idx in range(count):
         try:
             props = torch.cuda.get_device_properties(idx)
-            uuid = _normalize_uuid(getattr(props, "uuid", None))
+            uuid = _normalize_uuid(getattr(props, "uuid", None)) if nvidia_backend else None
             devices.append(
                 GpuDeviceProvenance(
                     logical_index=idx,
@@ -360,12 +416,18 @@ def discover() -> HardwareContext:
 
     props = torch.cuda.get_device_properties(0)
     visible_count, devices = _probe_devices(errors)
-    driver_version = _probe_driver_version(errors)
+    nvidia_backend = _installed_gpu_backend() == "cuda"
+    driver_version = _probe_driver_version(errors) if nvidia_backend else None
+    if not nvidia_backend:
+        errors.append(
+            "driver_identity: GPU accounting and stable driver identity are not "
+            "implemented for this non-CUDA backend"
+        )
     # Identity of the ACTIVE device (logical 0). Absent on hosts where the
     # driver or torch cannot report it — degraded, never fabricated.
-    active_uuid = next((d.uuid for d in devices if d.logical_index == 0), None) or _normalize_uuid(
-        getattr(props, "uuid", None)
-    )
+    active_uuid = next((d.uuid for d in devices if d.logical_index == 0), None)
+    if active_uuid is None and nvidia_backend:
+        active_uuid = _normalize_uuid(getattr(props, "uuid", None))
     return HardwareContext(
         active_device_uuid=active_uuid,
         hardware_fingerprint_version=2 if active_uuid else 1,

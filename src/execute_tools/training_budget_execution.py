@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from functools import wraps
+from typing import Literal
 
 from core.checkpoint_selection import CheckpointSelection
 from core.runtime_control.phases import RuntimePhase
@@ -16,6 +17,7 @@ from core.runtime_control.training_budget import (
     TrainingBudgetReceipt,
     decide_training_budget,
 )
+from core.runtime_control.verifier_provider import RuntimeVerifier
 from core.runtime_control.workload import ResolvedPhaseWorkload
 
 
@@ -164,3 +166,54 @@ def return_on_allocation_rejection[**P, R](
             return None
 
     return run
+
+
+def complete_training_workload(
+    session: RuntimeVerificationSession,
+    *,
+    budget_execution: TrainingBudgetExecution | None,
+    training_verifier: RuntimeVerifier | None,
+    validation_verifier: RuntimeVerifier | None,
+    optimizer_steps: int,
+    completed_epochs: int,
+    epoch_limit: int,
+    training_seconds: float,
+    validation_seconds: float,
+    validation_rows: int | None,
+    epoch0_dataset_seconds: float,
+) -> bool:
+    """Close successful whole epochs after required validation has completed.
+
+    This is called only at the production loop's successful exit. Counts are
+    reconciled for an authorized cooperative stop before actual admission.
+    Training seconds exclude validation; each incurred cost enters exactly once.
+    """
+    if budget_execution is not None:
+        budget_execution.reconcile(
+            session,
+            validation_rows=validation_rows,
+            epoch0_dataset_seconds=epoch0_dataset_seconds,
+        )
+    reason: Literal["requested_horizon", "cooperative_epoch_stop"] = (
+        "cooperative_epoch_stop"
+        if budget_execution is not None and completed_epochs < epoch_limit
+        else "requested_horizon"
+    )
+    session.complete_phase_workload(
+        "training",
+        actual_seconds=training_seconds,
+        executed_unit_count=optimizer_steps,
+        reason=reason,
+        verifier=training_verifier,
+        source="real_training_verification",
+    )
+    if validation_rows is not None:
+        session.complete_phase_workload(
+            "validation",
+            actual_seconds=validation_seconds,
+            executed_unit_count=validation_rows * completed_epochs,
+            reason=reason,
+            verifier=validation_verifier,
+            source="real_validation_verification",
+        )
+    return session.decide_admission(stage="completed_training_workload").decision == "admitted"

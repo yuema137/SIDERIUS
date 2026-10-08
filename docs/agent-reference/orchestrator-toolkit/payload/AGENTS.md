@@ -25,6 +25,14 @@ interface guidance; the task and run declaration own scientific, resource,
 deadline, information-access and submission requirements. If they disagree,
 report the conflict before the affected operation.
 
+If the declaration says preparation is incomplete, help the user author their
+own task/experiment in this project and identify missing prerequisites. Do not
+interpret installed instructions as launch readiness or a spending allowance.
+Before execution, finish the explicit declarations and protect selected inputs
+through the configured sandbox. During execution, preserve those frozen inputs.
+If `RUN-ORCHESTRATION.md` is present, read it for the exact check/launch commands
+and user-owned result locations. It is a setup guide, not a review receipt.
+
 Use [$siderius-toolkit](.agents/skills/siderius-toolkit/SKILL.md) to discover the
 provided capabilities. Read that index at startup; before first using a
 capability, read its linked guide and the relevant native-schema reference.

@@ -23,15 +23,19 @@ registry. It does not retry, wait, or reschedule.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from core.runtime_control.gpu_accounting import GpuAccountingSnapshot, OccupancyBound
+from core.runtime_control.gpu_requirement_evidence import GpuRequirementOwnership
 from core.runtime_control.pair_admission import (
     PairMember,
-    evaluate_pair_admission,
+    PositiveGpuGiB,
+    evaluate_resolved_pair_admission,
     gib_from_mib,
-    pair_ceiling_gib,
+    resolve_gpu_ceiling,
 )
 
 #: How a run treats an unproven situation. Not a severity — two
@@ -58,6 +62,7 @@ AdmissionReason = Literal[
     "insufficient_headroom",
     "measurement_unavailable",
     "policy_unavailable",
+    "environment_headroom_unproven",
 ]
 
 #: The refusals that are a RESOURCE verdict rather than an evidence gap
@@ -83,11 +88,8 @@ RESOURCE_REJECTIONS: frozenset[str] = frozenset({"insufficient_headroom"})
 #: Finer classification of a refusal, so a record says *how* it failed
 #: and not only that it did.
 #:
-#: `device_identity_mismatch` is **RESERVED and not currently emitted**.
-#: Comparing the snapshot's UUID against an expected device needs a
-#: caller-supplied expectation this layer is not given, and inventing one
-#: would widen B-C4b past its scope. Declared so the vocabulary is fixed
-#: before a producer exists, not because a producer exists.
+#: `device_identity_mismatch` compares the requirement's measured UUID
+#: with the current occupancy UUID. Physical device indices are not identity.
 AdmissionDetail = Literal[
     # under measurement_unavailable
     "sampler_error",
@@ -183,6 +185,9 @@ def stops_phase(enforcement: str, reason_code: str | None) -> bool:
             is not a resource rejection, and `enforce`'s "stop on any
             adverse decision" already has an adverse decision in hand.
     """
+    # Explicit isolation conditions precede the ordinary observation policy.
+    if reason_code == "environment_headroom_unproven":
+        return True
     if enforcement == "enforce":
         return True
     if enforcement == "enforce_resource_limits":
@@ -239,16 +244,11 @@ class GpuAdmissionPolicy(BaseModel):
             "source is configured, which in formal mode is refused."
         ),
     )
-    ceiling_gib: float | None = Field(
+    ceiling_gib: PositiveGpuGiB | None = Field(
         default=None,
-        # `gt=0`, not `gt=0.0`: an int bound keeps this module free of
-        # float literals, which the genericity test enforces so a
-        # capacity constant like 12 or 28 GiB cannot arrive unnoticed.
-        # This bound means "positive", not a capacity.
-        gt=0,
         description=(
-            "Resolved aggregate ceiling. `None` defers to the environment "
-            "resolver, preserving pre-B-G3 behaviour."
+            "Operator aggregate ceiling. None selects the environment declaration "
+            "or measured device capacity; host quota independently constrains both."
         ),
     )
     device_uuid: str | None = Field(
@@ -361,6 +361,8 @@ def evaluate_gpu_admission(
     run_name: str = "candidate",
     ceiling_gib: float | None = None,
     sampling_error: str | None = None,
+    requirement_ownership: GpuRequirementOwnership | None = None,
+    requirement_error: str | None = None,
 ) -> AdmissionDecision:
     """Decide whether to start a GPU phase, from measured occupancy.
 
@@ -369,8 +371,11 @@ def evaluate_gpu_admission(
         requirement_mib: how much this phase is expected to need. `None`
             means unknown — which is refused in formal mode and recorded
             in trial mode, **never** silently treated as zero.
-        requirement_provenance: where that figure came from. Only
-            `AUTHORITATIVE_PROVENANCE` counts as a measurement.
+        requirement_provenance: category of the measured figure; it cannot
+            independently establish process ownership or device applicability.
+        requirement_ownership: original ended-worker evidence and measured UUID.
+            Absence never implies that a figure describes an additional worker.
+        requirement_error: validation gap retained by the typed entry reader.
         mode: `formal` demonstrates safety before proceeding; `trial`
             proceeds and records what it could not prove.
             Typed as `str` and validated **here**, so an unrecognised
@@ -389,6 +394,22 @@ def evaluate_gpu_admission(
     occupancy is measured and the requirement does not fit, both refuse:
     headroom is a fact, not a posture.
     """
+    from core.runtime_control.process_visibility import requires_isolated_admission
+
+    if requires_isolated_admission(snapshot):
+        from core.runtime_control.isolated_admission import evaluate_isolated_admission
+
+        return evaluate_isolated_admission(
+            snapshot=snapshot,
+            requirement_mib=requirement_mib,
+            requirement_provenance=requirement_provenance,
+            mode=mode,
+            ceiling_gib=ceiling_gib,
+            sampling_error=sampling_error,
+            requirement_ownership=requirement_ownership,
+            requirement_error=requirement_error,
+        )
+
     if mode not in ACCEPTED_MODES:
         # An invalid posture refuses, like formal — but the record must
         # not SAY formal. Conflating a configuration error with a
@@ -444,6 +465,14 @@ def evaluate_gpu_admission(
         "requirement_provenance": requirement_provenance,
     }
 
+    evidence["requirement_ownership"] = (
+        requirement_ownership.model_dump(mode="json")
+        if isinstance(requirement_ownership, GpuRequirementOwnership)
+        else None
+    )
+    if requirement_error is not None:
+        evidence["requirement_error"] = requirement_error
+
     # --- telemetry ---------------------------------------------------
     if not telemetry or total_mib is None or used_mib is None or other_mib is None:
         if mode == "formal":
@@ -463,14 +492,43 @@ def evaluate_gpu_admission(
             evidence=evidence,
         )
 
-    if used_mib > total_mib:
+    if isinstance(snapshot, GpuAccountingSnapshot):
+        evidence["observed_accounting"] = snapshot.model_dump(mode="json")
+        if used_mib > total_mib:
+            return _refuse(
+                "measurement_unavailable",
+                f"the device reports {used_mib} MiB used of {total_mib} MiB total, "
+                "which cannot be true; an inconsistent reading is not a headroom figure",
+                source="unavailable",
+                evidence=evidence,
+                detail="inconsistent_accounting",
+            )
+    try:
+        if not isinstance(snapshot, GpuAccountingSnapshot):
+            raise ValueError("a typed GPU occupancy snapshot is required")
+        bound = OccupancyBound.model_validate(
+            snapshot.model_dump(include=set(OccupancyBound.model_fields))
+        )
+    except (ValueError, ValidationError):
         return _refuse(
             "measurement_unavailable",
-            f"the device reports {used_mib} MiB used of {total_mib} MiB total, "
-            "which cannot be true; an inconsistent reading is not a headroom figure",
+            "GPU ownership and device readings are incomplete or inconsistent; "
+            "they cannot establish current headroom",
             source="unavailable",
             evidence=evidence,
             detail="inconsistent_accounting",
+        )
+
+    try:
+        limits = resolve_gpu_ceiling(
+            ceiling_gib=ceiling_gib, measured_capacity_gib=gib_from_mib(bound.device_total_mib)
+        )
+    except (TypeError, ValueError) as error:
+        return _refuse(
+            "policy_unavailable",
+            f"the aggregate GPU ceiling could not be resolved: {error}",
+            source="unavailable",
+            evidence=evidence,
         )
 
     # FU-B-17. The ceiling triple is recorded as soon as the device
@@ -482,18 +540,18 @@ def evaluate_gpu_admission(
     # fields, because "the operator asked for 6 GiB" and "the card holds
     # 31.8 GiB" are different facts and the effective value is derived.
     evidence |= {
-        "configured_ceiling_gib": (pair_ceiling_gib() if ceiling_gib is None else ceiling_gib),
+        "configured_ceiling_gib": limits.operator_ceiling_gib,
+        "ceiling_resolution": limits.model_dump(mode="json"),
         "measured_device_capacity_gib": gib_from_mib(total_mib),
-        "effective_ceiling_gib": min(
-            (pair_ceiling_gib() if ceiling_gib is None else ceiling_gib),
-            gib_from_mib(total_mib),
-        ),
+        "effective_ceiling_gib": limits.effective_gib,
     }
 
     # --- requirement -------------------------------------------------
     authoritative_requirement: float | None = None
     if (
-        requirement_mib is not None
+        isinstance(requirement_mib, (int, float))
+        and not isinstance(requirement_mib, bool)
+        and math.isfinite(requirement_mib)
         and requirement_mib > 0
         and requirement_provenance in AUTHORITATIVE_PROVENANCE
     ):
@@ -519,59 +577,78 @@ def evaluate_gpu_admission(
             evidence=evidence,
         )
 
-    # --- headroom, from measurement ----------------------------------
-    # Policy may be stricter than the hardware, never looser: a
-    # configured ceiling above the device's capacity would admit work
-    # the card cannot hold.
-    measured_capacity_gib = gib_from_mib(total_mib)
-    configured = pair_ceiling_gib() if ceiling_gib is None else ceiling_gib
-    effective_ceiling = min(configured, measured_capacity_gib)
-
-    members = [
-        PairMember(
-            run_name=run_name,
-            predicted_peak_vram_gb=gib_from_mib(authoritative_requirement),
-            provenance=str(requirement_provenance),
+    ownership_issue = requirement_error
+    if not isinstance(requirement_ownership, GpuRequirementOwnership):
+        ownership_issue = ownership_issue or "requirement ownership is missing or invalid"
+    elif requirement_ownership.device_uuid != snapshot.device.uuid:
+        return _refuse(
+            "measurement_unavailable",
+            "requirement and current occupancy describe different GPU UUIDs",
+            source="unavailable",
+            evidence=evidence,
+            detail="device_identity_mismatch",
         )
-    ]
-    if other_mib > 0:
-        # Everything else on the device, measured. Deliberately not a
-        # named peer: identifying one would need a cross-process
-        # registry this layer does not have (D-B1).
-        members.append(
-            PairMember(
-                run_name="other_occupancy",
-                predicted_peak_vram_gb=gib_from_mib(float(other_mib)),
-                provenance="measured",
+    else:
+        ownership_issue = ownership_issue or requirement_ownership.applicability_refusal(snapshot)
+    if ownership_issue is not None:
+        evidence["requirement_error"] = ownership_issue
+        if mode == "formal":
+            return _refuse(
+                "policy_unavailable", ownership_issue, source="unavailable", evidence=evidence
             )
+        return _admit(
+            f"{ownership_issue}; proceeding under trial mode with no safety claim",
+            source="unavailable",
+            evidence=evidence,
         )
 
-    pair = evaluate_pair_admission(members, ceiling_gib=effective_ceiling)
+    # The measured worker has ended and the phase worker does not exist yet.
+    # Every currently used byte is retained occupancy, including parent memory
+    # and unattributed device usage. Never subtract either as if already included.
+    effective_ceiling = limits.effective_gib
+    try:
+        members = [
+            PairMember(
+                run_name=run_name,
+                predicted_peak_vram_gb=gib_from_mib(authoritative_requirement),
+                provenance=str(requirement_provenance),
+            )
+        ]
+        if bound.device_used_mib > 0:
+            members.append(
+                PairMember(
+                    run_name="current_device_occupancy",
+                    predicted_peak_vram_gb=gib_from_mib(bound.device_used_mib),
+                    provenance="measured",
+                )
+            )
+        pair = evaluate_resolved_pair_admission(members, limits=limits)
+    except ValueError as error:
+        return _refuse("policy_unavailable", str(error), source="unavailable", evidence=evidence)
     evidence |= {
-        # The ceiling triple is already recorded above (FU-B-17); these
-        # are the headroom figures that only exist once a requirement
-        # has been established.
+        "retained_own_tree_mib": bound.own_tree_mib,
+        "known_other_mib": bound.other_mib,
+        "unattributed_mib": bound.unattributed_mib,
+        "current_device_used_mib": bound.device_used_mib,
         "aggregate_gib": pair.aggregate_gib,
         "headroom_gib": pair.headroom_gib,
         "host_quota_gib": pair.host_quota_gib,
         "pair_reasons": list(pair.reasons),
     }
-
+    summary = (
+        f"{pair.aggregate_gib:.2f} GiB measured demand plus current occupancy against "
+        f"a {effective_ceiling:.2f} GiB effective ceiling"
+    )
     if not pair.feasible:
         return _refuse(
             "insufficient_headroom",
-            f"{pair.aggregate_gib:.2f} GiB predicted against a "
-            f"{effective_ceiling:.2f} GiB effective ceiling — short by "
-            f"{-pair.headroom_gib:.2f} GiB. The environment does not currently "
-            "permit this phase",
+            f"{summary} — short by {-pair.headroom_gib:.2f} GiB. "
+            "The environment does not currently permit this phase",
             source=str(requirement_provenance),
             evidence=evidence,
         )
-
     return _admit(
-        f"{pair.aggregate_gib:.2f} GiB predicted against a "
-        f"{effective_ceiling:.2f} GiB effective ceiling, {pair.headroom_gib:.2f} GiB "
-        "headroom remaining",
+        f"{summary}, {pair.headroom_gib:.2f} GiB headroom remaining",
         source=str(requirement_provenance),
         evidence=evidence,
     )

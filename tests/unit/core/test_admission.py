@@ -23,6 +23,7 @@ from core.runtime_control.admission import (
     evaluate_gpu_admission,
 )
 from core.runtime_control.gpu_accounting import DeviceIdentity, GpuAccountingSnapshot
+from tests.helpers.gpu_requirement import ended_worker_ownership
 from tests.helpers.tuner_source import tuner_node_source
 
 SOURCE = Path(__file__).resolve().parents[3] / "src/core" / "runtime_control" / "admission.py"
@@ -59,6 +60,7 @@ def _decide(mode="formal", *, snapshot=None, mib=4_000, prov="measured", **kw):
         snapshot=_snap() if snapshot is None else snapshot,
         requirement_mib=mib,
         requirement_provenance=prov,
+        requirement_ownership=ended_worker_ownership(DEV.uuid),
         mode=mode,
         **kw,
     )

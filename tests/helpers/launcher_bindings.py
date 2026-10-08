@@ -62,6 +62,20 @@ def workflow_call_bindings(source: str | Path) -> dict[str, str]:
         ):
             continue
         launch = next((kw.value for kw in node.keywords if kw.arg == "launch"), None)
+        if isinstance(launch, ast.Name):
+            # Follow only one unambiguous direct assignment. A rebound variable
+            # must not make a dead projection count as a forwarded owner.
+            assignments = [
+                item.value
+                for item in ast.walk(tree)
+                if isinstance(item, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name) and target.id == launch.id
+                    for target in item.targets
+                )
+                and item.lineno < node.lineno
+            ]
+            launch = assignments[0] if len(assignments) == 1 else None
         if (
             isinstance(launch, ast.Call)
             and isinstance(launch.func, ast.Name)

@@ -29,6 +29,7 @@ from agent.schemas.hyperparam_tuning import (
     TimeAdmissionSource,
     serialize_expert_advice,
 )
+from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.ordering import OrderStrategy
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import ProposalOutput
@@ -36,7 +37,10 @@ from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from core.planner_strategy_identity import PlannerStrategyIdentity
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.completion import RuntimeCompletionPolicy
+from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
+from core.runtime_control.verifier_provider import RuntimeVerifierIdentity
 from execute_tools.dataset_config import DataScope
 
 
@@ -72,6 +76,7 @@ def local_validated_model(
     reflect_provider: Literal["gemini", "openai", "deepseek"] | None = None,
     reflect_model_id: str | None = None,
     reflect_reasoning_effort: str | None = None,
+    reflect_retry_policy: RetryPolicy | None = None,
     # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
     # DS7 — trial_strategy / target_files / eval_strategy params deleted
     # alongside the dead HyperparamTuningInput fields they fed.
@@ -154,8 +159,12 @@ def local_validated_model(
     formal_time_budget_minutes: float | None = None,
     trial_time_admission_source: TimeAdmissionSource = "measured",
     formal_time_admission_source: TimeAdmissionSource = "measured",
+    runtime_completion_policy: RuntimeCompletionPolicy = "completed-workload-v1",
+    runtime_verifier: str | None = None,
+    runtime_verifier_identity: RuntimeVerifierIdentity | None = None,
     data_dir: str | None = None,
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K two-budget split) ---
+    gpu_execution_policy: GpuExecutionPolicy | None = None,
     gpu_admission_measurement_source: str | None = None,
     gpu_admission_enforcement: AdmissionEnforcement = "observe_only",
     gpu_pair_ceiling_gib: float | None = None,
@@ -353,6 +362,7 @@ def local_validated_model(
         reflect_provider=reflect_provider,
         reflect_model_id=reflect_model_id,
         reflect_reasoning_effort=reflect_reasoning_effort,
+        reflect_retry_policy=reflect_retry_policy,
         storage=storage,
         is_trial=is_trial,
         trial_portion=trial_portion,
@@ -398,7 +408,11 @@ def local_validated_model(
         formal_time_budget_minutes=formal_time_budget_minutes,
         trial_time_admission_source=trial_time_admission_source,
         formal_time_admission_source=formal_time_admission_source,
+        runtime_completion_policy=runtime_completion_policy,
+        runtime_verifier=runtime_verifier,
+        runtime_verifier_identity=runtime_verifier_identity,
         data_dir=data_dir,
+        gpu_execution_policy=gpu_execution_policy,
         gpu_admission_measurement_source=gpu_admission_measurement_source,
         gpu_admission_enforcement=gpu_admission_enforcement,
         gpu_pair_ceiling_gib=gpu_pair_ceiling_gib,

@@ -37,7 +37,7 @@ defect shape this PR exists to remove.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -49,6 +49,10 @@ from core.runtime_control.admission import AUTHORITATIVE_PROVENANCE
 from core.runtime_control.gpu_measurement_identity import (
     PlannedCandidateIdentity,
     RealizedCandidateIdentity,
+)
+from core.runtime_control.gpu_requirement_evidence import (
+    AdmissionRequirementEvidence,
+    GpuRequirementOwnership,
 )
 
 #: The provenance category PR B accepts for a driver-visible measurement.
@@ -97,6 +101,7 @@ AuthorityRefusal = Literal[
     "realized_identity_absent",
     "phase_not_admissible",
     "no_driver_visible_evidence",
+    "requirement_ownership_unavailable",
 ]
 
 
@@ -231,6 +236,9 @@ class MeasuredGpuRequirement(BaseModel):
     #: PIDs attributed to the candidate's own tree. Retained so an operator can
     #: audit what was counted as "ours".
     owned_pids: tuple[int, ...] = ()
+    ownership: GpuRequirementOwnership | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     #: THE authoritative measurement identity: what the worker actually
     #: built, hashed by C1's canonical builder. `None` means the worker
@@ -296,6 +304,12 @@ class MeasuredGpuRequirement(BaseModel):
             return "phase_not_admissible"
         if not self.coverage.complete:
             return "sampling_incomplete"
+        if (
+            self.ownership is None
+            or self.ownership.device_uuid != self.observed_device_uuid
+            or self.ownership.completion_refusal is not None
+        ):
+            return "requirement_ownership_unavailable"
         return None
 
     @property
@@ -317,7 +331,7 @@ class MeasuredGpuRequirement(BaseModel):
     def as_admission_entry(self) -> dict[str, object]:
         """The phase entry `sandbox_executor` reads, or refusal.
 
-        Returns the `{"requirement_mib", "provenance"}` mapping PR B expects.
+        Returns the numeric/category entry together with typed worker ownership.
         Raises rather than emitting a placeholder when the measurement is not
         authoritative: a substituted figure would be, in that module's own
         words, "an assumption wearing a measurement's provenance".
@@ -342,13 +356,16 @@ class MeasuredGpuRequirement(BaseModel):
                 f"measurement for phase {self.request.phase!r} is not "
                 f"authoritative ({refusal}); it must not be delivered to admission"
             )
+        # authority_refusal has already proved the realized identity exists.
+        realized = cast(RealizedCandidateIdentity, self.realized_identity)
         return {
             "requirement_mib": self.driver_tree_peak_mib,
             "provenance": MEASURED_PROVENANCE,
+            "ownership": self.ownership.model_dump(mode="json") if self.ownership else None,
             "measurement_detail": (
                 f"isolated_prephase_measurement:{self.request.phase}"
                 f":{self.request.model_type}"
-                f":realized={self.realized_identity.realized_config_hash}"
+                f":realized={realized.realized_config_hash}"
                 f":planned={self.request.planned_identity.planned_config_hash}"
                 f":{self.observed_device_uuid}"
             ),
@@ -402,12 +419,9 @@ class MeasuredRequirementTable(BaseModel):
         phase, to the larger of the two, or to a model-name match. B-G0
         measured one PUNet candidate 1.8x apart across the two phases.
         """
-        entry = self.entries.get(phase)
-        if entry is None:
-            return None, None
-        requirement = entry.get("requirement_mib")
-        provenance = entry.get("provenance")
-        return (
-            requirement if isinstance(requirement, int | float) else None,
-            provenance if isinstance(provenance, str) else None,
-        )
+        evidence = self.for_phase_evidence(phase)
+        return evidence.requirement_mib, evidence.provenance
+
+    def for_phase_evidence(self, phase: str) -> AdmissionRequirementEvidence:
+        """Keep the number, ownership and validation gap together at consumption."""
+        return AdmissionRequirementEvidence.from_entry(self.entries.get(phase))

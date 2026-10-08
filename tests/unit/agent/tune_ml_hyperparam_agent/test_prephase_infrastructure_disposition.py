@@ -92,12 +92,13 @@ class TestStatusHonesty:
         )
         assert "did not permit" in rec["memory"]["conclusion"]
 
-    def test_the_reason_vocabulary_was_not_expanded(self):
-        # The fix is one extra STATUS, not a new taxonomy.
+    def test_the_reason_vocabulary_includes_isolation_evidence_refusal(self):
+        # Namespace-limited telemetry has its own fail-closed evidence gap.
         assert RESOURCE_ADMISSION_REASONS == (
             "insufficient_headroom",
             "measurement_unavailable",
             "policy_unavailable",
+            "environment_headroom_unproven",
         )
 
 

@@ -80,6 +80,7 @@ from execute_tools.trained_model_artifact import (
 from execute_tools.training_batches import completed_epoch_loss
 from execute_tools.training_budget_execution import (
     TrainingAllocationRejected,
+    complete_training_workload,
     enforce_training_allocation,
     return_on_allocation_rejection,
 )
@@ -815,6 +816,7 @@ def _validation_pass(
     observables: Any = None,
     check_allocation: Callable[[], None] | None = None,
     resolved_custom_target_dtype: Literal["long", "float"] | None = None,
+    completing_workload: bool = False,
 ) -> tuple[float, int, float]:
     """One R3 observation: the run-resolved objective on the validation scope.
 
@@ -956,7 +958,12 @@ def _validation_pass(
                         # validation term; every batch after this one is
                         # running on borrowed time until the refreshed value
                         # reaches the sidecar.
-                        if on_verified is not None:
+                        complete_success = (
+                            completing_workload
+                            and verifier.state == "verified"
+                            and n_total == _declared_len(val_dataset)
+                        )
+                        if on_verified is not None and not complete_success:
                             on_verified()
                         verifier = None
             del val_dataset, val_loader
@@ -1427,12 +1434,13 @@ def run_experiment_streaming(
     checkpoint_selector = CheckpointSelector(
         train_cfg.checkpoint_selection, has_validation=task_eval_scope is not None
     )
-    if train_cfg.target_standardization != "none" and (
-        get_output_type(model_cfg.model_type) not in {"regressor", "hybrid"}
-        or not get_target_torch_dtype(loss_cfg).is_floating_point
-    ):
-        raise ValueError(
-            "target standardization requires a regressor with continuous floating targets"
+    if train_cfg.target_standardization != "none":
+        from execute_tools.target_standardization import validate_target_standardization
+
+        validate_target_standardization(
+            enabled=True,
+            output_type=get_output_type(model_cfg.model_type),
+            target_dtype=lambda: get_target_torch_dtype(loss_cfg),
         )
     budget_execution = (
         TrainingBudgetExecution(
@@ -1677,7 +1685,13 @@ def run_experiment_streaming(
                 return True
         return False
 
+    completed_optimizer_steps = 0
     for ep in range(epoch_limit):
+        completing_workload = (
+            runtime_session is not None
+            and runtime_session.policy.runtime_completion_policy == "completed-workload-v1"
+            and ep + 1 == epoch_limit
+        )
         if budget_execution:
             budget_execution.start_epoch()
         # One verifier spans successive training passes. The first interval
@@ -1888,7 +1902,12 @@ def run_experiment_streaming(
                     if use_cuda_sync:
                         torch.cuda.synchronize()
                     state = verifier.feed(max((time.perf_counter() - t_step) * 1000.0, 1e-6))
-                    if state in ("verified", "failed_no_steady_state", "failed_pathological_unit"):
+                    complete_success = (
+                        state == "verified"
+                        and completing_workload
+                        and len(batch_losses) == len(loader)
+                    )
+                    if verifier.is_terminal and not complete_success:
                         rejected_mid_epoch = _finish_training_verification(decide_admission=True)
                         verifier = None
                         if rejected_mid_epoch:
@@ -1918,6 +1937,7 @@ def run_experiment_streaming(
         avg_loss = completed_epoch_loss(
             batch_losses, batch_rows, drop_last=train_cfg.drop_last, reduction=loss_cfg.reduction
         )
+        completed_optimizer_steps += len(batch_losses)
         training_samples.append(sum(batch_rows))
         history.append(float(avg_loss))
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
@@ -1946,6 +1966,7 @@ def run_experiment_streaming(
                 batch_size=train_cfg.batch_size,
                 verifier=validation_verifier,
                 on_verified=_finish_validation_verification,
+                completing_workload=completing_workload,
                 observables=observation,
                 check_allocation=lambda: enforce_training_allocation(
                     runtime_session, phase="validation"
@@ -1960,7 +1981,9 @@ def run_experiment_streaming(
             # reached a verdict (that is the Gate-2 attempt-1 fix). Idempotent,
             # so this only fires for a pass that ended while still verifying.
             if validation_verifier is not None and validation_verifier.is_terminal:
-                _finish_validation_verification()
+                complete_success = completing_workload and validation_verifier.state == "verified"
+                if not complete_success:
+                    _finish_validation_verification()
             print(f"Epoch {ep} | Validation Loss: {r3:.6f} ({n_val} ML segments)")
 
             checkpoint_selector.observe(model, epoch=ep + 1, validation_loss=float(r3))
@@ -1969,6 +1992,35 @@ def run_experiment_streaming(
             decision = budget_execution.finish_epoch(optimizer_steps=len(batch_losses))
             if decision.action == "stop":
                 break
+
+    completed_actual = (
+        runtime_session is not None
+        and runtime_session.policy.runtime_completion_policy == "completed-workload-v1"
+        and t_train_start is not None
+    )
+    if completed_actual:
+        assert runtime_session is not None and t_train_start is not None
+        admitted = complete_training_workload(
+            runtime_session,
+            budget_execution=budget_execution,
+            training_verifier=verifier,
+            validation_verifier=validation_verifier,
+            optimizer_steps=completed_optimizer_steps,
+            completed_epochs=len(history),
+            epoch_limit=epoch_limit,
+            training_seconds=max(
+                time.perf_counter() - t_train_start - validation_seconds_total, 1e-9
+            ),
+            validation_seconds=validation_seconds_total,
+            validation_rows=validation_requested_rows,
+            epoch0_dataset_seconds=epoch0_dataset_seconds,
+        )
+        verifier = validation_verifier = None
+        if not admitted:
+            del model, optimizer, criterion
+            torch.cuda.empty_cache()
+            gc.collect()
+            return None
 
     if verifier is not None:
         # The workload has actually ended (including a cooperative epoch stop).
@@ -1982,7 +2034,7 @@ def run_experiment_streaming(
             gc.collect()
             return None
 
-    if runtime_session is not None and budget_execution is not None:
+    if not completed_actual and runtime_session is not None and budget_execution is not None:
         budget_execution.reconcile(
             runtime_session,
             validation_rows=validation_requested_rows,
@@ -2000,9 +2052,10 @@ def run_experiment_streaming(
         # admission (design §3.9). The pass is not priced by admission /
         # prediction / the watchdog in 07a — 07c / runtime-control debt;
         # ``validation_seconds`` in the payload is the evidence.
-        runtime_session.record_phase_actual(
-            "training", (time.perf_counter() - t_train_start) - validation_seconds_total
-        )
+        if not completed_actual:
+            runtime_session.record_phase_actual(
+                "training", (time.perf_counter() - t_train_start) - validation_seconds_total
+            )
 
         # 07c C5 — the OTHER half of Q-07c-5. The seconds 07a already
         # accumulates become the validation phase's ACTUAL, so
@@ -2015,7 +2068,7 @@ def run_experiment_streaming(
         # recorded — the measurement is worth keeping even when the
         # prediction is not, which is the §6.2 event-log rule. It is closed
         # out here so the failure is recorded rather than dropped silently.
-        if validation_seconds:
+        if validation_seconds and not completed_actual:
             _finish_validation_verification()
             runtime_session.record_phase_actual("validation", validation_seconds_total)
 

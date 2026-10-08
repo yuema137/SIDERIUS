@@ -185,6 +185,15 @@ from workflows.task_composition import (
     verify_composition_is_bound,
 )
 from workflows.task_config import get_task_description, load_task_config
+from workflows.task_settings import (
+    _refuse_data_scope_for_a_foreign_topology as _refuse_data_scope_for_a_foreign_topology,
+)
+from workflows.task_settings import (
+    resolve_analysis_binding as _resolve_analysis_binding,
+)
+from workflows.task_settings import (
+    validate_scope_settings,
+)
 
 
 def _log_rss(step: str) -> None:
@@ -1851,21 +1860,6 @@ def _run_composed_data_analysis(
     return output
 
 
-def _resolve_analysis_binding(task_composition, enabled: bool | None):
-    """Resolve the workflow treatment against the task-owned binding.
-
-    A launch flag transports an experiment's treatment; it never constructs
-    missing task authority or changes the standalone agent contract.
-    """
-
-    binding = getattr(task_composition, "data_analysis", None)
-    if enabled is True and binding is None:
-        raise ValueError(
-            "data_analysis_enabled=True requires a task-composed data_analysis binding"
-        )
-    return None if enabled is False else binding
-
-
 def _attach_composed_analysis(proposal_input, analysis_output):
     """Apply the optional typed edge without branching in ``run_workflow``."""
 
@@ -1888,37 +1882,6 @@ def _attach_composed_literature(proposal_input, literature_output):
     return local_typed_evidence(literature_output, proposal_input=proposal_input)
 
 
-def _refuse_data_scope_for_a_foreign_topology(scope_is_partial: bool, task_composition) -> None:
-    """`--data_scope` names FILE INDICES; refuse it for a task without them.
-
-    Step 12 / PR-12bc B7 (§D.4). Extracted rather than inlined: `run_workflow`
-    carries a §12.1 branch tripwire, and this check is a self-contained
-    decision with its own reason — exactly the shape that belongs behind a
-    call.
-
-    `--data_scope` is TIDMAD/legacy vocabulary. Silently resolving it against a
-    composed task's partition count would restrict a run to partitions the
-    operator never meant. Refused BY NAME, at startup, before an LLM call or a
-    GPU minute. Composed TIDMAD keeps honouring it through its own capability,
-    which is why the discriminator is "does this task declare TIDMAD's
-    topology" and never a task name.
-    """
-    if not scope_is_partial or task_composition is None:
-        return
-    from execute_tools.dataset_config import tidmad_topology
-
-    try:
-        tidmad_topology(resolve_dataset_profile())
-    except ValueError as exc:
-        raise ValueError(
-            f"--data_scope names FILE INDICES, which is legacy vocabulary this "
-            f"composed task does not share ({exc}). Declare the restriction "
-            f"through the task's own scope capability instead; a file-index "
-            f"list cannot be reinterpreted for a task with a different "
-            f"partition concept."
-        ) from exc
-
-
 def _workflow_lock_identity(launch, llm_config: WorkflowLLMConfig) -> LockLaunchIdentity:
     """The workflow's arXiv-U1/U3 lock identity, from the launch config.
 
@@ -1933,6 +1896,7 @@ def _workflow_lock_identity(launch, llm_config: WorkflowLLMConfig) -> LockLaunch
     from agent.planner_strategy import resolve_planner_strategy
 
     return LockLaunchIdentity(
+        gpu_execution_policy=launch.gpu_execution_policy,
         planner_strategy_identity=resolve_planner_strategy(
             llm_config.get("tune").get("planner_strategy")
         ).identity,
@@ -1972,6 +1936,8 @@ def _workflow_lock_identity(launch, llm_config: WorkflowLLMConfig) -> LockLaunch
         ),
         trial_time_admission_source=launch.trial_time_admission_source,
         formal_time_admission_source=launch.formal_time_admission_source,
+        runtime_completion_policy=launch.runtime_completion_policy,
+        runtime_verifier_identity=launch.runtime_verifier_identity,
     )
 
 
@@ -2119,6 +2085,9 @@ def run_workflow(
     # parameters carried before; the carrier restates none of them.
     if launch is None:
         launch = WorkflowLaunchConfig()
+    from workflows.run_config import bind_runtime_verifier_launch
+
+    launch = bind_runtime_verifier_launch(launch)
 
     validate_launch_trial_overrides(launch)
 
@@ -2256,7 +2225,7 @@ def run_workflow(
     # Discover once per workflow run and thread into every ProposalInput
     # via post-hoc assignment after local_full_context returns (pattern
     # mirrors previous_failures and mindset below at the propose call site).
-    # The tuner's own HardwareContext.get_or_create call in its run() init
+    # The tuner's own core.hardware_context.get_or_create call in its run() init
     # reads the same manifest path — first-caller-writes, later-callers-read.
     # See docs/phase66_ws_b_proposer_hardening.md §4.1.
     from pathlib import Path as _Path
@@ -2357,20 +2326,13 @@ def run_workflow(
     _run_partitions = resolve_dataset_profile().partition_count
     _resolved_scope = _run_scope.resolve(_run_partitions)
     _scope_is_partial = _resolved_scope != list(range(_run_partitions))
-    if _scope_is_partial and launch.formal_strategy != "snapshot":
-        raise ValueError(
-            f"partial data_scope requires formal_strategy='snapshot' "
-            f"(got {launch.formal_strategy!r}). Operator configuration is a "
-            f"contract — it is never normalized."
-        )
-    _refuse_data_scope_for_a_foreign_topology(_scope_is_partial, task_composition)
-    if health_gate_enabled and _scope_is_partial and health_gate_files is None:
-        raise ValueError(
-            "partial data_scope with HealthGates enabled requires an "
-            "explicit health_gate_files list (there is no automatic "
-            "default). Pass health_gate_files ⊆ the scope, or disable "
-            "the subsystem with health_gate_enabled=False."
-        )
+    validate_scope_settings(
+        scope_is_partial=_scope_is_partial,
+        formal_strategy=launch.formal_strategy,
+        task_composition=task_composition,
+        health_gate_enabled=health_gate_enabled,
+        health_gate_files=health_gate_files,
+    )
     _run_invariants, _run_effective_health_config = build_run_invariants(
         resolved_data_scope=_resolved_scope,
         health_gate_enabled=health_gate_enabled,
@@ -3381,6 +3343,7 @@ def run_workflow(
             reflect_provider=tune_llm.get("reflect_provider"),
             reflect_model_id=tune_llm.get("reflect_model_id"),
             reflect_reasoning_effort=tune_llm.get("reflect_reasoning_effort"),
+            reflect_retry_policy=tune_llm.get("reflect_retry_policy"),
             is_trial=launch.is_trial,
             # Lane F2 — TRANSIT-ONLY fields (no tuner consumer); a bare
             # launch restores the input-schema default so input bytes are
@@ -3423,7 +3386,11 @@ def run_workflow(
             formal_time_budget_minutes=launch.formal_time_budget_minutes,
             trial_time_admission_source=launch.trial_time_admission_source,
             formal_time_admission_source=launch.formal_time_admission_source,
+            runtime_completion_policy=launch.runtime_completion_policy,
+            runtime_verifier=launch.runtime_verifier,
+            runtime_verifier_identity=launch.runtime_verifier_identity,
             data_dir=launch.data_dir,
+            gpu_execution_policy=launch.gpu_execution_policy,
             gpu_admission_measurement_source=launch.gpu_admission_measurement_source,
             gpu_admission_enforcement=launch.gpu_admission_enforcement,
             gpu_pair_ceiling_gib=launch.gpu_pair_ceiling_gib,

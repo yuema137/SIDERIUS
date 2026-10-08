@@ -158,7 +158,7 @@ class TestVerifiedPath:
         obs = json.load(open(sidecar))
         assert obs["final_status"] == "completed"
         assert obs["admission"]["decision"] == "admitted"
-        assert obs["admission"]["stage"] == "post_training_verification"
+        assert obs["admission"]["stage"] == "completed_training_workload"
         assert obs["admission"]["verification_cost_seconds"] > 0.0
 
         training = obs["components"]["training"]
@@ -319,14 +319,17 @@ def test_short_epochs_preserve_verification_and_exact_training(
         assert len(validation["measurement"]["raw_timings_ms"]) > 4
 
 
+@pytest.mark.parametrize("policy", ["completed-workload-v1", "verified-prediction-v1"])
 @pytest.mark.parametrize("budget", [None, 3600])
-def test_true_end_retains_insufficient_evidence(tiny_setup, tmp_path, monkeypatch, budget):
+def test_true_end_retains_insufficient_evidence(tiny_setup, tmp_path, monkeypatch, budget, policy):
     monkeypatch.setattr(sys.modules[__name__], "N_PSD_SEGMENTS", 2)
     sidecar = tmp_path / "short.json"
     session = RuntimeVerificationSession(
         str(sidecar),
         policy=RuntimeControlPolicy(
-            operator_budget_seconds=budget, verification=_cross_epoch_config()
+            operator_budget_seconds=budget,
+            verification=_cross_epoch_config(),
+            runtime_completion_policy=policy,
         ),
     )
     summary = _run(tiny_setup, session, "short")
@@ -334,8 +337,10 @@ def test_true_end_retains_insufficient_evidence(tiny_setup, tmp_path, monkeypatc
     training = record["components"]["training"]
     assert len(training["measurement"]["raw_timings_ms"]) == 2
     assert training["prediction"] is None
-    assert (summary is None) == (budget is not None)
-    assert record["final_status"] == ("completed" if budget is None else "rejected")
+    rejected = budget is not None and policy == "verified-prediction-v1"
+    assert (summary is None) == rejected
+    assert record["final_status"] == ("rejected" if rejected else "completed")
+    assert ("completion" in training) == (policy == "completed-workload-v1")
 
 
 def test_cooperative_stop_finalizes_pending_training(tiny_setup, tmp_path, monkeypatch):
@@ -462,3 +467,90 @@ def test_pathological_verdict_survives_epoch_boundary(tiny_setup, tmp_path, monk
     assert training["measurement"]["detail"]["state"] == "failed_pathological_unit"
     assert len(training["measurement"]["raw_timings_ms"]) > 2
     assert not list((tmp_path / "cached_models").glob("*.pth"))
+
+
+@pytest.mark.parametrize("policy", ["completed-workload-v1", "verified-prediction-v1"])
+def test_finite_training_and_validation_complete_together(
+    tiny_setup, tmp_path, monkeypatch, policy
+):
+    """Whole-work completion covers validation too, and never adds optimizer work."""
+    monkeypatch.setattr(sys.modules[__name__], "N_PSD_SEGMENTS", 4)
+    session = RuntimeVerificationSession(
+        str(tmp_path / "finite_validation.json"),
+        policy=RuntimeControlPolicy(
+            operator_budget_seconds=3600,
+            verification=_cross_epoch_config(),
+            runtime_completion_policy=policy,
+        ),
+    )
+    data_path = _ObservedDataPath()
+    with bind_task_data_path(data_path):
+        summary = _run(
+            tiny_setup,
+            session,
+            "finite_validation",
+            task_eval_scope=object(),
+            validation_requested_rows=4,
+        )
+    admitted = policy == "completed-workload-v1"
+    assert (summary is not None) == admitted
+    assert [phase for phase, _ in data_path.visits] == ["training", "validation"]
+    if admitted:
+        components = session.observation.components
+        for phase in ("training", "validation"):
+            assert components[phase].completion.verification_basis == "workload_exhausted"
+            assert components[phase].workload.unit_count == 4
+            assert components[phase].prediction is None
+        expected = sum(
+            c.measurement.total_measurement_seconds
+            for c in components.values()
+            if c.measurement is not None and c.workload and c.workload.phase != "setup"
+        )
+        assert session.observation.admission.verification_cost_seconds == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("policy", ["completed-workload-v1", "verified-prediction-v1"])
+def test_last_unit_verified_forecast_cannot_reject_completed_actual(
+    tiny_setup, tmp_path, monkeypatch, policy
+):
+    """A last-step estimate is obsolete once both complete phase costs are known."""
+    from core.runtime_control.adaptive import AdaptiveUnitVerification
+
+    monkeypatch.setattr(sys.modules[__name__], "N_PSD_SEGMENTS", 3)
+    config = AdaptiveVerificationConfig(
+        steady=SteadyStateConfig(window=2, stable_windows=2, rel_spread_tol=0.99),
+        min_timed_steps=1,
+        min_timed_ms=0,
+    )
+    original_feed = AdaptiveUnitVerification.feed
+    monkeypatch.setattr(
+        AdaptiveUnitVerification,
+        "feed",
+        lambda self, unit_ms, **kwargs: original_feed(self, 1, elapsed_ms=1),
+    )
+    original_prediction = AdaptiveUnitVerification.prediction
+
+    def expensive_prediction(self, *args, **kwargs):
+        prediction = original_prediction(self, *args, **kwargs)
+        return prediction.model_copy(update={"predicted_seconds": 1000})
+
+    monkeypatch.setattr(AdaptiveUnitVerification, "prediction", expensive_prediction)
+    session = RuntimeVerificationSession(
+        str(tmp_path / "last-unit.json"),
+        policy=RuntimeControlPolicy(
+            operator_budget_seconds=30,
+            verification=config,
+            runtime_completion_policy=policy,
+        ),
+    )
+    with bind_task_data_path(_ObservedDataPath()):
+        summary = _run(
+            tiny_setup, session, "last-unit", task_eval_scope=object(), validation_requested_rows=3
+        )
+    assert (summary is not None) == (policy == "completed-workload-v1")
+    if summary:
+        for phase in ("training", "validation"):
+            component = session.observation.components[phase]
+            assert component.prediction.predicted_seconds == 1000
+            assert component.completion.verification_basis == "verified"
+            assert component.actual_seconds < 30

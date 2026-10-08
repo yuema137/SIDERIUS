@@ -9,7 +9,9 @@ from core.runtime_control.gpu_measurement_phases import CandidateComponents
 from core.runtime_control.gpu_measurement_spec import GpuMeasurementSpec
 
 
-def build_inference_components(spec: GpuMeasurementSpec, trace: Any = None) -> CandidateComponents:
+def build_inference_components(
+    spec: GpuMeasurementSpec, trace: Any = None, *, deadline_at: float | None = None
+) -> CandidateComponents:
     """Build the model now; open bounded evaluation data in the work phase.
 
     The loss type may affect model construction, but inference creates no
@@ -22,6 +24,9 @@ def build_inference_components(spec: GpuMeasurementSpec, trace: Any = None) -> C
     from execute_tools.task_probe_batch import task_inference_probe_batches
     from ml_models.models_format_sandbox import LossConfig, TrainConfig
 
+    checkpoint = spec.inference_checkpoint
+    if checkpoint is not None and (deadline_at is None or spec.inference_binding is None):
+        raise ValueError("checkpoint measurement requires its source binding and worker deadline")
     reference = spec.task_probe_data
     if reference is None or reference.evaluation_scope_payload is None:
         raise ValueError("Inference measurement requires a composed task evaluation scope")
@@ -40,10 +45,24 @@ def build_inference_components(spec: GpuMeasurementSpec, trace: Any = None) -> C
         loss_type=loss_cfg.loss_type,
     )
     if trace is not None:
-        trace.record("after_model_construction", model=model, detail="no checkpoint")
+        trace.record(
+            "after_model_construction",
+            model=model,
+            detail="no checkpoint" if checkpoint is None else "checkpoint load pending",
+        )
     model = model.to(spec.device)
     if trace is not None:
         trace.record("after_model_to_device", synchronize=True, model=model)
+    verified_checkpoint = None
+    if checkpoint is not None:
+        from execute_tools.inference_checkpoint import load_bound_inference_checkpoint
+
+        assert deadline_at is not None
+        model, verified_checkpoint = load_bound_inference_checkpoint(
+            model, checkpoint, deadline_at=deadline_at
+        )
+        if trace is not None:
+            trace.record("after_checkpoint_load", synchronize=True, model=model)
     model.eval()
     total = int(sum(p.numel() for p in model.parameters()))
     trainable = int(sum(p.numel() for p in model.parameters() if p.requires_grad))
@@ -74,6 +93,7 @@ def build_inference_components(spec: GpuMeasurementSpec, trace: Any = None) -> C
 
     return CandidateComponents(
         model=model,
+        verified_checkpoint=verified_checkpoint,
         model_input=None,
         loss_target=None,
         optimizer=None,

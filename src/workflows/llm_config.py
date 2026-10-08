@@ -29,7 +29,15 @@ import warnings
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
+
+from agent.schemas.llm_retry import RetryPolicy
 
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 
@@ -93,12 +101,21 @@ class NodeLLMConfig(BaseModel):
     max_retries: int | None = Field(
         default=None,
         description=(
-            "Maximum retry attempts for transient API errors (429, 5xx). "
+            "Maximum total transport attempts, including the initial request, "
+            "for transient API errors (429, 5xx). "
             "None (default) = retry indefinitely (Slurm wall time is the "
             "natural timeout). Set to a positive integer for interactive "
             "use (e.g. 6 for ~77s, 20 for ~15min)."
         ),
     )
+
+    @model_serializer(mode="wrap")
+    def serialize_retry_intent(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Keep retry inheritance distinct from an explicitly unbounded limit."""
+        result = handler(self)
+        if "max_retries" not in self.model_fields_set:
+            result.pop("max_retries", None)
+        return result
 
     @model_validator(mode="after")
     def validate_reasoning_effort(self) -> NodeLLMConfig:
@@ -381,6 +398,8 @@ class WorkflowLLMConfig(BaseModel):
                 "llm_provider": self.interpret.provider,
                 "llm_model_id": self.interpret.model_id,
             }
+            if "max_retries" in self.interpret.model_fields_set:
+                result["llm_max_retries"] = self.interpret.max_retries
             if self.interpret.reasoning_effort is not None:
                 result["llm_reasoning_effort"] = self.interpret.reasoning_effort
             return result
@@ -404,7 +423,11 @@ class WorkflowLLMConfig(BaseModel):
             }
             if config.planner_strategy is not None:
                 result["planner_strategy"] = config.planner_strategy
-            # The tuner creates one LLMBridge — use the planner's retry config.
+            if "max_retries" in config.reflector.model_fields_set:
+                result["reflect_retry_policy"] = RetryPolicy(
+                    max_retries=config.reflector.max_retries
+                )
+            # Omitted reflector limits retain the planner's retry config.
             if config.planner.max_retries is not None:
                 result["max_retries"] = config.planner.max_retries
             if config.planner.reasoning_effort is not None:
@@ -451,6 +474,12 @@ class WorkflowLLMConfig(BaseModel):
                 "search_llm_provider": config.search.provider,
                 "search_llm_model_id": config.search.model_id,
             }
+            if "max_retries" in config.main.model_fields_set:
+                result["llm_max_retries"] = config.main.max_retries
+            if "max_retries" in config.search.model_fields_set:
+                result["search_llm_retry_policy"] = RetryPolicy(
+                    max_retries=config.search.max_retries
+                )
             if config.main.reasoning_effort is not None:
                 result["llm_reasoning_effort"] = config.main.reasoning_effort
             if config.search.reasoning_effort is not None:

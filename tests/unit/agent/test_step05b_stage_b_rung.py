@@ -142,4 +142,6 @@ def test_no_calibration_value_participates_in_either_contrast():
     assert _MAX_BATCH_TIMESTEPS == 800_000
     assert _DEFAULT_CANDIDATE_BATCHES == (64, 32, 16, 8, 4, 2, 1)
     assert SEG_SIZE_BOUNDS == (2500, 40_000)
-    assert _ROLE_DEFAULT_RSS_GB == {"training": 40, "inference": 60, "scoring": 24}
+    # Native launches have no implicit address-space cap. An explicitly
+    # selected execution policy owns limits; topology contrasts cannot add one.
+    assert _ROLE_DEFAULT_RSS_GB == {"training": None, "inference": None, "scoring": None}

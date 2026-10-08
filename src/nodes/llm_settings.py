@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from agent.schemas.llm_retry import RetryPolicy
+
 
 @dataclass(frozen=True)
 class NodeLLMDefaults[ModelId: (str, None)]:
@@ -59,22 +61,29 @@ def literature_bridge_arguments(
     search_provider: str | None,
     search_model_id: str | None,
     search_reasoning_effort: str | None,
+    max_retries: int | None = None,
+    search_retry_policy: RetryPolicy | None = None,
 ) -> LiteratureBridgeArguments:
     """Project validated literature input; main routing has no default here."""
     main = node_bridge_kwargs(
         provider=provider,
         model_id=model_id,
-        max_retries=None,
+        max_retries=max_retries,
         reasoning_effort=reasoning_effort,
         omit_unset_retries=True,
     )
     search = None
-    if search_provider or search_model_id or search_reasoning_effort:
+    search_routing_override = bool(search_provider or search_model_id or search_reasoning_effort)
+    if search_routing_override or search_retry_policy is not None:
         search = node_bridge_kwargs(
             provider=search_provider or provider,
             model_id=search_model_id or model_id,
-            max_retries=None,
-            reasoning_effort=search_reasoning_effort,
+            max_retries=(
+                search_retry_policy.max_retries if search_retry_policy is not None else max_retries
+            ),
+            reasoning_effort=(
+                search_reasoning_effort if search_routing_override else reasoning_effort
+            ),
             omit_unset_retries=True,
         )
     return LiteratureBridgeArguments(main, search)

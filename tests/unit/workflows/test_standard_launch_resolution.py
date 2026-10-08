@@ -59,6 +59,15 @@ def test_production_passes_shared_projection_to_workflow(tmp_path, monkeypatch):
     dataset = tmp_path / "data"
     dataset.mkdir()
     projected = []
+    expected_locks = []
+    original_invariants = run_one_iteration.compute_expected_invariants
+
+    def capture_invariants(*args, **kwargs):
+        result = original_invariants(*args, **kwargs)
+        expected_locks.append(result)
+        return result
+
+    monkeypatch.setattr(run_one_iteration, "compute_expected_invariants", capture_invariants)
 
     def capture(*args, **kwargs):
         value = standard_launch.build_standard_launch_config(*args, **kwargs)
@@ -87,6 +96,8 @@ def test_production_passes_shared_projection_to_workflow(tmp_path, monkeypatch):
             str(dataset),
             "--llm_config",
             str(routing),
+            "--runtime_completion_policy",
+            "verified-prediction-v1",
             "--max_rounds",
             "7",
             "--trial_time_budget_minutes",
@@ -104,6 +115,8 @@ def test_production_passes_shared_projection_to_workflow(tmp_path, monkeypatch):
     assert len(projected) == 1
     assert run.call_args.kwargs["launch"] is projected[0]
     assert projected[0].data_dir == str(dataset.resolve())
+    assert projected[0].runtime_completion_policy == "verified-prediction-v1"
+    assert expected_locks[0].runtime_completion_policy == "verified-prediction-v1"
     assert projected[0].max_rounds == 7
     assert projected[0].trial_time_budget_minutes == 1.5
     assert projected[0].formal_time_budget_minutes == 9
@@ -119,6 +132,12 @@ def test_forwarding_census_requires_reachable_projection():
     dead = "build_standard_launch_config(args, identity)\nrun_workflow(launch=other)"
     assert "formal_time_budget_minutes" in workflow_call_bindings(live)
     assert "formal_time_budget_minutes" not in workflow_call_bindings(dead)
+    assigned = "cfg = build_standard_launch_config(args, identity)\nrun_workflow(launch=cfg)"
+    rebound = (
+        "cfg = build_standard_launch_config(args, identity)\ncfg = other\nrun_workflow(launch=cfg)"
+    )
+    assert "formal_time_budget_minutes" in workflow_call_bindings(assigned)
+    assert "formal_time_budget_minutes" not in workflow_call_bindings(rebound)
 
 
 @pytest.mark.parametrize(

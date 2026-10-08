@@ -747,17 +747,16 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   the id. Losses are NOT metrics — but that boundary is TYPED, not lexical: since Step 12 / PR-12a C5 closed D16, **`MetricSpec.id` is an OPAQUE identity** and `log_loss` is as declarable as `accuracy`. What enforces the boundary is the contract (a deliverable, an aggregation, an executable `ScoreabilityContract`), `_compose_metric`'s `EvaluationMetric` type check, and `extra="forbid"` plus zero loss-named fields on the record-facing types.
   Records carry the additive `metric_result` / `metric_refusal`; the frozen
   `denoising_score` / `file_vector` / `score_table` names are unchanged (D1).
-- **RLIMIT_AS for inference subprocess = 60 GiB**
-  (`src/core/sandbox_executor.py:_ROLE_DEFAULT_RSS_GB["inference"] = 60`).
-  Training uses 40 GiB, scoring uses 24 GiB. The inference bump (commit
-  `4acb5b5`) is required for full-scope baseline inference on RTX 5090 — CUDA
-  static VA is ~18-20 GiB, plus ~7.4 GiB numpy peak per-file (four ~1.86 GiB
-  int8 arrays — the `np.zeros((dim1, input_size), dtype=_storage_dtype)`
-  `denoised`/`injected` pairs in `src/execute_tools/inference_single.py`), plus
-  the transient `.flatten().astype(int8)` copies `create_abra_file` emits,
-  plus caching-allocator
-  overhead. Do not lower this back to 40 without re-verifying full-scope
-  baseline inference passes.
+- **Subprocess address-space limits are caller-owned.** With no
+  `SIDERIUS_SUBPROCESS_RSS_GB` declaration, training, inference and scoring
+  inherit existing OS soft/hard limits; infra adds no guessed host cap.
+  The legacy variable name configures **RLIMIT_AS, not physical RAM/RSS**.
+  Explicit nonnegative global integers or complete per-role mappings retain
+  their existing behavior; `0` adds no cap and does not remove OS restrictions.
+  Historical conditions belong in exp with verified provenance. The former
+  inference 60-GiB configuration must not be replaced by a guessed lower value
+  when reproducing a recorded run; full-scope baseline inference historically
+  failed under 40 GiB. That history does not establish a universal infra default.
 - **Focal loss implementation** (`src/ml_models/loss_models_sandbox.py`, class
   `FocalLoss1D`)
   is line-for-line identical to TIDMAD's `network.py:FocalLoss1D`. If you
@@ -945,7 +944,8 @@ PR-12d zero-Health statement below records that earlier revision.
   naming is declared by the task, validated by `DeliverableNaming`, which
   stays the sole owner. Transport is emitted **only when bound**, so legacy
   argv is unchanged. Ceilings became declared calibration with provenance in
-  `core/execution_calibration.py` — two layers only, `0` still disables, a
+  `core/execution_calibration.py` — caller declaration or OS inheritance, `0`
+  still adds no extra cap, a
   malformed override REFUSES loudly, and the lock RECORDS them without ever
   comparing them (`RunInvariants._PROVENANCE` partitions with `_CANONICAL`).
   **Things future work must not re-break**: the `active_*` vs `resolve_*`
@@ -955,9 +955,10 @@ PR-12d zero-Health statement below records that earlier revision.
   Gate caught them disagreeing — see below); `DeliverableNaming` needs
   `extra="forbid"` because a misspelled declaration key otherwise yields the
   shipped TIDMAD template and a cleanup glob that deletes files the run never
-  wrote; and `_ROLE_DEFAULT_RSS_GB` resolves 40/60/24 with the inference value
-  marked `empirical_unverified` — **lowering it without re-verifying
-  full-scope baseline inference is a regression**. **Operator rulings**:
+  wrote. The later operator portability ruling supersedes the former local
+  40/60/24 defaults: omitted role caps now inherit the OS; historical settings
+  stay explicit in exp when their provenance is verified. Do not guess lower
+  historical inference limits without re-verifying full-scope behavior. **Operator rulings**:
   **R-11-13** (R-11-1's "argv byte-identical" was literally false after C7's
   frozen absolute script anchoring; wording corrected, code NOT reverted) and
   **R-11-14** (C8's additive `task_composition_fingerprint` stamp RATIFIED —

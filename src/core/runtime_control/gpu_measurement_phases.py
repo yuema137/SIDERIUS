@@ -54,9 +54,12 @@ from core.runtime_control.gpu_measurement_spec import (
     PhaseExecutionReport,
     PhaseStatus,
     RealismEvidence,
+    TrainingDataCoverage,
     WorkerStatus,
 )
 from core.runtime_control.gpu_requirement import MeasuredPhase
+from core.runtime_control.inference_checkpoint_reference import InferenceCheckpointReference
+from core.target_standardization import TargetStandardizationReceipt
 
 _MIB = 1024 * 1024
 
@@ -97,6 +100,9 @@ class CandidateComponents:
     ) = None
     inference_device: str = "cpu"
     inference_input_dtype: Any = None
+    verified_checkpoint: InferenceCheckpointReference | None = None
+    training_data: TrainingDataCoverage | None = None
+    training_standardization: TargetStandardizationReceipt | None = None
 
 
 @dataclass
@@ -115,6 +121,7 @@ class PhaseRunOutcome:
     #: request, even when a later phase failed.
     realized_identity: Any = None
     detail: str = ""
+    verified_checkpoint: InferenceCheckpointReference | None = None
 
 
 class PhaseJournal:
@@ -262,6 +269,7 @@ def run_measured_phases(
     await_setup_sampler_ready: Callable[[], bool] | None = None,
     setup_reservation_observer: Callable[[], ObservedReservation] | None = None,
     inference_reservation_observer: Callable[[], ObservedReservation] | None = None,
+    training_reservation_observer: Callable[[], ObservedReservation] | None = None,
     phase_observed_enough: Callable[[], bool] | None = None,
     trace: Any = None,
     wall_clock: Callable[[], float] = time.time,
@@ -295,6 +303,7 @@ def run_measured_phases(
     reports: list[PhaseExecutionReport] = []
     setup_reservations: list[ObservedReservation] = []
     inference_reservations: list[ObservedReservation] = []
+    training_reservations: list[ObservedReservation] = []
     counters: dict[str, Any] = {
         "forward_calls": 0,
         "backward_calls": 0,
@@ -312,7 +321,7 @@ def run_measured_phases(
         "outputs_released": 0,
     }
     #: Kept out of `counters` so it never reaches `RealismEvidence(**counters)`.
-    identity_slot: dict[str, Any] = {"realized_identity": None}
+    identity_slot: dict[str, Any] = {"realized_identity": None, "verified_checkpoint": None}
 
     def _evidence() -> RealismEvidence:
         return RealismEvidence(**counters)
@@ -349,6 +358,7 @@ def run_measured_phases(
             phases=tuple(reports),
             realism=_evidence(),
             realized_identity=identity_slot["realized_identity"],
+            verified_checkpoint=identity_slot["verified_checkpoint"],
             detail=detail[:400],
         )
 
@@ -364,6 +374,11 @@ def run_measured_phases(
     _reset_peaks(device)
     try:
         components = build_components()
+        identity_slot["verified_checkpoint"] = components.verified_checkpoint
+        if components.training_data is not None:
+            counters["training_data"] = components.training_data
+        if components.training_standardization is not None:
+            counters["training_standardization"] = components.training_standardization
         if setup_reservation_observer is not None:
             setup_reservations.append(setup_reservation_observer())
             if not setup_reservations[-1].acknowledged:
@@ -372,6 +387,9 @@ def run_measured_phases(
         raise_if_code_package_failure(exc)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
+        from core.runtime_control.gpu_training_components import TrainingPreparationDeadline
+
+        preparation_expired = isinstance(exc, TrainingPreparationDeadline)
         allocated, reserved = _read_peaks(device)
         setup_ended = wall_clock()
         kind = _classify_exception(exc)
@@ -390,7 +408,11 @@ def run_measured_phases(
         )
         journal.record("phase_end", "setup", status="failed")
         return _finish(
-            "CUDA_OOM" if kind == "cuda" else "WORKER_FAILURE",
+            "DEADLINE_EXCEEDED"
+            if preparation_expired
+            else "CUDA_OOM"
+            if kind == "cuda"
+            else "WORKER_FAILURE",
             f"setup failed: {type(exc).__name__}: {exc}",
             pending=(phase,),
         )
@@ -456,7 +478,10 @@ def run_measured_phases(
     runner = _run_training if is_training else _run_inference
     requested = training_steps if is_training else inference_batches
     extra: dict[str, Any] = (
-        {}
+        {
+            "reservation_observer": training_reservation_observer,
+            "observed_reservations": training_reservations,
+        }
         if is_training
         # Inference observes a held real state instead of repeating the
         # workload, so the parent's completion signal becomes the hold's
@@ -503,6 +528,7 @@ def run_measured_phases(
                 units=requested,
                 counters=counters,
                 out_of_time=_out_of_time,
+                **extra,
             )
             executed += more
             repetitions += 1
@@ -516,7 +542,9 @@ def run_measured_phases(
             completion = "sample_target_reached"
     allocated, reserved = _read_peaks(device)
     reserved_bytes = (
-        reservation_peak_bytes(device) if inference_reservation_observer is not None else None
+        reservation_peak_bytes(device)
+        if inference_reservation_observer is not None or training_reservation_observer is not None
+        else None
     )
     work_ended = wall_clock()
     reports.append(
@@ -529,7 +557,9 @@ def run_measured_phases(
             allocator_peak_mib=allocated,
             allocator_reserved_peak_mib=reserved,
             allocator_reserved_peak_bytes=reserved_bytes,
-            observed_reservations=tuple(inference_reservations),
+            observed_reservations=tuple(
+                training_reservations if is_training else inference_reservations
+            ),
             units_executed=executed,
             units_requested=requested,
             repetitions=repetitions,
@@ -565,14 +595,15 @@ def _run_training(
     units: int,
     counters: dict[str, Any],
     out_of_time: Callable[[], bool],
+    reservation_observer: Callable[[], ObservedReservation] | None = None,
+    observed_reservations: list[ObservedReservation] | None = None,
 ) -> tuple[int, PhaseStatus, str]:
     """Real steps: zero_grad -> forward -> loss -> backward -> step.
 
     The watched parameter is cloned before the first step and compared
-    after the last. A step that moves nothing means the loss was detached
-    from the model somewhere and the backward was decorative -- which is
-    the precise failure this whole worker exists because PR A's probe
-    could not rule out.
+    after the last as a diagnostic. Stationary or unused parameters may not
+    move. Bound measurements additionally observe optimizer ownership and fresh
+    gradient connectivity, without imposing a nonzero-gradient requirement.
     """
     watched = _watched_parameter(components.model)
     before = None
@@ -586,6 +617,11 @@ def _run_training(
     status: PhaseStatus = "COMPLETED"
     detail = ""
     try:
+        bound = components.training_data is not None
+        if bound:
+            from core.runtime_control.training_measurement_steps import verify_optimizer_ownership
+
+            verify_optimizer_ownership(components, counters)
         if hasattr(components.model, "train"):
             components.model.train()
         for _ in range(units):
@@ -594,14 +630,37 @@ def _run_training(
                 detail = f"deadline: the worker budget was spent after {executed} step(s)"
                 break
             components.optimizer.zero_grad(set_to_none=True)
+            if bound and any(p.grad is not None for p in components.model.parameters()):
+                raise ValueError("bound training optimizer did not clear model gradients")
             output = components.model(components.model_input)
             counters["forward_calls"] += 1
+            if bound:
+                counters["training_data"] = counters["training_data"].model_copy(
+                    update={"observed_output_shape": tuple(output.shape)}
+                )
             loss = components.loss_fn(output, components.loss_target)
             loss.backward()
             counters["backward_calls"] += 1
+            if bound:
+                if not any(
+                    p.requires_grad and p.grad is not None for p in components.model.parameters()
+                ):
+                    raise ValueError("bound training backward did not connect to model parameters")
+                evidence = counters["training_steps"]
+                counters["training_steps"] = evidence.model_copy(
+                    update={"connected_backward_calls": evidence.connected_backward_calls + 1}
+                )
             components.optimizer.step()
             counters["optimizer_steps"] += 1
             executed += 1
+            if reservation_observer is not None:
+                hold = reservation_observer()
+                assert observed_reservations is not None
+                observed_reservations.append(hold)
+                if not hold.acknowledged:
+                    raise RuntimeError(
+                        "driver sampling did not acknowledge the training reservation"
+                    )
     except BaseException as exc:  # classified below, never swallowed
         raise_if_code_package_failure(exc)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):

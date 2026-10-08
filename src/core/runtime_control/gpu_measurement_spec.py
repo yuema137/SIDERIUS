@@ -46,9 +46,12 @@ from core.runtime_control.gpu_requirement import (
     CandidateMeasurementRequest,
     MeasuredPhase,
 )
+from core.runtime_control.inference_checkpoint_reference import InferenceCheckpointReference
 from core.runtime_control.inference_measurement_binding import InferenceMeasurementBinding
+from core.runtime_control.training_measurement_binding import TrainingMeasurementBinding
+from core.target_standardization import TargetStandardizationReceipt
 from execute_tools.dataset_config import DatasetProfile
-from execute_tools.task_data_path import TaskProbeDataSpec
+from execute_tools.task_data_path import EpochSamplingParams, TaskProbeDataSpec
 
 #: How the worker as a whole ended. Distinct from a *phase* status: a
 #: worker can complete while the phase inside it OOMed, and the parent
@@ -93,7 +96,14 @@ class GpuMeasurementSpec(BaseModel):
 
     label: str = Field(min_length=1)
     request: CandidateMeasurementRequest
+    strict_lifecycle: bool = Field(default=False, exclude_if=lambda value: value is False)
     inference_binding: InferenceMeasurementBinding | None = None
+    training_binding: TrainingMeasurementBinding | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    inference_checkpoint: InferenceCheckpointReference | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     #: The candidate exactly as production would construct it. These are
     #: the same three payloads the trainer receives.
@@ -238,6 +248,14 @@ class GpuMeasurementSpec(BaseModel):
     #: `None` means the parent's hard deadline is the only bound.
     soft_deadline_seconds: float | None = Field(default=None, gt=0.0)
 
+    @model_validator(mode="after")
+    def _checkpoint_describes_native_inference(self) -> GpuMeasurementSpec:
+        if self.inference_checkpoint is not None:
+            if self.request.phase != "inference":
+                raise ValueError("a checkpoint reference is only valid for inference measurement")
+            self.inference_checkpoint.validate_native_path(self.request.model_type)
+        return self
+
     @property
     def phase(self) -> MeasuredPhase:
         return self.request.phase
@@ -320,6 +338,32 @@ class InferenceDataCoverage(BaseModel):
     batches: tuple[InferenceBatchObservation, ...]
 
 
+class TrainingDataCoverage(BaseModel):
+    """Actual selected rows and preprocessing, distinct from configured batch size."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    configured_batch_size: int = Field(gt=0, strict=True)
+    materialized_dataset_rows: int = Field(gt=0, strict=True)
+    observed_batch_rows: int = Field(gt=0, strict=True)
+    input_shape: tuple[int, ...]
+    target_shape: tuple[int, ...]
+    storage_input_dtype: str
+    model_input_dtype: str
+    target_dtype: str
+    observed_output_shape: tuple[int, ...] | None = None
+    sampling: EpochSamplingParams
+    fitting_sampling: EpochSamplingParams | None = None
+    standardization: TargetStandardizationReceipt | None = None
+
+
+class TrainingStepEvidence(BaseModel):
+    """Optimizer ownership and fresh model gradients; movement is not required."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    optimizer_matches_model_parameters: bool
+    connected_backward_calls: int = Field(ge=0, strict=True)
+
+
 class RealismEvidence(BaseModel):
     """Proof that the measurement ran the real thing.
 
@@ -331,8 +375,8 @@ class RealismEvidence(BaseModel):
 
     So the worker COUNTS what it did and reports it, and the parent can
     refuse a "measurement" that never trained. `parameter_update_verified`
-    is the strongest of these: an optimizer step that changes no parameter
-    means the graph was detached somewhere and the backward was decorative.
+    is a diagnostic for one watched parameter, not a universal connectivity
+    test: stationary gradients and unused parameters can legitimately stay still.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -342,6 +386,15 @@ class RealismEvidence(BaseModel):
     optimizer_steps: int = Field(default=0, ge=0)
     inference_batches: int = Field(default=0, ge=0)
     inference_data: InferenceDataCoverage | None = None
+    training_data: TrainingDataCoverage | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    training_steps: TrainingStepEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    training_standardization: TargetStandardizationReceipt | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     #: Largest absolute change in the watched trainable parameter across
     #: the training phase. `None` when training did not run.
@@ -444,6 +497,13 @@ class WorkerMeasurementReport(BaseModel):
     label: str = Field(min_length=1)
     request: CandidateMeasurementRequest
     inference_binding: InferenceMeasurementBinding | None = None
+    training_binding: TrainingMeasurementBinding | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    verified_checkpoint: InferenceCheckpointReference | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
     status: WorkerStatus
 
     device: str = Field(min_length=1)

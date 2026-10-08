@@ -46,8 +46,19 @@ you plan to run the contributor gate (`make check`, see
 
 Supported interpreter and accelerator, today: **Python 3.12** (the version CI
 installs) and **CUDA GPUs** for the supported real scientific training path.
-Synthetic examples and focused tests can run on CPU; broader real-training
-accelerator support is outside this guide.
+Synthetic examples and focused tests can run on CPU. GPU discovery does not
+restrict NVIDIA devices to a model-name list; the installed PyTorch build,
+driver and selected execution path must actually support the device.
+
+AMD/ROCm compatibility is experimental and has not been hardware-tested.
+Discovery distinguishes ROCm from CUDA, but ROCm driver/process memory
+accounting is not implemented, so paths requiring that resource protection
+cannot run. The current frozen installation selects CUDA packages; it does not
+install a ROCm environment. Do not disable required protection or replace
+packages inside the frozen environment to bypass these limits. Intel GPU
+execution is not currently supported. See the
+[accelerator facts contract](../../src/core/accelerator-runtime.md) for the
+difference between detected properties and a successful runtime check.
 
 ### Installed packages and checkout resources
 
@@ -115,6 +126,18 @@ the framework does not recover them from a task-specific machine config.
 Choose the task with `--task_composition`. See [Your first run](first-run.md)
 for a complete Quickstart command.
 
+Child training, inference and scoring processes inherit the operating system's
+existing address-space limits by default. Infra does not add a machine-specific
+memory cap. This does not mean unlimited memory or protection from physical-RAM
+exhaustion. Optional `SIDERIUS_SUBPROCESS_RSS_GB` retains its historical name but
+sets **virtual address space (`RLIMIT_AS`), not resident RAM (`RSS`)**. Choose a
+cap only when you know the execution environment's requirements; CUDA mappings
+alone can reserve substantial address space. Use one nonnegative integer for all
+roles or a complete `training=N,inference=N,scoring=N` mapping. Explicit `0` adds
+no cap and leaves inherited OS restrictions intact. Never infer a universal cap
+from another machine's RAM/GPU size. Configuration and provenance are described
+in the [execution contract](../../src/core/core-contract.md).
+
 The optional dashboard has its own gitignored path configuration:
 
 ```bash
@@ -173,7 +196,7 @@ PY
     --run_name reviewed_run \
     --task_composition /path/to/task/composition.yaml \
     --data_dir /path/to/task/data \
-    --llm_config configs/llm/openai_tiered_pro.json \
+    --llm_config configs/llm/openai_smoke_luna.json \
     --no-ml_lit_review_enabled \
     --healthgate_mode blocking \
     --result_authority diagnostic \

@@ -178,7 +178,9 @@ def resolve_device(spec: GpuMeasurementSpec) -> DeviceResolution:
 _MEASUREMENT_DTYPE_PREFERENCE = "int32"
 
 
-def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
+def build_production_components(
+    spec: GpuMeasurementSpec, trace: Any = None, *, deadline_at: float | None = None
+):
     """A builder that constructs exactly what the phase will really run.
 
     Returns a zero-argument callable so construction happens INSIDE the
@@ -212,11 +214,11 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
     if spec.phase == "inference":
         from core.runtime_control.gpu_inference_components import build_inference_components
 
-        return lambda: build_inference_components(spec, trace)
+        return lambda: build_inference_components(spec, trace, deadline_at=deadline_at)
 
     def _build() -> CandidateComponents:
         from core.runtime_control.gpu_measurement_data import load_bounded_probe_batch
-        from execute_tools.model_input_dtype import resolve_input_dtype
+        from execute_tools.model_input_dtype import apply_contract_cardinality, resolve_input_dtype
         from execute_tools.train_engine_sandbox import build_training_optimizer
         from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
         from ml_models.models_format_sandbox import (
@@ -236,7 +238,9 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
         if config_cls is None:
             raise RuntimeError(f"no config class registered for {model_type!r}")
 
-        model_cfg = config_cls(**spec.model_config_payload)
+        model_cfg = config_cls(
+            **apply_contract_cardinality(spec.model_config_payload, spec.model_io_contract)
+        )
         train_cfg = TrainConfig(**spec.train_config)
         loss_cfg = LossConfig(**spec.loss_config)
 
@@ -252,6 +256,12 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
         # branch this replaces was wrong for any generated plugin whose head
         # shape depends on the loss — it would silently build the wrong model
         # and measure it.
+        if spec.training_binding is not None or train_cfg.target_standardization != "none":
+            from core.runtime_control.gpu_training_components import (
+                check_training_preparation_deadline,
+            )
+
+            check_training_preparation_deadline(deadline_at)
         model = construct_registered_model(model_type, model_cfg, loss_type=loss_cfg.loss_type)
         if trace is not None:
             trace.record(
@@ -310,71 +320,103 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
         # training filename family -- come from the profile the PARENT
         # transported. This process is clean, so an ambient resolution here
         # would always answer TIDMAD regardless of the bound task.
-        task_target = None
-        if spec.task_probe_data is not None:
-            from execute_tools.task_probe_batch import load_task_probe_batch
-
-            task_input, task_target = load_task_probe_batch(spec.task_probe_data, input_batch)
-            batch = task_input.to(spec.device)
-            bounded_evidence: Any = {
-                "source": "task_data_path",
-                "semantic_fingerprint": spec.task_probe_data.semantic_fingerprint,
-            }
-        else:
-            if seg is None:  # narrowed from the explicit temporal branch above
-                raise RuntimeError(
-                    "a legacy temporal measurement reached bounded probe loading "
-                    "without a segmentation dimension"
-                )
-            bounded = load_bounded_probe_batch(
-                data_dir=spec.data_dir,
-                batch_size=input_batch,
-                segment_length=seg,
-                profile=spec.dataset_profile,
+        training_data = None
+        training_standardization = None
+        if spec.training_binding is not None or train_cfg.target_standardization != "none":
+            from core.runtime_control.gpu_training_components import (
+                prepare_task_training_components,
             )
-            batch = bounded.tensor.to(spec.device)
-            bounded_evidence = bounded.evidence
 
-        # Training measurement uses its existing dtype contract. Inference
-        # dispatches to its separate builder before reaching this path.
-        model_input = batch.to(
-            resolve_input_dtype(
-                model_type, spec.model_io_contract, site_preference=_MEASUREMENT_DTYPE_PREFERENCE
-            )
-        )
-        if trace is not None:
-            # The same point `inference_single.py` records: the input is on
-            # the device in the dtype the model will be handed. What the
-            # probe allocates AFTER this — `loss_target`, the optimizer —
-            # has no formal-inference counterpart, so it deliberately falls
-            # on the far side of this milestone where the comparison can
-            # see it rather than inside it.
-            trace.record(
-                "after_input_to_device",
-                batch_index=0,
-                synchronize=True,
+            prepared = prepare_task_training_components(
+                spec,
                 model=model,
-                model_input=model_input,
+                train_cfg=train_cfg,
+                loss_cfg=loss_cfg,
+                input_dtype=resolve_input_dtype(
+                    model_type,
+                    spec.model_io_contract,
+                    site_preference=_MEASUREMENT_DTYPE_PREFERENCE,
+                ),
+                deadline_at=deadline_at,
             )
-        # 01A3c: validate the task/loss contract before target casting,
-        # constructor execution, or any loss-driven effect.
-        loss_fn = get_criterion(
-            loss_cfg,
-            class_weights=None,
-            expected_contract_snapshot=spec.expected_custom_loss_snapshot,
-        )
-        target_dtype = get_target_torch_dtype(loss_cfg)
-        loss_target = (
-            task_target.to(device=spec.device, dtype=target_dtype)
-            if task_target is not None
-            else batch.to(dtype=target_dtype)
-        )
-        if task_target is None and loss_target is batch:
-            # `.to()` on a matching dtype returns the SAME object, which
-            # would leave one fewer tensor resident than the trainer holds.
-            loss_target = batch.clone()
+            model, model_input, loss_target = (
+                prepared.model,
+                prepared.model_input,
+                prepared.loss_target,
+            )
+            loss_fn, optimizer = prepared.criterion, prepared.optimizer
+            training_data, training_standardization = prepared.coverage, prepared.standardization
+            bounded_evidence = {"source": "task_data_path"}
+        else:
+            task_target = None
+            if spec.task_probe_data is not None:
+                from execute_tools.task_probe_batch import load_task_probe_batch
 
-        optimizer = build_training_optimizer(model, train_cfg)
+                task_input, task_target = load_task_probe_batch(
+                    spec.task_probe_data, input_batch, drop_last=train_cfg.drop_last
+                )
+                batch = task_input.to(spec.device)
+                bounded_evidence: Any = {
+                    "source": "task_data_path",
+                    "semantic_fingerprint": spec.task_probe_data.semantic_fingerprint,
+                }
+            else:
+                if seg is None:  # narrowed from the explicit temporal branch above
+                    raise RuntimeError(
+                        "a legacy temporal measurement reached bounded probe loading "
+                        "without a segmentation dimension"
+                    )
+                bounded = load_bounded_probe_batch(
+                    data_dir=spec.data_dir,
+                    batch_size=input_batch,
+                    segment_length=seg,
+                    profile=spec.dataset_profile,
+                )
+                batch = bounded.tensor.to(spec.device)
+                bounded_evidence = bounded.evidence
+
+            # Training measurement uses its existing dtype contract. Inference
+            # dispatches to its separate builder before reaching this path.
+            model_input = batch.to(
+                resolve_input_dtype(
+                    model_type,
+                    spec.model_io_contract,
+                    site_preference=_MEASUREMENT_DTYPE_PREFERENCE,
+                )
+            )
+            if trace is not None:
+                # The same point `inference_single.py` records: the input is on
+                # the device in the dtype the model will be handed. What the
+                # probe allocates AFTER this — `loss_target`, the optimizer —
+                # has no formal-inference counterpart, so it deliberately falls
+                # on the far side of this milestone where the comparison can
+                # see it rather than inside it.
+                trace.record(
+                    "after_input_to_device",
+                    batch_index=0,
+                    synchronize=True,
+                    model=model,
+                    model_input=model_input,
+                )
+            # 01A3c: validate the task/loss contract before target casting,
+            # constructor execution, or any loss-driven effect.
+            loss_fn = get_criterion(
+                loss_cfg,
+                class_weights=None,
+                expected_contract_snapshot=spec.expected_custom_loss_snapshot,
+            )
+            target_dtype = get_target_torch_dtype(loss_cfg)
+            loss_target = (
+                task_target.to(device=spec.device, dtype=target_dtype)
+                if task_target is not None
+                else batch.to(dtype=target_dtype)
+            )
+            if task_target is None and loss_target is batch:
+                # `.to()` on a matching dtype returns the SAME object, which
+                # would leave one fewer tensor resident than the trainer holds.
+                loss_target = batch.clone()
+
+            optimizer = build_training_optimizer(model, train_cfg)
         total = int(sum(p.numel() for p in model.parameters()))
         trainable = int(sum(p.numel() for p in model.parameters() if p.requires_grad))
         # D-C2-7. THE authoritative measurement identity, and the only
@@ -385,7 +427,7 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
             model_type=model_type,
             optimizer_type=str(getattr(train_cfg, "optimizer_type", "adamw")),
             seg_size=seg,
-            # The batch actually used, whichever phase this is.
+            # Configured batch identity; actual tail rows have separate evidence.
             batch_size=batch_size,
             precision=str(next(model.parameters()).dtype).replace("torch.", ""),
             parameter_count=total,
@@ -403,6 +445,8 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
             trainable_parameter_count=trainable,
             realized_identity=realized,
             bounded_read=bounded_evidence,
+            training_data=training_data,
+            training_standardization=training_standardization,
         )
 
     return _build
@@ -421,6 +465,7 @@ def validate_candidate_configs(spec: GpuMeasurementSpec) -> str | None:
     usable.
     """
     try:
+        from execute_tools.model_input_dtype import apply_contract_cardinality
         from ml_models.models_format_sandbox import (
             LossConfig,
             TrainConfig,
@@ -445,7 +490,7 @@ def validate_candidate_configs(spec: GpuMeasurementSpec) -> str | None:
                 f"no config class registered for {spec.request.model_type!r} "
                 f"({len(MODEL_REGISTRY)} model(s) in the live registry)"
             )
-        config_cls(**spec.model_config_payload)
+        config_cls(**apply_contract_cardinality(spec.model_config_payload, spec.model_io_contract))
         TrainConfig(**spec.train_config)
         LossConfig(**spec.loss_config)
     except Exception as exc:
@@ -515,7 +560,10 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
     `trace` is an optional `MilestoneTracer` (V20 PR C2, validation only).
     `None` in production; nothing here calls it when absent.
     """
-    worker_deadline = time.monotonic() + spec.request.deadline_seconds
+    worker_started = time.monotonic()
+    worker_deadline = worker_started + spec.request.deadline_seconds
+    if spec.phase == "training" and spec.soft_deadline_seconds is not None:
+        worker_deadline = min(worker_deadline, worker_started + spec.soft_deadline_seconds)
     base: dict[str, Any] = {
         "label": spec.label,
         "request": spec.request,
@@ -523,6 +571,8 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
         "worker_pid": os.getpid(),
         "request_id": spec.request.request_id,
     }
+    if spec.inference_checkpoint is not None and spec.inference_binding is None:
+        raise ValueError("checkpoint measurement requires a full inference source binding")
     if spec.inference_binding is not None:
         from core.runtime_control.inference_measurement_binding import inference_measurement_binding
 
@@ -532,6 +582,16 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
                 "inference measurement request/source binding mismatch before execution"
             )
         base["inference_binding"] = actual_binding
+
+    if spec.training_binding is not None:
+        from core.runtime_control.training_measurement_binding import training_measurement_binding
+
+        actual_training_binding = training_measurement_binding(spec)
+        if actual_training_binding != spec.training_binding:
+            raise ValueError(
+                "training measurement request/source binding mismatch before execution"
+            )
+        base["training_binding"] = actual_training_binding
 
     resolution = resolve_device(spec)
     if resolution.status is not None:
@@ -564,8 +624,8 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
         )
 
     journal = PhaseJournal(spec.journal_path)
-    setup_reservation = inference_reservation = None
-    if spec.inference_binding is not None:
+    setup_reservation = inference_reservation = training_reservation = None
+    if spec.inference_binding is not None or spec.training_binding is not None:
         from core.runtime_control.gpu_measurement_hold import reservation_observer
 
         if spec.reservation_ack_path is None:
@@ -581,18 +641,26 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
             timeout_seconds=spec.max_phase_seconds,
             deadline_at=worker_deadline,
         )
-        inference_reservation = reservation_observer(
+        work_reservation = reservation_observer(
             device=spec.device,
             journal=journal,
-            phase="inference",
+            phase=spec.phase,
             request_id=spec.request.request_id,
             ack_path=spec.reservation_ack_path,
             timeout_seconds=spec.max_phase_seconds,
             deadline_at=worker_deadline,
         )
 
+        if spec.phase == "training":
+            training_reservation = work_reservation
+        else:
+            inference_reservation = work_reservation
+
+    training_options: dict[str, Any] = {}
+    if training_reservation is not None:
+        training_options["training_reservation_observer"] = training_reservation
     outcome = run_measured_phases(
-        build_components=build_production_components(spec, trace),
+        build_components=build_production_components(spec, trace, deadline_at=worker_deadline),
         phase=spec.phase,
         device=spec.device,
         training_steps=spec.training_steps,
@@ -606,11 +674,12 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
         ),
         await_setup_sampler_ready=(
             _marker_waiter(spec.sampler_ready_path, spec.sampler_ready_timeout_seconds)
-            if spec.inference_binding is not None
+            if spec.inference_binding is not None or spec.training_binding is not None
             else None
         ),
         setup_reservation_observer=setup_reservation,
         inference_reservation_observer=inference_reservation,
+        **training_options,
         # Training polls (repeat until enough); inference BLOCKS (hold the
         # real state open until enough). A non-blocking probe here released
         # the hold instantly and only one sample landed.
@@ -628,9 +697,15 @@ def measure(spec: GpuMeasurementSpec, trace: Any = None) -> WorkerMeasurementRep
         and inference_measurement_binding(spec) != spec.inference_binding
     ):
         raise ValueError("inference measurement request/source binding changed during execution")
+    if (
+        spec.training_binding is not None
+        and training_measurement_binding(spec) != spec.training_binding
+    ):
+        raise ValueError("training measurement request/source binding changed during execution")
     return WorkerMeasurementReport(
         **base,
         status=outcome.status,
+        verified_checkpoint=outcome.verified_checkpoint,
         observed_device_uuid=resolution.observed_uuid,
         device_name=resolution.device_name,
         phases=outcome.phases,

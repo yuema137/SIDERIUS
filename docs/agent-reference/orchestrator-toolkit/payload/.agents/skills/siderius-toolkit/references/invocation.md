@@ -106,6 +106,55 @@ def in_task_context(manifest_path, authorized_data_root, invoke):
         return invoke(composition, build_task_composition_ref(composition))
 ```
 
+### Complete bootstrap for a fresh root caller
+
+The short helper above assumes an executor already initialized the process.
+For a **fresh root caller**, use the following complete ordering. Save your
+caller in the external project; do not import nodes, plugin registries or task
+composition helpers above the generated-library binding. Run descendants through
+their existing transport; do not use `root_code_scope` to erase an inherited pin
+inside a worker.
+
+```python
+def run_native_call(manifest_path, data_root, output_directory, invoke):
+    from pathlib import Path
+    from core.generated_library import bind_generated_library_to_workspace
+
+    output = Path(output_directory).resolve()
+    output.mkdir(parents=True, exist_ok=False)
+    bind_generated_library_to_workspace(str(output))
+
+    from core.durable_io import publish_bytes_write_once
+    from core.local_code import root_code_scope
+
+    with root_code_scope():
+        from workflows.task_composition import (
+            bind_run_task_composition,
+            build_task_composition_ref,
+            compose_run_task_bindings,
+        )
+
+        composition = compose_run_task_bindings(str(Path(manifest_path).resolve()))
+        with bind_run_task_composition(composition, physical_data_root=str(Path(data_root).resolve())):
+            reference = build_task_composition_ref(composition)
+            # The callback imports the chosen node, constructs its native input,
+            # configures its workspace/storage and returns its typed output.
+            result = invoke(composition, reference, output)
+            publish_bytes_write_once(
+                str(output / "capability-output.json"),
+                result.model_dump_json(indent=2).encode("utf-8"),
+            )
+            return result
+```
+
+Pass your own callback and explicit manifest/data/output paths. The callback
+still owns node-specific typed inputs, measurement capability where required,
+model routing and native storage; the output directory alone does not configure
+every node's storage. The helper refuses to reuse a result directory. A failure
+may leave that directory without `capability-output.json`; preserve the error
+and partial artifacts instead of treating directory existence as success.
+This helper is an example, not an installed scheduler or provider wrapper.
+
 The callback still has to populate the specific node's typed input. Composition
 does not automatically inject all task prose, I/O contracts, advice, hardware,
 Health or protocol fields. The per-agent guide identifies those inputs.

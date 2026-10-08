@@ -129,16 +129,23 @@ class TestTheProbeSitesAreUnreachableForAnUndeclaredModel:
         src = (REPO_ROOT / "src/core" / "runtime_control" / "probe_production.py").read_text(
             encoding="utf-8"
         )
-        guard = src.index("if config_cls is None:")
-        construct = src.index("cfg = config_cls(**model_config)")
-        assert guard < construct, (
-            "the no-config-class refusal must precede the model construction "
-            "it protects; otherwise a model declaring nothing reaches "
-            "observation-building and a 0 workload can be recorded."
-        )
-        assert "raise RuntimeError" in src[guard : guard + 200], (
-            "the no-config-class branch no longer raises. Two safety_margin=0 "
-            "sites depend on this refusal for their unreachability claim."
+        tree = ast.parse(src)
+        guards = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.If) and ast.unparse(n.test) == "config_cls is None"
+        ]
+        constructors = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "config_cls"
+        ]
+        assert len(guards) == len(constructors) == 1
+        assert guards[0].lineno < constructors[0].lineno
+        assert any(isinstance(n, ast.Raise) for n in ast.walk(guards[0])), (
+            "the no-config-class guard must refuse before constructing or recording a probe"
         )
 
 

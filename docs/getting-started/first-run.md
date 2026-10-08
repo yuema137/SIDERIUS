@@ -87,7 +87,11 @@ Real scientific task packages and campaign workflows live in the separate
 `siderius-exp` repository. Point the same generic launcher at that repository's
 manifest and workspace; no framework checkout file needs to be edited.
 
-Start small — one iteration, one round, trial budget, a bounded scope:
+For a first flow check, copy the [Luna smoke profile](../../configs/llm/README.md)
+to your workspace as `llm/agents.json`. Keep paper-history configurations for
+historical reproduction. Start small: one iteration, one round, a bounded
+data selection and a suitable trial budget. The task/data paths below are
+placeholders for the task you prepared; `tasks/example` is not a shipped task:
 
 ```bash
 bash scripts/launch/run_chain.sh \
@@ -95,12 +99,13 @@ bash scripts/launch/run_chain.sh \
     --workspace /path/to/your/workspace \
     --run_name first_run_v1 \
     --task_composition /path/to/siderius-exp/tasks/example/compositions/workflow.yaml \
-    --llm_config /path/to/siderius-exp/configs/llm/example.json \
+    --llm_config /path/to/your/workspace/llm/agents.json \
     --data_dir /path/to/task/data \
     --healthgate_mode blocking \
     --result_authority scientific \
     --num_iterations 1 \
     --max_rounds 1 \
+    --max_fail_rounds 1 \
     --trial_time_budget_minutes 20
 ```
 

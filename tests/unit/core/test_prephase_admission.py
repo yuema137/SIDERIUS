@@ -49,6 +49,7 @@ from core.runtime_control.prephase_admission import (
     attach_measured_requirements,
     decide_prephase_admission,
 )
+from tests.helpers.gpu_requirement import ended_worker_ownership
 
 UUID = "GPU-c30b6678"
 DEVICE = DeviceIdentity(uuid=UUID, physical_index=0)
@@ -158,6 +159,7 @@ def _authoritative(**over) -> MeasuredGpuRequirement:
     payload = dict(
         request=REQUEST,
         outcome="COMPLETED_MEASUREMENT",
+        ownership=ended_worker_ownership(UUID),
         driver_tree_peak_mib=4_096,
         allocator_peak_mib=3_000,
         observed_device_uuid=UUID,
@@ -580,3 +582,22 @@ class TestInferenceAuthorityIsBoundToItsBatch:
         a, _ = self._identities(None, None)
         b, _ = self._identities(25, 25)
         assert a.planned_config_hash == b.planned_config_hash
+
+
+def test_namespace_bound_refusal_is_unavailable_not_candidate_over_cap():
+    """#633: bounded measurement stays authoritative; outside uncertainty stops launch."""
+    snapshot = _snapshot(other_mib=0).model_copy(
+        update={
+            "process_visibility": "namespace_limited",
+            "device_used_mib": 500,
+            "unattributed_mib": 500,
+            "accounting_skew_mib": 500,
+        }
+    )
+    outcome = _decide(snapshot=snapshot, ceiling_gib=4.25)
+    assert outcome.requirement.authoritative
+    assert outcome.disposition == "STOP_MEASUREMENT_UNAVAILABLE"
+    assert outcome.admission.reason_code == "environment_headroom_unproven"
+    assert not outcome.may_launch_formal_phase
+    assert not outcome.carries_candidate_blame
+    assert not outcome.permits_shrink_advice

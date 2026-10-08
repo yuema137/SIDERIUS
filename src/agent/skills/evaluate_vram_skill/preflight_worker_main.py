@@ -130,11 +130,11 @@ def _write(result_path: str, payload: dict) -> None:
     tmp.replace(target)
 
 
-def _task_probe_batch(raw: dict[str, Any], batch_size: int) -> tuple[Any, Any]:
-    """Materialize one full batch through the run's existing task contract."""
+def _task_probe_batch(raw: dict[str, Any], batch_size: int, *, drop_last: bool) -> tuple[Any, Any]:
+    """Materialize a real batch through the run's task and tail policy."""
     from execute_tools.task_probe_batch import load_task_probe_batch
 
-    return load_task_probe_batch(raw, batch_size)
+    return load_task_probe_batch(raw, batch_size, drop_last=drop_last)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -273,9 +273,12 @@ def main(argv: list[str] | None = None) -> int:
             if spec.get("task_probe_data") is not None and (
                 hardware is None or hardware.device_available
             ):
+                from ml_models.models_format_sandbox import resolve_training_drop_last
+
                 probe_input_sample, probe_target_sample = _task_probe_batch(
                     spec["task_probe_data"],
                     int((spec.get("train_config") or {}).get("batch_size", 1)),
+                    drop_last=resolve_training_drop_last(spec.get("train_config") or {}),
                 )
             if (spec.get("task_probe_data") or {}).get("evaluation_scope_payload") is not None:
                 from execute_tools.task_probe_batch import load_task_inference_probe_input

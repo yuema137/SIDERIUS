@@ -298,6 +298,9 @@ expression — and failing before any GPU work is the fail-closed direction.
 | `formal_time_budget_minutes` | `float \| None` | No | `None` | Formal wall-time ceiling. `None` disables Formal time admission regardless of source. |
 | `trial_time_admission_source` | `forecast \| measured` | No | `measured` | Trial's sole time-admission authority. `measured` enforces executing-device evidence and skips advance forecast admission; `forecast` does the reverse. |
 | `formal_time_admission_source` | `forecast \| measured` | No | `measured` | Formal's independent sole time-admission authority, with the same mutually exclusive semantics. |
+| `runtime_completion_policy` | `completed-workload-v1 \| verified-prediction-v1` | No | `completed-workload-v1` | Completed phase actual costs govern the current attempt; incomplete phases still require conservative verification. Explicit strict mode retains the pre-completion admission rule. Compared in run identity and forwarded unchanged to training and inference. Historical experiment selection belongs to the consumer repository. |
+| `runtime_verifier` | `str \| None` | No | `None` | Optional installed runtime-verifier provider. Omitted constructs the native verifier. Selection resolves before work and never silently falls back. |
+| `runtime_verifier_identity` | `RuntimeVerifierIdentity \| None` | No | `None` | Resolved source and qualified-assembly identity, compared in workspace locks and verified in the executor environment. Ordinarily resolved from `runtime_verifier`; an explicit expected identity must match. |
 | `trial_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates trial rounds. `None` = trial VRAM-gate disabled. |
 | `formal_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates formal rounds. `None` = formal VRAM-gate disabled. |
 | `vram_probe_step_timeout_seconds` | `float` | No | `180.0` | Watchdog for one training-mode or inference footprint forward during VRAM preflight. It runs no optimizer update and does not bound an epoch or candidate run. |
@@ -876,9 +879,11 @@ no authoritative measurement for any candidate. Consequences:
   exists. **This is the guard working, not a failure**, and it is not a
   statement about any candidate.
 - Getting to a working `formal` run means: resolve the new UUID,
-  configure the host's ceilings (the `28.0` GiB default suits a ~32 GiB
-  card and would badly under-serve a larger one), collect a bounded
-  driver-visible measurement, and have PR C validate and promote it.
+  obtain applicable phase-specific measurement evidence, and resolve the
+  aggregate ceiling against actual device capacity. An omitted operator ceiling
+  uses measured capacity; an explicit/environment ceiling and declared host
+  quota can tighten it. No local-machine numeric default is assumed. See
+  [the aggregate ceiling contract](../../core/runtime_control/gpu-ceilings.md).
   The operator sequence is [`docs/getting-started/installation.md`](../../../docs/getting-started/installation.md)
   → "Moving to a different machine or GPU".
 
@@ -2019,3 +2024,11 @@ readable but cannot certify continuation under the new builder. Retain the old
 workspace/revision or start a new workspace using verified experiment settings.
 Copying or editing the old lock does not constitute verification. No training,
 scoring, Health, scheduling or scientific defaults are changed by locking them.
+
+## Independent reflector retry selection
+
+`reflect_retry_policy` is an optional typed transport override. Its absence retains
+planner retry inheritance; its explicit `max_retries` value, including None,
+governs reflector requests independently. Workflow JSON uses the existing
+`tune.reflector.max_retries` leaf. This does not change tuning attempt/round counts.
+See the [shared retry contract](../../agent/retry-policy.md).

@@ -123,16 +123,27 @@ class TestRunShard:
 
 
 class TestFrozenSensitiveManifest:
-    def test_the_manifest_is_exactly_the_five_frozen_files(self):
+    def test_the_manifest_is_exactly_the_six_reviewed_files(self):
         """Freezing means the set does not drift silently.
 
         Fails as: a file is added or removed without the reasoning that CP-6
         requires, re-opening the keyword-classification trap.
         """
-        assert len(SENSITIVE_FILES) == 5
+        assert len(SENSITIVE_FILES) == 6
         assert TIMING_FILES | GIT_STATE_FILES == set(SENSITIVE_FILES)
         assert len(GIT_STATE_FILES) == 0
-        assert len(TIMING_FILES) == 5
+        assert len(TIMING_FILES) == 6
+
+    def test_checkpoint_worker_deadline_witness_is_excluded_from_bulk(self):
+        """52373be9 timed out before the blocking-read marker under bulk load.
+
+        Fails if the real manifest lets this startup witness compete with bulk
+        shards, even though the worker deadline and cleanup checks still run.
+        """
+        path = "tests/unit/core/test_checkpoint_identity_preparation.py"
+        plan = plan_shards([path], count=1, sensitive=SENSITIVE_FILES)
+        assert path in plan.sensitive
+        assert plan.bulk_files == []
 
     def test_every_sensitive_file_states_why_it_is_sensitive(self):
         """A quarantine without a reason becomes permanent and unexamined.

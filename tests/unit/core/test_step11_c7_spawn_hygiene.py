@@ -158,17 +158,25 @@ class TestScriptPathsAreAnchored:
         The children still run with the caller's working directory, because
         relative paths in their own arguments resolve against it.
         """
-        tree = ast.parse(SANDBOX.read_text(encoding="utf-8"))
-        cwd_launches = [
+        # The owned subprocess owner moved; scoring remains in the executor.
+        from core.runtime_control import observed_subprocess
+
+        trees = [
+            ast.parse(path.read_text(encoding="utf-8"))
+            for path in (SANDBOX, pathlib.Path(observed_subprocess.__file__))
+        ]
+        launches = [
             node
+            for tree in trees
             for node in ast.walk(tree)
             if isinstance(node, ast.Call)
-            for kw in node.keywords
-            if kw.arg == "cwd"
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"Popen", "run"}
         ]
-        assert len(cwd_launches) == 3, (
-            f"the three child launches must still pass the caller's cwd; found {len(cwd_launches)}"
-        )
+        assert len(launches) == 2  # observed child owner plus scoring
+        for launch in launches:
+            cwd = next(kw.value for kw in launch.keywords if kw.arg == "cwd")
+            assert ast.unparse(cwd) == "os.getcwd()"
 
 
 # ----------------------------------------------------------------------
@@ -181,35 +189,35 @@ class TestTheLaunchSplitIsUnchangedAndCorrectlyJustified:
         """The operator-stop-critical invariant: deadline mode takes its own
         session, plain mode does not.
         """
-        src = SANDBOX.read_text(encoding="utf-8")
-        tree = ast.parse(src)
-        wrapper = next(
-            n
-            for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "_run_observed_subprocess"
-        )
-        assert any(
-            isinstance(n, ast.Call)
-            and isinstance(n.func, ast.Name)
-            and n.func.id == "_run_observed_process"
-            for n in ast.walk(wrapper)
-        ), "the package wrapper must still call the process-supervision owner"
-        fn = next(
-            n
-            for n in tree.body
-            if isinstance(n, ast.FunctionDef) and n.name == "_run_observed_process"
-        )
-        sessions = [
-            kw.value.value
-            for node in ast.walk(fn)
-            if isinstance(node, ast.Call)
-            for kw in node.keywords
-            if kw.arg == "start_new_session" and isinstance(kw.value, ast.Constant)
-        ]
-        assert sessions == [True], (
-            "exactly ONE launch in this seam takes its own session (the "
-            f"deadline path); got {sessions}"
-        )
+        import subprocess
+        import sys
+        from unittest.mock import patch
+
+        from core.runtime_control import observed_subprocess
+        from core.sandbox_executor import _run_observed_subprocess
+
+        # Keep the production facade linked to the owner, then witness the real
+        # Popen arguments instead of requiring a function to stay in one file.
+        assert _run_observed_subprocess is observed_subprocess.run_observed_subprocess
+        original = subprocess.Popen
+        seen = []
+
+        def spawn(*args, **kwargs):
+            seen.append(kwargs)
+            return original(*args, **kwargs)
+
+        with patch.object(subprocess, "Popen", spawn):
+            for provider in (None, lambda: (10, "test")):
+                _run_observed_subprocess(
+                    [sys.executable, "-c", "pass"],
+                    env=dict(os.environ),
+                    preexec_fn=None,
+                    capture_stdout=True,
+                    deadline_provider=provider,
+                    poll_seconds=0.01,
+                )
+        assert "start_new_session" not in seen[0]
+        assert seen[1]["start_new_session"] is True
 
     def test_the_stale_mechanism_is_no_longer_cited_as_fact(self):
         """`timeout --signal=INT` may appear ONLY inside the correction that

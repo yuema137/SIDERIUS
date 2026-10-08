@@ -49,6 +49,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 from core.execution_calibration import calibration_provenance
 from core.generated_library import generated_library_provenance
 from core.planner_strategy_identity import PlannerStrategyIdentity
+from core.runtime_control.completion import RuntimeCompletionPolicy
+from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
+from core.runtime_control.verifier_provider import RuntimeVerifierIdentity
 
 RUN_INVARIANTS_BASENAME = "run_invariants_lock.json"
 
@@ -319,6 +322,15 @@ class RunInvariants(BaseModel):
     # cannot silently resume under the new measured-by-default behavior.
     trial_time_admission_source: Literal["forecast", "measured"] | None = None
     formal_time_admission_source: Literal["forecast", "measured"] | None = None
+    runtime_verifier_identity: RuntimeVerifierIdentity | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    runtime_completion_policy: RuntimeCompletionPolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    gpu_execution_policy: GpuExecutionPolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     planner_strategy_identity: PlannerStrategyIdentity | None = None
     created_at: str | None = None
     # Step 11 C3 (R-11-6) — the per-role subprocess memory ceilings this
@@ -421,6 +433,9 @@ class RunInvariants(BaseModel):
         "workflow_parameter_rules",
         "trial_time_admission_source",
         "formal_time_admission_source",
+        "runtime_completion_policy",
+        "runtime_verifier_identity",
+        "gpu_execution_policy",
         "planner_strategy_identity",
     )
 
@@ -904,6 +919,15 @@ class LockLaunchIdentity(BaseModel):
     workflow_parameter_rules: dict[str, Any] | None = None
     trial_time_admission_source: Literal["forecast", "measured"] | None = None
     formal_time_admission_source: Literal["forecast", "measured"] | None = None
+    runtime_verifier_identity: RuntimeVerifierIdentity | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    runtime_completion_policy: RuntimeCompletionPolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    gpu_execution_policy: GpuExecutionPolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     planner_strategy_identity: PlannerStrategyIdentity | None = None
 
 
@@ -1097,6 +1121,9 @@ def build_run_invariants(
             workflow_parameter_rules=_launch_identity.workflow_parameter_rules,
             trial_time_admission_source=_launch_identity.trial_time_admission_source,
             formal_time_admission_source=_launch_identity.formal_time_admission_source,
+            runtime_completion_policy=_launch_identity.runtime_completion_policy,
+            runtime_verifier_identity=_launch_identity.runtime_verifier_identity,
+            gpu_execution_policy=_launch_identity.gpu_execution_policy,
             planner_strategy_identity=_launch_identity.planner_strategy_identity,
             # Step 11 C3 (R-11-6) — stamped at the SAME shared builder, for
             # the same reason C9d is: every entry point then records the

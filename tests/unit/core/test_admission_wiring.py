@@ -227,11 +227,11 @@ class TestGatePlacement:
             for n in ast.walk(fn)
             if isinstance(n, ast.Call)
             and isinstance(n.func, ast.Name)
-            and n.func.id == "_run_observed_subprocess"
+            and n.func.id == "run_phase_subprocess"
         ]
         assert len(gate_lines) == 1, f"{method}: expected one gate, found {gate_lines}"
-        assert len(launch_lines) == 2, (
-            f"{method}: expected the watchdog and plain branches, found {launch_lines}"
+        assert len(launch_lines) == 1, (
+            f"{method}: expected one shared watchdog/plain launch boundary, found {launch_lines}"
         )
         assert all(gate_lines[0] < line for line in launch_lines), (
             f"{method}: a launch at {launch_lines} precedes the gate at {gate_lines[0]}"

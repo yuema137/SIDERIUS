@@ -1293,7 +1293,7 @@ def _build_admission_policy(agent_input, *, is_trial: bool, device_identity: Any
             "ceiling_source": (
                 "launcher"
                 if getattr(agent_input, "gpu_pair_ceiling_gib", None) is not None
-                else "environment_or_default"
+                else "environment_or_measured_capacity"
             ),
             "device_uuid_source": "hardware_discovery",
             "enforcement_source": (
@@ -1370,6 +1370,9 @@ def _build_runtime_policy(
             else None
         ),
         "time_admission_source": admission_source,
+        "runtime_completion_policy": getattr(
+            agent_input, "runtime_completion_policy", "completed-workload-v1"
+        ),
         # VALIDATION POSTURE, None in every campaign. The Gate workload
         # envelope: the trainer builds a smaller epoch, so the bound is
         # spent before execution rather than enforced by killing a run.
@@ -1400,6 +1403,16 @@ def _build_runtime_policy(
             "max_phase_seconds": agent_input.validation_max_phase_seconds,
         },
     }
+    selection = getattr(agent_input, "runtime_verifier", None)
+    if selection is not None:
+        from core.runtime_control.verifier_provider import resolve_runtime_verifier_identity
+
+        identity = resolve_runtime_verifier_identity(
+            selection, agent_input.runtime_verifier_identity
+        )
+        assert identity is not None
+        policy["runtime_verifier"] = selection
+        policy["runtime_verifier_identity"] = identity.model_dump(mode="json")
     if allocation is not None:
         policy["training_budget"] = allocation.model_dump()
     verification_window_seconds = getattr(

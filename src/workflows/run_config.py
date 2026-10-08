@@ -43,7 +43,7 @@ ownership.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Literal
 
@@ -56,6 +56,13 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import OutputTypeName
 from core.runtime_control.admission import AdmissionEnforcement
+from core.runtime_control.completion import RuntimeCompletionPolicy
+from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
+from core.runtime_control.pair_admission import PositiveGpuGiB
+from core.runtime_control.verifier_provider import (
+    RuntimeVerifierIdentity,
+    resolve_runtime_verifier_identity,
+)
 from workflows.scientific_evidence_stage import EvidenceStageOrder
 from workflows.strategy_modes import ExplorationMode, FormalRoundStrategy, StrategyMode
 
@@ -135,9 +142,17 @@ class WorkflowLaunchConfig:
     formal_time_budget_minutes: float | None = None
     trial_time_admission_source: TimeAdmissionSource = "measured"
     formal_time_admission_source: TimeAdmissionSource = "measured"
+    runtime_completion_policy: RuntimeCompletionPolicy = "completed-workload-v1"
+    runtime_verifier: str | None = field(default=None, metadata={"omit_if_none": True})
+    runtime_verifier_identity: RuntimeVerifierIdentity | None = field(
+        default=None, metadata={"omit_if_none": True}
+    )
+    gpu_execution_policy: GpuExecutionPolicy | None = field(
+        default=None, metadata={"omit_if_none": True}
+    )
     gpu_admission_measurement_source: str | None = None
     gpu_admission_enforcement: AdmissionEnforcement = "observe_only"
-    gpu_pair_ceiling_gib: float | None = None
+    gpu_pair_ceiling_gib: PositiveGpuGiB | None = None
     trial_vram_budget_gb: float | None = None
     formal_vram_budget_gb: float | None = None
     vram_probe_step_timeout_seconds: float = 180.0
@@ -310,3 +325,15 @@ def validate_launch_trial_overrides(launch: WorkflowLaunchConfig) -> None:
         force_formal_round=launch.force_formal_round,
         formal_training_scope_source=launch.formal_training_scope_source,
     )
+
+
+def bind_runtime_verifier_launch(launch: WorkflowLaunchConfig) -> WorkflowLaunchConfig:
+    """Resolve optional provider identity before any workflow work or lock."""
+    from dataclasses import replace
+
+    identity = resolve_runtime_verifier_identity(
+        launch.runtime_verifier, launch.runtime_verifier_identity
+    )
+    if identity == launch.runtime_verifier_identity:
+        return launch
+    return replace(launch, runtime_verifier_identity=identity)

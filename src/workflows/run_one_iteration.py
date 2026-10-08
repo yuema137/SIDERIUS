@@ -53,13 +53,16 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 # A direct one-iteration launch does not pass through run_chain.sh.  Establish
 # the same read-only-checkout policy before importing any SIDERIUS module, and
 # transport it to every training, inference, scoring, and probe subprocess.
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 sys.dont_write_bytecode = True
+
+if TYPE_CHECKING:
+    from workflows.reviewed_launch import ReviewedLaunchContext
 
 from dotenv import load_dotenv
 
@@ -1046,6 +1049,7 @@ def compute_expected_invariants(
         ),
         # arXiv U1 — the identity the workflow's pre-flight will lock too.
         launch_identity=LockLaunchIdentity(
+            gpu_execution_policy=identity.gpu_execution_policy,
             planner_strategy_identity=planner_identity,
             lit_review_enabled=identity.lit_review_enabled,
             data_analysis_enabled=identity.data_analysis_enabled,
@@ -1078,6 +1082,8 @@ def compute_expected_invariants(
             ),
             trial_time_admission_source=args.trial_time_admission_source,
             formal_time_admission_source=args.formal_time_admission_source,
+            runtime_completion_policy=args.runtime_completion_policy,
+            runtime_verifier_identity=identity.runtime_verifier_identity,
         ),
     )
     return invariants
@@ -1156,8 +1162,10 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
     return 0
 
 
-def main():
-    args = normalize_args(build_parser().parse_args())
+def main(argv: list[str] | None = None, *, reviewed_setup: "ReviewedLaunchContext | None" = None):
+    args = normalize_args(build_parser().parse_args(argv))
+    if reviewed_setup is not None:
+        reviewed_setup.check_entry(args)
     # Validate the resolved schedule before workspace binding, task imports or LLM work.
     try:
         validate_launch_trial_overrides(
@@ -1185,6 +1193,8 @@ def main():
     with ExitStack() as package_scope:
         package_scope.enter_context(root_code_scope())
         try:
+            if reviewed_setup is not None:
+                return _run_bound_iteration(args, package_scope, reviewed_setup=reviewed_setup)
             return _run_bound_iteration(args, package_scope)
         except Exception as exc:
             from workflows.package_failure import halt_on_package_failure
@@ -1198,7 +1208,12 @@ def main():
             raise
 
 
-def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
+def _run_bound_iteration(
+    args: argparse.Namespace,
+    package_scope: ExitStack,
+    *,
+    reviewed_setup: "ReviewedLaunchContext | None" = None,
+):
     """Run the existing lifecycle after root workspace/package decisions."""
 
     # Both owners transitively load model registries. A cold launch must bind
@@ -1222,6 +1237,9 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
 
             raise_if_code_package_failure(exc)
             preflight_composition_error = exc
+
+    if reviewed_setup is not None and preflight_composition_error is None:
+        reviewed_setup.check_composition(preflight_composition)
 
     # Launch policy and invariants materialize Health before run activation.
     # They must see the same capture, without creating a transport sidecar.
@@ -1269,7 +1287,11 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
     # regime profile > explicit uncalibrated state) BEFORE the dry-run view
     # and before any consumer reads the watchdog args. The banner goes to
     # STDERR: stdout is a parsed surface (the dry-run JSON, chain captures).
-    watchdog_policy = resolve_watchdog_policy(args)
+    watchdog_policy = (
+        reviewed_setup.resolve_watchdog(args)
+        if reviewed_setup is not None
+        else resolve_watchdog_policy(args)
+    )
     print(
         f"[watchdog_policy] enabled={watchdog_policy.enabled} "
         f"safety_factor={watchdog_policy.safety_factor} "
@@ -1607,6 +1629,9 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
         )
         sys.exit(1)
 
+    if reviewed_setup is not None:
+        reviewed_setup.check_invariants(expected_invariants, llm_config, launch_identity)
+
     from ml_models.plugin_binding import bind_run_model_plugins
 
     try:
@@ -1723,13 +1748,16 @@ def _run_bound_iteration(args: argparse.Namespace, package_scope: ExitStack):
         # `resolve_dataset_dir` above, so this is the SAME authority, not a
         # second convention (R-11-7).
         with bind_run_task_composition(run_composition, physical_data_root=args.data_dir):
+            launch_config = build_standard_launch_config(
+                args,
+                launch_identity,
+                resolved_paths=resolved_paths,
+                fixed_candidate_plan=fixed_candidate_plan,
+            )
+            if reviewed_setup is not None:
+                reviewed_setup.check_launch(launch_config)
             results = run_workflow(
-                launch=build_standard_launch_config(
-                    args,
-                    launch_identity,
-                    resolved_paths=resolved_paths,
-                    fixed_candidate_plan=fixed_candidate_plan,
-                ),
+                launch=launch_config,
                 measurement_capability=measurement_capability,
                 workspace=args.workspace,
                 run_name=run_name,

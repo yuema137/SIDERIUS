@@ -1,0 +1,75 @@
+{
+  "interpret": {
+    "provider": "openai",
+    "model_id": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "max_retries": 1
+  },
+  "data_analysis": {
+    "provider": "openai",
+    "model_id": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "max_retries": 1
+  },
+  "implement": {
+    "provider": "openai",
+    "model_id": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "max_retries": 1
+  },
+  "validate": {
+    "provider": "openai",
+    "model_id": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "max_retries": 1
+  },
+  "propose": {
+    "comparison": {
+      "provider": "openai",
+      "model_id": "gpt-6-luna",
+      "reasoning_effort": "medium",
+      "max_retries": 1
+    },
+    "reasoning": {
+      "provider": "openai",
+      "model_id": "gpt-6-luna",
+      "reasoning_effort": "medium",
+      "max_retries": 1
+    },
+    "proposing": {
+      "provider": "openai",
+      "model_id": "gpt-6-luna",
+      "reasoning_effort": "medium",
+      "max_retries": 1
+    }
+  },
+  "tune": {
+    "planner_strategy": "native-timing-v1",
+    "planner": {
+      "provider": "openai",
+      "model_id": "gpt-6-luna",
+      "reasoning_effort": "medium",
+      "max_retries": 1
+    },
+    "reflector": {
+      "provider": "openai",
+      "model_id": "gpt-6-luna",
+      "reasoning_effort": "medium",
+      "max_retries": 1
+    }
+  },
+  "lit_review": {
+    "main": {
+      "provider": "openai",
+      "model_id": "gpt-6-luna",
+      "reasoning_effort": "medium",
+      "max_retries": 1
+    },
+    "search": {
+      "provider": "openai",
+      "model_id": "gpt-6-luna",
+      "reasoning_effort": "medium",
+      "max_retries": 1
+    }
+  }
+}

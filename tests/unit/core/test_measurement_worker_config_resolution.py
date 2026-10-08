@@ -90,7 +90,7 @@ def _validate_in_clean_subprocess(plugin_dir: Path) -> dict:
             from core.runtime_control.gpu_measurement_worker_main import (
                 validate_candidate_configs,
             )
-            # `validate_candidate_configs` reads exactly four attributes.
+            # The optional contract is absent in this registry-only witness.
             # A stand-in keeps this test bound to registry resolution rather
             # than to unrelated GpuMeasurementSpec fields (result_path,
             # worker_memory_limit_bytes, device_uuid, ...) whose evolution
@@ -104,6 +104,7 @@ def _validate_in_clean_subprocess(plugin_dir: Path) -> dict:
                 },
                 train_config={"lr": 5e-4, "epochs": 1, "batch_size": 2},
                 loss_config={"loss_type": "ce"},
+                model_io_contract=None,
             )
             out["rejection"] = validate_candidate_configs(spec)
         except Exception as exc:

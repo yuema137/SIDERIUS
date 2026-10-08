@@ -550,38 +550,41 @@ class TestRuntimeAccounting:
     def test_training_actual_excludes_the_recorded_validation_seconds(
         self, two_family, tmp_path, monkeypatch
     ):
-        """MUTATION `record_phase_actual("training", perf_counter() - t_start)`
-        (the pre-07a line) would include the passes. We make each pass REPORT
-        100 s (the real work is milliseconds) and read the RAW actual handed
-        to the session: it must be ≈ (real elapsed − 300 s), i.e. deeply
-        negative — impossible unless the subtraction happens.
+        """Removing validation subtraction must inflate completed training cost.
 
-        07c C5 UPGRADE. The spy now keys by PHASE. This previously asserted
-        `len(raw_actuals) == 1`, which was an incidental fact of 07a's world
-        rather than the property under test: C5 legitimately records a SECOND
-        actual, for the new ``validation`` phase, so that
-        ``realized_unit_ms = actual ÷ units`` can calibrate future runs. The
-        original claim is unchanged and still asserted on the TRAINING actual;
-        the validation actual is now pinned beside it, so the test proves both
-        halves of the split — the training observation stays pure AND the
-        validation cost is no longer discarded.
+        A deterministic clock advances 0.01s per training timing read and
+        exactly 100s per validation pass. The completion API receives positive
+        training-only time and the separate 300s validation cost, each once.
+        This also covers the default completed-workload path, which no longer
+        calls record_phase_actual for successful exhausted workloads.
         """
+        from types import SimpleNamespace
+
+        clock = {"now": 0.0}
+
+        def tick():
+            clock["now"] += 0.01
+            return clock["now"]
+
+        monkeypatch.setattr(tes, "time", SimpleNamespace(perf_counter=tick))
         real_pass = tes._validation_pass
 
         def slow_reporting_pass(**kwargs):
+            started = clock["now"]
             r3, n, _secs = real_pass(**kwargs)
+            clock["now"] = started + 100.0
             return r3, n, 100.0
 
         monkeypatch.setattr(tes, "_validation_pass", slow_reporting_pass)
         session = RuntimeVerificationSession(str(tmp_path / "rv.json"), attempt_id="acct")
         raw_actuals: list[tuple[str, float]] = []
-        orig = session.record_phase_actual
+        orig = session.complete_phase_workload
 
-        def spy(phase, actual_seconds):
+        def spy(phase, *, actual_seconds, **kwargs):
             raw_actuals.append((phase, actual_seconds))
-            orig(phase, actual_seconds)
+            orig(phase, actual_seconds=actual_seconds, **kwargs)
 
-        monkeypatch.setattr(session, "record_phase_actual", spy)
+        monkeypatch.setattr(session, "complete_phase_workload", spy)
         summary = _run(
             two_family,
             tmp_path,
@@ -590,24 +593,12 @@ class TestRuntimeAccounting:
             runtime_session=session,
         )
         assert summary["training_history"]["validation_seconds"] == [100.0, 100.0, 100.0]
-
         by_phase = dict(raw_actuals)
         assert len(raw_actuals) == len(by_phase), f"a phase was recorded twice: {raw_actuals}"
         assert set(by_phase) == {"training", "validation"}, raw_actuals
-
-        # The original 07a claim, unchanged: NEGATIVE is impossible unless the
-        # 300 s of reported validation was subtracted out. Real elapsed time is
-        # strictly positive, so `elapsed - 300` is the only way here.
-        #
-        # The bound was `-300.0 <= x < -290.0`, which silently also asserted
-        # that the real CPU training finishes in under 10 s. It does, on an idle
-        # machine; under full-suite load it took 12.66 s and the test failed
-        # with `-287.34` — a machine-speed assumption masquerading as a
-        # correctness bound. The mutation it exists to catch (dropping the
-        # subtraction) makes the value POSITIVE, so `< 0` kills it just as
-        # dead, without pinning the host's speed.
-        assert -300.0 < by_phase["training"] < 0.0, raw_actuals
-        # 07c: and those same 300 s are now RECORDED rather than discarded.
+        # The 36 optimizer steps take fewer than 100 clock reads at 0.01s
+        # each. Without subtraction this is greater than 300s, not below 1s.
+        assert 0.0 < by_phase["training"] < 1.0, raw_actuals
         assert by_phase["validation"] == pytest.approx(300.0)
 
     def test_verification_unit_count_is_unchanged_by_the_pass(self, two_family, tmp_path):

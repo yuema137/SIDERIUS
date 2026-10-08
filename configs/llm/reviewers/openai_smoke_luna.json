@@ -1,0 +1,6 @@
+{
+  "provider": "openai",
+  "model_id": "gpt-6-luna",
+  "reasoning_effort": "medium",
+  "max_retries": 1
+}
