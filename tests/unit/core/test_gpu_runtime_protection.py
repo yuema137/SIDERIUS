@@ -682,3 +682,52 @@ def test_guard_cleans_owned_descendant_and_leader_reaps_it(tmp_path):
     assert caught.value.lifecycle.group_cleanup.final.status == "absent"
     with pytest.raises(ProcessLookupError):
         os.kill(int(ready.read_text()), 0)
+
+
+def test_publication_lock_wait_cannot_hide_previous_coverage_expiry():
+    state, clock, _ = state_fixture()
+    original_lock = state._lock
+    query_entered, query_release, publishing = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
+
+    class PublicationLock:
+        calls = 0
+
+        def __enter__(self):
+            self.calls += 1
+            if self.calls == 2:
+                publishing.set()
+            original_lock.acquire()
+
+        def __exit__(self, *_):
+            original_lock.release()
+
+    state._lock = PublicationLock()
+    clock.value = 0.2
+
+    def sample(*_):
+        query_entered.set()
+        assert query_release.wait(2)
+        return snapshot()
+
+    thread = threading.Thread(target=state.sample_once, args=(sample,))
+    thread.start()
+    assert query_entered.wait(1)
+    original_lock.acquire()
+    try:
+        query_release.set()
+        assert publishing.wait(1)
+        # New sample is still fresh, but OLD coverage expired while waiting.
+        clock.value = 1.1
+    finally:
+        original_lock.release()
+    thread.join(1)
+    assert not thread.is_alive()
+    receipt = state.receipt()
+    assert receipt.last_live.query_started_at == 0.2
+    assert "expired" in receipt.decision.reason
+    assert receipt.first_stop_observation.query_started_at == 0.0
+    assert state.check(thread_alive=True).status == "stop"

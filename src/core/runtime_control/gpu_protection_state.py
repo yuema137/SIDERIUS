@@ -164,10 +164,12 @@ class ProtectedGpuObservation:
             snapshot=snapshot,
             sampling_error=error,
         )
-        now = self.clock()
         with self._lock:
             if self._state == "frozen":
                 return
+            # Publication can wait behind another state operation. Use the
+            # actual commit time, not a timestamp captured before that wait.
+            now = self.clock()
             if not live_after and self._ended is None:
                 self._ended, self._state = now, "stopping"
             # Check OLD accepted coverage before renewal, including delayed threads.
