@@ -244,17 +244,19 @@ class TestComposedTaskBatch:
                 sampling=EpochSamplingParams(data_dir=registered),
             )
 
+    @pytest.mark.parametrize("drop_last", [True, False])
     def test_worker_uses_task_data_path_instead_of_physical_array_loader(
-        self, tmp_path, registered, monkeypatch
+        self, tmp_path, registered, monkeypatch, drop_last
     ):
         """Dropping this branch makes generic Formal admission policy-unavailable."""
         import execute_tools.task_probe_batch as task_probe_module
 
-        calls: list[int] = []
+        calls: list[tuple[int, bool]] = []
 
-        def _task_batch(_reference, batch_size):
-            calls.append(batch_size)
-            batch = torch.randint(0, 256, (batch_size, 8), dtype=torch.long)
+        def _task_batch(_reference, batch_size, *, drop_last):
+            calls.append((batch_size, drop_last))
+            rows = batch_size if drop_last else 1
+            batch = torch.randint(0, 256, (rows, 8), dtype=torch.long)
             return batch, batch.clone()
 
         monkeypatch.setattr(task_probe_module, "load_task_probe_batch", _task_batch)
@@ -266,12 +268,15 @@ class TestComposedTaskBatch:
             segmentation_applicability="temporal",
         )
 
-        components = build_production_components(
-            _spec(tmp_path, registered, task_probe_data=task_ref)
-        )()
+        spec = _spec(tmp_path, registered, task_probe_data=task_ref)
+        spec = spec.model_copy(
+            update={"train_config": {**spec.train_config, "drop_last": drop_last}}
+        )
+        components = build_production_components(spec)()
 
-        assert calls == [2]
-        assert tuple(components.model_input.shape) == (2, 8)
+        assert calls == [(2, drop_last)]
+        assert tuple(components.model_input.shape) == (2 if drop_last else 1, 8)
+        assert spec.train_config["batch_size"] == 2
         assert components.bounded_read == {
             "source": "task_data_path",
             "semantic_fingerprint": "a" * 64,

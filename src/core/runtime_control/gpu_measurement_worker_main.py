@@ -318,7 +318,9 @@ def build_production_components(
         if spec.task_probe_data is not None:
             from execute_tools.task_probe_batch import load_task_probe_batch
 
-            task_input, task_target = load_task_probe_batch(spec.task_probe_data, input_batch)
+            task_input, task_target = load_task_probe_batch(
+                spec.task_probe_data, input_batch, drop_last=train_cfg.drop_last
+            )
             batch = task_input.to(spec.device)
             bounded_evidence: Any = {
                 "source": "task_data_path",

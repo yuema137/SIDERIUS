@@ -226,8 +226,8 @@ def test_task_probe_uses_production_dtype_authorities(replay_inputs, monkeypatch
     reference = TaskProbeDataSpec.model_validate(config["task_probe_data"])
     original_loader = task_batches.load_task_probe_batch
 
-    def storage_batch(ref, batch_size):
-        inputs, targets = original_loader(ref, batch_size)
+    def storage_batch(ref, batch_size, *, drop_last):
+        inputs, targets = original_loader(ref, batch_size, drop_last=drop_last)
         return inputs.to(torch.float64), targets.to(torch.int16)
 
     monkeypatch.setattr(task_batches, "load_task_probe_batch", storage_batch)
@@ -243,3 +243,41 @@ def test_task_probe_uses_production_dtype_authorities(replay_inputs, monkeypatch
         executors.setup()
         assert executors.train_step() > 0
         assert executors.inference_batch() > 0
+
+
+@pytest.mark.parametrize("drop_last", [True, False])
+def test_replay_setup_uses_real_tail_policy_without_training(replay_inputs, monkeypatch, drop_last):
+    """Four actual task rows cannot fill batch8 unless the caller retains a tail."""
+    import execute_tools.task_probe_batch as task_batches
+    from core.runtime_control.probe_production import production_probe_executors
+    from core.runtime_control.probe_task import bind_probe_task
+
+    _, config = replay_inputs
+    reference = TaskProbeDataSpec.model_validate(config["task_probe_data"])
+    original_loader = task_batches.load_task_probe_batch
+    observed = []
+
+    def capture(ref, batch_size, *, drop_last):
+        result = original_loader(ref, batch_size, drop_last=drop_last)
+        observed.append((batch_size, drop_last, result[0].shape[0]))
+        return result
+
+    monkeypatch.setattr(task_batches, "load_task_probe_batch", capture)
+    train_config = {**config["train_config"], "batch_size": 8, "drop_last": drop_last}
+    with bind_probe_task(reference) as composition:
+        executors = production_probe_executors(
+            model_type="quickstart_reference_mlp",
+            model_config=config["model_config_payload"],
+            train_config=train_config,
+            loss_config=composition.objective.model_dump(mode="json"),
+            task_probe_data=reference,
+            device="cpu",
+        )
+        if drop_last:
+            with pytest.raises(ValueError, match="one full resource probe batch of size 8"):
+                executors.setup()
+            assert observed == []
+        else:
+            executors.setup()
+            assert observed == [(8, False, 4)]
+        assert train_config["batch_size"] == 8

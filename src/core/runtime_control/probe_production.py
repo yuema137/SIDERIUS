@@ -260,7 +260,9 @@ def production_probe_executors(
         if task_probe_data is not None:
             from execute_tools.task_probe_batch import load_task_probe_batch
 
-            inputs, targets = load_task_probe_batch(task_probe_data, train_cfg.batch_size)
+            inputs, targets = load_task_probe_batch(
+                task_probe_data, train_cfg.batch_size, drop_last=train_cfg.drop_last
+            )
         else:
             inputs = _legacy_probe_batch(
                 model_type=model_type,
