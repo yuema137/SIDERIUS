@@ -8,7 +8,7 @@ Imports keep their names: `from core.layout import package_root`, never
 | Package | Responsibility / entry documentation |
 | --- | --- |
 | [agent](agent/README.md) | LLM gateway, schemas, typed protocols, prompts and atomic skills |
-| [nodes](nodes/README.md) | Six capabilities with adjacent contract documents; [node index](../docs/agent-reference/index.md#nodes) |
+| [nodes](nodes/README.md) | Research capabilities with adjacent contract documents; [node index](../docs/agent-reference/index.md#nodes) |
 | [workflows](workflows/README.md) | Deterministic node sequencing, task composition and carried state |
 | [core](core/README.md) | Subprocess isolation, workspace state, resources and recovery |
 | [execute_tools](execute_tools/README.md) | Training, inference, scoring and [Health](execute_tools/health_checks/README.md) |
