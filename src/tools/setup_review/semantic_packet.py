@@ -4,12 +4,13 @@ import json
 
 from pydantic import JsonValue
 
+from tools.setup_review.environment_models import EnvironmentPreviewReport
 from tools.setup_review.models import SetupDeclarationReport
 from tools.setup_review.route_models import LLMRoute
 from tools.setup_review.semantic_models import SavedTaskCheckSnapshot
 from tools.setup_review.task_settings_models import TaskSettingsSummary
 
-Snapshot = SetupDeclarationReport | SavedTaskCheckSnapshot
+Snapshot = SetupDeclarationReport | SavedTaskCheckSnapshot | EnvironmentPreviewReport
 
 # This is a transmission allowlist, not a second default/configuration owner.
 _SETTINGS = frozenset(
@@ -57,6 +58,8 @@ def _scalars(values: dict[str, JsonValue], names: tuple[str, ...]) -> dict[str, 
 
 
 def declaration_of(snapshot: Snapshot) -> SetupDeclarationReport:
+    if isinstance(snapshot, EnvironmentPreviewReport):
+        return snapshot.current_declaration
     return snapshot.declaration if isinstance(snapshot, SavedTaskCheckSnapshot) else snapshot
 
 
@@ -123,6 +126,8 @@ def _settings_packet(settings: TaskSettingsSummary) -> dict[str, JsonValue]:
 
 def build_packet(snapshot: Snapshot) -> dict[str, JsonValue]:
     """Project facts already saved; never follow a source path or import task code."""
+    if isinstance(snapshot, EnvironmentPreviewReport):
+        return _environment_packet(snapshot)
     declaration = declaration_of(snapshot)
     packet: dict[str, JsonValue] = {
         "scope": declaration.scope,
@@ -204,3 +209,31 @@ def build_packet(snapshot: Snapshot) -> dict[str, JsonValue]:
 
 def packet_text(packet: dict[str, JsonValue]) -> str:
     return json.dumps(packet, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
+
+
+def _environment_packet(snapshot: EnvironmentPreviewReport) -> dict[str, JsonValue]:
+    """Only named saved facts; no source reads, runtime discovery or open-map dumps."""
+    packet = build_packet(snapshot.saved_task_check)
+    packet["historical_task_unresolved"] = packet["unresolved"]
+    packet["unresolved"] = list(snapshot.limitations)
+    packet["effective_settings"] = _scalars(snapshot.launch_settings, tuple(sorted(_SETTINGS)))
+    hardware = snapshot.gpu_runtime.hardware
+    packet["environment"] = {
+        "installed_backend": snapshot.gpu_runtime.installed_backend,
+        "runtime_version": snapshot.gpu_runtime.runtime_version,
+        "device_available": hardware.device_available,
+        "device_name": hardware.device_name,
+        "total_memory_bytes": hardware.total_memory_bytes,
+        "implemented_accounting_adapter": snapshot.gpu_runtime.implemented_accounting_adapter,
+        "limitations": list(snapshot.gpu_runtime.limitations),
+        "aggregate_gpu_ceiling_gib": snapshot.aggregate_gpu_ceiling_gib,
+        "per_candidate_usable_cap_bytes": snapshot.per_candidate_usable_cap_bytes,
+        "watchdog": snapshot.watchdog.model_dump(mode="json"),
+    }
+    packet["credentials"] = [item.model_dump(mode="json") for item in snapshot.credentials]
+    packet["coverage"] = (
+        "Selected standard launch settings and observed environment facts, with historical task "
+        "settings from the saved task check. Original sources, arbitrary caller behavior, data, "
+        "authentication and successful execution remain unverified. No launch is approved."
+    )
+    return packet

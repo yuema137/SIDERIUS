@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
@@ -20,6 +19,7 @@ from tools.setup_review.models import (
 from tools.setup_review.routes import standard_llm_routes
 from tools.setup_review.task_settings_models import FORMAL_DELTA_FIELDS, encode_formal_delta
 from workflows.launch_identity import resolve_launch_identity
+from workflows.launch_projection import json_launch_values
 from workflows.llm_config import resolve_standard_llm_config
 from workflows.standard_cli import build_parser, normalize_args
 
@@ -178,7 +178,7 @@ def inspect_parsed_declaration(
         task_manifest=str(manifest),
         output_directory=str(output),
         parameters=_parameter_rows(parser, args),
-        launch_identity=asdict(identity),
+        launch_identity=json_launch_values(identity),
         declared_llm_config=llm_config.model_dump(mode="json", by_alias=True),
         llm_routes=routes,
         environment_check_requested=check_environment,

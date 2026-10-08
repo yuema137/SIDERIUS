@@ -32,6 +32,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Check configured credential names for presence; never record values",
     )
+    parser.add_argument(
+        "--bind-launch",
+        action="store_true",
+        help="Explicitly pin selected files and a clean installation for optional reviewed launch",
+    )
     args = parser.parse_args(argv)
     try:
         request = EnvironmentPreviewRequest.model_validate(vars(args))

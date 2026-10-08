@@ -1,7 +1,6 @@
 """Explicitly observe launch settings; never create a run or import its task."""
 
 import os
-from dataclasses import asdict
 from pathlib import Path
 
 from core.durable_io import publish_bytes_write_once
@@ -23,8 +22,8 @@ from tools.setup_review.environment_render import render_environment_preview
 from tools.setup_review.inspection import _json_value, inspect_parsed_declaration
 from tools.setup_review.semantic_models import SavedTaskCheckSnapshot, SnapshotInputError
 from tools.setup_review.snapshot_io import claim_snapshot_output, read_snapshot
-from tools.setup_review.task_settings_models import FORMAL_DELTA_FIELDS, encode_formal_delta
 from workflows.launch_identity import resolve_launch_identity
+from workflows.launch_projection import json_launch_values
 from workflows.run_config import validate_launch_trial_overrides
 from workflows.runtime_settings import resolve_watchdog_policy
 from workflows.standard_launch import build_standard_launch_config
@@ -75,6 +74,15 @@ def inspect_environment(request: EnvironmentPreviewRequest) -> EnvironmentPrevie
         )
     if manifest_digest(current.task_manifest) != snapshot.result.manifest_sha256:
         raise SnapshotInputError("Task manifest changed; regenerate the task check")
+    binding = None
+    if request.bind_launch:
+        from workflows.reviewed_launch_binding import capture_binding
+
+        if snapshot.result.task is None:
+            raise SnapshotInputError("Task identity is missing; regenerate the task check")
+        binding = capture_binding(
+            args, request.input_max_bytes, source_paths=snapshot.result.task.source_paths
+        )
     args.data_dir = resolve_dataset_dir(args.data_dir, purpose="setup environment preview")
     gpu_runtime = inspect_gpu_runtime()
     hardware = gpu_runtime.hardware
@@ -92,14 +100,39 @@ def inspect_environment(request: EnvironmentPreviewRequest) -> EnvironmentPrevie
             measured_capacity_gib=gib_from_bytes(hardware.total_memory_bytes),
             environ=limits,
         )
+    if binding is not None:
+        from copy import deepcopy
+
+        profile_args = deepcopy(args)
     watchdog = resolve_watchdog_policy(args, device_name=hardware.device_name)
+    if binding is not None:
+        from core.runtime_control.watchdog_profile import selected_profile_source
+        from workflows.reviewed_launch_binding import file_pin
+        from workflows.runtime_settings import build_required_profile_binding
+
+        selected = selected_profile_source(
+            watchdog,
+            device_name=hardware.device_name,
+            required_binding=build_required_profile_binding(args),
+        )
+        if selected is not None:
+            pin = file_pin(selected, binding.file_max_bytes)
+            pins = {item.path: item for item in binding.files}
+            pins[pin.path] = pin
+            binding = binding.model_copy(update={"files": tuple(pins[key] for key in sorted(pins))})
+        if resolve_watchdog_policy(profile_args, device_name=hardware.device_name) != watchdog:
+            raise SnapshotInputError(
+                "Runtime profile changed during binding; regenerate the observation"
+            )
     launch = build_standard_launch_config(
         args, resolve_launch_identity(args), resolved_paths=[], fixed_candidate_plan=None
     )
     validate_launch_trial_overrides(launch)
-    values = asdict(launch)
-    for field in FORMAL_DELTA_FIELDS:
-        values[field] = encode_formal_delta(values[field])
+    values = json_launch_values(launch)
+    if binding is not None:
+        from workflows.reviewed_launch_binding import verify_binding
+
+        verify_binding(binding)
     report = EnvironmentPreviewReport(
         source_report=str(request.report),
         source_sha256=request.expected_sha256,
@@ -121,6 +154,7 @@ def inspect_environment(request: EnvironmentPreviewRequest) -> EnvironmentPrevie
         dataset_directory=str(Path(args.data_dir).resolve()),
         launch_settings={name: _json_value(value) for name, value in values.items()},
         limitations=_LIMITATIONS,
+        launch_binding=binding,
     )
     claim_snapshot_output(request, snapshot)
     publish_bytes_write_once(

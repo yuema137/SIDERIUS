@@ -30,6 +30,7 @@ tripping through the filesystem.
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -78,6 +79,7 @@ def default_task_config_path() -> str:
 # value on subsequent calls so the YAML is parsed once per process. Keyed by
 # the absolute resolved path so distinct test fixtures don't collide.
 _CACHE: dict[str, dict[str, Any]] = {}
+_CACHE_SOURCE_SHA256: dict[str, str] = {}
 
 # Remediation message shown when the canonical config file is missing.
 # Kept in sync with the wording in
@@ -177,6 +179,7 @@ def _clear_cache_for_tests() -> None:
     fixture file under a single path without seeing stale parsed data.
     """
     _CACHE.clear()
+    _CACHE_SOURCE_SHA256.clear()
 
 
 def load_task_config(path: str | None = None) -> dict[str, Any]:
@@ -237,8 +240,13 @@ def load_task_config(path: str | None = None) -> dict[str, Any]:
     if not os.path.isfile(resolved):
         raise FileNotFoundError(_MISSING_FILE_REMEDIATION.format(path=resolved))
 
-    with open(resolved, encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
+    with open(resolved, "rb") as f:
+        source_bytes = f.read()
+    # Preserve the named text stream and universal-newline parsing behavior.
+    buffer = io.BytesIO(source_bytes)
+    buffer.name = resolved
+    with io.TextIOWrapper(buffer, encoding="utf-8") as stream:
+        raw = yaml.safe_load(stream)
 
     if raw is None or not isinstance(raw, dict):
         raise ValueError(
@@ -301,6 +309,7 @@ def load_task_config(path: str | None = None) -> dict[str, Any]:
     # round-trip back through `ForwardContract(**...)` coerces them back.
     config["forward_contract"] = contract.model_dump(mode="json")
     _CACHE[resolved] = config
+    _CACHE_SOURCE_SHA256[resolved] = hashlib.sha256(source_bytes).hexdigest()
     return config
 
 
@@ -485,3 +494,19 @@ def render_forward_contract(fc: ForwardContract) -> str:
         lines += ["", descriptor]
 
     return "\n".join(lines)
+
+
+def assert_cached_task_config_source(path: str, observed_sha256: str) -> None:
+    """Explicit reviewed launch cannot authorize stale or unproven cached content.
+
+    The caller supplies identity from the shared regular-file reader. Ordinary
+    loading retains its process-local cache and dictionary identity unchanged.
+    """
+    resolved = os.path.abspath(path)
+    if resolved not in _CACHE:
+        return
+    if _CACHE_SOURCE_SHA256.get(resolved) != observed_sha256:
+        raise ValueError(
+            "Cached task configuration has stale or missing source evidence; "
+            "restart the process and regenerate the task/environment review"
+        )

@@ -82,8 +82,9 @@ working-directory change cannot run it elsewhere. The command does not consume
 this report. Agent-chosen training parameters, dynamic node execution, complete
 source freshness, data compatibility, Health execution, authentication, budget
 enforcement and successful training remain unverified. No LLM review/skip is
-created; prior semantic receipts bind only their earlier source bytes. The current
-semantic reviewer does not accept the environment-report schema.
+created; prior semantic receipts bind only their earlier source bytes. The semantic reviewer accepts the environment-report schema through its explicit v3 field projection.
+A reviewed/skip receipt still grants no launch permission; only the separately selected
+[reviewed launch](reviewed-launch.md) checks a launch binding.
 
 ## Failure and security boundary
 

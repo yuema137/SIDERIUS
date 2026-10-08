@@ -16,6 +16,7 @@ from core.execution_deadline import (
     execution_deadline,
     remaining_seconds,
 )
+from tools.setup_review.environment_models import EnvironmentPreviewReport
 from tools.setup_review.route_models import RouteTransport
 from tools.setup_review.semantic_models import (
     SKILL_SPEC as SKILL_SPEC,
@@ -84,6 +85,14 @@ def review_snapshot(request: SemanticReviewRequest) -> SemanticReviewReceipt:
                 _LIMITATIONS[0],
                 "Saved task-dependent settings were resolved; data, hardware, actual Health "
                 "evaluations, authentication and successful execution remain unchecked.",
+                *_LIMITATIONS[2:],
+            ]
+        if isinstance(snapshot, EnvironmentPreviewReport):
+            common["prompt_version"] = "setup-review/v3"
+            common["limitations"] = [
+                "Environment values were observed earlier; they are not current launch permission.",
+                "Task settings remain the historical task-check observation.",
+                "Selected fields only; arbitrary caller behavior, data and authentication are unverified.",
                 *_LIMITATIONS[2:],
             ]
         if not isinstance(operation, ReviewSnapshotRequest):

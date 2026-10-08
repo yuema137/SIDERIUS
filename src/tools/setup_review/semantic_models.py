@@ -101,7 +101,9 @@ class SemanticReviewReceipt(ReviewModel):
     deterministic_outcome: str
     output: str
     input_max_bytes: int
-    prompt_version: Literal["setup-review/v1", "setup-review/v2"] = "setup-review/v1"
+    prompt_version: Literal["setup-review/v1", "setup-review/v2", "setup-review/v3"] = (
+        "setup-review/v1"
+    )
     packet_sha256: Digest
     system_sha256: Digest | None = None
     user_sha256: Digest | None = None

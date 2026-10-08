@@ -7,3 +7,7 @@ provides the synthetic CPU walkthrough; these pages do not qualify scientific
 hardware or model performance.
 
 See [the parent guide](../README.md) for child ownership and the focused validation route.
+
+For optional configuration review, see [standard setup routes](../../src/tools/setup_review/README.md#choose-direct-or-reviewed-launch).
+Direct launch remains available without a review. For your own native caller, use
+the [external orchestration project guide](../../src/tools/orchestration_setup/README.md).

@@ -119,6 +119,12 @@ def test_forwarding_census_requires_reachable_projection():
     dead = "build_standard_launch_config(args, identity)\nrun_workflow(launch=other)"
     assert "formal_time_budget_minutes" in workflow_call_bindings(live)
     assert "formal_time_budget_minutes" not in workflow_call_bindings(dead)
+    assigned = "cfg = build_standard_launch_config(args, identity)\nrun_workflow(launch=cfg)"
+    rebound = (
+        "cfg = build_standard_launch_config(args, identity)\ncfg = other\nrun_workflow(launch=cfg)"
+    )
+    assert "formal_time_budget_minutes" in workflow_call_bindings(assigned)
+    assert "formal_time_budget_minutes" not in workflow_call_bindings(rebound)
 
 
 @pytest.mark.parametrize(

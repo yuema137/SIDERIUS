@@ -127,3 +127,11 @@ response/validation deadlines, malformed responses and retained deterministic
 failure. HTML escapes all user/model text. Partial publication never replaces a
 concurrent file. Real provider quality, authentication, costs, GPU behavior and
 four independent onboarding runs require separate authorized qualification.
+
+## Environment snapshots
+
+Environment/v1 is accepted through the same bounded inert reader. Packet v3 adds
+explicit selected launch/environment fields while retaining historical task labels.
+No source path or hardware is visited during review/skip. v1/v2 packet branches
+remain unchanged. Findings are advisory; optional launch consumption and disposition
+are owned by [reviewed-launch.md](reviewed-launch.md), not the semantic gateway.

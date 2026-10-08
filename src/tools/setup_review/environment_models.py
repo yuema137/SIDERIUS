@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import JsonValue
+from pydantic import Field, JsonValue
 
 from core.hardware_context import GpuRuntimeFacts
 from core.runtime_control.pair_admission import ResolvedGpuCeiling
@@ -15,12 +15,14 @@ from tools.setup_review.semantic_models import (
     SavedTaskCheckSnapshot,
     SnapshotOperation,
 )
+from workflows.reviewed_launch_binding import LaunchInputBinding
 
 
 class EnvironmentPreviewRequest(SnapshotOperation):
     """Reading this request explicitly selects local property/profile inspection."""
 
     check_environment: bool = False
+    bind_launch: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class EnvironmentPreviewReport(ReviewModel):
@@ -42,3 +44,6 @@ class EnvironmentPreviewReport(ReviewModel):
     dataset_directory: str
     launch_settings: dict[str, JsonValue]
     limitations: tuple[str, ...]
+    launch_binding: LaunchInputBinding | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
