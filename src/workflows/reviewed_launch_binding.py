@@ -88,6 +88,7 @@ def declared_input_paths(args: argparse.Namespace) -> tuple[str, ...]:
         args.llm_config,
         args.health_checks_config,
         args.required_runtime_profile_path,
+        getattr(args, "gpu_execution_policy_json", None),
     ]
     advice = resolve_advice_artifact(args)
     if advice is not None:

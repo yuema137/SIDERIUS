@@ -114,8 +114,8 @@ telemetry absence does not prove zero usage. The receipt records its filename
 only if present, never fabricates a served-model identity or total cost.
 
 Snapshot identity is not a complete task/environment closure. Editing task files
-after the earlier report is not detected here. A future explicitly selected
-reviewed-launch adapter must resolve current owner facts and bind freshness;
+after the earlier report is not detected here. The optional
+reviewed-launch adapter separately resolves current owner facts and binds freshness;
 ordinary launchers have no new gate. Paper compatibility settings remain exp-owned.
 
 ## Verification expectations
@@ -135,3 +135,8 @@ explicit selected launch/environment fields while retaining historical task labe
 No source path or hardware is visited during review/skip. v1/v2 packet branches
 remain unchanged. Findings are advisory; optional launch consumption and disposition
 are owned by [reviewed-launch.md](reviewed-launch.md), not the semantic gateway.
+
+When selected, `declared_gpu_execution_policy` contains only named saved measurement,
+RSS, startup, observation and control limits. It does not load the policy file or
+fill missing saved fields with defaults. These are declared settings; the execution
+supervisor may intersect them with its other bounds. Unselected policy adds no field.

@@ -34,7 +34,8 @@ checkout. There is no generic orchestration approval, scheduler or skill registr
   workspace/Health files before a late mismatch; no recursive rollback occurs.
 
 Explicit file inputs are manifest, LLM JSON, Health override, advice, selected
-literature configuration, runtime profile and finite declaration files named by
+literature configuration, runtime profile, selected GPU execution policy JSON,
+and finite declaration files named by
 task provenance. Plugin directory roots are excluded. The task-config owner records
 the SHA of the same bytes it parsed alongside its existing cache. A populated cache
 with stale or missing source evidence refuses reviewed launch with a restart and

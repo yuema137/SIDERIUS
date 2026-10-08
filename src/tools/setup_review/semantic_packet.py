@@ -217,6 +217,9 @@ def _environment_packet(snapshot: EnvironmentPreviewReport) -> dict[str, JsonVal
     packet["historical_task_unresolved"] = packet["unresolved"]
     packet["unresolved"] = list(snapshot.limitations)
     packet["effective_settings"] = _scalars(snapshot.launch_settings, tuple(sorted(_SETTINGS)))
+    policy = snapshot.launch_settings.get("gpu_execution_policy")
+    if isinstance(policy, dict):
+        packet["declared_gpu_execution_policy"] = _gpu_policy_packet(policy)
     hardware = snapshot.gpu_runtime.hardware
     packet["environment"] = {
         "installed_backend": snapshot.gpu_runtime.installed_backend,
@@ -237,3 +240,31 @@ def _environment_packet(snapshot: EnvironmentPreviewReport) -> dict[str, JsonVal
         "authentication and successful execution remain unverified. No launch is approved."
     )
     return packet
+
+
+def _gpu_policy_packet(policy: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """Project saved declared limits, not live supervisor bounds or arbitrary maps."""
+    projected = _scalars(
+        policy,
+        (
+            "phase_measurement_budget_seconds",
+            "worker_rss_limit_bytes",
+            "startup_ack_timeout_seconds",
+            "startup_receipt_limit_bytes",
+        ),
+    )
+    protection = policy.get("protection")
+    if isinstance(protection, dict):
+        selected = _scalars(protection, ("max_sample_age_seconds",))
+        for name, fields in (
+            (
+                "observation",
+                ("fast_interval_ms", "fast_window_ms", "steady_interval_ms", "join_timeout_ms"),
+            ),
+            ("control", ("poll_seconds", "grace_seconds", "reap_seconds")),
+        ):
+            values = protection.get(name)
+            if isinstance(values, dict):
+                selected[name] = _scalars(values, fields)
+        projected["protection"] = selected
+    return projected

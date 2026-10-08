@@ -251,7 +251,9 @@ def test_file_pin_refuses_symlink_size_and_changed_bytes(tmp_path):
     assert file_pin(str(target), 10) != before
 
 
-def _exercise_real_standard_main(tmp_path, monkeypatch, change_task_config):
+def _exercise_real_standard_main(
+    tmp_path, monkeypatch, change_task_config, *, gpu_policy=None, change_policy=False
+):
     """Real Quickstart composition/Health/planner; no model, provider or dataset execution."""
     from tools.setup_review.composition_child import compose_in_child
     from tools.setup_review.composition_models import CompositionJob, TaskCheckSettings
@@ -312,6 +314,10 @@ def _exercise_real_standard_main(tmp_path, monkeypatch, change_task_config):
             "--no-runtime_watchdog",
         ],
     )
+    policy_path = tmp_path / "gpu-policy.json"
+    if gpu_policy is not None:
+        policy_path.write_text(json.dumps(gpu_policy))
+        request.argv.extend(["--gpu_execution_policy_json", str(policy_path)])
     declaration, args = inspect_parsed_declaration(request, tmp_path / "declaration")
     job = CompositionJob(
         manifest=str(manifest),
@@ -350,6 +356,11 @@ def _exercise_real_standard_main(tmp_path, monkeypatch, change_task_config):
         )
     )
     env_path = tmp_path / "environment/report.json"
+    if gpu_policy is not None:
+        from tools.setup_review.semantic_packet import build_packet
+
+        assert env.launch_settings["gpu_execution_policy"] == gpu_policy
+        assert build_packet(env)["declared_gpu_execution_policy"] == gpu_policy
     review_snapshot(
         SemanticReviewRequest.model_validate(
             {
@@ -373,10 +384,15 @@ def _exercise_real_standard_main(tmp_path, monkeypatch, change_task_config):
         receipt=semantic_path,
         receipt_sha256=hashlib.sha256(semantic_path.read_bytes()).hexdigest(),
     )
-    if change_task_config:
-        config = yaml.safe_load(task_config.read_text())
-        config["task_description"] = "A changed scientific declaration after review"
-        task_config.write_text(yaml.safe_dump(config))
+    if change_task_config or change_policy:
+        if change_task_config:
+            config = yaml.safe_load(task_config.read_text())
+            config["task_description"] = "A changed scientific declaration after review"
+            task_config.write_text(yaml.safe_dump(config))
+        else:
+            # Same resolved values, different reviewed file: this must exercise
+            # the file pin, not merely the later effective-value comparison.
+            policy_path.write_text(json.dumps(gpu_policy, indent=2))
         with patch(
             "workflows.model_exploration.run_workflow", side_effect=AssertionError("must not run")
         ) as workflow:
@@ -397,6 +413,15 @@ def _exercise_real_standard_main(tmp_path, monkeypatch, change_task_config):
         return value
 
     monkeypatch.setattr(run_one_iteration, "build_standard_launch_config", capture)
+    invariant_calls = []
+    invariant_owner = run_one_iteration.build_run_invariants
+
+    def capture_invariants(*args, **kwargs):
+        result = invariant_owner(*args, **kwargs)
+        invariant_calls.append((kwargs["launch_identity"], result[0]))
+        return result
+
+    monkeypatch.setattr(run_one_iteration, "build_run_invariants", capture_invariants)
     with patch("workflows.model_exploration.run_workflow", side_effect=SystemExit(0)) as workflow:
         with pytest.raises(SystemExit) as stopped:
             launch_reviewed(launch_request)
@@ -404,6 +429,13 @@ def _exercise_real_standard_main(tmp_path, monkeypatch, change_task_config):
     assert len(projected) == 1
     assert workflow.call_args.kwargs["launch"] is projected[0]
     assert projected[0].max_rounds == env.launch_settings["max_rounds"]
+    if gpu_policy is not None:
+        assert len(invariant_calls) == 1
+        lock_identity, invariants = invariant_calls[0]
+        selected = projected[0].gpu_execution_policy
+        assert selected.model_dump(mode="json") == gpu_policy
+        assert lock_identity.gpu_execution_policy is selected
+        assert invariants.gpu_execution_policy is selected
     assert (
         json.loads((launch_request.output / "launch-check.json").read_text())["outcome"]
         == "matched"
