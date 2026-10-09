@@ -159,13 +159,12 @@ making the same mistake unless the shape is fixed at emission time.**
 8. **Parameter count estimate.** You MUST supply `parameter_count_estimate`
    as a positive integer — your best estimate of the total trainable
    parameter count at the `baseline_config`. This drives the proposer-side
-   pre-flight cost gate: the static cost model multiplies your estimate by
-   the active `segmentation_size` and training steps to predict wall-time.
-   An order-of-magnitude estimate is sufficient — be realistic about
-   multi-head attention, state dimensions, dilated convolution stacks, and
-   bidirectional layers. If your estimate exceeds the active time budget,
-   the gate will reject the draft and ask you to revise toward a simpler
-   or lighter architectural class.
+   static time advisory, which uses the proposed workload and configured
+   phase budget. An order-of-magnitude estimate is sufficient — be realistic
+   about multi-head attention, state dimensions, dilated convolution stacks,
+   and bidirectional layers. This uncalibrated estimate does not reject or
+   revise a proposal and does not establish a parameter-count ceiling.
+   Actual execution and resource checks remain authoritative.
 
 9. **Loss selection — 3-branch decision rule.** Exactly one of these three
    branches MUST hold; the schema validator rejects any other combination.

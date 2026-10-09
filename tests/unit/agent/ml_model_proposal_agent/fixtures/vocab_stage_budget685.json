@@ -1,0 +1,18 @@
+{
+  "base_revision": "c7996a352d064229725ab1ebe886b9006bdbf36d",
+  "scope": "Native full request/output traces after the intentional #685 budget-context addition and advisory wording correction. Pre-147 capture remains in vocab_stage_pre147.json. Captured from focused pytest execution before fixture update.",
+  "source_sha256": {
+    "src/agent/prompt_templates/proposal/budget_context.py": "82ff1ddcfbe51e59b0f51264e62bf542e85f7e31e39b61833805db1b44f66b32",
+    "src/agent/prompt_templates/proposal/proposing_stage.md": "653ca111d0baa3efee60cb2e5617de3e91f5fe71f81b83d34de825810c92a514",
+    "src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py": "b319f15ea92031b2f9697f489b63649c49217169d274a3c09087c38017da4b16",
+    "src/agent/schemas/proposal.py": "4ea345813e4bf13c407c2bc894bc5bd60a16db3c45908a0370ca68cb072333ad"
+  },
+  "cases": {
+    "empty": "3e9185c6c4358f440fa5cbaae210b0401c379bb923444f19fec56380be55b6eb",
+    "omitted": "bd6c0c54114d10306f5d35710ee06db2edf1ef2c05ade1536180d54339a6a805",
+    "vocabulary": "5226b01a0a20158be3b8ad543183e22ad78060ff6da09aa9f4616568ecf01273",
+    "ignored": "69a1024155e6142d359349bbcdb621f53c0e9802630bd3feeb8bccc23f7e6c5f",
+    "no-causal": "1ac879f99287aea82c9e580f69476d63ecc4bc44104346d82ab5cc320de147e8",
+    "no-comparison": "a1b3461f811e43a419bca1a615dae5fa95b15ac2e87c08929823eada977675ae"
+  }
+}

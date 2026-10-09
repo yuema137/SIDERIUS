@@ -38,6 +38,7 @@ from agent.prompt_templates.proposal import (
     render_data_analysis_evidence,
     render_literature_review_evidence,
 )
+from agent.prompt_templates.proposal.budget_context import render_proposer_time_budget_context
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
@@ -1229,6 +1230,9 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     full-coverage fixture and a legacy artifact with absent keys.
     """
     lines = []
+    budget_block = render_proposer_time_budget_context(inp)
+    if budget_block:
+        lines += [budget_block, ""]
 
     # Phase 6.6 WS-B (B.2 bleed-over, landed with B.1 for Level-2 validation):
     # Render the [HARDWARE CONTEXT] block at the top of the user prompt so the
@@ -1709,6 +1713,9 @@ class MLModelProposalAgent:
         print(f"   Legacy reasoning complete ({len(reasoning)} chars).")
 
         commit_prompt = _build_commit_prompt(reasoning, inp.existing_model_types)
+        budget_block = render_proposer_time_budget_context(inp)
+        if budget_block:
+            commit_prompt = budget_block + "\n\n" + commit_prompt
         raw = self.bridge.generate(
             _render_commit_system_prompt(
                 inp.forward_contract,
@@ -1857,6 +1864,7 @@ class MLModelProposalAgent:
         # P-d: hardware + constraints blocks are now rendered in pipeline mode
         # (pre-P-d these were rendered only in legacy mode at _build_reasoning_prompt
         # so production runs never saw them — dangling pointers in the system prompts).
+        budget_block = render_proposer_time_budget_context(inp)
         hardware_block = _render_hardware_context_block(inp.hardware_context, inp.vram_budget_gb)
         data_scope_block = _render_data_scope_block(inp.data_scope)
         constraints_block = "\n\n".join(
@@ -2042,6 +2050,8 @@ class MLModelProposalAgent:
                 order=order,
             )
             user_prompt_parts: list[str] = []
+            if budget_block:
+                user_prompt_parts.append(budget_block)
             if cold_start_block:
                 user_prompt_parts.append(cold_start_block)
             if hardware_block:
@@ -2151,6 +2161,8 @@ class MLModelProposalAgent:
                             # context → accumulated → vocab (matches the main
                             # reasoning-stage assembly above).
                             retry_parts: list[str] = []
+                            if budget_block:
+                                retry_parts.append(budget_block)
                             if hardware_block:
                                 retry_parts.append(hardware_block)
                             if data_scope_block:
@@ -2265,6 +2277,8 @@ class MLModelProposalAgent:
                 )
                 # P-d order — mirrors the boldness-retry assembly above.
                 correction_parts: list[str] = []
+                if budget_block:
+                    correction_parts.append(budget_block)
                 if hardware_block:
                     correction_parts.append(hardware_block)
                 if data_scope_block:
@@ -2369,6 +2383,8 @@ class MLModelProposalAgent:
             # (proposing-stage prompts already cite vocab via system-prompt
             # template_vars; rendering it again would bloat the prompt).
             proposing_parts: list[str] = []
+            if budget_block:
+                proposing_parts.append(budget_block)
             if hardware_block:
                 proposing_parts.append(hardware_block)
             if constraints_block:

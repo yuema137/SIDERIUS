@@ -1,4 +1,4 @@
-"""Flag OFF ⇒ the proposer reasoning prompt is byte-identical to pre-CB4.
+"""Flag OFF preserves the reasoning baseline without exposing health evidence.
 
 CB4-a (``pr3_healthgate_feedback.md`` §3.7, CB4 spec §3/§5). The golden
 was rendered at commit ``2052fa2`` (clean tree, before the proposer
@@ -9,6 +9,8 @@ the interpretation dict is the real ``model_dump`` of a typed
 for two disjoint models, plus §14.N gate-exhaustion data. So parity is
 asserted with the structured fields PRESENT and the flag OFF — by exact
 full-string equality, never by absence of the new block alone.
+The #685 native budget-context prefix is included; the earlier health and
+interpretation content remains unchanged.
 """
 
 from pathlib import Path

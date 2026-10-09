@@ -1,4 +1,4 @@
-"""Owner-stage correction and frozen successful-path prompt parity for #147."""
+"""Owner-stage correction and current native successful-path request snapshots."""
 
 import hashlib
 import json
@@ -68,8 +68,8 @@ def trace(tmp_path, variant):
 @pytest.mark.parametrize(
     "variant", ["empty", "omitted", "vocabulary", "ignored", "no-causal", "no-comparison"]
 )
-def test_successful_trace_matches_pre_147(tmp_path, variant):
-    fixture = Path(__file__).with_name("fixtures") / "vocab_stage_pre147.json"
+def test_successful_trace_matches_budget_context_baseline(tmp_path, variant):
+    fixture = Path(__file__).with_name("fixtures") / "vocab_stage_budget685.json"
     assert trace(tmp_path, variant) == json.loads(fixture.read_text())["cases"][variant]
 
 

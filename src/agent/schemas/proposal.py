@@ -975,20 +975,17 @@ class ProposalInput(BaseModel):
     )
     trial_time_budget_minutes: float | None = Field(
         default=None,
-        description="Wall-time budget in minutes against which evaluate_time_skill "
-        "gates the baseline config when inp.is_trial=True. None = "
-        "trial gate disabled (no estimate). "
-        "See §2.7 + Phase I — the single time_budget_minutes field "
-        "used in Phases D-G was split into trial/formal so each mode "
-        "has its own ceiling.",
+        description="Configured Trial time budget in minutes, shown independently "
+        "in every proposer request. Used by the static preflight advisory when "
+        "is_trial=True; it never rejects or revises proposals. None means no "
+        "Trial budget was supplied to this input, so its advisory is skipped.",
     )
     formal_time_budget_minutes: float | None = Field(
         default=None,
-        description="Wall-time budget in minutes against which evaluate_time_skill "
-        "gates the baseline config when inp.is_trial=False. None = "
-        "formal gate disabled. Sized independently from the trial "
-        "budget because formal runs use the full dataset and have a "
-        "wall-time scale 50-100× longer.",
+        description="Configured Formal time budget in minutes, shown independently "
+        "in every proposer request. Used by the static preflight advisory when "
+        "is_trial=False; it never rejects or revises proposals. None means no "
+        "Formal budget was supplied to this input, so its advisory is skipped.",
     )
     data_dir: str | None = Field(
         default=None,
@@ -1297,12 +1294,10 @@ class ProposalOutput(BaseModel):
     parameter_count_estimate: int | None = Field(
         default=None,
         description="LLM-emitted estimate of the total trainable parameter count "
-        "for baseline_config. Consumed by the proposer's pre-flight "
-        "static-cost gate (Fix 2) — an order-of-magnitude estimate "
-        "is sufficient for gate-level decisions. None = pre-flight "
-        "was not run for this draft (either the LLM omitted the field "
-        "or the active time budget was disabled). See "
-        "docs/reliable_resource_proposer.md §7 Decision 3 + §9 Commit 6.",
+        "for baseline_config. Consumed by the proposer-side static time "
+        "advisory, not a rejection gate or parameter-count ceiling. "
+        "None means the proposal omitted this estimate; advisory audit "
+        "fields separately record whether preflight ran.",
     )
     preflight_estimated_minutes: float | None = Field(
         default=None,
@@ -1318,10 +1313,9 @@ class ProposalOutput(BaseModel):
         default=None,
         description="preflight_estimated_minutes / active_budget_minutes, rounded "
         "to 3 decimal places. factor <= 1.0 means the draft is "
-        "predicted to fit; factor > 1.0 would have triggered a "
-        "pre-flight rejection. On exhaustion of the pre-flight revision "
-        "loop the emitted candidate is the lowest-factor draft seen "
-        "(not necessarily the last one).",
+        "predicted to fit; factor > 1.0 means the static estimate exceeds "
+        "that budget. The shared runtime policy can emit an advisory note; "
+        "this estimate never rejects, revises or selects a proposal.",
     )
     custom_loss_spec: CustomLossSpec | None = Field(
         default=None,

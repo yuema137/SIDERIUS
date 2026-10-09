@@ -1,3 +1,8 @@
+## Configured time budgets
+- Trial time budget: not configured in this input
+- Formal time budget: not configured in this input
+Use these configured budgets when considering the architecture and workload. Each is a phase budget, not a utilization target or a total experiment/API spending limit. The proposer-side static time estimate is advisory: it does not reject or revise proposals, and it does not establish a parameter-count ceiling. These values do not change the declared task, workflow permissions or native training capabilities; execution uses its resolved resource policy.
+
 ## Interpretation Summary
 Models analysed     : ['model_a', 'model_b']
 Total experiments   : 7

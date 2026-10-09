@@ -68,8 +68,8 @@ not silently restore the previous ignored-configuration behavior.
 | `target_files` | `list[int]` | No | `[]` | File indices to sample from. Required when `trial_strategy="target"`. |
 | `train_portion` | `float` | No | `0.1` | Per-epoch fraction supplied to the static proposal-time estimate; it does not trigger data sampling in the proposer. |
 | `sampling_seed` | `int \| None` | No | `None` | Optional seed recorded as proposal context; the static estimate performs no `build_sample_set()` data access. |
-| `trial_time_budget_minutes` | `float \| None` | No | `None` | Active trial budget supplied to the static `estimate_proposal_time` advisory; it never rejects or revises a proposal. |
-| `formal_time_budget_minutes` | `float \| None` | No | `None` | Active formal budget supplied to the static `estimate_proposal_time` advisory; it never rejects or revises a proposal. |
+| `trial_time_budget_minutes` | `float \| None` | No | `None` | Configured Trial minutes, delivered independently in every proposer request and used by the static advisory when `is_trial=True`. `None` renders as not configured in this input; the advisory never rejects or revises a proposal. |
+| `formal_time_budget_minutes` | `float \| None` | No | `None` | Configured Formal minutes, delivered independently in every proposer request and used by the static advisory when `is_trial=False`. `None` renders as not configured in this input; the advisory never rejects or revises a proposal. |
 | `vram_budget_gb` | `float \| None` | No | `None` | Active operator-defined VRAM ceiling (GB) for the upcoming tuning iteration. Workflow picks trial vs formal budget based on `is_trial`. |
 | `data_dir` | `str \| None` | No | `None` | Caller-selected physical data root forwarded to the workflow/runtime when supplied. The proposer preflight is a static estimate: it performs no HDF5/data access and does not switch to a synthetic fallback when this value is absent. |
 | `debug_dump_proposing_prompt_path` | `str \| None` | No | `None` | Debug instrumentation: when set, pipeline mode writes the rendered proposing-stage system prompt to this path before calling the LLM. Useful for offline prompt audits (Checkpoint P). |
@@ -106,7 +106,7 @@ not silently restore the previous ignored-configuration behavior.
 | `proposed_vocab_candidates` | `list[dict[str, str]]` | New feature/capability candidates from the comparison or reasoning stage. Each entry is `{"name", "kind" (feature\|capability), ...}`. |
 | `proposed_discoveries` | `list[VocabEntry]` | New `kind="discovery"` vocabulary entries the proposer suggests. Empirical findings expressed as sentences. Added to `runtime_vocab` after the next interpretation pass. |
 | `memo_consistency_notes` | `list[str]` | Inconsistencies the proposing stage noticed between the `DiscoveryMemo` and what's physically implementable. Empty = no issues. |
-| `parameter_count_estimate` | `int \| None` | LLM-emitted estimate of the total trainable parameter count for `baseline_config`. Consumed by the proposer's own pre-flight static-cost gate. |
+| `parameter_count_estimate` | `int \| None` | LLM-emitted estimate of the total trainable parameter count for `baseline_config`. Consumed by the proposer's static time advisory, never a parameter-count ceiling. |
 | `preflight_estimated_minutes` | `float \| None` | Pre-flight static-formula wall-time estimate (minutes) for `baseline_config`, evaluated against the active time budget. |
 | `preflight_factor` | `float \| None` | `preflight_estimated_minutes / active_budget_minutes`, rounded to 3 decimal places. `≤ 1.0` = predicted to fit; `> 1.0` = a labeled `PREFLIGHT_ADVISORY` note is appended to `memo_consistency_notes` (C1, 2026-07-30: the estimate is `static_uncalibrated` provenance and ADVISORY ONLY — it never triggers rejection or revision). C8b (2026-07-30): the note is emitted on the SHARED `RuntimeDecisionPolicy` decision (`phase="proposal"`), not on a private `factor > 1.0` comparison; the deciding policy identity is appended to the note, and a REJECT/ABORT at this stage raises `AssertionError` rather than silently rejecting a proposal. |
 
@@ -277,7 +277,21 @@ The constructor accepts `bridge_factory` (test injection — defaults to `LLMBri
 - **Citation discipline** (`_check_citation_discipline`). The reasoning stage's output is checked for valid `source_ref` values: each ref must correspond to an entry in `expert_context` or `agent_cards`. Invalid refs (hallucinated citations) trigger an error message appended to the next attempt's prompt.
 - **Inherited-component source format**: causal and proposing prompts include examples of the existing `InheritedComponent` contract: bare model types for experiments, and supplied `prefix:identifier` references for external agents or humans. Examples are not permission to invent sources. The existing schema validation and causal-stage correction path remain authoritative.
 - **Task-background block in all three pipeline SYSTEM prompts** (PR 01b / S1-C). Each stage's base template (`comparison_stage.md`, `causal_reasoning_stage.md`, `proposing_stage.md`) carries `{task_background_block}` exactly once, immediately before its `## Your task` heading, in BOTH `explore` and `exploit` modes. It is filled from `inp.task_description` by `_render_pipeline_task_background()`, which delegates to `_render_task_background()` with an EMPTY `ForwardContract` — so the `Background on the task:` label has exactly one authority in the codebase and the forward contract is NOT duplicated into stages 1-2 (the proposing stage renders it separately through its own `{forward_contract}` placeholder). An absent or whitespace-only description collapses the block to `""`, leaving the rendered prompt byte-identical to the pre-JOIN template. The description authority is `configs/task_config.yaml` via `load_task_config()`; the workflow injects it at the proposer call site, and the standalone CLI loads it in `main()`. Before this PR the value was transported into `template_vars` and consumed by no template — the comparison and causal stages, which choose the architecture family, received no task framing at all.
-- **Pipeline mode prompt assembly order** (locked by Commit P-d). Each pipeline stage's user prompt assembles blocks in this top-to-bottom order: (1) `[HARDWARE CONTEXT]`, (2) `## Constraints`, (3) `## External Contributors` (rendered `agent_cards`), (4) `## Expert Context` (rendered `expert_context`), (5) candidate markdown + accumulated JSON, (6) vocab block (reasoning stages only). This order is what Checkpoint P signed off on; reordering would be a structural regression.
+- **Configured time budgets in every request.**
+  `agent/prompt_templates/proposal/budget_context.py` renders Trial and Formal
+  minutes independently from `ProposalInput`, including explicit missing-value
+  text. The block leads legacy reasoning and commit requests, initial pipeline
+  stages, boldness retries, causal corrections and proposing retries. Comparison
+  corrections retain the original request. It is outside the clamped prior-stage
+  output, and commit does not depend on reasoning text repeating the values.
+  This context adds no model-size target, tuning permission or training feature.
+- **Pipeline user prompt order.** Configured time budgets precede the existing
+  context: cold-start banner (initial stages only), hardware and data-scope blocks
+  where present, constraints, external contributors, expert context, candidate
+  markdown plus accumulated JSON, then vocabulary for reasoning stages. Proposing
+  retains its existing omission of data-scope and vocabulary blocks. An explicit
+  rendering provider that returns an empty budget block leaves the other blocks
+  and their separators unchanged.
 - **Mindset overrides `_explore.md` / `_exploit.md` fallback.** When `mindset` is set, it replaces the default exploration/exploitation hint block at `{# EXPLORATION_MODE_BLOCK #}` in the causal-reasoning prompt. This is how the workflow signals "explore more / exploit more" without editing prompt files.
 - **Auditing helper for tests.** `_audit_proposer_components(...)` (used by `tests/unit/agent/ml_model_proposal_agent/`) returns a 10-key components dict mirroring `bridge.generate(...)` inputs — for verifying prompt assembly in isolation without firing an LLM call.
 - **Duplicate-name guard.** If the LLM proposes a `model_name` already in `existing_model_types`, `run()` raises `ValueError` immediately — no retry, no fallback. The workflow is expected to vary constraints or seed prompt on the next attempt.
@@ -373,7 +387,7 @@ a no-change prediction is corrected by the causal stage's existing retry.
 
 ## Explicit rendering profiles
 
-Stage system prompts load templates through `proposal.template` and append training guidance through `native_training.appendix`. An explicit run-scoped rendering profile may replace these text boundaries. Stage orchestration, vocabulary validation and correction budgets remain native; selecting old text does not bypass current validators.
+Stage system prompts load templates through `proposal.template` and append training guidance through `native_training.appendix`. The configured time-budget block uses `proposal.time_budget_context`. An explicit run-scoped rendering profile may replace these text boundaries, including returning an empty budget block for a qualified historical request. Stage orchestration, vocabulary validation and correction budgets remain native; selecting old text does not bypass current validators.
 
 Composition declares the optional `prompt_renderer` and pins its identity.
 See the [task-composition contract](../../../docs/reference/task-composition.md#explicit-prompt-rendering-providers)
