@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
 from agent.schemas.model_io_contract import ModelIOContract
+from agent.schemas.model_probe import ModelProbeContext
 from agent.schemas.proposal import InheritedComponent
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 
@@ -99,6 +100,11 @@ class ValidatorInput(BaseModel):
         default=None,
         description="Optional human-provided guidance (highest priority — overrides expert_advice). "
         "When present, injected into the LLM prompt as high-priority context.",
+    )
+    model_probe_context: ModelProbeContext | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Task-owned validation input identity, transported without reinterpretation.",
     )
     model_io_contract: ModelIOContract | None = Field(
         default=None,

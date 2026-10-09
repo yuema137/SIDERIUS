@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput, TaskCompositionRef
 from agent.schemas.model_io_contract import ModelIOContract
+from agent.schemas.model_probe import ModelProbeContext
 from agent.schemas.output_types import OutputTypeName
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
@@ -501,6 +502,11 @@ class ImplementorOutput(BaseModel):
         "``run_name``, the absolute path to the plugin file, and whether the "
         "dummy-tensor forward pass validated. See "
         "``docs/design/enable_loss_inventory.md`` § Commit L3.",
+    )
+    model_probe_context: ModelProbeContext | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Task-owned validation input identity, transported without reinterpretation.",
     )
     model_io_contract: ModelIOContract | None = Field(
         default=None,

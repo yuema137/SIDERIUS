@@ -10,9 +10,10 @@ import tempfile
 from pathlib import Path
 
 import psutil
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent.schemas.model_io_contract import ModelIOContract
+from agent.schemas.model_probe import ModelProbeContext, ModelProbeSetupError
 from core.local_code.child import prepare_child
 from core.subprocess_env import subprocess_env
 
@@ -20,12 +21,16 @@ ProbeResult = tuple[bool, bool, bool, str | None, int | None, int | None]
 
 
 class ProbeRequest(BaseModel):
+    model_probe_context: ModelProbeContext | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     model_file_path: str
     model_io_contract: ModelIOContract | None
     result_path: str
 
 
 class ProbeResponse(BaseModel):
+    setup_error: str | None = Field(default=None, exclude_if=lambda value: value is None)
     instantiation_ok: bool
     gradient_ok: bool
     output_type_ok: bool
@@ -34,6 +39,8 @@ class ProbeResponse(BaseModel):
     trainable_parameters: int | None
 
     def as_tuple(self) -> ProbeResult:
+        if self.setup_error is not None:
+            raise ModelProbeSetupError(self.setup_error)
         return (
             self.instantiation_ok,
             self.gradient_ok,
@@ -65,6 +72,8 @@ def _worker_address_space_limit() -> int:
 def run_bounded_probe(
     model_file_path: str,
     model_io_contract: ModelIOContract | None,
+    *,
+    model_probe_context: ModelProbeContext | None = None,
 ) -> ProbeResult:
     """Return a failed candidate verdict if its isolated check exceeds resources."""
     with tempfile.TemporaryDirectory(prefix="siderius-validator-") as directory:
@@ -74,6 +83,7 @@ def run_bounded_probe(
             ProbeRequest(
                 model_file_path=model_file_path,
                 model_io_contract=model_io_contract,
+                model_probe_context=model_probe_context,
                 result_path=str(result),
             ).model_dump_json(),
             encoding="utf-8",
@@ -128,13 +138,25 @@ def main() -> None:
         _check_instantiation_and_gradient,
     )
 
-    verdict = _check_instantiation_and_gradient(
-        request.model_file_path,
-        request.model_io_contract,
-        _isolated_worker=True,
+    options = (
+        {"model_probe_context": request.model_probe_context}
+        if request.model_probe_context is not None
+        else {}
     )
+    setup_error = None
+    try:
+        verdict = _check_instantiation_and_gradient(
+            request.model_file_path,
+            request.model_io_contract,
+            _isolated_worker=True,
+            **options,
+        )
+    except ModelProbeSetupError as error:
+        setup_error = str(error)
+        verdict = (False, False, False, None, None, None)
     Path(request.result_path).write_text(
         ProbeResponse(
+            setup_error=setup_error,
             instantiation_ok=verdict[0],
             gradient_ok=verdict[1],
             output_type_ok=verdict[2],

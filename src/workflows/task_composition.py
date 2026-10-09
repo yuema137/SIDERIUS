@@ -1872,8 +1872,11 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
     """
     if task_composition is None:
         return None
+    from agent.skills.task_model_probe import model_probe_context_for
+
     objective = getattr(task_composition, "objective", None)
     return TaskCompositionRef(
+        model_probe_context=model_probe_context_for(task_composition),
         semantic_fingerprint=task_composition.semantic_fingerprint,
         task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
         task_health_binding=task_composition.task_health_binding,

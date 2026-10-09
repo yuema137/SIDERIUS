@@ -12,3 +12,7 @@ scientific validity or output-quality guarantees. No dataset, task name or
 hardware-specific length is selected here. Existing shape realization rejects
 ambiguous independent symbolic axes rather than assigning one configured length
 to unrelated dimensions.
+
+Tasks with constrained input values can supply a
+[task-owned candidate input](task_model_probe.md). That optional provider replaces
+random values while retaining this module as the geometry owner.
