@@ -101,6 +101,7 @@ IMPLEMENTOR_INPUT_KEYS = {
 IMPLEMENTOR_OUTPUT_KEYS = {
     "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
     "model_io_contract",  # Step 04a — deliberate addition, this pin forced it
+    "model_probe_context",  # Optional task-owned probe transport (PR #680).
     "baseline_config_adjustments",
     "capability_metadata",
     "config_fields",
@@ -117,6 +118,7 @@ IMPLEMENTOR_OUTPUT_KEYS = {
 VALIDATOR_INPUT_KEYS = {
     "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
     "model_io_contract",  # Step 04a — deliberate addition, this pin forced it
+    "model_probe_context",  # Optional task-owned probe transport (PR #680).
     "config_fields",
     "description_file_path",
     "expert_advice",
