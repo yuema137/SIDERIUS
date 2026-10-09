@@ -7,9 +7,10 @@ with the task composition.
 
 ## Required operator settings
 
-Declare both role time budgets and explicit role epoch ceilings in 1..100.
+Declare both role time budgets and explicit positive integer epoch ceilings.
 The existing epoch-cap resolver remains authoritative: role-specific cap,
-then `max_epochs`. The reserve must be strictly between zero and one.
+then `max_epochs`. There is no additional framework ceiling of 100 epochs.
+The reserve must be strictly between zero and one.
 Incomplete configuration is rejected at the typed tuner boundary, before
 training. Formal receives its own budget and ceiling even when `full_clone`
 copies the Trial proposal's initial epochs.

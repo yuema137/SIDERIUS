@@ -948,3 +948,20 @@ def test_cooperative_epochs_use_budget_and_keep_last_weights(
     assert session.observation.components["training"].workload.unit_count == 36
     assert session.observation.components["validation"].workload.unit_count == 72
     interpret_training_results(adaptive, expected_validation=True)
+
+
+def test_explicit_epoch_schedule_above_100_reaches_native_cpu_training(two_family, tmp_path):
+    """A legal caller schedule must reach real optimization and persisted history."""
+    summary = _run(
+        two_family,
+        tmp_path,
+        name="large_epoch_schedule",
+        eval_sample_set=None,
+        epochs=101,
+        batch_size=1,
+        sample_set={0: [0]},
+    )
+    history = TrainingHistory.model_validate(summary["training_history"])
+    assert history.epochs_planned == history.epochs_completed == 101
+    assert len(summary["loss_history"]) == 101
+    assert _saved_state(tmp_path, "large_epoch_schedule")

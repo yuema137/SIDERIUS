@@ -323,8 +323,8 @@ Chain, iteration and tuner entrypoints accept
 `--training_budget_reserve_fraction FLOAT` (default omitted/`None`). This
 explicit opt-in reserves part of each resolved role time budget for downstream
 work and enables time/cap-based epoch allocation. Both role budgets and
-explicit epoch caps in `1..100` are required. It does not enable scientific
-early stopping or a watchdog. See [cooperative training](cooperative-training-budget.md).
+explicit positive integer epoch caps are required; there is no additional
+100-epoch ceiling. It does not enable scientific early stopping or a watchdog. See [cooperative training](cooperative-training-budget.md).
 
 ### Optional optimizer-step guard
 

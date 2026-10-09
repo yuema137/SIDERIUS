@@ -883,7 +883,7 @@ class TrainConfig(BaseModel):
     # declared parameter rules; moving task-owned baseline artifacts must not
     # silently change the generic schema's resolved value.
     lr: float = Field(default=5e-4, ge=1e-6, le=1e-1)
-    epochs: int = Field(default=10, ge=1, le=100)
+    epochs: int = Field(default=10, ge=1)
     # --- Add batch ---
     batch_size: int = Field(default=1, ge=1, le=1024, description="Batch size for training")
     # ----------------------------

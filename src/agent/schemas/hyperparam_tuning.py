@@ -2539,7 +2539,7 @@ class HyperparamTuningInput(BaseModel):
         default=None,
         gt=0,
         lt=1,
-        description="Opt in to cooperative epoch allocation; reserve this fraction of the role budget for inference/scoring/save. Requires an explicit role epoch cap <=100. No scientific early stopping; retain last weights.",
+        description="Opt in to cooperative epoch allocation; reserve this fraction of the role budget for inference/scoring/save. Requires an explicit positive role epoch cap. No scientific early stopping; retain last weights.",
     )
     trial_max_epochs: int | None = Field(
         default=None,
@@ -2580,10 +2580,10 @@ class HyperparamTuningInput(BaseModel):
                 (False, self.formal_time_budget_minutes),
             ):
                 cap = self.resolve_epoch_cap(is_trial=is_trial).cap
-                if budget is None or cap is None or cap > 100:
+                if budget is None or cap is None:
                     raise ValueError(
                         "Cooperative training requires both role time budgets and "
-                        "explicit epoch caps in 1..100; no implicit unbounded training"
+                        "explicit positive epoch caps; no implicit unbounded training"
                     )
         return self
 

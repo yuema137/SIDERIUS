@@ -1921,7 +1921,7 @@ Design: `docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training
 
 `training_budget_reserve_fraction: float | None = None` is forwarded from
 `--training_budget_reserve_fraction`. When supplied, it must be in `(0,1)`;
-both role time budgets and explicit effective epoch caps in `1..100` are
+both role time budgets and explicit positive integer effective epoch caps are
 required. Initial proposed epochs no longer fix the executed horizon. The
 trainer adds complete epochs while the role allowance, downstream reserve
 and epoch cap permit. Formal retains its independent allowance under

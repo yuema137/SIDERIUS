@@ -25,7 +25,7 @@ class TrainingBudgetEnvelope(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
     budget_seconds: float = Field(gt=0)
     reserve_fraction: float = Field(gt=0, lt=1)
-    max_epochs: int = Field(ge=1, le=100)
+    max_epochs: int = Field(ge=1)
     max_optimizer_steps: int | None = Field(default=None, gt=0)
     started_monotonic_seconds: float = Field(ge=0)
 

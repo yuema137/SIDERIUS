@@ -44,6 +44,17 @@ ml_hyperparameter_tune_agent
 | `order_strategy` | `str` | No | `"shuffle"` | **Resolved** training sample visitation order (V19 PR 2). |
 | `file_order` | `list[int] \| None` | No | `None` | **Resolved** file visitation order for `sequential`. |
 
+### Epoch ownership
+
+`TrainConfig.epochs` is a positive integer, defaults to 10 when omitted, and
+has no fixed upper ceiling. The tuner resolves the role-specific epoch cap,
+then the common `max_epochs`, and clamps the configuration before calling
+this skill. If neither cap is supplied, the tuner adds no implicit cap.
+The standard workflow CLI still defaults `max_epochs` to 1; direct callers
+must supply the schedule and resource limits appropriate for their task.
+Cooperative allocation additionally requires explicit positive epoch caps
+and role time budgets; its time and optimizer-step protections are unchanged.
+
 ## Output
 
 Returns the sandbox executor's result dict unchanged — `status`,

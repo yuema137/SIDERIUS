@@ -291,3 +291,104 @@ def test_default_launch_allows_more_than_old_step_ceiling_but_stops_on_time(tmp_
         next_optimizer_steps=100_000,
     )
     assert decision.action == "stop" and decision.reason == "time_budget"
+
+
+def test_large_explicit_caps_reach_allocations_and_keep_all_stop_guards(tmp_path):
+    """The typed tuner opt-in and executor envelope must accept the same cap."""
+    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+    from agent.schemas.storage import LocalStorageConfig, StorageConfig
+    from core.runtime_control.session import RuntimeControlPolicy
+    from nodes.ml_hyperparameter_tune_agent import _build_runtime_policy
+
+    inputs = HyperparamTuningInput(
+        model_type="punet",
+        storage=StorageConfig(
+            backend="local", local=LocalStorageConfig(workspace=str(tmp_path), run_name="large-cap")
+        ),
+        trial_time_budget_minutes=15,
+        formal_time_budget_minutes=45,
+        training_budget_reserve_fraction=0.2,
+        trial_max_epochs=500,
+        formal_max_epochs=750,
+    )
+    for trial, minutes, cap in ((True, 15, 500), (False, 45, 750)):
+        policy = RuntimeControlPolicy.model_validate(
+            _build_runtime_policy(
+                inputs,
+                chosen_time_budget=minutes,
+                admission_source="forecast",
+                is_trial=trial,
+                base_dir=str(tmp_path),
+            )
+        )
+        allocation = policy.training_budget
+        assert allocation is not None and allocation.max_epochs == cap
+        assert allocation.budget_seconds == minutes * 60
+        assert (
+            decide_training_budget(
+                allocation,
+                elapsed_seconds=101,
+                completed_epochs=101,
+                observed_epoch_seconds=[1] * 101,
+            ).action
+            == "continue"
+        )
+        assert (
+            decide_training_budget(
+                allocation,
+                elapsed_seconds=cap,
+                completed_epochs=cap,
+                observed_epoch_seconds=[1] * cap,
+            ).reason
+            == "epoch_cap"
+        )
+        assert (
+            decide_training_budget(
+                allocation,
+                elapsed_seconds=minutes * 60,
+                completed_epochs=101,
+                observed_epoch_seconds=[1] * 101,
+            ).reason
+            == "time_budget"
+        )
+        stepped = allocation.model_copy(update={"max_optimizer_steps": 101})
+        assert (
+            decide_training_budget(
+                stepped,
+                elapsed_seconds=101,
+                completed_epochs=101,
+                observed_epoch_seconds=[1] * 101,
+                completed_optimizer_steps=101,
+                next_optimizer_steps=1,
+            ).reason
+            == "step_limit"
+        )
+
+
+def test_cooperative_opt_in_still_requires_both_positive_caps_and_time_budgets(tmp_path):
+    """Removing a numeric ceiling must not permit an unbounded allocation."""
+    import pytest
+
+    from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+    from agent.schemas.storage import LocalStorageConfig, StorageConfig
+
+    valid = dict(
+        model_type="punet",
+        storage=StorageConfig(
+            backend="local", local=LocalStorageConfig(workspace=str(tmp_path), run_name="limits")
+        ),
+        trial_time_budget_minutes=15,
+        formal_time_budget_minutes=45,
+        training_budget_reserve_fraction=0.2,
+        max_epochs=500,
+    )
+    for overrides in (
+        {"max_epochs": None},
+        {"trial_time_budget_minutes": None},
+        {"formal_time_budget_minutes": None},
+        {"max_epochs": 0},
+        {"max_epochs": -1},
+        {"trial_max_epochs": 1.5},
+    ):
+        with pytest.raises(ValueError):
+            HyperparamTuningInput.model_validate({**valid, **overrides})
