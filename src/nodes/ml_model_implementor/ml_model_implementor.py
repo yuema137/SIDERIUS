@@ -219,7 +219,12 @@ def _smoke_test_plugin(
             from agent.skills.task_model_validation import check_task_model
 
             verdict = check_task_model(
-                model, config, model_io_contract, model_probe_context, declared, gradients=False,
+                model,
+                config,
+                model_io_contract,
+                model_probe_context,
+                declared,
+                gradients=False,
             )
             return verdict[3]
 
@@ -1827,7 +1832,10 @@ class MLModelImplementor:
         context = inp.task_composition_ref.model_probe_context if inp.task_composition_ref else None
         smoke_options = {"model_probe_context": context} if context is not None else {}
         smoke_error = _smoke_test_plugin(
-            plugin_src, inp.model_name, inp.forward_contract.model_io, **smoke_options,
+            plugin_src,
+            inp.model_name,
+            inp.forward_contract.model_io,
+            **smoke_options,
         )
         if smoke_error:
             return f"Smoke test failed: {smoke_error}"
@@ -2168,8 +2176,11 @@ class MLModelImplementor:
                 # Omitting it here would silently drop the validator back to
                 # the legacy path for every reuse iteration.
                 model_io_contract=inp.forward_contract.model_io,
-                model_probe_context=(inp.task_composition_ref.model_probe_context
-                                     if inp.task_composition_ref else None),
+                model_probe_context=(
+                    inp.task_composition_ref.model_probe_context
+                    if inp.task_composition_ref
+                    else None
+                ),
                 loss_provenance=loss_provenance,
                 loss_capability_metadata=loss_capability_metadata,
             )
@@ -2235,8 +2246,9 @@ class MLModelImplementor:
         test_src = _assemble_test(
             inp.model_name,
             inp.forward_contract.model_io,
-            model_probe_context=(inp.task_composition_ref.model_probe_context
-                                 if inp.task_composition_ref else None),
+            model_probe_context=(
+                inp.task_composition_ref.model_probe_context if inp.task_composition_ref else None
+            ),
             # C12-P / F-12e-G1: read from the SAME authority the plugin's own
             # declaration was rendered from, so the generated test can never
             # construct a class the assembled source does not support.
@@ -2339,8 +2351,9 @@ class MLModelImplementor:
             # second read of the task config. `None` on the legacy
             # prose-only path, which the validator preserves unchanged.
             model_io_contract=inp.forward_contract.model_io,
-            model_probe_context=(inp.task_composition_ref.model_probe_context
-                                 if inp.task_composition_ref else None),
+            model_probe_context=(
+                inp.task_composition_ref.model_probe_context if inp.task_composition_ref else None
+            ),
             loss_provenance=loss_provenance,
             loss_capability_metadata=loss_capability_metadata,
             capability_metadata=capability_metadata,

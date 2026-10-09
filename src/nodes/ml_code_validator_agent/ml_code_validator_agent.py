@@ -332,7 +332,8 @@ def _check_plugin(model_file_path: str) -> tuple[bool, str | None]:
 
 
 def _run_tests(
-    test_file_path: str, model_probe_context: ModelProbeContext | None = None,
+    test_file_path: str,
+    model_probe_context: ModelProbeContext | None = None,
 ) -> tuple[bool, str]:
     """
     Run pytest on ``test_file_path``.
@@ -557,7 +558,9 @@ def _check_instantiation_and_gradient(
 
         if model_probe_context is not None:
             return run_bounded_probe(
-                model_file_path, model_io_contract, model_probe_context=model_probe_context,
+                model_file_path,
+                model_io_contract,
+                model_probe_context=model_probe_context,
             )
         return run_bounded_probe(model_file_path, model_io_contract)
 
@@ -609,7 +612,12 @@ def _check_instantiation_and_gradient(
         from agent.skills.task_model_validation import check_task_model
 
         verdict = check_task_model(
-            model, config, model_io_contract, model_probe_context, declared_type, gradients=True,
+            model,
+            config,
+            model_io_contract,
+            model_probe_context,
+            declared_type,
+            gradients=True,
         )
         return (*verdict, realized_total, realized_trainable)
 
@@ -736,8 +744,11 @@ class MLCodeValidatorAgent:
         plugin_ok, plugin_err = _check_plugin(inp.model_file_path)
 
         # 2. Pytest
-        probe_options: ModelProbeOptions = ({"model_probe_context": inp.model_probe_context}
-                         if inp.model_probe_context is not None else {})
+        probe_options: ModelProbeOptions = (
+            {"model_probe_context": inp.model_probe_context}
+            if inp.model_probe_context is not None
+            else {}
+        )
         tests_ok, test_output = _run_tests(inp.test_file_path, **probe_options)
 
         # 3. Description

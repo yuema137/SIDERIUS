@@ -1827,7 +1827,9 @@ def _run_bound_iteration(
         from execute_tools.evaluation_metric import MetricIdentityConflictError
         from nodes.result_interpretation_agent import InterpretationContractError
 
-        if isinstance(e, (MetricIdentityConflictError, InterpretationContractError, ModelProbeSetupError)):
+        if isinstance(
+            e, (MetricIdentityConflictError, InterpretationContractError, ModelProbeSetupError)
+        ):
             _halt_contract_failure(args.workspace, args.start_iteration, e)
         sys.exit(1)
 

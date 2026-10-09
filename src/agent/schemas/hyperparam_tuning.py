@@ -1487,7 +1487,8 @@ class TaskCompositionRef(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     model_probe_context: ModelProbeContext | None = Field(
-        default=None, exclude_if=lambda value: value is None,
+        default=None,
+        exclude_if=lambda value: value is None,
         description="Explicit task-owned model probe identity; absent preserves legacy probes.",
     )
 

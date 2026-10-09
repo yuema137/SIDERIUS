@@ -102,7 +102,8 @@ class ValidatorInput(BaseModel):
         "When present, injected into the LLM prompt as high-priority context.",
     )
     model_probe_context: ModelProbeContext | None = Field(
-        default=None, exclude_if=lambda value: value is None,
+        default=None,
+        exclude_if=lambda value: value is None,
         description="Task-owned validation input identity, transported without reinterpretation.",
     )
     model_io_contract: ModelIOContract | None = Field(
