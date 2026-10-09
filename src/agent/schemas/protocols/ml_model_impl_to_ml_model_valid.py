@@ -64,6 +64,7 @@ def local_all_fields(
         # never defaulted, so a contract that existed upstream cannot be
         # replaced by a plausible-looking substitute on the way down.
         model_io_contract=output.model_io_contract,
+        model_probe_context=output.model_probe_context,
         llm_provider=llm_provider,
         llm_model_id=llm_model_id,
         storage=storage,

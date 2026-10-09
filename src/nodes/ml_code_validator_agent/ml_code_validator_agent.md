@@ -186,7 +186,13 @@ a failure diagnostic. Pytest retains its ordinary filesystem side effects.
 
 ### Candidate probe geometry
 
-The shared `model_io_probe_skill` constructs both nodes' probes. Temporal
+An optional task-owned input provider supplies semantically valid synthetic
+inputs to the implementor, generated tests and validator. See the
+[task-owned probe contract](../../agent/skills/task_model_probe.md) for declaration,
+identity transport and setup-error handling. Without that capability, existing
+random-input recipes remain unchanged.
+
+The shared `model_io_probe_skill` owns probe geometry. Temporal
 candidates are checked at their validated `segmentation_size`; required lengths
 use the fixed input contract when one exists. A fixed contract/config conflict
 is reported explicitly before the model forward pass. The synthetic length 64

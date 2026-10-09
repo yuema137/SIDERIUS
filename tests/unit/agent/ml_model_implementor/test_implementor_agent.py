@@ -730,3 +730,16 @@ class TestExpertAdviceInPrompt:
         expert_pos = prompt.index("Expert Guidance")
         human_pos = prompt.index("Human Guidance")
         assert expert_pos < human_pos
+
+
+def test_task_probe_setup_failure_does_not_request_model_repair(agent_with_mocks, inp):
+    """Task fixture defects must escape the generation/repair loop after one response."""
+    from agent.schemas.model_probe import ModelProbeSetupError
+
+    with patch(
+        "nodes.ml_model_implementor.ml_model_implementor._smoke_test_plugin",
+        side_effect=ModelProbeSetupError("invalid task fixture"),
+    ):
+        with pytest.raises(ModelProbeSetupError, match="invalid task fixture"):
+            agent_with_mocks.run(inp)
+    assert agent_with_mocks.bridge.generate.call_count == 1

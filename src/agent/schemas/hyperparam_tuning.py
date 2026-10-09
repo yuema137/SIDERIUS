@@ -22,6 +22,7 @@ from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
 from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
 from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.model_io_contract import TensorContract
+from agent.schemas.model_probe import ModelProbeContext
 from agent.schemas.ordering import (
     OrderingObservation,
     OrderingValidationError,
@@ -1484,6 +1485,11 @@ class TaskCompositionRef(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    model_probe_context: ModelProbeContext | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+        description="Explicit task-owned model probe identity; absent preserves legacy probes.",
+    )
 
     semantic_fingerprint: str = Field(
         description=(

@@ -37,6 +37,7 @@ from agent.schemas.custom_loss_contract import CustomLossApplicability
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput, LossProvenance
 from agent.schemas.model_io_contract import ModelIOContract, TensorContract
+from agent.schemas.model_probe import ModelProbeContext, ModelProbeSetupError
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
@@ -144,6 +145,8 @@ def _smoke_test_plugin(
     plugin_src: str,
     model_name: str,
     model_io_contract: ModelIOContract | None = None,
+    *,
+    model_probe_context: ModelProbeContext | None = None,
 ) -> str | None:
     """
     Dynamically load *plugin_src*, instantiate the model with default config,
@@ -212,6 +215,14 @@ def _smoke_test_plugin(
         # before the validator ever sees it.
         declared = getattr(mod, "PLUGIN_OUTPUT_TYPE", "classifier")
 
+        if model_probe_context is not None:
+            from agent.skills.task_model_validation import check_task_model
+
+            verdict = check_task_model(
+                model, config, model_io_contract, model_probe_context, declared, gradients=False,
+            )
+            return verdict[3]
+
         # Forward pass. Step 04a: derived when a contract is supplied, the
         # shipped geometry otherwise.
         if model_io_contract is None:
@@ -240,6 +251,8 @@ def _smoke_test_plugin(
 
         return None  # success
 
+    except ModelProbeSetupError:
+        raise
     except Exception as e:
         return f"{type(e).__name__}: {e}"
     finally:
@@ -1651,6 +1664,7 @@ def _assemble_test(
     model_io_contract: ModelIOContract | None = None,
     *,
     config_declares_segmentation_size: bool = True,
+    model_probe_context: ModelProbeContext | None = None,
 ) -> str:
     """Render the candidate's own test file.
 
@@ -1680,6 +1694,12 @@ def _assemble_test(
             construct "with defaults" that no longer exist. ``True`` renders
             ``PLUGIN_CONFIG_CLASS()`` byte-for-byte as before.
     """
+    if model_probe_context is not None:
+        from agent.skills.task_model_validation import render_task_model_test
+
+        if model_io_contract is None:
+            raise ModelProbeSetupError("task-owned generated tests require a model I/O contract")
+        return render_task_model_test(model_name, model_io_contract, model_probe_context)
     if model_io_contract is None:
         index_extent = _LEGACY_SELF_CHECK_CLASSES
         num_classes = _LEGACY_SELF_CHECK_CLASSES
@@ -1804,7 +1824,11 @@ class MLModelImplementor:
             )
 
         # Check 3: smoke test (instantiate + forward pass with defaults)
-        smoke_error = _smoke_test_plugin(plugin_src, inp.model_name, inp.forward_contract.model_io)
+        context = inp.task_composition_ref.model_probe_context if inp.task_composition_ref else None
+        smoke_options = {"model_probe_context": context} if context is not None else {}
+        smoke_error = _smoke_test_plugin(
+            plugin_src, inp.model_name, inp.forward_contract.model_io, **smoke_options,
+        )
         if smoke_error:
             return f"Smoke test failed: {smoke_error}"
 
@@ -2144,6 +2168,8 @@ class MLModelImplementor:
                 # Omitting it here would silently drop the validator back to
                 # the legacy path for every reuse iteration.
                 model_io_contract=inp.forward_contract.model_io,
+                model_probe_context=(inp.task_composition_ref.model_probe_context
+                                     if inp.task_composition_ref else None),
                 loss_provenance=loss_provenance,
                 loss_capability_metadata=loss_capability_metadata,
             )
@@ -2209,6 +2235,8 @@ class MLModelImplementor:
         test_src = _assemble_test(
             inp.model_name,
             inp.forward_contract.model_io,
+            model_probe_context=(inp.task_composition_ref.model_probe_context
+                                 if inp.task_composition_ref else None),
             # C12-P / F-12e-G1: read from the SAME authority the plugin's own
             # declaration was rendered from, so the generated test can never
             # construct a class the assembled source does not support.
@@ -2311,6 +2339,8 @@ class MLModelImplementor:
             # second read of the task config. `None` on the legacy
             # prose-only path, which the validator preserves unchanged.
             model_io_contract=inp.forward_contract.model_io,
+            model_probe_context=(inp.task_composition_ref.model_probe_context
+                                 if inp.task_composition_ref else None),
             loss_provenance=loss_provenance,
             loss_capability_metadata=loss_capability_metadata,
             capability_metadata=capability_metadata,

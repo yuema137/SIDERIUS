@@ -56,6 +56,7 @@ from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.native_training import render_native_training_appendix
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.model_io_contract import ModelIOContract
+from agent.schemas.model_probe import ModelProbeContext, ModelProbeOptions
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import LLMCodeReview, ValidatorInput, ValidatorOutput
 from agent.skills.forbidden_pattern_skill import check_file as _check_forbidden_patterns
@@ -330,7 +331,9 @@ def _check_plugin(model_file_path: str) -> tuple[bool, str | None]:
     return True, None
 
 
-def _run_tests(test_file_path: str) -> tuple[bool, str]:
+def _run_tests(
+    test_file_path: str, model_probe_context: ModelProbeContext | None = None,
+) -> tuple[bool, str]:
     """
     Run pytest on ``test_file_path``.
 
@@ -355,6 +358,10 @@ def _run_tests(test_file_path: str) -> tuple[bool, str]:
             "Skipped: no test file provided (Branch B model reuse — "
             "plugin already validated at registration time)."
         )
+    if model_probe_context is not None:
+        from agent.skills.task_model_validation import run_task_model_tests
+
+        return run_task_model_tests(test_file_path)
     invocation = prepare_child(
         [sys.executable, "-m", "pytest", test_file_path, "-v", "--tb=short"],
         subprocess_env(),
@@ -436,6 +443,7 @@ def _check_instantiation_and_gradient(
     model_io_contract: ModelIOContract | None = None,
     *,
     _isolated_worker: bool = False,
+    model_probe_context: ModelProbeContext | None = None,
 ) -> tuple[bool, bool, bool, str | None, int | None, int | None]:
     """
     Load plugin, instantiate config + model, run a dummy forward + backward pass,
@@ -547,6 +555,10 @@ def _check_instantiation_and_gradient(
     ):
         from agent.skills.validator_probe_worker import run_bounded_probe
 
+        if model_probe_context is not None:
+            return run_bounded_probe(
+                model_file_path, model_io_contract, model_probe_context=model_probe_context,
+            )
         return run_bounded_probe(model_file_path, model_io_contract)
 
     try:
@@ -592,6 +604,14 @@ def _check_instantiation_and_gradient(
             realized_total,
             realized_trainable,
         )
+
+    if model_probe_context is not None:
+        from agent.skills.task_model_validation import check_task_model
+
+        verdict = check_task_model(
+            model, config, model_io_contract, model_probe_context, declared_type, gradients=True,
+        )
+        return (*verdict, realized_total, realized_trainable)
 
     # Step 04a: the probe geometry. With a contract the facts are derived;
     # without one the legacy geometry is reproduced verbatim (§15.1 row 1).
@@ -716,7 +736,9 @@ class MLCodeValidatorAgent:
         plugin_ok, plugin_err = _check_plugin(inp.model_file_path)
 
         # 2. Pytest
-        tests_ok, test_output = _run_tests(inp.test_file_path)
+        probe_options: ModelProbeOptions = ({"model_probe_context": inp.model_probe_context}
+                         if inp.model_probe_context is not None else {})
+        tests_ok, test_output = _run_tests(inp.test_file_path, **probe_options)
 
         # 3. Description
         desc_ok, desc_err = _check_description(inp.description_file_path)
@@ -752,6 +774,7 @@ class MLCodeValidatorAgent:
                 # `None` = legacy prose-only caller, which keeps the shipped
                 # probe geometry.
                 model_io_contract=inp.model_io_contract,
+                **probe_options,
             )
         else:
             inst_ok, grad_ok, otype_ok, inst_err = (
