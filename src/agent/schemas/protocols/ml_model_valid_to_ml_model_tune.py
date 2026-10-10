@@ -41,6 +41,7 @@ from core.runtime_control.completion import RuntimeCompletionPolicy
 from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from core.runtime_control.verifier_provider import RuntimeVerifierIdentity
+from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 from execute_tools.dataset_config import DataScope
 
 
@@ -202,6 +203,7 @@ def local_validated_model(
     max_steps_per_attempt: int | None = None,
     min_formal_batch_size: int | None = None,
     allow_extreme_steps: bool = False,
+    runtime_watchdog_deadline_policy: RuntimeWatchdogDeadlinePolicy = "budget-ceiling-v1",
     runtime_watchdog_enabled: bool = False,
     runtime_safety_factor: float = 1.0,
     runtime_trial_safety_factor: float | None = None,
@@ -435,6 +437,7 @@ def local_validated_model(
         max_steps_per_attempt=max_steps_per_attempt,
         min_formal_batch_size=min_formal_batch_size,
         allow_extreme_steps=allow_extreme_steps,
+        runtime_watchdog_deadline_policy=runtime_watchdog_deadline_policy,
         runtime_watchdog_enabled=runtime_watchdog_enabled,
         runtime_safety_factor=runtime_safety_factor,
         runtime_trial_safety_factor=runtime_trial_safety_factor,

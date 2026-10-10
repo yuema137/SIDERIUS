@@ -52,7 +52,8 @@ assert dict(os.environ) == before_environment
     )
 
 
-def test_production_passes_shared_projection_to_workflow(tmp_path, monkeypatch):
+@pytest.mark.parametrize("deadline_policy", ["budget-ceiling-v1", "forecast-tightening-v1"])
+def test_production_passes_shared_projection_to_workflow(tmp_path, monkeypatch, deadline_policy):
     repo = Path(__file__).resolve().parents[3]
     routing = tmp_path / "llm.json"
     routing.write_text(json.dumps({"tune": {"planner_strategy": "native-timing-v1"}}))
@@ -96,6 +97,9 @@ def test_production_passes_shared_projection_to_workflow(tmp_path, monkeypatch):
             str(dataset),
             "--llm_config",
             str(routing),
+            "--runtime_watchdog",
+            "--runtime_watchdog_deadline_policy",
+            deadline_policy,
             "--runtime_completion_policy",
             "verified-prediction-v1",
             "--max_rounds",
@@ -117,6 +121,17 @@ def test_production_passes_shared_projection_to_workflow(tmp_path, monkeypatch):
     assert projected[0].data_dir == str(dataset.resolve())
     assert projected[0].runtime_completion_policy == "verified-prediction-v1"
     assert expected_locks[0].runtime_completion_policy == "verified-prediction-v1"
+    assert projected[0].runtime_watchdog_deadline_policy == deadline_policy
+    assert expected_locks[0].runtime_watchdog_deadline_policy == deadline_policy
+    from workflows.llm_config import WorkflowLLMConfig
+    from workflows.model_exploration import _workflow_lock_identity
+
+    assert (
+        _workflow_lock_identity(
+            projected[0], WorkflowLLMConfig(tune={"planner_strategy": "native-timing-v1"})
+        ).runtime_watchdog_deadline_policy
+        == deadline_policy
+    )
     assert projected[0].max_rounds == 7
     assert projected[0].trial_time_budget_minutes == 1.5
     assert projected[0].formal_time_budget_minutes == 9

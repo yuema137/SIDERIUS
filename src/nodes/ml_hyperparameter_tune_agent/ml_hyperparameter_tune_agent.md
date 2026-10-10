@@ -309,11 +309,19 @@ expression — and failing before any GPU work is the fail-closed direction.
 | `data_dir` | `str \| None` | No | `None` | Caller-selected physical dataset root forwarded to runtime measurement and child execution. Supported composed launches require an explicit root; the framework never substitutes a scientific-task or machine-local default. |
 | `measurement_capability` | `ResolvedMeasurementCapability \| None` | No | `None` | Caller-resolved measurement identity and availability. The workflow transports this typed value through the validator-to-tuner protocol so tuning and calibration never infer a scientific task identity from `data_dir`. `None` records an unavailable measurement path and cannot authorize a formal scientific decision that requires measured evidence. |
 
-**The time budgets above are forecast/admission inputs, not runtime
-limits.** They gate whether a round is admitted, using an estimate; the
-epoch that is admitted then runs to completion. A round once ran 33m53s
-under a 5-minute budget. For an actual bound, see the validation-posture
-fields below.
+The phase time budgets feed the selected admission authority. When the watchdog
+is enabled with `runtime_watchdog_deadline_policy="budget-ceiling-v1"` (the default
+selection), the resolved phase budget also reaches an independent watchdog
+ceiling, even with forecast admission. An authorized Formal budget extension
+feeds both consumers. Without the watchdog, an admission budget is not a hard
+subprocess deadline; cooperative training allocation has its own contract.
+
+Before setup or LLM calls, the tuner validates ceilings for the round modes
+reachable through its existing mode-resolution owner. Missing native ceilings
+are configuration errors, not candidate failures to retry. Explicit
+`forecast-tightening-v1` retains old forecast tightening and floor behavior.
+See [watchdog deadlines](../../../docs/reference/watchdog-deadlines.md) for
+validation, serialization, timing precision and historical selection.
 
 ### Validation posture (Gate harness only — `None`/off in every campaign)
 
@@ -326,7 +334,7 @@ executes, without distorting what the planner is allowed to decide. See
 | `validation_max_portion` | `float \| None` | No | `None` | Hard ceiling on the RESOLVED `trial_portion` / `train_portion` / `eval_portion`, applied as `min(planned, ceiling)` after the planner, after `plan_overrides` and after the formal-round override chain. Governs formal rounds too — that is what stops `formal_eval_portion`'s 1.0 default pulling full scope into a smoke test. |
 | `validation_max_train_samples` | `int \| None` (`>= 1`) | No | `None` | Absolute ceiling on the ML segments one training epoch may contain, applied where the epoch is BUILT (`TIDMADEpochDataset`), so fewer segments are read and fewer optimizer steps exist before any run. Needed beside the portion because a fraction's base is not harness-owned: samples per PSD segment are `psd_segment_length // seg_size`, and `seg_size` is the planner's model config. CLAMPS, never rejects — unlike `max_steps_per_attempt`, whose refusal skipped every round of a Gate attempt. `resolve_training_workload(..., max_samples=)` mirrors it exactly, so the executed step count is knowable before launch. |
 | `validation_max_samples` | `int \| None` (`>= 1`) | No | `None` | Absolute ceiling on the ML segments one VALIDATION pass may contain — the validation-row counterpart of `validation_max_train_samples`, which bounds TRAINING rows. **The two names differ by one word and bound different sets**, which is why both exist: 07a's Gate 2 capped the training epoch at 2,000 rows while validation ran the full 15,000-row eval SampleSet, 7.5× the training work, every epoch. Applied to the REQUESTED scope before it materializes (`clamp_validation_scope`), so 07a's `validation_samples == validation_requested_samples` invariant is never relaxed — a ceiling applied afterwards would make every clamped run raise. CLAMPS to whole PSD segments and never overshoots: the resolved count is the largest multiple of `psd_segment_length // seg_size` at or below the ceiling. A ceiling below one PSD segment's rows is REFUSED (under TIDMAD at `seg_size` 40,000 that is 250 rows), because R3 does not exist for an empty scope. INTERIM cost bounding, not the root fix — the priced watchdog deadline is. `TrainingHistory.validation_requested_samples_before_limit` records the pre-limit natural scope, so `was_limited` is recoverable. Reaches the trainer through the runtime policy, not a new training argv flag. |
-| `validation_max_phase_seconds` | `float \| None` | No | `None` | Emergency wall-clock fuse for one execution phase, enforced by the RT4 watchdog as an extra deadline candidate — never by admission, so it cannot skip the attempt. Requires `runtime_watchdog_enabled` (refused otherwise). Not a sizing mechanism: a run killed at the deadline yields no evidence. Effective ceiling is `max(this, runtime_watchdog_floor_seconds)`. **Orthogonal to `validation_max_samples`**: seconds versus samples, so there is no `min()` between them — the sample ceiling sizes the workload, this remains an independent wall-clock termination. |
+| `validation_max_phase_seconds` | `float \| None` | No | `None` | Emergency wall-clock fuse for one execution phase, enforced by the RT4 watchdog as an extra deadline candidate — never by admission, so it cannot skip the attempt. Requires `runtime_watchdog_enabled` (refused otherwise). Not a sizing mechanism: a run killed at the deadline yields no evidence. Native policy never raises this ceiling; explicit `forecast-tightening-v1` retains `max(selected_deadline, runtime_watchdog_floor_seconds)`. **Orthogonal to `validation_max_samples`**: seconds versus samples, so there is no `min()` between them — the sample ceiling sizes the workload, this remains an independent wall-clock termination. |
 
 ### Workflow-populated fields
 

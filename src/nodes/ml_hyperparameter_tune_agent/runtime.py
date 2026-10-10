@@ -22,13 +22,20 @@ from importlib import import_module as _import_module
 from pathlib import Path
 from typing import Any
 
+from pydantic import TypeAdapter
+
+from agent.schemas.hyperparam_tuning import ExperimentPlan, HyperparamTuningInput
 from agent.schemas.ordering import OrderingObservation, OrderingRefusalPhase, ResolvedOrdering
 from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from core.record_role import observed_attempt_role
 from core.runtime_control.records import AdmissionRecord
+from core.runtime_control.session import RuntimeControlPolicy, WatchdogConfig
 from core.sandbox_executor import TidmadSandbox
-from nodes.ml_hyperparameter_tune_agent.policy import _latest_trial_inference_marginal
+from nodes.ml_hyperparameter_tune_agent.policy import (
+    _latest_trial_inference_marginal,
+    resolve_round_trial_mode,
+)
 from nodes.ml_hyperparameter_tune_agent.records import (
     RESOURCE_ADMISSION_STATUS,
     _build_resource_admission_record,
@@ -1305,6 +1312,58 @@ def _build_admission_policy(agent_input, *, is_trial: bool, device_identity: Any
     )
 
 
+def validate_watchdog_startup(agent_input: HyperparamTuningInput) -> None:
+    """Refuse missing native ceilings before setup or any candidate attempt.
+
+    Enumerate only roles reachable through the existing round-mode authority.
+    A Formal bypass cannot supply a missing base budget: it is conditional on
+    that original budget. RuntimeControlPolicy remains the ceiling validator.
+    """
+    if (
+        not agent_input.runtime_watchdog_enabled
+        or agent_input.runtime_watchdog_deadline_policy != "budget-ceiling-v1"
+    ):
+        return
+    authored_modes = (True, False)
+    if "is_trial" in agent_input.plan_overrides:
+        authored_modes = (
+            TypeAdapter(ExperimentPlan.model_fields["is_trial"].annotation).validate_python(
+                agent_input.plan_overrides["is_trial"]
+            ),
+        )
+    final_positions = (True,) if agent_input.max_rounds == 1 else (False, True)
+    reachable = {
+        resolve_round_trial_mode(
+            authored,
+            trial_allowed=agent_input.is_trial,
+            is_formal_round=final,
+            force_formal_round=agent_input.force_formal_round,
+        )
+        for authored in authored_modes
+        for final in final_positions
+    }
+    for is_trial in sorted(reachable, reverse=True):
+        minutes = (
+            agent_input.trial_time_budget_minutes
+            if is_trial
+            else agent_input.formal_time_budget_minutes
+        )
+        try:
+            RuntimeControlPolicy(
+                watchdog=WatchdogConfig(
+                    enabled=True,
+                    deadline_policy=agent_input.runtime_watchdog_deadline_policy,
+                    budget_seconds=None if minutes is None else minutes * 60.0,
+                    max_phase_seconds=agent_input.validation_max_phase_seconds,
+                    floor_seconds=agent_input.runtime_watchdog_floor_seconds,
+                    safety_factor=agent_input.runtime_watchdog_safety_factor,
+                )
+            )
+        except ValueError as exc:
+            role = "Trial" if is_trial else "Formal"
+            raise ValueError(f"Runtime watchdog configuration for {role}: {exc}") from exc
+
+
 def _build_runtime_policy(
     agent_input,
     *,
@@ -1387,6 +1446,9 @@ def _build_runtime_policy(
         "formal_safety_factor": agent_input.runtime_formal_safety_factor,
         "watchdog": {
             "enabled": agent_input.runtime_watchdog_enabled,
+            "deadline_policy": getattr(
+                agent_input, "runtime_watchdog_deadline_policy", "budget-ceiling-v1"
+            ),
             "floor_seconds": agent_input.runtime_watchdog_floor_seconds,
             # V19 split (2026-07-29): watchdog-only multiplier; None →
             # the deadline falls back to the phase-effective
@@ -1397,9 +1459,8 @@ def _build_runtime_policy(
             # the watchdog rather than in operator_budget_seconds: the
             # budget is an ADMISSION input, and a small one would reject
             # the attempt before training instead of bounding it — the
-            # Gate would then prove nothing at all. Note the trial branch
-            # above ships operator_budget_seconds=None, so on a trial
-            # round this is the only non-forecast deadline candidate.
+            # Gate would then prove nothing at all. Native watchdog budgets
+            # travel independently of the selected admission authority.
             "max_phase_seconds": agent_input.validation_max_phase_seconds,
         },
     }
@@ -1422,6 +1483,12 @@ def _build_runtime_policy(
         policy["verification"] = {
             "max_wall_ms": verification_window_seconds * 1000.0,
         }
+    if (
+        agent_input.runtime_watchdog_enabled
+        and policy["watchdog"]["deadline_policy"] == "budget-ceiling-v1"
+        and chosen_time_budget is not None
+    ):
+        policy["watchdog"]["budget_seconds"] = chosen_time_budget * 60.0
     return policy
 
 

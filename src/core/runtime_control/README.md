@@ -9,6 +9,17 @@ forecasts and blocking measurements are distinct authorities.
 
 See [the parent guide](../README.md) for child ownership and the focused validation route.
 
+## Stopping at a time budget
+
+When enabled, the watchdog normally uses your declared time ceiling. A forecast
+of two minutes does not shorten a fifteen-minute budget. A short explicit ceiling
+also takes precedence over the old minimum runtime floor. Admission checks and
+resource monitoring remain separate.
+
+Use `--runtime_watchdog_deadline_policy forecast-tightening-v1` only when you
+explicitly want the old forecast-based deadline. For configuration, missing-budget
+errors and historical compatibility, see [watchdog deadlines](../../../docs/reference/watchdog-deadlines.md).
+
 ## GPU admission before a new phase
 
 A successful measurement describes the GPU memory held by its isolated worker.

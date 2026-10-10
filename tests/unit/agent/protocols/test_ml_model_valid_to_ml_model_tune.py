@@ -948,3 +948,30 @@ def test_selected_verifier_identity_survives_protocol_and_child_policy(
     assert child.runtime_verifier == profile.name
     assert child.runtime_verifier_identity == tuner.runtime_verifier_identity
     assert not calls  # Identity discovery performs no phase work.
+
+
+@pytest.mark.parametrize("policy", ["budget-ceiling-v1", "forecast-tightening-v1"])
+def test_watchdog_selection_reaches_tuner_input(validator_output, proposal_output, storage, policy):
+    result = local_validated_model(
+        validator_output,
+        proposal_output,
+        storage,
+        runtime_watchdog_enabled=True,
+        runtime_watchdog_deadline_policy=policy,
+        trial_time_budget_minutes=13.25,
+        formal_time_budget_minutes=47.5,
+    )
+    assert result.runtime_watchdog_deadline_policy == policy
+    from core.runtime_control.session import RuntimeControlPolicy
+    from nodes.ml_hyperparameter_tune_agent.runtime import _build_runtime_policy
+
+    for is_trial, minutes in [(True, 13.25), (False, 47.5)]:
+        actual = RuntimeControlPolicy.model_validate(
+            _build_runtime_policy(
+                result, chosen_time_budget=minutes, is_trial=is_trial, base_dir="/unused"
+            )
+        )
+        assert actual.watchdog.deadline_policy == policy
+        assert actual.watchdog.budget_seconds == (
+            minutes * 60 if policy == "budget-ceiling-v1" else None
+        )

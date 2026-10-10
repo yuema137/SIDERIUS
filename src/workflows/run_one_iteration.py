@@ -1082,6 +1082,9 @@ def compute_expected_invariants(
             ),
             trial_time_admission_source=args.trial_time_admission_source,
             formal_time_admission_source=args.formal_time_admission_source,
+            runtime_watchdog_deadline_policy=(
+                args.runtime_watchdog_deadline_policy if args.runtime_watchdog else None
+            ),
             runtime_completion_policy=args.runtime_completion_policy,
             runtime_verifier_identity=identity.runtime_verifier_identity,
         ),
@@ -1143,6 +1146,7 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
         # from (cli / shipped profile / measured overlay / uncalibrated)
         # without reading framework source.
         "execution_regime": args.execution_regime,
+        "runtime_watchdog_deadline_policy": args.runtime_watchdog_deadline_policy,
         "runtime_watchdog_enabled": watchdog_policy.enabled,
         "runtime_watchdog_safety_factor": watchdog_policy.safety_factor,
         "runtime_watchdog_floor_seconds": watchdog_policy.floor_seconds,
@@ -1294,6 +1298,7 @@ def _run_bound_iteration(
     )
     print(
         f"[watchdog_policy] enabled={watchdog_policy.enabled} "
+        f"deadline_policy={args.runtime_watchdog_deadline_policy} "
         f"safety_factor={watchdog_policy.safety_factor} "
         f"floor_seconds={watchdog_policy.floor_seconds} "
         f"source={watchdog_policy.provenance}",

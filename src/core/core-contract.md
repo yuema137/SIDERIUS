@@ -127,6 +127,14 @@ projections, replay integrity) and the tuner/workflow suites that exercise the
 sandbox seam in pseudo mode.
 
 
+## Watchdog deadline ownership
+
+`runtime_control/watchdog_deadline.py` owns deadline selection. Typed selection
+and independent watchdog budget are validated by `WatchdogConfig` and
+`RuntimeControlPolicy`; admission continues to use its existing outer budget.
+See [watchdog deadlines](../../docs/reference/watchdog-deadlines.md) for native
+ceilings, explicit historical selection, transport and resume semantics.
+
 ## Phase launch and supervision structure (issue 672)
 
 `runtime_control/phase_launch.py::run_phase_subprocess` is the shared selector

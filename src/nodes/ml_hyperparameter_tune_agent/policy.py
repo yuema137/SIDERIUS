@@ -867,6 +867,17 @@ def _formal_inheritance_spec(
     return handler, (("batch_size", "epochs") if recovery is not None else ()), recovery
 
 
+def resolve_round_trial_mode(
+    planned_is_trial: bool,
+    *,
+    trial_allowed: bool,
+    is_formal_round: bool,
+    force_formal_round: bool,
+) -> bool:
+    """Resolve the round role before the separate Formal inheritance step."""
+    return planned_is_trial and trial_allowed and not (is_formal_round and force_formal_round)
+
+
 def _apply_mode_override_chain(
     plan: ExperimentPlan,
     *,
@@ -946,12 +957,15 @@ def _apply_mode_override_chain(
 
     Mutates ``plan`` in place and returns it for caller-chaining.
     """
-    if not trial_allowed:
-        plan.is_trial = False
+    plan.is_trial = resolve_round_trial_mode(
+        plan.is_trial,
+        trial_allowed=trial_allowed,
+        is_formal_round=is_formal_round,
+        force_formal_round=force_formal_round,
+    )
     if not (is_formal_round and force_formal_round):
         return plan
 
-    plan.is_trial = False
     canonical = _canonical_strategy(formal_round_strategy)
     handler = _FORMAL_STRATEGY_REGISTRY.get(canonical)
     if handler is None:

@@ -1,4 +1,4 @@
-"""Watchdog deadline authority derived from progressive runtime evidence."""
+"""Watchdog deadline authority for explicit ceilings or opted-in forecast tightening."""
 
 from __future__ import annotations
 
@@ -30,14 +30,22 @@ def watchdog_deadline_provider(
     phase: str = "training",
     observation_reader: Callable[[str], dict[str, Any] | None] = _read_observation,
 ) -> Callable[[], tuple[float | None, str]]:
-    """Return the TOTAL ELAPSED SINCE SUBPROCESS START deadline for one phase.
+    """Return a deadline measured from subprocess start, plus its source.
 
-    An explicit operator budget is tightened only when measurement-backed
-    evidence covers the active phase. Training additionally requires measured
-    validation evidence when validation declares nonzero work. Without an
-    operator budget, progressive measured components retain the existing trial
-    behavior and may establish the first deadline.
+    Native policy ignores point forecasts and never raises a declared ceiling.
+    Legacy forecast tightening is an explicit policy choice. The supervisor's
+    polling and termination grace remain separate from this deadline selection.
     """
+    if policy.watchdog.deadline_policy == "budget-ceiling-v1":
+        ceilings = (
+            (policy.operator_budget_seconds, "operator_budget"),
+            (policy.watchdog.budget_seconds, "watchdog_budget"),
+            (policy.watchdog.max_phase_seconds, "validation_max_phase"),
+        )
+        supplied = [(value, source) for value, source in ceilings if value is not None]
+        deadline = min(supplied, key=lambda item: item[0]) if supplied else (None, "none")
+        return lambda: deadline
+
     watchdog_factor = (
         policy.watchdog.safety_factor
         if policy.watchdog.safety_factor is not None

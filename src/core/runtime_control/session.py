@@ -71,6 +71,7 @@ from core.runtime_control.verifier_provider import (
     create_runtime_verifier,
     resolve_runtime_verifier_identity,
 )
+from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 from core.runtime_control.workload import ResolvedPhaseWorkload
 
 ADMISSION_STAGE_POST_SETUP = "post_setup_runtime_verification"
@@ -78,19 +79,40 @@ ADMISSION_STAGE_POST_PHASE = "post_{phase}_verification"
 
 
 class WatchdogConfig(BaseModel):
-    """Runtime-watchdog policy (RT4, §4).
+    """Explicit subprocess deadline selection; disabled unless enabled by launch.
 
-    Deadline = ``max(floor, min(operator_budget, verified_estimate ×
-    effective_watchdog_factor))`` where the effective watchdog factor is
-    ``watchdog.safety_factor`` when set, else the shared policy
-    ``safety_factor`` (V19 split) — every number here is a schema-level input
-    recorded in provenance, never a protocol constant. Disabled by
-    default: enabling is an explicit operator/chain decision (RT6).
+    Native ``budget-ceiling-v1`` uses declared ceilings only. The explicitly
+    selected ``forecast-tightening-v1`` retains the original minimum of budget,
+    emergency ceiling and measured forecasts, followed by the configurable
+    floor. That legacy floor can exceed a declared ceiling; native policy never
+    does. Polling, TERM/KILL grace and cleanup govern termination latency.
     """
 
     model_config = ConfigDict(frozen=True)
 
     enabled: bool = Field(default=False)
+    deadline_policy: RuntimeWatchdogDeadlinePolicy = "budget-ceiling-v1"
+    budget_seconds: float | None = Field(
+        default=None,
+        gt=0.0,
+        allow_inf_nan=False,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Explicit watchdog-only phase budget, independent of admission. "
+            "Native policy also respects operator_budget_seconds and the emergency "
+            "phase ceiling; the smallest declared ceiling wins."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _reject_ignored_budget(self) -> WatchdogConfig:
+        if self.deadline_policy == "forecast-tightening-v1" and self.budget_seconds is not None:
+            raise ValueError(
+                "forecast-tightening-v1 does not accept watchdog.budget_seconds; "
+                "use budget-ceiling-v1 for an independent watchdog budget"
+            )
+        return self
+
     grace_seconds: float = Field(
         default=10.0,
         ge=0.0,
@@ -104,45 +126,25 @@ class WatchdogConfig(BaseModel):
     floor_seconds: float = Field(
         default=60.0,
         ge=0.0,
-        description="Configurable deadline floor — prevents degenerate deadlines for near-zero estimates (§4).",
+        description="Deadline floor for explicit forecast-tightening-v1 only; native ceilings are never raised.",
     )
     safety_factor: float | None = Field(
         default=None,
         ge=1.0,
         description=(
-            "V19 watchdog-only multiplier override (admission/watchdog "
-            "split, 2026-07-29). None (default) → the watchdog deadline "
-            "uses the shared RuntimeControlPolicy.safety_factor — "
-            "byte-identical V18 behavior. When set, ONLY the watchdog "
-            "deadline estimate term uses this value; admission continues "
-            "to read RuntimeControlPolicy.safety_factor."
+            "Multiplier for explicit forecast-tightening-v1 only. None uses the "
+            "phase-effective RuntimeControlPolicy.safety_factor. Does not alter "
+            "admission or native budget-ceiling deadlines."
         ),
     )
     max_phase_seconds: float | None = Field(
         default=None,
         gt=0.0,
         description=(
-            "Absolute wall-clock ceiling for ONE subprocess phase, as a "
-            "third deadline candidate beside the operator budget and the "
-            "verified estimate — the deadline is still the minimum of "
-            "whatever candidates exist, floored by floor_seconds.\n\n"
-            "WATCHDOG-ONLY, exactly like safety_factor above: admission "
-            "never reads it. That separation is the point. Routing a "
-            "validation ceiling through operator_budget_seconds would "
-            "make admission compare a forecast against it and REJECT the "
-            "attempt before training — the failure that already wasted a "
-            "Gate attempt when max_steps_per_attempt was set below the "
-            "planner's normal solution and every round was skipped. A "
-            "runaway safety net must never become an admission gate.\n\n"
-            "It is a SAFETY stop, never the sizing mechanism: a Gate is "
-            "made cheap by bounding its data workload, and this only "
-            "catches the pathological case where a small workload is "
-            "still slow (big model, batch_size 1). None (the default, and "
-            "every production campaign) leaves the deadline exactly as it "
-            "was.\n\n"
-            "floor_seconds still applies last, so the effective ceiling is "
-            "max(max_phase_seconds, floor_seconds) — set both when the "
-            "intended ceiling is below the 60 s default floor."
+            "Emergency ceiling for one subprocess phase, independent of admission. "
+            "Native policy takes the minimum of all declared ceilings without a "
+            "floor. Explicit forecast-tightening-v1 preserves the old floor after "
+            "the minimum; choose native policy for a strict declared ceiling."
         ),
     )
 
@@ -157,6 +159,24 @@ class RuntimeControlPolicy(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True)
+
+    @model_validator(mode="after")
+    def _require_watchdog_ceiling(self) -> RuntimeControlPolicy:
+        if not self.watchdog.enabled or self.watchdog.deadline_policy != "budget-ceiling-v1":
+            return self
+        ceilings = (
+            self.watchdog.budget_seconds,
+            self.operator_budget_seconds,
+            self.watchdog.max_phase_seconds,
+        )
+        supplied = [value for value in ceilings if value is not None]
+        if not supplied or not all(math.isfinite(value) for value in supplied):
+            raise ValueError(
+                "Enabled budget-ceiling-v1 watchdog requires a finite explicit phase "
+                "budget or max_phase_seconds; supply a budget, disable the watchdog, "
+                "or explicitly select forecast-tightening-v1"
+            )
+        return self
 
     runtime_completion_policy: RuntimeCompletionPolicy = "completed-workload-v1"
     runtime_verifier: str | None = Field(default=None, exclude_if=lambda value: value is None)

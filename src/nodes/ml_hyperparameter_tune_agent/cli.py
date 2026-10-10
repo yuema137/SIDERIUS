@@ -15,9 +15,11 @@ consumer and one obvious test (parse these flags, get this input).
 
 import argparse
 import warnings
+from typing import get_args
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.ordering import parse_file_order_cli
+from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 from execute_tools.dataset_config import DataScope
 
 #: Exit code for a campaign that ran but did not complete every round.
@@ -515,17 +517,24 @@ def build_parser() -> argparse.ArgumentParser:
         "(recorded in run provenance).",
     )
     parser.add_argument(
+        "--runtime_watchdog_deadline_policy",
+        choices=get_args(RuntimeWatchdogDeadlinePolicy),
+        default="budget-ceiling-v1",
+        help="Watchdog deadline selection: budget-ceiling-v1 uses explicit ceilings; "
+        "forecast-tightening-v1 explicitly preserves historical forecast tightening and floor.",
+    )
+    parser.add_argument(
         "--runtime_watchdog",
         action="store_true",
         help="§4 runtime watchdog: run training/inference subprocesses in "
-        "their own process group under the deadline max(floor, "
-        "min(budget, verified_estimate x safety)). Default off.",
+        "their own process group under the selected deadline policy. "
+        "Native policy requires an explicit ceiling. Default off.",
     )
     parser.add_argument(
         "--runtime_safety_factor",
         type=float,
         default=1.0,
-        help="§2.10 safety multiplier for admission and the watchdog "
+        help="§2.10 safety multiplier for admission and the legacy watchdog "
         "deadline. Default 1.0 (schema-mirroring); V18 production "
         "posture is 1.5, passed explicitly by the launch config.",
     )
@@ -549,7 +558,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--runtime_watchdog_floor_seconds",
         type=float,
         default=60.0,
-        help="§4 watchdog deadline floor. Default 60.0 "
+        help="Legacy forecast-tightening-v1 deadline floor only. Default 60.0 "
         "(schema-mirroring); V18 production posture is 120.0.",
     )
     parser.add_argument(
@@ -772,6 +781,7 @@ def build_agent_input(
     input_dict["max_steps_per_attempt"] = args.max_steps_per_attempt or None
     input_dict["min_formal_batch_size"] = args.min_formal_batch_size or None
     input_dict["allow_extreme_steps"] = args.allow_extreme_steps
+    input_dict["runtime_watchdog_deadline_policy"] = args.runtime_watchdog_deadline_policy
     input_dict["runtime_watchdog_enabled"] = args.runtime_watchdog
     input_dict["runtime_safety_factor"] = args.runtime_safety_factor
     input_dict["runtime_trial_safety_factor"] = args.runtime_trial_safety_factor

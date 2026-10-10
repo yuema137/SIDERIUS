@@ -223,6 +223,7 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     _time_skip_memory_extra,
     _vram_skip_memory_extra,
     is_evidence_refusal,
+    validate_watchdog_startup,
 )
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
     project_attempt_topology_facts,
@@ -611,6 +612,11 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
         validation_max_samples=agent_input.validation_max_samples,
         trial_time_admission_source=agent_input.trial_time_admission_source,
         formal_time_admission_source=agent_input.formal_time_admission_source,
+        runtime_watchdog_deadline_policy=(
+            agent_input.runtime_watchdog_deadline_policy
+            if agent_input.runtime_watchdog_enabled
+            else None
+        ),
         runtime_completion_policy=agent_input.runtime_completion_policy,
         runtime_verifier_identity=agent_input.runtime_verifier_identity,
     )
@@ -740,6 +746,7 @@ class HyperparamTuningAgent:
         """
         # --- Validate input ---
         agent_input = HyperparamTuningInput.model_validate(agent_input)
+        validate_watchdog_startup(agent_input)
 
         # --- Extract frequently used fields ---
         # StorageConfig.local is Optional (only populated when backend='local').

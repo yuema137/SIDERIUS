@@ -105,6 +105,7 @@ class TestDeadlineFormula:
     def _policy(self, **kw) -> RuntimeControlPolicy:
         return RuntimeControlPolicy(
             watchdog=WatchdogConfig(
+                deadline_policy="forecast-tightening-v1",
                 enabled=True,
                 floor_seconds=kw.pop("floor", 0.0),
                 max_phase_seconds=kw.pop("watchdog_max_phase_seconds", None),
@@ -180,7 +181,9 @@ class TestDeadlineFormula:
         (tmp_path / "rv.json").write_text(json.dumps(payload), encoding="utf-8")
         policy = RuntimeControlPolicy(
             operator_budget_seconds=10_000.0,
-            watchdog=WatchdogConfig(enabled=True, floor_seconds=120.0),
+            watchdog=WatchdogConfig(
+                deadline_policy="forecast-tightening-v1", enabled=True, floor_seconds=120.0
+            ),
         )
         deadline, _source = _watchdog_deadline_provider(policy, sidecar)()
         assert deadline == pytest.approx(120.0)  # near-zero estimate floored (§4)
@@ -225,7 +228,7 @@ class TestExecutorKillHandling:
             t_cfg={"epochs": 1, "batch_size": 1, "device": "cpu"},
             l_cfg={},
             sample_set={"0": [0]},
-            runtime_policy={"watchdog": {"enabled": True}},
+            runtime_policy={"operator_budget_seconds": 10.0, "watchdog": {"enabled": True}},
         )
         assert out["status"] == "wall_clock_timeout"
         assert out["watchdog"]["deadline_s"] == 10.0

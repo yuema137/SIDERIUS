@@ -35,6 +35,7 @@ _SETTINGS = frozenset(
         "runtime_completion_policy",
         "runtime_verifier",
         "runtime_verifier_identity",
+        "runtime_watchdog_deadline_policy",
         "runtime_watchdog",
         "runtime_watchdog_safety_factor",
         "runtime_watchdog_floor_seconds",

@@ -1940,6 +1940,9 @@ def _workflow_lock_identity(launch, llm_config: WorkflowLLMConfig) -> LockLaunch
         ),
         trial_time_admission_source=launch.trial_time_admission_source,
         formal_time_admission_source=launch.formal_time_admission_source,
+        runtime_watchdog_deadline_policy=(
+            launch.runtime_watchdog_deadline_policy if launch.runtime_watchdog_enabled else None
+        ),
         runtime_completion_policy=launch.runtime_completion_policy,
         runtime_verifier_identity=launch.runtime_verifier_identity,
     )
@@ -3417,6 +3420,7 @@ def run_workflow(
             max_steps_per_attempt=launch.max_steps_per_attempt,
             min_formal_batch_size=launch.min_formal_batch_size,
             allow_extreme_steps=launch.allow_extreme_steps,
+            runtime_watchdog_deadline_policy=launch.runtime_watchdog_deadline_policy,
             runtime_watchdog_enabled=launch.runtime_watchdog_enabled,
             runtime_safety_factor=launch.runtime_safety_factor,
             runtime_trial_safety_factor=launch.runtime_trial_safety_factor,

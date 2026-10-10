@@ -116,6 +116,7 @@ def build_standard_launch_config(
         max_steps_per_attempt=args.max_steps_per_attempt or None,
         min_formal_batch_size=args.min_formal_batch_size or None,
         allow_extreme_steps=args.allow_extreme_steps,
+        runtime_watchdog_deadline_policy=args.runtime_watchdog_deadline_policy,
         runtime_watchdog_enabled=args.runtime_watchdog,
         runtime_safety_factor=args.runtime_safety_factor,
         runtime_trial_safety_factor=args.runtime_trial_safety_factor,

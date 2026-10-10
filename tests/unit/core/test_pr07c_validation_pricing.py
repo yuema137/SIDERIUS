@@ -86,6 +86,8 @@ def _write_sidecar(path: Path, components: dict[str, dict]) -> str:
 
 
 class _Watchdog:
+    deadline_policy = "forecast-tightening-v1"
+
     def __init__(self, *, max_phase_seconds=None, floor_seconds=0.0, safety_factor=None):
         self.max_phase_seconds = max_phase_seconds
         self.floor_seconds = floor_seconds

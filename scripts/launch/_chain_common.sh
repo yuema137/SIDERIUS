@@ -136,6 +136,7 @@ MAX_STEPS_PER_ATTEMPT=0             # Disabled: time budgets govern runtime
 MIN_FORMAL_BATCH_SIZE=0              # §3.2: matches disabled Python default
 ALLOW_EXTREME_STEPS=0
 RUNTIME_WATCHDOG=""                 # arXiv #261 tri-state: empty == omit == the (device, execution regime) runtime profile decides; 1 forwards --runtime_watchdog; 0 forwards --no-runtime_watchdog
+RUNTIME_WATCHDOG_DEADLINE_POLICY="" # omit to use the native Python default; legacy must be explicit
 EXECUTION_REGIME=""                 # arXiv #261: empty == omit == Python default 'single'; the posture declares co-resident regimes
 ENABLE_CHAIN_INCUMBENT_FORMAL_GATES=0  # V19 PR 1: consumption-only switch; matches Python default False
 ORDER_STRATEGY_OVERRIDE=""          # V19 PR 2: empty == omit == agent decides (default 'shuffle')
@@ -346,6 +347,7 @@ parse_chain_args() {
         --max_steps_per_attempt)  MAX_STEPS_PER_ATTEMPT="$2"; shift 2 ;;
         --min_formal_batch_size)  MIN_FORMAL_BATCH_SIZE="$2"; shift 2 ;;
         --allow_extreme_steps)    ALLOW_EXTREME_STEPS=1; shift ;;
+        --runtime_watchdog_deadline_policy) RUNTIME_WATCHDOG_DEADLINE_POLICY="$2"; shift 2 ;;
         --runtime_watchdog)       RUNTIME_WATCHDOG=1; shift ;;
         --no-runtime_watchdog)    RUNTIME_WATCHDOG=0; shift ;;
         --execution_regime)       EXECUTION_REGIME="$2"; shift 2 ;;
@@ -663,6 +665,9 @@ build_app_args() {
     fi
     if [ -n "$RUNTIME_FORMAL_SAFETY_FACTOR" ]; then
         APP_ARGS+=(--runtime_formal_safety_factor "$RUNTIME_FORMAL_SAFETY_FACTOR")
+    fi
+    if [ -n "$RUNTIME_WATCHDOG_DEADLINE_POLICY" ]; then
+        APP_ARGS+=(--runtime_watchdog_deadline_policy "$RUNTIME_WATCHDOG_DEADLINE_POLICY")
     fi
     if [ -n "$RUNTIME_WATCHDOG_SAFETY_FACTOR" ]; then
         APP_ARGS+=(--runtime_watchdog_safety_factor "$RUNTIME_WATCHDOG_SAFETY_FACTOR")

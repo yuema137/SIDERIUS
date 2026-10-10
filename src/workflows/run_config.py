@@ -63,6 +63,7 @@ from core.runtime_control.verifier_provider import (
     RuntimeVerifierIdentity,
     resolve_runtime_verifier_identity,
 )
+from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 from workflows.scientific_evidence_stage import EvidenceStageOrder
 from workflows.strategy_modes import ExplorationMode, FormalRoundStrategy, StrategyMode
 
@@ -172,6 +173,7 @@ class WorkflowLaunchConfig:
     max_steps_per_attempt: int | None = None
     min_formal_batch_size: int | None = None
     allow_extreme_steps: bool = False
+    runtime_watchdog_deadline_policy: RuntimeWatchdogDeadlinePolicy = "budget-ceiling-v1"
     runtime_watchdog_enabled: bool = False
     runtime_safety_factor: float = 1.0
     runtime_trial_safety_factor: float | None = None

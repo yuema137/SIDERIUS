@@ -16,7 +16,9 @@ def test_shared_selection_preserves_exact_runner_options_and_timeout_projection(
     policy = (
         None
         if selection == "absent"
-        else RuntimeControlPolicy(watchdog=WatchdogConfig(enabled=selection != "disabled"))
+        else RuntimeControlPolicy(
+            operator_budget_seconds=30, watchdog=WatchdogConfig(enabled=selection != "disabled")
+        )
     )
     completed = subprocess.CompletedProcess(["child"], 0)
     timeout = {"elapsed_s": 12, "deadline_s": 10, "estimate_source": "fixture"}

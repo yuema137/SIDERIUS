@@ -52,6 +52,7 @@ from core.planner_strategy_identity import PlannerStrategyIdentity
 from core.runtime_control.completion import RuntimeCompletionPolicy
 from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.verifier_provider import RuntimeVerifierIdentity
+from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 
 RUN_INVARIANTS_BASENAME = "run_invariants_lock.json"
 
@@ -325,6 +326,11 @@ class RunInvariants(BaseModel):
     runtime_verifier_identity: RuntimeVerifierIdentity | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    # None denotes a disabled watchdog or an old lock without this identity.
+    # Enabling either policy must not silently resume either unknown state.
+    runtime_watchdog_deadline_policy: RuntimeWatchdogDeadlinePolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     runtime_completion_policy: RuntimeCompletionPolicy | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -433,6 +439,7 @@ class RunInvariants(BaseModel):
         "workflow_parameter_rules",
         "trial_time_admission_source",
         "formal_time_admission_source",
+        "runtime_watchdog_deadline_policy",
         "runtime_completion_policy",
         "runtime_verifier_identity",
         "gpu_execution_policy",
@@ -922,6 +929,9 @@ class LockLaunchIdentity(BaseModel):
     runtime_verifier_identity: RuntimeVerifierIdentity | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    runtime_watchdog_deadline_policy: RuntimeWatchdogDeadlinePolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     runtime_completion_policy: RuntimeCompletionPolicy | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -1121,6 +1131,7 @@ def build_run_invariants(
             workflow_parameter_rules=_launch_identity.workflow_parameter_rules,
             trial_time_admission_source=_launch_identity.trial_time_admission_source,
             formal_time_admission_source=_launch_identity.formal_time_admission_source,
+            runtime_watchdog_deadline_policy=_launch_identity.runtime_watchdog_deadline_policy,
             runtime_completion_policy=_launch_identity.runtime_completion_policy,
             runtime_verifier_identity=_launch_identity.runtime_verifier_identity,
             gpu_execution_policy=_launch_identity.gpu_execution_policy,

@@ -18,6 +18,7 @@ from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
 from agent.schemas.hyperparam_tuning import TrainingValidationPortion
 from agent.schemas.ordering import parse_file_order_cli
 from agent.schemas.parameter_rules import ParameterRules
+from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 from core.runtime_control.watchdog_profile import ExecutionRegime
 from execute_tools.dataset_config import DataScope
 from workflows.advice import ADVICE_PER_AGENT_KEYS, render_advice_value, resolve_advice_artifact
@@ -701,9 +702,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--runtime_watchdog. NOT a sizing mechanism: normal Gate cost comes "
         "from --validation_max_train_samples and the data scope, which are "
         "enforced BEFORE launch. Set it well above the expected duration — "
-        "a run killed at the deadline yields no evidence at all. The "
-        "watchdog floor still applies: the effective ceiling is "
-        "max(this, --runtime_watchdog_floor_seconds).",
+        "a run killed at the deadline yields no evidence at all. Native "
+        "budget-ceiling-v1 never raises this ceiling; explicit "
+        "forecast-tightening-v1 retains its historical floor.",
     )
     parser.add_argument(
         "--validation_fixed_candidate_plan",
@@ -803,6 +804,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="§5 operator override: bypass both step/batch guardrails.",
     )
     parser.add_argument(
+        "--runtime_watchdog_deadline_policy",
+        choices=get_args(RuntimeWatchdogDeadlinePolicy),
+        default="budget-ceiling-v1",
+        help="Watchdog deadline selection: budget-ceiling-v1 uses explicit ceilings; "
+        "forecast-tightening-v1 explicitly preserves historical forecast tightening and floor.",
+    )
+    parser.add_argument(
         "--runtime_watchdog",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -818,7 +826,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--runtime_safety_factor",
         type=float,
         default=1.0,
-        help="§2.10 safety multiplier for admission + watchdog deadline. "
+        help="§2.10 safety multiplier for admission and legacy forecast deadlines. "
         "Default 1.0 (schema-mirroring); V18 production posture 1.5.",
     )
     parser.add_argument(
@@ -839,15 +847,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--runtime_watchdog_safety_factor",
         type=float,
         default=None,
-        help="V19 watchdog-only deadline multiplier (admission/watchdog "
-        "split). Omitted -> watchdog uses the phase-effective admission "
-        "factor exactly as V18. V19 5090 posture: 3.5.",
+        help="Multiplier for explicit forecast-tightening-v1 only; omitted uses "
+        "the phase-effective admission factor. Native budget ceilings ignore it.",
     )
     parser.add_argument(
         "--runtime_watchdog_floor_seconds",
         type=float,
         default=None,
-        help="§4 watchdog deadline floor. Unset -> the device/execution "
+        help="Legacy forecast-tightening-v1 deadline floor only. Unset -> the device/execution "
         "profile's floor when the profile governs, else the legacy 60.0 "
         "(schema-mirroring); V18 production posture 120.0.",
     )

@@ -59,6 +59,7 @@ from core.runtime_control.verifier_provider import (
     RuntimeVerifierIdentity,
     resolve_runtime_verifier_identity,
 )
+from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 from core.target_standardization import TargetStandardizationReceipt
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_execution import CandidateEvaluationResult
@@ -2326,13 +2327,15 @@ class HyperparamTuningInput(BaseModel):
             "provenance — never a prompt instruction."
         ),
     )
+    runtime_watchdog_deadline_policy: RuntimeWatchdogDeadlinePolicy = "budget-ceiling-v1"
     runtime_watchdog_enabled: bool = Field(
         default=False,
         description=(
             "§4 runtime watchdog (RT4/RT6): when True, training/inference "
             "subprocesses run in their own process group under the "
-            "deadline max(floor, min(operator_budget, verified_estimate x "
-            "safety)). Disabled by default; Gate 2 enables it explicitly."
+            "selected deadline policy. Native policy requires an explicit "
+            "budget or emergency ceiling; forecasts do not shorten it. "
+            "Disabled by default."
         ),
     )
     runtime_safety_factor: float = Field(
@@ -2340,7 +2343,7 @@ class HyperparamTuningInput(BaseModel):
         ge=1.0,
         description=(
             "§2.10 safety multiplier applied to the known-cost sum at "
-            "admission time and to the verified estimate in the watchdog "
+            "admission time and to the verified estimate in the legacy watchdog "
             "deadline. Schema default 1.0 preserves programmatic-caller "
             "behavior; the V18 production posture (1.5) is passed "
             "explicitly by the launch configuration (Gate 2 wiring, "
@@ -2375,23 +2378,17 @@ class HyperparamTuningInput(BaseModel):
         default=None,
         ge=1.0,
         description=(
-            "V19 watchdog-only deadline multiplier (admission/watchdog "
-            "split, 2026-07-29). None (default) → the watchdog uses the "
-            "phase-effective admission factor exactly as V18 — omitting "
-            "this flag reproduces V18 behavior. When set, ONLY the "
-            "watchdog deadline uses it (both phases); admission keeps "
-            "the phase-effective factor. V19 single-GPU launch posture: 3.5."
+            "Forecast multiplier only for explicit forecast-tightening-v1. "
+            "None uses the phase-effective admission factor. Native "
+            "budget-ceiling-v1 does not use predictions or this multiplier."
         ),
     )
     runtime_watchdog_floor_seconds: float = Field(
         default=60.0,
         ge=0.0,
         description=(
-            "§4 watchdog deadline floor. Schema default 60.0 mirrors "
-            "WatchdogConfig; the V18 production posture (120.0 — covers "
-            "the measured 20-25 s subprocess startup that verified "
-            "components do not include) is passed explicitly by the "
-            "launch configuration."
+            "Deadline floor only for explicit forecast-tightening-v1. "
+            "Native budget-ceiling-v1 never raises an explicit ceiling."
         ),
     )
     runtime_verification_max_wall_seconds: float | None = Field(
@@ -2750,14 +2747,13 @@ class HyperparamTuningInput(BaseModel):
             "a run killed at the deadline yields no evidence and wastes "
             "the whole attempt, which is exactly why it is set well above "
             "the expected duration.\n\n"
-            "``trial_time_budget_minutes`` does NOT serve this purpose — "
-            "it is forecast-based admission, and a round once ran 33m53s "
-            "under a 5-minute budget.\n\n"
+            "The phase budget also bounds enabled native watchdog execution; "
+            "this emergency ceiling can impose a tighter diagnostic bound.\n\n"
             "Requires ``runtime_watchdog_enabled``: the watchdog is the "
             "only thing that enforces it, so accepting one without the "
-            "other would record a hard bound that does nothing. Note the "
-            "watchdog floor still applies — the effective ceiling is "
-            "max(this, runtime_watchdog_floor_seconds)."
+            "other would record a hard bound that does nothing. Native "
+            "budget-ceiling-v1 never raises this ceiling; explicit "
+            "forecast-tightening-v1 retains its historical floor."
         ),
     )
     plan_overrides: dict[str, Any] = Field(

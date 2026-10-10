@@ -74,7 +74,10 @@ def _formal_policy(watchdog_factor: float | None) -> RuntimeControlPolicy:
         trial_safety_factor=V18_TRIAL_FACTOR,
         formal_safety_factor=V18_FORMAL_FACTOR,
         watchdog=WatchdogConfig(
-            enabled=True, floor_seconds=V18_FLOOR_S, safety_factor=watchdog_factor
+            deadline_policy="forecast-tightening-v1",
+            enabled=True,
+            floor_seconds=V18_FLOOR_S,
+            safety_factor=watchdog_factor,
         ),
     )
 
@@ -84,7 +87,10 @@ def _trial_policy(watchdog_factor: float | None) -> RuntimeControlPolicy:
         operator_budget_seconds=None,  # V18: trials are record-only
         safety_factor=V18_TRIAL_FACTOR,
         watchdog=WatchdogConfig(
-            enabled=True, floor_seconds=V18_FLOOR_S, safety_factor=watchdog_factor
+            deadline_policy="forecast-tightening-v1",
+            enabled=True,
+            floor_seconds=V18_FLOOR_S,
+            safety_factor=watchdog_factor,
         ),
     )
 

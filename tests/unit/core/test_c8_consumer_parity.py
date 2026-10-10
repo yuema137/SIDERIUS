@@ -86,7 +86,10 @@ def _formal_policy(**over) -> RuntimeControlPolicy:
         trial_safety_factor=3.0,
         formal_safety_factor=FORMAL_SAFETY,
         watchdog=WatchdogConfig(
-            enabled=True, floor_seconds=WATCHDOG_FLOOR_S, safety_factor=WATCHDOG_FACTOR
+            deadline_policy="forecast-tightening-v1",
+            enabled=True,
+            floor_seconds=WATCHDOG_FLOOR_S,
+            safety_factor=WATCHDOG_FACTOR,
         ),
     )
     base.update(over)
@@ -143,6 +146,7 @@ class TestAdmissionParity:
                 tmp_path / f"w{watchdog_factor}",
                 policy=_formal_policy(
                     watchdog=WatchdogConfig(
+                        deadline_policy="forecast-tightening-v1",
                         enabled=True,
                         floor_seconds=WATCHDOG_FLOOR_S,
                         safety_factor=watchdog_factor,
@@ -194,7 +198,10 @@ class TestWatchdogDeadlineParity:
     def test_watchdog_factor_defaults_to_the_shared_safety_factor(self, monkeypatch):
         policy = _formal_policy(
             watchdog=WatchdogConfig(
-                enabled=True, floor_seconds=WATCHDOG_FLOOR_S, safety_factor=None
+                deadline_policy="forecast-tightening-v1",
+                enabled=True,
+                floor_seconds=WATCHDOG_FLOOR_S,
+                safety_factor=None,
             )
         )
         provider = self._provider(monkeypatch, policy=policy, predicted_seconds=1000.0)
@@ -202,7 +209,9 @@ class TestWatchdogDeadlineParity:
         assert provider()[0] == pytest.approx(2000.0)
 
     def test_no_budget_and_no_evidence_disables_the_deadline(self, monkeypatch):
-        policy = RuntimeControlPolicy(watchdog=WatchdogConfig(enabled=True))
+        policy = RuntimeControlPolicy(
+            watchdog=WatchdogConfig(deadline_policy="forecast-tightening-v1", enabled=True)
+        )
         provider = self._provider(monkeypatch, policy=policy, predicted_seconds=None)
         assert provider() == (None, "none")
 
@@ -227,7 +236,11 @@ class TestWatchdogDeadlineParity:
         assert (deadline, source) == (7200.0, "operator_budget")  # not 120 s floor
 
         no_budget = RuntimeControlPolicy(
-            watchdog=WatchdogConfig(enabled=True, safety_factor=WATCHDOG_FACTOR)
+            watchdog=WatchdogConfig(
+                deadline_policy="forecast-tightening-v1",
+                enabled=True,
+                safety_factor=WATCHDOG_FACTOR,
+            )
         )
         assert _watchdog_deadline_provider(no_budget, "unused")() == (None, "none")
 

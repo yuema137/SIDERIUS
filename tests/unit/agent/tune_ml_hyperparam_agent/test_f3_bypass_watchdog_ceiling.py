@@ -54,7 +54,16 @@ def _formal_over(estimated: float) -> dict:
     }
 
 
-def _run(tmp_path, *, formal_check, bypass_minutes, bypass_delta=0.0, trial_check=None):
+def _run(
+    tmp_path,
+    *,
+    formal_check,
+    bypass_minutes,
+    bypass_delta=0.0,
+    trial_check=None,
+    watchdog_enabled=False,
+    deadline_policy="budget-ceiling-v1",
+):
     """Drive run() through a REAL trial round then the forced-formal round.
 
     Round 1 (trial): time check OK → success record → trial winner.
@@ -127,6 +136,8 @@ def _run(tmp_path, *, formal_check, bypass_minutes, bypass_delta=0.0, trial_chec
             progress_bar=False,
             trial_time_budget_minutes=20.0,
             formal_time_budget_minutes=120.0,
+            runtime_watchdog_enabled=watchdog_enabled,
+            runtime_watchdog_deadline_policy=deadline_policy,
             trial_time_admission_source="forecast",
             formal_time_admission_source="forecast",
             bypass_formal_time_budget_minutes=bypass_minutes,
@@ -238,3 +249,29 @@ def test_forecast_past_even_the_elevated_ceiling_is_refused(tmp_path):
 
 
 pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")
+
+
+@pytest.mark.parametrize("policy", ["budget-ceiling-v1", "forecast-tightening-v1"])
+def test_enabled_watchdog_receives_resolved_bypass_without_changing_admission(tmp_path, policy):
+    from core.runtime_control.session import RuntimeControlPolicy
+    from core.runtime_control.watchdog_deadline import watchdog_deadline_provider
+
+    _records, calls = _run(
+        tmp_path,
+        formal_check=_formal_over(150.0),
+        bypass_minutes=200.0,
+        watchdog_enabled=True,
+        deadline_policy=policy,
+    )
+    policies = [RuntimeControlPolicy.model_validate(p) for p in _training_policies(calls)]
+    assert len(policies) == 2
+    for actual, minutes in zip(policies, [20.0, 200.0], strict=True):
+        assert actual.operator_budget_seconds is None
+        assert actual.time_admission_source == "forecast"
+        assert actual.watchdog.deadline_policy == policy
+        if policy == "budget-ceiling-v1":
+            assert actual.watchdog.budget_seconds == minutes * 60
+            deadline, _ = watchdog_deadline_provider(actual, "/missing")()
+            assert deadline == minutes * 60
+        else:
+            assert actual.watchdog.budget_seconds is None

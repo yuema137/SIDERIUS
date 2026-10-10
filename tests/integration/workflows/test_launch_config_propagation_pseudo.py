@@ -89,6 +89,7 @@ SENTINELS = {
     "formal_vram_budget_gb": 25.0,
     # runtime control (audit spec §4.1 values)
     "runtime_watchdog_enabled": True,
+    "runtime_watchdog_deadline_policy": "forecast-tightening-v1",
     "runtime_safety_factor": 1.51,
     "runtime_trial_safety_factor": 3.11,
     "runtime_formal_safety_factor": 2.22,
@@ -305,6 +306,7 @@ def test_every_sentinel_reaches_the_tuner_input_and_the_lock(tmp_path, propagati
     lock_path = os.path.join(ws, "run_invariants_lock.json")
     assert os.path.exists(lock_path), "run-invariants lock not written"
     lock = json.loads(open(lock_path).read())
+    assert lock["runtime_watchdog_deadline_policy"] == "forecast-tightening-v1"
     lock_text = json.dumps(lock)
     flat = json.dumps(lock)
     # ordering + feedback policy + scope are lock-pinned; assert exact values

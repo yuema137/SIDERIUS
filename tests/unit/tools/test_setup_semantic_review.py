@@ -36,6 +36,8 @@ def snapshot(tmp_path, monkeypatch):
             "data",
             "--max_rounds",
             "4",
+            "--runtime_watchdog_deadline_policy",
+            "forecast-tightening-v1",
         ],
     )
     report = inspect_declaration(request, tmp_path / "preview")
@@ -117,6 +119,8 @@ def test_review_uses_public_gateway_and_saved_exact_packet(snapshot, tmp_path, m
     assert receipt.user_sha256 == hashlib.sha256(captured["user"].encode()).hexdigest()
     assert "PRIVATE_EXTRA" not in captured["user"]
     assert '"declared_value": 4' in captured["user"]
+    assert '"name": "runtime_watchdog_deadline_policy"' in captured["user"]
+    assert '"declared_value": "forecast-tightening-v1"' in captured["user"]
     page = (tmp_path / "review/index.html").read_text()
     assert "<script>not approval</script>" not in page
     assert "&lt;script&gt;not approval&lt;/script&gt;" in page
