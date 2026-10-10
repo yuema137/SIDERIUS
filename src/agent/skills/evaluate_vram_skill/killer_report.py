@@ -213,7 +213,7 @@ def render_intensity_report(batch_size: int, segmentation_size: int) -> KillerRe
     place.
     """
     product = compute_intensity.compute_intensity(batch_size, segmentation_size)
-    cap = compute_intensity._MAX_BATCH_TIMESTEPS
+    cap = compute_intensity.require_limit()
 
     verdict = (
         f"❌ OVER-BUDGET (Compute-intensity) — "
@@ -255,7 +255,7 @@ def render_combined_report(
         total_memory_bytes,
     )
     product = compute_intensity.compute_intensity(batch_size, segmentation_size)
-    cap = compute_intensity._MAX_BATCH_TIMESTEPS
+    cap = compute_intensity.require_limit()
 
     details = MemoryKillerDetails(
         binding_cap="vram+compute_intensity",

@@ -5,17 +5,16 @@ Phase 6.6 §3.10. Pure-Python arithmetic — no torch, no CUDA, no filesystem.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from agent.skills.evaluate_vram_skill import compute_intensity as ci
 from agent.skills.evaluate_vram_skill.compute_intensity import (
-    _MAX_BATCH_TIMESTEPS,
     compute_intensity,
     describe_violation,
     passes,
 )
+
+pytestmark = pytest.mark.usefixtures("historical_workload_rule")
 
 # ── Calibrated constant (regression against §3.10.3 sign-off) ───────────────
 
@@ -23,7 +22,7 @@ from agent.skills.evaluate_vram_skill.compute_intensity import (
 def test_cap_matches_calibration():
     """800,000 = Phase 6.5 Stage 2 failure point (1,000,000) × 20% margin.
     Changing this constant is a version-controlled edit per §3.10.3."""
-    assert _MAX_BATCH_TIMESTEPS == 800_000
+    assert ci.configured_limit() == 800_000
 
 
 # ── Primitive arithmetic ────────────────────────────────────────────────────
@@ -57,8 +56,8 @@ def test_passes_at_or_below_cap(B, T):
 def test_passes_at_exact_boundary_accepts():
     """`<=` not `<`: exactly the cap is accepted. Pin this explicitly so a
     future edit to `<` trips a test instead of silently tightening the gate."""
-    assert passes(1, _MAX_BATCH_TIMESTEPS) is True
-    assert passes(_MAX_BATCH_TIMESTEPS, 1) is True
+    assert passes(1, 800_000) is True
+    assert passes(800_000, 1) is True
     # Other factorisations that land exactly on the cap:
     assert passes(800, 1000) is True  # 800 * 1000 == 800_000
     assert passes(100, 8000) is True  # 100 * 8000 == 800_000
@@ -71,8 +70,8 @@ def test_passes_at_exact_boundary_accepts():
         # own named regression test below, which is where a reader looking
         # for the incident will go.
         (21, 40_000),  # 840,000 — just over cap
-        (_MAX_BATCH_TIMESTEPS + 1, 1),
-        (1, _MAX_BATCH_TIMESTEPS + 1),
+        (800_000 + 1, 1),
+        (1, 800_000 + 1),
     ],
 )
 def test_passes_above_cap_rejects(B, T):

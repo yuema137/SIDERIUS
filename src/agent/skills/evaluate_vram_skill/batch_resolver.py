@@ -7,10 +7,10 @@ applicable Phase 6.6 cap:
 
   (1) Predicted peak VRAM ≤ ``cap_bytes`` — from the structural probe plus
       the selected estimation provider and its declared residual terms.
-  (2) ``compute_intensity.passes(B, segmentation_size)`` — §3.10's CUDA
-      kernel-watchdog heuristic, only when a temporal size is declared.
-      A concrete task-owned probe with no temporal dimension is still
-      measured, but is not judged against invented temporal geometry.
+  (2) The selected profile's optional batch/segmentation workload rule,
+      only when a segmentation size is declared. Native estimation supplies
+      no universal product ceiling. A concrete task-owned probe with no
+      temporal dimension is not judged against invented temporal geometry.
 
 If no candidate satisfies both caps, raise ``BatchSearchRefused``, a
 ``ValueError`` carrying the last candidate's typed decision. Allocation
@@ -218,10 +218,10 @@ def resolve_inference_decision(
     if not candidate_batches:
         raise ValueError("candidate_batches must be non-empty.")
 
-    # Apply the existing deterministic cap before constructing inputs or
+    # Apply an explicitly selected workload rule before constructing inputs or
     # tracing a model. An ineligible batch cannot become usable through a
     # costly footprint measurement, and must not consume the search budget.
-    if segmentation_size is not None:
+    if segmentation_size is not None and compute_intensity.configured_limit() is not None:
         eligible = tuple(
             batch
             for batch in candidate_batches

@@ -7,7 +7,7 @@ forecast built from structural inspection and bounded inference search:
   * ``estimation_inputs`` — forward observations and registered-state inventory
   * ``core.preflight_estimation`` — explicit, pinned arithmetic provider
   * ``batch_resolver.resolve_inference_decision``    (§3.5, A.4)
-  * ``compute_intensity.passes``                     (§3.10, A.4.5)
+  * ``compute_intensity.passes`` — optional profile-owned workload rule
   * ``evidence`` — typed decision projection and refusal text
 
 The wrapper is the single consumer that glues them together. Training

@@ -134,12 +134,12 @@ def test_no_calibration_value_participates_in_either_contrast():
     """
     from agent.skills.evaluate_time_skill.trigger_policy import SEG_SIZE_BOUNDS
     from agent.skills.evaluate_vram_skill.batch_resolver import _DEFAULT_CANDIDATE_BATCHES
-    from agent.skills.evaluate_vram_skill.compute_intensity import _MAX_BATCH_TIMESTEPS
+    from agent.skills.evaluate_vram_skill.compute_intensity import configured_limit
     from agent.skills.inference_skill.estimator import _INFERENCE_VS_TRAINING_RATIO
     from core.sandbox_executor import _ROLE_DEFAULT_RSS_GB
 
     assert _INFERENCE_VS_TRAINING_RATIO == 2.7
-    assert _MAX_BATCH_TIMESTEPS == 800_000
+    assert configured_limit() is None
     assert _DEFAULT_CANDIDATE_BATCHES == (64, 32, 16, 8, 4, 2, 1)
     assert SEG_SIZE_BOUNDS == (2500, 40_000)
     # Native launches have no implicit address-space cap. An explicitly

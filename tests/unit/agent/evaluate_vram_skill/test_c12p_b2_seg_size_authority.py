@@ -143,7 +143,9 @@ class TestTheIntensityGateIsPricedByTheDeclaration:
 
         assert resolved == 8000
 
-    def test_a_foreign_pack_default_does_not_trip_the_intensity_cap(self, monkeypatch, capsys):
+    def test_a_foreign_pack_default_does_not_trip_the_intensity_cap(
+        self, monkeypatch, capsys, historical_workload_rule
+    ):
         """The FOREIGN COMPOSED TASK case, asserted at the harm.
 
         Defect this test alone catches: on a composed Pets or DAVIS run, an

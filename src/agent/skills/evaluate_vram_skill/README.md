@@ -23,6 +23,11 @@ against a 5 GiB cap means the **estimate** failed the configured check; it does
 not mean a GPU measurement observed 8 GiB. A compute-intensity refusal can have
 no VRAM estimate at all.
 
+Normal runs do not impose a fixed limit on batch size multiplied by input length.
+Different data layouts can do very different amounts of work at the same size.
+An explicitly selected historical plugin may retain that limit. Passing this
+check still requires memory inspection; it does not certify that training fits.
+
 Also inspect `memory.inference_verification` when present. For example, the
 8 GiB estimate above may refuse while a measured 4 GiB workload fits the 5 GiB
 cap. Complete, identity-checked evidence can permit that measured batch; the

@@ -4,11 +4,53 @@ import pytest
 import torch
 from torch import nn
 
-from agent.skills.evaluate_vram_skill.batch_resolver import resolve_inference_decision
+from agent.skills.evaluate_vram_skill.batch_resolver import (
+    BatchSearchRefused,
+    resolve_inference_decision,
+)
 from agent.skills.evaluate_vram_skill.estimation_inputs import observe_phase
 from agent.skills.evaluate_vram_skill.overhead import cuda_context_bytes
 from agent.skills.evaluate_vram_skill.structural_probe import probe_activation_footprint
 from core.preflight_estimation import estimate_phase
+
+
+@pytest.mark.parametrize("declared_extent", [518_005, 760_150, 5_469_229])
+def test_large_declared_shape_reaches_real_cpu_probe_without_universal_limit(declared_extent):
+    """#689: metadata size alone must not veto a bounded supplied probe.
+
+    A small real tensor keeps this offline test cheap. This proves routing and
+    memory refusal, not feasibility of the corresponding full scientific graph.
+    """
+    model = RepeatedLayer(4, 1)
+    kwargs = dict(
+        segmentation_size=declared_extent,
+        candidate_batches=(1,),
+        supplied_probe=torch.zeros(1, 4),
+    )
+    decision = resolve_inference_decision(model, cap_bytes=2 * 1024**3, **kwargs)
+    assert decision.batch_size == 1
+    assert decision.intensity_product is None
+    assert decision.intensity_limit is None
+    assert decision.vram_estimate_bytes == 96 + cuda_context_bytes()
+    with pytest.raises(BatchSearchRefused) as exc:
+        resolve_inference_decision(model, cap_bytes=1, **kwargs)
+    assert exc.value.decision.binding_caps == ("vram",)
+
+
+def test_explicit_rule_refuses_large_declared_shape_before_cpu_probe(historical_workload_rule):
+    """The historical route retains exactly the old shape rejection evidence."""
+    with pytest.raises(BatchSearchRefused) as exc:
+        resolve_inference_decision(
+            RepeatedLayer(4, 1),
+            segmentation_size=5_469_229,
+            cap_bytes=2 * 1024**3,
+            candidate_batches=(1,),
+            supplied_probe=torch.zeros(1, 4),
+        )
+    assert exc.value.decision.binding_caps == ("compute_intensity",)
+    assert exc.value.decision.intensity_product == 5_469_229
+    assert exc.value.decision.intensity_limit == 800_000
+    assert exc.value.decision.vram_estimate_bytes is None
 
 
 class RepeatedLayer(nn.Module):

@@ -2,6 +2,7 @@
 
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -129,6 +130,28 @@ def test_scope_unwinds_on_failure(tmp_path):
     assert providers.active_preflight_identity() == native
 
 
+def test_rule_only_change_is_pinned_and_rejected_at_worker_binding(tmp_path):
+    """#689: unchanged source files cannot hide a changed workload rule."""
+    original = profile(tmp_path)
+    guarded = replace(original, workload_rule=providers.BatchSegmentationLimit(limit=800_000))
+    different = replace(guarded, workload_rule=providers.BatchSegmentationLimit(limit=900_000))
+    assert len({p.identity().content_sha256 for p in (original, guarded, different)}) == 3
+    with pytest.raises(ValueError, match="changed after"):
+        with providers.bind_preflight_estimator(different, expected=guarded.identity()):
+            pytest.fail("worker accepted a different rule with unchanged provider sources")
+    with providers.bind_preflight_estimator(guarded):
+        object.__setattr__(guarded, "workload_rule", different.workload_rule)
+        with pytest.raises(ValueError, match="changed during"):
+            providers.active_workload_rule()
+
+
+def test_rule_is_revalidated_at_profile_boundary(tmp_path):
+    """Trusted providers can bypass Pydantic construction; binding must not."""
+    invalid = providers.BatchSegmentationLimit.model_construct(limit=-1)
+    with pytest.raises(ValueError):
+        replace(profile(tmp_path), workload_rule=invalid)
+
+
 def test_composition_pins_explicit_and_native_identity(tmp_path, monkeypatch):
     from workflows import task_composition as composition
 
@@ -144,6 +167,11 @@ def test_composition_pins_explicit_and_native_identity(tmp_path, monkeypatch):
     monkeypatch.setattr(composition, "resolve_preflight_estimator", lambda _: external)
     bound = composition.compose_run_task_bindings(str(manifest))
     assert bound.semantic_fingerprint != native.semantic_fingerprint
+    guarded = replace(external, workload_rule=providers.BatchSegmentationLimit(limit=800_000))
+    monkeypatch.setattr(composition, "resolve_preflight_estimator", lambda _: guarded)
+    guarded_bound = composition.compose_run_task_bindings(str(manifest))
+    assert guarded_bound.semantic_fingerprint != bound.semantic_fingerprint
+    monkeypatch.setattr(composition, "resolve_preflight_estimator", lambda _: external)
     with composition.bind_run_task_composition(bound, physical_data_root=str(tmp_path)):
         composition.verify_composition_is_bound(bound)
         assert providers.active_preflight_identity() == external.identity()

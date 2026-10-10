@@ -20,7 +20,6 @@ from agent.skills.evaluate_vram_skill.batch_resolver import (
     resolve_inference_batch,
     resolve_inference_decision,
 )
-from agent.skills.evaluate_vram_skill.compute_intensity import _MAX_BATCH_TIMESTEPS
 from agent.skills.evaluate_vram_skill.overhead import cuda_context_bytes
 from agent.skills.evaluate_vram_skill.structural_probe import (
     ForwardLayerReport,
@@ -187,6 +186,7 @@ def test_empty_candidate_list_raises(monkeypatch):
 # ── Compute-intensity cap: rejects even when VRAM fits ─────────────────────
 
 
+@pytest.mark.usefixtures("historical_workload_rule")
 def test_skips_candidate_that_fits_vram_but_fails_intensity(monkeypatch):
     """At T=40000: B=64 → 2,560,000 fails; B=32 → 1,280,000 fails;
     B=16 → 640,000 passes (< 800_000). Activations are nil, so every
@@ -199,6 +199,7 @@ def test_skips_candidate_that_fits_vram_but_fails_intensity(monkeypatch):
     assert got == 16
 
 
+@pytest.mark.usefixtures("historical_workload_rule")
 def test_intensity_cap_at_exact_boundary_accepts(monkeypatch):
     """`compute_intensity.passes` uses `<=`. At B=20, T=40000 → 800_000 ==
     cap → must be accepted. At B=32, product = 1,280,000 → rejected.
@@ -241,6 +242,7 @@ def test_raises_vram_binding_when_smallest_batch_blows_cap(monkeypatch):
     assert label == "vram", f"Expected VRAM-only binding, got {label!r}"
 
 
+@pytest.mark.usefixtures("historical_workload_rule")
 def test_raises_intensity_binding_when_only_intensity_fails(monkeypatch):
     """Activations are nil; cap is huge → VRAM is never binding. But every
     candidate has B × T > 800_000, so intensity refuses all. B=1 is the
@@ -255,6 +257,7 @@ def test_raises_intensity_binding_when_only_intensity_fails(monkeypatch):
     assert label == "compute_intensity", f"Expected intensity-only binding, got {label!r}"
 
 
+@pytest.mark.usefixtures("historical_workload_rule")
 def test_intensity_only_refusal_does_not_invent_unmeasured_vram_verdict(monkeypatch):
     """All batches are ineligible; do not run or claim a memory measurement."""
 
@@ -265,7 +268,7 @@ def test_intensity_only_refusal_does_not_invent_unmeasured_vram_verdict(monkeypa
     cap = 1 * 1024**3
 
     with pytest.raises(ValueError) as exc_info:
-        resolve_inference_batch(_NoOp(), segmentation_size=_MAX_BATCH_TIMESTEPS + 1, cap_bytes=cap)
+        resolve_inference_batch(_NoOp(), segmentation_size=800_000 + 1, cap_bytes=cap)
 
     label = _binding_label(str(exc_info.value))
     assert label == "compute_intensity", f"Only intensity was measured, got {label!r}"
@@ -286,6 +289,7 @@ def test_error_message_surfaces_cap_and_peak_numbers(monkeypatch):
     assert "compute_intensity_passes=" in msg
 
 
+@pytest.mark.usefixtures("historical_workload_rule")
 def test_error_message_names_segmentation_size(monkeypatch):
     """The Proposer must see T so it knows which lever to pull."""
     _install_probe(monkeypatch, lambda B: (100 * 1024**3, 0))
@@ -345,6 +349,7 @@ def test_default_candidate_batches_matches_spec():
 # ── Principle 2 module-source spot-check ──────────────────────────────────
 
 
+@pytest.mark.usefixtures("historical_workload_rule")
 def test_known_ineligible_batches_never_execute_a_probe(monkeypatch):
     """2026-09-19: CPU probes at 64/32 consumed 668s before eligible batch16."""
     measured = []
@@ -374,6 +379,7 @@ def test_typed_refusal_keeps_last_custom_batch_and_original_estimate(monkeypatch
     assert decision.estimator == "inference_registered_state_v1"
 
 
+@pytest.mark.usefixtures("historical_workload_rule")
 def test_prefilter_refusal_keeps_actual_custom_batch_without_vram_observation(monkeypatch):
     """#615: intensity prefilter must not invent a B=1 probe or zero-byte peak."""
     monkeypatch.setattr(

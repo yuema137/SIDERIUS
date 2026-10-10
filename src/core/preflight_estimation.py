@@ -1,4 +1,4 @@
-"""Versioned arithmetic providers for structural preflight observations.
+"""Versioned arithmetic providers and explicit structural workload rules.
 
 The framework retains probing, budgets, batch search and failure attribution.
 Installed providers are trusted code; their declared sources and the framework
@@ -16,6 +16,7 @@ from functools import wraps
 from importlib.metadata import entry_points
 from pathlib import Path
 from types import MappingProxyType
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,6 +24,15 @@ from core.planner_strategy_identity import source_fingerprint
 from core.preflight_observations import PhaseEstimate, PhaseObservations
 
 NATIVE_ESTIMATOR = "registered-state-v1"
+
+
+class BatchSegmentationLimit(BaseModel):
+    """An explicitly selected workload rule, not a generic GPU capacity bound."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    kind: Literal["batch-times-segmentation-v1"] = "batch-times-segmentation-v1"
+    limit: int = Field(gt=0)
 
 
 class PreflightEstimatorIdentity(BaseModel):
@@ -108,10 +118,11 @@ def estimation_assembly_digest() -> str:
 
 @dataclass(frozen=True)
 class PreflightEstimatorProfile:
-    """One installed, source-pinned arithmetic function.
+    """One installed arithmetic function and optional static workload rule.
 
     External providers declare the assemblies they have qualified. Installation
-    alone never selects a provider. A manifest must select it explicitly.
+    alone never selects a provider. A manifest must select it explicitly. Rules
+    constrain shape admission only; estimates cannot change caps or execution.
     """
 
     name: str
@@ -119,12 +130,21 @@ class PreflightEstimatorProfile:
     estimate: Callable[[PhaseObservations], PhaseEstimate]
     sources: Mapping[str, Path]
     qualified_assemblies: frozenset[str]
+    workload_rule: BatchSegmentationLimit | None = None
 
     def __post_init__(self) -> None:
         if not self.sources:
             raise ValueError("A preflight estimator must declare its source files")
         object.__setattr__(self, "sources", MappingProxyType(dict(self.sources)))
         object.__setattr__(self, "qualified_assemblies", frozenset(self.qualified_assemblies))
+        if self.workload_rule is not None:
+            if not isinstance(self.workload_rule, BatchSegmentationLimit):
+                raise TypeError("workload_rule must be BatchSegmentationLimit or None")
+            object.__setattr__(
+                self,
+                "workload_rule",
+                BatchSegmentationLimit.model_validate(self.workload_rule.model_dump()),
+            )
 
     def identity(self) -> PreflightEstimatorIdentity:
         assembly = estimation_assembly_digest()
@@ -133,7 +153,16 @@ class PreflightEstimatorProfile:
         return PreflightEstimatorIdentity(
             name=self.name,
             version=self.version,
-            content_sha256=source_fingerprint({k: p.read_bytes() for k, p in self.sources.items()}),
+            content_sha256=source_fingerprint(
+                {
+                    **{f"source:{k}": p.read_bytes() for k, p in self.sources.items()},
+                    "policy:workload_rule": (
+                        self.workload_rule.model_dump_json().encode()
+                        if self.workload_rule is not None
+                        else b"null"
+                    ),
+                }
+            ),
             assembly_sha256=assembly,
         )
 
@@ -190,6 +219,14 @@ def active_preflight_identity() -> PreflightEstimatorIdentity:
     if profile.identity() != identity:
         raise ValueError("Preflight estimator changed during the run")
     return identity
+
+
+def active_workload_rule() -> BatchSegmentationLimit | None:
+    """Read the rule from the same checked binding as structural estimation."""
+    active_preflight_identity()
+    binding = _active.get()
+    profile = binding[0] if binding is not None else resolve_preflight_estimator()
+    return profile.workload_rule
 
 
 @contextmanager

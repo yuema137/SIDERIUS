@@ -13,8 +13,33 @@ extra-forbid Pydantic contracts. The framework copies nested input data before
 calling a provider and revalidates its result. It requires matching phases,
 nonnegative integer byte counts and a diagnostic breakdown summing to the
 diagnostic total. Providers cannot return admission flags, new caps, candidate
-batches or timeout policies. Admission and diagnostic bytes can differ: search
+batches or timeout policies through an estimate. Admission and diagnostic bytes can differ: search
 and human-facing summaries use different documented activation proxies.
+
+## Explicit static workload rules
+
+`PreflightEstimatorProfile.workload_rule` optionally declares a frozen, strict
+`BatchSegmentationLimit(kind="batch-times-segmentation-v1", limit=...)`.
+Native `registered-state-v1` selects `None`: batch size times a transport or
+segmentation extent does not establish generic kernel cost. There is no implicit
+product ceiling and no GPU/model/task-name exception.
+
+A selected rule is applied only when segmentation extent is declared. The same
+rule owns training inspection, early inference-candidate filtering and recorded
+`intensity_product`/`intensity_limit`. Without an applicable rule both evidence
+fields are null. A static refusal may omit a VRAM estimate only when the explicit
+rule rejected the candidate before probing; absent evidence never proves a pass.
+
+This declaration does not disable structural memory checks, probe deadlines/RSS
+limits, task batch constraints, measured admission or selected runtime protection.
+Direct structural-skill calls still establish only estimates, not GPU feasibility.
+The protected native execution route separately requires bounded phase measurements
+and usable device headroom; an incomplete measurement remains a refusal.
+
+Declare calibrated historical limits in an experiment-owned provider. The resolved
+rule (including null) is hashed with the declared sources, so even a rule-only
+change invalidates composition, worker and resume identities. Installing a profile
+does not select its rule. Migrate to a new workspace; keep archived locks intact.
 
 ## Observation contract
 

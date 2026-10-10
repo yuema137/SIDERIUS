@@ -14,7 +14,6 @@ import pytest
 from pydantic import ValidationError
 
 from agent.skills.evaluate_vram_skill import killer_report
-from agent.skills.evaluate_vram_skill.compute_intensity import _MAX_BATCH_TIMESTEPS
 from agent.skills.evaluate_vram_skill.killer_report import (
     KillerReport,
     MemoryKillerDetails,
@@ -90,6 +89,9 @@ def _probe(layers: list[LayerReport]) -> ProbeResult:
 
 
 # ── VRAM renderer — layer-level attribution (§3.6) ─────────────────────────
+
+
+pytestmark = pytest.mark.usefixtures("historical_workload_rule")
 
 
 def test_vram_report_identifies_dominant_leaf():
@@ -225,7 +227,7 @@ def test_intensity_report_populates_config_fields_only():
     assert d.batch_size == 25
     assert d.segmentation_size == 40_000
     assert d.intensity_product == 1_000_000
-    assert d.intensity_cap == _MAX_BATCH_TIMESTEPS
+    assert d.intensity_cap == 800_000
 
     # VRAM half untouched:
     assert d.dominant_layer is None
@@ -297,7 +299,7 @@ def test_combined_report_populates_both_halves():
     assert d.batch_size == 25
     assert d.segmentation_size == 40_000
     assert d.intensity_product == 1_000_000
-    assert d.intensity_cap == _MAX_BATCH_TIMESTEPS
+    assert d.intensity_cap == 800_000
 
 
 def test_combined_verdict_names_both_modes():

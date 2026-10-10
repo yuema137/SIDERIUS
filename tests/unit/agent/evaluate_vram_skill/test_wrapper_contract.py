@@ -461,6 +461,7 @@ def test_training_vram_over_budget_produces_vram_killer():
 # ── 5. Training-intensity over-budget ──────────────────────────────────────
 
 
+@pytest.mark.usefixtures("historical_workload_rule")
 def test_training_intensity_over_budget_produces_intensity_killer():
     """When the VRAM estimate fits but B*T > 800k, retain the intensity dimensions."""
     with _Patches() as p:
@@ -482,6 +483,7 @@ def test_training_intensity_over_budget_produces_intensity_killer():
 # ── 6. Combined training failure (both caps bind) ──────────────────────────
 
 
+@pytest.mark.usefixtures("historical_workload_rule")
 def test_both_training_caps_binding_produces_combined_killer():
     with _Patches() as p:
         p.intensity_passes.return_value = False
@@ -532,6 +534,7 @@ def test_inference_resolver_vram_failure_produces_vram_killer():
     assert out["static_preflight_evidence"]["phases"][1] == decision.model_dump(mode="json")
 
 
+@pytest.mark.usefixtures("historical_workload_rule")
 def test_inference_resolver_intensity_failure_produces_intensity_killer():
     """When the resolver fails on intensity at B=1, the wrapper must NOT
     re-probe (pure ``segmentation_size`` problem, no layer attribution)."""
@@ -732,3 +735,51 @@ def test_vram_budget_gb_cannot_exceed_physical_cap():
 # `test_vram_budget_gb_cannot_exceed_physical_cap` above stays separate: it
 # passes `vram_budget_gb=30.0` and is about the VETO direction of `min()`,
 # not about what a plain feasible run returns.
+
+
+@pytest.mark.parametrize("historical", [False, True])
+def test_large_task_shape_uses_one_selected_rule_in_both_phases(monkeypatch, historical):
+    """#689: actual wrapper and batch resolver agree; only expensive probes are fake."""
+    from dataclasses import replace
+    from functools import partial
+
+    from agent.skills.evaluate_vram_skill import batch_resolver, compute_intensity
+    from core.preflight_estimation import (
+        BatchSegmentationLimit,
+        bind_preflight_estimator,
+        resolve_preflight_estimator,
+    )
+
+    profile = replace(
+        resolve_preflight_estimator(),
+        workload_rule=BatchSegmentationLimit(limit=800_000) if historical else None,
+    )
+    real_passes = compute_intensity.passes
+    with bind_preflight_estimator(profile), _Patches() as patches:
+        patches.intensity_passes.side_effect = real_passes
+        patches.resolve.side_effect = partial(
+            batch_resolver.resolve_inference_decision, candidate_batches=(1,)
+        )
+        monkeypatch.setattr(
+            batch_resolver, "probe_activation_footprint", patches._probe_side_effect
+        )
+        out = wrapper.run_skill(
+            None,
+            hardware_context=_gpu_ctx(),
+            probe_input_sample=torch.zeros(1, 4),
+            probe_target_sample=torch.zeros(1, 4, dtype=torch.long),
+            max_inference_batch_size=1,
+            **_run_kwargs(model_config={"segmentation_size": 5_469_229}),
+        )
+    assert out["status"] == "success"
+    assert out["feasible"] is (not historical)
+    evidence = StaticPreflightEvidence.model_validate(out["static_preflight_evidence"])
+    assert evidence.binding_caps == (("compute_intensity",) if historical else ())
+    for phase in evidence.phases:
+        assert phase.batch_size == 1
+        assert phase.intensity_product == (5_469_229 if historical else None)
+        assert phase.intensity_limit == (800_000 if historical else None)
+    if historical:
+        assert evidence.phases[1].vram_estimate_bytes is None
+    else:
+        assert all(phase.vram_estimate_bytes is not None for phase in evidence.phases)

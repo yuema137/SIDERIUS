@@ -15,6 +15,7 @@ def phase_decision(
     segmentation_size: int | None,
     estimator: str | None = None,
 ) -> StaticPhaseDecision:
+    limit = compute_intensity.configured_limit() if segmentation_size is not None else None
     return StaticPhaseDecision(
         phase=phase,
         batch_size=batch_size,
@@ -28,12 +29,10 @@ def phase_decision(
         else None,
         intensity_product=(
             compute_intensity.compute_intensity(batch_size, segmentation_size)
-            if segmentation_size is not None
+            if segmentation_size is not None and limit is not None
             else None
         ),
-        intensity_limit=compute_intensity._MAX_BATCH_TIMESTEPS
-        if segmentation_size is not None
-        else None,
+        intensity_limit=limit,
     )
 
 

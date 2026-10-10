@@ -255,8 +255,11 @@ probe failures and existing CPU/GPU applicability remain unchanged. See
 ### Inference search admission
 
 Before any input allocation or structural forward, inference batch resolution
-filters candidates using the existing compute-intensity cap when temporal
-geometry is declared. Rejected candidates cannot consume CPU probing time.
+filters candidates using the selected profile's optional workload rule when temporal
+geometry is declared. Native estimation has no universal product limit; an
+explicit historical estimator may declare one. See the
+[provider contract](../../../../docs/reference/preflight-estimation.md#explicit-static-workload-rules).
+Rejected candidates cannot consume CPU probing time.
 If no candidate passes, the diagnostic reports only the intensity refusal;
 VRAM remains unmeasured. Tasks without temporal geometry retain probe-based
 selection without an invented intensity constraint. Completed slow measurements
