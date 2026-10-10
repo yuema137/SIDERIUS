@@ -87,6 +87,7 @@ from core.run_invariants import (
     RunInvariants,
     RunInvariantsViolation,
     build_run_invariants,
+    effective_watchdog_deadline_policy,
 )
 from execute_tools.data_paths import DatasetDirectoryUnavailable, resolve_dataset_dir
 from execute_tools.dataset_config import DataScope, resolve_dataset_profile
@@ -1082,8 +1083,8 @@ def compute_expected_invariants(
             ),
             trial_time_admission_source=args.trial_time_admission_source,
             formal_time_admission_source=args.formal_time_admission_source,
-            runtime_watchdog_deadline_policy=(
-                args.runtime_watchdog_deadline_policy if args.runtime_watchdog else None
+            runtime_watchdog_deadline_policy=effective_watchdog_deadline_policy(
+                args.runtime_watchdog, args.runtime_watchdog_deadline_policy
             ),
             runtime_completion_policy=args.runtime_completion_policy,
             runtime_verifier_identity=identity.runtime_verifier_identity,

@@ -43,6 +43,7 @@ from core.run_invariants import (
     LockLaunchIdentity,
     RunHealthMaterialization,
     build_run_invariants,
+    effective_watchdog_deadline_policy,
     load_run_invariants,
     validate_run_invariants,
 )
@@ -612,10 +613,8 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
         validation_max_samples=agent_input.validation_max_samples,
         trial_time_admission_source=agent_input.trial_time_admission_source,
         formal_time_admission_source=agent_input.formal_time_admission_source,
-        runtime_watchdog_deadline_policy=(
-            agent_input.runtime_watchdog_deadline_policy
-            if agent_input.runtime_watchdog_enabled
-            else None
+        runtime_watchdog_deadline_policy=effective_watchdog_deadline_policy(
+            agent_input.runtime_watchdog_enabled, agent_input.runtime_watchdog_deadline_policy
         ),
         runtime_completion_policy=agent_input.runtime_completion_policy,
         runtime_verifier_identity=agent_input.runtime_verifier_identity,

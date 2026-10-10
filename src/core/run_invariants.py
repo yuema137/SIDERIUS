@@ -57,6 +57,13 @@ from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
 RUN_INVARIANTS_BASENAME = "run_invariants_lock.json"
 
 
+def effective_watchdog_deadline_policy(
+    enabled: bool, selection: RuntimeWatchdogDeadlinePolicy
+) -> RuntimeWatchdogDeadlinePolicy | None:
+    """Only an enabled watchdog contributes a deadline policy to run identity."""
+    return selection if enabled else None
+
+
 class RunInvariantsViolation(ValueError):
     """A run's configuration contradicts the workspace's invariant lock."""
 

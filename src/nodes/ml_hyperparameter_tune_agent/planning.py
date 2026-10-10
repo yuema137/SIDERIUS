@@ -300,6 +300,13 @@ def _no_sample_set_notice(mode: str, file_index: int | None) -> str:
     )
 
 
+def _persist_trial_config(configs_dir: str, exp_id: str, trial_config: TrialConfig) -> None:
+    """Persist the validated execution scope before finalizing attempt provenance."""
+    path = os.path.join(configs_dir, f"trial_config_{exp_id}.json")
+    with open(path, "w", encoding="utf-8") as stream:
+        json.dump(trial_config.model_dump(), stream, indent=2)
+
+
 def prepare_attempt(
     bindings: RunBindings,
     *,
@@ -864,9 +871,7 @@ def prepare_attempt(
     print(f"Reasoning: {plan.reasoning or 'No reasoning provided.'}")
 
     # Save validated TrialConfig
-    trial_config_path = os.path.join(sandbox.dirs["configs"], f"trial_config_{exp_id}.json")
-    with open(trial_config_path, "w", encoding="utf-8") as f:
-        json.dump(trial_config.model_dump(), f, indent=2)
+    _persist_trial_config(sandbox.dirs["configs"], exp_id, trial_config)
 
     # C. ACT: Execute the Atomic Skill Pipeline (Train -> Inf -> Score)
     model_config = plan.model_cfg.copy()

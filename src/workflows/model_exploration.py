@@ -125,6 +125,7 @@ from core.run_invariants import (
     LockLaunchIdentity,
     RunHealthMaterialization,
     build_run_invariants,
+    effective_watchdog_deadline_policy,
     ensure_run_invariants,
     validate_stamped_invariants,
 )
@@ -1940,8 +1941,8 @@ def _workflow_lock_identity(launch, llm_config: WorkflowLLMConfig) -> LockLaunch
         ),
         trial_time_admission_source=launch.trial_time_admission_source,
         formal_time_admission_source=launch.formal_time_admission_source,
-        runtime_watchdog_deadline_policy=(
-            launch.runtime_watchdog_deadline_policy if launch.runtime_watchdog_enabled else None
+        runtime_watchdog_deadline_policy=effective_watchdog_deadline_policy(
+            launch.runtime_watchdog_enabled, launch.runtime_watchdog_deadline_policy
         ),
         runtime_completion_policy=launch.runtime_completion_policy,
         runtime_verifier_identity=launch.runtime_verifier_identity,
