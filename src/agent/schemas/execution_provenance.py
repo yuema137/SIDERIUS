@@ -60,6 +60,7 @@ KNOWN_AUTHORITIES: frozenset[str] = frozenset(
         "partial_scope_strategy_normalization",
         "max_epochs_bound",
         "forced_model_type",
+        "resolved_round_workload",
         "unattributed",
     }
 )
@@ -75,6 +76,7 @@ AUTHORITY_DESCRIPTIONS: dict[str, str] = {
     "partial_scope_strategy_normalization": "partial data scope normalization",
     "max_epochs_bound": "--max_epochs bound",
     "forced_model_type": "forced model type",
+    "resolved_round_workload": "resolved round workload (persisted TrialConfig)",
     "unattributed": "resolved after the plan was authored (step not registered)",
 }
 
@@ -123,6 +125,16 @@ class ExecutionProvenance(BaseModel):
         description=(
             "One entry per field whose authored value differs from the "
             "executed one. Empty when the plan was not overruled."
+        ),
+    )
+
+    plan_resolution_events: tuple[ResolutionEvent, ...] | None = Field(
+        default=None,
+        description=(
+            "Intermediate plan-only comparison, before projecting the persisted "
+            "TrialConfig. Historical rendering providers may select this evidence; "
+            "it is not execution truth. None means unavailable, () means an empty "
+            "comparison. Native rendering and diverged use events only."
         ),
     )
 

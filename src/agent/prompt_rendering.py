@@ -50,6 +50,10 @@ def rendering_assembly_digest() -> str:
         "data_analysis_agent",
     ):
         paths += list((root.parent / "nodes" / node).glob("*.py"))
+    # The reflector block consumes a typed projection from these producers;
+    # qualifying template bytes alone would miss changes in its input meaning.
+    tuner = root.parent / "nodes" / "ml_hyperparameter_tune_agent"
+    paths += [tuner / "planning.py", tuner / "provenance.py"]
     return source_fingerprint({str(p.relative_to(root.parent)): p.read_bytes() for p in paths})
 
 

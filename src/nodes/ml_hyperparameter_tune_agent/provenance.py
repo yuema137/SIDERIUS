@@ -28,6 +28,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent.schemas.execution_provenance import ExecutionProvenance, ResolutionEvent
+from agent.schemas.hyperparam_tuning import TrialConfig
 
 
 def _flatten(value: Any, prefix: str = "") -> dict[str, str]:
@@ -156,7 +157,14 @@ class ResolutionTracker:
         model type is one: it is applied to a COPY of ``model_cfg`` after
         planning has finished mutating the plan, so no plan diff can see it.
         """
-        final = _flatten(plan.model_dump())
+        return self._finish_values(_flatten(plan.model_dump()), self._claims, extra)
+
+    def _finish_values(
+        self,
+        final: dict[str, str],
+        claims: dict[str, str],
+        extra: tuple[tuple[str, str, str, str], ...],
+    ) -> ExecutionProvenance:
         events: list[ResolutionEvent] = []
         for path in sorted(set(self._authored) | set(final)):
             authored = self._authored.get(path, ABSENT)
@@ -170,7 +178,7 @@ class ResolutionTracker:
                     field_path=path,
                     proposed=authored,
                     executed=executed,
-                    authority=self._claims.get(path, "unattributed"),
+                    authority=claims.get(path, "unattributed"),
                 )
             )
         for path, proposed, executed, authority in extra:
@@ -186,7 +194,13 @@ class ResolutionTracker:
             )
         return ExecutionProvenance(events=tuple(events))
 
-    def finish_with_model(self, plan: Any, *, executed_model_type: Any) -> ExecutionProvenance:
+    def finish_with_model(
+        self,
+        plan: Any,
+        *,
+        executed_model_type: Any,
+        trial_config: TrialConfig | None = None,
+    ) -> ExecutionProvenance:
         """:meth:`finish` plus the model channel, which no plan diff can see.
 
         The resolved model type is written onto a COPY of ``model_cfg`` after
@@ -194,15 +208,58 @@ class ResolutionTracker:
         against ``plan.model_type`` — the architecture the PLANNER authored —
         and never against ``model_cfg["model_type"]``, a mirror filled in from
         the resolved value (see :data:`_MIRROR_PATHS`).
+
+        Production must supply its persisted ``trial_config``. Workload fields
+        are projected onto a snapshot, without mutating either input. The old
+        plan-only comparison is retained as explicit compatibility evidence.
+        Omitting the config is a plan-only comparison, not execution evidence.
         """
-        return self.finish(
-            plan,
-            extra=(
-                (
-                    "model_type",
-                    repr(plan.model_type),
-                    repr(executed_model_type),
-                    "forced_model_type",
-                ),
+        extra = (
+            (
+                "model_type",
+                repr(plan.model_type),
+                repr(executed_model_type),
+                "forced_model_type",
             ),
+        )
+        checkpoint = self.finish(plan, extra=extra)
+        if trial_config is None:
+            return checkpoint
+
+        final = _flatten(plan.model_dump())
+        claims = self._claims.copy()
+        # These are the plan's workload coordinates. Read the already validated
+        # execution result, never repeat policy selection or ceiling arithmetic.
+        values = {
+            name: getattr(trial_config, name)
+            for name in (
+                "is_trial",
+                "trial_strategy",
+                "trial_portion",
+                "train_portion",
+                "target_files",
+                "eval_strategy",
+                "eval_portion",
+                "train_validation_align",
+            )
+        }
+        # None means the planner made no ordering proposal. Its materialized
+        # default is not an overrule. Retain authored presence even if an
+        # intermediate override cleared it; execution still has a concrete order.
+        if (
+            self._authored.get("order_strategy", "None") != "None"
+            or plan.order_strategy is not None
+        ):
+            values["order_strategy"] = trial_config.resolved_order_strategy
+        if self._authored.get("file_order", "None") != "None" or plan.file_order is not None:
+            values["file_order"] = trial_config.resolved_file_order
+        for name, value in values.items():
+            executed = repr(value)
+            if final[name] != executed:
+                claims[name] = "resolved_round_workload"
+                final[name] = executed
+        resolved = self._finish_values(final, claims, extra)
+        return ExecutionProvenance(
+            events=resolved.events,
+            plan_resolution_events=checkpoint.events,
         )

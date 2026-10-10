@@ -878,7 +878,9 @@ def prepare_attempt(
         expected_custom_loss_snapshot = bindings.custom_loss_inventory.expected_snapshot
 
     # Lane D / F15 — close the tracker (the model channel is not plan-visible).
-    execution_provenance = resolution.finish_with_model(plan, executed_model_type=model_type)
+    execution_provenance = resolution.finish_with_model(
+        plan, executed_model_type=model_type, trial_config=trial_config
+    )
     active_params = {
         "exp_id": exp_id,
         "run_name": run_name,

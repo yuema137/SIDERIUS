@@ -137,3 +137,23 @@ def test_validator_consumes_scoped_appendix_provider(tmp_path):
     assert overridden.removesuffix("\nCUSTOM APPENDIX") == native.removesuffix(
         render_native_training_appendix()
     )
+
+
+@pytest.mark.parametrize("producer", ["planning.py", "provenance.py"])
+def test_tuner_producer_changes_invalidate_rendering_qualification(monkeypatch, producer):
+    """Input meaning can change without changing a template; bind both producers."""
+    from pathlib import Path
+
+    from agent.prompt_rendering import rendering_assembly_digest
+
+    original = Path.read_bytes
+    expected = rendering_assembly_digest()
+
+    def changed(path):
+        data = original(path)
+        if path.name == producer and path.parent.name == "ml_hyperparameter_tune_agent":
+            return data + b"\n# Changed input semantics\n"
+        return data
+
+    monkeypatch.setattr(Path, "read_bytes", changed)
+    assert rendering_assembly_digest() != expected

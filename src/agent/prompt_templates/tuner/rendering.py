@@ -47,6 +47,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.prompt_rendering import prompt_boundary
 from agent.prompt_templates.tuner.loss_context import PlannerLossContext
 from agent.schemas.execution_provenance import AUTHORITY_DESCRIPTIONS
 from ml_models.models_format_sandbox import LossConfig
@@ -671,6 +672,7 @@ def render_reflector_dynamics_block(diagnosis: Any) -> str:
     )
 
 
+@prompt_boundary("tuner.execution_provenance")
 def render_execution_provenance_block(provenance: Any) -> str:
     """What the framework RESOLVED after the plan was authored.
 

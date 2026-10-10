@@ -1660,7 +1660,7 @@ call site, and `render_execution_provenance_block` renders it above the
 hypothesis, which is relabelled a PROPOSAL when it was overruled.
 
 **Detection is structural, attribution is best-effort.** The tracker DIFFS the
-authored plan against the final plan rather than recording at each known
+authored plan against the final execution projection rather than recording at each known
 override site, so a seventh resolution step added later is still reported —
 as `unattributed`, never as agreement. A hand-written recorder at each site
 would go silently blind, which is the census-blindness shape this repository
@@ -1670,6 +1670,24 @@ has repeatedly been bitten by.
 reflector prompt is byte-identical to before. A key the planner never authored
 that resolves to a falsy schema default is suppressed as default
 materialization; one that resolves to a real value (`loss_name`) is kept.
+
+Production supplies the persisted `TrialConfig` to `finish_with_model`.
+Its training/validation strategies and fractions, target files, alignment and
+trial status supersede the intermediate plan; explicit ordering proposals use
+the resolved ordering aliases. This projection reads existing resolution
+results and does not repeat policy or ceiling logic. A superseding workload
+change is attributed to `resolved_round_workload`. If it restores the authored
+value, no disagreement is emitted. Neither input is mutated. Generated seeds
+and ordering defaults with no authored proposal are not proposal overrides.
+
+`ExecutionProvenance.events` and `.diverged` describe final execution only.
+`plan_resolution_events` is a separate, optional intermediate-plan checkpoint
+for explicit historical rendering providers: `None` means unavailable, an empty
+tuple means available with no differences. Native rendering ignores it. The
+`tuner.execution_provenance` prompt boundary permits an experiment-owned provider
+to restore a qualified historical block without altering execution. The tuner
+producer source is included in rendering assembly identity. Changed identities
+require a new workspace; archived records are not rewritten.
 
 **Known limit**: a claim in free prose about a field the plan never declared
 structurally cannot be detected by a plan diff.
