@@ -272,6 +272,12 @@ raises `ProcessControlError`; inspect its lifecycle and the observer receipt.
 The supervisor stops only its owned child group. A stop is an environment result,
 not evidence that the model should shrink.
 
+Other jobs may share the GPU. A transient mismatch between device-wide and
+per-process readings can wait for the next sample while the previous accepted
+reading is still fresh. The mismatch does not renew that time window. A reported
+ceiling breach still stops the owned child group immediately; persistent or
+unresolved readings fail closed. Other jobs are never terminated by this guard.
+
 For example, with a supplied 900 MiB ceiling, a sampled total of 950 MiB stops
 the child even if the next reading is 700 MiB. The total already includes the
 worker, so its measured demand is not added again. Samples can miss intervening

@@ -12,6 +12,7 @@ from core.runtime_control.gpu_protection import (
     GpuProtectionReceipt,
     GpuRuntimeProtectionPolicy,
     TimedGpuObservation,
+    classify_observation,
     observation_refusal,
     protection_mechanism_digest,
 )
@@ -53,6 +54,8 @@ class ProtectedGpuObservation:
         )
         self._count = 0
         self._valid = 0
+        self._inconsistent = 0
+        self._last_inconsistent: TimedGpuObservation | None = None
         self._join_timeout = False
         self._check_coverage(clock())
 
@@ -127,6 +130,15 @@ class ProtectedGpuObservation:
                 return
             if not self._valid:
                 self._latch("no successful GPU observation was bracketed by a live child")
+            accepted = self._live or self.initial
+            if (
+                self._last_inconsistent is not None
+                and self._last_inconsistent.sequence > accepted.sequence
+            ):
+                self._latch(
+                    "GPU accounting inconsistency remained unresolved at phase end",
+                    self._last_inconsistent,
+                )
             if join_timed_out:
                 self._join_timeout = True
                 self._latch("GPU observer did not join within its selected bound")
@@ -176,11 +188,17 @@ class ProtectedGpuObservation:
             self._check_coverage(self._ended if self._ended is not None else now)
             self._count += 1
             self._latest = observation
-            reason = observation_refusal(
+            decision = classify_observation(
                 observation, self.binding, self.policy, now=now, coverage_ends_at=self._ended
             )
-            if reason:
-                self._latch(reason, observation)
+            if decision.status == "cross_query_skew":
+                # OLD accepted coverage was checked above. Discard this reading
+                # without renewing it, and let the same sampler try next cadence.
+                self._inconsistent += 1
+                self._last_inconsistent = observation
+            elif decision.status == "refused":
+                assert decision.reason is not None
+                self._latch(decision.reason, observation)
             elif live_after and self._state == "running":
                 self._live = observation
                 self._valid += 1
@@ -204,4 +222,6 @@ class ProtectedGpuObservation:
                 started_at=self._started,
                 ended_at=self._ended,
                 join_timed_out=self._join_timeout,
+                last_inconsistent=self._last_inconsistent,
+                inconsistent_observations=self._inconsistent,
             )

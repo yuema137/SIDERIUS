@@ -89,6 +89,16 @@ class GpuProtectionReceipt(BaseModel):
     started_at: float | None
     ended_at: float | None
     join_timed_out: bool
+    last_inconsistent: TimedGpuObservation | None = None
+    inconsistent_observations: int = Field(default=0, ge=0)
+
+
+class GpuObservationDecision(BaseModel):
+    """Classify evidence without granting authority to an inconsistent reading."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    status: Literal["accepted", "cross_query_skew", "refused"]
+    reason: str | None = None
 
 
 def observation_refusal(
@@ -100,29 +110,69 @@ def observation_refusal(
     coverage_ends_at: float | None = None,
 ) -> str | None:
     """One coherent, recent, device-matched total; never add worker demand."""
+    return classify_observation(
+        observation, binding, policy, now=now, coverage_ends_at=coverage_ends_at
+    ).reason
+
+
+def classify_observation(
+    observation: TimedGpuObservation,
+    binding: GpuProtectionBinding,
+    policy: GpuRuntimeProtectionPolicy,
+    *,
+    now: float,
+    coverage_ends_at: float | None = None,
+) -> GpuObservationDecision:
+    """Separate negative cross-query skew from terminal evidence failures."""
+
+    def refused(reason: str) -> GpuObservationDecision:
+        return GpuObservationDecision(status="refused", reason=reason)
+
     if observation.query_completed_at > now:
-        return "observation has a future query interval"
+        return refused("observation has a future query interval")
     coverage_time = min(now, coverage_ends_at) if coverage_ends_at is not None else now
     if coverage_time - observation.query_started_at > policy.max_sample_age_seconds:
-        return "GPU observation coverage expired"
+        return refused("GPU observation coverage expired")
     if observation.sampling_error is not None:
-        return f"GPU sampling failed: {observation.sampling_error}"
+        return refused(f"GPU sampling failed: {observation.sampling_error}")
     snapshot = observation.snapshot
     if snapshot is None or not snapshot.telemetry_available:
-        return "GPU telemetry unavailable"
+        return refused("GPU telemetry unavailable")
     if snapshot.device.uuid != binding.device.uuid:
-        return "GPU observation device UUID changed"
+        return refused("GPU observation device UUID changed")
     if snapshot.device_total_mib != binding.device_total_mib:
-        return "GPU observation physical capacity changed"
+        return refused("GPU observation physical capacity changed")
+    # Either query can reveal an over-ceiling total even when the two queries
+    # disagree. Recovery must never hide that observation. Other jobs count too.
+    for used in (snapshot.device_used_mib, snapshot.per_pid_total_mib):
+        if used is not None and gib_from_mib(used) > binding.effective_ceiling_gib:
+            return refused("current device occupancy exceeds the resolved GPU ceiling")
     try:
-        bound = OccupancyBound.model_validate(
-            snapshot.model_dump(include=set(OccupancyBound.model_fields))
-        )
+        OccupancyBound.model_validate(snapshot.model_dump(include=set(OccupancyBound.model_fields)))
     except ValueError:
-        return "GPU accounting is incomplete or inconsistent"
-    if gib_from_mib(bound.device_used_mib) > binding.effective_ceiling_gib:
-        return "current device occupancy exceeds the resolved GPU ceiling"
-    return None
+        reason = "GPU accounting is incomplete or inconsistent"
+        if _negative_cross_query_skew(snapshot):
+            return GpuObservationDecision(status="cross_query_skew", reason=reason)
+        return refused(reason)
+    return GpuObservationDecision(status="accepted")
+
+
+def _negative_cross_query_skew(snapshot: GpuAccountingSnapshot) -> bool:
+    """Only the producer's complete negative-skew shape may await a new query."""
+    fields = snapshot.model_dump(include=set(OccupancyBound.model_fields))
+    if any(type(value) is not int for value in fields.values()):
+        return False
+    return (
+        fields["device_total_mib"] > 0
+        and 0 <= fields["device_used_mib"] <= fields["device_total_mib"]
+        and fields["own_tree_mib"] >= 0
+        and fields["other_mib"] >= 0
+        and fields["own_tree_mib"] + fields["other_mib"] == fields["per_pid_total_mib"]
+        and fields["unattributed_mib"] == 0
+        and fields["device_used_mib"] - fields["per_pid_total_mib"]
+        == fields["accounting_skew_mib"]
+        < 0
+    )
 
 
 def protection_mechanism_digest() -> str:

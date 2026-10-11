@@ -731,3 +731,185 @@ def test_publication_lock_wait_cannot_hide_previous_coverage_expiry():
     assert "expired" in receipt.decision.reason
     assert receipt.first_stop_observation.query_started_at == 0.0
     assert state.check(thread_alive=True).status == "stop"
+
+
+def test_cross_query_skew_waits_for_fresh_shared_gpu_sample():
+    """A foreign allocation between queries must not immediately kill our child."""
+    from core.runtime_control.gpu_accounting import sample
+
+    class Result:
+        def __init__(self, stdout):
+            self.stdout = stdout
+
+    def driver(cmd, **_):
+        if any(arg.startswith("--query-gpu=") for arg in cmd):
+            return Result(f"3, {DEVICE.uuid}, 400, 2048\n")
+        return Result(f"900, 600, {DEVICE.uuid}\n")
+
+    state, clock, _ = state_fixture()
+    clock.value = 0.1
+    state.sample_once(lambda pid, dev: sample(pid, dev, runner=driver, proc_reader=lambda _: None))
+    assert state.check(thread_alive=True).status == "continue"
+    pending = state.receipt()
+    assert pending.valid_live_samples == 0
+    assert pending.last_live is None
+    assert pending.last_inconsistent.snapshot.accounting_skew_mib == -200
+    clock.value = 0.2
+    state.sample_once(lambda *_: snapshot(800))  # Other jobs still occupy memory.
+    recovered = state.receipt()
+    assert recovered.decision.status == "continue"
+    assert recovered.valid_live_samples == 1
+    assert recovered.inconsistent_observations == 1
+    assert recovered.last_inconsistent.sequence == 1
+    assert recovered.last_live.snapshot.other_mib == 800
+
+
+def skewed_snapshot(*, used=400, own=0, other=600, **changes):
+    return snapshot(
+        used,
+        own_tree_mib=own,
+        other_mib=other,
+        per_pid_total_mib=own + other,
+        accounting_skew_mib=used - own - other,
+        **changes,
+    )
+
+
+@pytest.mark.parametrize("own,other", [(600, 0), (0, 600), (200, 400)])
+def test_skew_never_renews_coverage_and_expiry_cannot_be_repaired(own, other):
+    state, clock, _ = state_fixture()
+    state.sample_once(lambda *_: snapshot())
+    for at in (0.2, 0.7, 1.0):
+        clock.value = at
+        state.sample_once(lambda *_: skewed_snapshot(own=own, other=other))
+        assert state.check(thread_alive=True).status == "continue"
+    assert state.receipt().last_live.query_started_at == 0.0
+    assert state.receipt().valid_live_samples == 1
+    clock.value = 1.01
+    assert "expired" in state.check(thread_alive=True).reason
+    state.sample_once(lambda *_: snapshot())
+    assert state.receipt().decision.status == "stop"
+    assert state.receipt().inconsistent_observations == 3
+
+
+@pytest.mark.parametrize("used,own,other", [(1400, 0, 1600), (400, 0, 1100), (400, 1100, 0)])
+def test_skew_cannot_hide_any_observed_usage_above_ceiling(used, own, other):
+    state, _, _ = state_fixture()
+    state.sample_once(lambda *_: skewed_snapshot(used=used, own=own, other=other))
+    assert state.check(thread_alive=True).status == "stop"
+    assert state.receipt().valid_live_samples == 0
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"device": DeviceIdentity(uuid="foreign-device", physical_index=3)},
+        {"total": 4096},
+        {"unattributed_mib": 5},
+        {"telemetry_available": False},
+    ],
+)
+def test_negative_skew_does_not_excuse_other_invalid_evidence(change):
+    state, _, _ = state_fixture()
+    state.sample_once(lambda *_: skewed_snapshot(**change))
+    assert state.check(thread_alive=True).status == "stop"
+
+
+def test_incoherent_initial_observation_prevents_child_launch(monkeypatch):
+    calls = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: calls.append(kw))
+    initial = TimedGpuObservation(
+        sequence=0, query_started_at=0.0, query_completed_at=0.0, snapshot=skewed_snapshot()
+    )
+    obs = observer(initial=initial, clock=lambda: 0.0)
+    with pytest.raises(ProcessControlError):
+        run(obs)
+    assert not calls
+
+
+@pytest.mark.parametrize("post_exit_valid", [False, True])
+def test_terminal_unresolved_skew_cannot_claim_success(post_exit_valid):
+    state, clock, child = state_fixture()
+    state.sample_once(lambda *_: snapshot())
+    clock.value = 0.1
+    state.sample_once(lambda *_: skewed_snapshot())
+    if post_exit_valid:
+
+        def crossing(*_):
+            child.returncode = 0
+            return snapshot()
+
+        state.sample_once(crossing)
+    else:
+        child.returncode = 0
+        state.end()
+    state.finish(join_timed_out=False)
+    assert state.receipt().decision.status == "stop"
+    assert state.receipt().valid_live_samples == 1
+
+
+@pytest.mark.parametrize("scale", [1, 8, 64])
+def test_shared_gpu_external_release_and_growth_preserve_conservative_occupancy(scale):
+    clock = Clock()
+    state = ProtectedGpuObservation(
+        binding(total=2048 * scale, cap=float(scale)),
+        policy(),
+        observation(total=2048 * scale),
+        clock,
+    )
+    state.configure(policy().control)
+    child = Child()
+    state.attach(child)
+    state.start(child.pid)
+    for at, used, own, other, residual in [
+        (0.1, 800, 100, 700, 0),  # Both our process and foreign jobs.
+        (0.2, 400, 100, 500, 0),  # Cross-query inconsistency during release.
+        (0.3, 600, 100, 300, 200),  # Includes invisible/unattributed foreign usage.
+    ]:
+        clock.value = at
+        state.sample_once(
+            lambda *_, used=used, own=own, other=other, residual=residual: snapshot(
+                used * scale,
+                total=2048 * scale,
+                own_tree_mib=own * scale,
+                other_mib=other * scale,
+                per_pid_total_mib=(own + other) * scale,
+                unattributed_mib=residual * scale,
+                accounting_skew_mib=(used - own - other) * scale,
+            )
+        )
+        assert state.check(thread_alive=True).status == "continue"
+    state.end()
+    state.finish(join_timed_out=False)
+    assert state.receipt().decision.status == "continue"
+    assert state.receipt().valid_live_samples == 2
+    assert state.receipt().inconsistent_observations == 1
+
+
+def test_real_child_recovers_from_skew_then_foreign_occupancy_stops_only_owned_group(tmp_path):
+    ready = tmp_path / "ready"
+    count = 0
+    foreign = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(10)"], start_new_session=True
+    )
+
+    def sampling(*_):
+        nonlocal count
+        if not ready.exists():
+            return snapshot()
+        count += 1
+        if count == 1:
+            return skewed_snapshot()
+        return snapshot(1500 if count >= 3 else 800)
+
+    obs = observer(sampler=sampling)
+    try:
+        with pytest.raises(ProcessControlError) as caught:
+            run(obs, f"import pathlib,time; pathlib.Path({str(ready)!r}).touch(); time.sleep(10)")
+        assert "occupancy" in caught.value.decision.reason
+        assert obs.protection_receipt().inconsistent_observations == 1
+        assert caught.value.lifecycle.group_cleanup.final.status == "absent"
+        assert foreign.poll() is None
+    finally:
+        foreign.kill()
+        foreign.wait(timeout=2)

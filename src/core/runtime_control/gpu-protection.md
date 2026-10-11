@@ -9,11 +9,11 @@ existing observer still owns one sampling thread. `process_control.py` defines
 an evidence-only supervisor interface. `observed_subprocess.py` alone signals,
 drains pipes, reaps and checks its owned process group.
 
-This API is not connected to training/inference execution or the tuner. There
-is no protection CLI flag, automatic policy, hardware discovery or changed
-ordinary observation default. Production activation needs separately reviewed
-admission transport, infrastructure-outcome persistence and partial-artifact
-handling. It must not map this stop to candidate OOM or automatic batch shrink.
+The optional native GPU execution policy activates this protection through
+`begin_attempt` and the protected training/inference dispatch described in
+[native GPU execution](native-gpu-execution.md). Ordinary observation without
+that policy retains its prior behavior. Protection stops are infrastructure
+outcomes, not candidate OOM evidence or authority for automatic batch shrink.
 
 ## Inputs and decision
 
@@ -40,9 +40,27 @@ Maximum age starts at query start. Before a fresh observation replaces the
 previous accepted one, the previous coverage is checked at publication time.
 If both threads stall past its expiry, the new reading cannot repair that gap.
 An unavailable observation or ceiling breach latches the first stop; later good
-readings remain diagnostics and cannot restore permission. No history list grows
-with phase duration. One live sample is a minimum coverage fact, not proof of
-unseen peaks or a physical memory partition.
+readings remain diagnostics and cannot restore permission. A narrowly classified
+negative accounting skew is discarded while previous accepted coverage remains
+fresh: all accounting fields must be present, own plus other must equal the
+per-PID total, device usage minus per-PID usage must equal the negative skew, and
+unattributed usage must be zero. The device and process queries are separate;
+allocation by this worker or another job can produce this shape. It never
+renews coverage or increments accepted live samples. The existing sampler tries
+again at its configured cadence, with no extra retry count or grace period.
+
+Either observed device usage or the per-PID total exceeding the resolved ceiling
+stops immediately, even with negative skew. Wrong device/capacity, other malformed
+accounting, query errors and unavailable telemetry still stop immediately. Initial
+incoherence refuses before spawn; persistent live incoherence exhausts the age of
+the last accepted query. A phase ending without a coherent live sample after its
+last inconsistent observation also fails closed. Post-exit samples cannot resolve
+that missing live evidence. Shared GPUs remain supported: other processes and
+positive unattributed usage are normal accounting, subject to the aggregate ceiling.
+
+No history list grows with phase duration. The receipt retains the last raw
+inconsistent observation and its count even after recovery. One live sample is
+a minimum coverage fact, not proof of unseen peaks or a physical memory partition.
 
 ## Lifecycle and errors
 
