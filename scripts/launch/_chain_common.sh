@@ -122,6 +122,7 @@ RUNTIME_COMPLETION_POLICY="completed-workload-v1"
 RUNTIME_VERIFIER=""
 FORMAL_EVAL_PORTION=1.0             # Phase R §13: eval-side scope for formal training; default 1.0 = production full-clone (lower for smoke/CI)
 GPU_ADMISSION_MEASUREMENT_SOURCE="" # B-G3: reference, never a figure; empty == omit
+GPU_EXECUTION_POLICY_JSON=""       # optional policy file; Python owns validation and identity
 GPU_ADMISSION_ENFORCEMENT=""        # B-G3/D-B4: empty == omit == observe_only
 GPU_PAIR_CEILING_GIB=""             # B-G3: empty == omit == defer to env/default
 TRIAL_VRAM_BUDGET_GB=""             # §3.2: empty == omit == Python None
@@ -365,6 +366,12 @@ parse_chain_args() {
         --runtime_verification_max_wall_seconds) RUNTIME_VERIFICATION_MAX_WALL_SECONDS="$2"; shift 2 ;;
         --formal_eval_portion)       FORMAL_EVAL_PORTION="$2"; shift 2 ;;
         --gpu_admission_measurement_source) GPU_ADMISSION_MEASUREMENT_SOURCE="$2"; shift 2 ;;
+        --gpu_execution_policy_json)
+            if [[ -z "${2:-}" || "$2" == --* ]]; then
+                echo "Required: --gpu_execution_policy_json FILE" >&2
+                exit 1
+            fi
+            GPU_EXECUTION_POLICY_JSON="$2"; shift 2 ;;
         --gpu_admission_enforcement) GPU_ADMISSION_ENFORCEMENT="$2"; shift 2 ;;
         --gpu_pair_ceiling_gib)   GPU_PAIR_CEILING_GIB="$2"; shift 2 ;;
         --trial_vram_budget_gb)   TRIAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
@@ -654,6 +661,9 @@ build_app_args() {
     APP_ARGS+=(--formal_time_admission_source "$FORMAL_TIME_ADMISSION_SOURCE")
     APP_ARGS+=(--runtime_completion_policy "$RUNTIME_COMPLETION_POLICY")
     [[ -z "$RUNTIME_VERIFIER" ]] || APP_ARGS+=(--runtime_verifier "$RUNTIME_VERIFIER")
+    if [ -n "$GPU_EXECUTION_POLICY_JSON" ]; then
+        APP_ARGS+=(--gpu_execution_policy_json "$GPU_EXECUTION_POLICY_JSON")
+    fi
     # RT6 runtime-control surface: numeric flags always cross explicitly.
     # The Formal-only batch floor defaults to 0 (disabled), preserving
     # Trial/Formal parity unless a task or campaign opts in.

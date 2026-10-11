@@ -135,6 +135,7 @@ bash scripts/launch/run_chain.sh \
 | `--experiment_arm LABEL` | opaque experiment-arm label (arXiv U1). Pinned into `run_invariants_lock.json` and stamped on every record, tuner output and manifest; forwarded only when set. **Omitted = unlabelled**, byte-identical argv. Drives no behaviour |
 | `--ml_lit_review_enabled` / `--no-ml_lit_review_enabled` | the literature-review node's presence in the workflow topology. Both the resolved flag and, when ON, the sha256 of the resolved lit-review YAML are pinned in the lock |
 | `--ml_lit_review_config PATH` | forwards a task-owned literature-review YAML through the chain launcher; omit it only when the child default is intended |
+| `--gpu_execution_policy_json FILE` | optional GPU execution policy JSON file; forwards the supplied path unchanged to every iteration in both modes. Use an absolute path when the file is outside the checkout. The native Python runner owns typed validation and run identity; omission preserves its default. A missing or empty argument is refused by the launcher. |
 
 Everything else is pass-through to the iteration: `--data_scope`,
 `--health_gate_enabled` / `--no-health_gate_enabled`, `--health_gate_files`,
