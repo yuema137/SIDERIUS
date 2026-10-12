@@ -104,3 +104,26 @@ cfaec79b15a9bfe60e74a21fb9b9c87fe47cf751f40c26e5c910273c5296547e  fig_human.png
 f70b7c06d10007c0bfb4ed07c95501719ab14bb664dcf939016392c94a61168f  fig_loop.png
 
 ```
+
+## Figure 3: TIDMAD exploration and LLM cost
+
+Exported 2026-10-12 from the same published PDF identified above, page 8
+(zero-based index 7). Crop box in bottom-left PDF points: `(108, 530, 504, 711)`.
+The crop retains both panels, axis labels and the full legend, excluding the
+paper caption and surrounding prose. No curves, labels or results are redrawn.
+
+Use the same export procedure with `(3, 7, (108, 530, 504, 711))`.
+The SVG retains `viewBox="0 0 396 181"`, with display width `1200`, height `548`
+and a white background rectangle `(0, 0, 396, 181)`. The PNG is 3200 pixels wide.
+
+Figure 3 reports estimated API-equivalent LLM costs, not GPU training costs or
+invoices. The README's performance statement also refers to Table 1: Run 5
+(orchestration without Data Analysis) has 30 valid proposals and best valid
+score 2.744; the fixed-workflow conditions have the lowest estimated LLM costs.
+This is evidence for the reported TIDMAD conditions, not a task-independent
+ranking of execution approaches.
+
+```text
+4db756f3d36f82aee79d21b7dad192b5ee807fe513a685129674514b28095c41  figure3.svg
+72e028875fad2a3c1590113288e3c6bceee6cc531b2549fc728261910f08673f  figure3.png
+```

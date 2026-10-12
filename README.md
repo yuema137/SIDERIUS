@@ -3,80 +3,112 @@
 **S**cientific **I**nquiry, **D**esign, **E**xploration, and **R**easoning
 **I**ntegrated **U**sing multi-agent **S**ystems
 
-SIDERIUS is a task-generic framework for supervised scientific machine
-learning. An LLM can interpret results, propose a model, write model code, and
-learn from previous attempts. The framework keeps the parts that must remain
-reproducible and comparable under deterministic control: data access, training,
-inference, scoring, validity checks, resource limits, and provenance.
+**Turn your dataset and research question into an iterative ML experiment.**
+Work with your coding agent to define the task; SIDERIUS then helps propose
+models, implement them, train and evaluate them, and use the results to guide
+the next attempt.
 
-The task owns the scientific meaning. The caller owns the workflow composition
-and run settings. SIDERIUS supplies the typed interfaces and execution core
-that connect them.
+- **Run a research loop:** go from a hypothesis to model code, measured results
+  and the next experiment, with a record of each attempt.
+- **Evaluate more than a score:** declare task-specific validity checks alongside
+  your metric, with controlled data access and reproducible evaluation rules.
+- **Choose how to explore:** start with a lightweight fixed workflow or let an
+  LLM orchestrator compose research steps. Select models independently by role.
 
-## Paper
+<a id="start-with-your-coding-agent"></a>
 
-Read [Beyond a Better Score: Long-Horizon Agentic ML Development and Evaluation Protocol for Physics Time Series](https://zenodo.org/records/23071121).
-The paper studies how LLM agents can develop scientifically valid models,
-combining reusable research capabilities, multiple layers of scientific
-evaluation, and exploration within compute budgets. Experiments on TIDMAD,
-TESS, Project8, and LIGO evaluate both model performance and scientific validity.
+## Quick start with your coding agent
 
-## Start with your coding agent
+Clone the repository and open it in your coding agent:
 
-**We recommend using SIDERIUS together with your coding agent.** It can read the
-repository, help turn your research question into a task package and experiment,
-and prepare the files and launch command. You decide the scientific goal, data
-split, models and budgets. You can write everything by hand, but that is not our
-recommended starting path.
-
-Choose how you want to work with the agent:
-
-| Way of working | Who leads the setup? | Where to start |
-| --- | --- | --- |
-| **Assistant — recommended for a first task** | Describe your problem and data. Your agent handles setup and guides you through designing the task and experiment. | Start with the one-sentence example below. |
-| **Professional** | You direct the task, workflow and experiment choices, working closely with your agent to inspect the code and implement your setup. | Give it your plan and the [task contract](docs/reference/task-composition.md). |
-
-These are ways of collaborating, not software mode switches. Either can use the
-same optional [configuration review and HTML report](src/tools/setup_review/README.md).
-You can also launch directly without that review. Choosing a fixed workflow or
-an external orchestrator is a separate [execution choice](src/tools/orchestration_setup/README.md).
-
-### Assistant example: start with one sentence
-
-Clone this repository and open it in your coding agent, then say:
-
-```text
-I have MNIST images and labels in /data/mnist; help me build and evaluate a digit classifier.
+```bash
+git clone https://github.com/yuema137/SIDERIUS.git
+cd SIDERIUS
 ```
 
-Replace the task and path with your own. You do not need to know the configuration
-format or write a task package first. The agent follows the repository's
-[setup guidance](docs/agent-reference/siderius-setup-review/SKILL.md) and takes
-you through the whole preparation:
+**Both Professional and Assistant start with a short request.** They describe
+how you collaborate with your coding agent, not software mode switches.
+You can also prepare everything by hand.
 
-1. **Set up the environment:** inspect the data layout and available hardware,
-   prepare the correct Python environment and explain which API keys to set.
-2. **Design the task with you:** agree on inputs, labels, training/validation/test
-   splits and the score. For this example, the task maps an image to a digit.
-3. **Prepare the experiment:** help choose the model routing, data amount,
-   iterations and time/memory budgets, then save the files in your own project.
-4. **Show how to run and inspect results:** give you the exact saved script,
-   settings and output paths; optionally produce a configuration-review HTML page.
+| Way of working | Who leads? |
+| --- | --- |
+| **Professional** | You choose the research plan; your agent helps implement it. |
+| **Assistant** | You describe the problem; your agent guides you through the choices. |
 
-The agent does the setup work and asks when a consequential choice is missing;
-it should not hand you a list of unexplained files to author. You retain control
-of the scientific choices and paid execution. Training starts once the required
-environment, data and execution authorization are in place. This is guidance for
-your coding agent, not a separate automatic service or a guarantee of model quality.
+### Professional: bring your plan
 
-No global skill installation is required: the agent reads the linked repository file.
-The [getting-started guide](docs/getting-started/README.md) links installation
-and the next setup steps. Your coding agent's own model and the models called
-inside a SIDERIUS experiment are separate choices. Use the
-[Luna test configuration](configs/llm/openai_smoke_luna.json) for the latter during a first
-flow check.
+For a lightweight fixed workflow, paste:
+
+```text
+Use SIDERIUS in Professional style. My MNIST images and labels are in /data/mnist.
+Build a digit-classification task and a three-iteration fixed-workflow experiment
+in ~/mnist-research. Keep the test split out of search feedback; optimize validation
+accuracy. Help me set model routing and GPU/time budgets, then show me the saved
+configuration, launch script and result paths before running.
+```
+
+For orchestration, replace the execution request with:
+
+```text
+Use orchestration instead of the fixed workflow. Set up the external project and
+sandbox so my agent can choose which SIDERIUS capabilities to call and when,
+within the data-access rules and budgets we agree on.
+```
+
+You do not need to write configuration files first. Your agent can turn your
+plan into a [task package](docs/reference/task-composition.md) and experiment.
+
+### Assistant: describe your problem
+
+Paste:
+
+```text
+Use SIDERIUS in Assistant style. I have MNIST images and labels in /data/mnist;
+help me build and evaluate a digit classifier. Follow this repository's setup
+guidance, help me choose workflow or orchestration, and prepare an external
+project with the environment, task, experiment and launch script.
+```
+
+Your agent follows the [setup guidance](docs/agent-reference/siderius-setup-review/SKILL.md):
+it inspects your data and hardware, helps agree on splits and metrics, prepares
+the environment and API-key setup, and saves the task and experiment in your own
+project. It shows the exact launch command and where to find results.
+No global skill installation is needed.
+
+Replace the example data and project paths with your own. In either style,
+you control the scientific choices and paid execution; the agent asks about
+missing decisions before launching. A [configuration review and HTML report](src/tools/setup_review/README.md)
+is optional. See [getting started](docs/getting-started/README.md) for installation
+and detailed setup.
+
+### Choose the execution: workflow or orchestration
+
+Either collaboration style can use either execution approach:
+
+| Execution | What happens | When to choose it |
+| --- | --- | --- |
+| **Fixed workflow — lightweight starting point** | Research capabilities run in a predefined sequence, without an extra LLM deciding each next call. | Start quickly with lower coordination overhead and a predictable research loop. |
+| **Orchestration — flexible exploration** | An LLM caller chooses and combines capabilities as evidence arrives. | Explore beyond a fixed sequence, with more setup and potentially higher LLM cost. |
+
+**Workflow keeps coordination lightweight; orchestration offers more room to
+adapt the research process.** In the paper's TIDMAD comparison, fixed workflows
+had the lowest estimated LLM cost, while orchestration without Data Analysis
+produced the most valid models and the best valid score. This demonstrates its
+potential, not a guarantee that orchestration wins on every task.
+
+[![Paper Figure 3: valid and non-valid TIDMAD models versus estimated LLM cost](docs/assets/paper/figure3.svg)](docs/assets/paper/figure3.svg)
+
+**Figure 3 — Exploration and LLM cost on TIDMAD.** The left panel counts valid
+models; the right counts non-valid models. Costs are estimates and exclude GPU
+training. See the [paper](https://zenodo.org/records/23071121) for the experimental
+conditions, or the [orchestration setup guide](src/tools/orchestration_setup/README.md)
+to prepare your own caller and sandbox.
 
 ### Choose models by role
+
+For a first flow check, use the [Luna test profile](configs/llm/openai_smoke_luna.json).
+Your coding agent’s own model and the models called inside the experiment are
+separate choices.
 
 **For research runs, we recommend
 [`openai-moderate-v1.json`](configs/llm/openai-moderate-v1.json).** It uses
@@ -115,7 +147,16 @@ show how to inspect the saved files and adjust iterations, data fractions,
 splits, and time/VRAM budgets before running again. Real runs use GPU resources
 and incur API charges.
 
-## How the pieces fit together
+<a id="paper"></a>
+
+## Paper and architecture
+
+Read [Beyond a Better Score: Long-Horizon Agentic ML Development and Evaluation Protocol for Physics Time Series](https://zenodo.org/records/23071121).
+The paper studies scientifically valid model development on TIDMAD, TESS,
+Project8 and LIGO, combining composable research capabilities, scientific
+checks and exploration within compute budgets.
+
+### How the pieces fit together
 
 [![Paper Figure 1: SIDERIUS infrastructure and typed capability contracts](docs/assets/paper/figure1.svg)](docs/assets/paper/figure1.svg)
 
@@ -138,7 +179,9 @@ These figures are exported from the [paper on Zenodo](https://zenodo.org/records
 Their source and export details are recorded in
 [`docs/assets/paper/README.md`](docs/assets/paper/README.md).
 
-## Quickstart
+<a id="quickstart"></a>
+
+## Check your installation
 
 To check a framework installation without credentials, GPU work or external
 data, use the [synthetic Quickstart](examples/quickstart/README.md). It shows

@@ -1,12 +1,13 @@
 # Paper illustrations
 
-The root README shows Figure 1 (infrastructure) and Figure 2 (evaluation) from
+The root README shows infrastructure, evaluation and exploration results from
 [the SIDERIUS paper](https://zenodo.org/records/23071121).
 
 | Figure | Zoomable vector image | High-resolution preview |
 | --- | --- | --- |
 | 1 — Scientific capabilities and caller-owned workflows | [SVG](figure1.svg) | [PNG](figure1.png) |
 | 2 — Task specification and scientific evaluation | [SVG](figure2.svg) | [PNG](figure2.png) |
+| 3 — Valid models and estimated LLM cost on TIDMAD | [SVG](figure3.svg) | [PNG](figure3.png) |
 
 The SVG images stay sharp when enlarged; the PNGs are 3200 pixels wide. These
 are exports of the paper figures, with their content and layout unchanged.
