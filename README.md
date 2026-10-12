@@ -73,9 +73,23 @@ No global skill installation is required: the agent reads the linked repository 
 The [getting-started guide](docs/getting-started/README.md) links installation
 and the next setup steps. Your coding agent's own model and the models called
 inside a SIDERIUS experiment are separate choices. Use the
-[Luna test configuration](configs/llm/README.md) for the latter during a first
-flow check; for production research, start from the paper's LLM configuration
-or supply your own supported model choices.
+[Luna test configuration](configs/llm/openai_smoke_luna.json) for the latter during a first
+flow check.
+
+### Choose models by role
+
+**For research runs, we recommend
+[`openai-moderate-v1.json`](configs/llm/openai-moderate-v1.json).** It uses
+`gpt-6-astra` for all three proposer stages and the validator, and
+`gpt-5.6-luna` for the other workflow roles, all with `medium` reasoning.
+
+SIDERIUS lets you choose a supported model and provider independently for each
+role. You can allocate stronger models to proposal and validation while using
+lighter models elsewhere, then adjust individual roles for your task and budget
+without changing the workflow code. See the [configuration guide](configs/llm/README.md)
+to copy a profile into your project and select it at launch. Model selection does
+not set a spending limit or guarantee better scores; paper replay keeps its
+[recorded experiment configurations](https://github.com/yuema137/siderius-exp).
 
 ## Try an existing task with siderius-exp
 

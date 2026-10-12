@@ -8,18 +8,46 @@ Use a separate configuration when you start evaluating scientific ideas.
 | --- | --- | --- |
 | Offline setup check | Installation checks and the launcher's `--dry-run`; no API key or model call needed | Configuration and command preparation; no real model or training calls |
 | First real run / tutorial demo | [`openai_smoke_luna.json`](openai_smoke_luna.json) | All workflow LLM routes use GPT-6 Luna, with `medium` reasoning; use a small dataset and short workflow |
-| Production / scientific research | Start from the paper's LLM routing in [siderius-exp](https://github.com/yuema137/siderius-exp/tree/main/tutorials/shared#move-from-a-demo-to-research) | Our recommended starting point after the flow check; plan API costs separately |
+| Production / scientific research | [`openai-moderate-v1.json`](openai-moderate-v1.json) | Our recommended research starting point: Astra for proposal and validation, Luna elsewhere; plan API costs separately |
 | Custom model choices | Your own reviewed copy of a routing file | Select supported providers/models for each stage and your own budget |
 | Paper history | The experiment's frozen config and compatibility packages in [siderius-exp](https://github.com/yuema137/siderius-exp) | Preserve the recorded experiment's information flow; this is a separate purpose, not a higher-quality tier |
 
 The Luna profile is for functional testing, not our recommended production
-configuration or a promise of scientific quality. For research, the paper's
-model choices are a starting point, not a guarantee of the same results on a
-new task. You may replace them with your own supported model choices.
+configuration or a promise of scientific quality. The moderate profile is a
+research starting point, not a guarantee of better scores or lower total cost.
+You may replace its routes with your own supported model choices.
 
 Choosing the paper's **LLM routes** does not require historical compatibility
 mode. Keep model/provider selection separate from planner strategies, runtime
 policies, and archived experiment settings; those belong to the experiment.
+
+## Use the recommended research profile
+
+`openai-moderate-v1.json` selects OpenAI `gpt-6-astra` for proposer comparison,
+reasoning and proposing, and for validation. Interpretation, data analysis,
+implementation, tuner planner/reflector and literature main/search use
+`gpt-5.6-luna`. Every route uses `medium` reasoning and `max_retries: 1`.
+
+From your infra checkout, copy it once into a new file in your external project:
+
+```bash
+mkdir -p /absolute/path/to/your-workspace/llm
+cp -i configs/llm/openai-moderate-v1.json /absolute/path/to/your-workspace/llm/openai-moderate-v1.json
+```
+
+Pass
+`--llm_config /absolute/path/to/your-workspace/llm/openai-moderate-v1.json` to
+your task's launch command. Keep this saved copy with your experiment so future
+profile changes do not alter its configuration. Set `OPENAI_API_KEY` through the
+[credential setup](../../docs/getting-started/installation.md#api-keys) and
+verify access to both models before a paid run.
+
+Each role can use its own supported model/provider; changing one does not
+require editing workflow code. This template selects the native planner and
+does not enable optional capabilities or choose training, retry-round or cost
+budgets. The separate setup-review and external orchestration models are not
+controlled by this workflow profile. Existing defaults and historical paper
+configurations remain unchanged.
 
 ## Start with the smoke profile
 

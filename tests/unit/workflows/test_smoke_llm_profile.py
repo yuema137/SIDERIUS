@@ -1,9 +1,11 @@
-"""The opt-in smoke profiles must not inherit a costly or foreign model route."""
+"""Opt-in workflow profiles must preserve their declared role routing."""
 
 import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+
+import pytest
 
 from core.layout import checkout_root
 from tools.setup_review.routes import standard_llm_routes
@@ -34,7 +36,20 @@ def _mock_provider(monkeypatch, content: dict) -> Mock:
     return client
 
 
-def test_smoke_routes_reach_only_luna_requests(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    ("profile", "luna_model", "astra_roles"),
+    [
+        ("openai_smoke_luna.json", "gpt-6-luna", frozenset()),
+        (
+            "openai-moderate-v1.json",
+            "gpt-5.6-luna",
+            frozenset({"validate", "propose.comparison", "propose.reasoning", "propose.proposing"}),
+        ),
+    ],
+)
+def test_profiles_preserve_role_models_at_request_boundary(
+    monkeypatch, tmp_path, profile, luna_model, astra_roles
+):
     """Missing slots, reflector routing or dropped effort fail at the SDK edge.
 
     Existing setup-route tests separately bind this inspection to real node
@@ -43,7 +58,7 @@ def test_smoke_routes_reach_only_luna_requests(monkeypatch, tmp_path):
     """
     from agent.llm_bridge import LLMBridge
 
-    config = WorkflowLLMConfig.from_json(str(_profile_path("openai_smoke_luna.json")))
+    config = WorkflowLLMConfig.from_json(str(_profile_path(profile)))
     assert config.tune is not None
     assert config.tune.planner_strategy == "native-timing-v1"
     routes = standard_llm_routes(
@@ -67,7 +82,8 @@ def test_smoke_routes_reach_only_luna_requests(monkeypatch, tmp_path):
         assert route.issue is None
         assert route.transport is not None
         assert route.transport.provider == "openai"
-        assert route.transport.model_id == "gpt-6-luna"
+        expected_model = "gpt-6-astra" if route.name in astra_roles else luna_model
+        assert route.transport.model_id == expected_model
         assert route.transport.reasoning_effort == "medium"
         assert route.transport.max_retries == 1
         bridge = LLMBridge(**route.bridge_arguments)
@@ -87,7 +103,7 @@ def test_smoke_routes_reach_only_luna_requests(monkeypatch, tmp_path):
             result = bridge.generate("Return JSON.", "Offline route probe.", label=route.name)
         assert result == {"ok": True}
         request = client.chat.completions.create.call_args.kwargs
-        assert request["model"] == "gpt-6-luna"
+        assert request["model"] == expected_model
         assert request["reasoning_effort"] == "medium"
         assert request["response_format"] == {"type": "json_object"}
     assert client.chat.completions.create.call_count == 11
