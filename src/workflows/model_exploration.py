@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from workflows.data_analysis_stage import WorkflowAnalysisOutput
     from workflows.historical_analysis_assets import HistoricalTuningSource
 
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
 from agent.prompt_templates.proposal.task_blocks import load_proposal_task_blocks
@@ -2030,8 +2031,8 @@ def run_workflow(
         max_proposal_attempts: Max propose→implement→validate retries per iteration.
         target_score: Optional early stop — halt if best score >= target.
         file_index: Training/validation file index (ignored when is_trial=True).
-        llm_config: Per-node LLM configuration. If None, each node uses its
-            own built-in default. See WorkflowLLMConfig for details.
+        llm_config: Per-node LLM configuration. If None, use the complete
+            default workflow profile. See WorkflowLLMConfig.default for details.
         health_checks_config: Optional HealthGate YAML override forwarded to
             every tuner invocation. None preserves the tuner's shipped default.
         data_scope: DataScope restricting every component of this run to a
@@ -2100,7 +2101,7 @@ def run_workflow(
     validate_launch_trial_overrides(launch)
 
     if llm_config is None:
-        llm_config = WorkflowLLMConfig()
+        llm_config = WorkflowLLMConfig.default()
 
     # Step 10 / P1 — a composed run must arrive with its authorities ACTIVE.
     #
@@ -3926,12 +3927,13 @@ def main():
     # Build LLM config: --llm_config file takes precedence, then --provider/--model_id
     if args.llm_config:
         wf_llm_config = WorkflowLLMConfig.from_json(args.llm_config)
-    elif args.provider and args.model_id:
-        wf_llm_config = WorkflowLLMConfig.uniform(args.provider, args.model_id)
-    elif args.provider:
-        wf_llm_config = WorkflowLLMConfig.uniform(args.provider, "gemini-3.1-flash-lite-preview")
+    elif args.provider or args.model_id:
+        provider = args.provider or DEFAULT_LLM_PROVIDER
+        wf_llm_config = WorkflowLLMConfig.uniform(
+            provider, args.model_id or default_model_for_provider(provider)
+        )
     else:
-        wf_llm_config = None  # each node uses its own default
+        wf_llm_config = WorkflowLLMConfig.default()
 
     # Step 10 / P1 — the module CLI is a composition edge too, and it owns
     # the binding for exactly the same reason the chain launcher does.

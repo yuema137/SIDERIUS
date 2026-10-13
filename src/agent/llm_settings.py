@@ -9,7 +9,11 @@ not proof of an effective network destination or provider availability.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import Literal, TypedDict
+
+# One authority for omitted agent routing. Explicit provider/model choices win.
+DEFAULT_LLM_PROVIDER: Literal["openai"] = "openai"
+DEFAULT_LLM_MODEL = "gpt-5.6-luna"
 
 
 class ProviderConfig(TypedDict):
@@ -30,7 +34,7 @@ KNOWN_PROVIDERS: dict[str, ProviderConfig] = {
     "openai": {
         "base_url": None,  # SDK default
         "api_key_env": "OPENAI_API_KEY",
-        "default_model": "gpt-4o",
+        "default_model": DEFAULT_LLM_MODEL,
     },
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -50,6 +54,14 @@ KNOWN_PROVIDERS: dict[str, ProviderConfig] = {
     #     "default_model": "claude-sonnet-4-20250514",
     # },
 }
+
+def default_model_for_provider(provider: str) -> str:
+    """Resolve an omitted model without mixing providers and model IDs."""
+    known = KNOWN_PROVIDERS.get(provider.lower())
+    if known is None:
+        raise ValueError(f"An explicit model_id is required for provider {provider!r}")
+    return known["default_model"]
+
 
 #: Per-request wall-clock timeout, in seconds, for every provider client.
 #:

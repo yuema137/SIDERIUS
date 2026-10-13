@@ -44,6 +44,11 @@ from openai.types.chat import ChatCompletionMessageFunctionToolCall
 from pydantic import ValidationError
 
 from agent.llm_settings import (
+    DEFAULT_LLM_PROVIDER,
+    resolve_main_transport,
+    resolve_reflect_transport,
+)
+from agent.llm_settings import (
     DEFAULT_REQUEST_TIMEOUT_SECONDS as DEFAULT_REQUEST_TIMEOUT_SECONDS,
 )
 from agent.llm_settings import (
@@ -54,10 +59,6 @@ from agent.llm_settings import (
 )
 from agent.llm_settings import (
     ProviderConfig as _ProviderConfig,
-)
-from agent.llm_settings import (
-    resolve_main_transport,
-    resolve_reflect_transport,
 )
 from agent.planner_strategy import resolve_planner_strategy
 from agent.prompt_templates.tuner.rendering import (
@@ -394,7 +395,7 @@ class LLMBridge:
 
     def __init__(
         self,
-        provider: str = "gemini",
+        provider: str = DEFAULT_LLM_PROVIDER,
         model_id: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,

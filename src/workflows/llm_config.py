@@ -37,6 +37,7 @@ from pydantic import (
     model_validator,
 )
 
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
 from agent.schemas.llm_retry import RetryPolicy
 
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
@@ -48,22 +49,31 @@ def resolve_standard_llm_config(args: argparse.Namespace) -> WorkflowLLMConfig:
     Explicit JSON supersedes legacy model flags. Missing node blocks retain
     their existing downstream defaults; this is not a complete node projection.
     """
-    reflect_provider = args.reflect_provider
-    reflect_model_id = args.reflect_model_id
-    if reflect_model_id is None and reflect_provider is None:
-        reflect_model_id = "gemini-2.5-flash"
     if args.llm_config:
         return WorkflowLLMConfig.from_json(args.llm_config)
-    if args.llm_model != "gemini-3.1-pro-preview":
-        warnings.warn(
-            "--llm_model is deprecated; use --llm_config instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+    if args.llm_model is None:
+        config = WorkflowLLMConfig.default()
+        if args.reflect_provider is not None or args.reflect_model_id is not None:
+            assert config.tune is not None
+            provider = args.reflect_provider or DEFAULT_LLM_PROVIDER
+            config.tune.reflector = NodeLLMConfig(
+                provider=provider,
+                model_id=args.reflect_model_id or default_model_for_provider(provider),
+            )
+        return config
+    warnings.warn(
+        "--llm_model is deprecated; use --llm_config instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    # Explicit legacy model flags retain their Gemini meaning.
+    reflect_model_id = args.reflect_model_id
+    if reflect_model_id is None and args.reflect_provider is None:
+        reflect_model_id = "gemini-2.5-flash"
     return WorkflowLLMConfig.uniform(
         "gemini",
         args.llm_model,
-        reflect_provider=reflect_provider,
+        reflect_provider=args.reflect_provider,
         reflect_model_id=reflect_model_id,
     )
 
@@ -87,11 +97,11 @@ class NodeLLMConfig(BaseModel):
     """
 
     provider: Literal["gemini", "openai", "deepseek"] = Field(
-        default="gemini",
+        default=DEFAULT_LLM_PROVIDER,
         description="LLM provider.",
     )
     model_id: str = Field(
-        default="gemini-3.1-flash-lite-preview",
+        default_factory=lambda data: default_model_for_provider(data["provider"]),
         description="Specific model ID passed to the provider.",
     )
     reasoning_effort: ReasoningEffort | None = Field(
@@ -141,9 +151,8 @@ class TunerLLMConfig(BaseModel):
     use different providers and different models — see
     docs/break_tuner_agent.md for the rationale.
 
-    The default values reflect the recommended split: pro for the
-    reasoning-heavy planner, flash for the templated reflector. Override
-    either or both via the JSON config or the Python constructor.
+    Both stages use the central economical model default. Override either
+    or both via the JSON config or the Python constructor.
     """
 
     planner_strategy: str | None = Field(
@@ -152,24 +161,17 @@ class TunerLLMConfig(BaseModel):
     )
 
     planner: NodeLLMConfig = Field(
-        default_factory=lambda: NodeLLMConfig(
-            provider="gemini",
-            model_id="gemini-3.1-pro-preview",
-        ),
+        default_factory=NodeLLMConfig,
         description=(
             "Sub-agent config for the tuner's plan() call. Reasoning-heavy "
-            "task — recommend a frontier model. Default: gemini-3.1-pro-preview."
+            "task — recommend a frontier model."
         ),
     )
     reflector: NodeLLMConfig = Field(
-        default_factory=lambda: NodeLLMConfig(
-            provider="gemini",
-            model_id="gemini-2.5-flash",
-        ),
+        default_factory=NodeLLMConfig,
         description=(
             "Sub-agent config for the tuner's reflect() call. Templated "
-            "extraction task — recommend a fast/cheap model. Default: "
-            "gemini-2.5-flash (GA, unlimited daily quota, strong JSON-mode)."
+            "extraction task. Uses the central economical default."
         ),
     )
 
@@ -194,33 +196,23 @@ class ProposalLLMConfig(BaseModel):
     """
 
     comparison: NodeLLMConfig = Field(
-        default_factory=lambda: NodeLLMConfig(
-            provider="gemini",
-            model_id="gemini-2.5-flash",
-        ),
+        default_factory=NodeLLMConfig,
         description=(
             "Sub-agent config for Stage 1 (comparison). Data-heavy analysis "
-            "of past models — can use a cheaper/faster model. Default: gemini-2.5-flash."
+            "of past models — can use a cheaper/faster model."
         ),
     )
     reasoning: NodeLLMConfig = Field(
-        default_factory=lambda: NodeLLMConfig(
-            provider="gemini",
-            model_id="gemini-3.1-pro-preview",
-        ),
+        default_factory=NodeLLMConfig,
         description=(
-            "Sub-agent config for Stage 2 (causal reasoning). Needs strong "
-            "reasoning ability. Default: gemini-3.1-pro-preview."
+            "Sub-agent config for Stage 2 (causal reasoning). Needs strong reasoning ability."
         ),
     )
     proposing: NodeLLMConfig = Field(
-        default_factory=lambda: NodeLLMConfig(
-            provider="gemini",
-            model_id="gemini-3.1-pro-preview",
-        ),
+        default_factory=NodeLLMConfig,
         description=(
             "Sub-agent config for Stage 3 (architecture design). Needs precise "
-            "structured JSON output. Default: gemini-3.1-pro-preview."
+            "structured JSON output."
         ),
     )
 
@@ -249,10 +241,7 @@ class LitReviewLLMConfig(BaseModel):
     """
 
     main: NodeLLMConfig = Field(
-        default_factory=lambda: NodeLLMConfig(
-            provider="deepseek",
-            model_id="deepseek-v4-pro",
-        ),
+        default_factory=NodeLLMConfig,
         description=(
             "Sub-agent config for the lit-review node's compression + "
             "synthesis calls. Reasoning-heavy — recommend a strong model. "
@@ -260,10 +249,7 @@ class LitReviewLLMConfig(BaseModel):
         ),
     )
     search: NodeLLMConfig = Field(
-        default_factory=lambda: NodeLLMConfig(
-            provider="deepseek",
-            model_id="deepseek-v4-pro",
-        ),
+        default_factory=NodeLLMConfig,
         description=(
             "Sub-agent config for the lit-review node's search-decision "
             "call. Templated query/escalate/done step — can use a cheaper "
@@ -278,7 +264,7 @@ class WorkflowLLMConfig(BaseModel):
     Per-node LLM configuration for a workflow.
 
     Each field is optional. When None, the corresponding node uses its own
-    built-in default (e.g. the implementor defaults to gemini-3.1-pro-preview).
+    built-in central model default.
 
     Agents with multiple sub-calls use nested config classes:
       - The tuner uses `TunerLLMConfig` (planner + reflector).
@@ -501,6 +487,29 @@ class WorkflowLLMConfig(BaseModel):
         return cls.model_validate(data)
 
     @classmethod
+    def default(cls) -> WorkflowLLMConfig:
+        """Complete first-run routing, independent of repository file location.
+
+        Export this value for the downloadable default JSON. Explicit user
+        files are parsed separately, preserving partial-config inheritance.
+        Model defaults live in agent.llm_settings; no historical strategy is
+        selected here. One transport attempt is not a campaign cost ceiling.
+        """
+
+        def leaf() -> NodeLLMConfig:
+            return NodeLLMConfig(reasoning_effort="medium", max_retries=1)
+
+        return cls(
+            interpret=leaf(),
+            data_analysis=leaf(),
+            implement=leaf(),
+            validate=leaf(),
+            propose=ProposalLLMConfig(comparison=leaf(), reasoning=leaf(), proposing=leaf()),
+            tune=TunerLLMConfig(planner=leaf(), reflector=leaf()),
+            lit_review=LitReviewLLMConfig(main=leaf(), search=leaf()),
+        )
+
+    @classmethod
     def uniform(
         cls,
         provider: str,
@@ -580,5 +589,10 @@ def resolve_standard_tuner_llm_options(options: Mapping[str, Any]) -> dict[str, 
 
     options = dict(options)
     for option, field in (("provider", "llm_provider"), ("model_id", "llm_model_id")):
-        options.setdefault(option, HyperparamTuningInput.model_fields[field].default)
+        if option not in options:
+            schema_field = HyperparamTuningInput.model_fields[field]
+            options[option] = schema_field.get_default(
+                call_default_factory=True,
+                validated_data={"llm_provider": options.get("provider", DEFAULT_LLM_PROVIDER)},
+            )
     return options

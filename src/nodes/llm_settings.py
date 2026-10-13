@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from agent.llm_settings import DEFAULT_LLM_PROVIDER
 from agent.schemas.llm_retry import RetryPolicy
 
 
@@ -21,11 +22,11 @@ class NodeLLMDefaults[ModelId: (str, None)]:
     reasoning_effort: str | None = None
 
 
-INTERPRET = NodeLLMDefaults("gemini", "gemini-3.1-flash-lite-preview")
-IMPLEMENT = NodeLLMDefaults("gemini", "gemini-3.1-pro-preview")
-VALIDATE = NodeLLMDefaults("gemini", "gemini-3.1-flash-lite-preview")
-ANALYZE = NodeLLMDefaults("gemini", None)
-PROPOSE = NodeLLMDefaults("gemini", "gemini-3.1-flash-lite-preview")
+INTERPRET = NodeLLMDefaults(DEFAULT_LLM_PROVIDER, None)
+IMPLEMENT = NodeLLMDefaults(DEFAULT_LLM_PROVIDER, None)
+VALIDATE = NodeLLMDefaults(DEFAULT_LLM_PROVIDER, None)
+ANALYZE = NodeLLMDefaults(DEFAULT_LLM_PROVIDER, None)
+PROPOSE = NodeLLMDefaults(DEFAULT_LLM_PROVIDER, None)
 
 
 def node_bridge_kwargs(

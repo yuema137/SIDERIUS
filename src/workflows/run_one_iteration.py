@@ -1474,8 +1474,8 @@ def _run_bound_iteration(
     if args.llm_config:
         print(f"  LLM config       : {args.llm_config} (supersedes --llm_model)")
     else:
-        print(f"  LLM (planner)    : gemini / {args.llm_model}")
         resolved_tune_routing = llm_config.get("tune")
+        print(f"  LLM (planner)    : {resolved_tune_routing['provider']} / {resolved_tune_routing['model_id']}")
         eff_reflect_provider = resolved_tune_routing["reflect_provider"]
         eff_reflect_model_id = resolved_tune_routing["reflect_model_id"]
         print(f"  LLM (reflector)  : {eff_reflect_provider} / {eff_reflect_model_id}")

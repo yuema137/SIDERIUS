@@ -66,8 +66,8 @@ class TestValidatorInput:
         assert "U-Net" in inp.model_description
         assert "Embedding" in inp.mathematical_definition
         assert inp.storage.backend == "local"
-        assert inp.llm_provider == "gemini"
-        assert inp.llm_model_id == "gemini-3.1-flash-lite-preview"
+        assert inp.llm_provider == "openai"
+        assert inp.llm_model_id == "gpt-5.6-luna"
 
     def test_custom_llm_provider_overrides_default(self):
         inp = ValidatorInput(**VALID_INPUT_KWARGS, llm_provider="openai")

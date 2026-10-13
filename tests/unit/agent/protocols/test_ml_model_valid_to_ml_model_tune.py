@@ -182,7 +182,7 @@ class TestLocalValidatedModel:
         [
             pytest.param("max_rounds", 50, id="max_rounds"),
             pytest.param("file_index", 6, id="file_index"),
-            pytest.param("llm_provider", "gemini", id="llm_provider"),
+            pytest.param("llm_provider", "openai", id="llm_provider"),
             pytest.param("is_trial", False, id="is_trial"),
             # V19 PR 1 (P1-C3): omitted incumbent → None (no incumbent);
             # coupling flag defaults OFF.
@@ -975,3 +975,21 @@ def test_watchdog_selection_reaches_tuner_input(validator_output, proposal_outpu
         assert actual.watchdog.budget_seconds == (
             minutes * 60 if policy == "budget-ceiling-v1" else None
         )
+
+
+@pytest.mark.parametrize(
+    "provider, expected",
+    [
+        ("openai", "gpt-5.6-luna"),
+        ("gemini", "gemini-3.1-flash-lite-preview"),
+        ("deepseek", "deepseek-v4-pro"),
+    ],
+)
+def test_provider_only_mapping_resolves_matching_model(
+    validator_output, proposal_output, storage, provider, expected
+):
+    """The tuner mapper must resolve omitted model IDs against the selected provider."""
+    result = local_validated_model(
+        validator_output, proposal_output, storage, llm_provider=provider
+    )
+    assert result.llm_model_id == expected

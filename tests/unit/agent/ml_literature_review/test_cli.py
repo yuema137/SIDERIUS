@@ -177,8 +177,8 @@ class TestArgParser:
         assert args.lit_review_config == "/task/literature.yaml"
         assert args.task_composition == "/task/composition.yaml"
         assert args.data_dir == "/task/data"
-        assert args.provider == "gemini"
-        assert args.model_id == "gemini-3.1-flash-lite-preview"
+        assert args.provider == "openai"
+        assert args.model_id is None  # resolved against the selected provider
 
     def test_experiment_history_accepts_both_spellings(self):
         """Defect only this catches: losing either spelling of the

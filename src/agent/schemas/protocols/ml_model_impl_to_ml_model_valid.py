@@ -17,6 +17,7 @@ output file from storage. All required data is mapped explicitly by this protoco
 
 from typing import Literal
 
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
 from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorInput
@@ -25,8 +26,8 @@ from agent.schemas.validator import ValidatorInput
 def local_all_fields(
     output: ImplementorOutput,
     storage: StorageConfig,
-    llm_provider: Literal["gemini", "openai", "deepseek"] = "gemini",
-    llm_model_id: str = "gemini-3.1-flash-lite-preview",
+    llm_provider: Literal["gemini", "openai", "deepseek"] = DEFAULT_LLM_PROVIDER,
+    llm_model_id: str | None = None,
 ) -> ValidatorInput:
     """
     Map ImplementorOutput -> ValidatorInput in-memory.
@@ -66,7 +67,9 @@ def local_all_fields(
         model_io_contract=output.model_io_contract,
         model_probe_context=output.model_probe_context,
         llm_provider=llm_provider,
-        llm_model_id=llm_model_id,
+        llm_model_id=(
+            llm_model_id if llm_model_id is not None else default_model_for_provider(llm_provider)
+        ),
         storage=storage,
     )
 

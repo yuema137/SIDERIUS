@@ -227,8 +227,8 @@ def test_actual_workflow_tuner_forwarding_and_protocol(tmp_path, planner_retries
 def test_missing_blocks_and_literature_inheritance():
     absent = route_map({})
     empty = route_map({"implement": {}, "tune": {}})
-    assert absent["implement"].transport.model_id != empty["implement"].transport.model_id
-    assert absent["tune.planner"].transport.model_id != empty["tune.planner"].transport.model_id
+    assert absent["implement"].transport.model_id == empty["implement"].transport.model_id == "gpt-5.6-luna"
+    assert absent["tune.planner"].transport.model_id == empty["tune.planner"].transport.model_id == "gpt-5.6-luna"
     assert absent["lit_review.main"].transport is None
     assert "requires a main provider/model" in absent["lit_review.main"].issue
     inherited = route_map(
@@ -306,7 +306,6 @@ def test_key_access_requires_opt_in_and_potentially_active_route():
         environment={"OPENAI_API_KEY": "secret-test-marker", "GEMINI_API_KEY": ""},
     )
     assert {check.name: check.status for check in checks} == {
-        "GEMINI_API_KEY": "missing",
         "OPENAI_API_KEY": "present_nonempty",
     }
     assert "secret-test-marker" not in "".join(check.model_dump_json() for check in checks)

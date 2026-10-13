@@ -74,7 +74,7 @@ RESULT_AUTHORITY=scientific
 SKIP_FORMAL_MIN_DELTA=-1.0
 BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA=0.0
 BYPASS_FORMAL_TIME_BUDGET_MINUTES=""             # Lane F3: empty == omit == no bypass ceiling extension
-LLM_MODEL="gemini-3.1-pro-preview"  # §3.2: matches run_one_iteration.py default
+LLM_MODEL=""  # Omitted routing is resolved by the Python configuration owner.
 LLM_CONFIG=""
 # F-PROFILE-WIRE-1 — the DECLARED required runtime profile. Both empty ==
 # omitted == the legacy measured > shipped > uncalibrated ladder, and no new
@@ -518,7 +518,7 @@ build_app_args() {
         --skip_formal_min_delta "$SKIP_FORMAL_MIN_DELTA"
         --bypass_formal_time_budget_min_delta "$BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA"
         ${BYPASS_FORMAL_TIME_BUDGET_MINUTES:+--bypass_formal_time_budget_minutes "$BYPASS_FORMAL_TIME_BUDGET_MINUTES"}
-        --llm_model "$LLM_MODEL"
+        ${LLM_MODEL:+--llm_model "$LLM_MODEL"}
         # Lane F2 — forwarded only when TYPED (empty == omit == the
         # Python tri-state's None == AGENT_CONTROLLED).
         ${TRIAL_PORTION:+--trial_portion "$TRIAL_PORTION"}

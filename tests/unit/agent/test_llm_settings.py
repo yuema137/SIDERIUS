@@ -25,9 +25,9 @@ assert "openai" not in sys.modules
 with patch.object(os, "getenv", side_effect=AssertionError("credential read")):
     main = resolve_main_transport(provider="OPENAI", reasoning_effort="high")
     reflect = resolve_reflect_transport(main, provider="gemini")
-assert main.model_id == "gpt-4o"
+assert main.model_id == "gpt-5.6-luna"
 assert main.base_url is None
-assert reflect.model_id == "gpt-4o"
+assert reflect.model_id == "gpt-5.6-luna"
 assert reflect.reasoning_effort is None
 assert not reflect.reuse_main_client
 """

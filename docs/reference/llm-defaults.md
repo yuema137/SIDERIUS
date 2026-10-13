@@ -1,0 +1,47 @@
+# Default model routing
+
+## Authority and ownership
+
+`agent.llm_settings.DEFAULT_LLM_PROVIDER` and `DEFAULT_LLM_MODEL` own omitted
+agent routing. `KNOWN_PROVIDERS` owns provider-specific omitted-model resolution.
+An explicit Gemini or DeepSeek provider never inherits an OpenAI model ID.
+
+`WorkflowLLMConfig.default()` builds the complete standard first-run profile.
+`configs/llm/default.json` is its downloadable export, checked for drift by
+`test_economical_defaults.py`; it is not a second runtime authority. To regenerate:
+
+```python
+import json
+from pathlib import Path
+from workflows.llm_config import WorkflowLLMConfig
+Path("configs/llm/default.json").write_text(
+    json.dumps(WorkflowLLMConfig.default().model_dump(
+        mode="json", by_alias=True, exclude_none=True), indent=2) + "\n"
+)
+```
+
+Change the central model identifier and regenerate this export for a future
+model migration. Previously saved explicit profiles remain pinned intentionally.
+No runtime code loads the example JSON by a checkout-relative path.
+
+## Resolution and compatibility
+
+The standard entry gives explicit `--llm_config` first priority. An explicit
+legacy `--llm_model` keeps its Gemini routing and legacy reflector behavior.
+With neither flag, the complete economical profile is selected. Shell launchers
+forward omission rather than embedding another model default.
+
+Explicit JSON is parsed without overlaying the default profile. Missing analysis
+and literature routes retain interpreter inheritance. Direct node constructors,
+input schemas and protocol mappers resolve omitted models through the provider
+registry. Partial configs retain their retry/reasoning omission semantics.
+
+The automatic workflow profile selects medium reasoning and one transport
+attempt for retryable status responses. Timeout/connection retry policy, content
+repair attempts, workflow attempts and cumulative spending limits are distinct.
+Direct node retry behavior is unchanged. No planner strategy is selected here;
+scientific historical behavior belongs to exp profiles, not model defaults.
+
+Historical paper configurations explicitly set their models. Source assembly
+qualification is still required for historical plugin acceptance after changing
+fingerprinted modules; unchanged routing alone is not proof of prompt replay.

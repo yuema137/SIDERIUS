@@ -16,6 +16,7 @@ from typing import Annotated, Any, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
 from agent.schemas.custom_loss_contract import CustomLossApplicability, TaskOwnedCustomLoss
 from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
@@ -3026,14 +3027,14 @@ class HyperparamTuningInput(BaseModel):
 
     # --- LLM (planner) ---
     llm_provider: Literal["gemini", "openai", "deepseek"] = Field(
-        default="gemini",
+        default=DEFAULT_LLM_PROVIDER,
         description=(
             "LLM provider for the planner sub-call (and the default for the "
             "reflector when not overridden)."
         ),
     )
     llm_model_id: str = Field(
-        default="gemini-3.1-flash-lite-preview",
+        default_factory=lambda data: default_model_for_provider(data["llm_provider"]),
         description=(
             "Model ID for the planner sub-call (and the default for the "
             "reflector when not overridden)."

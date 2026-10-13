@@ -39,55 +39,63 @@ assert ProposerRoute is proposer_routing.ProposerRoute
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize("slot", ["implement", "interpret", "validate", "propose", "analyze"])
 @pytest.mark.parametrize(
-    "slot,default_model",
+    "provider, expected",
     [
-        ("implement", "gemini-3.1-pro-preview"),
-        ("interpret", "gemini-3.1-flash-lite-preview"),
-        ("validate", "gemini-3.1-flash-lite-preview"),
+        (None, "gpt-5.6-luna"),
+        ("gemini", "gemini-3.1-flash-lite-preview"),
+        ("deepseek", "deepseek-v4-pro"),
     ],
 )
-def test_constructor_and_empty_config_keep_distinct_owners(tmp_path, slot, default_model) -> None:
-    """Empty config must not silently replace the omitted implementor's pro model."""
+def test_constructor_defaults_resolve_against_selected_provider(tmp_path, slot, provider, expected):
+    """Exercise actual constructors and transport resolution without provider clients."""
+    from agent.llm_settings import resolve_main_transport
+    from nodes.data_analysis_agent import DataAnalysisAgent
     from nodes.ml_code_validator_agent import MLCodeValidatorAgent
     from nodes.ml_model_implementor import MLModelImplementor
+    from nodes.ml_model_proposal_agent import MLModelProposalAgent
     from nodes.result_interpretation_agent import ResultInterpretationAgent
 
     constructors = {
         "implement": MLModelImplementor,
         "interpret": ResultInterpretationAgent,
         "validate": MLCodeValidatorAgent,
+        "propose": MLModelProposalAgent,
+        "analyze": DataAnalysisAgent,
     }
-    for payload, expected in (
-        ({}, default_model),
-        ({slot: {}}, "gemini-3.1-flash-lite-preview"),
-    ):
-        factory = Mock()
-        extra = (
-            {"capability_index_path": str(tmp_path / "index.json")} if slot == "implement" else {}
-        )
-        constructors[slot](
-            **WorkflowLLMConfig.model_validate(payload).get(slot), bridge_factory=factory, **extra
-        )
-        assert factory.call_args.kwargs == {
-            "provider": "gemini",
-            "model_id": expected,
-            "max_retries": None,
-        }
+    captured = []
+
+    def factory(**kwargs):
+        kwargs.pop("max_retries", None)
+        captured.append(resolve_main_transport(**kwargs))
+        return Mock()
+
+    extra = (
+        {"capability_index_path": str(tmp_path / "index.json")}
+        if slot in {"implement", "propose"}
+        else {}
+    )
+    if provider is not None:
+        extra["provider"] = provider
+    if slot == "analyze":
+        extra["task_analysis_capability"] = Mock()
+    instance = constructors[slot](bridge_factory=factory, **extra)
+    if slot == "analyze":
+        instance._bridge()
+    assert captured[0].model_id == expected
+    assert captured[0].provider == (provider or "openai")
 
 
-def test_tuner_workflow_projection_preserves_missing_versus_empty_config() -> None:
-    """Missing tune is the input schema default, not TunerLLMConfig's pro default."""
-    assert (
-        resolve_standard_tuner_llm_options(WorkflowLLMConfig().get("tune"))["model_id"]
-        == "gemini-3.1-flash-lite-preview"
-    )
-    assert (
-        resolve_standard_tuner_llm_options(
-            WorkflowLLMConfig.model_validate({"tune": {}}).get("tune")
-        )["model_id"]
-        == "gemini-3.1-pro-preview"
-    )
+def test_tuner_workflow_projection_resolves_missing_and_empty_config() -> None:
+    """Both unconfigured tuner paths must resolve a usable model, not PydanticUndefined."""
+    for payload in ({}, {"tune": {}}):
+        assert (
+            resolve_standard_tuner_llm_options(
+                WorkflowLLMConfig.model_validate(payload).get("tune")
+            )["model_id"]
+            == "gpt-5.6-luna"
+        )
 
 
 def test_literature_search_keeps_its_own_effort_and_client_split() -> None:

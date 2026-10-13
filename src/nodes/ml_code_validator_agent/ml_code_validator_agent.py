@@ -53,6 +53,7 @@ import sys
 import torch
 
 from agent.llm_bridge import LLMBridge
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
 from agent.prompt_templates.native_training import render_native_training_appendix
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.model_io_contract import ModelIOContract
@@ -745,7 +746,7 @@ class MLCodeValidatorAgent:
     def __init__(
         self,
         provider: str = VALIDATE.provider,
-        model_id: str = VALIDATE.model_id,
+        model_id: str | None = VALIDATE.model_id,
         max_retries: int | None = VALIDATE.max_retries,
         reasoning_effort: str | None = VALIDATE.reasoning_effort,
         bridge_factory=None,
@@ -1020,8 +1021,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--model_description", required=True)
     p.add_argument("--mathematical_definition", required=True)
-    p.add_argument("--llm_provider", default="gemini", choices=["gemini", "openai"])
-    p.add_argument("--llm_model_id", default="gemini-3.1-flash-lite-preview")
+    p.add_argument("--llm_provider", default=DEFAULT_LLM_PROVIDER, choices=["gemini", "openai"])
+    p.add_argument("--llm_model_id", default=None)
     p.add_argument("--workspace", default="./siderius_workspace")
     p.add_argument("--run_name", default="v1")
     return p
@@ -1038,7 +1039,11 @@ def main() -> None:
         model_description=args.model_description,
         mathematical_definition=args.mathematical_definition,
         llm_provider=args.llm_provider,
-        llm_model_id=args.llm_model_id,
+        llm_model_id=(
+            args.llm_model_id
+            if args.llm_model_id is not None
+            else default_model_for_provider(args.llm_provider)
+        ),
         storage=StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=args.workspace, run_name=args.run_name),

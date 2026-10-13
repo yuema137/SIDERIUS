@@ -31,10 +31,10 @@ class TestNodeLLMConfig:
             NodeLLMConfig(provider="gemini", reasoning_effort="medium")
 
     def test_defaults(self):
-        """No args → falls back to gemini / flash-lite-preview defaults."""
+        """Omitted routes use the central economical model."""
         c = NodeLLMConfig()
-        assert c.provider == "gemini"
-        assert c.model_id == "gemini-3.1-flash-lite-preview"
+        assert c.provider == "openai"
+        assert c.model_id == "gpt-5.6-luna"
 
     def test_explicit_provider_and_model(self):
         c = NodeLLMConfig(provider="openai", model_id="gpt-4o-mini")
@@ -59,14 +59,14 @@ class TestNodeLLMConfig:
 
 class TestTunerLLMConfig:
     def test_defaults(self):
-        """No args → planner = gemini-3.1-pro-preview, reflector = gemini-2.5-flash."""
+        """Both omitted tuner routes use Luna."""
         c = TunerLLMConfig()
         assert isinstance(c.planner, NodeLLMConfig)
         assert isinstance(c.reflector, NodeLLMConfig)
-        assert c.planner.provider == "gemini"
-        assert c.planner.model_id == "gemini-3.1-pro-preview"
-        assert c.reflector.provider == "gemini"
-        assert c.reflector.model_id == "gemini-2.5-flash"
+        assert c.planner.provider == "openai"
+        assert c.planner.model_id == "gpt-5.6-luna"
+        assert c.reflector.provider == "openai"
+        assert c.reflector.model_id == "gpt-5.6-luna"
 
     def test_planner_and_reflector_are_independent_objects(self):
         """The two slots must be distinct NodeLLMConfig instances so editing
@@ -115,14 +115,14 @@ class TestTunerLLMConfig:
                 "reflector": {"provider": "gemini", "model_id": "gemini-2.5-flash"},
             }
         )
-        assert loaded.planner.model_id == "gemini-3.1-pro-preview"  # default
+        assert loaded.planner.model_id == "gpt-5.6-luna"  # default
         assert loaded.reflector.model_id == "gemini-2.5-flash"
 
     def test_empty_dict_loads_with_both_defaults(self):
         """An empty dict should load with both fields at default."""
         loaded = TunerLLMConfig.model_validate({})
-        assert loaded.planner.model_id == "gemini-3.1-pro-preview"
-        assert loaded.reflector.model_id == "gemini-2.5-flash"
+        assert loaded.planner.model_id == "gpt-5.6-luna"
+        assert loaded.reflector.model_id == "gpt-5.6-luna"
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +319,7 @@ class TestWorkflowLLMConfigJSON:
             },
         }
         cfg = WorkflowLLMConfig.model_validate(data)
-        assert cfg.tune.planner.model_id == "gemini-3.1-pro-preview"  # default
+        assert cfg.tune.planner.model_id == "gpt-5.6-luna"  # default
         assert cfg.tune.reflector.model_id == "gemini-2.5-flash"
 
     def test_round_trip_via_model_dump_and_validate(self):
@@ -341,15 +341,14 @@ class TestWorkflowLLMConfigJSON:
 
 class TestLitReviewLLMConfig:
     def test_defaults(self):
-        """No args → both main and search use deepseek / deepseek-v4-pro
-        (matches the JSON-level defaults landing in llm_configs/*.json)."""
+        """Both omitted literature routes use Luna."""
         from workflows.llm_config import LitReviewLLMConfig
 
         c = LitReviewLLMConfig()
-        assert c.main.provider == "deepseek"
-        assert c.main.model_id == "deepseek-v4-pro"
-        assert c.search.provider == "deepseek"
-        assert c.search.model_id == "deepseek-v4-pro"
+        assert c.main.provider == "openai"
+        assert c.main.model_id == "gpt-5.6-luna"
+        assert c.search.provider == "openai"
+        assert c.search.model_id == "gpt-5.6-luna"
 
     def test_main_and_search_are_independent_objects(self):
         from workflows.llm_config import LitReviewLLMConfig

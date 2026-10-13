@@ -7,7 +7,8 @@ Use a separate configuration when you start evaluating scientific ideas.
 | Purpose | What to use | What it establishes |
 | --- | --- | --- |
 | Offline setup check | Installation checks and the launcher's `--dry-run`; no API key or model call needed | Configuration and command preparation; no real model or training calls |
-| First real run / tutorial demo | [`openai_smoke_luna.json`](openai_smoke_luna.json) | All workflow LLM routes use GPT-6 Luna, with `medium` reasoning; use a small dataset and short workflow |
+| Default / first real run | [`default.json`](default.json) | All workflow routes use GPT-5.6 Luna, with `medium` reasoning and no automatic 429/5xx retries; start with a small dataset and short workflow |
+| Existing GPT-6 Luna demos | [`openai_smoke_luna.json`](openai_smoke_luna.json) | Explicit GPT-6 Luna profile, retained for experiments that already selected it |
 | Production / scientific research | [`openai-moderate-v1.json`](openai-moderate-v1.json) | Our recommended research starting point: Astra for proposal and validation, Luna elsewhere; plan API costs separately |
 | Custom model choices | Your own reviewed copy of a routing file | Select supported providers/models for each stage and your own budget |
 | Paper history | The experiment's frozen config and compatibility packages in [siderius-exp](https://github.com/yuema137/siderius-exp) | Preserve the recorded experiment's information flow; this is a separate purpose, not a higher-quality tier |
@@ -20,6 +21,27 @@ You may replace its routes with your own supported model choices.
 Choosing the paper's **LLM routes** does not require historical compatibility
 mode. Keep model/provider selection separate from planner strategies, runtime
 policies, and archived experiment settings; those belong to the experiment.
+
+## What happens without a config
+
+The standard workflow automatically uses `default.json`'s routing when you omit
+`--llm_config` and the legacy `--llm_model` override. The runtime constructs that
+profile from the shared defaults, so it also works in an installed package.
+Every model role uses OpenAI `gpt-5.6-luna`, with `medium` reasoning and
+`max_retries: 1`. Set `OPENAI_API_KEY` before a real run.
+
+Copy `default.json` into your external project and pass its path with
+`--llm_config` to freeze those choices. Explicit profiles, including moderate,
+keep their own models. A partial file retains the documented inheritance rules;
+it is not merged with the automatic profile. Direct node APIs use the same
+model default, while retaining their existing retry and reasoning options.
+
+For implementation details and how to update the shared default, see the
+[default-routing reference](../../docs/reference/llm-defaults.md).
+
+The default reduces accidental use of stronger models; it does not impose a
+run-wide spending limit. Transport timeouts, content repairs and workflow
+attempts have their own controls. Use small runs and explicit budgets for tests.
 
 ## Use the recommended research profile
 
@@ -46,10 +68,9 @@ Each role can use its own supported model/provider; changing one does not
 require editing workflow code. This template selects the native planner and
 does not enable optional capabilities or choose training, retry-round or cost
 budgets. The separate setup-review and external orchestration models are not
-controlled by this workflow profile. Existing defaults and historical paper
-configurations remain unchanged.
+controlled by this workflow profile. Explicit research profiles and historical paper configurations remain unchanged.
 
-## Start with the smoke profile
+## Save the default profile for a first run
 
 From your infra checkout, copy the file to your own workspace:
 
@@ -58,7 +79,7 @@ mkdir -p /absolute/path/to/your-workspace/llm
 if [ -e /absolute/path/to/your-workspace/llm/agents.json ]; then
   echo "agents.json already exists; choose a new filename or workspace" >&2
 else
-  cp configs/llm/openai_smoke_luna.json /absolute/path/to/your-workspace/llm/agents.json
+  cp configs/llm/default.json /absolute/path/to/your-workspace/llm/agents.json
 fi
 ```
 
@@ -74,8 +95,8 @@ access or successful training on your task.
 The profile fills every workflow model slot: interpretation, data analysis,
 all three proposal stages, implementation, validation, tuning planner and
 reflector, and both literature stages. Enabling an optional capability does not
-switch it to a more expensive model. The file selects `native-timing-v1`, so no
-paper compatibility package is needed. It does not enable those capabilities
+switch it to a more expensive model. The default file leaves planner strategy selection to the installation.
+It does not select a paper compatibility profile. It does not enable those capabilities
 or set data size, training budgets, iteration count, or failed-round limits.
 
 For the first flow check, explicitly set one iteration, one round and

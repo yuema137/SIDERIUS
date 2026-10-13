@@ -17,6 +17,7 @@ import argparse
 import warnings
 from typing import get_args
 
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.ordering import parse_file_order_cli
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
@@ -41,13 +42,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--provider",
         type=str,
         choices=["gemini", "openai"],
-        default="gemini",
+        default=DEFAULT_LLM_PROVIDER,
         help="LLM provider for the planner sub-call (default for reflector when not overridden).",
     )
     parser.add_argument(
         "--model_id",
         type=str,
-        default="gemini-3.1-flash-lite-preview",
+        default=None,
         help="Model ID for the planner sub-call (default for reflector when not overridden).",
     )
     parser.add_argument(
@@ -681,7 +682,9 @@ def build_agent_input(
         "resume": args.resume,
         "expert_advice": args.expert_advice,
         "llm_provider": args.provider,
-        "llm_model_id": args.model_id,
+        "llm_model_id": args.model_id
+        if args.model_id is not None
+        else default_model_for_provider(args.provider),
         "planner_strategy": args.planner_strategy,
         "reflect_provider": args.reflect_provider,
         "reflect_model_id": args.reflect_model_id,

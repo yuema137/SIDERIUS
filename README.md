@@ -106,7 +106,11 @@ to prepare your own caller and sandbox.
 
 ### Choose models by role
 
-For a first flow check, use the [Luna test profile](configs/llm/openai_smoke_luna.json).
+Without a model configuration, the standard workflow uses **GPT-5.6 Luna for
+every role**, with medium reasoning and no automatic retries for 429/5xx
+responses. Timeout and workflow retries have separate controls.
+Start with a small flow check; stronger models are an explicit choice.
+You can save the [default profile](configs/llm/default.json) with your experiment.
 Your coding agent’s own model and the models called inside the experiment are
 separate choices.
 

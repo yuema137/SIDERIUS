@@ -227,7 +227,7 @@ def test_retry_presence_survives_workflow_serialization(override, wire_format):
     for leaf in (payload["tune"]["reflector"], payload["lit_review"]["search"]):
         assert ("max_retries" in leaf) == ("max_retries" in override)
         # Only retry presence is special; human-facing resolved defaults remain.
-        assert leaf["model_id"] == "gemini-3.1-flash-lite-preview"
+        assert leaf["model_id"] == "gpt-5.6-luna"
         assert leaf["reasoning_effort"] is None
     assert routes(restored) == before
     expected = override.get("max_retries", 1)

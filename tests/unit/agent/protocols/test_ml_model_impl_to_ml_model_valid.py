@@ -11,7 +11,7 @@ Tests cover:
       threaded through (model_type, model_file_path, test_file_path,
       description_file_path, config_fields, model_description,
       mathematical_definition) plus storage pass-through
-    - llm_provider defaults to "gemini" and is overridable via kwarg
+    - llm_provider defaults to "openai" and is overridable via kwarg
     - llm_model_id is overridable via kwarg
 
   database_all_fields
@@ -90,7 +90,7 @@ class TestLocalAllFields:
     @pytest.mark.parametrize(
         "kwargs, expected_attr, expected_value",
         [
-            pytest.param({}, "llm_provider", "gemini", id="default_llm_provider_is_gemini"),
+            pytest.param({}, "llm_provider", "openai", id="default_llm_provider_is_openai"),
             pytest.param(
                 {"llm_provider": "openai"}, "llm_provider", "openai", id="custom_llm_provider"
             ),
@@ -107,7 +107,7 @@ class TestLocalAllFields:
         expected_attr,
         expected_value,
     ):
-        """LLM-knob contract: ``llm_provider`` falls back to "gemini" when
+        """LLM-knob contract: ``llm_provider`` falls back to "openai" when
         the caller omits it, and both ``llm_provider`` / ``llm_model_id``
         are overridable via kwargs. One parametrized family with explicit
         case IDs replaces three flat tests."""
@@ -124,3 +124,19 @@ class TestDatabaseAllFields:
     def test_raises_not_implemented(self, implementor_output, storage):
         with pytest.raises(NotImplementedError):
             database_all_fields(implementor_output, storage)
+
+
+@pytest.mark.parametrize(
+    "provider, expected",
+    [
+        ("openai", "gpt-5.6-luna"),
+        ("gemini", "gemini-3.1-flash-lite-preview"),
+        ("deepseek", "deepseek-v4-pro"),
+    ],
+)
+def test_provider_only_mapping_resolves_matching_model(
+    implementor_output, storage, provider, expected
+):
+    """A provider override must not accidentally send the default Luna ID to Gemini."""
+    result = local_all_fields(implementor_output, storage, llm_provider=provider)
+    assert result.llm_model_id == expected

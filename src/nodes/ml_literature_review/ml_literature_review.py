@@ -46,6 +46,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
 from agent.prompt_templates.literature_review import (
     DIMENSION_LABELS,
     render_data_analysis_context,
@@ -1060,8 +1061,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "YAML's top-level `enabled:` key gates the workflow stage only and is "
         "ignored here — invoking this CLI is the enablement.",
     )
-    parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai"])
-    parser.add_argument("--model_id", type=str, default="gemini-3.1-flash-lite-preview")
+    parser.add_argument(
+        "--provider", type=str, default=DEFAULT_LLM_PROVIDER, choices=["gemini", "openai"]
+    )
+    parser.add_argument("--model_id", type=str, default=None)
     parser.add_argument(
         "--task_composition",
         required=True,
@@ -1145,7 +1148,9 @@ def _build_cli_input(args: argparse.Namespace) -> LiteratureReviewInput:
             },
             "run_name": args.run_name,
             "llm_provider": args.provider,
-            "llm_model_id": args.model_id,
+            "llm_model_id": args.model_id
+            if args.model_id is not None
+            else default_model_for_provider(args.provider),
         }
     )
 

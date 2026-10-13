@@ -21,6 +21,7 @@ the proposal provides expert_advice and baseline_config for the tuning agent.
 
 from typing import Any, Literal
 
+from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
 from agent.schemas.hyperparam_tuning import (
     HealthGateMode,
     HyperparamTuningInput,
@@ -69,8 +70,8 @@ def local_validated_model(
     healthgate_mode: HealthGateMode | None = None,
     result_authority: ResultAuthority | None = None,
     file_index: int = 6,
-    llm_provider: Literal["gemini", "openai", "deepseek"] = "gemini",
-    llm_model_id: str = "gemini-3.1-flash-lite-preview",
+    llm_provider: Literal["gemini", "openai", "deepseek"] = DEFAULT_LLM_PROVIDER,
+    llm_model_id: str | None = None,
     reasoning_effort: str | None = None,
     planner_strategy: str | None = None,
     expected_planner_strategy: PlannerStrategyIdentity | None = None,
@@ -238,7 +239,7 @@ def local_validated_model(
         ``validate_runtime_config`` + run-invariants lock enforce the rest.
         See docs/design/enable_partial_file_list.md.
       - file_index    : data split index (caller-supplied, default 6; ignored when is_trial=True)
-      - llm_provider  : planner-call provider (caller-supplied, default gemini)
+      - llm_provider  : planner-call provider (caller-supplied, otherwise central provider default)
       - llm_model_id  : planner-call model ID (caller-supplied)
       - reflect_provider : optional separate provider for the tuner's
         reflect() call. None means the reflector uses llm_provider.
@@ -357,7 +358,9 @@ def local_validated_model(
         candidate_id=output.candidate_id,
         expert_advice=expert_advice,
         llm_provider=llm_provider,
-        llm_model_id=llm_model_id,
+        llm_model_id=(
+            llm_model_id if llm_model_id is not None else default_model_for_provider(llm_provider)
+        ),
         reasoning_effort=reasoning_effort,
         planner_strategy=planner_strategy,
         expected_planner_strategy=expected_planner_strategy,

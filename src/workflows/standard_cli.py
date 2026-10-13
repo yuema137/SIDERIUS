@@ -154,10 +154,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--llm_model",
         type=str,
-        default="gemini-3.1-pro-preview",
-        help="Gemini model ID for all 5 agents (the planner sub-call of the "
+        default=None,
+        help="Legacy explicit Gemini model override. Omitted uses the central Luna profile. "
+        "The planner sub-call of the "
         "tuner uses this; the reflector sub-call uses --reflect_model_id "
-        "if set, else falls back to a provider-aware default).",
+        "if set, else falls back to a provider-aware default.",
     )
     parser.add_argument(
         "--reflect_provider",
@@ -172,9 +173,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Optional separate model for the tuner's reflector sub-call. "
-        "When unset for the gemini provider, defaults to 'gemini-2.5-flash' "
-        "(GA model with unlimited daily quota). When unset for other "
-        "providers, falls back to --llm_model (legacy behavior).",
+        "Without legacy model flags, omitted reflector settings use the default "
+        "Luna profile; an explicit provider selects its own model default. "
+        "Explicit --llm_model retains the legacy Gemini reflector behavior.",
     )
     parser.add_argument(
         "--gpu_memory_limit_gb",

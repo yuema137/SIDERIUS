@@ -23,6 +23,7 @@ from pydantic import ValidationError
 
 from agent.cache_consolidator import consolidate
 from agent.llm_bridge import LLMBridge
+from agent.llm_settings import DEFAULT_LLM_PROVIDER
 from agent.prompt_templates.formal_failure import render_formal_failure_feedback
 from agent.prompt_templates.interpretation.rendering import (
     DEDUP_SYSTEM_PROMPT,
@@ -195,7 +196,7 @@ class ResultInterpretationAgent:
     def __init__(
         self,
         provider: str = INTERPRET.provider,
-        model_id: str = INTERPRET.model_id,
+        model_id: str | None = INTERPRET.model_id,
         max_retries: int | None = INTERPRET.max_retries,
         reasoning_effort: str | None = INTERPRET.reasoning_effort,
         bridge_factory=None,
@@ -1395,8 +1396,10 @@ def main():
     parser.add_argument(
         "--model_type", type=str, required=True, help="Model architecture (e.g. 'punet')."
     )
-    parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai"])
-    parser.add_argument("--model_id", type=str, default="gemini-3.1-flash-lite-preview")
+    parser.add_argument(
+        "--provider", type=str, default=DEFAULT_LLM_PROVIDER, choices=["gemini", "openai"]
+    )
+    parser.add_argument("--model_id", type=str, default=None)
     parser.add_argument(
         "--required_gate_ids",
         nargs="*",

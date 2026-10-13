@@ -158,12 +158,13 @@ def test_forwarding_census_requires_reachable_projection():
 @pytest.mark.parametrize(
     "flags, provider, model",
     [
-        ([], "gemini", "gemini-2.5-flash"),
-        (["--reflect_provider", "openai"], "openai", "gemini-3.1-pro-preview"),
-        (["--reflect_model_id", "custom-model"], "gemini", "custom-model"),
+        ([], "openai", "gpt-5.6-luna"),
+        (["--llm_model", "legacy-model"], "gemini", "gemini-2.5-flash"),
+        (["--reflect_provider", "openai"], "openai", "gpt-5.6-luna"),
+        (["--reflect_model_id", "custom-model"], "openai", "custom-model"),
     ],
 )
-def test_legacy_reflector_selection(flags, provider, model):
+def test_default_and_explicit_legacy_reflector_selection(flags, provider, model):
     args = normalize_args(
         build_parser().parse_args(
             [

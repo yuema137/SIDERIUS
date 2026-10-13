@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from agent.llm_bridge import LLMBridge
+from agent.llm_settings import DEFAULT_LLM_PROVIDER
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.prompt_templates.native_training import render_native_training_appendix
 from agent.prompt_templates.proposal import live_loss_metadata
@@ -1787,7 +1788,7 @@ class MLModelImplementor:
     def __init__(
         self,
         provider: str = IMPLEMENT.provider,
-        model_id: str = IMPLEMENT.model_id,
+        model_id: str | None = IMPLEMENT.model_id,
         max_retries: int | None = IMPLEMENT.max_retries,
         reasoning_effort: str | None = IMPLEMENT.reasoning_effort,
         bridge_factory=None,
@@ -2420,8 +2421,10 @@ def main():
     parser = argparse.ArgumentParser(description="SIDERIUS ml_model_implementor")
     parser.add_argument("--workspace", type=str, default="./siderius_workspace")
     parser.add_argument("--run_name", type=str, default="v1")
-    parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai"])
-    parser.add_argument("--model_id", type=str, default="gemini-3.1-pro-preview")
+    parser.add_argument(
+        "--provider", type=str, default=DEFAULT_LLM_PROVIDER, choices=["gemini", "openai"]
+    )
+    parser.add_argument("--model_id", type=str, default=None)
     args = parser.parse_args()
 
     from core.generated_library import bind_generated_library_to_workspace

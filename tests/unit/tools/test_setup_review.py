@@ -95,7 +95,7 @@ def test_missing_and_explicit_llm_blocks_are_not_effective_defaults(request_for,
     report = inspect_declaration(request_for("--llm_config", "llm.json"), tmp_path / "report")
     assert report.declared_llm_config["interpret"] is None
     assert isinstance(report.declared_llm_config["implement"], dict)
-    assert report.declared_llm_config["implement"]["provider"] == "gemini"
+    assert report.declared_llm_config["implement"]["provider"] == "openai"
     assert report.llm_review == "not_performed"
     assert "Static LLM routes" in " ".join(report.unresolved)
 

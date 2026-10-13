@@ -32,6 +32,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
+from agent.llm_settings import DEFAULT_LLM_PROVIDER
 from agent.prompt_templates.formal_failure import render_formal_failure_feedback
 from agent.prompt_templates.proposal import (
     live_loss_metadata,
@@ -1565,7 +1566,7 @@ class MLModelProposalAgent:
     def __init__(
         self,
         provider: str = PROPOSE.provider,
-        model_id: str = PROPOSE.model_id,
+        model_id: str | None = PROPOSE.model_id,
         max_retries: int | None = PROPOSE.max_retries,
         reasoning_effort: str | None = PROPOSE.reasoning_effort,
         bridge_factory=None,
@@ -2596,8 +2597,10 @@ def main():
         default="v1",
         help="Run name — reads interpretation_{run_name}.json, writes proposal_{run_name}.json",
     )
-    parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai"])
-    parser.add_argument("--model_id", type=str, default="gemini-3.1-flash-lite-preview")
+    parser.add_argument(
+        "--provider", type=str, default=DEFAULT_LLM_PROVIDER, choices=["gemini", "openai"]
+    )
+    parser.add_argument("--model_id", type=str, default=None)
     parser.add_argument(
         "--task_composition",
         required=True,
