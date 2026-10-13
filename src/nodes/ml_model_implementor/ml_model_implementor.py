@@ -173,6 +173,17 @@ def _smoke_test_plugin(
         with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(plugin_src)
 
+        if model_probe_context is not None:
+            from agent.skills.task_model_probe_contract import task_probe_declaration
+
+            if task_probe_declaration(model_probe_context, model_io_contract) is not None:
+                from agent.skills.validator_probe_worker import run_bounded_probe
+
+                return run_bounded_probe(
+                    tmp_path, model_io_contract,
+                    model_probe_context=model_probe_context, gradients=False,
+                )[3]
+
         # Load the module
         import importlib.util
 
@@ -206,6 +217,12 @@ def _smoke_test_plugin(
             **probe_config_kwargs(mod.PLUGIN_CONFIG_CLASS, model_io_contract)
         )
         probe_extent = candidate_probe_extent(config, model_io_contract)
+        if model_probe_context is not None:
+            from agent.skills.task_model_probe_contract import resolve_task_probe_extent
+
+            probe_extent = resolve_task_probe_extent(
+                model_probe_context, model_io_contract, config, symbolic=probe_extent
+            )
         model = mod.PLUGIN_MODEL_CLASS(config)
         model.eval()
 
@@ -1246,6 +1263,19 @@ def _build_code_system_prompt(inp: ImplementorInput) -> str:
     )
 
 
+def _probe_contract_prompt(inp: ImplementorInput) -> str:
+    """Render only explicit task probe declarations; preserve undeclared prompts."""
+    context = inp.task_composition_ref.model_probe_context if inp.task_composition_ref else None
+    if context is None:
+        return ""
+    from agent.skills.task_model_probe_contract import render_model_probe_contract
+
+    contract = inp.forward_contract.model_io
+    if contract is None:
+        raise ModelProbeSetupError("task-owned model probes require a model I/O contract")
+    return render_model_probe_contract(context, contract)
+
+
 def _build_reasoning_prompt(inp: ImplementorInput) -> str:
     model_cfg = inp.baseline_config.get("model_config", {})
     train_cfg = inp.baseline_config.get("train_config", {})
@@ -1353,14 +1383,20 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
             "fix each issue raised above.",
         ]
 
+    probe_block = _probe_contract_prompt(inp)
+    if probe_block:
+        lines += ["", probe_block]
     return "\n".join(lines)
 
 
 def _build_code_prompt(reasoning: str, inp: ImplementorInput) -> str:
     model_cfg = inp.baseline_config.get("model_config", {})
     advice_block = ""
+    probe_block = _probe_contract_prompt(inp)
+    if probe_block:
+        advice_block = f"\n{probe_block}\n"
     if inp.human_advice:
-        advice_block = f"\n## Implement Advice (high priority)\n{inp.human_advice}\n"
+        advice_block += f"\n## Implement Advice (high priority)\n{inp.human_advice}\n"
     return (
         f"## Your Reasoning\n\n{reasoning}\n\n"
         f"---\n\n"
@@ -1391,6 +1427,8 @@ def _build_repair_prompt(
     """
     model_cfg = inp.baseline_config.get("model_config", {})
 
+    probe_block = _probe_contract_prompt(inp)
+    probe_section = f"{probe_block}\n\n" if probe_block else ""
     history_section = ""
     if error_history:
         history_lines = ["## Error History (do NOT reintroduce these mistakes)\n"]
@@ -1403,6 +1441,7 @@ def _build_repair_prompt(
         f"```json\n{json.dumps(code, indent=2)}\n```\n\n"
         f"## Current Error (fix this)\n\n{error}\n\n"
         f"{history_section}"
+        f"{probe_section}"
         f"---\n\n"
         f"## Model name: `{inp.model_name}`\n"
         f"## Class name: `{_class_name(inp.model_name)}`\n"

@@ -796,3 +796,44 @@ verification permits execution. Raw driver samples and the journal are stored
 under the workspace's `preflight_workers/inference_verification/` directory.
 An admitted sample does not certify every later input, trained weight or
 non-allocator transient; normal execution safeguards remain necessary.
+
+### Candidate validation fixture contract
+
+A task implementing `model_validation_input(request)` may also declare
+`model_validation_contract`, as a `ModelProbeContract` instance or an equivalent
+mapping validated at the task-object boundary. It contains:
+
+- `description`: nonempty semantics of the synthetic CPU fixture, including what
+  a candidate must accept. The implementor receives this declaration during
+  reasoning, code generation and repair.
+- `symbolic_extent_config_field`: optional candidate configuration field holding
+  a positive integer extent. It requires exactly one shared non-batch symbolic
+  dimension across the input/output contract and no dynamic axes. Fixed axes
+  remain unchanged. A conflicting candidate temporal extent is rejected.
+- `config_fields`: explicit names of candidate scalar configuration fields made
+  available as `ModelProbeRequest.candidate_config`. Include the extent field
+  here if the fixture needs to read it directly; the resolved `input_shape`
+  already incorporates it. Undeclared configuration is not exposed.
+- `max_input_elements`: required positive integer upper bound on the product of
+  the resolved input shape, checked before fixture allocation. This bounds the
+  check, not the production dataset or model memory.
+
+The candidate configuration and model parameter count are never reduced for a
+fixture. Missing or invalid candidate fields are candidate construction errors
+that can be repaired. Malformed task declarations, ambiguous dimension bindings,
+identity mismatches and fixture allocation-cap violations are setup errors;
+retrying candidate code cannot resolve them. Declared checks append their actual
+input/output geometry and exposed candidate fields to forward-failure feedback.
+
+Without a declaration, existing fixture geometry, prompt text and failure text
+remain unchanged. A declaration without an extent binding uses the existing
+shape recipe (including candidate temporal lengths where supported); its prompt
+shows the recipe's default input shapes. Symbolic alignment alone is not a
+promise that arbitrary sizes are scientifically valid. Tasks must declare a
+fixture that their supported candidate models can legitimately consume.
+
+Declared candidate checks execute generated model code in the existing bounded
+probe child, including implementor forward-only checks and generated validator
+tests. The input cap is not an activation-memory guarantee. Child failure or
+resource exhaustion rejects the candidate rather than granting a pass; task
+setup failures retain their separate typed transport.

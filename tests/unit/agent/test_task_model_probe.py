@@ -29,6 +29,7 @@ def declared_task(
     batch=1,
     packaged=False,
     batch_sizes=None,
+    input_axes=None,
 ):
     pack = tmp_path / "task"
     shutil.copytree(ROOT / "examples/quickstart", pack)
@@ -45,6 +46,11 @@ def _model_validation_input(self, request):
 QuickstartTaskDataPath.model_validation_input = _model_validation_input
 """
     )
+    if input_axes is not None:
+        config_path = pack / "declared/task_config.yaml"
+        config = yaml.safe_load(config_path.read_text())
+        config["forward_contract"]["model_io"]["input"]["axes"] = input_axes
+        config_path.write_text(yaml.safe_dump(config))
     manifest = yaml.safe_load((ROOT / "configs/task_composition/quickstart.yaml").read_text())
     manifest_text = (
         yaml.safe_dump(manifest)

@@ -15,7 +15,11 @@ from agent.schemas.parameter_rules import (
     ParameterRules,
     resolve_parameter_rule_document,
 )
-from agent.skills.model_io_probe_skill import declared_output_tensor, realize_shape
+from agent.skills.model_io_probe_skill import (
+    ProbeConstructionError,
+    declared_output_tensor,
+    realize_shape,
+)
 
 if TYPE_CHECKING:
     import torch
@@ -71,8 +75,13 @@ def _resolved_provider(context: ModelProbeContext, contract: ModelIOContract):
                 raise ModelProbeSetupError(
                     "model_validation_batch_sizes must be nonempty positive integers"
                 )
-            yield provider, composition.parameter_rules, preferred_batches
-    except ModelProbeSetupError:
+            yield (
+                provider,
+                composition.parameter_rules,
+                preferred_batches,
+                composition.task_data_path,
+            )
+    except (ModelProbeSetupError, ProbeConstructionError):
         raise
     except Exception as exc:
         raise ModelProbeSetupError(f"cannot resolve model probe task: {exc}") from exc
@@ -122,6 +131,7 @@ def legal_probe_batches(
 class ModelProbeCase:
     input: torch.Tensor
     expected_output_shape: tuple[int, ...]
+    description: str = ""
 
 
 def task_model_probe_cases(
@@ -130,6 +140,7 @@ def task_model_probe_cases(
     output_type: str,
     *,
     symbolic: int | None = None,
+    candidate_config: object | None = None,
 ) -> tuple[ModelProbeCase, ...]:
     """Build fresh CPU inputs; never fall back after an explicit provider fails."""
     import torch
@@ -140,16 +151,27 @@ def task_model_probe_cases(
         raise ModelProbeSetupError("task-owned model probes require a model I/O contract")
     # Candidate output declarations are candidate errors, not task setup failures.
     output_tensor = declared_output_tensor(contract, output_type)
+    from agent.skills.task_model_probe_contract import (
+        check_probe_input_size,
+        resolve_probe_declaration,
+    )
+
     cases = []
-    with _resolved_provider(context, contract) as (provider, rules, preferred_batches):
+    with _resolved_provider(context, contract) as (provider, rules, preferred_batches, task):
+        declaration, symbolic, config_values = resolve_probe_declaration(
+            task, contract, candidate_config, symbolic=symbolic
+        )
         batches = legal_probe_batches(contract, rules, preferred_batches)
         dtype = resolve_contract_input_dtype(contract.input.dtype)
         for batch in batches:
             shape = realize_shape(contract.input, batch=batch, symbolic=symbolic)
+            if declaration is not None:
+                check_probe_input_size(declaration, shape)
             request = ModelProbeRequest(
                 model_io_contract=contract,
                 input_shape=shape,
                 dtype=str(dtype).removeprefix("torch."),
+                **({"candidate_config": config_values} if declaration is not None else {}),
             )
             try:
                 value = provider(request)
@@ -169,6 +191,13 @@ def task_model_probe_cases(
             cases.append(
                 ModelProbeCase(
                     input=value.detach().clone(),
+                    description=(
+                        f"; task probe input shape={shape}, expected output="
+                        f"{realize_shape(output_tensor, batch=batch, symbolic=symbolic)}, "
+                        f"candidate fields={config_values}"
+                        if declaration is not None
+                        else ""
+                    ),
                     expected_output_shape=realize_shape(
                         output_tensor,
                         batch=batch,

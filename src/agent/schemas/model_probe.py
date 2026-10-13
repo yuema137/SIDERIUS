@@ -1,7 +1,7 @@
 """Task-owned, data-free inputs for deterministic model candidate checks."""
 
 from pathlib import Path
-from typing import TypedDict
+from typing import Annotated, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -29,6 +29,31 @@ class ModelProbeContext(BaseModel):
         return value
 
 
+class ModelProbeContract(BaseModel):
+    """Task-owned fixture semantics; never permission to change candidate config."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    description: str = Field(min_length=1)
+    symbolic_extent_config_field: str | None = Field(default=None, min_length=1)
+    config_fields: tuple[str, ...] = ()
+    max_input_elements: Annotated[int, Field(strict=True, gt=0)]
+
+    @field_validator("description")
+    @classmethod
+    def nonblank_description(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("probe description must not be blank")
+        return value
+
+    @field_validator("config_fields")
+    @classmethod
+    def unique_fields(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value) or any(not name.strip() for name in value):
+            raise ValueError("probe config fields must be nonempty and unique")
+        return value
+
+
 class ModelProbeRequest(BaseModel):
     """Resolved geometry, not permission to read datasets or run a model."""
 
@@ -37,6 +62,12 @@ class ModelProbeRequest(BaseModel):
     model_io_contract: ModelIOContract
     input_shape: tuple[int, ...] = Field(min_length=1)
     dtype: str = Field(min_length=1)
+    candidate_config: dict[
+        str,
+        Annotated[int, Field(strict=True)]
+        | Annotated[float, Field(strict=True)]
+        | Annotated[bool, Field(strict=True)],
+    ] = Field(default_factory=dict, exclude_if=lambda value: not value)
 
     @field_validator("input_shape")
     @classmethod

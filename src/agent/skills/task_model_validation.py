@@ -35,6 +35,7 @@ def check_task_model(
             contract,
             output_type,
             symbolic=candidate_probe_extent(config, contract),
+            candidate_config=config,
         )
     except ProbeConstructionError as exc:
         return False, False, False, f"Candidate probe cannot be constructed: {exc}"
@@ -44,7 +45,7 @@ def check_task_model(
                 output = model(case.input)
         except Exception as exc:
             raise_if_code_package_failure(exc)
-            return False, False, False, f"Forward pass failed: {exc}"
+            return False, False, False, f"Forward pass failed: {exc}{case.description}"
         if (
             not isinstance(output, torch.Tensor)
             or tuple(output.shape) != case.expected_output_shape
@@ -111,6 +112,28 @@ def render_task_model_test(
     context: ModelProbeContext,
 ) -> str:
     """Generated tests use the shared checker and explicit identity, never random data."""
+    from agent.skills.task_model_probe_contract import task_probe_declaration
+
+    if task_probe_declaration(context, contract) is not None:
+        return f"""from pathlib import Path
+from agent.schemas.model_io_contract import ModelIOContract
+from agent.schemas.model_probe import ModelProbeContext, ModelProbeSetupError
+from agent.skills.validator_probe_worker import run_bounded_probe
+from agent.skills.task_model_validation import report_setup_failure
+
+CONTRACT = ModelIOContract.model_validate_json({contract.model_dump_json()!r})
+CONTEXT = ModelProbeContext.model_validate_json({context.model_dump_json()!r})
+
+
+def test_task_owned_forward_and_gradient():
+    model_path = Path(__file__).resolve().parent.parent / "models" / {f"{model_name}.py"!r}
+    try:
+        result = run_bounded_probe(str(model_path), CONTRACT, model_probe_context=CONTEXT)
+    except ModelProbeSetupError as error:
+        report_setup_failure(error)
+        raise
+    assert all(result[:3]), result[3]
+"""
     return f"""import os
 import sys
 

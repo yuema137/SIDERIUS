@@ -444,6 +444,7 @@ def _check_instantiation_and_gradient(
     model_io_contract: ModelIOContract | None = None,
     *,
     _isolated_worker: bool = False,
+    _gradients: bool = True,
     model_probe_context: ModelProbeContext | None = None,
 ) -> tuple[bool, bool, bool, str | None, int | None, int | None]:
     """
@@ -495,6 +496,16 @@ def _check_instantiation_and_gradient(
             was generated against, mapped in by the impl->valid protocol, or
             ``None`` on the legacy path.
     """
+    if model_probe_context is not None and not _isolated_worker:
+        from agent.skills.task_model_probe_contract import task_probe_declaration
+
+        if task_probe_declaration(model_probe_context, model_io_contract) is not None:
+            from agent.skills.validator_probe_worker import run_bounded_probe
+
+            return run_bounded_probe(
+                model_file_path, model_io_contract,
+                model_probe_context=model_probe_context, gradients=_gradients,
+            )
     try:
         module = captured_plugin(model_file_path)
     except Exception as e:
@@ -540,7 +551,17 @@ def _check_instantiation_and_gradient(
             **probe_config_kwargs(module.PLUGIN_CONFIG_CLASS, model_io_contract)
         )
         probe_extent = candidate_probe_extent(config, model_io_contract)
+        if model_probe_context is not None:
+            from agent.skills.task_model_probe_contract import resolve_task_probe_extent
+
+            probe_extent = resolve_task_probe_extent(
+                model_probe_context, model_io_contract, config, symbolic=probe_extent
+            )
     except Exception as e:
+        from agent.schemas.model_probe import ModelProbeSetupError
+
+        if isinstance(e, ModelProbeSetupError):
+            raise
         raise_if_code_package_failure(e)
         return False, False, False, f"Model instantiation failed: {e}", None, None
 
@@ -617,7 +638,7 @@ def _check_instantiation_and_gradient(
             model_io_contract,
             model_probe_context,
             declared_type,
-            gradients=True,
+            gradients=_gradients,
         )
         return (*verdict, realized_total, realized_trainable)
 

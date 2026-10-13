@@ -27,6 +27,7 @@ class ProbeRequest(BaseModel):
     model_file_path: str
     model_io_contract: ModelIOContract | None
     result_path: str
+    gradients: bool = True
 
 
 class ProbeResponse(BaseModel):
@@ -74,6 +75,7 @@ def run_bounded_probe(
     model_io_contract: ModelIOContract | None,
     *,
     model_probe_context: ModelProbeContext | None = None,
+    gradients: bool = True,
 ) -> ProbeResult:
     """Return a failed candidate verdict if its isolated check exceeds resources."""
     with tempfile.TemporaryDirectory(prefix="siderius-validator-") as directory:
@@ -85,6 +87,7 @@ def run_bounded_probe(
                 model_io_contract=model_io_contract,
                 model_probe_context=model_probe_context,
                 result_path=str(result),
+                gradients=gradients,
             ).model_dump_json(),
             encoding="utf-8",
         )
@@ -149,6 +152,7 @@ def main() -> None:
             request.model_file_path,
             request.model_io_contract,
             _isolated_worker=True,
+            _gradients=request.gradients,
             **options,
         )
     except ModelProbeSetupError as error:
