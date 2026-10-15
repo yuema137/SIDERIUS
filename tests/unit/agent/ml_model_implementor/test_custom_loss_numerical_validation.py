@@ -4,7 +4,10 @@ from pathlib import Path
 
 import torch
 
-from agent.schemas.custom_loss_contract import ExplicitPairApplicability
+from agent.schemas.custom_loss_contract import (
+    ExplicitPairApplicability,
+    build_custom_loss_contract_snapshot,
+)
 from agent.schemas.custom_loss_validation import validate_custom_loss_plugin
 from agent.schemas.model_io_contract import Dimension, ModelIOContract, TensorAxis, TensorContract
 from ml_models.models_format_sandbox import DtypeAdmissibility
@@ -23,12 +26,14 @@ def _tensor(*dims: int | str, dtype: str = "float32") -> TensorContract:
 
 
 def _masked_loss_source(marker: Path | None = None) -> str:
+    model_io, target, applicability = _declared_pair()
+    metadata = _metadata(model_io, target, applicability)
     marker_effect = "" if marker is None else f"Path({str(marker)!r}).write_text('imported')\n"
     return (
         "from pathlib import Path\n"
         "import torch\n"
         "from pydantic import BaseModel\n"
-        f"{marker_effect}"
+        f"{marker_effect}{metadata}"
         "class Config(BaseModel):\n    pass\n"
         "class MaskedLoss(torch.nn.Module):\n"
         "    def __init__(self, config):\n        super().__init__()\n"
@@ -38,6 +43,16 @@ def _masked_loss_source(marker: Path | None = None) -> str:
         "PLUGIN_LOSS_TYPE = 'masked'\n"
         "PLUGIN_LOSS_CONFIG_CLASS = Config\n"
         "PLUGIN_LOSS_CLASS = MaskedLoss\n"
+    )
+
+
+def _metadata(model_io, target, applicability):
+    snapshot = build_custom_loss_contract_snapshot(model_io.output, target, applicability)
+    return (
+        "PLUGIN_LOSS_TARGET_DTYPE = 'float'\n"
+        + "PLUGIN_CAPABILITY_CONTRACT = "
+        + repr(snapshot.model_dump(mode="json"))
+        + "\n"
     )
 
 
@@ -180,7 +195,7 @@ def test_equal_shape_generic_pair_remains_available_without_provider():
 
     assert (
         validate_custom_loss_plugin(
-            _mse_loss_source(),
+            _mse_loss_source() + _metadata(model_io, tensor, applicability),
             "mse",
             model_io,
             tensor,

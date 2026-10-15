@@ -346,11 +346,10 @@ class TestLossPrompts:
             assert prompt.strip(), f"{name} is empty"
 
     def test_reasoning_prompt_states_forward_contract(self):
-        """The reasoning prompt must show the LLM the [B,256,T] / [B,T]
-        forward contract — this is the single hardest constraint to
-        recover from if missed."""
-        assert "[B, num_classes, T]" in IMPLEMENTOR_LOSS_REASONING_PROMPT
-        assert "[B, T]" in IMPLEMENTOR_LOSS_REASONING_PROMPT
+        """Task shapes and supervision own the contract, not classifier defaults."""
+        assert "supplied task contract" in IMPLEMENTOR_LOSS_REASONING_PROMPT
+        assert "canonical supervision dtype" in IMPLEMENTOR_LOSS_REASONING_PROMPT
+        assert "[B, num_classes, T]" not in IMPLEMENTOR_LOSS_REASONING_PROMPT
         assert "requires_grad" in IMPLEMENTOR_LOSS_REASONING_PROMPT
 
     def test_code_prompt_states_signature_and_scalar_return(self):

@@ -15,6 +15,7 @@ Output a JSON object with exactly these fields:
 Hard constraints — violating any of these makes the code invalid:
 - The forward signature is FIXED: ``def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:``.
   Use ``inputs`` and ``targets`` everywhere in forward_body — NEVER rename them.
+  Follow the supplied task shapes and canonical target dtype; do not assume classification.
 - forward_body MUST end with a return of a SCALAR tensor (``.dim() == 0``) that
   carries gradient through ``inputs``.
 - init_body MUST define every attribute referenced in forward_body. Do NOT access

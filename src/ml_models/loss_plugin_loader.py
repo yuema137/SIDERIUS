@@ -9,9 +9,14 @@ plugin file must define exactly three module-level symbols:
     PLUGIN_LOSS_CONFIG_CLASS : type  — Pydantic BaseModel subclass
     PLUGIN_LOSS_CLASS        : type  — nn.Module subclass
 
+Contract-aware plugins also declare PLUGIN_CAPABILITY_CONTRACT and
+PLUGIN_LOSS_TARGET_DTYPE ("long" for canonical int64, "float" for float32).
+Missing legacy dtype defaults to long only without a contract. Invalid or
+contradictory declarations are refused.
+
     Forward contract:
-        inputs:  torch.Tensor [B, num_classes, T] float32  (model logits)
-        targets: torch.Tensor [B, T]              int64    (class indices)
+        inputs:  task-declared prediction tensor
+        targets: task-declared supervision, using the native target representation
         returns: torch.Tensor scalar                       (requires_grad=True)
 
 Discovery: scans the directories returned by ``_resolve_loss_dirs()``:
@@ -150,15 +155,6 @@ def _validate_expected_contract(
         raise ValueError("loss plugin capability contract does not match the composed task")
 
 
-def _optional_contract_snapshot(path: str) -> CapabilityContractSnapshot | None:
-    """Read valid metadata when present without changing the legacy load route."""
-
-    try:
-        return read_loss_contract_snapshot(path)
-    except (OSError, SyntaxError, ValueError):
-        return None
-
-
 class _InvalidPackageLoss(ValueError):
     """Unwind new modules when required loss metadata is absent."""
 
@@ -189,22 +185,14 @@ def _load_loss_plugin(
     captured_contract = None
     if captured_member is not None:
         captured_source = captured_member.source.decode("utf-8")
-        if expected_contract_snapshot is not None:
-            captured_contract = parse_loss_contract_snapshot_literal(captured_source, filename=path)
-        else:
-            try:
-                captured_contract = parse_loss_contract_snapshot_literal(
-                    captured_source, filename=path
-                )
-            except (SyntaxError, ValueError):
-                captured_contract = None
+        captured_contract = parse_loss_contract_snapshot_literal(captured_source, filename=path)
     if captured_member is not None:
         _validate_expected_contract(captured_contract, expected_contract_snapshot)
 
     try:
         with acquire_module(path) as captured:
             if captured is not None:
-                attributes = _loss_attributes(captured, path)
+                attributes = _loss_attributes(captured, path, captured_contract)
                 if attributes is None:
                     raise _InvalidPackageLoss
                 attributes["contract_snapshot"] = captured_contract
@@ -213,17 +201,20 @@ def _load_loss_plugin(
         raise
     except _InvalidPackageLoss:
         return None
+    except ValueError:
+        raise
     except Exception as exc:
         print(f"[LossLoader] Failed to load {path}: {exc}")
         return None
 
-    validated_source: str | None = None
-    validated_contract: CapabilityContractSnapshot | None = None
-    if expected_contract_snapshot is not None:
-        with open(path, encoding="utf-8") as source_file:
-            validated_source = source_file.read()
+    with open(path, encoding="utf-8") as source_file:
+        validated_source = source_file.read()
+    try:
         validated_contract = parse_loss_contract_snapshot_literal(validated_source, filename=path)
-        _validate_expected_contract(validated_contract, expected_contract_snapshot)
+    except SyntaxError as exc:
+        print(f"[LossLoader] Failed to load {path}: {exc}")
+        return None
+    _validate_expected_contract(validated_contract, expected_contract_snapshot)
 
     module_name = _MODULE_NAME_PREFIX + os.path.splitext(os.path.basename(path))[0]
     spec = importlib.util.spec_from_file_location(module_name, path)
@@ -235,10 +226,7 @@ def _load_loss_plugin(
     # (via ``__name__``) without surprising downstream inspect calls.
     sys.modules[module_name] = module
     try:
-        if validated_source is None:
-            spec.loader.exec_module(module)
-        else:
-            exec(compile(validated_source, path, "exec"), module.__dict__)
+        exec(compile(validated_source, path, "exec"), module.__dict__)
     except Exception as e:
         # Roll back the sys.modules entry on load failure so a broken plugin
         # can be fixed and retried in the same process.
@@ -246,36 +234,33 @@ def _load_loss_plugin(
         print(f"[LossLoader] Failed to load {path}: {e}")
         return None
 
-    attributes = _loss_attributes(module, path)
-    if attributes is not None:
-        attributes["contract_snapshot"] = (
-            validated_contract
-            if expected_contract_snapshot is not None
-            else _optional_contract_snapshot(path)
-        )
-    return attributes
+    try:
+        return _loss_attributes(module, path, validated_contract)
+    except ValueError:
+        sys.modules.pop(module_name, None)
+        raise
 
 
-def _loss_attributes(module: ModuleType, path: str) -> dict[str, Any] | None:
-    """Preserve loss-specific metadata interpretation for either acquisition path."""
+def validate_loss_module_target(
+    module: ModuleType, snapshot: CapabilityContractSnapshot | None
+) -> str:
+    """Validate plugin target metadata; only absent legacy metadata defaults."""
+    from agent.schemas.custom_loss_target import validate_custom_loss_target_declaration
+
+    default = "long" if snapshot is None else None
+    declaration = getattr(module, "PLUGIN_LOSS_TARGET_DTYPE", default)
+    return validate_custom_loss_target_declaration(declaration, snapshot).declaration
+
+
+def _loss_attributes(
+    module: ModuleType, path: str, snapshot: CapabilityContractSnapshot | None = None
+) -> dict[str, Any] | None:
+    """Apply identical target admission to filesystem and captured modules."""
     for attr in REQUIRED_LOSS_PLUGIN_SYMBOLS:
         if not hasattr(module, attr):
             print(f"[LossLoader] Skipping {os.path.basename(path)}: missing '{attr}'")
             return None
-
-    # I13 — read the optional ``PLUGIN_LOSS_TARGET_DTYPE`` declaration. Plugins
-    # generated before I13 don't carry the field; default to ``"long"`` to
-    # match the int64-targets forward contract documented in
-    # ``proposing_stage.md``. Invalid values are warned and clamped to the
-    # default rather than rejected so a typo doesn't kill the plugin.
-    target_dtype = getattr(module, "PLUGIN_LOSS_TARGET_DTYPE", "long")
-    if target_dtype not in ("long", "float"):
-        print(
-            f"[LossLoader] Warning: {os.path.basename(path)}: "
-            f"PLUGIN_LOSS_TARGET_DTYPE={target_dtype!r} is not 'long' or "
-            f"'float'; defaulting to 'long'."
-        )
-        target_dtype = "long"
+    target_dtype = validate_loss_module_target(module, snapshot)
 
     # Step 12 / PR-12d D4c — the OPTIONAL normalization declaration.
     #
@@ -304,6 +289,7 @@ def _loss_attributes(module: ModuleType, path: str) -> dict[str, Any] | None:
         "config_class": module.PLUGIN_LOSS_CONFIG_CLASS,
         "loss_class": module.PLUGIN_LOSS_CLASS,
         "target_dtype": target_dtype,
+        "contract_snapshot": snapshot,
         "reduction": reduction,
     }
 
@@ -407,15 +393,13 @@ def load_loss_plugin(
                 continue
             try:
                 plugin = _load_loss_plugin(path, expected_contract_snapshot)
-            except ValueError as exc:
+            except (ValueError, SyntaxError) as exc:
                 # One generated-library root may hold losses for many tasks.
                 # A contract mismatch proves THIS candidate is unavailable;
                 # it does not prove a later candidate with the requested name
                 # is unavailable. Keep scanning without importing the refused
                 # module, then surface the refusals if no compatible target is
                 # found anywhere.
-                if expected_contract_snapshot is None:
-                    raise
                 contract_refusals.append(f"{fname}: {exc}")
                 continue
             if plugin is None:
@@ -438,7 +422,13 @@ def load_loss_plugin(
                 # Same class as issue #234, which PR-12a closed one family
                 # over: a metadata declaration silently ignored becomes wrong
                 # science.
+                from ml_models.loss_models_sandbox import LOSS_CONTRACT_REGISTRY
+
                 LOSS_TARGET_DTYPE_REGISTRY[loss_name] = plugin["target_dtype"]
+                if plugin["contract_snapshot"] is not None:
+                    LOSS_CONTRACT_REGISTRY[loss_name] = plugin["contract_snapshot"]
+                else:
+                    LOSS_CONTRACT_REGISTRY.pop(loss_name, None)
                 if plugin["reduction"] is not None:
                     LOSS_REDUCTION_REGISTRY[loss_name] = plugin["reduction"]
                 return plugin
@@ -446,7 +436,7 @@ def load_loss_plugin(
         detail = "; ".join(contract_refusals[:5])
         raise ValueError(
             f"Custom loss {loss_name!r} has no loadable plugin matching the "
-            f"composed task contract. Refused before import: {detail}"
+            f"composed task contract. Candidate refusals: {detail}"
         )
     return None
 

@@ -36,6 +36,7 @@ from agent.prompt_templates.implementor.task_blocks import load_implementor_task
 from agent.prompt_templates.native_training import render_native_training_appendix
 from agent.prompt_templates.proposal import live_loss_metadata
 from agent.schemas.custom_loss_contract import CustomLossApplicability
+from agent.schemas.custom_loss_target import resolve_custom_loss_target
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput, LossProvenance
 from agent.schemas.model_io_contract import ModelIOContract, TensorContract
@@ -803,10 +804,8 @@ from typing import Self
 PLUGIN_LOSS_TYPE = "{loss_name}"
 {contract_literal}
 
-# I13 — target dtype the loss expects. "long" (int64) is the classifier
-# contract; "float" matches a regressor (smooth_l1-style) contract. All
-# losses generated under the current proposer forward contract use "long".
-PLUGIN_LOSS_TARGET_DTYPE = "long"
+# Native target representation resolved from the declared task contract.
+PLUGIN_LOSS_TARGET_DTYPE = "{target_dtype}"
 
 
 class {LossClass}Config(BaseModel):
@@ -831,8 +830,8 @@ class {LossClass}(nn.Module):
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         # Forward contract:
-        #   inputs:  [B, num_classes, T] float32  (model logits)
-        #   targets: [B, T]              int64    (class indices)
+        #   inputs:  prediction tensor declared by the task contract
+        #   targets: task supervision, native dtype {target_dtype}
         #   returns: scalar tensor                (requires_grad=True)
 {forward_body}
 
@@ -845,26 +844,23 @@ IMPLEMENTOR_LOSS_REASONING_PROMPT = """\
 You are a senior PyTorch engineer{LOSS_ENGINEER_ROLE}.
 
 Your task: given a mathematical definition for a new loss function, plan its PyTorch
-implementation in detail before writing code. The loss receives classifier-shaped
-logits and integer class targets; it must return a SCALAR tensor with gradient.
+implementation in detail before writing code. The loss receives the task-declared
+prediction and supervision tensors; it must return a SCALAR tensor with gradient.
 
 ## Forward contract — non-negotiable
 
-  - ``inputs``  : ``torch.Tensor`` of shape ``[B, num_classes, T]`` (float32, logits)
-  - ``targets`` : ``torch.Tensor`` of shape ``[B, T]``              (int64, class indices in [0, num_classes))
+  - ``inputs``  : prediction tensor with the shape, dtype and semantics in the supplied task contract
+  - ``targets`` : supervision tensor with the shape, dtype and semantics in that contract
   - returns     : ``torch.Tensor`` SCALAR  (i.e. ``.dim() == 0``)
                   with ``requires_grad=True`` so training can backprop.
 
 ## Module-level constant — REQUIRED (I13)
 
-Every loss plugin you generate MUST declare ``PLUGIN_LOSS_TARGET_DTYPE``
-at module level. For the classifier contract above (int64 targets), the
-value is the literal string ``"long"``. The template already includes
-this declaration — do NOT remove or rename it. Consumers
-(``evaluate_time_skill``, ``train_engine_sandbox``) read this to decide
-whether to cast targets to ``.long()`` or ``.float()`` before invoking
-your loss. Missing this declaration will silently default to ``"long"``
-but is treated as a defect.
+The template owns ``PLUGIN_LOSS_TARGET_DTYPE``. It derives ``"long"`` (int64)
+or ``"float"`` (float32) from the task's canonical supervision dtype. Do not
+invent, remove or override it. Native training casts targets to that declared
+representation before your forward method. Preserve their scientific meaning;
+continuous targets must not be rounded or converted to class indices.
 
 ## Allowed imports — STRICT ALLOW-LIST
 
@@ -884,8 +880,7 @@ ANY other import will fail at plugin load time. In particular:
 
 ## Anti-patterns to avoid
 
-  - Do NOT return a non-scalar tensor (any reduction over the leading and time
-    dims is fine: ``.mean()``, ``.sum()`` / batch_size, etc.).
+  - Do NOT return a non-scalar tensor (choose reduction axes from the task contract: ``.mean()``, ``.sum()`` / batch_size, etc.).
   - Do NOT compute the loss on ``targets.float()`` without checking shape — if the
     loss uses ``F.cross_entropy`` or similar, pass the int64 targets directly.
 
@@ -901,7 +896,8 @@ non-differentiable operations like ``argmax``-based weights). However, NEVER
 call ``.detach()`` on ``inputs`` directly, and never sever the main
 computational path from ``inputs`` → loss.
 
-Safe pattern — weight is detached; gradient still flows via ``F.cross_entropy``:
+Classification-only example — when the declared task uses integer classes,
+weight can be detached while gradient still flows via ``F.cross_entropy``:
 
     with torch.no_grad():
         weight = compute_weight(inputs, targets)   # treated as constant
@@ -921,7 +917,8 @@ In your reasoning, cover all of the following:
    plugin configuration with its defaults; per-attempt overrides of custom-loss
    parameters are not supported. A different setting requires a different plugin implementation.
 4. What additional imports beyond torch, nn, F, BaseModel, Field, model_validator are needed?
-5. Trace the forward pass shape-by-shape from ``[B, num_classes, T]`` to scalar.
+5. Trace the forward pass from the declared prediction and target shapes to scalar.
+   Do not assume a class axis, a time axis or matching prediction/target shapes.
 
 Think step by step. Be concrete about tensor shapes at each stage.
 Do not write final Python code yet — that is the next step."""
@@ -945,6 +942,7 @@ Output a JSON object with exactly these fields:
 Hard constraints — violating any of these makes the code invalid:
 - The forward signature is FIXED: ``def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:``.
   Use ``inputs`` and ``targets`` everywhere in forward_body — NEVER rename them.
+  Follow the supplied task shapes and canonical target dtype; do not assume classification.
 - forward_body MUST end with a return of a SCALAR tensor (``.dim() == 0``) that
   carries gradient through ``inputs``.
 - init_body MUST define every attribute referenced in forward_body. Do NOT access
@@ -1065,6 +1063,7 @@ def _assemble_loss_plugin(
         LossClass=loss_cls,
         description=description_oneline,
         contract_literal=contract_literal,
+        target_dtype=resolve_custom_loss_target(contract_snapshot).declaration,
         extra_imports=extra_imports,
         config_fields_code=config_fields_code,
         config_validators_code=config_validators_code,
@@ -1953,6 +1952,9 @@ class MLModelImplementor:
             raise ValueError(
                 "custom_loss_spec contract snapshot disagrees with the task declaration"
             )
+
+        # Refuse unsupported target representations before paid generation.
+        resolve_custom_loss_target(expected_snapshot)
 
         # Source iteration label for registry + provenance. ``storage.local``
         # may be absent for non-local backends; degrade gracefully.

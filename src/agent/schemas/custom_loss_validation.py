@@ -12,11 +12,13 @@ from typing import Any, cast
 from agent.schemas.custom_loss_contract import (
     CustomLossApplicability,
     SyntheticLossPairProvider,
+    build_custom_loss_contract_snapshot,
     resolve_custom_loss_applicability,
     validate_synthetic_loss_pair,
 )
 from agent.schemas.model_io_contract import ModelIOContract, TensorContract
 from agent.skills.model_io_probe_skill import ProbeConstructionError, build_loss_probe_pair
+from core.capability_registry import CapabilityContractSnapshot
 
 
 def _resolve_declared_applicability(
@@ -125,7 +127,17 @@ def _load_loss_factory(
     loss_name: str,
     module_path: str,
     loss_parameters: dict[str, Any] | None = None,
+    expected_snapshot: CapabilityContractSnapshot | None = None,
 ) -> tuple[Callable[[Any, Any], Any] | None, str | None]:
+    from ml_models.loss_plugin_loader import parse_loss_contract_snapshot_literal
+
+    try:
+        with open(module_path, encoding="utf-8") as handle:
+            snapshot = parse_loss_contract_snapshot_literal(handle.read(), filename=module_path)
+        if expected_snapshot is not None and snapshot != expected_snapshot:
+            raise ValueError("Loss probe capability contract does not match the task")
+    except (SyntaxError, TypeError, ValueError) as exc:
+        return None, f"Loss probe target contract refused: {exc}"
     spec = importlib.util.spec_from_file_location(f"siderius_loss_dummy_{loss_name}", module_path)
     if spec is None or spec.loader is None:
         return None, f"Could not resolve module spec for assembled loss plugin '{loss_name}'."
@@ -141,6 +153,14 @@ def _load_loss_factory(
         if not hasattr(module, attr):
             return None, f"Assembled plugin is missing required attribute '{attr}'."
     try:
+        from agent.schemas.custom_loss_target import validate_custom_loss_target_declaration
+        from ml_models.loss_plugin_loader import validate_loss_module_target
+
+        declaration = validate_loss_module_target(module, snapshot)
+        dtype = validate_custom_loss_target_declaration(declaration, snapshot).torch_dtype
+    except (TypeError, ValueError) as exc:
+        return None, f"Loss probe target contract refused: {exc}"
+    try:
         config = module.PLUGIN_LOSS_CONFIG_CLASS(**(loss_parameters or {}))
     except Exception as exc:
         if loss_parameters is None:
@@ -153,7 +173,8 @@ def _load_loss_factory(
             f"{type(exc).__name__}: {exc}."
         )
     try:
-        return module.PLUGIN_LOSS_CLASS(config), None
+        criterion = module.PLUGIN_LOSS_CLASS(config)
+        return lambda prediction, target: criterion(prediction, target.to(dtype=dtype)), None
     except Exception as exc:
         return None, f"PLUGIN_LOSS_CLASS(config) failed to construct: {type(exc).__name__}: {exc}."
 
@@ -163,6 +184,7 @@ def _load_bound_loss_factory(
     loss_name: str,
     plugin_path: str,
     parameters: dict[str, Any] | None,
+    expected_snapshot: CapabilityContractSnapshot | None = None,
 ) -> tuple[Callable[[Any, Any], Any] | None, str | None]:
     """Use captured native package loading; never silently fall back to disk."""
     from core.local_code import selected_member
@@ -172,11 +194,17 @@ def _load_bound_loss_factory(
         member = selected_member(plugin_path)
         if member is None or member.source != plugin_src.encode():
             return None, "Loss probe source differs from the selected captured package member."
-        plugin = load_loss_plugin_from_path(plugin_path)
+        plugin = load_loss_plugin_from_path(plugin_path, expected_snapshot)
         if plugin is None or plugin["loss_type"] != loss_name:
             return None, "Loss probe package declares a different or invalid loss identity."
         config = plugin["config_class"](**(parameters or {}))
-        return plugin["loss_class"](config), None
+        from agent.schemas.custom_loss_target import validate_custom_loss_target_declaration
+
+        dtype = validate_custom_loss_target_declaration(
+            plugin["target_dtype"], plugin["contract_snapshot"]
+        ).torch_dtype
+        criterion = plugin["loss_class"](config)
+        return lambda prediction, target: criterion(prediction, target.to(dtype=dtype)), None
     except Exception as exc:
         return None, f"Loss probe package failed to load: {type(exc).__name__}: {exc}"
 
@@ -233,7 +261,8 @@ def validate_custom_loss_plugin_or_raise_setup(
     """Validate declarations, tiny tensors, plugin construction and gradients.
 
     The task-owned pair is constructed and checked before plugin source is
-    written or imported. No cast, reshape or broadcast is invented here.
+    written or imported. The shared native target declaration controls casting;
+    no reshape or broadcast is invented here.
     Omitted loss_parameters preserves default-config validation. A caller
     qualifying a concrete objective supplies its effective configuration.
     Optional plugin_path selects a member of the caller's active finite code
@@ -245,15 +274,22 @@ def validate_custom_loss_plugin_or_raise_setup(
         model_io, supervision_target, applicability, pair_provider
     )
 
+    snapshot = None
+    if model_io is not None and supervision_target is not None and applicability is not None:
+        snapshot = build_custom_loss_contract_snapshot(
+            model_io.output, supervision_target, applicability
+        )
     with tempfile.TemporaryDirectory(prefix=f"siderius_loss_dummy_{loss_name}_") as tmp_dir:
         module_path = os.path.join(tmp_dir, "loss_plugin.py")
         with open(module_path, "w", encoding="utf-8") as handle:
             handle.write(plugin_src)
         if plugin_path is None:
-            loss_fn, load_error = _load_loss_factory(loss_name, module_path, loss_parameters)
+            loss_fn, load_error = _load_loss_factory(
+                loss_name, module_path, loss_parameters, snapshot
+            )
         else:
             loss_fn, load_error = _load_bound_loss_factory(
-                plugin_src, loss_name, plugin_path, loss_parameters
+                plugin_src, loss_name, plugin_path, loss_parameters, snapshot
             )
         if load_error is not None:
             return load_error

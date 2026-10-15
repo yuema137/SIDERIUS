@@ -46,6 +46,30 @@ Generated model source is staged into `{workspace}/plugins/{run_name}/`;
 current declared package members retain their original captured source path.
 The capability index records available capabilities; it is not code identity.
 
+### Custom-loss target representation
+
+`agent/schemas/custom_loss_target.py` resolves native target routing from the
+task's custom-loss capability contract. The supported canonical representations
+are `int64` (`PLUGIN_LOSS_TARGET_DTYPE = "long"`) and `float32`
+(`PLUGIN_LOSS_TARGET_DTYPE = "float"`). Other canonical representations fail
+explicitly; the framework does not silently narrow them or infer dtype from a
+task name, tensor shape or loss name. Applicability must admit the selected cast
+for both the supervision target and the loss input.
+
+Generated loss metadata follows that contract. The numerical probe applies the
+same target conversion as native training and validation. A contract-aware
+plugin must declare compatible target metadata; missing, invalid or conflicting
+metadata is refused. A present but malformed capability contract is an error,
+not an uncontracted legacy plugin. Where the caller supplies the composed task's
+expected contract, loading checks it before executing the candidate module.
+
+A loadable legacy plugin with no capability contract may retain the historical
+`long` default when its target declaration is absent. An unavailable custom loss
+does not establish a dtype and cannot silently select that default. Built-in
+loss routing is unchanged. Correcting a plugin changes its code identity: retain
+old evidence and use a new explicitly configured workspace rather than replacing
+the selected code inside an existing run.
+
 ### The generated-capability library (arXiv P1)
 
 Cross-run durable state — promoted model/loss plugins and the capability

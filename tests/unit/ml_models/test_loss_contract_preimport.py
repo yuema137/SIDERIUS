@@ -65,6 +65,7 @@ import torch.nn as nn
 from pydantic import BaseModel
 PLUGIN_CAPABILITY_CONTRACT = {snapshot.model_dump(mode="json")!r}
 PLUGIN_LOSS_TYPE = "transport_loss"
+PLUGIN_LOSS_TARGET_DTYPE = "float"
 class Config(BaseModel):
     pass
 class Loss(nn.Module):
@@ -194,6 +195,9 @@ def test_in_memory_criterion_refuses_mismatch_before_loss_constructor(tmp_path):
     LOSS_REGISTRY["transport_loss"] = _Loss
     LOSS_CONFIG_REGISTRY["transport_loss"] = _Config
     LOSS_CONTRACT_REGISTRY["transport_loss"] = _snapshot(1)
+    from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY
+
+    LOSS_TARGET_DTYPE_REGISTRY["transport_loss"] = "float"
 
     config = LossConfig(loss_type="custom", loss_name="transport_loss")
     with pytest.raises(ValueError, match="does not match"):

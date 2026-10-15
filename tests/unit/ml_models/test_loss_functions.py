@@ -827,20 +827,13 @@ class TestI13GetTargetTorchDtype:
         finally:
             LOSS_TARGET_DTYPE_REGISTRY.pop("__i13_custom_float__", None)
 
-    def test_custom_unregistered_defaults_to_long(self):
-        """When ``loss_name`` is not in LOSS_TARGET_DTYPE_REGISTRY (e.g.
-        in-process pre-flight before register_loss_in_memory has run),
-        the helper falls back to torch.long — the classifier contract."""
+    def test_unknown_custom_loss_is_not_assumed_to_be_classification(self):
+        """An unavailable loss has no validated target declaration to use."""
         from ml_models.loss_models_sandbox import get_target_torch_dtype
 
         cfg = LossConfig(loss_type="custom", loss_name="__i13_never_registered__")
-        assert get_target_torch_dtype(cfg) == torch.long
-
-
-class TestI13RegisterPopulatesDtypeRegistry:
-    """register_loss_in_memory must populate BOTH LOSS_REGISTRY (the class)
-    AND LOSS_TARGET_DTYPE_REGISTRY (the declared dtype). Without the latter,
-    cross-process Branch B reuse can't route targets correctly."""
+        with pytest.raises(ValueError, match="unavailable custom loss"):
+            get_target_torch_dtype(cfg)
 
     def test_register_populates_dtype_registry_long(self, tmp_path):
         from ml_models.loss_models_sandbox import register_loss_in_memory
