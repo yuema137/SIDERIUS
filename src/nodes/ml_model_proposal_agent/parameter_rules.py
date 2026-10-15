@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
+from agent.prompt_rendering import prompt_boundary
 from agent.schemas.hyperparam_tuning import TaskCompositionRef
 from agent.schemas.parameter_rules import (
     ParameterRuleError,
@@ -14,6 +15,7 @@ from agent.schemas.parameter_rules import (
 )
 
 
+@prompt_boundary("proposer.parameter_rules")
 def render_proposal_parameter_rules(
     composition_ref: TaskCompositionRef | None,
     workflow_rules: ParameterRules | None,

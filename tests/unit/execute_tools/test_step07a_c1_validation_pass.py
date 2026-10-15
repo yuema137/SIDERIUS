@@ -106,6 +106,7 @@ def _run(
     runtime_session: RuntimeVerificationSession | None = None,
     seed: bool = True,
     checkpoint_selection: str = "last_completed_epoch",
+    lr_schedule: dict | None = None,
 ) -> dict:
     """One in-process streaming run on the fixture; fixed seeds by default."""
     if seed:
@@ -121,6 +122,7 @@ def _run(
                 optimizer_type="adam",
                 device="cpu",
                 checkpoint_selection=checkpoint_selection,
+                lr_schedule=lr_schedule,
             ),
             loss_cfg or LossConfig(),
             sample_set=sample_set or fx.full_sample_set(),
@@ -884,8 +886,9 @@ def test_training_verification_includes_loader_wait(two_family, tmp_path, monkey
     "cap,budget,step_limit,reason",
     [(100, 12, None, "time_budget"), (3, 120, None, "epoch_cap"), (100, 120, 40, "step_limit")],
 )
+@pytest.mark.parametrize("scheduled", [False, True])
 def test_cooperative_epochs_use_budget_and_keep_last_weights(
-    two_family, tmp_path, monkeypatch, cap, budget, step_limit, reason
+    two_family, tmp_path, monkeypatch, cap, budget, step_limit, reason, scheduled
 ):
     """A two-epoch proposal expands; budget stop keeps exact last trained state.
 
@@ -920,10 +923,12 @@ def test_cooperative_epochs_use_budget_and_keep_last_weights(
     session = RuntimeVerificationSession(
         str(tmp_path / "budget-runtime.json"), attempt_id="cooperative", policy=policy
     )
+    schedule = {"kind": "cosine", "horizon_epochs": 1, "min_lr": 0.0001} if scheduled else None
     adaptive = _run(
         two_family,
         tmp_path,
         name="cooperative",
+        lr_schedule=schedule,
         eval_sample_set=two_family.full_sample_set(),
         epochs=2,
         runtime_session=session,
@@ -932,6 +937,7 @@ def test_cooperative_epochs_use_budget_and_keep_last_weights(
         two_family,
         tmp_path,
         name="fixed_reference",
+        lr_schedule=schedule,
         eval_sample_set=two_family.full_sample_set(),
         epochs=3,
     )
@@ -940,6 +946,10 @@ def test_cooperative_epochs_use_budget_and_keep_last_weights(
         _saved_state(tmp_path, "cooperative"), _saved_state(tmp_path, "fixed_reference")
     )
     receipt = adaptive["training_budget"]
+    if scheduled:
+        assert adaptive["training_history"]["learning_rates"] == [[0.001], [0.0001], [0.0001]]
+    else:
+        assert "learning_rates" not in adaptive["training_history"]
     assert receipt["completed_epochs"] == 3 and receipt["proposed_epochs"] == 2
     assert receipt["stop"]["reason"] == reason
     assert receipt["checkpoint_selection"] == "last_completed_epoch"

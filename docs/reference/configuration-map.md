@@ -107,6 +107,12 @@ Select an explicit observe policy with `--health_checks_config /path/to/policy.y
 and declare `--healthgate_mode observe_only --result_authority diagnostic`.
 The mode declaration checks consistency; it does not choose a policy file.
 
+## Native optimizer schedule
+
+The optional `train_config.lr_schedule` selects explicit epoch cosine or step
+decay. See [learning-rate scheduling](learning-rate-scheduling.md) for parameter
+semantics, existing lock rules, actual execution evidence and measurement limits.
+
 ---
 
 ## Next

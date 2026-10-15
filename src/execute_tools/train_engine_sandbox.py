@@ -39,6 +39,7 @@ from execute_tools.dataset_config import (
     resolve_dataset_profile,
     tidmad_topology,
 )
+from execute_tools.learning_rate_schedule import build_epoch_lr_controller
 from execute_tools.model_input_dtype import (
     TRAINING_SITE_DTYPE,
     apply_contract_cardinality,
@@ -999,6 +1000,7 @@ def _build_training_history(
     validation_requested_samples_before_limit: int | None = None,
     observations: dict[str, list[float]] | None = None,
     training_samples: list[int] | None = None,
+    learning_rates: list[list[float]] | None = None,
     target_standardization: TargetStandardizationReceipt | None = None,
 ) -> TrainingHistory:
     """Assemble the additive ``training_history`` payload (design §3.5).
@@ -1027,6 +1029,7 @@ def _build_training_history(
     }
     return TrainingHistory(
         training_samples=training_samples,
+        learning_rates=learning_rates,
         objective_kind=loss_cfg.loss_type,
         objective_config_fingerprint=objective_config_fingerprint(
             loss_cfg, target_standardization=target_standardization
@@ -1152,10 +1155,13 @@ def run_experiment(
 
     # Optimizer Setup
     optimizer = build_training_optimizer(model, train_cfg)
+    lr_controller = build_epoch_lr_controller(optimizer, train_cfg.lr_schedule)
+    learning_rates: list[list[float]] | None = [] if lr_controller is not None else None
 
     history = []
     training_samples = []
     for ep in range(train_cfg.epochs):
+        epoch_rates = lr_controller.start_epoch(ep) if lr_controller is not None else None
         model.train()
         batch_losses = []
         batch_rows = []
@@ -1202,6 +1208,8 @@ def run_experiment(
         )
         training_samples.append(sum(batch_rows))
         history.append(float(avg_loss))
+        if learning_rates is not None and epoch_rates is not None:
+            learning_rates.append(epoch_rates)
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
 
     # Result Summary — the three legacy keys FIRST and byte-identical; the
@@ -1216,6 +1224,7 @@ def run_experiment(
             loss_cfg=loss_cfg,
             epochs_planned=train_cfg.epochs,
             training_samples=training_samples if not train_cfg.drop_last else None,
+            learning_rates=learning_rates,
             train_objective=history,
             validation_objective=None,
             validation_requested_samples=None,
@@ -1494,6 +1503,8 @@ def run_experiment_streaming(
 
     # Optimizer (once)
     optimizer = build_training_optimizer(model, train_cfg)
+    lr_controller = build_epoch_lr_controller(optimizer, train_cfg.lr_schedule)
+    learning_rates: list[list[float]] | None = [] if lr_controller is not None else None
 
     # Deterministic base seed for reproducible per-epoch subsampling
     base_seed = train_base_seed if train_base_seed is not None else hash(exp_id) % (2**31)
@@ -1687,6 +1698,7 @@ def run_experiment_streaming(
 
     completed_optimizer_steps = 0
     for ep in range(epoch_limit):
+        epoch_rates = lr_controller.start_epoch(ep) if lr_controller is not None else None
         completing_workload = (
             runtime_session is not None
             and runtime_session.policy.runtime_completion_policy == "completed-workload-v1"
@@ -1940,6 +1952,8 @@ def run_experiment_streaming(
         completed_optimizer_steps += len(batch_losses)
         training_samples.append(sum(batch_rows))
         history.append(float(avg_loss))
+        if learning_rates is not None and epoch_rates is not None:
+            learning_rates.append(epoch_rates)
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
 
         # Step 07a — R3 for THIS completed epoch (one observation per R2
@@ -2112,6 +2126,7 @@ def run_experiment_streaming(
             loss_cfg=loss_cfg,
             epochs_planned=len(history) if budget_execution else train_cfg.epochs,
             training_samples=training_samples if not train_cfg.drop_last else None,
+            learning_rates=learning_rates,
             target_standardization=target_standardization,
             train_objective=history,
             validation_objective=validation_history,

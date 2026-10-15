@@ -218,6 +218,11 @@ class TrainingHistory(BaseModel):
     epochs_planned: int = Field(ge=0)
     epochs_completed: int = Field(ge=0)
     training_samples: list[int] | None = Field(default=None, exclude_if=lambda v: v is None)
+    learning_rates: list[list[float]] | None = Field(
+        default=None,
+        exclude_if=lambda v: v is None,
+        description="Actual optimizer-group learning rates used in each completed training epoch.",
+    )
     train_objective: list[float | None] = Field(
         description=(
             "R2 — the SAME floats as the legacy loss_history. An ELEMENT is "
@@ -302,6 +307,17 @@ class TrainingHistory(BaseModel):
             or any(count <= 0 for count in self.training_samples)
         ):
             raise ValueError("training_samples requires one positive row count per completed epoch")
+        if self.learning_rates is not None:
+            rates = self.learning_rates
+            if len(rates) != self.epochs_completed or any(
+                not row or any(not math.isfinite(value) or value < 0 for value in row)
+                for row in rates
+            ):
+                raise ValueError(
+                    "learning_rates requires finite nonnegative group rates per completed epoch"
+                )
+            if rates and any(len(row) != len(rates[0]) for row in rates):
+                raise ValueError("learning_rates optimizer-group count must remain stable")
         n = len(self.train_objective)
         if self.epochs_completed != n:
             raise ValueError(

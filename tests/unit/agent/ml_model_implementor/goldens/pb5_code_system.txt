@@ -58,9 +58,17 @@ naming a model or buffer after a training intervention does not implement it.
   it requires that scope and does not use final scoring results. The selected
   epoch is recorded in `selected_checkpoint`. It does not perform scientific
   early stopping or invoke a plugin's custom training loop / validation callback.
-  A proposed scheduler
-  or independent ensemble-member training procedure needs an actual supported
-  execution path; describing one does not make it run.
+  Independent ensemble-member training needs an actual supported execution
+  path; describing one does not make it run.
+- `train_config.lr_schedule` is optional (null disables scheduling). Native
+  epoch schedules support `kind="cosine"` with explicit `horizon_epochs` and
+  `min_lr`, or `kind="step"` with explicit `step_size_epochs` and `gamma`.
+  Epoch index zero uses `train_config.lr`; cosine reaches its floor at the
+  horizon index and remains there if the training budget extends the run.
+  These are epoch schedules, not batch schedules or optimizer resume. Actual
+  optimizer-group rates for completed epochs are recorded in
+  `training_history.learning_rates`. Existing parameter rules can lock the
+  entire schedule (including exact null) or fields of an existing schedule.
 - `train_config.target_standardization="training_pool_global"` enables a
   framework affine transform for continuous regression: fit one global mean
   and population standard deviation from the authorized training pool, compare

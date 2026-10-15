@@ -61,6 +61,11 @@ def rendering_assembly_digest() -> str:
         tuner / "contracts.py",
     ]
     paths.append(root / "llm_bridge.py")
+    # Generated config manuals include these typed training declarations.
+    paths += [
+        root.parent / "ml_models" / "models_format_sandbox.py",
+        root.parent / "ml_models" / "learning_rate_schedule.py",
+    ]
     paths += [
         root.parent / "workflows" / "constraint_disclosure.py",
     ]

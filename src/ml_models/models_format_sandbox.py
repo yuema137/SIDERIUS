@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from core.checkpoint_selection import CheckpointSelection
 from core.target_standardization import TargetStandardization
+from ml_models.learning_rate_schedule import CosineLearningRateSchedule, LearningRateSchedule
 
 # ==========================================
 # 1. Base Model Configuration
@@ -910,6 +911,16 @@ class TrainConfig(BaseModel):
     checkpoint_selection: CheckpointSelection = "last_completed_epoch"
     target_standardization: TargetStandardization = "none"
     drop_last: bool = True
+    lr_schedule: LearningRateSchedule | None = Field(default=None, exclude_if=lambda v: v is None)
+
+    @model_validator(mode="after")
+    def validate_learning_rate_schedule(self) -> TrainConfig:
+        if (
+            isinstance(self.lr_schedule, CosineLearningRateSchedule)
+            and self.lr_schedule.min_lr > self.lr
+        ):
+            raise ValueError("lr_schedule.min_lr must not exceed train_config.lr")
+        return self
 
 
 def resolve_training_drop_last(config: dict) -> bool:
