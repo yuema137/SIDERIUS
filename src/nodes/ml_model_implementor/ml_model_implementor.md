@@ -135,6 +135,15 @@ Explicit generated-code directories remain supported for orchestrators. The refe
 
 ## Key behavioral notes
 
+- **Custom-loss parameters are generated defaults, not runtime overrides.**
+  `CustomLossSpec.config_fields` describes fields and defaults to implement in
+  `PLUGIN_LOSS_CONFIG_CLASS`. Native training instantiates that class with its
+  defaults. `LossConfig` selects the custom plugin by `loss_name`; unknown keys
+  in custom mode are rejected before execution rather than silently ignored.
+  The existing builtin-only fields retain their established normalization and
+  do not become plugin parameters. Changing plugin defaults requires a distinct
+  implementation with the appropriate plugin identity; arbitrary per-attempt
+  custom-loss parameter tuning is not supported.
 - **Custom-loss validation is task-compatible and data-free.** The implementor
   receives the same filtered inventory as the proposer/tuner. When a task's
   semantic target cannot be synthesized generically, the bound task may expose

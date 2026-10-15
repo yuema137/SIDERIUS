@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import StrEnum
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -793,6 +794,22 @@ class LossConfig(BaseModel):
             "per-run directory) before training begins."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_unsupported_custom_parameters(cls, value: Any) -> Any:
+        """Custom routing cannot silently accept unimplemented plugin overrides."""
+        if isinstance(value, Mapping) and value.get("loss_type") == "custom":
+            unsupported = set(value) - cls.model_fields.keys()
+            if unsupported:
+                names = ", ".join(sorted(str(key) for key in unsupported))
+                raise ValueError(
+                    f"Unsupported custom-loss fields: {names}. Custom losses execute "
+                    "their plugin configuration defaults; per-attempt plugin parameter "
+                    "overrides are not supported. Remove these fields. To change the "
+                    "objective, generate or explicitly select a plugin with the intended defaults."
+                )
+        return value
 
     # NOTE (V21 PR A, 2026-08-07): ``check_compatibility`` was deleted here.
     # It was a name-literal gate (``model_type != "fcnet"``) with ZERO
