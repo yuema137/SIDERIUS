@@ -21,6 +21,28 @@ from execute_tools.task_data_path import (
 )
 
 
+def require_local_output_inventory(
+    *, task: object | None, composed: bool, external_evaluation: bool
+) -> None:
+    """Reject an incomplete composed local route before any paid execution.
+
+    Presence is checked without enumerating outputs that do not exist yet.
+    Complete external evaluators own their output lifetime; uncomposed legacy
+    execution retains its indexed naming adapter. Runtime certification still
+    checks the returned inventory, containment and filesystem evidence.
+    """
+    if external_evaluation or not composed:
+        return
+    if not callable(getattr(task, "enumerate_output_artifacts", None)):
+        raise ValueError(
+            "Composed local evaluation requires callable "
+            "TaskOutputArtifactCapability.enumerate_output_artifacts before execution, "
+            "including when retain_model_outputs=True. Implement exact attempt-owned "
+            "output enumeration in the task data path; this is a task setup error, "
+            "not a model failure."
+        )
+
+
 class OutputArtifactEvidence(BaseModel):
     """Content identity and observed disposition of one exact output file."""
 

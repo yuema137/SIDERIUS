@@ -61,7 +61,7 @@ data-path method.
 | `TaskHealthCoverageCapability` | `validate_health_coverage` | task-owned coverage proof before an enabled composed Health attempt |
 | `TaskStorageReadScope` | `storage_read_scope` | optional validated physical-read provenance; absence means unavailable evidence |
 | Task-owned model probe input | `model_validation_input(request)`; optional `model_validation_batch_sizes` | optional callable, verified through composition; see [candidate probe contract](../../../src/agent/skills/task_model_probe.md) |
-| `TaskOutputArtifactCapability` | `enumerate_output_artifacts` | task-owned enumeration for an exact evaluation request; no framework filename guessing |
+| `TaskOutputArtifactCapability` | `enumerate_output_artifacts` | required for composed local evaluation, including retained outputs; see [route-specific retention contract](../../reference/model-output-retention.md); no framework filename guessing |
 
 `build_training_scope` and `build_eval_scope` are **separate methods**, not one
 method with a `leg` argument — the leg is not a parameter, it is a different

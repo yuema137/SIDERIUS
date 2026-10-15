@@ -2122,6 +2122,15 @@ def run_workflow(
     # doing it. An un-composed run is a no-op here.
     verify_composition_is_bound(task_composition)
 
+    from execute_tools.evaluation_execution import candidate_evaluation_executor
+    from execute_tools.model_output_retention import require_local_output_inventory
+
+    require_local_output_inventory(
+        task=task_composition.task_data_path if task_composition is not None else None,
+        composed=task_composition is not None,
+        external_evaluation=candidate_evaluation_executor() is not None,
+    )
+
     # Step 12 / PR-12a C7 (D-12a-7, Q-12-3 RATIFIED) — refused HERE, at
     # startup, because this is the first point where composition presence and
     # the resolved flag are both in hand, and refusing before the iteration

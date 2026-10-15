@@ -521,7 +521,11 @@ class TaskOutputArtifactInventory(BaseModel):
 
 @runtime_checkable
 class TaskOutputArtifactCapability(Protocol):
-    """Optional task-owned output enumeration; not a new scoring authority.
+    """Task-owned output enumeration; required for composed local evaluation.
+
+    This sibling capability is optional for other execution routes, including
+    complete external evaluators. Local output certification requires it even
+    when outputs are retained. It is not a new scoring authority.
 
     An implementation must list every per-sample artifact currently present
     for the exact request, including sidecars and partially written outputs.

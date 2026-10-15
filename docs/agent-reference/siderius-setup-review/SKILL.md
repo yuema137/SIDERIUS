@@ -105,3 +105,9 @@ Give the user exact paths for saved task/experiment files, the launch command,
 run status and results. Explain one requested parameter change and which files
 and reports must be saved again. Keep README prose concise and link detailed
 schema/identity/error contracts instead of copying them into the human entry.
+
+Task composition does not select local versus complete external evaluation.
+Before calling local inference readiness complete, check the task's
+[output inventory requirement](../../reference/model-output-retention.md).
+Workflow and direct tuner startup enforce that route-specific prerequisite;
+a composition-only review does not certify it or the eventual output files.

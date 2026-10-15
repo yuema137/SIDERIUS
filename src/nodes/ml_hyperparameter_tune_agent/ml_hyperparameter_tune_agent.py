@@ -747,6 +747,18 @@ class HyperparamTuningAgent:
         agent_input = HyperparamTuningInput.model_validate(agent_input)
         validate_watchdog_startup(agent_input)
 
+        from execute_tools.evaluation_execution import candidate_evaluation_executor
+        from execute_tools.model_output_retention import require_local_output_inventory
+
+        run_task_data_path = (
+            resolve_bound_task_data_path() if agent_input.task_composition_ref is not None else None
+        )
+        require_local_output_inventory(
+            task=run_task_data_path,
+            composed=agent_input.task_composition_ref is not None,
+            external_evaluation=candidate_evaluation_executor() is not None,
+        )
+
         # --- Extract frequently used fields ---
         # StorageConfig.local is Optional (only populated when backend='local').
         # The tuner only supports the local backend; surface the precondition
@@ -1372,11 +1384,7 @@ class HyperparamTuningAgent:
             run_secondary_metrics=run_secondary_metrics,
             run_order=run_order,
             run_scientific_gate_ids=_resolve_run_gate_ids(agent_input),
-            run_task_data_path=(
-                resolve_bound_task_data_path()
-                if agent_input.task_composition_ref is not None
-                else None
-            ),
+            run_task_data_path=run_task_data_path,
             run_task_render=run_task_render,
             run_name=run_name,
             workspace=workspace,

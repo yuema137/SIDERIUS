@@ -28,7 +28,7 @@ grants Data Analysis access to ground truth or previously saved outputs.
 
 ## Ordinary task outputs
 
-An operator-approved task implementation may implement the optional
+A composed task using local evaluation must implement the
 `TaskOutputArtifactCapability.enumerate_output_artifacts` method. Given an
 `EvaluationReadRequest` naming the output root and exact run, experiment
 attempt and model, it returns a typed `TaskOutputArtifactInventory` of paths
@@ -91,7 +91,12 @@ model outputs or analysis evidence under an existing execution identity.
 These receipts certify what the local executor observed and retired. They do
 not make a task plugin untrusted, authorize new data, or prove that an external
 process could not copy an output beforehand. A composed scientific task must
-provide its own exact artifact inventory before the default-delete policy can
-be used in an effectful run. The task's existing deliverable codec and
+provide its own exact artifact inventory for both retained and retired outputs.
+Workflow and direct tuner startup check method availability before LLM or GPU
+work; they do not enumerate nonexistent outputs. Runtime certification still
+validates each actual inventory. A complete external candidate evaluator owns
+its output lifetime and is exempt from this local capability requirement.
+Composition alone does not select an execution route and remains valid without
+this capability. The task's existing deliverable codec and
 evaluation semantics remain the scientific authorities; inventory only
 describes the lifetime of their output files.
