@@ -600,8 +600,10 @@ def _run_training(
 ) -> tuple[int, PhaseStatus, str]:
     """Real steps: zero_grad -> forward -> loss -> backward -> step.
 
-    The watched parameter is cloned before the first step and compared
-    after the last as a diagnostic. Stationary or unused parameters may not
+    Independent CPU snapshots of the watched parameter are compared before
+    and after the steps. Diagnostic allocations must not enter candidate GPU
+    high-water accounting, especially after the last observed hold.
+    Stationary or unused parameters may not
     move. Bound measurements additionally observe optimizer ownership and fresh
     gradient connectivity, without imposing a nonzero-gradient requirement.
     """
@@ -609,7 +611,7 @@ def _run_training(
     before = None
     if watched is not None:
         try:
-            before = watched.detach().clone()
+            before = watched.detach().to(device="cpu", copy=True)
         except Exception:  # pragma: no cover - exotic parameter guard
             before = None
 
@@ -671,7 +673,8 @@ def _run_training(
 
     if watched is not None and before is not None:
         try:
-            delta = float((watched.detach() - before).abs().max().item())
+            after = watched.detach().to(device="cpu", copy=True)
+            delta = float((after - before).abs().max().item())
             counters["parameter_update_max_abs_delta"] = delta
             counters["parameter_update_verified"] = delta > 0.0
         except Exception:  # pragma: no cover - exotic parameter guard

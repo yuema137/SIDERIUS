@@ -39,6 +39,11 @@ of backward calls that produced at least one model parameter gradient after a
 fresh reset. Zero gradients and unused parameters are legitimate. It requires
 neither all parameters to participate nor any parameter to move. The old
 `parameter_update_verified` field remains a diagnostic of one watched parameter.
+Its independent before/after snapshots and delta arithmetic run on CPU,
+removing the explicit device snapshot and delta allocations. Transfer internals
+remain backend-owned and subject to the same peak/hold checks. Snapshot copies preserve dtype;
+copy time and host memory remain within existing measurement deadline and RSS
+protection. A failed copy does not establish a verified parameter update.
 Current native `TrainConfig` learning-rate validation remains unchanged.
 
 Bound setup and training reuse existing reservation holds and driver ACKs.
