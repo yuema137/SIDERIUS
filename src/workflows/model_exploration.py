@@ -196,6 +196,7 @@ from workflows.task_settings import (
 from workflows.task_settings import (
     validate_scope_settings,
 )
+from workflows.termination import infrastructure_abort_reason
 
 
 def _log_rss(step: str) -> None:
@@ -2087,7 +2088,9 @@ def run_workflow(
             batch_size / segmentation_size so the VRAM ceiling can differ.
 
     Returns:
-        List of HyperparamTuningOutput objects, one per successful iteration.
+        List of tuner outputs, including a terminal infrastructure abort if one
+        occurred. Callers must check ``infrastructure_abort_reason(results)``
+        before continuing a campaign; a nonempty list does not imply success.
     """
     # Step 09.5a C3 — the transit configuration is one value now. A caller
     # that supplies none gets exactly the defaults the 72 individual
@@ -3490,6 +3493,10 @@ def run_workflow(
         _capture_historical_source_for_analysis(
             _analysis_binding, historical_sources, tune_output, tuning_dir
         )
+        if infrastructure_abort_reason((tune_output,)) is not None:
+            # Retain the typed evidence, but do not treat an infrastructure
+            # failure as scientific feedback or spend on another candidate.
+            break
 
         # Issue #92 safety net — the primary promotion fires earlier
         # (right after ``_register_plugin``) so the loss is globally
@@ -3709,7 +3716,8 @@ def run_workflow(
     # --- Final summary ---
     finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"\n{'=' * 60}")
-    print("  Workflow Complete")
+    aborted = infrastructure_abort_reason(state.iteration_results) is not None
+    print("  Workflow Aborted: infrastructure failure" if aborted else "  Workflow Complete")
     print(f"  Started     : {started_at}")
     print(f"  Finished    : {finished_at}")
     print(f"  Iterations  : {len(state.iteration_results)}/{launch.max_iterations}")
@@ -3739,10 +3747,11 @@ def _save_workflow_summary(
     best_score_overall: float | None,
 ):
     """Save a JSON summary of the full workflow run."""
+    aborted = infrastructure_abort_reason(iteration_results) is not None
     summary = {
         "workflow": "model_exploration",
         "run_name": run_name,
-        "status": "completed" if iteration_results else "failed",
+        "status": "completed" if iteration_results and not aborted else "failed",
         "started_at": started_at,
         "finished_at": finished_at,
         "total_iterations": len(iteration_results),
@@ -3757,6 +3766,8 @@ def _save_workflow_summary(
             for r in iteration_results
         ],
     }
+    if aborted:
+        summary["termination_reason"] = "infrastructure_abort"
     path = os.path.join(workspace, f"workflow_{run_name}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=4)
@@ -3942,7 +3953,7 @@ def main():
     # A composed run with no --data_dir is refused rather than silently
     # reading TIDMAD's data (R-11-8).
     with bind_run_task_composition(run_composition, physical_data_root=args.data_dir):
-        run_workflow(
+        results = run_workflow(
             launch=WorkflowLaunchConfig(
                 data_dir=args.data_dir,
                 model_types=args.models,
@@ -3966,6 +3977,9 @@ def main():
             llm_config=wf_llm_config,
             task_composition=run_composition,
         )
+
+    if infrastructure_abort_reason(results) is not None:
+        raise SystemExit(3)
 
 
 if __name__ == "__main__":

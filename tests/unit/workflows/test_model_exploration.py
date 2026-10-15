@@ -883,6 +883,89 @@ class TestRunWorkflowSingleIteration:
 
 
 class TestRunWorkflowMultiIteration:
+    @pytest.mark.parametrize("abort_iteration", [1, 2])
+    def test_infrastructure_abort_stops_before_next_candidate(
+        self, workflow_env, abort_iteration, capsys
+    ):
+        names = iter(["model_a", "model_b", "model_c"])
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
+        )
+        outputs = []
+
+        def tune(inp):
+            output = _make_tune_output(model_type=inp.model_type, score=1.6)
+            if len(outputs) + 1 == abort_iteration:
+                output.status = "failed"
+                output.termination_reason = "infrastructure_abort"
+                output.all_records = []
+                output.completed_rounds = 0
+                output.best_denoising_score = None
+                output.best_formal_denoising_score = None
+            outputs.append(output)
+            return output
+
+        workflow_env["tune"].return_value.run.side_effect = tune
+        with patch(
+            "workflows.model_exploration.tuning_outputs_to_summaries",
+            wraps=tuning_outputs_to_summaries,
+        ) as summaries:
+            results = run_workflow(
+                launch=WorkflowLaunchConfig(
+                    data_dir=workflow_env["data_dir"],
+                    model_types=["punet"],
+                    source_run_name="v1",
+                    max_iterations=3,
+                ),
+                workspace=workflow_env["workspace"],
+                run_name="test_run",
+            )
+        assert results == outputs
+        assert len(results) == abort_iteration
+        for node in ("propose", "impl", "tune"):
+            assert workflow_env[node].return_value.run.call_count == abort_iteration
+        assert not any(
+            output is outputs[-1] for call in summaries.call_args_list for output in call.args[0]
+        ), "Aborted evidence must not become scientific summaries"
+        summary = json.loads(
+            (Path(workflow_env["workspace"]) / "test_run" / "workflow_test_run.json").read_text()
+        )
+        assert summary["status"] == "failed"
+        assert summary["termination_reason"] == "infrastructure_abort"
+        assert summary["total_iterations"] == abort_iteration
+        assert summary["iterations"][-1]["status"] == "failed"
+        if abort_iteration == 2:
+            assert summary["best_score_overall"] == 1.6
+        console = capsys.readouterr().out
+        assert "Workflow Aborted" in console
+        assert "Workflow Complete" not in console
+
+    def test_candidate_failure_keeps_existing_continuation(self, workflow_env):
+        names = iter(["model_a", "model_b", "model_c"])
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
+        )
+
+        def tune(inp):
+            output = _make_tune_output(model_type=inp.model_type, score=1.6)
+            output.status = "partial"
+            output.termination_reason = "aborted_fail_rounds"
+            return output
+
+        workflow_env["tune"].return_value.run.side_effect = tune
+        results = run_workflow(
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=3,
+            ),
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+        )
+        assert len(results) == 3
+        assert workflow_env["tune"].return_value.run.call_count == 3
+
     def test_runs_multiple_iterations(self, workflow_env):
         # Each iteration needs a unique model name
         names = iter(["model_a", "model_b", "model_c"])
@@ -2604,3 +2687,35 @@ class TestL6cPromoteLossToGlobal:
         assert "identical content already exists" in captured.out.lower()
         assert "promo_loss_b" in captured.out
         assert not (l6c_global_losses_dir / "promo_loss_a.py").exists()
+
+
+@pytest.mark.parametrize("aborted", [False, True])
+def test_module_cli_reports_infrastructure_abort(tmp_path, monkeypatch, aborted):
+    import workflows.model_exploration as exploration
+
+    output = _make_tune_output()
+    if aborted:
+        output.status = "failed"
+        output.termination_reason = "infrastructure_abort"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "model_exploration",
+            "--data_dir",
+            str(tmp_path),
+            "--models",
+            "punet",
+            "--source_run_name",
+            "seed",
+            "--task_composition",
+            str(QUICKSTART),
+        ],
+    )
+    with patch.object(exploration, "run_workflow", return_value=[output]) as workflow:
+        if aborted:
+            with pytest.raises(SystemExit) as stopped:
+                exploration.main()
+            assert stopped.value.code == 3
+        else:
+            exploration.main()
+        workflow.assert_called_once()

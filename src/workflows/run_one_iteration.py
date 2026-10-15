@@ -167,6 +167,7 @@ from workflows.task_composition import (
     compose_run_task_bindings,
     resolve_composed_measurement_capability,
 )
+from workflows.termination import infrastructure_abort_reason as _infrastructure_abort_reason
 
 _CHECKOUT_ROOT = checkout_root()
 SIDERIUS_ROOT = (
@@ -296,22 +297,6 @@ def _resolve_chain_run_id(workspace: str, run_name: str) -> str:
     with open(sidecar, "w", encoding="utf-8") as f:
         f.write(new)
     return new
-
-
-def _infrastructure_abort_reason(results: list) -> str | None:
-    """C9c: the tuner's typed infrastructure-abort signal, if it fired.
-
-    ``termination_reason == "infrastructure_abort"`` means the runtime
-    EVIDENCE CHANNEL failed — registry, persistence, schema/protocol,
-    probe executor, telemetry, communication, or a policy invariant. It is
-    deliberately distinct from a candidate rejection (attempt-local), gate
-    exhaustion (``no_records``, chain continues), an operator stop, and an
-    ordinary subprocess crash.
-    """
-    for output in results or []:
-        if getattr(output, "termination_reason", None) == "infrastructure_abort":
-            return getattr(output, "status", None) or "infrastructure_abort"
-    return None
 
 
 def _write_halt_marker(workspace: str, payload: dict) -> str:
@@ -1475,7 +1460,9 @@ def _run_bound_iteration(
         print(f"  LLM config       : {args.llm_config} (supersedes --llm_model)")
     else:
         resolved_tune_routing = llm_config.get("tune")
-        print(f"  LLM (planner)    : {resolved_tune_routing['provider']} / {resolved_tune_routing['model_id']}")
+        print(
+            f"  LLM (planner)    : {resolved_tune_routing['provider']} / {resolved_tune_routing['model_id']}"
+        )
         eff_reflect_provider = resolved_tune_routing["reflect_provider"]
         eff_reflect_model_id = resolved_tune_routing["reflect_model_id"]
         print(f"  LLM (reflector)  : {eff_reflect_provider} / {eff_reflect_model_id}")

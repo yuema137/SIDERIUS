@@ -46,6 +46,25 @@ An absolute external literature YAML is supported; relative `--lit_review_config
 paths remain checkout-root-relative. A contradictory history metric id/direction
 refuses; absent or matching stamps are not proof of whole-task compatibility.
 
+## Infrastructure aborts
+
+`run_workflow()` returns typed tuner outputs, including an output whose
+`termination_reason` is `infrastructure_abort` when runtime evidence fails.
+The workflow preserves that output and stops before scientific aggregation or
+another candidate. Its workflow summary has `status: failed` and
+`termination_reason: infrastructure_abort`. Ordinary candidate failures retain
+their existing continuation policy.
+
+Python campaign callers must inspect the returned list with
+`workflows.termination.infrastructure_abort_reason(results)` and stop when the
+result is not `None`; earlier successful scores do not make the campaign safe
+to continue. The direct model-exploration CLI exits 3 on this condition.
+The one-iteration CLI preserves its manifest, writes `.chain_halted`, and exits
+3; the marker prevents the next chained iteration from starting. The direct
+Python API and model-exploration CLI do not create a chain marker or implement
+automatic recovery. Diagnose the failed evidence channel before explicitly
+starting further work; do not reinterpret an abort as a model-quality failure.
+
 ## Archived X9 preflight reference
 
 The X9 preflight and its executable documentation moved to

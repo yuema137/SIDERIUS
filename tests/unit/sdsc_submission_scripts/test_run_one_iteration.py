@@ -2144,3 +2144,43 @@ class TestFormalLaunchPolicyIsEnforcedAtTheChainBoundary:
         assert "RESULT_AUTHORITY=scientific" in common
         assert '--healthgate_mode "$HEALTHGATE_MODE"' in common
         assert '--result_authority "$RESULT_AUTHORITY"' in common
+
+
+def test_infrastructure_abort_preserves_manifest_and_blocks_next_launch(
+    tmp_path, isolated_registries
+):
+    from tests.unit.workflows.test_model_exploration import _make_tuning_output
+
+    output = _make_tuning_output()
+    output.status = "failed"
+    output.termination_reason = "infrastructure_abort"
+    output.all_records = []
+    output.completed_rounds = 0
+    seed = tmp_path / "seed.json"
+    seed.write_text(output.model_dump_json())
+    argv = ["--workspace", str(tmp_path), "--start_iteration", "1", "--seed_paths", str(seed)]
+    events = []
+    original_marker = runner._write_halt_marker
+
+    def manifest(iter_dir, run_name, results, **kwargs):
+        assert results == [output]
+        events.append("manifest")
+        return {"status": "no_records"}
+
+    def marker(workspace, payload):
+        events.append("marker")
+        return original_marker(workspace, payload)
+
+    with (
+        patch("workflows.model_exploration.run_workflow", return_value=[output]) as workflow,
+        patch.object(runner, "write_manifest", side_effect=manifest),
+        patch.object(runner, "_write_halt_marker", side_effect=marker),
+    ):
+        assert _run_main(argv) == 3
+        assert events == ["manifest", "marker"]
+        assert (
+            json.loads((tmp_path / ".chain_halted").read_text())["reason"] == "infrastructure_abort"
+        )
+        assert _run_main(argv) == 3
+        workflow.assert_called_once()
+        assert events == ["manifest", "marker"]
