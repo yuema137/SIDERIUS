@@ -720,6 +720,19 @@ prompt digest, so resuming a brief under different permissions is refused.
 
 Before generating an optional AnalysisBrief, the interpreter persists its primary interpretation with the input digest. A retry with the same input reuses that primary output, so a new LLM wording cannot invalidate the already persisted brief. A changed input or damaged primary receipt fails closed.
 
+Brief receipts record the execution bridge's `provider` and `model_name`, including
+resolved defaults, rather than an omitted constructor model. Injected bridges
+without those attributes use the declared route and the shared transport
+resolver; a missing model is resolved against the effective provider. Exposed
+metadata must be non-empty strings. An unresolved model (including an unknown
+provider without an explicit model) fails before the brief call, without
+inventing a receipt identity. This validation applies only when the brief is
+requested. Success, invalid-response and timeout receipts use the same route;
+resume rejects a different resolved provider or model. Provider spelling on a
+metadata-free injected bridge is preserved; production uses the bridge's
+normalized provider. This receipt identifies the requested execution model,
+not a separately verified provider-side model revision.
+
 ### Prediction reference provenance
 
 Proposal-time comparisons consume only the framework-stamped

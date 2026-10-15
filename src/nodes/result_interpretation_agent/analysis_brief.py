@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pydantic import Field, ValidationError
 
+from agent.llm_settings import resolve_main_transport
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.schemas.analysis_brief_generation import AnalysisBriefGenerationReceipt
 from agent.schemas.data_analysis.common import (
@@ -186,18 +187,35 @@ def _load_record(path: Path) -> _AnalysisBriefGenerationRecord:
     return _AnalysisBriefGenerationRecord.model_validate_json(path.read_bytes())
 
 
+def _brief_route(bridge, provider: str, model_id: str | None) -> tuple[str, str]:
+    """Prefer execution metadata; minimal injected bridges use declared routing."""
+    provider = getattr(bridge, "provider", provider)
+    if not isinstance(provider, str) or not provider.strip():
+        raise ValueError("AnalysisBrief requires a non-empty bridge provider")
+    if hasattr(bridge, "model_name"):
+        model_id = bridge.model_name
+    else:
+        model_id = resolve_main_transport(provider=provider, model_id=model_id).model_id
+    if not isinstance(model_id, str) or not model_id.strip():
+        raise ValueError(
+            "AnalysisBrief requires a resolved model identity; set model_id explicitly"
+        )
+    return provider, model_id
+
+
 def generate_or_resume_analysis_brief(
     *,
     bridge,
     inp: InterpretationInput,
     interpretation: InterpretationOutput,
     provider: str,
-    model_id: str,
+    model_id: str | None,
 ) -> tuple[AnalysisBrief | None, AnalysisBriefGenerationReceipt]:
     """Generate or reuse the optional brief without affecting primary interpretation."""
 
     if not inp.analysis_brief_requested:
         raise ValueError("brief generation may only run when explicitly requested")
+    provider, model_id = _brief_route(bridge, provider, model_id)
     system, user = _prompt(inp, interpretation)
     user = append_constraint_disclosure(user, inp.constraint_context)
     prompt_digest = canonical_sha256({"system": system, "user": user})
