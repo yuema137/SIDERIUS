@@ -29,7 +29,9 @@ def test_declared_probe_reaches_all_generation_stages(tmp_path):
         _build_reasoning_prompt(inp),
         _build_code_prompt("Reasoned implementation", inp),
         _build_repair_prompt(
-            {"forward_body": "return x"}, "Wrong output shape", inp,
+            {"forward_body": "return x"},
+            "Wrong output shape",
+            inp,
             [(1, "Missing parameter")],
         ),
     ]
@@ -44,9 +46,11 @@ def test_undeclared_probe_preserves_all_user_prompts(tmp_path):
     _, context, _ = declared_task(tmp_path)
     composition = compose_run_task_bindings(context.manifest_path)
     base = fixture_input(forward_contract=composition.forward_contract)
-    composed = base.model_copy(update={
-        "task_composition_ref": build_task_composition_ref(composition),
-    })
+    composed = base.model_copy(
+        update={
+            "task_composition_ref": build_task_composition_ref(composition),
+        }
+    )
     for render in (
         _build_reasoning_prompt,
         lambda inp: _build_code_prompt("reasoning", inp),

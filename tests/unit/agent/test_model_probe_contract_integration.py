@@ -30,7 +30,7 @@ def composed_fixture(tmp_path, *, binding="records"):
 
 
 def candidate(tmp_path, records):
-    source = f'''import torch
+    source = f"""import torch
 from torch import nn
 from pydantic import BaseModel
 PLUGIN_MODEL_TYPE = "record_model"
@@ -49,7 +49,7 @@ class Model(nn.Module):
         return self.head((x * self.weights[None, :, None]).mean(1))
 PLUGIN_CONFIG_CLASS = Config
 PLUGIN_MODEL_CLASS = Model
-'''
+"""
     models = tmp_path / "models"
     models.mkdir()
     path = models / "record_model.py"

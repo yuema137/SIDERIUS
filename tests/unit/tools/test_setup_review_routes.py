@@ -227,8 +227,16 @@ def test_actual_workflow_tuner_forwarding_and_protocol(tmp_path, planner_retries
 def test_missing_blocks_and_literature_inheritance():
     absent = route_map({})
     empty = route_map({"implement": {}, "tune": {}})
-    assert absent["implement"].transport.model_id == empty["implement"].transport.model_id == "gpt-5.6-luna"
-    assert absent["tune.planner"].transport.model_id == empty["tune.planner"].transport.model_id == "gpt-5.6-luna"
+    assert (
+        absent["implement"].transport.model_id
+        == empty["implement"].transport.model_id
+        == "gpt-5.6-luna"
+    )
+    assert (
+        absent["tune.planner"].transport.model_id
+        == empty["tune.planner"].transport.model_id
+        == "gpt-5.6-luna"
+    )
     assert absent["lit_review.main"].transport is None
     assert "requires a main provider/model" in absent["lit_review.main"].issue
     inherited = route_map(

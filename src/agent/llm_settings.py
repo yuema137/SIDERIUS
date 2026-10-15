@@ -55,6 +55,7 @@ KNOWN_PROVIDERS: dict[str, ProviderConfig] = {
     # },
 }
 
+
 def default_model_for_provider(provider: str) -> str:
     """Resolve an omitted model without mixing providers and model IDs."""
     known = KNOWN_PROVIDERS.get(provider.lower())
