@@ -12,6 +12,7 @@ Naming convention:
   data_scope: full_spec — all fields needed by the implementor
 """
 
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import TaskCompositionRef
 from agent.schemas.implementor import ImplementorInput
 from agent.schemas.proposal import ProposalOutput
@@ -22,6 +23,7 @@ def local_full_spec(
     output: ProposalOutput,
     storage: StorageConfig,
     *,
+    constraint_context: ConstraintContext | None = None,
     task_composition_ref: TaskCompositionRef | None = None,
 ) -> ImplementorInput:
     """
@@ -42,6 +44,7 @@ def local_full_spec(
     docs/design/enable_loss_inventory.md § Commit L3.
     """
     return ImplementorInput(
+        constraint_context=constraint_context,
         # V21 PR E hop 2: the system-minted identity travels inside the
         # objects, so this protocol maps it field->field like every other
         # field. None propagates for pre-PR-E / non-proposer candidates.

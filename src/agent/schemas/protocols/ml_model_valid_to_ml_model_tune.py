@@ -22,6 +22,7 @@ the proposal provides expert_advice and baseline_config for the tuning agent.
 from typing import Any, Literal
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import (
     HealthGateMode,
     HyperparamTuningInput,
@@ -213,6 +214,8 @@ def local_validated_model(
     runtime_watchdog_safety_factor: float | None = None,
     runtime_watchdog_floor_seconds: float = 60.0,
     runtime_verification_max_wall_seconds: float | None = None,
+    *,
+    constraint_context: ConstraintContext | None = None,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -336,6 +339,7 @@ def local_validated_model(
         expert_advice = f"{prefix}\n\n{base}" if base else prefix
 
     return HyperparamTuningInput(
+        constraint_context=constraint_context,
         model_type=output.model_type,
         file_index=file_index,
         max_rounds=max_rounds,

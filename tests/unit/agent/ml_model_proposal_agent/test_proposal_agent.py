@@ -573,3 +573,18 @@ class TestRenderVocabulary:
 
 
 pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")
+
+
+def test_legacy_reasoning_and_commit_receive_same_constraint_context(agent, tmp_path):
+    from tests.unit.agent.test_constraint_disclosure import locked_context
+
+    inp = make_input(str(tmp_path))
+    inp.constraint_context = locked_context()
+    agent.run(inp)
+    calls = agent.bridge.generate_text.call_args_list + agent.bridge.generate.call_args_list
+    assert {c.kwargs["label"] for c in calls} == {
+        "proposer.legacy_reasoning",
+        "proposer.legacy_commit",
+    }
+    for recorded in calls:
+        assert '"train_config.lr"' in recorded.args[1]

@@ -54,7 +54,13 @@ def rendering_assembly_digest() -> str:
     # The reflector block consumes a typed projection from these producers;
     # qualifying template bytes alone would miss changes in its input meaning.
     tuner = root.parent / "nodes" / "ml_hyperparameter_tune_agent"
-    paths += [tuner / "planning.py", tuner / "provenance.py"]
+    paths += [
+        tuner / "planning.py",
+        tuner / "provenance.py",
+        tuner / "feedback.py",
+        tuner / "contracts.py",
+    ]
+    paths.append(root / "llm_bridge.py")
     paths += [
         root.parent / "workflows" / "constraint_disclosure.py",
     ]

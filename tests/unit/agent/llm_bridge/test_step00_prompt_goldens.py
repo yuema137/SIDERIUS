@@ -41,6 +41,7 @@ from agent.prompts import (
     _truncate_memory_history,
 )
 from agent.schemas.training_diagnosis import TrainingDiagnosis
+from tests.helpers.constraint_disclosure import without_incomplete_disclosure
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import (
     BoundaryRecorderBridge,
@@ -315,7 +316,9 @@ class TestPB2Reflector:
             system, GOLDENS / "pb2_reflector_system.txt", surface="PB-2 reflector system prompt"
         )
         assert_golden(
-            user, GOLDENS / "pb2_reflector_user.txt", surface="PB-2 reflector user prompt"
+            without_incomplete_disclosure(user),
+            GOLDENS / "pb2_reflector_user.txt",
+            surface="PB-2 reflector user prompt",
         )
 
 

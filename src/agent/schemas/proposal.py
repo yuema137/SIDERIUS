@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
@@ -781,6 +782,10 @@ class ProposalInput(BaseModel):
     ``agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py``,
     which maps InterpretationOutput → ProposalInput.
     """
+
+    constraint_context: ConstraintContext | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     interpretation_evidence: ProposerInterpretationEvidence = Field(
         description="The proposer's TYPED view of the interpretation — the ONE "

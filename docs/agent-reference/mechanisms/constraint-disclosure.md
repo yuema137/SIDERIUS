@@ -9,9 +9,10 @@ task objectives, workflow overrides and execution policy retain those duties.
 
 `workflows.constraint_disclosure.workflow_constraint_context` projects the
 launch configuration and task composition. The normal workflow supplies this
-context to interpreter, literature review and optional Data Analysis inputs.
-Downstream proposal, implementation, validation and tuning still use their
-existing input contracts; this shared transport does not yet cover those nodes.
+context to interpreter, literature review, optional Data Analysis, proposer,
+implementor, validator and tuner inputs through their typed edge protocols.
+Existing detailed proposer and tuner constraint blocks remain authoritative
+projections; shared disclosure supplements their cross-stage visibility.
 
 ## Payload and meaning
 
@@ -42,13 +43,31 @@ synthesis, vocabulary deduplication and optional analysis-brief generation
 receive them. Data Analysis structured generation, repair, planning, synthesis
 and generated-skill promotion share the same append path.
 
+Proposer legacy reasoning/commit, configured stages, vocabulary corrections,
+boldness retries, causal corrections and structural proposing retries receive
+the same context. Implementor model and custom-loss reasoning/code/repair calls
+and validator code review also receive it. Planner calls augment a supplied
+context with the existing owner-produced `PlannerTimingContext` without
+mutating the run snapshot. `PreparedAttempt.timing_context` retains those
+planning-time facts for reflection, including inherited values that happen to
+equal the authored values and therefore do not appear as provenance differences.
+Reflection receives this snapshot alongside actual execution provenance; it
+does not recompute historical winner selection after the attempt. Missing
+context remains missing, including when historical transport is disabled.
+
+New optional public-call arguments are keyword-only where earlier positional
+arguments exist. Direct calls remain supported with incomplete context. Proposer
+component telemetry keeps its named content categories; the gateway accounts
+for the added block in the existing residual scaffolding category.
+
 ## Identity, persistence and historical compatibility
 
 `constraints.disclosure` is an existing-system prompt-rendering boundary. Its
 native renderer appends one block; an explicit experiment-owned renderer may
 return an empty string, preserving the original prompt bytes. No execution
 rule changes when a historical renderer is selected. Rendering identity covers
-schemas, templates, affected upstream nodes and the workflow projection.
+schemas, templates, affected nodes, LLM bridge, tuner planning/feedback and the
+workflow projection.
 Analysis-brief receipts hash the final transmitted prompt; changed disclosure
 cannot reuse an incompatible brief. Data Analysis input identity includes
 present advisory context, so removing it in a renderer alone cannot recover

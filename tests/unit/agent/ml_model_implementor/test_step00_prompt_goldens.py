@@ -34,6 +34,7 @@ from nodes.ml_model_implementor.ml_model_implementor import (
     _build_loss_repair_prompt,
     _build_repair_prompt,
 )
+from tests.helpers.constraint_disclosure import without_incomplete_disclosure
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
 
@@ -158,9 +159,17 @@ class TestPB5ModelPrompts:
         m1, l1, s1, u1 = agent.bridge.captures[1]
         assert (m1, l1) == ("_chat_json", "implementor.code")
         assert_golden(s0, GOLDENS / "pb5_reasoning_system.txt", surface="PB-5 reasoning system")
-        assert_golden(u0, GOLDENS / "pb5_reasoning_user.txt", surface="PB-5 reasoning user")
+        assert_golden(
+            without_incomplete_disclosure(u0),
+            GOLDENS / "pb5_reasoning_user.txt",
+            surface="PB-5 reasoning user",
+        )
         assert_golden(s1, GOLDENS / "pb5_code_system.txt", surface="PB-5 code system")
-        assert_golden(u1, GOLDENS / "pb5_code_user.txt", surface="PB-5 code user")
+        assert_golden(
+            without_incomplete_disclosure(u1),
+            GOLDENS / "pb5_code_user.txt",
+            surface="PB-5 code user",
+        )
 
     def test_loss_reasoning_and_code_prompts(self, tmp_path):
         agent = MLModelImplementor(
@@ -186,10 +195,16 @@ class TestPB5ModelPrompts:
             s0, GOLDENS / "pb5_loss_reasoning_system.txt", surface="PB-5 loss reasoning system"
         )
         assert_golden(
-            u0, GOLDENS / "pb5_loss_reasoning_user.txt", surface="PB-5 loss reasoning user"
+            without_incomplete_disclosure(u0),
+            GOLDENS / "pb5_loss_reasoning_user.txt",
+            surface="PB-5 loss reasoning user",
         )
         assert_golden(s1, GOLDENS / "pb5_loss_code_system.txt", surface="PB-5 loss code system")
-        assert_golden(u1, GOLDENS / "pb5_loss_code_user.txt", surface="PB-5 loss code user")
+        assert_golden(
+            without_incomplete_disclosure(u1),
+            GOLDENS / "pb5_loss_code_user.txt",
+            surface="PB-5 loss code user",
+        )
 
 
 class TestPB5RepairPrompts:

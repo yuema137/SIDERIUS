@@ -743,3 +743,24 @@ def test_task_probe_setup_failure_does_not_request_model_repair(agent_with_mocks
         with pytest.raises(ModelProbeSetupError, match="invalid task fixture"):
             agent_with_mocks.run(inp)
     assert agent_with_mocks.bridge.generate.call_count == 1
+
+
+def test_constraints_reach_model_generation_and_repair(agent_with_mocks, inp, monkeypatch):
+    from tests.unit.agent.test_constraint_disclosure import locked_context
+
+    inp.constraint_context = locked_context()
+    errors = iter(["Synthetic repair trigger", None])
+    monkeypatch.setattr(agent_with_mocks, "_validate_code", lambda *_: next(errors))
+    agent_with_mocks.run(inp)
+    calls = (
+        agent_with_mocks.bridge.generate_text.call_args_list
+        + agent_with_mocks.bridge.generate.call_args_list
+    )
+    assert {call.kwargs["label"] for call in calls} == {
+        "implementor.reasoning",
+        "implementor.code",
+        "implementor.repair",
+    }
+    for recorded in calls:
+        assert '"train_config.lr"' in recorded.args[1]
+        assert recorded.args[1].count("[CURRENT RUN EXECUTION CONSTRAINTS]") == 1

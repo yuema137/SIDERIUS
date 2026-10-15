@@ -274,3 +274,27 @@ class TestPartialSchemaScope:
 
 
 pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")
+
+
+def test_constraints_survive_causal_correction_and_proposing(tmp_path):
+    from tests.unit.agent.test_constraint_disclosure import locked_context
+
+    bridge = MagicMock()
+    bridge.generate.side_effect = [
+        FAKE_COMPARISON_OUTPUT,
+        MALFORMED_REASONING,
+        CORRECTED_REASONING,
+        FAKE_PROPOSING_OUTPUT,
+    ]
+    inp = _pipeline_input(tmp_path)
+    inp.constraint_context = locked_context()
+    _agent(bridge).run(inp)
+    assert [call.kwargs["label"] for call in bridge.generate.call_args_list] == [
+        "proposer.comparison",
+        "proposer.causal_reasoning",
+        "proposer.causal_reasoning.correction",
+        "proposer.proposing",
+    ]
+    for call in bridge.generate.call_args_list:
+        assert '"train_config.lr"' in call.args[1]
+        assert call.args[1].count("[CURRENT RUN EXECUTION CONSTRAINTS]") == 1

@@ -392,3 +392,16 @@ Stage system prompts load templates through `proposal.template` and append train
 Composition declares the optional `prompt_renderer` and pins its identity.
 See the [task-composition contract](../../../docs/reference/task-composition.md#explicit-prompt-rendering-providers)
 for installation, binding, failure behavior and new-workspace requirements.
+
+
+## Shared execution-constraint context
+
+The input's optional `constraint_context` is a typed, read-only projection of
+existing run authorities. It is appended to semantic LLM calls and their
+correction/repair requests; deterministic enforcement remains unchanged.
+Absent context is disclosed as incomplete, never unrestricted. The workflow
+passes one snapshot through public protocols; explicit historical transport
+disabling does not weaken enforcement or synthesize replacement context.
+See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
+for call coverage, planner/reflector timing snapshots, resume identity and
+experiment-owned historical rendering requirements.

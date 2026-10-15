@@ -15,6 +15,7 @@ module produces the typed evidence that travels TO those surfaces.
 
 from typing import Literal
 
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.health_feedback import (
     FormalValidityFeedback,
     InvalidCandidateOutcome,
@@ -755,6 +756,7 @@ def invoke_reflection(
     metric_spec,
     training_diagnosis,
     task_render,
+    constraint_context: ConstraintContext | None = None,
 ) -> dict:
     """Ask the reflector to turn one attempt's results into memory.
 
@@ -773,6 +775,10 @@ def invoke_reflection(
     without the second is the F15 defect — a reflection that narrated a
     proposed loss as though it had run. They travel together from here on.
     """
+    if constraint_context is not None and prepared.timing_context is not None:
+        constraint_context = constraint_context.model_copy(
+            update={"timing": prepared.timing_context}
+        )
     return brain.reflect(
         exp_id,
         prepared.hypothesis,
@@ -790,4 +796,5 @@ def invoke_reflection(
         # Lane D / F15 — what RESOLUTION overruled, so the reflector describes
         # the run that executed rather than the one that was proposed.
         execution_provenance=prepared.execution_provenance,
+        constraint_context=constraint_context,
     )

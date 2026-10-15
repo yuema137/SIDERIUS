@@ -23,6 +23,7 @@ database_full_context   DB-backed transfer: interp agent writes the interpretati
 
 from collections.abc import Sequence
 
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.health_feedback import FormalValidityFeedback
 from agent.schemas.hyperparam_tuning import (
     ExpertAdviceInput,
@@ -72,6 +73,8 @@ def local_full_context(
     recent_formal_validity: Sequence[FormalValidityFeedback] = (),
     # --- Structured HealthGate feedback flag (V19 PR 3 §3.7/§3.9) ---
     enable_structured_health_feedback: bool = False,
+    *,
+    constraint_context: ConstraintContext | None = None,
 ) -> ProposalInput:
     """
     Local in-memory protocol — transfers the complete interpretation directly.
@@ -285,6 +288,7 @@ def local_full_context(
     if enable_structured_health_feedback:
         result["enable_structured_health_feedback"] = True
 
+    result["constraint_context"] = constraint_context
     return ProposalInput.model_validate(result)
 
 

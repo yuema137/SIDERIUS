@@ -33,6 +33,7 @@ from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER
+from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.formal_failure import render_formal_failure_feedback
 from agent.prompt_templates.proposal import (
     live_loss_metadata,
@@ -1708,7 +1709,7 @@ class MLModelProposalAgent:
         reasoning_system_prompt = _build_reasoning_system_prompt(inp)
         reasoning = self.bridge.generate_text(
             reasoning_system_prompt,
-            reasoning_prompt,
+            append_constraint_disclosure(reasoning_prompt, inp.constraint_context),
             label="proposer.legacy_reasoning",
         )
         print(f"   Legacy reasoning complete ({len(reasoning)} chars).")
@@ -1723,7 +1724,7 @@ class MLModelProposalAgent:
                 inp.proposal_blocks,
                 allowed_output_types=inp.allowed_output_types,
             ),
-            commit_prompt,
+            append_constraint_disclosure(commit_prompt, inp.constraint_context),
             label="proposer.legacy_commit",
         )
 
@@ -2068,7 +2069,9 @@ class MLModelProposalAgent:
             user_prompt_parts.append(_render_stage_user_prompt(clamped_accumulated))
             if vocab_block:
                 user_prompt_parts.append(vocab_block)
-            user_prompt = "\n\n".join(user_prompt_parts)
+            user_prompt = append_constraint_disclosure(
+                "\n\n".join(user_prompt_parts), inp.constraint_context
+            )
 
             print(f"   Stage '{stage.name}': calling LLM... [PROMPT_SIZE] {len(user_prompt)} chars")
             stage_audit = _audit_proposer_components(
@@ -2192,7 +2195,7 @@ class MLModelProposalAgent:
                                 "causal_reasoning"
                             ).generate(
                                 retry_system,
-                                retry_user,
+                                append_constraint_disclosure(retry_user, inp.constraint_context),
                                 label="proposer.causal_reasoning",
                                 components=retry_audit["components"],
                             )
@@ -2313,7 +2316,7 @@ class MLModelProposalAgent:
                 )
                 causal_raw = self._bridge_for_stage("causal_reasoning").generate(
                     correction_system,
-                    correction_user,
+                    append_constraint_disclosure(correction_user, inp.constraint_context),
                     label="proposer.causal_reasoning.correction",
                     components=correction_audit["components"],
                 )
@@ -2415,7 +2418,7 @@ class MLModelProposalAgent:
             )
             raw = self._bridge_for_stage("proposing").generate(
                 proposing_prompt,
-                proposing_user,
+                append_constraint_disclosure(proposing_user, inp.constraint_context),
                 label="proposer.proposing",
                 components=proposing_audit["components"],
             )

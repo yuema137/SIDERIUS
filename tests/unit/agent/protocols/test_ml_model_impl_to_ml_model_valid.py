@@ -140,3 +140,14 @@ def test_provider_only_mapping_resolves_matching_model(
     """A provider override must not accidentally send the default Luna ID to Gemini."""
     result = local_all_fields(implementor_output, storage, llm_provider=provider)
     assert result.llm_model_id == expected
+
+
+def test_existing_positional_provider_is_not_rebound_to_context(implementor_output, storage):
+    from tests.unit.agent.test_constraint_disclosure import locked_context
+
+    result = local_all_fields(
+        implementor_output, storage, "openai", "test-model", constraint_context=locked_context()
+    )
+    assert result.llm_provider == "openai"
+    assert result.llm_model_id == "test-model"
+    assert result.constraint_context == locked_context()

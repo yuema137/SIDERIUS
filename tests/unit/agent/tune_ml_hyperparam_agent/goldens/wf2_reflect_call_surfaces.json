@@ -50,7 +50,8 @@
         "metric_spec": "MetricSpec",
         "task_render": "TunerTaskRender",
         "training_diagnosis": "TrainingDiagnosis",
-        "execution_provenance": "ExecutionProvenance"
+        "execution_provenance": "ExecutionProvenance",
+        "constraint_context": "NoneType"
       }
     },
     {
@@ -99,7 +100,8 @@
         "metric_spec": "MetricSpec",
         "task_render": "TunerTaskRender",
         "training_diagnosis": "TrainingDiagnosis",
-        "execution_provenance": "ExecutionProvenance"
+        "execution_provenance": "ExecutionProvenance",
+        "constraint_context": "NoneType"
       }
     }
   ]

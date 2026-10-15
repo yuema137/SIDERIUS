@@ -1608,6 +1608,7 @@ class HyperparamTuningAgent:
                     reflect_results = {**train_results, **score_results}
                     reflection = invoke_reflection(
                         brain,
+                        constraint_context=agent_input.constraint_context,
                         exp_id=exp_id,
                         prepared=prepared,
                         reflect_results=reflect_results,

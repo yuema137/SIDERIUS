@@ -865,3 +865,23 @@ def test_spatial_loss_setup_requires_task_pair_before_paid_calls(
                 agent_with_mocks._generate_loss(inp_loss_only)
             agent_with_mocks.bridge.generate_text.assert_not_called()
             agent_with_mocks.bridge.generate.assert_not_called()
+
+
+def test_constraints_reach_loss_generation_and_numerical_repair(agent_with_mocks, inp_loss_only):
+    from tests.unit.agent.test_constraint_disclosure import locked_context
+
+    inp_loss_only.constraint_context = locked_context()
+    agent_with_mocks.bridge.generate.side_effect = [BAD_LOSS_CODE_NON_SCALAR, GOOD_LOSS_CODE]
+    agent_with_mocks._generate_loss(inp_loss_only)
+    calls = (
+        agent_with_mocks.bridge.generate_text.call_args_list
+        + agent_with_mocks.bridge.generate.call_args_list
+    )
+    assert {call.kwargs["label"] for call in calls} == {
+        "implementor.loss.reasoning",
+        "implementor.loss.code",
+        "implementor.loss.repair",
+    }
+    for call in calls:
+        assert '"train_config.lr"' in call.args[1]
+        assert call.args[1].count("[CURRENT RUN EXECUTION CONSTRAINTS]") == 1

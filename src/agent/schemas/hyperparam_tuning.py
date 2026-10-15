@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, 
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.custom_loss_contract import CustomLossApplicability, TaskOwnedCustomLoss
 from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
 from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
@@ -1673,6 +1674,10 @@ class HyperparamTuningInput(BaseModel):
     mode using ``file_index``. All trial fields are ignored. When ``is_trial=True``,
     the agent builds a SampleSet from the trial strategy and ignores ``file_index``.
     """
+
+    constraint_context: ConstraintContext | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     # --- Research ---
     expected_planner_strategy: PlannerStrategyIdentity | None = Field(

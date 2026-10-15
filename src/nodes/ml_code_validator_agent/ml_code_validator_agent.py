@@ -54,6 +54,7 @@ import torch
 
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
+from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.native_training import render_native_training_appendix
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.model_io_contract import ModelIOContract
@@ -504,8 +505,10 @@ def _check_instantiation_and_gradient(
             from agent.skills.validator_probe_worker import run_bounded_probe
 
             return run_bounded_probe(
-                model_file_path, model_io_contract,
-                model_probe_context=model_probe_context, gradients=_gradients,
+                model_file_path,
+                model_io_contract,
+                model_probe_context=model_probe_context,
+                gradients=_gradients,
             )
     try:
         module = captured_plugin(model_file_path)
@@ -982,7 +985,7 @@ class MLCodeValidatorAgent:
         )
         raw = self.bridge.generate(
             _build_review_system_prompt(inp.model_io_contract),
-            user_prompt,
+            append_constraint_disclosure(user_prompt, inp.constraint_context),
             label="validator.code_review",
         )
         return LLMCodeReview.model_validate(raw)

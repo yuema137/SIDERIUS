@@ -34,6 +34,7 @@ from enum import Enum
 from typing import Any
 
 from agent.schemas.ordering import ResolvedOrdering
+from agent.schemas.planner_timing import PlannerTimingContext
 from core.capability_registry import CapabilityContractSnapshot
 from core.planner_strategy_identity import PlannerStrategyIdentity
 from execute_tools.evaluation_execution import CandidateEvaluationResult
@@ -298,6 +299,8 @@ class PreparedAttempt:
     #: route. Transient by design: it is not attempt eligibility or record
     #: state, and ``None`` preserves builtin and uncomposed behavior.
     expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None
+    # Owner-produced facts used when planning this attempt, retained for reflection.
+    timing_context: PlannerTimingContext | None = None
 
 
 @dataclass(frozen=True)

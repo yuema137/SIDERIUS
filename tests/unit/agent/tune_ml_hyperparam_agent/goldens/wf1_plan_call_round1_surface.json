@@ -13,7 +13,7 @@
   "kwargs": {
     "model_description": null,
     "exploration_checklist": "",
-    "plugin_source_excerpt": "## PLUGIN CONFIG SCHEMA (authoritative — read validators carefully)\nThe planner prompt's JSON schema below cannot represent `@model_validator(mode='after')` or cross-field `@field_validator` bodies. Treat the source below as the single source of truth for any cross-field invariants; a proposed config that violates one will be rejected by the resource-eval skill and burn a retry attempt.\n\n```python\nclass PeWavenetDeltaConfig(BaseModel):\n    model_type: str = Field(default=\"pe_wavenet_delta\")\n    segmentation_size: int = Field(default=1000, ge=1)\n    batch_size: int = Field(default=1, ge=1)\n    hidden_dim: int = Field(default=128, ge=8, le=8192)\n\n```\n",
+    "plugin_source_excerpt": "## PLUGIN CONFIG SCHEMA (authoritative \u2014 read validators carefully)\nThe planner prompt's JSON schema below cannot represent `@model_validator(mode='after')` or cross-field `@field_validator` bodies. Treat the source below as the single source of truth for any cross-field invariants; a proposed config that violates one will be rejected by the resource-eval skill and burn a retry attempt.\n\n```python\nclass PeWavenetDeltaConfig(BaseModel):\n    model_type: str = Field(default=\"pe_wavenet_delta\")\n    segmentation_size: int = Field(default=1000, ge=1)\n    batch_size: int = Field(default=1, ge=1)\n    hidden_dim: int = Field(default=128, ge=8, le=8192)\n\n```\n",
     "current_round": 1,
     "custom_loss_inventory": {
       "type": "CustomLossInventory",
@@ -177,6 +177,7 @@
       "validation_max_samples": null,
       "validation_max_train_samples": null,
       "workflow_rules": null
-    }
+    },
+    "constraint_context": null
   }
 }

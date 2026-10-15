@@ -68,6 +68,7 @@ def _shipped_forward_contract() -> ForwardContract:
     return ForwardContract(**load_task_config()["forward_contract"])
 
 
+from tests.helpers.constraint_disclosure import without_incomplete_disclosure
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
 
@@ -404,7 +405,9 @@ class TestPB3PipelineProposer:
             assert "{task_background_block}" not in system
             assert "Step-00 fixture task" in system
             assert_golden(
-                user, GOLDENS / f"pb3_{stem}_user.txt", surface=f"PB-3 {label} user prompt"
+                without_incomplete_disclosure(user),
+                GOLDENS / f"pb3_{stem}_user.txt",
+                surface=f"PB-3 {label} user prompt",
             )
 
     def test_exploit_mode_systems_and_mode_invariant_users(self, tmp_path, pinned_env):
@@ -421,7 +424,7 @@ class TestPB3PipelineProposer:
             assert "Step-00 fixture task" in system
             # User prompts are mode-invariant — same goldens as explore.
             assert_golden(
-                user,
+                without_incomplete_disclosure(user),
                 GOLDENS / f"pb3_{stem}_user.txt",
                 surface=f"PB-3 {label} user prompt (mode-invariance)",
             )

@@ -464,3 +464,11 @@ class TestDataScopePassThrough:
     def test_default_full_scope_when_omitted(self, storage, interp_output):
         result = local_full_context(interp_output, storage)
         assert result.data_scope == DataScope.default()
+
+
+def test_existing_positional_expert_context_keeps_its_slot(interp_output, storage):
+    from tests.unit.agent.test_constraint_disclosure import locked_context
+
+    result = local_full_context(interp_output, storage, [], constraint_context=locked_context())
+    assert result.expert_context == []
+    assert result.constraint_context == locked_context()

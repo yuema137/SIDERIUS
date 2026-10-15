@@ -1,5 +1,6 @@
 [
   "config_manual",
+  "constraint_context",
   "current_round",
   "custom_loss_inventory",
   "expected_planner_strategy",

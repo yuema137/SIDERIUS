@@ -3007,6 +3007,7 @@ def run_workflow(
                 propose_input = local_full_context(
                     interpretation,
                     attempt_storage,
+                    constraint_context=current_constraints,
                     expert_context=expert_context_for_propose + external_channels["expert_context"],
                     vocab_seed=list(bindings.vocab_seed) + external_channels["vocab_seed"],
                     agent_cards=external_channels["agent_cards"],
@@ -3160,6 +3161,7 @@ def run_workflow(
                     impl_input = local_full_spec(
                         proposal,
                         impl_storage.storage,
+                        constraint_context=current_constraints,
                         task_composition_ref=build_task_composition_ref(bindings.task_composition),
                     )
                     impl_input.plugin_dir = impl_storage.plugin_dir
@@ -3211,6 +3213,7 @@ def run_workflow(
                     valid_input = local_all_fields(
                         impl_output,
                         impl_storage.storage,
+                        constraint_context=current_constraints,
                         llm_provider=valid_llm.get("provider", VALIDATE.provider),
                         llm_model_id=valid_llm.get("model_id", VALIDATE.model_id),
                     )
@@ -3359,6 +3362,7 @@ def run_workflow(
             # Step 12 / PR-12a (D-12a-1) — the composition projection crosses
             # the edge on the INPUT, beside every other run-scoped decision
             # this protocol already maps.
+            constraint_context=current_constraints,
             task_composition_ref=build_task_composition_ref(bindings.task_composition),
             workflow_parameter_rules=launch.workflow_parameter_rules,
             disclose_execution_constraints=launch.disclose_execution_constraints,

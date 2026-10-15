@@ -2058,3 +2058,16 @@ planner retry inheritance; its explicit `max_retries` value, including None,
 governs reflector requests independently. Workflow JSON uses the existing
 `tune.reflector.max_retries` leaf. This does not change tuning attempt/round counts.
 See the [shared retry contract](../../agent/retry-policy.md).
+
+
+## Shared execution-constraint context
+
+The input's optional `constraint_context` is a typed, read-only projection of
+existing run authorities. It is appended to semantic LLM calls and their
+correction/repair requests; deterministic enforcement remains unchanged.
+Absent context is disclosed as incomplete, never unrestricted. The workflow
+passes one snapshot through public protocols; explicit historical transport
+disabling does not weaken enforcement or synthesize replacement context.
+See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
+for call coverage, planner/reflector timing snapshots, resume identity and
+experiment-owned historical rendering requirements.

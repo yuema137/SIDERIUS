@@ -428,20 +428,23 @@ def prepare_attempt(
             agent_input.training_budget_reserve_fraction
         )
 
+    timing_context = build_timing_context(
+        agent_input,
+        trial_allowed=trial_allowed,
+        is_formal_round=is_formal_round,
+        current_round=iteration,
+        trial_winner=formal_trial_winner,
+        memory_history=memory_history,
+        scope_is_partial=scope_is_partial,
+    )
+
     # B. THINK: Plan next experiment
     decision = brain.plan(
         memory_history,
+        constraint_context=agent_input.constraint_context,
         planner_strategy=agent_input.planner_strategy,
         expected_planner_strategy=bindings.planner_strategy_identity,
-        timing_context=build_timing_context(
-            agent_input,
-            trial_allowed=trial_allowed,
-            is_formal_round=is_formal_round,
-            current_round=iteration,
-            trial_winner=formal_trial_winner,
-            memory_history=memory_history,
-            scope_is_partial=scope_is_partial,
-        ),
+        timing_context=timing_context,
         **allocation_kwargs,
         expert_advice=expert_advice_str,
         force_model=model_type_setting,
@@ -918,6 +921,7 @@ def prepare_attempt(
     }
 
     return PreparedAttempt(
+        timing_context=timing_context,
         plan=plan,
         trial_config=trial_config,
         active_params=active_params,

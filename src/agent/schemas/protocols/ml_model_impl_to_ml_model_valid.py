@@ -18,6 +18,7 @@ output file from storage. All required data is mapped explicitly by this protoco
 from typing import Literal
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorInput
@@ -28,6 +29,8 @@ def local_all_fields(
     storage: StorageConfig,
     llm_provider: Literal["gemini", "openai", "deepseek"] = DEFAULT_LLM_PROVIDER,
     llm_model_id: str | None = None,
+    *,
+    constraint_context: ConstraintContext | None = None,
 ) -> ValidatorInput:
     """
     Map ImplementorOutput -> ValidatorInput in-memory.
@@ -49,6 +52,7 @@ def local_all_fields(
       - storage, llm_provider, llm_model_id: passed from the orchestrator
     """
     return ValidatorInput(
+        constraint_context=constraint_context,
         # V21 PR E hop 3: carried from the IMMEDIATE upstream (the
         # implementor's echo), not re-read from the proposal — so severing
         # any earlier echo is visible end to end instead of papered over.

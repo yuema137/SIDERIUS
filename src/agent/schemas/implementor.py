@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput, TaskCompositionRef
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.model_probe import ModelProbeContext
@@ -234,6 +235,10 @@ class ImplementorInput(BaseModel):
     ``agent/schemas/protocols/ml_model_propose_to_ml_model_impl.py``,
     which maps ProposalOutput → ImplementorInput.
     """
+
+    constraint_context: ConstraintContext | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     candidate_id: str | None = Field(
         default=None,

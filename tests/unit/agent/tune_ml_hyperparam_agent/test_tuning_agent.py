@@ -779,6 +779,9 @@ class TestDynamicTrialFormal:
         inp = _make_trial_input(tmp_path, max_rounds=1, is_trial=True)
         inp.force_formal_round = False
         inp.planner_strategy = "native-timing-v1"
+        from tests.unit.agent.test_constraint_disclosure import locked_context
+
+        inp.constraint_context = locked_context()
         inp.plan_overrides = {"eval_portion": 0.23}
         inp.formal_eval_portion = 0.29
         inp.formal_max_epochs = 7
@@ -787,6 +790,7 @@ class TestDynamicTrialFormal:
         sent = mock_brain.plan.call_args.kwargs
         assert sent["expected_planner_strategy"].name == "native-timing-v1"
         assert sent["timing_context"].plan_overrides == {"eval_portion": 0.23}
+        assert sent["constraint_context"] == inp.constraint_context
         user = recorder.captures[0][3]
         assert '"formal_eval_portion": 0.29' in user
         assert '"epoch_cap": 7' in user

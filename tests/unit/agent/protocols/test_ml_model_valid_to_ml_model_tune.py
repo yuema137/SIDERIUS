@@ -1012,3 +1012,29 @@ def test_disclosure_selection_reaches_tuner_lock(
     )
     assert result.disclose_execution_constraints is enabled
     assert _lock_launch_identity(result).disclose_execution_constraints is enabled
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_workflow_constraint_transport_to_tuner(
+    validator_output, proposal_output, storage, enabled
+):
+    from tests.unit.agent.test_constraint_disclosure import locked_context
+    from workflows.constraint_disclosure import workflow_constraint_context
+    from workflows.run_config import WorkflowLaunchConfig
+
+    context = workflow_constraint_context(
+        WorkflowLaunchConfig(
+            disclose_execution_constraints=enabled,
+            workflow_parameter_rules=locked_context().workflow_rules,
+        ),
+        None,
+    )
+    result = local_validated_model(
+        validator_output,
+        proposal_output,
+        storage,
+        constraint_context=context,
+        disclose_execution_constraints=enabled,
+    )
+    assert result.constraint_context == context
+    assert ("constraint_context" in result.model_dump()) is enabled

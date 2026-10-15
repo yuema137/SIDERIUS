@@ -61,6 +61,7 @@ from agent.llm_settings import (
     ProviderConfig as _ProviderConfig,
 )
 from agent.planner_strategy import resolve_planner_strategy
+from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.tuner.rendering import (
     EFFICIENCY_BAND_PCT,
     LEGACY_PER_FILE_COMPARISON_BLOCK,
@@ -74,6 +75,7 @@ from agent.prompts import (
     get_reflector_user_prompt,
     render_collapse_advice,
 )
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.planner_timing import PlannerTimingContext
 from agent.schemas.telemetry import (
@@ -983,6 +985,8 @@ class LLMBridge:
         timing_context: PlannerTimingContext | None = None,
         planner_strategy: str | None = None,
         expected_planner_strategy: PlannerStrategyIdentity | None = None,
+        *,
+        constraint_context: ConstraintContext | None = None,
     ) -> dict:
         """
         Uses the Planner logic to observe Research Memory and decide next steps.
@@ -1228,6 +1232,9 @@ class LLMBridge:
                 "returned. Formal uses its own allocation even when cloning Trial settings. "
                 "Do not infer convergence or GPU utilization from a budget/cap stop.\n"
             )
+        if constraint_context is not None and timing_context is not None:
+            constraint_context = constraint_context.model_copy(update={"timing": timing_context})
+        final_user_prompt = append_constraint_disclosure(final_user_prompt, constraint_context)
         return self.generate(system_prompt, final_user_prompt, label="tuner.planner")
 
     def reflect(
@@ -1241,6 +1248,7 @@ class LLMBridge:
         training_diagnosis: Any = None,
         task_render: TunerTaskRender | None = None,
         execution_provenance: Any = None,
+        constraint_context: ConstraintContext | None = None,
     ) -> dict:
         """
         Uses the Reflector logic to transform results into new Memory entries.
@@ -1321,7 +1329,7 @@ class LLMBridge:
             self.reflect_client,
             self.reflect_model_name,
             system_prompt,
-            user_prompt,
+            append_constraint_disclosure(user_prompt, constraint_context),
             label="tuner.reflector",
             provider=self.reflect_provider,
         )

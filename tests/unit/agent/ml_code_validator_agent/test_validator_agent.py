@@ -1141,3 +1141,15 @@ class TestInheritanceDecoupledFromPassed:
         # When the model fails for a trainability reason, inheritance deviation
         # notes are not emitted (the deviation only propagates for passing models).
         assert out.inheritance_deviation_notes is None
+
+
+def test_constraints_reach_validator_review(tmp_path):
+    from tests.unit.agent.test_constraint_disclosure import locked_context
+
+    inp = make_input(tmp_path)
+    inp.constraint_context = locked_context()
+    agent = MLCodeValidatorAgent.__new__(MLCodeValidatorAgent)
+    agent.bridge = MagicMock()
+    agent.bridge.generate.return_value = FAKE_LLM_REVIEW
+    agent._llm_review(inp, "class Model: pass")
+    assert '"train_config.lr"' in agent.bridge.generate.call_args.args[1]

@@ -31,6 +31,7 @@ from typing import Any
 
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER
+from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.prompt_templates.native_training import render_native_training_appendix
 from agent.prompt_templates.proposal import live_loss_metadata
@@ -181,8 +182,10 @@ def _smoke_test_plugin(
                 from agent.skills.validator_probe_worker import run_bounded_probe
 
                 return run_bounded_probe(
-                    tmp_path, model_io_contract,
-                    model_probe_context=model_probe_context, gradients=False,
+                    tmp_path,
+                    model_io_contract,
+                    model_probe_context=model_probe_context,
+                    gradients=False,
                 )[3]
 
         # Load the module
@@ -2003,14 +2006,18 @@ class MLModelImplementor:
                 "{LOSS_ENGINEER_ROLE}",
                 render_engineer_role(inp.implementor_blocks, for_losses=True),
             ),
-            _build_loss_reasoning_prompt(spec),
+            append_constraint_disclosure(
+                _build_loss_reasoning_prompt(spec), inp.constraint_context
+            ),
             label="implementor.loss.reasoning",
         )
         print(f"   Loss reasoning complete ({len(reasoning)} chars).")
 
         code = self.bridge.generate(
             IMPLEMENTOR_LOSS_CODE_PROMPT,
-            _build_loss_code_prompt(reasoning, spec),
+            append_constraint_disclosure(
+                _build_loss_code_prompt(reasoning, spec), inp.constraint_context
+            ),
             label="implementor.loss.code",
         )
 
@@ -2034,7 +2041,7 @@ class MLModelImplementor:
             error_history.append((attempt, error))
             code = self.bridge.generate(
                 IMPLEMENTOR_LOSS_REPAIR_PROMPT,
-                repair_prompt,
+                append_constraint_disclosure(repair_prompt, inp.constraint_context),
                 label="implementor.loss.repair",
             )
             plugin_src = _assemble_loss_plugin(loss_name, spec.description, code, expected_snapshot)
@@ -2250,7 +2257,7 @@ class MLModelImplementor:
         reasoning_prompt = _build_reasoning_prompt(inp)
         reasoning = self.bridge.generate_text(
             reasoning_system_prompt,
-            reasoning_prompt,
+            append_constraint_disclosure(reasoning_prompt, inp.constraint_context),
             label="implementor.reasoning",
         )
         print(f"   Reasoning complete ({len(reasoning)} chars).")
@@ -2262,7 +2269,7 @@ class MLModelImplementor:
         code_prompt = _build_code_prompt(reasoning, inp)
         code = self.bridge.generate(
             code_system_prompt,
-            code_prompt,
+            append_constraint_disclosure(code_prompt, inp.constraint_context),
             label="implementor.code",
         )
         code = self._patch_common_mistakes(code)
@@ -2279,7 +2286,7 @@ class MLModelImplementor:
             error_history.append((attempt, error))
             code = self.bridge.generate(
                 IMPLEMENTOR_REPAIR_PROMPT,
-                repair_prompt,
+                append_constraint_disclosure(repair_prompt, inp.constraint_context),
                 label="implementor.repair",
             )
             code = self._patch_common_mistakes(code)
