@@ -7,7 +7,9 @@ from collections.abc import Callable
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 
 from agent.data_analysis.persistence import AnalysisRunStore
+from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.data_analysis import render_structured_output_repair_prompt
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.data_analysis.common import FrozenModel, NonEmptyStr, canonical_sha256
 from core.execution_deadline import remaining_seconds
 
@@ -61,11 +63,14 @@ def generate_validated[ValidatedModelT: BaseModel](
     user: str,
     label: str,
     semantic_projection: Callable[[object], object | None],
+    constraint_context: ConstraintContext | None = None,
 ) -> ValidatedModelT:
     """Validate once, then permit one schema-only repair with semantic anchors."""
 
     remaining_seconds(label)
-    raw = bridge.generate(system, user, label=label)
+    raw = bridge.generate(
+        system, append_constraint_disclosure(user, constraint_context), label=label
+    )
     remaining_seconds(label)
     initial_digest = canonical_sha256(raw)
     try:
@@ -98,7 +103,11 @@ def generate_validated[ValidatedModelT: BaseModel](
             validation_errors=[issue.model_dump(mode="json") for issue in issues],
         )
         remaining_seconds(f"{label}.repair")
-        repaired = bridge.generate(repair_system, repair_user, label=f"{label}.repair")
+        repaired = bridge.generate(
+            repair_system,
+            append_constraint_disclosure(repair_user, constraint_context),
+            label=f"{label}.repair",
+        )
         remaining_seconds(f"{label}.repair")
         repaired_digest = canonical_sha256(repaired)
         try:

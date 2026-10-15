@@ -139,6 +139,7 @@ class WorkflowLaunchConfig:
     bypass_formal_time_budget_minutes: float | None = None
     plan_overrides: dict | None = None
     workflow_parameter_rules: ParameterRules | None = None
+    disclose_execution_constraints: bool = True
     trial_time_budget_minutes: float | None = None
     formal_time_budget_minutes: float | None = None
     trial_time_admission_source: TimeAdmissionSource = "measured"

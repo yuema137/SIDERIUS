@@ -197,7 +197,7 @@ def test_requested_cold_start_generates_and_resumes_one_narrow_brief(tmp_path) -
     assert [call[0] for call in bridge.calls] == ["interpretation.analysis_brief"]
     assert output.analysis_brief is not None
     assert output.analysis_brief.questions[0].question.startswith("Does the observed")
-    prompt_payload = json.loads(bridge.calls[0][2])
+    prompt_payload = json.JSONDecoder().raw_decode(bridge.calls[0][2])[0]
     assert prompt_payload["interpretation_evidence"] == {
         "cold_start": True,
         "statement": "No prior experimental evidence exists.",
@@ -295,7 +295,7 @@ def test_brief_receives_bound_access_policy_and_resume_rejects_changed_permissio
     bridge = _BriefBridge({"questions": [{"question": "How variable are the observed inputs?"}]})
     agent = ResultInterpretationAgent(bridge_factory=lambda **_kwargs: bridge)
     agent.run(inp)
-    prompt = json.loads(bridge.calls[0][2])
+    prompt = json.JSONDecoder().raw_decode(bridge.calls[0][2])[0]
     assert prompt["analysis_access_policy"] == policy.model_dump(mode="json")
     assert prompt["analysis_resource_envelope"]["wall_time_budget_s"] == 300
     assert "Planning, code generation, execution, and synthesis" in bridge.calls[0][1]
@@ -351,3 +351,50 @@ def test_resume_reuses_primary_interpretation_when_llm_answer_changes(tmp_path) 
     assert bridge.primary_calls == 2
     assert [call[0] for call in bridge.calls].count("interpretation.analysis_brief") == 1
     assert second == first
+
+
+def test_constraint_change_rejects_brief_reuse_and_receipt_hashes_sent_text(tmp_path):
+    from agent.schemas.data_analysis.common import canonical_sha256
+    from nodes.result_interpretation_agent.analysis_brief import AnalysisBriefResumeMismatchError
+    from tests.unit.agent.test_constraint_disclosure import locked_context
+
+    bridge = _BriefBridge({"questions": [{"question": "Which input features vary?"}]})
+    inp = _cold_input(tmp_path, requested=True).model_copy(
+        update={"constraint_context": locked_context()}
+    )
+    agent = ResultInterpretationAgent(
+        provider="test", model_id="fake", bridge_factory=lambda **_: bridge
+    )
+    agent.run(inp)
+    _, system, user = bridge.calls[0]
+    receipt = json.loads((tmp_path / "analysis_brief_generation_brief-test.json").read_text())[
+        "receipt"
+    ]
+    assert receipt["prompt_sha256"] == canonical_sha256({"system": system, "user": user})
+    assert '"train_config.lr"' in user
+    with pytest.raises(AnalysisBriefResumeMismatchError):
+        agent.run(inp.model_copy(update={"constraint_context": None}))
+    assert len(bridge.calls) == 1
+
+
+def test_constraints_reach_primary_interpretation_calls(tmp_path):
+    from tests.unit.agent.test_constraint_disclosure import locked_context
+
+    bridge = _LegacyBridge(str(tmp_path))
+    inp = InterpretationInput(
+        summaries=[_SUMMARY, _SUMMARY.model_copy(update={"model_type": "second_model"})],
+        metric_spec=shipped_spec(),
+        task_description="Synthetic regression",
+        storage=_storage(tmp_path),
+        constraint_context=locked_context(),
+    )
+    ResultInterpretationAgent(
+        provider="test", model_id="fake", bridge_factory=lambda **_: bridge
+    ).run(inp)
+    assert {label for label, _, _ in bridge.calls} == {
+        "interpretation.per_model",
+        "interpretation.synthesis",
+    }
+    for _, _, user in bridge.calls:
+        assert '"train_config.lr"' in user
+        assert "not corrections to historical results" in user

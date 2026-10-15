@@ -285,3 +285,11 @@ with `max_retries: null` is unbounded. Workflow leaf JSON still uses `max_retrie
 See the [shared retry contract](../../agent/retry-policy.md) for total-attempt
 semantics, nullable overrides and limits. Paper resolution and dynamic-search
 round budgets are separate owners and are unchanged.
+
+## Current-run execution constraints
+
+`LiteratureReviewInput.constraint_context` scopes search decisions and synthesis
+recommendations through the shared disclosure. Paper extraction and its cached
+source facts remain independent of current-run limits: a published method must
+not be rewritten merely because this run cannot execute it. See the
+[disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md).

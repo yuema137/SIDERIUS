@@ -119,6 +119,7 @@ def prepare_generated_program(
         try:
             draft = generate_validated(
                 bridge,
+                constraint_context=analysis_input.constraint_context,
                 store=store,
                 model_type=GeneratedProgramDraft,
                 system=system,

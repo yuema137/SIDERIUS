@@ -20,6 +20,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.external_agents import ExternalAgentOutput
 from agent.schemas.llm_retry import RetryPolicy
 from agent.schemas.storage import StorageConfig
@@ -479,6 +480,10 @@ class LiteratureReviewInput(BaseModel):
     Literature-owned projections.  The node never receives either upstream
     capability's complete output object.
     """
+
+    constraint_context: ConstraintContext | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     interpretation_evidence: LiteratureReviewInterpretationEvidence = Field(
         description="Bounded current-state evidence projected from InterpretationOutput.",

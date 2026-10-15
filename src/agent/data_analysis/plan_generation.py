@@ -48,6 +48,7 @@ def generate_resolved_analysis_plan(
         try:
             plan = generate_validated(
                 bridge,
+                constraint_context=analysis_input.constraint_context,
                 store=store,
                 model_type=AnalysisPlan,
                 system=system,

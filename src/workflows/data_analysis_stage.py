@@ -9,6 +9,7 @@ from pathlib import Path
 from agent.data_analysis.generated_skill_registry import load_generated_skill_registry
 from agent.data_analysis.persistence import AnalysisRunStore
 from agent.data_analysis.source_scope import apply_source_prompt
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.data_analysis.common import CallerIdentity, CertifiedArtifactRef
 from agent.schemas.data_analysis.generated_skill import GeneratedExperimentSkillRegistryRef
 from agent.schemas.data_analysis.report import DataAnalysisReport
@@ -111,6 +112,7 @@ def run_optional_data_analysis(
     storage: StorageConfig,
     human_advice: str | None,
     source_prompt: str | None = None,
+    constraint_context: ConstraintContext | None = None,
     retain_model_outputs: bool = False,
     llm_kwargs: dict,
     bridge_factory,
@@ -174,6 +176,7 @@ def run_optional_data_analysis(
     try:
         analysis_input = local_analysis_input(
             interpretation,
+            constraint_context=constraint_context,
             request_id=request_id,
             task_context=binding.task_context,
             available_assets=binding.available_assets,

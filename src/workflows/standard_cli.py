@@ -515,6 +515,12 @@ def build_parser() -> argparse.ArgumentParser:
         "Keys must be valid ExperimentPlan fields.",
     )
     parser.add_argument(
+        "--disclose_execution_constraints",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Disclose existing constraints to agents; disabling changes advisory context only, not enforcement.",
+    )
+    parser.add_argument(
         "--workflow_parameter_rules",
         type=str,
         default=None,

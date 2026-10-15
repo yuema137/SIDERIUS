@@ -116,6 +116,7 @@ def generate_grounded_synthesis(
     for attempt in (1, 2):
         draft = generate_validated(
             bridge,
+            constraint_context=inp.constraint_context,
             store=store,
             model_type=_ReportSynthesis,
             system=system,

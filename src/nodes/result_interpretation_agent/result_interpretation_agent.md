@@ -767,3 +767,12 @@ Per-model system/user messages expose `interpretation.model_system` and `interpr
 Composition declares the optional `prompt_renderer` and pins its identity.
 See the [task-composition contract](../../../docs/reference/task-composition.md#explicit-prompt-rendering-providers)
 for installation, binding, failure behavior and new-workspace requirements.
+
+## Current-run execution constraints
+
+`InterpretationInput.constraint_context` carries optional typed, read-only
+constraints. Per-model interpretation, synthesis, vocabulary deduplication and
+analysis-brief generation append the shared disclosure. Evidence-only cache
+consolidation remains source-faithful. Brief receipts hash the final sent text
+and reject changed-context reuse. See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
+for coverage, ownership, incomplete direct calls and historical profiles.

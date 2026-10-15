@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.data_analysis.access import AnalysisAccessPolicy
 from agent.schemas.data_analysis.assets import AnalysisAsset
 from agent.schemas.data_analysis.common import CallerIdentity
@@ -38,6 +39,7 @@ def local_analysis_input(
     prior_evidence: tuple[PriorEvidenceRef, ...] = (),
     generated_skill_registry: GeneratedExperimentSkillRegistryRef | None = None,
     human_advice: str | None = None,
+    constraint_context: ConstraintContext | None = None,
     allow_generated_skill_promotion: bool = False,
     retain_model_outputs: bool = False,
     recovery_policy: AnalysisRecoveryPolicy | None = None,
@@ -53,6 +55,7 @@ def local_analysis_input(
             "analysis was requested but InterpretationOutput has no validated AnalysisBrief"
         )
     return DataAnalysisInput(
+        constraint_context=constraint_context,
         request_id=request_id,
         task_context=task_context,
         analysis_brief=interpretation.analysis_brief,

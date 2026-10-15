@@ -135,6 +135,7 @@ def build_standard_launch_config(
         human_advice_mindset=args.human_advice_mindset,
         plan_overrides=args.plan_overrides,
         workflow_parameter_rules=args.workflow_parameter_rules,
+        disclose_execution_constraints=args.disclose_execution_constraints,
         exploration_mode=args.exploration_mode,
         minimum_boldness=args.minimum_boldness,
         max_impl_attempts=args.max_impl_attempts,

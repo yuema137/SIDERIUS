@@ -243,3 +243,12 @@ framework contains no experiment-name or revision-based selection.
 ### Bounded report grounding retry
 
 Report synthesis validates citations against completed, covered SkillResults and their exact quantitative keys before constructing public findings. A failed grounding check permits one fresh synthesis from the same certified evidence within the existing whole-node deadline. It does not rerun skills, reset the budget, expand access, or silently rewrite a measurement. Repeated invalid citations fail closed. Both drafts and their validation errors are preserved in `synthesis_grounding_receipts.jsonl`; schema-only repair receipts remain separate. Question/finding/limitation references are checked by the same grounding validator.
+
+## Current-run execution constraints
+
+`DataAnalysisInput.constraint_context` supplies optional read-only execution
+facts to structured generation and schema repair, including planning, program
+generation, synthesis and promotion. It grants no data access. Present context
+participates in input identity; absent context is omitted from serialization.
+See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
+for the explicit historical transport and rendering requirements.

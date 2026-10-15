@@ -24,6 +24,7 @@ from pydantic import ValidationError
 from agent.cache_consolidator import consolidate
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER
+from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.formal_failure import render_formal_failure_feedback
 from agent.prompt_templates.interpretation.rendering import (
     DEDUP_SYSTEM_PROMPT,
@@ -35,6 +36,7 @@ from agent.prompt_templates.interpretation.rendering import (
     _flatten_entry_for_prompt,
 )
 from agent.schemas.cache_entry import CacheEntry
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.health_feedback import merge_fingerprint_history
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.interpretation import (
@@ -605,7 +607,7 @@ class ResultInterpretationAgent:
                 # docs/design/enable_global_task_config.md § Commit T4.
                 llm_response = self.bridge.generate(
                     _build_per_model_system_prompt(inp),
-                    per_model_prompt,
+                    append_constraint_disclosure(per_model_prompt, inp.constraint_context),
                     label="interpretation.per_model",
                 )
 
@@ -866,7 +868,7 @@ class ResultInterpretationAgent:
                 # substituted at call time from inp.task_description.
                 synthesis_response = self.bridge.generate(
                     _build_synthesis_system_prompt(inp),
-                    synthesis_prompt,
+                    append_constraint_disclosure(synthesis_prompt, inp.constraint_context),
                     label="interpretation.synthesis",
                 )
                 llm_findings = synthesis_response.get("key_findings", [])
@@ -980,7 +982,9 @@ class ResultInterpretationAgent:
             # Semantic dedup: check newly promoted entries against existing canonicals
             if promoted_names:
                 print(f"  Dedup: checking {len(promoted_names)} newly promoted entries...")
-                runtime_vocab, merge_changes = self._dedup_promoted(promoted_names, runtime_vocab)
+                runtime_vocab, merge_changes = self._dedup_promoted(
+                    promoted_names, runtime_vocab, inp.constraint_context
+                )
                 vocab_changes.extend(merge_changes)
 
             print(
@@ -1297,6 +1301,7 @@ class ResultInterpretationAgent:
         self,
         promoted_names: list[str],
         vocab: list["VocabEntry"],
+        constraint_context: ConstraintContext | None = None,
     ) -> tuple[list["VocabEntry"], list[str]]:
         """
         Semantic deduplication of newly promoted canonical entries (C.6).
@@ -1346,7 +1351,7 @@ class ResultInterpretationAgent:
             prompt = _build_dedup_prompt(entry, existing)
             response = self.bridge.generate(
                 DEDUP_SYSTEM_PROMPT,
-                prompt,
+                append_constraint_disclosure(prompt, constraint_context),
                 label="interpretation.dedup",
             )
 

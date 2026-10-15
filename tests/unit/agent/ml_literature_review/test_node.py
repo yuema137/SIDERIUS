@@ -2192,3 +2192,33 @@ class TestInitialVerbosity:
 
         assert len(out.retrieved_papers) == 1
         assert out.retrieved_papers[0].source.verbosity == 0
+
+
+def test_constraints_reach_search_and_synthesis_without_rewriting_source_facts(
+    tmp_path, monkeypatch
+):
+    from tests.unit.agent.test_constraint_disclosure import locked_context
+
+    bridge = FakeBridge(
+        responses={
+            "lit_review.paper_extract": dict(_VALID_EXTRACT),
+            "lit_review.search_decision": {"action": "done", "reasoning": "Enough sources."},
+            "lit_review.synthesis": {"findings": []},
+        }
+    )
+    monkeypatch.setattr(node_mod, "run_skill", FakeSkill(resolve=lambda _: _resolve_ok()))
+    inp = _input(tmp_path, dynamic=DynamicSearchConfig(enabled=True, max_rounds=1))
+    inp.constraint_context = locked_context()
+    MLLiteratureReviewAgent(
+        bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+    ).run(inp)
+    prompts = {label: user for label, _, user in bridge.prompts}
+    assert set(prompts) == {
+        "lit_review.paper_extract",
+        "lit_review.search_decision",
+        "lit_review.synthesis",
+    }
+    assert "CURRENT RUN EXECUTION CONSTRAINTS" not in prompts["lit_review.paper_extract"]
+    for label in ("lit_review.search_decision", "lit_review.synthesis"):
+        assert '"train_config.lr"' in prompts[label]
+        assert "Preserve source-paper facts" in prompts[label]

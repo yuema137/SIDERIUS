@@ -285,6 +285,7 @@ class DataAnalysisAgent:
         try:
             selection = generate_validated(
                 bridge,
+                constraint_context=inp.constraint_context,
                 store=store,
                 model_type=_SkillSelection,
                 system=selection_system,
@@ -660,6 +661,7 @@ class DataAnalysisAgent:
         )
         decision = generate_validated(
             bridge,
+            constraint_context=inp.constraint_context,
             store=store,
             model_type=_GeneratedSkillPromotionDecision,
             system=system,

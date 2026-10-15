@@ -1602,3 +1602,23 @@ def test_plan_recovery_does_not_reclassify_nonplanning_failures(tmp_path, failur
     assert caught.value is failure
     assert bridge.calls == ["data_analysis.skill_selection", "data_analysis.plan"]
     assert not capability.requested_scopes
+
+
+def test_constraint_context_reaches_analysis_stages_and_schema_repair(tmp_path):
+    from tests.unit.agent.test_constraint_disclosure import locked_context
+
+    inp = _input(tmp_path).model_copy(update={"constraint_context": locked_context()})
+    bridge = _RepairingBridge(analysis_input=inp)
+    DataAnalysisAgent(
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **_: bridge,
+        provider="test",
+        model_id="fake",
+    ).run(inp)
+    assert {label for label, _ in bridge.calls} >= {
+        "data_analysis.skill_selection",
+        "data_analysis.skill_selection.repair",
+        "data_analysis.plan",
+    }
+    for _, user in bridge.calls:
+        assert '"train_config.lr"' in user

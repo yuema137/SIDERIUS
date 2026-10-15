@@ -83,3 +83,27 @@ def test_production_main_uses_the_same_parser_and_normalizer(monkeypatch, tmp_pa
     with pytest.raises(ReachedNormalization):
         run_one_iteration.main()
     assert not (tmp_path / "runs").exists()
+
+
+@pytest.mark.parametrize(
+    "flags,expected", [([], True), (["--no-disclose_execution_constraints"], False)]
+)
+def test_disclosure_cli_selects_explicit_transport(flags, expected, tmp_path):
+    args = standard_cli.normalize_args(
+        standard_cli.build_parser().parse_args(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--run_name",
+                "constraints",
+                "--start_iteration",
+                "1",
+                "--task_composition",
+                "task.yaml",
+                "--data_dir",
+                "data",
+                *flags,
+            ]
+        )
+    )
+    assert args.disclose_execution_constraints is expected

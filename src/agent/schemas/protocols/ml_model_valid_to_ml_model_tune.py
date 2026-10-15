@@ -156,6 +156,7 @@ def local_validated_model(
     max_retries: int | None = None,
     plan_overrides: dict[str, Any] | None = None,
     workflow_parameter_rules: ParameterRules | None = None,
+    disclose_execution_constraints: bool | None = None,
     # --- Time-budget gate (evaluate_time_skill, Phase I two-budget split) ---
     trial_time_budget_minutes: float | None = None,
     formal_time_budget_minutes: float | None = None,
@@ -345,6 +346,7 @@ def local_validated_model(
         # than the tuner rediscovering it from the ambient environment.
         task_composition_ref=task_composition_ref,
         workflow_parameter_rules=workflow_parameter_rules,
+        disclose_execution_constraints=disclose_execution_constraints,
         # DS6b — None normalizes to the full scope here (not in the schema)
         # so the input always carries an explicit DataScope object.
         data_scope=data_scope if data_scope is not None else DataScope.default(),

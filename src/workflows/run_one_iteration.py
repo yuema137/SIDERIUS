@@ -1061,6 +1061,7 @@ def compute_expected_invariants(
             validation_max_portion=args.validation_max_portion,
             validation_max_samples=args.validation_max_samples,
             formal_training_scope_source=args.formal_training_scope_source,
+            disclose_execution_constraints=args.disclose_execution_constraints,
             workflow_parameter_rules=(
                 None
                 if args.workflow_parameter_rules is None

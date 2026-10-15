@@ -594,6 +594,7 @@ def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
 
     return LockLaunchIdentity(
         gpu_execution_policy=agent_input.gpu_execution_policy,
+        disclose_execution_constraints=agent_input.disclose_execution_constraints,
         planner_strategy_identity=resolve_planner_strategy(
             agent_input.planner_strategy, expected=agent_input.expected_planner_strategy
         ).identity,

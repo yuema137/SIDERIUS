@@ -993,3 +993,22 @@ def test_provider_only_mapping_resolves_matching_model(
         validator_output, proposal_output, storage, llm_provider=provider
     )
     assert result.llm_model_id == expected
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_disclosure_selection_reaches_tuner_lock(
+    validator_output, proposal_output, storage, enabled
+):
+    from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+        _lock_launch_identity,
+    )
+
+    result = local_validated_model(
+        validator_output,
+        proposal_output,
+        storage,
+        planner_strategy="native-timing-v1",
+        disclose_execution_constraints=enabled,
+    )
+    assert result.disclose_execution_constraints is enabled
+    assert _lock_launch_identity(result).disclose_execution_constraints is enabled

@@ -23,6 +23,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.data_analysis.access import AnalysisAccessPolicy
 from agent.schemas.data_analysis.context import AnalysisBrief
 from agent.schemas.data_analysis.resources import AnalysisResourceEnvelope
@@ -627,6 +628,10 @@ class InterpretationInput(BaseModel):
     Constraint: at least one model type must be reachable — either derived from
     summaries or listed explicitly in model_types.
     """
+
+    constraint_context: ConstraintContext | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     summaries: list[ModelRunSummary] = Field(
         default_factory=list,

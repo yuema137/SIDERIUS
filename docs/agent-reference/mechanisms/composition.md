@@ -141,3 +141,10 @@ All composition symbols below belong to `src/workflows/task_composition.py`.
 - [Composition reference](../../reference/task-composition.md) — the section table
 - [Plugins](plugins.md) — loading and identity
 - [Metrics](metrics.md), [Health gates](health-gates.md), [Data path and scope](data-path-and-scope.md)
+
+## Advisory execution constraints
+
+The workflow projects existing authorities into optional typed agent context;
+this does not resolve or enforce them again. The
+[execution-constraint disclosure contract](constraint-disclosure.md) specifies
+covered nodes, missing-context semantics, configuration and historical identity.

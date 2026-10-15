@@ -47,6 +47,7 @@ from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
+from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.literature_review import (
     DIMENSION_LABELS,
     render_data_analysis_context,
@@ -516,7 +517,9 @@ class MLLiteratureReviewAgent:
             # bridge). Compression + synthesis stay on self.bridge.
             try:
                 decision = self.search_bridge.generate(
-                    sys_prompt, user_prompt, label="lit_review.search_decision"
+                    sys_prompt,
+                    append_constraint_disclosure(user_prompt, inp.constraint_context),
+                    label="lit_review.search_decision",
                 )
             except Exception as e:  # resilience boundary — a bad call ends the loop, not the run
                 logger.warning(
@@ -792,7 +795,11 @@ class MLLiteratureReviewAgent:
                 task_description=self._task_description,  # Fix 6 (6.5b-5)
                 data_analysis_context=data_analysis_context,
             )
-            raw = self.bridge.generate(sys_prompt, user_prompt, label="lit_review.synthesis")
+            raw = self.bridge.generate(
+                sys_prompt,
+                append_constraint_disclosure(user_prompt, inp.constraint_context),
+                label="lit_review.synthesis",
+            )
         except Exception as e:  # resilience boundary
             logger.warning("synthesis call failed: %s", e)
             return []

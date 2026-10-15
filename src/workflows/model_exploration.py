@@ -85,6 +85,7 @@ from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
 from agent.prompt_templates.proposal.task_blocks import load_proposal_task_blocks
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.data_analysis.generated_skill import GeneratedExperimentSkillRegistryRef
 from agent.schemas.external_agents import ExternalAgentOutput
 from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
@@ -157,6 +158,7 @@ from nodes.result_interpretation_agent import (
     reconcile_metric_spec,
     tuning_output_to_model_run_summary,
 )
+from workflows.constraint_disclosure import workflow_constraint_context
 from workflows.literature_config import (
     lit_review_config_sha256 as lit_review_config_sha256,
 )
@@ -769,6 +771,7 @@ def _build_lit_review_input(
     interp_output: InterpretationOutput,
     *,
     analysis_output=None,
+    constraint_context: ConstraintContext | None = None,
     llm_kwargs: dict,
     storage: StorageConfig,
     run_name: str,
@@ -846,6 +849,7 @@ def _build_lit_review_input(
     }
     if analysis_output is not None:
         payload["data_analysis_evidence"] = project_analysis_for_literature(analysis_output.report)
+    payload["constraint_context"] = constraint_context
     return LiteratureReviewInput.model_validate(payload)
 
 
@@ -1823,6 +1827,7 @@ def _run_composed_data_analysis(
     bridge_factory,
     historical_model_inference_capability: "HistoricalModelInferenceCapability | None" = None,
     historical_sources: "tuple[HistoricalTuningSource, ...]" = (),
+    constraint_context: ConstraintContext | None = None,
     task_composition_fingerprint: str | None = None,
     chain_workspace: str | None = None,
     literature_output=None,
@@ -1841,6 +1846,7 @@ def _run_composed_data_analysis(
 
     output = run_optional_data_analysis(
         interpretation,
+        constraint_context=constraint_context,
         binding=binding,
         iteration=iteration,
         run_name=run_name,
@@ -1937,6 +1943,7 @@ def _workflow_lock_identity(launch, llm_config: WorkflowLLMConfig) -> LockLaunch
         validation_max_portion=launch.validation_max_portion,
         validation_max_samples=launch.validation_max_samples,
         formal_training_scope_source=launch.formal_training_scope_source,
+        disclose_execution_constraints=launch.disclose_execution_constraints,
         workflow_parameter_rules=(
             None
             if launch.workflow_parameter_rules is None
@@ -2697,7 +2704,9 @@ def run_workflow(
             [*tuning_outputs, *state.iteration_results],
             bound=_declared_metric_spec(bindings.task_composition),
         )
+        current_constraints = workflow_constraint_context(launch, bindings.task_composition)
         interp_input = InterpretationInput(
+            constraint_context=current_constraints,
             summaries=new_summaries,
             model_knowledge_cache=state.model_knowledge_cache,
             metric_spec=run_metric_spec,
@@ -2798,9 +2807,11 @@ def run_workflow(
             _iteration=iteration,
             _storage=interp_storage,
             _generated_skill_registry=generated_skill_registry_ref,
+            _constraint_context=current_constraints,
         ):
             return _run_composed_data_analysis(
                 _interpretation,
+                constraint_context=_constraint_context,
                 binding=_analysis_binding,
                 iteration=_iteration,
                 run_name=bindings.run_name,
@@ -2823,6 +2834,7 @@ def run_workflow(
             _interpretation=interpretation,
             _iteration=iteration,
             _iter_dir=iter_dir,
+            _constraint_context=current_constraints,
         ):
             if not should_run_literature_review(_interpretation, enabled=launch.lit_review_enabled):
                 return None
@@ -2840,6 +2852,7 @@ def run_workflow(
             lit_input = _build_lit_review_input(
                 lit_review_config,
                 _interpretation,
+                constraint_context=_constraint_context,
                 analysis_output=analysis_output,
                 llm_kwargs=bindings.llm_config.get("lit_review"),
                 storage=lit_storage,
@@ -3348,6 +3361,7 @@ def run_workflow(
             # this protocol already maps.
             task_composition_ref=build_task_composition_ref(bindings.task_composition),
             workflow_parameter_rules=launch.workflow_parameter_rules,
+            disclose_execution_constraints=launch.disclose_execution_constraints,
             data_scope=bindings.data_scope,
             health_gate_enabled=bindings.health_gate_enabled,
             health_gate_files=(

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pydantic import Field, ValidationError
 
+from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.schemas.analysis_brief_generation import AnalysisBriefGenerationReceipt
 from agent.schemas.data_analysis.common import (
     FrozenModel,
@@ -198,6 +199,7 @@ def generate_or_resume_analysis_brief(
     if not inp.analysis_brief_requested:
         raise ValueError("brief generation may only run when explicitly requested")
     system, user = _prompt(inp, interpretation)
+    user = append_constraint_disclosure(user, inp.constraint_context)
     prompt_digest = canonical_sha256({"system": system, "user": user})
     schema_digest = canonical_sha256(_AnalysisBriefDraft.model_json_schema())
     advice_digest = canonical_sha256(

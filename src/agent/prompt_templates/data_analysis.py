@@ -60,6 +60,8 @@ def _planning_input(analysis_input: DataAnalysisInput) -> dict:
     payload.pop("declared_scope", None)
     # Recovery controls orchestration, not the scientific decision requested.
     payload.pop("recovery_policy", None)
+    # Shared disclosure is appended at the LLM boundary, including repairs.
+    payload.pop("constraint_context", None)
     payload["available_assets"] = [
         item.model_dump(mode="json") for item in analysis_input.planning_assets()
     ]

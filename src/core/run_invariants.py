@@ -325,6 +325,9 @@ class RunInvariants(BaseModel):
     # the scientific treatment. Store their canonical validated JSON shape;
     # None is the unconstrained legacy state.
     workflow_parameter_rules: dict[str, Any] | None = None
+    disclose_execution_constraints: bool | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Wall-time admission authority changes which evidence may refuse an
     # attempt. ``None`` denotes a legacy lock so a pre-feature workspace
     # cannot silently resume under the new measured-by-default behavior.
@@ -444,6 +447,7 @@ class RunInvariants(BaseModel):
         "validation_limits_recorded",
         "formal_training_scope_source",
         "workflow_parameter_rules",
+        "disclose_execution_constraints",
         "trial_time_admission_source",
         "formal_time_admission_source",
         "runtime_watchdog_deadline_policy",
@@ -931,6 +935,9 @@ class LockLaunchIdentity(BaseModel):
     validation_max_samples: int | None = Field(default=None, ge=1)
     formal_training_scope_source: Literal["operator", "agent"] = "operator"
     workflow_parameter_rules: dict[str, Any] | None = None
+    disclose_execution_constraints: bool | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     trial_time_admission_source: Literal["forecast", "measured"] | None = None
     formal_time_admission_source: Literal["forecast", "measured"] | None = None
     runtime_verifier_identity: RuntimeVerifierIdentity | None = Field(
@@ -1136,6 +1143,7 @@ def build_run_invariants(
             validation_limits_recorded=True,
             formal_training_scope_source=_launch_identity.formal_training_scope_source,
             workflow_parameter_rules=_launch_identity.workflow_parameter_rules,
+            disclose_execution_constraints=_launch_identity.disclose_execution_constraints,
             trial_time_admission_source=_launch_identity.trial_time_admission_source,
             formal_time_admission_source=_launch_identity.formal_time_admission_source,
             runtime_watchdog_deadline_policy=_launch_identity.runtime_watchdog_deadline_policy,

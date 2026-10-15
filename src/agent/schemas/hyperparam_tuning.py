@@ -3143,6 +3143,9 @@ class HyperparamTuningInput(BaseModel):
             "ambient environment; it is never a second authority for them."
         ),
     )
+    disclose_execution_constraints: bool | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     workflow_parameter_rules: ParameterRules | None = Field(
         default=None,
         description=(

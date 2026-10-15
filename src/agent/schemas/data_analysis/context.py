@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import Field, StrictBool, model_validator
 
+from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.storage import StorageConfig
 from agent.schemas.task_config import ForwardContract
 from execute_tools.evaluation_metric import MetricIdentityKey
@@ -127,6 +128,9 @@ class SkillPackRef(FrozenModel):
 
 
 class DataAnalysisInput(FrozenModel):
+    constraint_context: ConstraintContext | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     schema_version: Literal[1] = 1
     request_id: NonEmptyStr
     task_context: AnalysisTaskContext
