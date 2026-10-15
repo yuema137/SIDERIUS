@@ -1449,7 +1449,9 @@ def run_experiment_streaming(
         validate_target_standardization(
             enabled=True,
             output_type=get_output_type(model_cfg.model_type),
-            target_dtype=lambda: get_target_torch_dtype(loss_cfg),
+            target_dtype=lambda: get_target_torch_dtype(
+                loss_cfg, expected_contract_snapshot=expected_custom_loss_snapshot
+            ),
         )
     budget_execution = (
         TrainingBudgetExecution(

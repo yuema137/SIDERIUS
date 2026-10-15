@@ -320,6 +320,14 @@ def _load_custom_loss(
                     f"Custom loss {loss_name!r} capability contract does not match "
                     "the composed task"
                 )
+        from agent.schemas.custom_loss_target import validate_custom_loss_target_declaration
+        from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY
+
+        snapshot = LOSS_CONTRACT_REGISTRY.get(loss_name)
+        validate_custom_loss_target_declaration(
+            LOSS_TARGET_DTYPE_REGISTRY.get(loss_name, "long" if snapshot is None else None),
+            snapshot,
+        )
         config_cls = LOSS_CONFIG_REGISTRY[loss_name]
         return LOSS_REGISTRY[loss_name](config_cls())
 
@@ -346,7 +354,10 @@ def _load_custom_loss(
 
 
 def get_target_torch_dtype(
-    config: LossConfig, *, resolved_custom_dtype: Literal["long", "float"] | None = None
+    config: LossConfig,
+    *,
+    resolved_custom_dtype: Literal["long", "float"] | None = None,
+    expected_contract_snapshot: CapabilityContractSnapshot | None = None,
 ) -> torch.dtype:
     """Return the ``torch.dtype`` that ``targets`` must be cast to before
     invoking ``criterion(output, targets)`` for the given ``LossConfig``.
@@ -376,6 +387,8 @@ def get_target_torch_dtype(
             coordinator use this same dtype authority without importing candidate
             code. Refused for built-ins or when it conflicts with a declaration
             already loaded in this process. Omission retains existing behavior.
+        expected_contract_snapshot: Active task identity, checked before fresh plugin
+            import and against registered plugins when target routing precedes criterion loading.
 
     Returns:
         ``torch.long`` for classifier-style losses; ``torch.float32`` for
@@ -392,17 +405,39 @@ def get_target_torch_dtype(
     # config.loss_type == "custom" — read from the plugin's declaration.
     # Lazy import for the same reason ``_load_custom_loss`` uses it: keep
     # ``ml_models`` loadable without ``agent_generated/`` on the path.
-    from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY, get_loss_target_dtype
+    from ml_models.loss_plugin_loader import LOSS_TARGET_DTYPE_REGISTRY, load_loss_plugin
 
     name = config.loss_name or ""
+    if (
+        (name in LOSS_REGISTRY or name in LOSS_TARGET_DTYPE_REGISTRY)
+        and expected_contract_snapshot is not None
+        and LOSS_CONTRACT_REGISTRY.get(name) != expected_contract_snapshot
+    ):
+        raise ValueError("Custom loss capability contract does not match the composed task")
     if resolved_custom_dtype is not None:
         existing = LOSS_TARGET_DTYPE_REGISTRY.get(name)
         if existing is not None and existing != resolved_custom_dtype:
             raise ValueError("resolved custom target dtype conflicts with the loaded declaration")
         declared = resolved_custom_dtype
     else:
-        declared = get_loss_target_dtype(name)
-    return torch.long if declared == "long" else torch.float32
+        declared = LOSS_TARGET_DTYPE_REGISTRY.get(name)
+        if declared is None and name not in LOSS_REGISTRY:
+            plugin = load_loss_plugin(name, expected_contract_snapshot)
+            if plugin is None:
+                raise ValueError(
+                    f"Cannot resolve target dtype for unavailable custom loss {name!r}"
+                )
+            from agent.schemas.custom_loss_target import validate_custom_loss_target_declaration
+
+            return validate_custom_loss_target_declaration(
+                plugin["target_dtype"], plugin["contract_snapshot"]
+            ).torch_dtype
+        if declared is None and name not in LOSS_CONTRACT_REGISTRY:
+            declared = "long"
+    from agent.schemas.custom_loss_target import validate_custom_loss_target_declaration
+
+    snapshot = LOSS_CONTRACT_REGISTRY.get(name) or expected_contract_snapshot
+    return validate_custom_loss_target_declaration(declared, snapshot).torch_dtype
 
 
 def get_criterion(

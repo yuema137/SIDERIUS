@@ -400,20 +400,13 @@ class TestI13TargetDtypeDeclaration:
         assert result is not None
         assert result["target_dtype"] == "long"
 
-    def test_invalid_declaration_warns_and_defaults(
-        self, loss_dir: Path, capsys: pytest.CaptureFixture
-    ):
-        """Plugin with an invalid value (e.g. typo'd ``'int64'`` or
-        ``'i64'``) — loader warns to stdout and clamps to ``'long'``."""
+    def test_invalid_declaration_is_refused(self, loss_dir: Path):
+        """An explicit typo must not silently choose integer target semantics."""
         from ml_models.loss_plugin_loader import load_loss_plugin_from_path
 
         plugin_path = _write_plugin(loss_dir, "bad_decl_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "int64"')
-        result = load_loss_plugin_from_path(str(plugin_path))
-        assert result is not None
-        assert result["target_dtype"] == "long"
-        out = capsys.readouterr().out
-        assert "PLUGIN_LOSS_TARGET_DTYPE" in out
-        assert "defaulting to 'long'" in out
+        with pytest.raises(ValueError, match="declaration"):
+            load_loss_plugin_from_path(str(plugin_path))
 
     def test_get_loss_target_dtype_helper_default(self):
         """``get_loss_target_dtype(unknown_name)`` returns ``'long'`` —

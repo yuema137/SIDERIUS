@@ -67,7 +67,9 @@ def prepare_task_training_components(
         check_training_preparation_deadline(deadline_at)
 
     enabled = train_cfg.target_standardization != "none"
-    target_dtype = get_target_torch_dtype(loss_cfg)
+    target_dtype = get_target_torch_dtype(
+        loss_cfg, expected_contract_snapshot=spec.expected_custom_loss_snapshot
+    )
     if enabled:
         validate_target_standardization(
             enabled=True,

@@ -144,6 +144,16 @@ Explicit generated-code directories remain supported for orchestrators. The refe
   do not become plugin parameters. Changing plugin defaults requires a distinct
   implementation with the appropriate plugin identity; arbitrary per-attempt
   custom-loss parameter tuning is not supported.
+- **Custom-loss target routing follows the task contract.** The template derives
+  `PLUGIN_LOSS_TARGET_DTYPE` from the canonical supervision dtype through
+  `agent.schemas.custom_loss_target`: int64 maps to `long`, float32 to `float`.
+  Unsupported canonical representations are refused before paid generation.
+  Generated JSON cannot override this metadata. Loss prompts use task prediction
+  and supervision shapes, rather than imposing classifier-shaped tensors.
+  Admission and numerical probing use the same validated target representation
+  as native training. Contract-aware plugins with missing, malformed or
+  contradictory metadata are refused on load/reuse; only genuinely uncontracted
+  legacy plugins retain the missing-declaration integer default.
 - **Custom-loss validation is task-compatible and data-free.** The implementor
   receives the same filtered inventory as the proposer/tuner. When a task's
   semantic target cannot be synthesized generically, the bound task may expose

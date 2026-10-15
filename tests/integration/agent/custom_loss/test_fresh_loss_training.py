@@ -2,6 +2,8 @@
 
 Fake bridges replace only LLM responses. The numerical offset detects silent
 criterion fallback; no predeclared task loss can satisfy this witness.
+Criterion-side assertions catch #731: generated metadata must not truncate
+fractional regression supervision before either training or validation.
 This joins production boundaries explicitly; it does not run the complete
 model-exploration orchestrator or test live LLM scientific choices.
 """
@@ -151,7 +153,13 @@ def _implementor():
             "config_fields": {},
             "config_validators_code": "",
             "init_body": "        pass",
-            "forward_body": "        valid = targets[:, 1] > 0.5\n        return ((inputs[:, 0] - targets[:, 0])[valid] ** 2).mean() + 123.0",
+            "forward_body": (
+                "        assert targets.dtype == torch.float32, 'Regression target dtype changed'\n"
+                "        assert torch.any(targets[:, 0] != targets[:, 0].trunc()), "
+                "'Fractional regression targets were lost'\n"
+                "        valid = targets[:, 1] > 0.5\n"
+                "        return ((inputs[:, 0] - targets[:, 0])[valid] ** 2).mean() + 123.0"
+            ),
             "target_dtype": "float",
             "reduction": "mean",
         },

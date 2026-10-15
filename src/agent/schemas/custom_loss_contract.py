@@ -484,6 +484,13 @@ def resolve_custom_loss_applicability(
     if declaration is None:
         return _refused("custom-loss applicability declaration is missing")
 
+    if target_cast_dtype and _normalize_dtype(target_cast_dtype) not in {
+        _normalize_dtype(name) for name in supervision_target.dtype.admissible
+    }:
+        return _refused(
+            f"target cast dtype {target_cast_dtype!r} is not admitted by supervision_target"
+        )
+
     if isinstance(declaration, ExplicitPairApplicability):
         mismatch = _contract_matches(prediction, declaration.prediction, side="prediction")
         if mismatch:
