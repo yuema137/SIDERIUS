@@ -73,7 +73,9 @@ In your reasoning, cover all of the following:
 2. Does the loss require any per-class weighting, auxiliary tensor, or spectral
    transform? If so, name each one and how it is computed from ``inputs`` / ``targets``.
 3. What Pydantic config fields are needed? For each: name, type, default, valid range.
-   Keep them minimal — the agent will tune these later.
+   Keep them minimal and choose executable defaults. Native training constructs this
+   plugin configuration with its defaults; per-attempt overrides of custom-loss
+   parameters are not supported. A different setting requires a different plugin implementation.
 4. What additional imports beyond torch, nn, F, BaseModel, Field, model_validator are needed?
 5. Trace the forward pass shape-by-shape from ``[B, num_classes, T]`` to scalar.
 

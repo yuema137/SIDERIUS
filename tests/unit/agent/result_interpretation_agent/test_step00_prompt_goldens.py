@@ -28,6 +28,7 @@ from agent.prompt_templates.interpretation.rendering import (
 from agent.schemas.cache_entry import CacheEntry, ConsolidatedFinding
 from agent.schemas.interpretation import InterpretationInput, InterpretationTaskBlocks, VocabEntry
 from nodes.result_interpretation_agent import ResultInterpretationAgent
+from tests.helpers.constraint_disclosure import without_incomplete_disclosure
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
 
@@ -122,7 +123,11 @@ class TestPB7Dedup:
         assert (method, label) == ("_chat_json", "interpretation.dedup")
         assert system == DEDUP_SYSTEM_PROMPT
         assert_golden(system, GOLDENS / "pb7_dedup_system.txt", surface="PB-7 dedup system prompt")
-        assert_golden(user, GOLDENS / "pb7_dedup_user.txt", surface="PB-7 dedup user prompt")
+        assert_golden(
+            without_incomplete_disclosure(user),
+            GOLDENS / "pb7_dedup_user.txt",
+            surface="PB-7 dedup user prompt",
+        )
 
 
 class TestPB8CacheConsolidator:

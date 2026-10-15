@@ -32,6 +32,7 @@ from agent.schemas.literature_review import (
     SynthesisConfig,
 )
 from nodes.ml_literature_review.ml_literature_review import MLLiteratureReviewAgent
+from tests.helpers.constraint_disclosure import without_incomplete_disclosure
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
 
@@ -123,7 +124,7 @@ class TestPB9SearchDecision:
             system, GOLDENS / "pb9_search_system.txt", surface="PB-9 search-decision system"
         )
         assert_golden(
-            user,
+            without_incomplete_disclosure(user),
             GOLDENS / "pb9_search_user_first.txt",
             surface="PB-9 search-decision user (first round)",
         )
@@ -176,7 +177,11 @@ class TestPB9Synthesis:
             GOLDENS / "pb9_synthesis_system_v1_moderate.txt",
             surface="PB-9 synthesis system (v1/moderate)",
         )
-        assert_golden(user, GOLDENS / "pb9_synthesis_user.txt", surface="PB-9 synthesis user")
+        assert_golden(
+            without_incomplete_disclosure(user),
+            GOLDENS / "pb9_synthesis_user.txt",
+            surface="PB-9 synthesis user",
+        )
 
     def test_verbosity0_system(self, tmp_path):
         a = make_agent(tmp_path)

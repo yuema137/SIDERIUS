@@ -19,6 +19,7 @@ from agent.schemas.validator import ValidatorInput
 from nodes.ml_code_validator_agent.ml_code_validator_agent import (
     MLCodeValidatorAgent,
 )
+from tests.helpers.constraint_disclosure import without_incomplete_disclosure
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
 
@@ -72,7 +73,7 @@ class TestPB6CodeReview:
             system, GOLDENS / "pb6_code_review_system.txt", surface="PB-6 code_review system"
         )
         assert_golden(
-            user,
+            without_incomplete_disclosure(user),
             GOLDENS / "pb6_code_review_user_clean.txt",
             surface="PB-6 code_review user (clean)",
         )
@@ -94,7 +95,7 @@ class TestPB6CodeReview:
             system, GOLDENS / "pb6_code_review_system.txt", surface="PB-6 code_review system"
         )
         assert_golden(
-            user,
+            without_incomplete_disclosure(user),
             GOLDENS / "pb6_code_review_user_errors.txt",
             surface="PB-6 code_review user (errors)",
         )
