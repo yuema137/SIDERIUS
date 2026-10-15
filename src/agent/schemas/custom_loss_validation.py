@@ -74,9 +74,51 @@ def _prepare_validation_pair(
     try:
         prediction = cast(Any, prediction).detach().clone().requires_grad_(True)
         target = cast(Any, target).detach().clone()
-    except AttributeError as exc:
+    except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
         return None, f"Loss probe tensors could not be prepared: {exc}"
     return (prediction, target, description), None
+
+
+class CustomLossProbeSetupError(ValueError):
+    """Task probe preparation failed; generated loss source cannot repair it."""
+
+
+def prepare_custom_loss_validation(
+    model_io: ModelIOContract | None = None,
+    supervision_target: TensorContract | None = None,
+    applicability: CustomLossApplicability | None = None,
+    pair_provider: SyntheticLossPairProvider | None = None,
+) -> tuple[Any, Any, str]:
+    """Prepare validated probe inputs or raise a task/setup failure."""
+    error = _resolve_declared_applicability(model_io, supervision_target, applicability)
+    if error is not None:
+        raise CustomLossProbeSetupError(error)
+    prepared, error = _prepare_validation_pair(
+        model_io, supervision_target, applicability, pair_provider
+    )
+    if error is not None:
+        raise CustomLossProbeSetupError(error)
+    assert prepared is not None
+    return prepared
+
+
+def preflight_custom_loss_validation(
+    model_io: ModelIOContract | None = None,
+    supervision_target: TensorContract | None = None,
+    applicability: CustomLossApplicability | None = None,
+    pair_provider: SyntheticLossPairProvider | None = None,
+) -> None:
+    """Check setup before paid calls without advancing the CPU torch RNG.
+
+    Providers must be deterministic and data-free. This does not roll back
+    arbitrary provider side effects or Python/NumPy random state. No CUDA
+    generator is queried or initialized. Actual attempts retain their original
+    probe construction and RNG consumption, including source repairs.
+    """
+    import torch
+
+    with torch.random.fork_rng(devices=[]):
+        prepare_custom_loss_validation(model_io, supervision_target, applicability, pair_provider)
 
 
 def _load_loss_factory(
@@ -178,7 +220,7 @@ def _validate_loss_result(loss: Any, prediction: Any, *, loss_name: str) -> str 
     return None
 
 
-def validate_custom_loss_plugin(
+def validate_custom_loss_plugin_or_raise_setup(
     plugin_src: str,
     loss_name: str,
     model_io: ModelIOContract | None = None,
@@ -199,23 +241,9 @@ def validate_custom_loss_plugin(
     dependencies through the native plugin loader instead of flattening source.
     """
 
-    applicability_error = _resolve_declared_applicability(
-        model_io,
-        supervision_target,
-        applicability,
+    prediction, target, description = prepare_custom_loss_validation(
+        model_io, supervision_target, applicability, pair_provider
     )
-    if applicability_error is not None:
-        return applicability_error
-    prepared, pair_error = _prepare_validation_pair(
-        model_io,
-        supervision_target,
-        applicability,
-        pair_provider,
-    )
-    if pair_error is not None:
-        return pair_error
-    assert prepared is not None
-    prediction, target, description = prepared
 
     with tempfile.TemporaryDirectory(prefix=f"siderius_loss_dummy_{loss_name}_") as tmp_dir:
         module_path = os.path.join(tmp_dir, "loss_plugin.py")
@@ -238,3 +266,29 @@ def validate_custom_loss_plugin(
                 f"{type(exc).__name__}: {exc}. The forward must accept {description}."
             )
         return _validate_loss_result(loss, prediction, loss_name=loss_name)
+
+
+def validate_custom_loss_plugin(
+    plugin_src: str,
+    loss_name: str,
+    model_io: ModelIOContract | None = None,
+    supervision_target: TensorContract | None = None,
+    applicability: CustomLossApplicability | None = None,
+    pair_provider: SyntheticLossPairProvider | None = None,
+    loss_parameters: dict[str, Any] | None = None,
+    plugin_path: str | None = None,
+) -> str | None:
+    """Compatibility API: return setup or generated-code errors as strings."""
+    try:
+        return validate_custom_loss_plugin_or_raise_setup(
+            plugin_src,
+            loss_name,
+            model_io,
+            supervision_target,
+            applicability,
+            pair_provider,
+            loss_parameters,
+            plugin_path,
+        )
+    except CustomLossProbeSetupError as exc:
+        return str(exc)

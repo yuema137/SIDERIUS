@@ -140,9 +140,25 @@ Explicit generated-code directories remain supported for orchestrators. The refe
   semantic target cannot be synthesized generically, the bound task may expose
   `custom_loss_validation_pair()` to return a tiny deterministic prediction /
   target pair. The framework validates tensor count, size, declared shape and
-  dtype before generated-plugin import, then applies the existing finite,
+  dtype before paid loss reasoning/code and before generated-plugin import,
+  then applies the existing finite,
   scalar, backward and finite-gradient checks. The provider never receives a
-  dataset root or scope and is not a preprocessing hook.
+  dataset root or scope and is not a preprocessing hook. New generation runs a
+  setup preflight after the compatible registry-reuse short circuit. A
+  `CustomLossProbeSetupError` stops generation and the enclosing workflow;
+  the single-iteration CLI writes its existing chain-halt marker. It is not
+  generated-source repair feedback. Source/forward/gradient failures still use
+  the existing repair budget.
+
+  Preflight preserves the CPU PyTorch RNG and does not query or initialize CUDA.
+  Each actual validation attempt still constructs its own pair, preserving the
+  previous probe RNG sequence and repairs. Providers therefore receive one
+  additional preflight invocation; they must remain deterministic and data-free.
+  Arbitrary provider side effects and Python/NumPy random state are not rolled
+  back. A provider that fails on a later invocation also raises the setup error
+  without spending a source-repair call. The standalone
+  `validate_custom_loss_plugin` API continues returning `str | None`;
+  generation uses its typed-setup-error variant.
 
 - **Two-call chain-of-thought.** Call 1 = `bridge.generate_text(IMPLEMENTOR_REASONING_PROMPT, ...)` — free-form reasoning about PyTorch modules, shape handling, config-field choices. Call 2 = `bridge.generate(IMPLEMENTOR_CODE_PROMPT, ...)` — commit to specific code sections as strict JSON. The LLM never writes raw plugin boilerplate — it writes only the marked sections (`init_body`, `forward_body`, `config_fields_code`, `helper_class_defs`, etc.) and `_assemble_plugin` substitutes them into `PLUGIN_TEMPLATE`.
 - **5-check validation pipeline** runs after every commit/repair call (`_validate_code`):

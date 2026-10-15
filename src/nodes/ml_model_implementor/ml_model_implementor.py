@@ -1077,9 +1077,9 @@ def _dummy_tensor_validate_loss(
     pair_provider=None,
 ) -> str | None:
     """Delegate the assembled-loss probe to its typed validation boundary."""
-    from agent.schemas.custom_loss_validation import validate_custom_loss_plugin
+    from agent.schemas.custom_loss_validation import validate_custom_loss_plugin_or_raise_setup
 
-    return validate_custom_loss_plugin(
+    return validate_custom_loss_plugin_or_raise_setup(
         plugin_src,
         loss_name,
         model_io_contract,
@@ -1138,9 +1138,13 @@ def _custom_loss_pair_provider(inp: ImplementorInput):
     from agent.schemas.custom_loss_contract import (
         resolve_custom_loss_validation_pair_provider,
     )
+    from agent.schemas.custom_loss_validation import CustomLossProbeSetupError
     from execute_tools.task_data_path import require_bound_task_data_path
 
-    return resolve_custom_loss_validation_pair_provider(require_bound_task_data_path())
+    try:
+        return resolve_custom_loss_validation_pair_provider(require_bound_task_data_path())
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise CustomLossProbeSetupError(f"Custom loss probe provider setup failed: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1978,6 +1982,16 @@ class MLModelImplementor:
         if refused is not None:
             raise ValueError(f"custom loss {loss_name!r} is unavailable: {refused.reason}")
 
+        from agent.schemas.custom_loss_validation import preflight_custom_loss_validation
+
+        pair_provider = _custom_loss_pair_provider(inp)
+        preflight_custom_loss_validation(
+            inp.forward_contract.model_io,
+            inp.forward_contract.supervision_target,
+            inp.forward_contract.custom_loss_applicability,
+            pair_provider,
+        )
+
         # ---- 2. LLM calls (reasoning + code) ----------------------------
         print(f"🧪 Generating custom loss '{loss_name}' ...")
         reasoning = self.bridge.generate_text(
@@ -2001,7 +2015,6 @@ class MLModelImplementor:
         # ---- 3. Validate → repair loop ----------------------------------
         max_retries = inp.max_retries
         plugin_src = _assemble_loss_plugin(loss_name, spec.description, code, expected_snapshot)
-        pair_provider = _custom_loss_pair_provider(inp)
         error = _dummy_tensor_validate_loss(
             plugin_src,
             loss_name,

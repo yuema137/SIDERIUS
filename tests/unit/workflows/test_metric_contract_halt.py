@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+from agent.schemas.custom_loss_validation import CustomLossProbeSetupError
 from execute_tools.evaluation_metric import MetricIdentityConflictError
 from execute_tools.task_registration_scope import run_registration_scope
 from nodes.result_interpretation_agent.evidence import InterpretationContractError
@@ -21,6 +22,7 @@ from tests.unit.sdsc_submission_scripts.test_run_one_iteration import (
     [
         (InterpretationContractError("declaration conflict"), 3),
         (MetricIdentityConflictError("metric conflict"), 3),
+        (CustomLossProbeSetupError("loss task probe unavailable"), 3),
         (RuntimeError("candidate failed"), 1),
     ],
 )

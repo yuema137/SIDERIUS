@@ -1816,12 +1816,19 @@ def _run_bound_iteration(
             from core.local_code.failure import raise_if_code_package_failure
 
             raise_if_code_package_failure(e)
+        from agent.schemas.custom_loss_validation import CustomLossProbeSetupError
         from agent.schemas.model_probe import ModelProbeSetupError
         from execute_tools.evaluation_metric import MetricIdentityConflictError
         from nodes.result_interpretation_agent import InterpretationContractError
 
         if isinstance(
-            e, (MetricIdentityConflictError, InterpretationContractError, ModelProbeSetupError)
+            e,
+            (
+                MetricIdentityConflictError,
+                InterpretationContractError,
+                ModelProbeSetupError,
+                CustomLossProbeSetupError,
+            ),
         ):
             _halt_contract_failure(args.workspace, args.start_iteration, e)
         sys.exit(1)

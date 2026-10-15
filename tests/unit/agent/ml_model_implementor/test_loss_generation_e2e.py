@@ -265,7 +265,9 @@ class TestRegistryHitShortCircuit:
 
         class TaskImplementation:
             def custom_loss_validation_pair(self):
-                return "task-owned-prediction", "task-owned-target"
+                import torch
+
+                return torch.ones(2, 1), torch.zeros(2, 1)
 
         task = TaskImplementation()
         observed = {}
@@ -283,10 +285,11 @@ class TestRegistryHitShortCircuit:
             provenance = agent_with_mocks._generate_loss(inp_loss_only)
 
         assert provenance.action == "generated"
-        assert observed["provider"]() == (
-            "task-owned-prediction",
-            "task-owned-target",
-        )
+        import torch
+
+        prediction, target = observed["provider"]()
+        assert torch.equal(prediction, torch.ones(2, 1))
+        assert torch.equal(target, torch.zeros(2, 1))
 
     def test_composed_branch_b_refuses_mismatch_then_reuses_exact_contract(
         self, agent_with_mocks, inp_loss_only, tmp_path
@@ -703,3 +706,162 @@ class TestRunIntegration:
         assert out.loss_provenance is not None
         assert out.loss_provenance.action == "reused"
         assert out.loss_provenance.source_iteration == "iter_003"
+
+
+@pytest.mark.parametrize("late_failure", [False, True])
+def test_loss_setup_failure_stops_paid_repairs(
+    monkeypatch, agent_with_mocks, inp_loss_only, late_failure
+):
+    import importlib
+
+    import torch
+
+    from agent.schemas.custom_loss_validation import CustomLossProbeSetupError
+    from workflows.model_exploration import _proposal_attempt_failure
+
+    module = importlib.import_module("nodes.ml_model_implementor.ml_model_implementor")
+    calls = []
+
+    def provider():
+        calls.append(1)
+        if not late_failure or len(calls) > 1:
+            raise ValueError("broken task fixture")
+        return torch.ones(2, 256, 4), torch.zeros(2, 4, dtype=torch.long)
+
+    monkeypatch.setattr(module, "_custom_loss_pair_provider", lambda inp: provider)
+    with pytest.raises(CustomLossProbeSetupError, match="broken task fixture") as caught:
+        agent_with_mocks._generate_loss(inp_loss_only)
+    assert agent_with_mocks.bridge.generate_text.call_count == int(late_failure)
+    assert agent_with_mocks.bridge.generate.call_count == int(late_failure)
+    assert not Path(inp_loss_only.loss_dir).exists()
+    with pytest.raises(CustomLossProbeSetupError):
+        _proposal_attempt_failure(caught.value)
+
+
+@pytest.mark.parametrize("repair", [False, True])
+def test_preflight_preserves_legacy_prompt_calls_and_rng(
+    monkeypatch, agent_with_mocks, inp_loss_only, repair
+):
+    import torch
+
+    from agent.schemas import custom_loss_validation
+
+    actual_preflight = custom_loss_validation.preflight_custom_loss_validation
+    traces = []
+    for enabled in (False, True):
+        bridge = agent_with_mocks.bridge
+        bridge.reset_mock()
+        bridge.generate.side_effect = (
+            [BAD_LOSS_CODE_NON_SCALAR, GOOD_LOSS_CODE] if repair else [GOOD_LOSS_CODE]
+        )
+        monkeypatch.setattr(
+            custom_loss_validation,
+            "preflight_custom_loss_validation",
+            actual_preflight if enabled else lambda *args: None,
+        )
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(715)
+            result = agent_with_mocks._generate_loss(inp_loss_only)
+            traces.append(
+                (
+                    list(bridge.mock_calls),
+                    torch.random.get_rng_state().clone(),
+                    Path(result.loss_file_path).read_bytes(),
+                )
+            )
+    assert traces[0][0] == traces[1][0]
+    assert torch.equal(traces[0][1], traces[1][1])
+    assert traces[0][2] == traces[1][2]
+
+
+def test_noncallable_task_provider_is_setup_failure_before_paid_calls(
+    agent_with_mocks, inp_loss_only
+):
+    from types import SimpleNamespace
+
+    from agent.schemas.custom_loss_contract import custom_loss_snapshot_from_forward_contract
+    from agent.schemas.custom_loss_validation import CustomLossProbeSetupError
+    from execute_tools.task_data_path import bind_task_data_path
+
+    _bind_composed_equal_shape(inp_loss_only, objective=None)
+    inp_loss_only.custom_loss_spec = inp_loss_only.custom_loss_spec.model_copy(
+        update={
+            "contract_snapshot": custom_loss_snapshot_from_forward_contract(
+                inp_loss_only.forward_contract
+            )
+        }
+    )
+    with bind_task_data_path(SimpleNamespace(custom_loss_validation_pair="not callable")):
+        with pytest.raises(CustomLossProbeSetupError, match="not callable"):
+            agent_with_mocks._generate_loss(inp_loss_only)
+    agent_with_mocks.bridge.generate.assert_not_called()
+    agent_with_mocks.bridge.generate_text.assert_not_called()
+
+
+@pytest.mark.parametrize("shape", [(1, 8, 8), (2, 5, 7)])
+@pytest.mark.parametrize("provided", [False, True])
+def test_spatial_loss_setup_requires_task_pair_before_paid_calls(
+    agent_with_mocks, inp_loss_only, shape, provided
+):
+    import torch
+
+    from agent.schemas.custom_loss_contract import (
+        ExplicitPairApplicability,
+        custom_loss_snapshot_from_forward_contract,
+    )
+    from agent.schemas.custom_loss_validation import CustomLossProbeSetupError
+    from agent.schemas.model_io_contract import (
+        Dimension,
+        ModelIOContract,
+        TensorAxis,
+        TensorContract,
+    )
+    from execute_tools.task_data_path import bind_task_data_path
+    from ml_models.models_format_sandbox import DtypeAdmissibility
+
+    _bind_composed_equal_shape(inp_loss_only, objective=None)
+    tensor = TensorContract(
+        axes=(
+            TensorAxis(dimension=Dimension(symbolic="B")),
+            *(TensorAxis(dimension=Dimension(fixed=d)) for d in shape),
+        ),
+        dtype=DtypeAdmissibility(admissible=("float32",)),
+    )
+    applicability = ExplicitPairApplicability(prediction=tensor, target=tensor)
+    inp_loss_only.forward_contract = inp_loss_only.forward_contract.model_copy(
+        update={
+            "model_io": ModelIOContract(input=tensor, output=tensor),
+            "supervision_target": tensor,
+            "custom_loss_applicability": applicability,
+        }
+    )
+    inp_loss_only.task_composition_ref = inp_loss_only.task_composition_ref.model_copy(
+        update={"supervision_target": tensor, "custom_loss_applicability": applicability}
+    )
+    inp_loss_only.custom_loss_spec = inp_loss_only.custom_loss_spec.model_copy(
+        update={
+            "contract_snapshot": custom_loss_snapshot_from_forward_contract(
+                inp_loss_only.forward_contract
+            )
+        }
+    )
+
+    class Task:
+        def custom_loss_validation_pair(self):
+            return torch.ones(2, *shape), torch.zeros(2, *shape)
+
+    agent_with_mocks.bridge.generate.return_value = {
+        **GOOD_LOSS_CODE,
+        "forward_body": "return ((inputs - targets) ** 2).mean()",
+    }
+    with bind_task_data_path(Task() if provided else object()):
+        if provided:
+            result = agent_with_mocks._generate_loss(inp_loss_only)
+            assert result.dummy_tensor_validated
+            assert agent_with_mocks.bridge.generate_text.call_count == 1
+            assert agent_with_mocks.bridge.generate.call_count == 1
+        else:
+            with pytest.raises(CustomLossProbeSetupError, match="Loss probe"):
+                agent_with_mocks._generate_loss(inp_loss_only)
+            agent_with_mocks.bridge.generate_text.assert_not_called()
+            agent_with_mocks.bridge.generate.assert_not_called()

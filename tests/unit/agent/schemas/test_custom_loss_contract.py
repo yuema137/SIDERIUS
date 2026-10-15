@@ -192,6 +192,7 @@ def test_forward_contract_carries_task_owned_target_and_applicability():
 def test_implementor_refuses_before_generated_plugin_import(tmp_path):
     """A bad declared pair must not execute arbitrary generated source."""
 
+    from agent.schemas.custom_loss_validation import CustomLossProbeSetupError
     from nodes.ml_model_implementor.ml_model_implementor import _dummy_tensor_validate_loss
 
     marker = tmp_path / "imported"
@@ -204,12 +205,12 @@ def test_implementor_refuses_before_generated_plugin_import(tmp_path):
         f"Path({str(marker)!r}).write_text('imported')\n"
         "PLUGIN_LOSS_TYPE = 'side_effect'\n"
     )
-    error = _dummy_tensor_validate_loss(
-        source,
-        "side_effect",
-        model_io,
-        target,
-        declaration,
-    )
-    assert error is not None and "fixed extent" in error
+    with pytest.raises(CustomLossProbeSetupError, match="fixed extent"):
+        _dummy_tensor_validate_loss(
+            source,
+            "side_effect",
+            model_io,
+            target,
+            declaration,
+        )
     assert not marker.exists()

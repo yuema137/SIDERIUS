@@ -1075,9 +1075,10 @@ def _proposal_attempt_failure(exc: Exception) -> str:
     from core.local_code.failure import raise_if_code_package_failure
 
     raise_if_code_package_failure(exc)
+    from agent.schemas.custom_loss_validation import CustomLossProbeSetupError
     from agent.schemas.model_probe import ModelProbeSetupError
 
-    if isinstance(exc, ModelProbeSetupError):
+    if isinstance(exc, (ModelProbeSetupError, CustomLossProbeSetupError)):
         raise exc
     if isinstance(exc, CandidateAdmissionError):
         return f"CandidateAdmissionError: Candidate admission refused: {exc}"
