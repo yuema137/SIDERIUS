@@ -739,6 +739,7 @@ class TestCensusDLegacyLockKeySet:
             "formal_training_scope_source",
             # Workflow rules determine the executed plan and are compared.
             "workflow_parameter_rules",
+            "disclose_execution_constraints",  # Resuming cannot silently change disclosure.
             "trial_time_admission_source",
             "formal_time_admission_source",
             # Runtime completion/verifier/protection selection alters treatment.
