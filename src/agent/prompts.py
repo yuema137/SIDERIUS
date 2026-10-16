@@ -127,9 +127,10 @@ Do not infer a preferred model size or training duration solely from budget head
 
 ### TRIAL vs FORMAL MODE:
 The run supplies which workload fields you may propose for each mode:
-- **Trial mode** (`is_trial=true`): Train and evaluate on a sparse sample of segments across
-  multiple files. Fast iteration — use this for early exploration when you are still searching
-  for good hyperparameters. Scores are anchor-normalized and comparable across runs.
+- **Trial mode** (`is_trial=true`): An exploratory candidate phase. Its training
+  and evaluation scope come from the task/workflow constraints and may use full
+  data or a subset. The task declares metric semantics; this role alone implies
+  neither score normalization nor comparability across different scopes.
 - **Formal mode** (`is_trial=false`): The operator's formal evaluation scope
   determines the comparable formal score. Its training strategy and scope may
   be either operator-fixed or chosen from your plan; see the run-specific task
@@ -532,10 +533,11 @@ def format_plugin_source_excerpt_block(config_cls) -> str:
 # Interpret prior resource evidence without selecting a search strategy.
 RESOURCE_GATE_GUIDANCE_BLOCK = """### [RESOURCE GATE — EVIDENCE AND CONSTRAINTS]
 
-The resource block reports the supplied budgets and the most recent attempt's
-available estimates, candidate mode and batch size. Compare only matching units
-and scopes. A ratio above one exceeds that reported budget; it does not identify
-which parameter caused the excess or predict the next candidate's cost.
+The resource block separates configured Trial/Formal budgets from the most recent
+attempt's available estimates, mode and batch size. Prior estimates describe that
+attempt, not the upcoming candidate. Compare only matching units and scopes;
+exceeding a budget does not identify which parameter caused the excess or predict
+the next candidate's cost. Unknown prior mode stays unknown.
 
 Use TIMING CONTROL CONTEXT, the task contract and configuration constraints to
 identify controls that can affect the requested workload. An override, inherited
@@ -561,83 +563,42 @@ def _format_active_resource_budgets_block(
     last_time_estimate_minutes=None,
     last_batch_size=None,
 ):
-    """Render the per-round [ACTIVE RESOURCE BUDGETS] block (K.6).
+    """Separate configured budgets from prior evidence without choosing a mode.
 
-    The planner runs BEFORE this round's pre-flight gates, so the estimates
-    shown are those of the most recent prior attempt (success or skipped).
-    The mode label is the prior attempt's mode (`time_mode` on the record).
-    For round 1 with no prior attempts, both estimates are None and the
-    block falls back to "(no prior estimate)" lines.
-
-    Returns "" when no budget AND no prior estimate is available — nothing
-    informative to show.
-
-    See docs/resource_estimator_implement.md §10.3 / §10.11.
+    The private helper keeps its existing call signature. No upcoming mode is
+    inferred from the last attempt; workload selection remains with the caller.
+    Missing budget information is not evidence that every resource gate is off.
     """
-    any_budget = any(
-        b is not None
-        for b in (
-            trial_vram_budget_gb,
-            formal_vram_budget_gb,
-            trial_time_budget_minutes,
-            formal_time_budget_minutes,
-        )
+    budgets = (
+        ("Trial", trial_vram_budget_gb, trial_time_budget_minutes),
+        ("Formal", formal_vram_budget_gb, formal_time_budget_minutes),
     )
-    any_estimate = any(e is not None for e in (last_vram_estimate_gb, last_time_estimate_minutes))
-    if not any_budget and not any_estimate:
+    has_budget = any(vram is not None or minutes is not None for _, vram, minutes in budgets)
+    has_prior = any(
+        value is not None
+        for value in (last_mode, last_vram_estimate_gb, last_time_estimate_minutes, last_batch_size)
+    )
+    if not has_budget and not has_prior:
         return ""
 
-    # Fall back to "trial" when the prior round's mode is unknown (round 1
-    # before any attempts have run). The exploration default is trial mode;
-    # if the operator only set formal budgets the active-mode line still
-    # surfaces "(no budget — gate disabled)" and the LLM can react.
-    mode = last_mode if last_mode in ("trial", "formal") else "trial"
-    if mode == "trial":
-        active_vram_budget = trial_vram_budget_gb
-        active_time_budget = trial_time_budget_minutes
-    else:
-        active_vram_budget = formal_vram_budget_gb
-        active_time_budget = formal_time_budget_minutes
+    def quantity(value, unit):
+        return "not supplied" if value is None else f"{value:.6g} {unit}"
 
-    if current_round is not None:
-        header = f"[ACTIVE RESOURCE BUDGETS — round {current_round}, mode={mode}]"
-    else:
-        header = f"[ACTIVE RESOURCE BUDGETS — mode={mode}]"
-
-    # VRAM line
-    if active_vram_budget is None:
-        vram_line = "  VRAM:  (no budget — gate disabled)"
-    elif last_vram_estimate_gb is None:
-        vram_line = f"  VRAM:  (no prior estimate)   budget {active_vram_budget:.2f} GB"
-    else:
-        factor = last_vram_estimate_gb / active_vram_budget
-        verdict = "over" if factor > 1.0 else "under"
-        vram_line = (
-            f"  VRAM:  estimate {last_vram_estimate_gb:.2f} GB   "
-            f"budget {active_vram_budget:.2f} GB   "
-            f"factor {factor:.2f}  ({verdict})"
-        )
-
-    # Time line
-    if active_time_budget is None:
-        time_line = "  Time:  (no budget — gate disabled)"
-    elif last_time_estimate_minutes is None:
-        time_line = f"  Time:  (no prior estimate)   budget {active_time_budget:.1f} min"
-    else:
-        factor = last_time_estimate_minutes / active_time_budget
-        verdict = "over" if factor > 1.0 else "under"
-        time_line = (
-            f"  Time:  estimate {last_time_estimate_minutes:.2f} min   "
-            f"budget {active_time_budget:.1f} min   "
-            f"factor {factor:.2f}  ({verdict})"
-        )
-
-    if last_batch_size is not None:
-        bs_line = f"  Current batch_size: {last_batch_size}"
-    else:
-        bs_line = "  Current batch_size: (not yet set)"
-
-    return "\n".join([header, vram_line, time_line, bs_line])
+    round_note = f" — planning round {current_round}" if current_round is not None else ""
+    lines = [f"[CONFIGURED RESOURCE BUDGETS{round_note}]"]
+    for role, vram, minutes in budgets:
+        lines.append(f"  {role}: VRAM {quantity(vram, 'GB')}; time {quantity(minutes, 'min')}")
+    mode = last_mode if last_mode in ("trial", "formal") else "unknown"
+    lines.extend(
+        [
+            f"[PRIOR ATTEMPT EVIDENCE — mode={mode}]",
+            f"  VRAM estimate: {quantity(last_vram_estimate_gb, 'GB')}",
+            f"  Time estimate: {quantity(last_time_estimate_minutes, 'min')}",
+            f"  Prior batch_size: {last_batch_size if last_batch_size is not None else 'unknown'}",
+            "  Prior evidence does not select the next mode or predict a changed workload.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 # ==========================================
@@ -933,7 +894,7 @@ def get_planner_user_prompt(
     trial_max_epochs=None,
     formal_max_epochs=None,
     resolved_data_scope=None,
-    # --- Phase K (K.6) — [ACTIVE RESOURCE BUDGETS] block inputs ---
+    # --- Phase K (K.6) — [CONFIGURED RESOURCE BUDGETS] block inputs ---
     trial_vram_budget_gb=None,
     formal_vram_budget_gb=None,
     trial_time_budget_minutes=None,
@@ -992,7 +953,7 @@ def get_planner_user_prompt(
         trial_time_budget_minutes,
         formal_time_budget_minutes:
             Operator-supplied per-mode resource budgets. Forwarded into the
-            [ACTIVE RESOURCE BUDGETS] block so the LLM sees the numeric
+            [CONFIGURED RESOURCE BUDGETS] block so the LLM sees the numeric
             ceiling that the upcoming pre-flight gate will enforce. None for
             any field means "(no budget — gate disabled)" on that axis.
             See docs/resource_estimator_implement.md §10.3 / §10.11.

@@ -7,6 +7,12 @@ reflector and interpreter. This changes presentation only; persisted values,
 comparability, trend derivation and metric ordering are unchanged. Historical
 text belongs in an explicitly selected experiment-owned rendering profile.
 
+Planner resource context separates configured Trial/Formal budgets from prior
+attempt estimates, mode and batch size. A prior mode does not select the next
+mode; missing information remains explicit. Trial is a candidate role, not a
+guarantee of sparse data or normalized/comparable scores. The task metric and
+resolved workflow scope determine those properties.
+
 **Semantic owners**: `execute_tools/training_history.py` (the observation
 payload), `agent/schemas/training_diagnosis.py` (the derived facts)
 **Status**: ✅ Current

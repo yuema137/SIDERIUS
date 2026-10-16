@@ -965,7 +965,7 @@ class LLMBridge:
         trial_max_epochs: int | None = None,
         formal_max_epochs: int | None = None,
         resolved_data_scope: list[int] | None = None,
-        # --- Phase K (K.6) — [ACTIVE RESOURCE BUDGETS] block inputs ---
+        # --- Phase K (K.6) — [CONFIGURED RESOURCE BUDGETS] block inputs ---
         trial_vram_budget_gb: float | None = None,
         formal_vram_budget_gb: float | None = None,
         trial_time_budget_minutes: float | None = None,
@@ -1028,16 +1028,16 @@ class LLMBridge:
             trial_time_budget_minutes,
             formal_time_budget_minutes:
                 Operator-supplied per-mode resource budgets. Forwarded into the
-                [ACTIVE RESOURCE BUDGETS] planner-prompt block (Phase K, §10.3
-                / §10.11). None on any field renders "(no budget — gate
-                disabled)" on that axis.
+                [CONFIGURED RESOURCE BUDGETS] planner-prompt block. Both modes
+                are shown; None renders "not supplied", not a claim that
+                every gate is disabled.
             last_vram_estimate_gb,
             last_time_estimate_minutes,
             last_batch_size,
             last_mode:
                 Resource snapshot from the most recent prior attempt's record,
-                surfaced into the same [ACTIVE RESOURCE BUDGETS] block so the
-                LLM has a concrete number to react to. None means "no prior
+                surfaced separately in [PRIOR ATTEMPT EVIDENCE]. This snapshot
+                does not select the upcoming candidate's mode or budget. None means "no prior
                 data" (round 1 before any pre-flight has run).
             score_table_md:
                 Pre-rendered markdown from the best-so-far record's

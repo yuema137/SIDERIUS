@@ -1,23 +1,11 @@
+"""Issue735: configuration must not be mislabeled as prior or upcoming evidence.
+
+Preserves the original K.6 cases: no inputs, explicit None, both prior modes,
+missing budget on each axis, no estimates, and real prompt ordering. Adds
+unknown-mode, evidence-only and full-snapshot Trial witnesses.
 """
-Phase K (K.6) — planner-prompt resource blocks.
 
-Covers two helpers in ``agent/prompts.py``:
-
-  * ``_format_active_resource_budgets_block`` — per-round dynamic block that
-    renders the budgets, the most recent prior estimate, the resulting
-    factor, and the current batch_size. Edge cases: budget None, estimate
-    None, both None.
-  * ``RESOURCE_GATE_GUIDANCE_BLOCK`` — static guidance text appended near
-    the [ACTIVE RESOURCE BUDGETS] block. Verbatim text from
-    docs/resource_estimator_implement.md §10.3.
-
-Plus integration: ``get_planner_user_prompt`` injects both blocks together
-when budgets/estimates are present, and omits both when neither is set.
-The PLANNER_PROMPT system text no longer carries the abstract
-"GPU MEMORY RULES" section (replaced by §10.11's two new blocks).
-
-See docs/resource_estimator_implement.md §10.3 / §10.11.
-"""
+import pytest
 
 from agent.prompts import (
     PLANNER_PROMPT,
@@ -26,51 +14,25 @@ from agent.prompts import (
     get_planner_user_prompt,
 )
 
-# ---------------------------------------------------------------------------
-# PLANNER_PROMPT — the abstract GPU MEMORY RULES section is gone (K.6 §10.11)
-# ---------------------------------------------------------------------------
+
+def test_trial_role_does_not_invent_data_scope_or_metric_normalization():
+    trial = PLANNER_PROMPT.split("### TRIAL vs FORMAL MODE:")[1].split("Trial strategies")[0]
+    assert "task/workflow constraints" in trial
+    assert "full\n  data or a subset" in trial
+    assert "anchor-normalized" not in trial
+    assert "sparse sample" not in trial
+    assert "GPU MEMORY RULES" not in PLANNER_PROMPT
+    assert "Use TIMING CONTROL CONTEXT" in RESOURCE_GATE_GUIDANCE_BLOCK
+    assert "An override, inherited" in RESOURCE_GATE_GUIDANCE_BLOCK
+    assert "does not identify" in RESOURCE_GATE_GUIDANCE_BLOCK
+    assert "If both factors are <= 1: continue" not in RESOURCE_GATE_GUIDANCE_BLOCK
+    assert "Lowering batch_size reduces vram_factor" not in RESOURCE_GATE_GUIDANCE_BLOCK
 
 
-class TestPlannerSystemPromptCleanup:
-    def test_gpu_memory_rules_section_removed(self):
-        """K.6: the abstract 'GPU MEMORY RULES' header was replaced by the
-        per-round numeric block + static guidance. Confirm it no longer
-        appears in the system prompt so the LLM is not told two stories."""
-        assert "GPU MEMORY RULES" not in PLANNER_PROMPT
-
-
-# ---------------------------------------------------------------------------
-# RESOURCE_GATE_GUIDANCE_BLOCK — native evidence and constraint contract
-# ---------------------------------------------------------------------------
-
-
-class TestStaticGuidanceBlock:
-    def test_header_present(self):
-        assert "[RESOURCE GATE — EVIDENCE AND CONSTRAINTS]" in RESOURCE_GATE_GUIDANCE_BLOCK
-
-    def test_guidance_defers_control_ownership_and_does_not_prescribe_a_search_order(self):
-        """Resource estimates must not become an unconfigured search policy."""
-        text = RESOURCE_GATE_GUIDANCE_BLOCK
-        assert "Use TIMING CONTROL CONTEXT" in text
-        assert "An override, inherited" in text
-        assert "does not identify" in text
-        assert "If both factors are <= 1: continue" not in text
-        assert "Lowering batch_size reduces vram_factor" not in text
-        assert "frequency-resolution physics" not in text
-
-
-# ---------------------------------------------------------------------------
-# _format_active_resource_budgets_block — empty when nothing to show
-# ---------------------------------------------------------------------------
-
-
-class TestActiveBudgetsBlockEmpty:
-    def test_empty_when_no_budgets_and_no_estimates(self):
-        out = _format_active_resource_budgets_block()
-        assert out == ""
-
-    def test_empty_when_all_args_explicit_none(self):
-        out = _format_active_resource_budgets_block(
+@pytest.mark.parametrize("explicit", [False, True])
+def test_no_inputs_emit_no_block(explicit):
+    kwargs = (
+        dict(
             current_round=1,
             last_mode=None,
             trial_vram_budget_gb=None,
@@ -81,187 +43,89 @@ class TestActiveBudgetsBlockEmpty:
             last_time_estimate_minutes=None,
             last_batch_size=None,
         )
-        assert out == ""
+        if explicit
+        else {}
+    )
+    assert _format_active_resource_budgets_block(**kwargs) == ""
 
 
-# ---------------------------------------------------------------------------
-# _format_active_resource_budgets_block — full render with both axes
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("mode", ["trial", "formal", None, "unrecognized"])
+def test_both_budgets_survive_previous_mode_and_unknown_stays_unknown(mode):
+    text = _format_active_resource_budgets_block(
+        current_round=2,
+        last_mode=mode,
+        trial_vram_budget_gb=4,
+        formal_vram_budget_gb=24,
+        trial_time_budget_minutes=10,
+        formal_time_budget_minutes=30,
+        last_vram_estimate_gb=5.2,
+        last_time_estimate_minutes=8.4,
+        last_batch_size=4,
+    )
+    assert "[CONFIGURED RESOURCE BUDGETS — planning round 2]" in text
+    assert "Trial: VRAM 4 GB; time 10 min" in text
+    assert "Formal: VRAM 24 GB; time 30 min" in text
+    prior = mode if mode in ("trial", "formal") else "unknown"
+    assert f"[PRIOR ATTEMPT EVIDENCE — mode={prior}]" in text
+    assert "VRAM estimate: 5.2 GB" in text
+    assert "Time estimate: 8.4 min" in text
+    assert "Prior batch_size: 4" in text
+    assert "ACTIVE" not in text
+    assert "factor" not in text
 
 
-class TestActiveBudgetsBlockFull:
-    def test_trial_mode_full_render_matches_spec_example(self):
-        """Mirror the §10.3 example: round 3, trial mode, VRAM over budget,
-        Time under budget, batch_size 4."""
-        out = _format_active_resource_budgets_block(
-            current_round=3,
-            last_mode="trial",
-            trial_vram_budget_gb=4.0,
-            formal_vram_budget_gb=8.0,
-            trial_time_budget_minutes=20.0,
-            formal_time_budget_minutes=240.0,
-            last_vram_estimate_gb=5.20,
-            last_time_estimate_minutes=8.40,
-            last_batch_size=4,
-        )
-        assert "[ACTIVE RESOURCE BUDGETS — round 3, mode=trial]" in out
-        assert "estimate 5.20 GB" in out
-        assert "budget 4.00 GB" in out
-        assert "factor 1.30" in out
-        assert "(over)" in out
-        assert "estimate 8.40 min" in out
-        assert "budget 20.0 min" in out
-        assert "factor 0.42" in out
-        assert "(under)" in out
-        assert "Current batch_size: 4" in out
-
-    def test_formal_mode_picks_formal_budgets(self):
-        """When last_mode is 'formal', the active-mode budgets must come
-        from the formal_* fields, not trial_*."""
-        out = _format_active_resource_budgets_block(
-            current_round=12,
-            last_mode="formal",
-            trial_vram_budget_gb=4.0,
-            formal_vram_budget_gb=24.0,
-            trial_time_budget_minutes=20.0,
-            formal_time_budget_minutes=240.0,
-            last_vram_estimate_gb=18.0,
-            last_time_estimate_minutes=120.0,
-            last_batch_size=8,
-        )
-        assert "mode=formal" in out
-        # Active budget on each axis must be the formal one
-        assert "budget 24.00 GB" in out
-        assert "budget 240.0 min" in out
-        # Trial budget values must NOT appear in either axis line
-        assert "budget 4.00 GB" not in out
-        assert "budget 20.0 min" not in out
+@pytest.mark.parametrize("axis", ["vram", "time"])
+def test_missing_budget_does_not_hide_evidence_or_claim_all_gates_disabled(axis):
+    kwargs = {"trial_time_budget_minutes": 20} if axis == "vram" else {"trial_vram_budget_gb": 4}
+    text = _format_active_resource_budgets_block(
+        **kwargs,
+        last_mode="trial",
+        last_vram_estimate_gb=5,
+        last_time_estimate_minutes=8,
+    )
+    assert "VRAM estimate: 5 GB" in text
+    assert "Time estimate: 8 min" in text
+    assert "not supplied" in text
+    assert "gate disabled" not in text
 
 
-# ---------------------------------------------------------------------------
-# _format_active_resource_budgets_block — disabled-axis handling
-# ---------------------------------------------------------------------------
+def test_first_round_with_only_formal_budget_does_not_assume_trial():
+    text = _format_active_resource_budgets_block(current_round=1, formal_time_budget_minutes=30)
+    assert "Formal: VRAM not supplied; time 30 min" in text
+    assert "PRIOR ATTEMPT EVIDENCE — mode=unknown" in text
+    assert "VRAM estimate: not supplied" in text
+    assert "Time estimate: not supplied" in text
+    assert "Prior batch_size: unknown" in text
 
 
-class TestActiveBudgetsBlockDisabledAxis:
-    def test_vram_budget_none_renders_disabled_line_no_factor(self):
-        """When the active-mode VRAM budget is None, the VRAM line says
-        '(no budget — gate disabled)' and no factor is shown for that
-        axis. The Time line still renders normally."""
-        out = _format_active_resource_budgets_block(
-            current_round=2,
-            last_mode="trial",
-            trial_vram_budget_gb=None,
-            formal_vram_budget_gb=None,
-            trial_time_budget_minutes=20.0,
-            formal_time_budget_minutes=240.0,
-            last_vram_estimate_gb=5.0,  # ignored — no budget to compare against
-            last_time_estimate_minutes=8.0,
-            last_batch_size=4,
-        )
-        assert "VRAM:  (no budget — gate disabled)" in out
-        # No VRAM factor line for the disabled axis
-        assert "VRAM" in out
-        # Time line still renders with factor
-        assert "estimate 8.00 min" in out
-        assert "factor 0.40" in out
-
-    def test_time_budget_none_renders_disabled_line_no_factor(self):
-        out = _format_active_resource_budgets_block(
-            current_round=2,
-            last_mode="trial",
-            trial_vram_budget_gb=4.0,
-            formal_vram_budget_gb=8.0,
-            trial_time_budget_minutes=None,
-            formal_time_budget_minutes=None,
-            last_vram_estimate_gb=2.0,
-            last_time_estimate_minutes=8.0,
-            last_batch_size=4,
-        )
-        assert "Time:  (no budget — gate disabled)" in out
-        assert "estimate 2.00 GB" in out
-        assert "factor 0.50" in out
+def test_evidence_without_budgets_is_still_visible():
+    text = _format_active_resource_budgets_block(last_vram_estimate_gb=1e-8, last_batch_size=8)
+    assert "VRAM estimate: 1e-08 GB" in text
+    assert "Prior batch_size: 8" in text
+    assert "not supplied" in text
 
 
-# ---------------------------------------------------------------------------
-# _format_active_resource_budgets_block — no prior estimate handling
-# ---------------------------------------------------------------------------
+def test_real_planner_prompt_preserves_both_modes_and_block_order():
+    prompt = get_planner_user_prompt(
+        memory_history=[],
+        current_round=2,
+        max_rounds=2,
+        trial_time_budget_minutes=10,
+        formal_time_budget_minutes=30,
+        last_mode="trial",
+        last_time_estimate_minutes=2,
+        last_batch_size=16,
+    )
+    assert "Trial: VRAM not supplied; time 10 min" in prompt
+    assert "Formal: VRAM not supplied; time 30 min" in prompt
+    assert "PRIOR ATTEMPT EVIDENCE — mode=trial" in prompt
+    assert "Prior batch_size: 16" in prompt
+    assert prompt.index("[CONFIGURED RESOURCE") < prompt.index("[RESOURCE GATE")
+    assert prompt.index("[RESOURCE GATE") < prompt.index("### INSTRUCTIONS")
 
 
-class TestActiveBudgetsBlockNoPriorEstimate:
-    def test_round_1_no_prior_estimate_renders_budget_only(self):
-        """Round 1 before any pre-flight has run: budgets are known, but
-        last_*_estimate / last_batch_size / last_mode are all None.
-        Block must render budgets + '(no prior estimate)' lines and not
-        crash on factor division."""
-        out = _format_active_resource_budgets_block(
-            current_round=1,
-            last_mode=None,
-            trial_vram_budget_gb=4.0,
-            formal_vram_budget_gb=8.0,
-            trial_time_budget_minutes=20.0,
-            formal_time_budget_minutes=240.0,
-            last_vram_estimate_gb=None,
-            last_time_estimate_minutes=None,
-            last_batch_size=None,
-        )
-        # Falls back to trial mode for the active-mode label
-        assert "round 1, mode=trial" in out
-        assert "(no prior estimate)" in out
-        assert "budget 4.00 GB" in out
-        assert "budget 20.0 min" in out
-        assert "Current batch_size: (not yet set)" in out
-        # No factor lines when there's no estimate to compare
-        assert "factor" not in out
-
-
-# ---------------------------------------------------------------------------
-# get_planner_user_prompt integration
-# ---------------------------------------------------------------------------
-
-
-class TestPlannerPromptIntegration:
-    def test_blocks_absent_when_no_budgets_or_estimates(self):
-        """No regression on existing callers — the prompt does NOT include
-        the [ACTIVE RESOURCE BUDGETS] block when no resource kwargs are
-        supplied, and the static guidance is also absent (it's only
-        rendered alongside the dynamic block)."""
-        prompt = get_planner_user_prompt(memory_history=[])
-        assert "[ACTIVE RESOURCE BUDGETS" not in prompt
-        assert "[RESOURCE GATE — EVIDENCE AND CONSTRAINTS]" not in prompt
-
-    def test_both_blocks_rendered_when_budgets_set(self):
-        prompt = get_planner_user_prompt(
-            memory_history=[],
-            current_round=2,
-            max_rounds=10,
-            trial_vram_budget_gb=4.0,
-            trial_time_budget_minutes=20.0,
-            last_vram_estimate_gb=5.20,
-            last_time_estimate_minutes=8.40,
-            last_batch_size=4,
-            last_mode="trial",
-        )
-        # Dynamic block
-        assert "[ACTIVE RESOURCE BUDGETS — round 2, mode=trial]" in prompt
-        assert "estimate 5.20 GB" in prompt
-        assert "Current batch_size: 4" in prompt
-        # Static guidance follows
-        assert "[RESOURCE GATE — EVIDENCE AND CONSTRAINTS]" in prompt
-        assert "Use TIMING CONTROL CONTEXT" in prompt
-        # Order: dynamic block precedes static guidance
-        assert prompt.index("[ACTIVE RESOURCE BUDGETS") < prompt.index("[RESOURCE GATE")
-
-    def test_rendered_before_instructions(self):
-        """Both K.6 blocks must appear in the user prompt before the final
-        ### INSTRUCTIONS section so the LLM reads them with the rest of
-        the per-round context."""
-        prompt = get_planner_user_prompt(
-            memory_history=[],
-            current_round=1,
-            max_rounds=10,
-            trial_vram_budget_gb=4.0,
-            trial_time_budget_minutes=20.0,
-        )
-        assert prompt.index("[ACTIVE RESOURCE BUDGETS") < prompt.index("### INSTRUCTIONS")
-        assert prompt.index("[RESOURCE GATE") < prompt.index("### INSTRUCTIONS")
+def test_real_planner_without_resource_information_omits_blocks():
+    prompt = get_planner_user_prompt(memory_history=[])
+    assert "[CONFIGURED RESOURCE" not in prompt
+    assert "[PRIOR ATTEMPT EVIDENCE" not in prompt
+    assert "[RESOURCE GATE" not in prompt
