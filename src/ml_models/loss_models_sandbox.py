@@ -118,6 +118,8 @@ def register_loss_in_memory(
     # plugin — F-12d-2 was exactly the cost of them not agreeing.
     if plugin["reduction"] is not None:
         LOSS_REDUCTION_REGISTRY[loss_type] = plugin["reduction"]
+    else:
+        LOSS_REDUCTION_REGISTRY.pop(loss_type, None)
     return loss_type
 
 
