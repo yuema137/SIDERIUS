@@ -953,9 +953,9 @@ def get_planner_user_prompt(
         trial_time_budget_minutes,
         formal_time_budget_minutes:
             Operator-supplied per-mode resource budgets. Forwarded into the
-            [CONFIGURED RESOURCE BUDGETS] block so the LLM sees the numeric
-            ceiling that the upcoming pre-flight gate will enforce. None for
-            any field means "(no budget — gate disabled)" on that axis.
+            [CONFIGURED RESOURCE BUDGETS] block for both modes. None means
+            "not supplied", not a claim that every resource gate is disabled.
+            The prior attempt does not select the upcoming mode or budget.
             See docs/resource_estimator_implement.md §10.3 / §10.11.
         last_vram_estimate_gb,
         last_time_estimate_minutes,
