@@ -19,6 +19,7 @@ from execute_tools.task_data_path import (
     EvalMaterializationParams,
     EvaluationReadRequest,
     ScopeBuildRequest,
+    TaskOutputArtifactInventory,
     ValidationScopeError,
     deserialize_rows_scope,
 )
@@ -247,6 +248,21 @@ class SyntheticMaskedTaskDataPath:
             model_type=request.model_type, run_name=request.run_name, exp_id=request.exp_id
         )
         path.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+
+    def enumerate_output_artifacts(
+        self, request: EvaluationReadRequest
+    ) -> TaskOutputArtifactInventory:
+        """Identify this attempt's JSON, including partial writes for cleanup."""
+        name = self.deliverable_name(
+            model_type=request.model_type, run_name=request.run_name, exp_id=request.exp_id
+        )
+        path = Path(request.deliverable_dir) / name
+        return TaskOutputArtifactInventory(
+            run_name=request.run_name,
+            exp_id=request.exp_id,
+            model_type=request.model_type,
+            relative_paths=(name,) if path.exists() or path.is_symlink() else (),
+        )
 
     def read_evaluation_payload(self, request: EvaluationReadRequest) -> object:
         path = Path(request.deliverable_dir) / self.deliverable_name(
