@@ -70,16 +70,16 @@ Each node owns one stage. Its `.md` is the contract.
 
 | node | role | LLM | CLI (`main()`) |
 |---|---|:---:|---|
-| [`result_interpretation_agent`](../../src/nodes/result_interpretation_agent/result_interpretation_agent.md) | synthesise evidence across records; state what it supports | ✅ | `src/nodes/result_interpretation_agent/result_interpretation_agent.py:1381` |
+| [`result_interpretation_agent`](../../src/nodes/result_interpretation_agent/result_interpretation_agent.md) | synthesise evidence across records; state what it supports | ✅ | [main()](../../src/nodes/result_interpretation_agent/result_interpretation_agent.py) |
 | [`data_analysis_agent`](../../src/nodes/data_analysis_agent/data_analysis_agent.md) | execute authorized scientific-analysis skills and synthesize a bounded report | ✅ | Python capability API only |
-| [`ml_literature_review`](../../src/nodes/ml_literature_review/ml_literature_review.md) | surface papers as soft priors (optional stage) | ✅ | `src/nodes/ml_literature_review/ml_literature_review.py:1153` (standalone CLI; the workflow supplies typed evidence) |
-| [`ml_model_proposal_agent`](../../src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) | propose an architecture and an explicit prediction | ✅ | `src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py:2585` |
-| [`ml_model_implementor`](../../src/nodes/ml_model_implementor/ml_model_implementor.md) | write the model plugin (and optional loss plugin) | ✅ | `src/nodes/ml_model_implementor/ml_model_implementor.py:2380` |
-| [`ml_code_validator_agent`](../../src/nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ | `src/nodes/ml_code_validator_agent/ml_code_validator_agent.py:1009` |
-| [`ml_hyperparameter_tune_agent`](../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1881` (parser and input builder in `cli.py`) |
+| [`ml_literature_review`](../../src/nodes/ml_literature_review/ml_literature_review.md) | surface papers as soft priors (optional stage) | ✅ | [main()](../../src/nodes/ml_literature_review/ml_literature_review.py) (standalone CLI; the workflow supplies typed evidence) |
+| [`ml_model_proposal_agent`](../../src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) | propose an architecture and an explicit prediction | ✅ | [main()](../../src/nodes/ml_model_proposal_agent/ml_model_proposal_agent.py) |
+| [`ml_model_implementor`](../../src/nodes/ml_model_implementor/ml_model_implementor.md) | write the model plugin (and optional loss plugin) | ✅ | [main()](../../src/nodes/ml_model_implementor/ml_model_implementor.py) |
+| [`ml_code_validator_agent`](../../src/nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ | [main()](../../src/nodes/ml_code_validator_agent/ml_code_validator_agent.py) |
+| [`ml_hyperparameter_tune_agent`](../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | [main()](../../src/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py) (parser and input builder in `cli.py`) |
 
 Six nodes currently have a CLI entry: each exposes an `argparse` `main()`
-behind `if __name__ == "__main__":` at the line cited
+behind `if __name__ == "__main__":` in the linked module
 (`ml_literature_review`'s CLI landed with #303/#305). The marker and source
 citations are structural facts only; they do not certify that an invocation
 has all task context needed for a successful run. Invocation boundaries and

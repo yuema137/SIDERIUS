@@ -20,10 +20,9 @@ Four defects only these tests catch:
 2. **A node doc lying about its CLI.** `**CLI entry**: **present**` must
    coincide with an `if __name__ == "__main__":` guard in the node's main
    module, and `absent` with its absence.
-3. **A stale `main()` line in the agent reference.** The `CLI` column of
-   `docs/agent-reference/index.md` cites `file:line`; that line must be a
-   `def main`. (It WILL move when PR-12d lands and the tuner's `cli.py`
-   changes — that is the point: the doc is then corrected, not left stale.)
+3. **A nonexistent CLI entry in the agent reference.** The `CLI` column of
+   `docs/agent-reference/index.md` links to modules with a top-level `main`.
+   Ordinary line movement does not invalidate these source references.
 4. **A protocol module the registry docstring does not name.** Every
    `*_to_*.py` under `agent/schemas/protocols/` must be listed in the
    package docstring — the registry said "five" for months while six existed.
@@ -31,7 +30,7 @@ Four defects only these tests catch:
 How they fail: re-introduce `proposal_to_implementor_v1` in a node doc →
 `test_every_protocol_token_in_node_docs_resolves` names it; flip a node's
 type word → `test_node_type_matches_the_presence_of_a_main_guard` names the
-node; move `main()` → `test_agent_reference_cli_column_points_at_def_main`
+node; remove `main()` → `test_agent_reference_cli_column_links_to_top_level_main`
 names the row. Each was plant-proven at authoring time (see the PR body).
 """
 
@@ -71,7 +70,7 @@ _TO_TOKEN = re.compile(
 )
 _CLI_ENTRY = re.compile(r"\*\*CLI entry\*\*: \*\*(present|absent)\*\*")
 _MAIN_GUARD = re.compile(r'^if __name__ == "__main__":', re.MULTILINE)
-_CLI_CELL = re.compile(r"`(src/nodes/[A-Za-z0-9_/]+\.py):(\d+)`")
+_CLI_CELL = re.compile(r"\[main\(\)\]\(\.\./\.\./(src/nodes/[A-Za-z0-9_/]+\.py)\)")
 
 
 def _node_doc_paths_in_checkout() -> tuple[str, ...]:
@@ -208,21 +207,21 @@ def test_node_type_matches_the_presence_of_a_main_guard() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_agent_reference_cli_column_points_at_def_main() -> None:
+def test_agent_reference_cli_column_links_to_top_level_main() -> None:
     text = AGENT_REFERENCE_README.read_text(encoding="utf-8")
     cited = _CLI_CELL.findall(text)
     # Declared delta (#303/#305, landed 9f826731): the literature-review node
     # gained a CLI, so SIX nodes have a present CLI entry — the marker moved
     # WITH that landing.
-    assert len(cited) == 6, (
-        f"expected six `file:line` CLI citations (all six nodes have CLI entries, #303), got {cited}"
-    )
+    assert len(cited) == 6, f"expected six CLI source links, got {cited}"
+    assert len(set(cited)) == 6, "each CLI node must have its own source link"
     problems: list[str] = []
-    for rel, line_no in cited:
-        lines = (REPO_ROOT / rel).read_text(encoding="utf-8").splitlines()
-        actual = lines[int(line_no) - 1] if int(line_no) <= len(lines) else "<past end of file>"
-        if not actual.startswith("def main("):
-            problems.append(f"{rel}:{line_no} is {actual!r}, not a `def main(` line")
+    for rel in cited:
+        module = ast.parse((REPO_ROOT / rel).read_text(encoding="utf-8"))
+        if not any(
+            isinstance(node, ast.FunctionDef) and node.name == "main" for node in module.body
+        ):
+            problems.append(f"{rel} has no top-level main function")
     assert not problems, "\n".join(problems)
     # #303 removed the one asterisk: NO node may claim an absent CLI entry in
     # the CLI column any more — a reintroduced marker is the drift this pins.
