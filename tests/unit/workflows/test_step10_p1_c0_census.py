@@ -742,6 +742,7 @@ class TestCensusDLegacyLockKeySet:
             "trial_time_admission_source",
             "formal_time_admission_source",
             # Runtime completion/verifier/protection selection alters treatment.
+            "runtime_watchdog_deadline_policy",  # Explicit selected-policy identity.
             "runtime_completion_policy",
             "runtime_verifier_identity",
             "gpu_execution_policy",

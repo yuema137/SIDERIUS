@@ -70,7 +70,7 @@ def test_watchdog_cleanup_is_attempt_qualified(tmp_path, monkeypatch, naming):
         {},
         inference_batch=1,
         sample_set={"0": [0]},
-        runtime_policy={"watchdog": {"enabled": True}},
+        runtime_policy={"watchdog": {"enabled": True, "budget_seconds": 10.0}},
     )
     assert outcome["status"] == "wall_clock_timeout", outcome
     _assert_cleanup(tmp_path, ATTEMPT_FILES if naming is not None else set())
