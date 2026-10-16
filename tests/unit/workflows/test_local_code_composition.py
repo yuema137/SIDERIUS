@@ -134,9 +134,10 @@ def test_single_file_composition_and_effective_health_match_base_receipt(
 ):
     """Independent hashes pin the composed package and explicit probe semantics.
 
-    The receipt was re-recorded when the example declared that segmentation is
-    not applicable.  That declaration is identity-bearing because resource
-    observations from temporal and fixed-shape probes are not comparable.
+    The composition receipt includes the example source identity, including its
+    explicit output-artifact inventory. Adding that inventory changes the
+    composition identity without changing the effective Health configuration;
+    the independently frozen Health receipt below therefore stays unchanged.
     """
     from core.generated_library import bind_generated_library_to_workspace
     from execute_tools.health_checks import _plugin_binding
@@ -158,7 +159,7 @@ def test_single_file_composition_and_effective_health_match_base_receipt(
                 str(REPO_ROOT / "configs/task_composition/synthetic_masked_regression.yaml")
             )
             assert legacy_fingerprints == [
-                "3b55b025187f3d407c9f23d035570ef72a66d2de3eb4ef63eb0e663868c883ba"
+                "85cbe5fc86397839cb858e841a2a80afc984a4abfe31f00ad98db5bd46b2165f"
             ]
             assert composition.semantic_fingerprint != legacy_fingerprints[0]
             with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
