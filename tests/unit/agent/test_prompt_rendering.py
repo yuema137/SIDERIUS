@@ -125,6 +125,29 @@ def test_boundary_declaration_changes_identity(tmp_path):
     assert profile.identity().content_sha256 != other.identity().content_sha256
 
 
+def test_training_dynamics_override_reaches_all_three_consumers(tmp_path):
+    """Historical providers must not fall through to the new numeric format."""
+    from agent.prompt_templates.interpretation.rendering import (
+        render_interpretation_diagnosis_lines,
+    )
+    from agent.prompt_templates.tuner.rendering import (
+        render_planner_dynamics_block,
+        render_reflector_dynamics_block,
+    )
+    from tests.helpers.tuner_prompt_fixtures import DIAGNOSIS, HISTORY
+
+    profile = _profile(
+        tmp_path, {"tuner.training_dynamics": lambda diagnosis, objective_kind: "EXTERNAL DYNAMICS"}
+    )
+    with bind_prompt_profile(profile):
+        assert render_planner_dynamics_block(HISTORY).count("EXTERNAL DYNAMICS") == 3
+        assert "EXTERNAL DYNAMICS" in render_reflector_dynamics_block(DIAGNOSIS)
+        assert render_interpretation_diagnosis_lines(DIAGNOSIS, None) == [
+            "  best: EXTERNAL DYNAMICS"
+        ]
+    assert "EXTERNAL DYNAMICS" not in render_reflector_dynamics_block(DIAGNOSIS)
+
+
 def test_validator_consumes_scoped_appendix_provider(tmp_path):
     """The review node must share the appendix seam without changing its validator."""
     from nodes.ml_code_validator_agent.ml_code_validator_agent import _build_review_system_prompt

@@ -125,7 +125,7 @@ class TestTrainingDynamicsLine:
             train_trend="decreasing",
         )
         line = render_training_dynamics_line(train_only)
-        assert "train 2.90->2.10 (decreasing, 3 ep)" in line
+        assert "train 2.9->2.1 (decreasing, 3 ep)" in line
         assert "val not recorded" in line
 
     def test_an_incomparable_gap_says_WHY_it_is_absent(self):
@@ -178,7 +178,7 @@ class TestPlannerDynamicsBlock:
         assert block.startswith("### Training dynamics (last 3 experiments)")
         assert len(block.splitlines()) == 4
         assert block.count("none recorded") == 2
-        assert "[cross_entropy] train 0.02->0.01" in block
+        assert "[cross_entropy] train 0.0189->0.0123" in block
 
     def test_an_empty_history_renders_nothing_at_all(self):
         assert render_planner_dynamics_block([]) == ""
@@ -238,7 +238,7 @@ class TestBoundary:
     def test_the_planner_sees_the_summary_and_not_the_raw_payload(self):
         _system, user = _render_planner()
         assert "### Training dynamics (last 3 experiments)" in user
-        assert "[cross_entropy] train 0.02->0.01" in user
+        assert "[cross_entropy] train 0.0189->0.0123" in user
         for raw in ("training_history", "training_diagnosis", "metric_result", "metric_refusal"):
             assert raw not in user
         # ...and values that exist ONLY inside those payloads.
@@ -248,7 +248,7 @@ class TestBoundary:
     def test_the_reflector_sees_the_diagnosis_and_never_the_history(self):
         _system, user = _render_reflector()
         assert "### TRAINING DYNAMICS (this experiment)" in user
-        assert "train 0.02->0.01" in user
+        assert "train 0.0189->0.0123" in user
         for raw in ("training_history", "training_diagnosis", "objective_kind"):
             assert raw not in user
 
