@@ -224,21 +224,25 @@ def _load_loss_plugin(
     module = importlib.util.module_from_spec(spec)
     # Register BEFORE exec so the plugin can reference its own module name
     # (via ``__name__``) without surprising downstream inspect calls.
+    missing = object()
+    previous = sys.modules.get(module_name, missing)
+    accepted = False
     sys.modules[module_name] = module
     try:
-        exec(compile(validated_source, path, "exec"), module.__dict__)
-    except Exception as e:
-        # Roll back the sys.modules entry on load failure so a broken plugin
-        # can be fixed and retried in the same process.
-        sys.modules.pop(module_name, None)
-        print(f"[LossLoader] Failed to load {path}: {e}")
-        return None
-
-    try:
-        return _loss_attributes(module, path, validated_contract)
-    except ValueError:
-        sys.modules.pop(module_name, None)
-        raise
+        try:
+            exec(compile(validated_source, path, "exec"), module.__dict__)
+        except Exception as e:
+            print(f"[LossLoader] Failed to load {path}: {e}")
+            return None
+        attributes = _loss_attributes(module, path, validated_contract)
+        accepted = attributes is not None
+        return attributes
+    finally:
+        if not accepted:
+            if previous is missing:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = previous  # type: ignore[assignment]
 
 
 def validate_loss_module_target(

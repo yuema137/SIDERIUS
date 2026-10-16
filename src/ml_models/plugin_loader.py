@@ -159,20 +159,28 @@ def _load_plugin(path: str) -> dict | None:
     module = importlib.util.module_from_spec(spec)
     # Register BEFORE exec so the plugin can reference its own module name
     # (via ``__name__``) without surprising downstream inspect calls.
+    missing = object()
+    previous = sys.modules.get(module_name, missing)
+    accepted = False
     sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
-    except Exception as e:
-        # Roll back the sys.modules entry on load failure so a broken plugin
-        # can be fixed and retried in the same process.
-        sys.modules.pop(module_name, None)
-        from core.local_code.failure import raise_if_code_package_failure
+        try:
+            spec.loader.exec_module(module)
+        except Exception as e:
+            from core.local_code.failure import raise_if_code_package_failure
 
-        raise_if_code_package_failure(e)
-        print(f"[PluginLoader] Failed to load {path}: {e}")
-        return None
-
-    return _plugin_attributes(module, path)
+            raise_if_code_package_failure(e)
+            print(f"[PluginLoader] Failed to load {path}: {e}")
+            return None
+        attributes = _plugin_attributes(module, path)
+        accepted = attributes is not None
+        return attributes
+    finally:
+        if not accepted:
+            if previous is missing:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = previous  # type: ignore[assignment]
 
 
 @contextmanager

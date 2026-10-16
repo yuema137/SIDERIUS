@@ -46,6 +46,24 @@ Generated model source is staged into `{workspace}/plugins/{run_name}/`;
 current declared package members retain their original captured source path.
 The capability index records available capabilities; it is not code identity.
 
+### Legacy module admission rollback
+
+Legacy model and loss loaders temporarily publish a filename-derived module name
+so imports and source inspection work during admission. If import or metadata
+admission fails, including missing required symbols or an exception, they restore
+the exact prior `sys.modules` binding, or remove the temporary entry when no
+binding existed. Public registration therefore retains the previously admitted
+class and its inspectable source when the rejected same-basename candidate is
+a separate file and the original source remains unchanged.
+Successful admission still publishes the replacement module. Model inspection
+through `inspect_model_plugin` restores its entry even after successful inspection.
+
+This transaction covers the loader-owned module entry, not arbitrary side effects
+inside plugin code. It does not snapshot or restore files overwritten on disk,
+isolate concurrent same-basename imports, or keep
+multiple successfully admitted legacy modules under one module name. Captured
+package acquisition retains its separate source identity and rollback contract.
+
 ### Custom-loss target representation
 
 `agent/schemas/custom_loss_target.py` resolves native target routing from the
