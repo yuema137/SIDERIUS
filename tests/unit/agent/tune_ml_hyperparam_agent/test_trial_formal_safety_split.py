@@ -7,8 +7,9 @@ A caller may declare different runtime safety factors for Trial and Formal:
 
 Precedence per phase: phase-specific factor when provided → legacy
 ``runtime_safety_factor`` → its schema default. Enforcement (admission
-+ watchdog deadline) reads only the resolved ``safety_factor``; both
-configured phase values are recorded in runtime-policy provenance.
++ explicit forecast-tightening watchdog policy) reads the resolved
+``safety_factor``. The default watchdog uses the operator budget instead;
+both configured phase values are recorded in runtime-policy provenance.
 
 No real LLM, no training — parser + schema + policy assembly + the
 watchdog deadline provider against a synthetic sidecar.
@@ -58,6 +59,7 @@ def _input_from_args(a) -> HyperparamTuningInput:
         runtime_trial_safety_factor=a.runtime_trial_safety_factor,
         runtime_formal_safety_factor=a.runtime_formal_safety_factor,
         runtime_watchdog_floor_seconds=a.runtime_watchdog_floor_seconds,
+        runtime_watchdog_deadline_policy=a.runtime_watchdog_deadline_policy,
     )
 
 
@@ -112,7 +114,7 @@ class TestPhaseResolution:
             policy = RuntimeControlPolicy(
                 **_build_runtime_policy(
                     posture_input,
-                    chosen_time_budget=None,
+                    chosen_time_budget=20.0 if is_trial else 120.0,
                     is_trial=is_trial,
                     base_dir="/tmp/qualification_workspace",
                 )
@@ -199,24 +201,48 @@ class TestWatchdogDeadlineUsesPhaseFactor:
         )
         return str(path)
 
-    def test_trial_deadline_scales_by_trial_factor(self, tmp_path, posture_input):
+    @pytest.mark.parametrize(
+        "policy, expected, source",
+        [
+            ("budget-ceiling-v1", 1200.0, "operator_budget"),
+            ("forecast-tightening-v1", 200.0, "verified_components"),
+        ],
+    )
+    def test_trial_deadline_respects_selected_policy(
+        self, tmp_path, posture_input, policy, expected, source
+    ):
+        posture_input = posture_input.model_copy(
+            update={"runtime_watchdog_deadline_policy": policy}
+        )
         sidecar = self._sidecar(tmp_path, predicted_seconds=100.0)
         trial_policy = RuntimeControlPolicy(
             **_build_runtime_policy(
                 posture_input, chosen_time_budget=20.0, is_trial=True, base_dir=str(tmp_path)
             )
         )
-        deadline, source = _watchdog_deadline_provider(trial_policy, sidecar)()
-        assert source == "verified_components"
-        assert deadline == pytest.approx(200.0)  # 100 s × trial 2.0
+        deadline, actual_source = _watchdog_deadline_provider(trial_policy, sidecar)()
+        assert actual_source == source
+        assert deadline == pytest.approx(expected)
 
-    def test_formal_deadline_scales_by_formal_factor(self, tmp_path, posture_input):
+    @pytest.mark.parametrize(
+        "policy, expected, source",
+        [
+            ("budget-ceiling-v1", 7200.0, "operator_budget"),
+            ("forecast-tightening-v1", 150.0, "verified_components"),
+        ],
+    )
+    def test_formal_deadline_respects_selected_policy(
+        self, tmp_path, posture_input, policy, expected, source
+    ):
+        posture_input = posture_input.model_copy(
+            update={"runtime_watchdog_deadline_policy": policy}
+        )
         sidecar = self._sidecar(tmp_path, predicted_seconds=100.0)
         formal_policy = RuntimeControlPolicy(
             **_build_runtime_policy(
                 posture_input, chosen_time_budget=120.0, is_trial=False, base_dir=str(tmp_path)
             )
         )
-        deadline, source = _watchdog_deadline_provider(formal_policy, sidecar)()
-        assert source == "verified_components"
-        assert deadline == pytest.approx(150.0)  # 100 s × legacy/formal 1.5
+        deadline, actual_source = _watchdog_deadline_provider(formal_policy, sidecar)()
+        assert actual_source == source
+        assert deadline == pytest.approx(expected)
