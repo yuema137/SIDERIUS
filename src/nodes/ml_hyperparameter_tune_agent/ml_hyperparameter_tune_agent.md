@@ -1809,7 +1809,7 @@ to new consumers.
 | `contracts.py` | typed carriers only — no policy, execution, persistence or rendering |
 | `provenance.py` | what planning RESOLVED away from the authored plan (`ResolutionTracker`) |
 | `scope_acquisition.py` | task-owned scope acquisition (PR-12bc B5) and the package's ONE physical-topology decode (`AttemptTopologyFacts`, PR-12d seam B) |
-| `planning.py` | observe -> plan (LLM) -> overrides -> strategy/epoch clamps -> the round's sample sets |
+| `planning.py` | `_request_attempt_plan` reads history once and assembles one planner request; `prepare_attempt` validates the response, applies overrides and resolves execution scopes |
 | `execution.py` | the physical work, in three coarse phases (admission/preflight, training, inference+scoring+health) |
 | `records.py` | BUILDS records and the run output |
 | `runtime.py` | EMITS records and runtime observations; runtime-control helpers |
