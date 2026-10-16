@@ -431,6 +431,8 @@ def load_loss_plugin(
                     LOSS_CONTRACT_REGISTRY.pop(loss_name, None)
                 if plugin["reduction"] is not None:
                     LOSS_REDUCTION_REGISTRY[loss_name] = plugin["reduction"]
+                else:
+                    LOSS_REDUCTION_REGISTRY.pop(loss_name, None)
                 return plugin
     if contract_refusals:
         detail = "; ".join(contract_refusals[:5])

@@ -70,6 +70,19 @@ loss routing is unchanged. Correcting a plugin changes its code identity: retain
 old evidence and use a new explicitly configured workspace rather than replacing
 the selected code inside an existing run.
 
+### Custom-loss normalization declarations
+
+`PLUGIN_LOSS_REDUCTION` optionally declares `mean` or `sum`. Training-history
+comparability consumes that declaration; it does not infer normalization from
+the loss name or implementation. Missing, `None` and unsupported declarations
+are treated as undeclared by the loader.
+
+Both in-memory registration and filesystem resolution replace reduction
+metadata only after successful plugin admission. A replacement without a valid
+declaration clears the previous value; a failed load preserves the selected
+registry state. This does not authorize changing an immutable selected package
+or rewriting an existing workspace identity.
+
 ### The generated-capability library (arXiv P1)
 
 Cross-run durable state — promoted model/loss plugins and the capability
