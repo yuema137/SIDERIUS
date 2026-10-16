@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from agent.prompt_rendering import prompt_boundary
 from agent.prompt_templates.interpretation.execution import render_execution_evidence
+from agent.prompt_templates.numeric import format_evidence_float
 from agent.schemas.health_feedback import CollapseFingerprint
 from agent.schemas.interpretation import ModelRunSummary
 from agent.schemas.score_table import ScoreComparisonTable
@@ -497,6 +498,12 @@ def _render_record_roles(summary: ModelRunSummary) -> list[str]:
     return lines
 
 
+@prompt_boundary("interpretation.score_value")
+def format_interpretation_score(score: float | None) -> str:
+    """Preserve the stored score's precision without inferring scoreability."""
+    return "skipped" if score is None else format_evidence_float(score)
+
+
 @prompt_boundary("interpretation.model_user")
 def _build_per_model_prompt(
     summary: ModelRunSummary,
@@ -667,7 +674,7 @@ def _build_per_model_prompt(
             else None
         )
 
-        score_str = f"{score:.4f}" if score is not None else "skipped"
+        score_str = format_interpretation_score(score)
         extras = []
         if i < len(summary.round_is_trial):
             extras.append("role=Trial" if summary.round_is_trial[i] else "role=Formal")

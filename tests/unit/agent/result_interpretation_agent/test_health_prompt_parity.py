@@ -76,7 +76,9 @@ def test_per_model_prompt_parity_with_health_data_present():
         expert_advice_str="Focus on stability.",
         human_advice=None,
     )
-    assert rendered == (GOLDENS / "per_model_prompt_collapse.txt").read_text()
+    # Issue737 changes only numeric presentation; retain the original golden.
+    expected = (GOLDENS / "per_model_prompt_collapse.txt").read_text()
+    assert rendered == expected.replace("score=1.2500 ", "score=1.25 ")
 
 
 def test_per_model_prompt_parity_legacy_summary():
@@ -86,4 +88,6 @@ def test_per_model_prompt_parity_legacy_summary():
         expert_advice_str="",
         human_advice="Try smaller lr.",
     )
-    assert rendered == (GOLDENS / "per_model_prompt_legacy.txt").read_text()
+    # Preserve the historical fixture while declaring the native numeric delta.
+    expected = (GOLDENS / "per_model_prompt_legacy.txt").read_text()
+    assert rendered == expected.replace("score=0.7000 ", "score=0.7 ")
