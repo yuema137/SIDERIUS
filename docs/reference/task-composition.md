@@ -707,7 +707,7 @@ this contract is not a sandbox.
 The implementor, code validator and proposer share the native training
 appendix boundary. Supported boundaries are `native_training.appendix`, `proposal.template`,
 `interpretation.model_system`, `interpretation.model_user`,
-`tuner.execution_provenance`, and the
+`tuner.execution_provenance`, `tuner.training_dynamics`, and the
 `data_analysis.` stages `skill_selection`, `analysis_plan`,
 `generated_program`, `report_synthesis`, `generated_skill_promotion`,
 and `structured_output_repair`. See the decorated functions for exact typed
@@ -715,7 +715,13 @@ input signatures. An undeclared boundary raises when reached; it never silently
 uses another historical profile. These boundaries are not a universal replacement
 for every message produced by every node.
 
-The tuner boundary renders only the reflector's execution-provenance block.
+The `tuner.training_dynamics` boundary renders the shared diagnostic line used
+by planner, reflector and interpreter. Native rendering uses six significant
+digits for objective endpoints, observed degradation and signed gaps. An
+explicit historical provider may preserve an older textual representation;
+the persisted diagnosis and metric arithmetic remain unchanged.
+
+The `tuner.execution_provenance` boundary renders the reflector's execution-provenance block.
 Native rendering uses final execution `events`; an explicit historical provider
 may select the separate `plan_resolution_events` checkpoint. Missing checkpoint
 and an available empty checkpoint are distinct. This seam does not replace

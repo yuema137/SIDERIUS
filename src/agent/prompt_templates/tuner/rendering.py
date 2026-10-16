@@ -557,16 +557,20 @@ def render_metric_identity_line(spec: Any) -> str:
     return f"golden metric `{spec.id}` ({words['comparative']} is better)"
 
 
-def _fmt(value: float | None, digits: int = 2) -> str:
-    return "n/a" if value is None else f"{value:.{digits}f}"
+def _fmt(value: float | None, *, signed: bool = False) -> str:
+    """Keep objective-scale detail without expanding very small/large values."""
+    if value is None:
+        return "n/a"
+    return format(value, "+.6g" if signed else ".6g")
 
 
+@prompt_boundary("tuner.training_dynamics")
 def render_training_dynamics_line(diagnosis: Any, objective_kind: str | None = None) -> str:
     """ONE compact line of calibration-free training facts for one experiment.
 
     Example (planner, with the objective family label)::
 
-        [focal] train 2.90->2.35 (decreasing, 5 ep) · val 2.95->2.62
+        [focal] train 2.9->2.35 (decreasing, 5 ep) · val 2.95->2.62
         (decreasing; best ep 3, +0.07 after best) · gap +0.27 (comparable)
 
     ``objective_kind=None`` omits the ``[...]`` label — the REFLECTOR path.
@@ -624,7 +628,7 @@ def render_training_dynamics_line(diagnosis: Any, objective_kind: str | None = N
         reason = "not comparable" if diagnosis.comparability != "established" else "unavailable"
         parts.append(f"gap n/a ({reason})")
     else:
-        parts.append(f"gap {gap:+.2f} (comparable)")
+        parts.append(f"gap {_fmt(gap, signed=True)} (comparable)")
 
     return label + " · ".join(parts)
 

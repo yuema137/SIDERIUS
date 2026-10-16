@@ -111,7 +111,7 @@ class TestDiagnosisRenderer:
         assert len(lines) == 2
         assert lines[0].startswith("  best: ")
         assert lines[1].startswith("  formal: ")
-        assert "2.35" in lines[0] and "2.10" in lines[1], "roles must not be conflated"
+        assert "2.35" in lines[0] and "2.1" in lines[1], "roles must not be conflated"
 
     def test_absent_role_contributes_no_line(self):
         assert len(render_interpretation_diagnosis_lines(_diagnosis(), None)) == 1

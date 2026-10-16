@@ -1,5 +1,12 @@
 # Training objective, history and diagnosis
 
+Diagnostic prompt lines use six significant digits, including scientific
+notation for small or large objectives, rather than fixed decimal places.
+The shared `tuner.training_dynamics` rendering boundary covers planner,
+reflector and interpreter. This changes presentation only; persisted values,
+comparability, trend derivation and metric ordering are unchanged. Historical
+text belongs in an explicitly selected experiment-owned rendering profile.
+
 **Semantic owners**: `execute_tools/training_history.py` (the observation
 payload), `agent/schemas/training_diagnosis.py` (the derived facts)
 **Status**: ✅ Current

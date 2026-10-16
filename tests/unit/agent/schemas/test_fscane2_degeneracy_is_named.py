@@ -184,38 +184,30 @@ class TestTheNamedAbsenceTravels:
         assert observed.validation_degraded_after_best is True
 
 
-#: Captured by rendering each shape in a PRISTINE `3995400b` worktree, before
-#: any part of this fix existed. Hardcoded, never read back from the renderer:
-#: the whole claim is that these bytes did not move, and an expectation read
-#: from the thing under test cannot make that claim.
-_PRISTINE_DYNAMICS_LINES = {
+# Issue734 deliberately changes numeric presentation. These literal expectations
+# preserve the original incident's absence/zero/observed distinctions; historical
+# byte rendering is qualified by the exp compatibility corpus.
+_DYNAMICS_LINES = {
     "one_epoch": (
-        "[focal] train 2.90->2.90 (single_point, 1 ep) · "
+        "[focal] train 2.9->2.9 (single_point, 1 ep) · "
         "val 2.95->2.95 (single_point; best ep 0) · gap +0.05 (comparable)"
     ),
     "two_epoch_observed": (
-        "[focal] train 3.00->2.00 (decreasing, 2 ep) · "
-        "val 2.00->2.60 (increasing; best ep 0, +0.60 after best) · gap +0.60 (comparable)"
+        "[focal] train 3->2 (decreasing, 2 ep) · "
+        "val 2->2.6 (increasing; best ep 0, +0.6 after best) · gap +0.6 (comparable)"
     ),
     "two_epoch_zero_degradation": (
-        "[focal] train 3.00->2.00 (decreasing, 2 ep) · "
-        "val 3.00->2.00 (decreasing; best ep 1) · gap +0.00 (comparable)"
+        "[focal] train 3->2 (decreasing, 2 ep) · "
+        "val 3->2 (decreasing; best ep 1) · gap +0 (comparable)"
     ),
     "no_validation": (
-        "[focal] train 3.00->2.00 (decreasing, 2 ep) · val not recorded · gap n/a (unavailable)"
+        "[focal] train 3->2 (decreasing, 2 ep) · val not recorded · gap n/a (unavailable)"
     ),
 }
 
 
-class TestTheTunerPromptBytesDoNotMove:
-    """The LLM surface was already accidentally correct — `0.0` is falsy, so
-    no fabricated "+0.0 after best" note ever rendered. The ruling makes that
-    suppression intentional; it must not also make it VISIBLE, or this fix
-    would be a silent prompt change dressed as a record fix.
-
-    The one-epoch row is the load-bearing one: that diagnosis now carries
-    THREE Nones where it carried two numbers and a bool, and the rendered
-    bytes are the same."""
+class TestTunerPromptDegeneracySemantics:
+    """Do not fabricate degradation for insufficient or zero-change history."""
 
     @pytest.mark.parametrize(
         ("shape", "train", "validation"),
@@ -226,10 +218,8 @@ class TestTheTunerPromptBytesDoNotMove:
             ("no_validation", [3.0, 2.0], None),
         ],
     )
-    def test_the_dynamics_line_is_byte_identical_to_the_pristine_render(
-        self, shape, train, validation
-    ):
+    def test_dynamics_preserve_degeneracy_distinctions(self, shape, train, validation):
         line = render_training_dynamics_line(
             derive_training_diagnosis(_history(train, validation)), "focal"
         )
-        assert line == _PRISTINE_DYNAMICS_LINES[shape]
+        assert line == _DYNAMICS_LINES[shape]
