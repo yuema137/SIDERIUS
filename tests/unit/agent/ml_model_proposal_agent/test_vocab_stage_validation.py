@@ -1,4 +1,4 @@
-"""Owner-stage correction and current native successful-path request snapshots."""
+"""Owner-stage correction and historical traces with explicit current deltas."""
 
 import hashlib
 import json
@@ -8,6 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agent.prompt_templates.native_training import NATIVE_TRAINING_CONTRACT
+from tests.helpers.constraint_disclosure import without_incomplete_disclosure
+
 from .test_causal_stage_validation import _agent, _pipeline_input
 from .test_pipeline_runner import (
     FAKE_COMPARISON_OUTPUT,
@@ -16,6 +19,24 @@ from .test_pipeline_runner import (
 )
 
 pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")
+
+
+def _historical_trace_system(system):
+    """Isolate the reviewed scheduler appendix delta; keep the old trace oracle.
+
+    The text fixture is the exact NATIVE_TRAINING_CONTRACT constant from
+    4a8bd2bf, before scheduler support. Current appendix behavior is independently
+    checked by the explicit scheduler assertions below and the execution tests.
+    """
+    assert system.count(NATIVE_TRAINING_CONTRACT) == 1
+    assert "`train_config.lr_schedule` is optional" in system
+    assert '`kind="cosine"` with explicit `horizon_epochs`' in system
+    assert '`kind="step"` with explicit `step_size_epochs` and `gamma`' in system
+    assert "`training_history.learning_rates`" in system
+    historical = (
+        Path(__file__).with_name("fixtures") / "native_training_pre_scheduler.txt"
+    ).read_text()
+    return system.replace(NATIVE_TRAINING_CONTRACT, historical, 1)
 
 
 def trace(tmp_path, variant):
@@ -58,7 +79,11 @@ def trace(tmp_path, variant):
     output = _agent(bridge).run(inp).model_dump(mode="json")
     output.pop("candidate_id", None)  # Random runtime identity, not scientific output.
     calls = [
-        {"system": call.args[0], "user": call.args[1], "label": call.kwargs["label"]}
+        {
+            "system": _historical_trace_system(call.args[0]),
+            "user": without_incomplete_disclosure(call.args[1]),
+            "label": call.kwargs["label"],
+        }
         for call in bridge.generate.call_args_list
     ]
     serialized = json.dumps({"calls": calls, "output": output}, sort_keys=True)

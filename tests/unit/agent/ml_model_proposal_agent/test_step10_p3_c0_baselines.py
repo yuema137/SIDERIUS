@@ -47,6 +47,7 @@ from agent.schemas.proposal import ReasoningPipelineConfig
 from agent.schemas.proposer_evidence import build_proposer_evidence
 from execute_tools.dataset_config import bind_dataset_profile
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
+from tests.helpers.constraint_disclosure import without_incomplete_disclosure
 from tests.helpers.golden import assert_golden
 from tests.helpers.metric_fixtures import accuracy_like_spec, error_like_spec
 from tests.helpers.two_family_profile import make_two_family_profile
@@ -419,7 +420,7 @@ class TestP3C0PipelineBaselines:
                 caps, ["comparison", "causal", "proposing"], strict=True
             ):
                 assert_golden(
-                    user,
+                    without_incomplete_disclosure(user),
                     GOLDENS / f"p3c0_full_{stem}_user.txt",
                     surface=f"P3-C0 {label} user prompt ({mode}, full coverage)",
                 )
@@ -434,7 +435,7 @@ class TestP3C0PipelineBaselines:
             health=False,
         )
         assert_golden(
-            caps[0][3],
+            without_incomplete_disclosure(caps[0][3]),
             GOLDENS / "p3c0_absent_comparison_user.txt",
             surface="P3-C0 comparison user prompt (legacy absence)",
         )
@@ -452,8 +453,10 @@ class TestP3C0LegacyBaselines:
 
     def test_full_coverage(self, tmp_path, pinned_env) -> None:
         assert_golden(
-            capture_legacy(
-                tmp_path, pinned_env, interpretation=full_coverage_interpretation(), health=True
+            without_incomplete_disclosure(
+                capture_legacy(
+                    tmp_path, pinned_env, interpretation=full_coverage_interpretation(), health=True
+                )
             ),
             GOLDENS / "p3c0_full_legacy_reasoning_user.txt",
             surface="P3-C0 legacy reasoning user prompt (full coverage)",
@@ -461,8 +464,13 @@ class TestP3C0LegacyBaselines:
 
     def test_legacy_absence(self, tmp_path, pinned_env) -> None:
         assert_golden(
-            capture_legacy(
-                tmp_path, pinned_env, interpretation=legacy_absence_interpretation(), health=False
+            without_incomplete_disclosure(
+                capture_legacy(
+                    tmp_path,
+                    pinned_env,
+                    interpretation=legacy_absence_interpretation(),
+                    health=False,
+                )
             ),
             GOLDENS / "p3c0_absent_legacy_reasoning_user.txt",
             surface="P3-C0 legacy reasoning user prompt (legacy absence)",

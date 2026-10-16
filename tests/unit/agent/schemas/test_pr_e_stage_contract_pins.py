@@ -68,6 +68,7 @@ PROPOSAL_OUTPUT_KEYS = {
 }
 
 IMPLEMENTOR_INPUT_KEYS = {
+    "constraint_context",  # Explicit current-run constraints, added by #726.
     "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
     # P0 / 01A3b — the composed task projection now enters through
     # ImplementorInput construction instead of a post-validation assignment.
@@ -116,6 +117,7 @@ IMPLEMENTOR_OUTPUT_KEYS = {
 }
 
 VALIDATOR_INPUT_KEYS = {
+    "constraint_context",  # Explicit current-run constraints, added by #726.
     "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
     "model_io_contract",  # Step 04a — deliberate addition, this pin forced it
     "model_probe_context",  # Optional task-owned probe transport (PR #680).
