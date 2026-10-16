@@ -381,13 +381,13 @@ def prepare_attempt(
     plugin_source_excerpt = format_plugin_source_excerpt_block(config_cls)
 
     # Phase K (K.6) — extract the most recent prior attempt's
-    # resource snapshot so the [ACTIVE RESOURCE BUDGETS] block can
+    # resource snapshot so the [PRIOR ATTEMPT EVIDENCE] block can
     # show the LLM a concrete number to react to. Looks at the
     # last memory entry regardless of status (success / skipped):
     # the resource fields are absent on records produced with the
     # gates disabled and on schema-violation records. Round 1
-    # gives None on every field, which collapses to "(no prior
-    # estimate)" in the rendered block.
+    # gives None on every field; estimates render as "not supplied"
+    # when configured budgets cause the resource context to be shown.
     # See docs/resource_estimator_implement.md §10.3 / §10.11.
     last_record = memory_history[-1] if memory_history else {}
     last_memory = last_record.get("memory") or {}
