@@ -118,6 +118,8 @@ def render_panel(key, section, output):
             dpi=220,
             metadata={"Date": None} if extension == "svg" else None,
         )
+    svg = output / f"{key}.svg"
+    svg.write_text("\n".join(line.rstrip() for line in svg.read_text().splitlines()) + "\n")
     plt.close(fig)
 
 
