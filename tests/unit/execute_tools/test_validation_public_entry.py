@@ -24,7 +24,10 @@ def test_transported_custom_metadata_needs_no_plugin_registration(declared, expe
     config = LossConfig(loss_type="custom", loss_name=name)
     assert get_target_torch_dtype(config, resolved_custom_dtype=declared) == expected
     assert name not in LOSS_TARGET_DTYPE_REGISTRY  # No global binding was installed.
-    assert get_target_torch_dtype(config) == torch.int64  # Legacy omission unchanged.
+    # Without transported metadata or a loadable plugin, the target type is
+    # unknown. Refuse instead of silently treating continuous labels as integers.
+    with pytest.raises(ValueError, match="unavailable custom loss"):
+        get_target_torch_dtype(config)
 
 
 def test_conflicting_or_builtin_dtype_override_is_refused(monkeypatch):
