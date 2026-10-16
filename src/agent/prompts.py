@@ -1224,7 +1224,7 @@ def get_planner_user_prompt(
     )
 
     # Phase K (K.6) — per-round numeric resource block + static guidance.
-    # Both blocks are blank-string when no budgets/estimates are configured,
+    # Both blocks are blank when no budgets or prior evidence are supplied,
     # which collapses cleanly in the f-string template.
     active_budgets_block = _format_active_resource_budgets_block(
         current_round=current_round,
