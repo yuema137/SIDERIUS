@@ -1,0 +1,78 @@
+{
+  "snapshot_date": "2026-10-14",
+  "physics": {
+    "baseline": "S4D",
+    "metric": "R\u00b2",
+    "rows": [
+      {
+        "task": "TESS",
+        "siderius": 0.847752,
+        "baseline": 0.665
+      },
+      {
+        "task": "LIGO",
+        "siderius": 0.759887,
+        "baseline": 0.125
+      },
+      {
+        "task": "Project 8",
+        "siderius": 0.857373,
+        "baseline": 0.704
+      }
+    ]
+  },
+  "cancer": {
+    "baseline": "TREE",
+    "metric": "Test AUPRC",
+    "rows": [
+      {
+        "task": "MTG",
+        "siderius": 0.8218937182046592,
+        "baseline": 0.54,
+        "selected_iteration": 6
+      },
+      {
+        "task": "LTG",
+        "siderius": 0.8594606014195455,
+        "baseline": 0.731,
+        "selected_iteration": 10
+      },
+      {
+        "task": "PCNet",
+        "siderius": 0.8226714450685895,
+        "baseline": 0.672,
+        "selected_iteration": 6
+      },
+      {
+        "task": "Multinet",
+        "siderius": 0.809279613420455,
+        "baseline": 0.686,
+        "selected_iteration": 10
+      },
+      {
+        "task": "STRINGdb",
+        "siderius": 0.8145044136709085,
+        "baseline": 0.765,
+        "selected_iteration": 9
+      },
+      {
+        "task": "IRefIndex v9",
+        "siderius": 0.7368895062068143,
+        "baseline": 0.681,
+        "selected_iteration": 8
+      },
+      {
+        "task": "CPDB",
+        "siderius": 0.7849714180276617,
+        "baseline": 0.791,
+        "selected_iteration": 10
+      },
+      {
+        "task": "IRefIndex v15",
+        "siderius": 0.8007510807463556,
+        "baseline": 0.815,
+        "selected_iteration": 10
+      }
+    ]
+  }
+}

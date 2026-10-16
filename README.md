@@ -8,6 +8,14 @@ Work with your coding agent to define the task; SIDERIUS then helps propose
 models, implement them, train and evaluate them, and use the results to guide
 the next attempt.
 
+![Physics time-series results: SIDERIUS validation R² against S4D references](docs/assets/results/physics.svg)
+
+![Cancer gene identification: best Formal test AUPRC with adaptive test feedback, against TREE references](docs/assets/results/cancer.svg)
+
+Sources: [SIDERIUS paper](https://zenodo.org/records/23071121) ·
+[TREE paper](https://doi.org/10.1038/s41551-024-01312-5) ·
+[Comparison data and evaluation conditions](docs/assets/results/provenance.md).
+
 - **Run a research loop:** go from a hypothesis to model code, measured results
   and the next experiment, with a record of each attempt.
 - **Evaluate more than a score:** declare task-specific validity checks alongside
