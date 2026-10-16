@@ -71,7 +71,7 @@ class TestTrajectoryLabels:
             f"Round 1: score=invalidated [role=Formal] [GATE invalidate_round — {SIG}] —" in prompt
         )
         # Role provenance is present for healthy rounds as well.
-        assert "Round 2: score=1.2500 [role=Formal] —" in prompt
+        assert "Round 2: score=1.25 [role=Formal] —" in prompt
 
     def test_flag_off_keeps_bare_skipped(self):
         summary = tuning_output_to_model_run_summary(_collapse_output(), order=_STEP09A_ORDER)

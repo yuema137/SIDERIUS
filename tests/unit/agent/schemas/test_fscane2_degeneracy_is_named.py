@@ -190,18 +190,18 @@ class TestTheNamedAbsenceTravels:
 _DYNAMICS_LINES = {
     "one_epoch": (
         "[focal] train 2.9->2.9 (single_point, 1 ep) · "
-        "val 2.95->2.95 (single_point; best ep 0) · gap +0.05 (comparable)"
+        "val 2.95->2.95 (single_point; best ep 0) · gap +0.050000000000000266 (comparable)"
     ),
     "two_epoch_observed": (
-        "[focal] train 3->2 (decreasing, 2 ep) · "
-        "val 2->2.6 (increasing; best ep 0, +0.6 after best) · gap +0.6 (comparable)"
+        "[focal] train 3.0->2.0 (decreasing, 2 ep) · "
+        "val 2.0->2.6 (increasing; best ep 0, +0.6000000000000001 after best) · gap +0.6000000000000001 (comparable)"
     ),
     "two_epoch_zero_degradation": (
-        "[focal] train 3->2 (decreasing, 2 ep) · "
-        "val 3->2 (decreasing; best ep 1) · gap +0 (comparable)"
+        "[focal] train 3.0->2.0 (decreasing, 2 ep) · "
+        "val 3.0->2.0 (decreasing; best ep 1) · gap +0.0 (comparable)"
     ),
     "no_validation": (
-        "[focal] train 3->2 (decreasing, 2 ep) · val not recorded · gap n/a (unavailable)"
+        "[focal] train 3.0->2.0 (decreasing, 2 ep) · val not recorded · gap n/a (unavailable)"
     ),
 }
 

@@ -706,7 +706,7 @@ this contract is not a sandbox.
 
 The implementor, code validator and proposer share the native training
 appendix boundary. Supported boundaries are `native_training.appendix`, `proposal.template`,
-`interpretation.model_system`, `interpretation.model_user`,
+`interpretation.model_system`, `interpretation.model_user`, `interpretation.score_value`,
 `tuner.execution_provenance`, `tuner.training_dynamics`, and the
 `data_analysis.` stages `skill_selection`, `analysis_plan`,
 `generated_program`, `report_synthesis`, `generated_skill_promotion`,
@@ -716,10 +716,15 @@ uses another historical profile. These boundaries are not a universal replacemen
 for every message produced by every node.
 
 The `tuner.training_dynamics` boundary renders the shared diagnostic line used
-by planner, reflector and interpreter. Native rendering uses six significant
-digits for objective endpoints, observed degradation and signed gaps. An
+by planner, reflector and interpreter. Native rendering uses shortest round-trip decimal
+representations for objective endpoints, observed degradation and signed gaps. An
 explicit historical provider may preserve an older textual representation;
 the persisted diagnosis and metric arithmetic remain unchanged.
+
+The `interpretation.score_value` boundary renders individual chronological
+scores using the same lossless float representation. Missing scores remain
+`skipped`; structured Health invalidation labels still belong to the surrounding
+renderer. Historical experiment profiles may provide their original formatting.
 
 The `tuner.execution_provenance` boundary renders the reflector's execution-provenance block.
 Native rendering uses final execution `events`; an explicit historical provider

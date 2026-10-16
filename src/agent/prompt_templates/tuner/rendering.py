@@ -48,6 +48,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.prompt_rendering import prompt_boundary
+from agent.prompt_templates.numeric import format_evidence_float
 from agent.prompt_templates.tuner.loss_context import PlannerLossContext
 from agent.schemas.execution_provenance import AUTHORITY_DESCRIPTIONS
 from ml_models.models_format_sandbox import LossConfig
@@ -558,10 +559,10 @@ def render_metric_identity_line(spec: Any) -> str:
 
 
 def _fmt(value: float | None, *, signed: bool = False) -> str:
-    """Keep objective-scale detail without expanding very small/large values."""
+    """Keep all represented objective detail; absence remains explicit."""
     if value is None:
         return "n/a"
-    return format(value, "+.6g" if signed else ".6g")
+    return format_evidence_float(value, signed=signed)
 
 
 @prompt_boundary("tuner.training_dynamics")

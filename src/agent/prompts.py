@@ -6,6 +6,7 @@ from typing import Any
 # ==========================================
 # 1. SYSTEM PROMPTS (The Core Logic)
 # ==========================================
+from agent.prompt_templates.numeric import format_evidence_float
 from agent.prompt_templates.timing_attribution import (
     TIMING_ATTRIBUTION_NOTE,
     is_coherent_split,
@@ -582,7 +583,7 @@ def _format_active_resource_budgets_block(
         return ""
 
     def quantity(value, unit):
-        return "not supplied" if value is None else f"{value:.6g} {unit}"
+        return "not supplied" if value is None else f"{format_evidence_float(value)} {unit}"
 
     round_note = f" — planning round {current_round}" if current_round is not None else ""
     lines = [f"[CONFIGURED RESOURCE BUDGETS{round_note}]"]

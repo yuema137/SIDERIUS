@@ -1,7 +1,7 @@
 # Training objective, history and diagnosis
 
-Diagnostic prompt lines use six significant digits, including scientific
-notation for small or large objectives, rather than fixed decimal places.
+Diagnostic prompt lines use the shortest decimal representation that round-trips
+to the stored float, without a fixed precision cutoff.
 The shared `tuner.training_dynamics` rendering boundary covers planner,
 reflector and interpreter. This changes presentation only; persisted values,
 comparability, trend derivation and metric ordering are unchanged. Historical
@@ -12,6 +12,9 @@ attempt estimates, mode and batch size. A prior mode does not select the next
 mode; missing information remains explicit. Trial is a candidate role, not a
 guarantee of sparse data or normalized/comparable scores. The task metric and
 resolved workflow scope determine those properties.
+Configured budgets and prior numeric estimates use the same lossless float
+presenter. Keeping binary floating-point tails does not assert scientific
+significance; uncertainty and significance are not presentation decisions.
 
 **Semantic owners**: `execute_tools/training_history.py` (the observation
 payload), `agent/schemas/training_diagnosis.py` (the derived facts)

@@ -315,11 +315,19 @@ class TestPB2Reflector:
         assert_golden(
             system, GOLDENS / "pb2_reflector_system.txt", surface="PB-2 reflector system prompt"
         )
-        assert_golden(
-            without_incomplete_disclosure(user),
-            GOLDENS / "pb2_reflector_user.txt",
-            surface="PB-2 reflector user prompt",
+        # Keep the historical capture intact; #737 changes only this numeric
+        # evidence line. All remaining bytes still match the original prompt.
+        expected = (GOLDENS / "pb2_reflector_user.txt").read_text(encoding="utf-8")
+        historical = (
+            "train 0.02->0.01 (decreasing, 1 ep) · val 0.02->0.02 "
+            "(decreasing; best ep 0) · gap +0.00 (comparable)"
         )
+        lossless = (
+            "train 0.0189->0.0123 (decreasing, 1 ep) · val 0.0201->0.0155 "
+            "(decreasing; best ep 0) · gap +0.0032 (comparable)"
+        )
+        assert expected.count(historical) == 1
+        assert without_incomplete_disclosure(user) == expected.replace(historical, lossless)
 
 
 # ---------------------------------------------------------------------------
