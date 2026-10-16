@@ -1,21 +1,15 @@
-"""Tuner PLANNING — everything between "what happened so far" and "run this".
+"""Prepare a tuner attempt from run authorities and observed research history.
 
-Step 07 PR 07b, C7d (operator decision A-prime). PRIVATE node-internal module.
-
-One lifecycle phase, moved VERBATIM out of ``run()``: observe the history,
-build the planner's context, ask the LLM, validate its answer, apply the
-operator's overrides and the forced-formal chain, normalize the strategy under
-a partial scope, clamp the epochs, and resolve the round's sample sets. It ends
-where physical work begins — the first guardrail.
-
-The phase reads ~21 run-scoped authorities, which arrive as ONE
-:class:`~nodes.ml_hyperparameter_tune_agent.contracts.RunBindings`, and a
-handful of genuinely per-attempt facts, which stay explicit arguments. It
-returns a :class:`PreparedAttempt`: the products of planning, and nothing else.
+The private request helper assembles planner inputs and calls the bridge once.
+``prepare_attempt`` then validates the response, applies declared policies and
+resolves execution scopes. Neither stage performs training or scoring.
+Run-wide authorities arrive through ``RunBindings``; per-attempt identity stays
+explicit. The result is a ``PreparedAttempt`` for the execution guardrails.
 """
 
 import json
 import os
+from dataclasses import dataclass
 from typing import Any
 
 from agent.prompt_templates.timing_attribution import training_validation_disclosure
@@ -32,6 +26,7 @@ from agent.schemas.parameter_rules import (
     apply_parameter_rules,
     validate_parameter_rule_ownership,
 )
+from agent.schemas.planner_timing import PlannerTimingContext
 from execute_tools.health_checks.candidate_eligibility import (
     is_valid_candidate,
 )
@@ -307,58 +302,52 @@ def _persist_trial_config(configs_dir: str, exp_id: str, trial_config: TrialConf
         json.dump(trial_config.model_dump(), stream, indent=2)
 
 
-def prepare_attempt(
+@dataclass(frozen=True)
+class _PlannerResponse:
+    decision: dict[str, Any]
+    timing_context: PlannerTimingContext
+    memory_history: list[dict[str, Any]]
+
+
+def _request_attempt_plan(
     bindings: RunBindings,
     *,
-    attempt_ordering: AttemptOrdering,
-    attempt_role: AttemptRoleState | None = None,
     identity: AttemptIdentity,
     total_attempts: int,
     attempts_this_round: int,
     formal_trial_winner: dict | None,
-) -> PreparedAttempt:
-    """Plan one attempt: observe -> think -> resolve the round's data.
-
-    Behaviour is byte-identical to the block it replaces; the differential
-    oracle is the evidence. The run-scoped names are unpacked from
-    ``bindings`` below so the moved body reads exactly as it did inside
-    ``run()`` — a rename here would be a second change riding along with a
-    move, and only one of them would be provable.
-    """
-    iteration = identity.round_index
-    attempt_in_round = identity.attempt_in_round
-    is_formal_round = identity.is_formal_round
+) -> _PlannerResponse:
+    """Observe history once and request one plan without resolving its decisions."""
     agent_input = bindings.agent_input
-    sandbox = bindings.sandbox
     brain = bindings.brain
-    run_profile = bindings.run_profile
-    run_metric = bindings.run_metric
     run_order = bindings.run_order
     run_task_render = bindings.run_task_render
-    run_name = bindings.run_name
-    file_index = bindings.file_index
-    max_rounds = bindings.max_rounds
     model_type_setting = bindings.model_type_setting
     trial_allowed = bindings.trial_allowed
-    resolved_data_scope = bindings.resolved_data_scope
     scope_is_partial = bindings.scope_is_partial
     expert_advice_str = bindings.expert_advice_str
     config_manual_data = bindings.config_manual_data
     model_description = bindings.model_description
+    max_rounds = bindings.max_rounds
+    resolved_data_scope = bindings.resolved_data_scope
     trial_vram_budget = bindings.trial_vram_budget
     formal_vram_budget = bindings.formal_vram_budget
     trial_time_budget = bindings.trial_time_budget
     formal_time_budget = bindings.formal_time_budget
+    run_metric = bindings.run_metric
+    iteration = identity.round_index
+    is_formal_round = identity.is_formal_round
+
     N = attempts_this_round
 
     print(
         f"\n\n{'=' * 60}\nROUND {iteration}/{max_rounds} "
-        f"(attempt {attempt_in_round}/{N}, total {total_attempts}): "
+        f"(attempt {identity.attempt_in_round}/{N}, total {total_attempts}): "
         f"Planning...\n{'=' * 60}"
     )
 
     # A. OBSERVE: Retrieve full Research Memory from summary.json
-    memory_history = sandbox.get_summary()
+    memory_history = bindings.sandbox.get_summary()
 
     # Build exploration checklist from config schema + past records
     from agent.prompts import (
@@ -490,6 +479,48 @@ def prepare_attempt(
         # declaration: direction words + metric identity.
         metric_spec=run_metric.spec,
     )
+
+    return _PlannerResponse(
+        decision=decision, timing_context=timing_context, memory_history=memory_history
+    )
+
+
+def prepare_attempt(
+    bindings: RunBindings,
+    *,
+    attempt_ordering: AttemptOrdering,
+    attempt_role: AttemptRoleState | None = None,
+    identity: AttemptIdentity,
+    total_attempts: int,
+    attempts_this_round: int,
+    formal_trial_winner: dict | None,
+) -> PreparedAttempt:
+    """Plan one attempt: observe -> think -> resolve the round's data.
+
+    Request preparation is separate from policy resolution. Keep parsing,
+    overrides, provenance and scope acquisition in their existing order here.
+    """
+    iteration = identity.round_index
+    is_formal_round = identity.is_formal_round
+    agent_input = bindings.agent_input
+    sandbox = bindings.sandbox
+    run_profile = bindings.run_profile
+    run_name = bindings.run_name
+    file_index = bindings.file_index
+    model_type_setting = bindings.model_type_setting
+    trial_allowed = bindings.trial_allowed
+    resolved_data_scope = bindings.resolved_data_scope
+    scope_is_partial = bindings.scope_is_partial
+    response = _request_attempt_plan(
+        bindings,
+        identity=identity,
+        total_attempts=total_attempts,
+        attempts_this_round=attempts_this_round,
+        formal_trial_winner=formal_trial_winner,
+    )
+    memory_history = response.memory_history
+    decision = response.decision
+    timing_context = response.timing_context
 
     # Validate LLM output into ExperimentPlan (with fallback).
     # parse_with_fallback also reports an ordering proposal
