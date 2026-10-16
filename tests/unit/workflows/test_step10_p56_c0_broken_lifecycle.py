@@ -209,7 +209,9 @@ class TestWorkflowHalfIsMissing:
         assert {"analysis_access_policy", "analysis_resource_envelope"} <= keywords
         # PR #546 adds two caller-bound analysis context carriers, no new phase.
         # Plus the independent failed-Formal evidence carrier.
-        assert len(keywords) == 26
+        # #726 adds explicit current-run constraints to the same input.
+        assert "constraint_context" in keywords
+        assert len(keywords) == 27
 
     def test_exactly_two_write_sites_exist_for_the_carrier(self):
         """The §10 rule-4 single-writer contract, for THIS value specifically.

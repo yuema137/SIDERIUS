@@ -14,6 +14,7 @@ from core.resume import ResumeError, restore_prior_state
 from nodes.ml_hyperparameter_tune_agent.feedback import _build_formal_validity_feedback
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import _build_reasoning_prompt
 from nodes.result_interpretation_agent import ResultInterpretationAgent
+from tests.helpers.constraint_disclosure import without_incomplete_disclosure
 from tests.unit.agent.tune_ml_hyperparam_agent.test_trial_validity_feedback import (
     BLOCKING_IDS,
     _trial,
@@ -140,6 +141,9 @@ def test_analysis_brief_receives_failed_formal_facts_in_cold_start(tmp_path):
         {"questions": [{"question": "What authorized input scales were observed?", "priority": 1}]}
     )
     ResultInterpretationAgent(bridge_factory=lambda **kwargs: bridge).run(inp)
-    evidence = json.loads(bridge.calls[0][2])["interpretation_evidence"]
+    # The JSON evidence is followed by a separately checked constraint appendix.
+    evidence = json.loads(without_incomplete_disclosure(bridge.calls[0][2]))[
+        "interpretation_evidence"
+    ]
     assert evidence["failed_formal_attempts"][0]["invalid_count"] == 1
     assert "No prior experimental evidence exists" not in evidence["statement"]
