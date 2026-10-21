@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field, JsonValue
 
-from core.hardware_context import GpuRuntimeFacts
+from core.hardware_models import GpuRuntimeFacts
 from core.runtime_control.pair_admission import ResolvedGpuCeiling
 from core.runtime_control.watchdog_profile import ResolvedWatchdogSettings
 from tools.setup_review.models import SetupDeclarationReport

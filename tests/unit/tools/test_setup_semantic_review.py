@@ -416,11 +416,12 @@ import runpy
 import sys
 class Reject(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        forbidden = ('agent.llm_bridge', 'dotenv', 'openai', 'workflows.task_composition',
+        forbidden = ('torch', 'agent.llm_bridge', 'dotenv', 'openai', 'workflows.task_composition',
                      'workflows.run_one_iteration', 'workflows.model_exploration')
         if any(fullname == item or fullname.startswith(item + '.') for item in forbidden):
             raise AssertionError('Effectful import: ' + fullname)
 sys.meta_path.insert(0, Reject())
+os.environ["OPENAI_API_KEY"] = "synthetic-sentinel-not-a-credential"
 original = type(os.environ).__getitem__
 def guarded(self, key):
     if key in ('OPENAI_API_KEY', 'GEMINI_API_KEY', 'DEEPSEEK_API_KEY'):

@@ -102,3 +102,12 @@ Comparing selected inputs is not a complete dependency hash or a protection
 against hostile writers. Source/plugin changes and time-of-check/time-of-use
 races remain outside this preview's authority. Reviewed-launch binding is a
 separate consuming-owner change; ordinary runner defaults are unchanged.
+
+## Offline schema boundary
+
+`EnvironmentPreviewReport` uses the pure schemas in `core.hardware_models`.
+Loading a saved report for semantic review or explicit skip does not import
+PyTorch, discover devices or read credentials. Actual environment inspection
+continues through `core.hardware_context.inspect_gpu_runtime`; the runtime module
+re-exports the same schema classes for existing callers. JSON field definitions,
+cap arithmetic and hardware discovery behavior are unchanged.
