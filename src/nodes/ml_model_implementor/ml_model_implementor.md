@@ -272,3 +272,22 @@ disabling does not weaken enforcement or synthesize replacement context.
 See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
 for call coverage, planner/reflector timing snapshots, resume identity and
 experiment-owned historical rendering requirements.
+
+## Incoming generated-model configuration
+
+`MLModelImplementor.run` first calls `ImplementorInput.validate_for_implementation`
+to validate the execution-bound baseline using
+`agent/schemas/generated_model_config.py` before model or custom-loss API calls.
+Novel architecture defaults must be scalar `int`, `float` or `bool` values;
+incompatible values are refused with their `baseline_config.model_config` field
+paths. The framework does not rewrite scientific structure into another model.
+Routing identifiers and template-owned fields keep their existing contracts;
+train/loss configuration is outside this check. Schema deserialization and protocol
+transport remain available for archived records and offline prompt reconstruction;
+these operations do not establish execution eligibility.
+
+A populated nested `model_config.model_name` selects reuse and preserves the
+registered model's structured configuration. Existing registry checks still own
+availability. Merely naming a registered `model_type` does not select reuse.
+The code self-check and downstream validator share the scalar-default predicate,
+so correcting a proposal cannot introduce a competing type rule downstream.

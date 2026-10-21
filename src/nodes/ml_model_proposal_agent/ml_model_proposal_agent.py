@@ -1718,6 +1718,11 @@ class MLModelProposalAgent:
         budget_block = render_proposer_time_budget_context(inp)
         if budget_block:
             commit_prompt = budget_block + "\n\n" + commit_prompt
+        parameter_rules = render_proposal_parameter_rules(
+            inp.task_composition_ref, inp.workflow_parameter_rules
+        )
+        if parameter_rules:
+            commit_prompt = parameter_rules + "\n\n" + commit_prompt
         raw = self.bridge.generate(
             _render_commit_system_prompt(
                 inp.forward_contract,
@@ -1737,6 +1742,7 @@ class MLModelProposalAgent:
             )
 
         validation_context = {
+            "implementation_bound": True,
             "loss_registry_names": loss_inventory.names,
             "model_registry_names": _live_model_registry_names(self._registry),
             "allowed_output_types": inp.allowed_output_types,
@@ -2433,6 +2439,7 @@ class MLModelProposalAgent:
                     )
 
                 validation_context = {
+                    "implementation_bound": True,
                     "loss_registry_names": loss_inventory.names,
                     "model_registry_names": _live_model_registry_names(self._registry),
                     "allowed_output_types": inp.allowed_output_types,

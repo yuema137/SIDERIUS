@@ -78,11 +78,11 @@ def test_missing_non_exact_rule_is_deferred_but_authored_invalid_value_refuses()
         _resolve(authored, workflow=rules)
 
 
-def test_unconstrained_and_rendering_modes_preserve_legacy_behavior() -> None:
-    """No declared rule must not change object identity or prompt bytes."""
+def test_unconstrained_baseline_is_unchanged_and_generation_contract_is_visible() -> None:
+    """No declared rule preserves baseline identity; native generation remains constrained."""
     authored = _baseline()
     assert _resolve(authored) is authored
-    assert render_proposal_parameter_rules(None, None) == ""
+    assert "Generated model configuration contract" in render_proposal_parameter_rules(None, None)
     assert "model_config.segmentation_size: exact 40000" in render_proposal_parameter_rules(
         None, _rules("model_config.segmentation_size", {"exact": 40_000})
     )

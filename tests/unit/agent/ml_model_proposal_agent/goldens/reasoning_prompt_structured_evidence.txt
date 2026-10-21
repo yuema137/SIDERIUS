@@ -34,6 +34,9 @@ Arch B.
 ## Constraints
 Existing model type keys (your model_name must NOT be any of these): ['model_a', 'model_b']
 
+## Generated model configuration contract
+Without a populated model_config.model_name reuse selector, the implementor generates a new model. Its architecture defaults in baseline_config.model_config must be individual int, float or bool values, not strings, lists, mappings or null. model_type is a routing identifier; segmentation_size and batch_size retain their template-owned contracts. Naming an existing model_type alone does not select reuse. Express configurable stages as named scalar fields and describe their relationship in the architecture. Do not silently discard structure or stringify containers. To reuse a registered model, set baseline_config.model_config.model_name to its registered name and follow that model's configuration schema. This restriction does not apply to train_config or loss_config.
+
 [RECENT GATE EXHAUSTIONS (last 1 iteration)]
 iter N-1 (most recent):
 All 9 attempts were rejected by the resource gate.

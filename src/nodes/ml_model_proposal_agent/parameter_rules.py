@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 
 from agent.prompt_rendering import prompt_boundary
+from agent.schemas.generated_model_config import GENERATED_MODEL_CONFIG_GUIDANCE
 from agent.schemas.hyperparam_tuning import TaskCompositionRef
 from agent.schemas.parameter_rules import (
     ParameterRuleError,
@@ -30,13 +31,13 @@ def render_proposal_parameter_rules(
             value = rule.model_dump(mode="json")[rule.kind]
             lines.append(f"- {owner} {path}: {rule.kind} {json.dumps(value, sort_keys=True)}")
     if len(lines) == 1:
-        return ""
+        return GENERATED_MODEL_CONFIG_GUIDANCE
     lines.append(
         "Exact values become the effective baseline before the resource preflight; "
         "other rules validate supplied values. Include every known model input "
         "dimension in baseline_config."
     )
-    return "\n".join(lines)
+    return GENERATED_MODEL_CONFIG_GUIDANCE + "\n\n" + "\n".join(lines)
 
 
 def resolve_proposal_baseline_config(

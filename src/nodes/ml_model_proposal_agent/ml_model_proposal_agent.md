@@ -405,3 +405,27 @@ disabling does not weaken enforcement or synthesize replacement context.
 See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
 for call coverage, planner/reflector timing snapshots, resume identity and
 experiment-owned historical rendering requirements.
+
+## Implementation-bound model defaults
+
+Both live proposal modes validate `ProposalOutput` with
+`context={"implementation_bound": True}` after resolving declared parameter
+rules. `agent/schemas/generated_model_config.py` owns the generated architecture
+default contract and the scalar predicate shared with implementation/validation.
+
+Only a populated `baseline_config.model_config.model_name` selects registered
+model reuse. `model_type` alone does not select that route, even if its value is
+a built-in registry key. Without reuse, architecture defaults must be individual
+`int`, `float` or `bool` values. Routing identifiers and template-owned
+`segmentation_size`/`batch_size` retain their existing authorities. Train/loss
+configuration is not recursively restricted. No coercion, flattening or dropping
+of architecture values is performed.
+
+The existing `proposer.parameter_rules` rendering boundary explains this native
+contract to pipeline stages and both legacy requests. The pipeline sends schema
+errors back through its existing proposing correction loop; legacy mode raises
+without adding a new retry. Historical `ProposalOutput` records remain readable
+without the live context, but `MLModelImplementor.run` independently enforces the same
+contract before any generation call, including for fixed plans and direct callers.
+Explicit experiment-owned historical renderers may preserve prior text; they do
+not disable execution validation or authorize mutation of old workspace locks.

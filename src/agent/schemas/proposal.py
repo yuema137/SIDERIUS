@@ -15,6 +15,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from agent.schemas.constraint_disclosure import ConstraintContext
+from agent.schemas.generated_model_config import validate_implementation_baseline
 from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
@@ -1361,6 +1362,13 @@ class ProposalOutput(BaseModel):
                 "types; the constraint is a run property, not a model choice."
             )
         return v
+
+    @model_validator(mode="after")
+    def _validate_implementation_bound_baseline(self, info):
+        """Live proposals must satisfy their downstream generation contract."""
+        if (info.context or {}).get("implementation_bound"):
+            validate_implementation_baseline(self.baseline_config)
+        return self
 
     @model_validator(mode="after")
     def _validate_baseline_segmentation_size(self):

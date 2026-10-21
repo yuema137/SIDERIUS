@@ -15,6 +15,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.constraint_disclosure import ConstraintContext
+from agent.schemas.generated_model_config import validate_implementation_baseline
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput, TaskCompositionRef
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.model_probe import ModelProbeContext
@@ -404,6 +405,10 @@ class ImplementorInput(BaseModel):
         "(e.g. implementor_output_{run_name}.json). Omitted generated-code "
         "destinations are derived from this local workspace.",
     )
+
+    def validate_for_implementation(self) -> None:
+        """Check execution eligibility without restricting archival deserialization."""
+        validate_implementation_baseline(self.baseline_config)
 
     @model_validator(mode="after")
     def _resolve_generated_output_dirs(self):

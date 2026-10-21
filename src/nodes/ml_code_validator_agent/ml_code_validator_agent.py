@@ -56,6 +56,7 @@ from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.native_training import render_native_training_appendix
+from agent.schemas.generated_model_config import non_scalar_defaults
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.model_probe import ModelProbeContext, ModelProbeOptions
@@ -401,10 +402,7 @@ def _check_config_fields(config_fields: dict) -> tuple[bool, str | None]:
     Verify all config field default values are scalar types (int, float, bool).
     Returns (valid, error_message_or_None).
     """
-    bad = []
-    for name, value in config_fields.items():
-        if not isinstance(value, (int, float, bool)):
-            bad.append(f"'{name}': {type(value).__name__}")
+    bad = [f"'{name}': {kind}" for name, kind in non_scalar_defaults(config_fields).items()]
     if bad:
         return False, "Non-scalar config fields: " + ", ".join(bad)
     return True, None

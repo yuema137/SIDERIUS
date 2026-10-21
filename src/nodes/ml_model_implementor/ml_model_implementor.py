@@ -37,6 +37,7 @@ from agent.prompt_templates.native_training import render_native_training_append
 from agent.prompt_templates.proposal import live_loss_metadata
 from agent.schemas.custom_loss_contract import CustomLossApplicability
 from agent.schemas.custom_loss_target import resolve_custom_loss_target
+from agent.schemas.generated_model_config import non_scalar_defaults
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput, LossProvenance
 from agent.schemas.model_io_contract import ModelIOContract, TensorContract
@@ -1853,11 +1854,7 @@ class MLModelImplementor:
 
         # Check 2: config fields must be scalar (int, float, bool)
         config_fields = code.get("config_fields", {})
-        non_scalar = {
-            k: type(v).__name__
-            for k, v in config_fields.items()
-            if not isinstance(v, (int, float, bool))
-        }
+        non_scalar = non_scalar_defaults(config_fields)
         if non_scalar:
             return (
                 f"Non-scalar config fields: {non_scalar}. "
@@ -2087,6 +2084,7 @@ class MLModelImplementor:
     # ------------------------------------------------------------------
 
     def run(self, inp: ImplementorInput) -> ImplementorOutput:
+        inp.validate_for_implementation()
         # L4b — generate the custom loss BEFORE the model. Sequential order
         # so a loss-generation failure short-circuits before any model LLM
         # spend. ``loss_provenance`` is None when the proposer used a

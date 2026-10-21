@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agent.prompt_templates.native_training import NATIVE_TRAINING_CONTRACT
+from agent.schemas.generated_model_config import GENERATED_MODEL_CONFIG_GUIDANCE
 from tests.helpers.constraint_disclosure import without_incomplete_disclosure
 
 from .test_causal_stage_validation import _agent, _pipeline_input
@@ -37,6 +38,16 @@ def _historical_trace_system(system):
         Path(__file__).with_name("fixtures") / "native_training_pre_scheduler.txt"
     ).read_text()
     return system.replace(NATIVE_TRAINING_CONTRACT, historical, 1)
+
+
+def _historical_trace_user(user):
+    """Isolate #753's declared guidance addition, retaining the old trace oracle.
+
+    Actual guidance presence and invalid-response repair are independently checked
+    through production calls in test_generated_config_contract.py.
+    """
+    assert user.count(GENERATED_MODEL_CONFIG_GUIDANCE) == 1
+    return user.replace("\n\n" + GENERATED_MODEL_CONFIG_GUIDANCE, "", 1)
 
 
 def trace(tmp_path, variant):
@@ -81,7 +92,7 @@ def trace(tmp_path, variant):
     calls = [
         {
             "system": _historical_trace_system(call.args[0]),
-            "user": without_incomplete_disclosure(call.args[1]),
+            "user": _historical_trace_user(without_incomplete_disclosure(call.args[1])),
             "label": call.kwargs["label"],
         }
         for call in bridge.generate.call_args_list
