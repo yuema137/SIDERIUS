@@ -440,3 +440,109 @@ def test_unknown_or_nonfinite_provider_timestamp_never_yields_valid_prior(tmp_pa
         _KEY, "training", now=_LOOKUP_TIME, timestamp_parser=lambda timestamp: parsed
     )
     assert lookup.status == "stale"
+
+
+@pytest.mark.parametrize(
+    "earlier, latest",
+    [
+        ("2026-07-23T12:00:00+0800", "2026-07-23T05:00:00+0000"),
+        ("2026-07-23T12:00:00+00:00:00.5", "2026-07-23T12:00:00+00:00:00.25"),
+    ],
+)
+def test_newest_observation_uses_instant_not_wall_clock_text(tmp_path, earlier, latest):
+    store = ObservationStore(str(tmp_path))
+    for timestamp in (latest, earlier):
+        store.append(_observation(timestamp=timestamp), writer_id="fixture")
+    now = datetime.strptime(latest, "%Y-%m-%dT%H:%M:%S%z").timestamp()
+    now += timedelta(days=90).total_seconds()
+    lookup = store.lookup_prior(_KEY, "training", now=now)
+    assert lookup.status == "valid"
+    assert lookup.newest_timestamp == latest
+
+
+@pytest.mark.parametrize(
+    "samples, expected",
+    [
+        (
+            [
+                ("12:00:00+0800", True),
+                ("12:01:00+0800", True),
+                ("12:02:00+0800", True),
+                ("05:00:00+0000", False),
+            ],
+            "valid",
+        ),
+        (
+            [
+                ("13:00:00+0800", False),
+                ("06:00:00+0000", True),
+                ("07:00:00+0000", True),
+                ("08:00:00+0000", True),
+            ],
+            "evicted_drift",
+        ),
+    ],
+)
+def test_drift_uses_chronologically_recent_observations(tmp_path, samples, expected):
+    store = ObservationStore(str(tmp_path))
+    for timestamp, drift in reversed(samples):
+        store.append(
+            _observation(
+                timestamp="2026-07-23T" + timestamp,
+                actual_seconds=80 if drift else 40,
+                predicted_seconds=40,
+            ),
+            writer_id="fixture",
+        )
+    now = datetime.fromisoformat("2026-07-23T09:00:00+00:00").timestamp()
+    assert store.lookup_prior(_KEY, "training", now=now).status == expected
+
+
+def test_unknown_chronology_preserves_evidence_but_cannot_claim_drift(tmp_path):
+    store = ObservationStore(str(tmp_path))
+    for timestamp in ("not-a-time", "2026-07-23T12:00:00+0000", "000-invalid"):
+        store.append(
+            _observation(timestamp=timestamp, actual_seconds=80, predicted_seconds=40),
+            writer_id="fixture",
+        )
+    original = {p.name: p.read_bytes() for p in tmp_path.glob("observations_*.jsonl")}
+    lookup = store.lookup_prior(_KEY, "training", now=_LOOKUP_TIME)
+    assert lookup.status == "stale"
+    assert lookup.newest_timestamp is None
+    assert lookup.n_observations == 3
+    assert lookup.prior_unit_ms == 80
+    assert original == {p.name: p.read_bytes() for p in tmp_path.glob("observations_*.jsonl")}
+
+
+def test_equivalent_instants_use_deterministic_textual_tie_breaker(tmp_path):
+    timestamps = ["2026-07-23T12:00:00+0000", "2026-07-23T20:00:00+0800"]
+    lookups = []
+    now = datetime.fromisoformat(timestamps[0]).timestamp()
+    for name, order in (("forward", timestamps), ("reverse", list(reversed(timestamps)))):
+        store = ObservationStore(str(tmp_path / name))
+        for timestamp in order:
+            store.append(_observation(timestamp=timestamp), writer_id="fixture")
+        lookups.append(store.lookup_prior(_KEY, "training", now=now))
+    assert lookups[0] == lookups[1]
+    assert lookups[0].newest_timestamp == max(timestamps)
+
+
+@pytest.mark.parametrize("invalid", [None, (float("nan"), "x"), (float("inf"), "x")])
+def test_unavailable_order_key_cannot_yield_valid_prior(tmp_path, invalid):
+    store = ObservationStore(str(tmp_path))
+    store.append(_observation(), writer_id="fixture")
+    lookup = store.lookup_prior(
+        _KEY, "training", now=_LOOKUP_TIME, timestamp_order_key=lambda timestamp: invalid
+    )
+    assert lookup.status == "stale"
+    assert lookup.newest_timestamp is None
+
+
+def test_custom_parser_is_shared_by_age_and_default_ordering(tmp_path):
+    store = ObservationStore(str(tmp_path))
+    epochs = {"textually-last": 1.0, "actually-latest": 100.0}
+    for timestamp in epochs:
+        store.append(_observation(timestamp=timestamp), writer_id="fixture")
+    lookup = store.lookup_prior(_KEY, "training", now=101, timestamp_parser=epochs.get)
+    assert lookup.status == "valid"
+    assert lookup.newest_timestamp == "actually-latest"

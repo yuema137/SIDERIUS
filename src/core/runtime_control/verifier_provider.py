@@ -19,7 +19,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.planner_strategy_identity import source_fingerprint
 from core.runtime_control.adaptive import AdaptiveUnitVerification, AdaptiveVerificationConfig
 from core.runtime_control.completion import RuntimeCompletionPolicy
-from core.runtime_control.observation_store import ObservationTimestampParser
+from core.runtime_control.observation_store import (
+    ObservationTimestampOrderKey,
+    ObservationTimestampParser,
+)
 from core.runtime_control.records import PhaseMeasurement, PredictionSource, RuntimePrediction
 from core.runtime_control.workload import ResolvedPhaseWorkload
 
@@ -106,6 +109,7 @@ class RuntimeVerifierProfile:
     sources: Mapping[str, Path]
     qualified_assemblies: frozenset[str]
     observation_timestamp_parser: ObservationTimestampParser | None = None
+    observation_timestamp_order_key: ObservationTimestampOrderKey | None = None
 
     def __post_init__(self) -> None:
         if not self.sources:
@@ -158,17 +162,25 @@ def resolve_observation_timestamp_parser(
     selection: str | None,
     expected: RuntimeVerifierIdentity | None,
 ) -> ObservationTimestampParser | None:
+    """Retain the parser-only API; resolve both semantics under one identity."""
+    return resolve_observation_time_policy(selection, expected)[0]
+
+
+def resolve_observation_time_policy(
+    selection: str | None,
+    expected: RuntimeVerifierIdentity | None,
+) -> tuple[ObservationTimestampParser | None, ObservationTimestampOrderKey | None]:
     """Resolve prior timestamp semantics under the launch-pinned provider identity."""
     if selection is None:
         if expected is not None:
             raise ValueError("Native prior lookup cannot carry an external identity")
-        return None
+        return None, None
     if expected is None:
         raise ValueError("Selected prior lookup requires a resolved identity")
     profile = resolve_runtime_verifier(selection)
     if profile.identity() != expected:
         raise ValueError("Runtime verifier changed before prior lookup")
-    return profile.observation_timestamp_parser
+    return profile.observation_timestamp_parser, profile.observation_timestamp_order_key
 
 
 def create_runtime_verifier(
