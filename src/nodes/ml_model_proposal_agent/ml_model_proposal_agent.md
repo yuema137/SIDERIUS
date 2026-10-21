@@ -429,3 +429,20 @@ without the live context, but `MLModelImplementor.run` independently enforces th
 contract before any generation call, including for fixed plans and direct callers.
 Explicit experiment-owned historical renderers may preserve prior text; they do
 not disable execution validation or authorize mutation of old workspace locks.
+
+## Generated-name collision and registered reuse
+
+Both live routes pass `existing_model_types` and the current model registry names
+to `ProposalOutput.validate_model_name_availability` after baseline parameter
+rules are resolved and the schema is validated. A
+name already used by the workflow is refused for new generation. The documented
+Branch B exception is accepted only if the effective nested
+`baseline_config.model_config.model_name` equals the proposal's top-level name
+and is present in the registry. A different registered name cannot authorize
+colliding with another model's name. Registry membership validation continues
+to reject phantom reuse, including when the top-level name is otherwise unused.
+
+Legacy refusal and pipeline structural-correction limits are unchanged. Archive
+deserialization without live context stays supported; it does not authorize a
+new run. This change enforces the existing reuse exception and does not rewrite
+historical prompt templates or expand registered configuration capabilities.

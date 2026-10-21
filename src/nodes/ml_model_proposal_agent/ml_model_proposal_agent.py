@@ -1734,13 +1734,6 @@ class MLModelProposalAgent:
         )
 
         proposed_name = raw.get("model_name", "")
-        if proposed_name in inp.existing_model_types:
-            raise ValueError(
-                f"LLM proposed model_name '{proposed_name}' which already exists in "
-                f"existing_model_types: {inp.existing_model_types}. "
-                f"Re-run or adjust the constraints."
-            )
-
         validation_context = {
             "implementation_bound": True,
             "loss_registry_names": loss_inventory.names,
@@ -1769,6 +1762,9 @@ class MLModelProposalAgent:
                 "custom_loss_spec": raw.get("custom_loss_spec"),
             },
             context=validation_context,
+        )
+        output.validate_model_name_availability(
+            inp.existing_model_types, validation_context["model_registry_names"]
         )
         output = _attach_custom_loss_contract(output, inp.forward_contract)
 
@@ -2431,20 +2427,13 @@ class MLModelProposalAgent:
 
             try:
                 proposed_name = raw.get("model_name", "")
-                if proposed_name in inp.existing_model_types:
-                    raise ValueError(
-                        f"model_name '{proposed_name}' already exists in "
-                        f"existing_model_types: {inp.existing_model_types}. "
-                        f"Choose a different name."
-                    )
-
                 validation_context = {
                     "implementation_bound": True,
                     "loss_registry_names": loss_inventory.names,
                     "model_registry_names": _live_model_registry_names(self._registry),
                     "allowed_output_types": inp.allowed_output_types,
                 }
-                output = ProposalOutput.model_validate(
+                candidate_output = ProposalOutput.model_validate(
                     {
                         "model_name": proposed_name,
                         # V21 PR A — see the note at the other construction site.
@@ -2471,7 +2460,12 @@ class MLModelProposalAgent:
                     },
                     context=validation_context,
                 )
-                output = _attach_custom_loss_contract(output, inp.forward_contract)
+                candidate_output.validate_model_name_availability(
+                    inp.existing_model_types, validation_context["model_registry_names"]
+                )
+                candidate_output = _attach_custom_loss_contract(
+                    candidate_output, inp.forward_contract
+                )
                 # Citation discipline — warnings, not hard failures.
                 citation_violations = _check_citation_discipline(
                     source_refs=reasoning_output.get("source_refs", []),
@@ -2479,11 +2473,12 @@ class MLModelProposalAgent:
                     proposed_change=reasoning_output.get("proposed_change", ""),
                 )
                 if citation_violations:
-                    output.memo_consistency_notes.extend(citation_violations)
+                    candidate_output.memo_consistency_notes.extend(citation_violations)
                     print(
                         f"   Citation check: {len(citation_violations)} "
                         f"violation(s) appended to memo_consistency_notes."
                     )
+                output = candidate_output
                 break  # structurally valid — proceed to pre-flight
 
             except (ValidationError, ValueError) as exc:

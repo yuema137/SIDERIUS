@@ -1557,6 +1557,21 @@ class ProposalOutput(BaseModel):
             f"submit Branch B with a loss_name that is not in the registry."
         )
 
+    def validate_model_name_availability(
+        self, existing_model_types: list[str], registry_names: list[str]
+    ) -> None:
+        """Check generation collisions after resolving and validating the baseline."""
+        if self.model_name not in existing_model_types:
+            return
+        config = self.baseline_config.get("model_config")
+        reuse_name = config.get("model_name") if isinstance(config, dict) else None
+        if reuse_name == self.model_name and reuse_name in registry_names:
+            return
+        raise ValueError(
+            f"model_name '{self.model_name}' already exists in "
+            f"existing_model_types: {existing_model_types}. Choose a different name."
+        )
+
     @model_validator(mode="after")
     def _validate_branch_b_model_registry_membership(self, info):
         """Reject phantom Branch B for the MODEL surface — symmetric to
