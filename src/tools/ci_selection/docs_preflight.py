@@ -9,18 +9,28 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-# These are operator guides, not runtime prompt/skill inputs. Keep this list
-# explicit: docs/agent-reference contains payloads consumed by orchestration.
-ORDINARY_DOCUMENTS = frozenset(
-    {
-        "README.md",
-        "docs/getting-started/README.md",
-        "docs/getting-started/first-run.md",
-        "docs/getting-started/installation.md",
-    }
+# Audited reference/prose areas, not runtime prompt/skill inputs. In particular,
+# docs/agent-reference contains payloads; source READMEs can enter prompt digests.
+ORDINARY_DOCUMENT_DIRECTORIES = frozenset(
+    {"getting-started", "guides", "concepts", "reference", "releases", "audit"}
 )
+
+
+def is_ordinary_document(name: str) -> bool:
+    """Recognize canonical paths within the audited documentation boundary."""
+    path = PurePosixPath(name)
+    if path.as_posix() != name or path.is_absolute() or ".." in path.parts:
+        return False
+    if name == "README.md":
+        return True
+    return (
+        len(path.parts) >= 3
+        and path.parts[0] == "docs"
+        and path.parts[1] in ORDINARY_DOCUMENT_DIRECTORIES
+        and path.suffix.lower() == ".md"
+    )
 
 
 def ordinary_docs_only(raw: bytes, root: Path) -> bool:
@@ -37,7 +47,7 @@ def ordinary_docs_only(raw: bytes, root: Path) -> bool:
         return False
     for status, encoded in zip(fields[::2], fields[1::2], strict=True):
         name = os.fsdecode(encoded)
-        if status != b"M" or name not in ORDINARY_DOCUMENTS:
+        if status != b"M" or not is_ordinary_document(name):
             return False
         path = root / name
         if not path.is_file() or any(p.is_symlink() for p in (path, *path.parents)):

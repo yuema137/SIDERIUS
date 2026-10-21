@@ -85,7 +85,8 @@ jobs:
           .venv/bin/python -m pytest --noconftest -q \
             tests/unit/tools/test_md_links.py \
             tests/unit/tools/test_user_contract_docs_census.py \
-            tests/unit/docs/test_readme_audience_boundary.py
+            tests/unit/tools/test_task_split_evidence_docs.py \
+            tests/unit/docs/
 
       - name: Install dependencies (incl. dev group)
         if: steps.documentation.outputs.docs_only != 'true'
