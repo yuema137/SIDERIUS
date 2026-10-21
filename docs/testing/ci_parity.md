@@ -522,3 +522,26 @@ git diff --name-status -z origin/master...HEAD \
 `plan` prints selection and shard metadata only. Use `bulk` in place of `plan`
 only when the selected tests should actually execute. An absent or invalid
 changed-path file deliberately produces a full plan.
+
+## Ordinary documentation fast path
+
+PR CI classifies the shared NUL-delimited Git diff before installing application
+dependencies. `src/tools/ci_selection/docs_preflight.py` owns the explicit list
+of ordinary documents: the root README and the three current getting-started
+pages. Only modifications to existing regular files qualify. Empty, malformed,
+mixed, added, removed, renamed, copied, type-changed or unrecognized paths retain
+the normal CI route. Classification failure or a missing output also retains it.
+
+The existing quality job/status stays present. A qualifying PR installs only the
+frozen development dependency group and runs the existing Markdown link,
+user-contract and README audience checks with application conftests disabled.
+It skips application installation, Ruff, Pyright, unit-test execution lanes and
+their evidence upload. Documentation-check failures still fail the job.
+
+This exception does not treat all Markdown as inert: orchestration payloads,
+skills and prompts can be runtime inputs. Extending the list requires auditing
+consumers. Python comments, docstrings and schema descriptions use normal CI;
+no semantic equivalence is inferred from a small textual diff. Normal PRs keep
+the affected-test selector, and master pushes, scheduled/manual runs and unknown
+impact keep their existing full-suite policy. Production and paper experiment
+configuration are unchanged.

@@ -57,18 +57,52 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      # Bootstrap uses only Python's standard library; no application install.
+      # Missing/failed classification retains normal CI, never skips checks.
+      - name: Classify ordinary documentation changes
+        id: documentation
+        env:
+          PR_BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            exit 0
+          fi
+          git fetch --no-tags origin "$PR_BASE_REF" || exit 0
+          CHANGED_RAW="$RUNNER_TEMP/ci_changed_name_status.z"
+          git diff --name-status -z "origin/$PR_BASE_REF...HEAD" > "$CHANGED_RAW" || {
+            rm -f "$CHANGED_RAW"
+            exit 0
+          }
+          uv run --no-project python src/tools/ci_selection/docs_preflight.py \
+            --root . --changes "$CHANGED_RAW" || exit 0
+
+      - name: Check ordinary documentation
+        if: steps.documentation.outputs.docs_only == 'true'
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          uv sync --only-group dev --frozen
+          .venv/bin/python -m pytest --noconftest -q \
+            tests/unit/tools/test_md_links.py \
+            tests/unit/tools/test_user_contract_docs_census.py \
+            tests/unit/docs/test_readme_audience_boundary.py
+
       - name: Install dependencies (incl. dev group)
+        if: steps.documentation.outputs.docs_only != 'true'
         run: uv sync --group dev --frozen
 
       - name: Lint — ruff check
+        if: steps.documentation.outputs.docs_only != 'true'
         run: uv run ruff check .
 
       - name: Lint — ruff format (check only, no rewrite)
+        if: steps.documentation.outputs.docs_only != 'true'
         run: uv run ruff format --check .
 
       # The configured basic baseline and diagnostic overrides are authoritative.
       # See CLAUDE.md for policy; pyrightconfig.json owns scope and severities.
       - name: Type check — pyright (configured basic)
+        if: steps.documentation.outputs.docs_only != 'true'
         run: uv run pyright
 
       # ---- selective unit tests -------------------------------------------
@@ -79,6 +113,7 @@ jobs:
       # resolve to the full suite.
       - name: Resolve affected test suites
         id: selection
+        if: steps.documentation.outputs.docs_only != 'true'
         run: |
           # NO `set -e` here, deliberately. Every failure below must fall back
           # to the FULL SUITE, never fail the build and never skip tests. A
@@ -92,12 +127,13 @@ jobs:
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             full "${{ github.event_name }} runs everything by policy"
           fi
-          git fetch --no-tags origin "${{ github.base_ref }}" \
-            || full "could not fetch the base ref"
           CHANGED_RAW="$RUNNER_TEMP/ci_changed_name_status.z"
           CHANGED_JSON="$RUNNER_TEMP/ci_changed_files.json"
-          git diff --name-status -z "origin/${{ github.base_ref }}...HEAD" > "$CHANGED_RAW" \
-            || full "could not diff against the base ref"
+          # Discovery ran before installation. Missing evidence preserves the
+          # full-suite fallback for a failed fetch or diff.
+          if [ ! -f "$CHANGED_RAW" ]; then
+            full "could not fetch the base ref or could not diff against the base ref"
+          fi
           if [ ! -s "$CHANGED_RAW" ]; then
             full "empty diff"
           fi
@@ -131,6 +167,7 @@ jobs:
       # cannot go faster. `cpu_count` is recorded in the manifest so the FIRST
       # remote run corrects this profile with fact rather than assumption.
       - name: Unit tests — repository CI harness (no real_run, no integration)
+        if: steps.documentation.outputs.docs_only != 'true'
         env:
           CI_BULK_SHARDS: "4"
           CI_SHARD_THREADS: "1"
@@ -165,7 +202,7 @@ jobs:
       # workflow that stops at the first red step is the fix-one/rerun loop
       # wearing different clothes.
       - name: Unit tests — sensitive lane (serial, quiesced)
-        if: always()
+        if: always() && steps.documentation.outputs.docs_only != 'true'
         env:
           CI_SHARD_THREADS: "1"
         run: |
@@ -182,7 +219,7 @@ jobs:
       # zero extra cost. `if: always()` because a RED run is exactly when the
       # per-node detail matters most.
       - name: Upload structured test evidence
-        if: always()
+        if: always() && steps.documentation.outputs.docs_only != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ci-parity-evidence
