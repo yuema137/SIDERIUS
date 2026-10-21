@@ -371,3 +371,72 @@ def test_storage_evidence_does_not_change_prior_or_calibration_identity(tmp_path
         priors.append(store.lookup_prior(_KEY, "training", now=_LOOKUP_TIME))
     assert priors[0] == priors[1]
     assert priors[1].prior_unit_ms == 40.0
+
+
+@pytest.mark.parametrize("zone", ["UTC", "America/Los_Angeles", "Asia/Shanghai"])
+def test_offset_age_and_expiry_are_independent_of_host_timezone(tmp_path, zone):
+    """Exercise persisted observations in isolated host-timezone processes."""
+    import json
+    import os
+    import subprocess
+    import sys
+    import time
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("host timezone isolation requires time.tzset")
+
+    script = """
+import json, sys, time
+from datetime import datetime
+from pathlib import Path
+from core.runtime_control.observation_store import ObservationStore, PriorPolicy, _age_seconds, observation_calibration_key
+from core.runtime_control.records import RuntimeObservation
+
+time.tzset()
+payload = json.load(sys.stdin)
+now = datetime.fromisoformat("2026-07-23T12:00:00+00:00").timestamp()
+offsets = ["2026-07-23T12:00:00+0000", "2026-07-23T05:00:00-0700",
+           "2026-07-23T20:00:00+0800", "2026-07-23T17:30:00+05:30",
+           "2026-07-23T12:00:00Z"]
+results = []
+for index, timestamp in enumerate(offsets):
+    observation = RuntimeObservation.model_validate(dict(payload, timestamp=timestamp))
+    store = ObservationStore(str(Path(sys.argv[1]) / str(index)))
+    store.append(observation, writer_id="offset-test")
+    key = observation_calibration_key(observation, "training")
+    statuses = []
+    for days in (0.5, 90):
+        for delta in (-1, 0, 1):
+            lookup = store.lookup_prior(key, "training", policy=PriorPolicy(max_age_days=days),
+                                        now=now + days * 86400 + delta)
+            statuses.append(lookup.status)
+            assert lookup.prior_unit_ms == 40.0
+    results.append([_age_seconds(timestamp, now=now), statuses])
+naive = "2026-07-23T12:00:00"
+local_epoch = time.mktime(time.strptime(naive, "%Y-%m-%dT%H:%M:%S"))
+assert _age_seconds(naive, now=local_epoch + 60) == 60
+assert _age_seconds("not-a-timestamp", now=now) is None
+assert _age_seconds(offsets[0], now=now - 1) == -1
+print(json.dumps(results))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)],
+        input=_observation().model_dump_json(),
+        text=True,
+        capture_output=True,
+        env={**os.environ, "TZ": zone},
+        check=True,
+        timeout=30,
+    )
+    expected = [0.0, ["valid", "valid", "stale"] * 2]
+    assert json.loads(result.stdout) == [expected] * 5
+
+
+@pytest.mark.parametrize("parsed", [None, float("nan"), float("inf"), -float("inf")])
+def test_unknown_or_nonfinite_provider_timestamp_never_yields_valid_prior(tmp_path, parsed):
+    store = ObservationStore(str(tmp_path))
+    store.append(_observation(), writer_id="fixture")
+    lookup = store.lookup_prior(
+        _KEY, "training", now=_LOOKUP_TIME, timestamp_parser=lambda timestamp: parsed
+    )
+    assert lookup.status == "stale"
