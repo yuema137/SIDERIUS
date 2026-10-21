@@ -3085,10 +3085,12 @@ class HyperparamTuningInput(BaseModel):
     max_retries: int | None = Field(
         default=None,
         description=(
-            "Maximum retry attempts for transient API errors (429, 5xx). "
-            "None (default) = retry indefinitely — the process owner "
-            "(Slurm wall time, Ctrl-C) is the natural timeout. Set to a "
-            "positive integer for interactive use."
+            "Maximum total transport attempts, including the initial call, for "
+            "429, 5xx, timeout and connection failures. Both 0 and 1 allow only "
+            "the initial attempt; 2 allows one retry. None (default) permits "
+            "unbounded status-error retries subject to enclosing deadlines or "
+            "cancellation. Timeout/connection failures also consume a separate "
+            "bounded allowance. Does not cap content repair or workflow rounds."
         ),
     )
 

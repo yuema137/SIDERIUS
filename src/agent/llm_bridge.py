@@ -455,18 +455,17 @@ class LLMBridge:
                         - Both set: cross-provider routing (e.g. gemini for
                           planner, openai for reflector).
             max_retries:
-                      Maximum number of retry attempts for transient API
-                      errors (429, 5xx, connection, timeout). ``None``
-                      (default) means retry indefinitely — the process
-                      owner (Slurm wall time, Ctrl-C) is the natural
-                      timeout. Set to a positive integer for interactive
-                      use where infinite retry would be annoying (e.g. 6
-                      for the legacy ~77s window, 20 for ~15 minutes).
-                      Backoff doubles from 2.5s up to a 60s cap.
-
-                      NOTE: this budget governs RETRYABLE STATUS errors
-                      (429 / 5xx). Timeouts and connection errors have
-                      their own bounded budget — see ``timeout_retries``.
+                      Maximum total transport attempts, including the initial
+                      call, for 429, 5xx, connection and timeout failures.
+                      Both 0 and 1 allow only the initial attempt; 2 allows
+                      one retry. ``None`` (constructor default) permits
+                      unbounded status-error retries, subject to any enclosing
+                      deadline or process cancellation. Selected route profiles
+                      may set a finite limit. Timeout/connection failures also
+                      consume the bounded ``timeout_retries`` allowance.
+                      Backoff doubles from 2.5s up to a 60s cap unless the
+                      provider supplies a retry delay. Attempt counts do not
+                      bound elapsed time, content repair or workflow rounds.
             reflect_retry_policy:
                       Optional independent reflector transport policy. Omitted inherits
                       max_retries; an explicit policy with None is unbounded.
@@ -1341,28 +1340,15 @@ class LLMBridge:
     # Backoff: doubles from 2.5s up to a 60s cap, then stays at 60s.
     # Schedule: 2.5, 5, 10, 20, 40, 60, 60, 60, ...
     #
-    # When max_retries is None (default): retry indefinitely — the process
-    # owner (Slurm wall time, Ctrl-C) is the natural timeout. This is the
-    # right default for batch jobs where burning a round on a transient 503
-    # is far more expensive than waiting a few extra minutes.
+    # max_retries counts total transport attempts, including the initial call.
+    # Both 0 and 1 allow only the initial attempt. None leaves status retries
+    # unbounded; route profiles may set a finite limit. Enclosing deadlines
+    # and process cancellation still apply. See retry-policy.md.
     #
-    # When max_retries is an integer: stop after that many total attempts
-    # (e.g. max_retries=6 gives 1 initial + 5 retries, similar to the old
-    # fixed schedule). Use this for interactive/lilab sessions.
-    #
-    # Catches 429 (rate limit / quota) and 5xx (server errors incl. Google
-    # 503 "high demand"). Other 4xx errors (auth, bad request, model not
-    # found) are raised immediately — they will not heal on retry.
-    #
-    # TIMEOUT and CONNECTION errors are ALSO caught here, but they consume a
-    # SEPARATE bounded budget (`timeout_retries`, default
-    # DEFAULT_TIMEOUT_RETRIES) rather than this one. See the 2026-08-17 note
-    # on DEFAULT_REQUEST_TIMEOUT_SECONDS: unbounded timeout retry against a
-    # too-short client timeout is a loop that cannot make progress.
-    #
-    # The unbounded default for 429 is DELIBERATE and unchanged: a quota
-    # exhaustion heals when the operator tops up the balance, and the chain
-    # resuming by itself is the intended behaviour for long batch runs.
+    # Retryable statuses are 429 and 5xx. Other 4xx errors raise immediately.
+    # Timeout/connection failures count toward the total-attempt limit AND
+    # their separate bounded timeout_retries allowance. Neither limit controls
+    # content repair or workflow rounds, or establishes a total cost budget.
     _RETRY_INITIAL_WAIT = 2.5
     _RETRY_MAX_WAIT = 60.0
 

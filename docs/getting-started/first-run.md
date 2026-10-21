@@ -48,13 +48,24 @@ What you will see when the key is wrong, so you recognise it:
 - **Missing key**: the client refuses at construction —
   `The api_key client option must be set either by passing api_key to the
   client or by setting the OPENAI_API_KEY environment variable`.
-- **Invalid key**: the provider's HTTP 401 (`openai.AuthenticationError`) is
-  **raised immediately, not retried** — the bridge's retry policy is explicit
-  that auth and other 4xx client errors "are raised immediately — they will
-  not heal on retry" (`agent/llm_bridge.py`). Only rate limits (429) and
-  server errors (5xx) are retried.
-- Quota exhaustion (429), by contrast, retries indefinitely by design: top up
-  the balance and a long chain resumes on its own.
+- **Invalid key**: HTTP 401 (`openai.AuthenticationError`) is raised immediately.
+  Other 4xx errors are also terminal, except HTTP 429.
+- **Rate limit or quota exhaustion (429), or server error (5xx)**: continuation
+  depends on the selected route's `max_retries`. Despite its name, this counts
+  **total transport attempts**, including the initial call: `1` means no retry,
+  `2` means one retry, and legacy `0` also means one initial attempt. The shipped
+  default profile sets `1`. An explicit JSON `null` allows unbounded status-error
+  retries, subject to any enclosing execution deadline or process cancellation.
+  Restoring quota can help a still-retrying request; it does not restart a run
+  that has already failed.
+- **Timeout or connection failure**: these consume the same total-attempt limit
+  and an additional bounded timeout/connection allowance, even when
+  `max_retries` is `null`.
+
+See the [LLM profiles](../../configs/llm/README.md) for route selection and the
+[retry contract](../../src/agent/retry-policy.md) for inheritance and limits.
+Transport attempts do not cap content-repair attempts or workflow rounds, nor
+establish a total cost or elapsed-time budget.
 
 `.venv/bin/python scripts/diagnostics/check_agent_environment.py` checks each configured provider and
 prints `<PROVIDER>_API_KEY not found in .env` or the provider's own error for
