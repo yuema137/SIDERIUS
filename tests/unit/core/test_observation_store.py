@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 import multiprocessing
-import time
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -38,6 +38,11 @@ from core.runtime_control.records import (
 )
 from core.runtime_control.workload import ResolvedPhaseWorkload
 
+# These fixtures use local, timezone-naive timestamps, which the store supports.
+# Lookup time is explicit so unrelated assertions cannot age out with the calendar.
+_OBSERVATION_TIME = datetime(2026, 7, 23, 12)
+_LOOKUP_TIME = (_OBSERVATION_TIME + timedelta(minutes=1)).timestamp()
+
 _CONTEXT = {
     "precision": "float32",
     "optimizer_type": "adam",
@@ -53,7 +58,7 @@ def _observation(
     unit_ms: float = 40.0,
     actual_seconds: float | None = None,
     predicted_seconds: float | None = None,
-    timestamp: str = "2026-07-23T12:00:00+0000",
+    timestamp: str = _OBSERVATION_TIME.isoformat(),
     final_status: str = "completed",
     steady: bool = True,
     watchdog: str | None = None,
@@ -230,18 +235,21 @@ class TestPriorDerivation:
         store = ObservationStore(str(tmp_path))
         for actual in (30.0, 40.0, 50.0):  # realized 30/40/50 ms at 1000 units
             store.append(_observation(actual_seconds=actual), writer_id="c")
-        lookup = store.lookup_prior(_KEY, "training")
+        lookup = store.lookup_prior(_KEY, "training", now=_LOOKUP_TIME)
         assert lookup.status == "valid"
         assert lookup.prior_unit_ms == pytest.approx(40.0)
         assert lookup.n_observations == 3
 
     def test_absent_key(self, tmp_path):
-        assert ObservationStore(str(tmp_path)).lookup_prior(_KEY, "training").status == "absent"
+        assert (
+            ObservationStore(str(tmp_path)).lookup_prior(_KEY, "training", now=_LOOKUP_TIME).status
+            == "absent"
+        )
 
     def test_ineligible_observations_never_feed_priors(self, tmp_path):
         store = ObservationStore(str(tmp_path))
         store.append(_observation(watchdog="killed"), writer_id="c")
-        assert store.lookup_prior(_KEY, "training").status == "absent"
+        assert store.lookup_prior(_KEY, "training", now=_LOOKUP_TIME).status == "absent"
 
     def test_drift_evicts_prior(self, tmp_path):
         # §6b rule 4: 3 consecutive contract violations (ratio 2.0 →
@@ -252,11 +260,11 @@ class TestPriorDerivation:
                 _observation(
                     predicted_seconds=20.0,
                     actual_seconds=40.0,
-                    timestamp=f"2026-07-23T12:00:0{i}+0000",
+                    timestamp=(_OBSERVATION_TIME + timedelta(seconds=i)).isoformat(),
                 ),
                 writer_id="c",
             )
-        lookup = store.lookup_prior(_KEY, "training")
+        lookup = store.lookup_prior(_KEY, "training", now=_LOOKUP_TIME)
         assert lookup.status == "evicted_drift"
         assert lookup.prior_unit_ms is None
 
@@ -267,34 +275,45 @@ class TestPriorDerivation:
                 _observation(
                     predicted_seconds=40.0,
                     actual_seconds=44.0,  # ratio 1.1 — inside F=1.5
-                    timestamp=f"2026-07-23T12:00:0{i}+0000",
+                    timestamp=(_OBSERVATION_TIME + timedelta(seconds=i)).isoformat(),
                 ),
                 writer_id="c",
             )
-        assert store.lookup_prior(_KEY, "training").status == "valid"
+        assert store.lookup_prior(_KEY, "training", now=_LOOKUP_TIME).status == "valid"
 
-    def test_age_marks_stale(self, tmp_path):
+    @pytest.mark.parametrize("max_age_days", [0.5, 90.0])
+    @pytest.mark.parametrize("offset, expected", [(-1, "valid"), (0, "valid"), (1, "stale")])
+    def test_age_boundary_uses_declared_policy(self, tmp_path, max_age_days, offset, expected):
         store = ObservationStore(str(tmp_path))
         store.append(_observation(actual_seconds=40.0), writer_id="c")
-        future = time.time() + 200 * 86400
-        lookup = store.lookup_prior(_KEY, "training", now=future)
-        assert lookup.status == "stale"
-        assert lookup.prior_unit_ms == pytest.approx(40.0)  # usable w/ elevated safety
+        policy = PriorPolicy(max_age_days=max_age_days)
+        deadline = _OBSERVATION_TIME.timestamp() + timedelta(days=max_age_days).total_seconds()
+        lookup = store.lookup_prior(_KEY, "training", now=deadline + offset, policy=policy)
+        assert lookup.status == expected
+        assert lookup.prior_unit_ms == pytest.approx(40.0)  # stale remains usable
 
     def test_env_mismatch_never_cross_applied(self, tmp_path):
         store = ObservationStore(str(tmp_path))
         store.append(_observation(actual_seconds=40.0), writer_id="c")
         assert (
-            store.lookup_prior(_KEY, "training", current_gpu_name="RTX 5090").status
-            == "env_mismatch"
-        )
-        assert (
-            store.lookup_prior(_KEY, "training", current_torch_version="3.0.0").status
+            store.lookup_prior(
+                _KEY, "training", now=_LOOKUP_TIME, current_gpu_name="RTX 5090"
+            ).status
             == "env_mismatch"
         )
         assert (
             store.lookup_prior(
-                _KEY, "training", current_gpu_name="NVIDIA H100", current_torch_version="2.6.0"
+                _KEY, "training", now=_LOOKUP_TIME, current_torch_version="3.0.0"
+            ).status
+            == "env_mismatch"
+        )
+        assert (
+            store.lookup_prior(
+                _KEY,
+                "training",
+                now=_LOOKUP_TIME,
+                current_gpu_name="NVIDIA H100",
+                current_torch_version="2.6.0",
             ).status
             == "valid"
         )
@@ -306,13 +325,16 @@ class TestPriorDerivation:
                 _observation(
                     predicted_seconds=30.0,
                     actual_seconds=40.0,  # ratio 1.33: inside F=1.5, outside F=1.2
-                    timestamp=f"2026-07-23T12:00:0{i}+0000",
+                    timestamp=(_OBSERVATION_TIME + timedelta(seconds=i)).isoformat(),
                 ),
                 writer_id="c",
             )
-        assert store.lookup_prior(_KEY, "training").status == "valid"
+        assert store.lookup_prior(_KEY, "training", now=_LOOKUP_TIME).status == "valid"
         strict = PriorPolicy(contract_factor=1.2)
-        assert store.lookup_prior(_KEY, "training", policy=strict).status == "evicted_drift"
+        assert (
+            store.lookup_prior(_KEY, "training", now=_LOOKUP_TIME, policy=strict).status
+            == "evicted_drift"
+        )
         assert math.log(40.0 / 30.0) > math.log(1.2)  # scenario sanity
 
 
@@ -346,6 +368,6 @@ def test_storage_evidence_does_not_change_prior_or_calibration_identity(tmp_path
     for name, observation in (("before", original), ("after", changed)):
         store = ObservationStore(str(tmp_path / name))
         store.append(observation, writer_id="fixture")
-        priors.append(store.lookup_prior(_KEY, "training", now=1784811600.0))
+        priors.append(store.lookup_prior(_KEY, "training", now=_LOOKUP_TIME))
     assert priors[0] == priors[1]
     assert priors[1].prior_unit_ms == 40.0
