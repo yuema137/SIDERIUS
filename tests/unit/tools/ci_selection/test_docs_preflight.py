@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.ci_selection.docs_preflight import ordinary_docs_only
+from tools.ci_selection.docs_preflight import is_ordinary_document, ordinary_docs_only
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def test_audited_modifications_are_lightweight(docs_root):
         b"M\0README.md\0M\0src/core/runtime.py\0",
         b"M\0docs/agent-reference/orchestrator-toolkit/payload/AGENTS.md\0",
         b"M\0src/agent/skills/example/SKILL.md\0",
-        b"M\0docs/getting-started/new-runtime-prompt.md\0",
+        b"M\0docs/agent-reference/new-runtime-prompt.md\0",
         b"M\0../README.md\0",
         b"U\0README.md\0",
     ],
@@ -75,3 +75,38 @@ def test_runtime_steps_require_non_documentation_and_status_name_is_preserved():
     assert "--only-group dev --frozen" in docs["run"]
     assert "--noconftest" in docs["run"]
     assert docs["if"] == "steps.documentation.outputs.docs_only == 'true'"
+
+
+@pytest.mark.parametrize(
+    "area", ["getting-started", "guides", "concepts", "reference", "releases", "audit"]
+)
+def test_audited_document_directories_have_a_generic_boundary(docs_root, area):
+    name = f"docs/{area}/nested/example.md"
+    path = docs_root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# Documentation\n")
+    assert ordinary_docs_only(f"M\0{name}\0".encode(), docs_root)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "src/agent/prompt_templates/README.md",
+        "docs/agent-reference/orchestrator-toolkit/payload/README.md",
+        "docs/gates/gate_testing_standard.md",
+        "docs/testing/ci_parity.md",
+        "docs/design/proposal.md",
+        "examples/example/README.md",
+        "configs/README.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "docs/guides/example.py",
+        "docs/guides-extra/example.md",
+        "docs/guides/../../src/README.md",
+        "docs//guides/example.md",
+        "/docs/guides/example.md",
+        "./README.md",
+    ],
+)
+def test_nonordinary_or_noncanonical_paths_keep_normal_checks(name):
+    assert not is_ordinary_document(name)
