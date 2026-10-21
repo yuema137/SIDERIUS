@@ -30,6 +30,7 @@ import os
 import re
 import time
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,6 +41,8 @@ from core.runtime_control.records import RuntimeObservation
 _WRITER_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 ObservationTimestampParser = Callable[[str], float | None]
+ObservationTimestampOrderKey = Callable[[str], tuple[float, str] | None]
+_PriorObservation = tuple[str, float, float | None]
 
 #: final_status values whose observations may feed calibration (§6c).
 _CALIBRATION_ELIGIBLE_STATUSES: frozenset[str] = frozenset({"completed", "inference_complete"})
@@ -260,6 +263,7 @@ class ObservationStore:
         current_torch_version: str | None = None,
         now: float | None = None,
         timestamp_parser: ObservationTimestampParser | None = None,
+        timestamp_order_key: ObservationTimestampOrderKey | None = None,
     ) -> PriorLookup:
         """Derive the historical prior for ``key`` with §6b invalidation.
 
@@ -277,6 +281,8 @@ class ObservationStore:
             now:    Override for age computation (tests).
             timestamp_parser: Explicit provider's timestamp semantics; defaults
                     to offset-aware parsing with local-time legacy naive records.
+            timestamp_order_key: Explicit provider's ordering semantics; defaults
+                    to the effective parsed time with a textual tie-breaker.
         """
         policy = policy or PriorPolicy()
         if current_gpu_name is not None and f"gpu={current_gpu_name}|" not in key + "|":
@@ -286,7 +292,7 @@ class ObservationStore:
             if f"|torch{major}|" not in f"|{key}|":
                 return PriorLookup(status="env_mismatch")
 
-        matching: list[tuple[str, float, float | None]] = []
+        matching: list[_PriorObservation] = []
         for obs in self.read_all():
             if observation_calibration_key(obs, phase) != key:
                 continue
@@ -305,11 +311,13 @@ class ObservationStore:
         if not matching:
             return PriorLookup(status="absent")
 
-        matching.sort(key=lambda t: t[0])  # ISO timestamps sort lexically
+        ordered = _order_observations(matching, timestamp_parser, timestamp_order_key)
 
         # §6b rule 4 — drift eviction: N consecutive newest observations
         # violating the §2.10 contract evict the prior entirely.
-        recent_errors = [e for _, _, e in matching if e is not None][-policy.drift_consecutive :]
+        recent_errors = [e for _, _, e in (ordered or []) if e is not None][
+            -policy.drift_consecutive :
+        ]
         if len(recent_errors) >= policy.drift_consecutive and all(
             e > math.log(policy.contract_factor) for e in recent_errors
         ):
@@ -317,9 +325,13 @@ class ObservationStore:
 
         values = sorted(v for _, v, _ in matching)
         median = values[len(values) // 2]
-        newest_ts = matching[-1][0]
+        newest_ts = ordered[-1][0] if ordered is not None else None
         status: Literal["valid", "stale"] = "valid"
-        age_seconds = _age_seconds(newest_ts, now=now, timestamp_parser=timestamp_parser)
+        age_seconds = (
+            _age_seconds(newest_ts, now=now, timestamp_parser=timestamp_parser)
+            if newest_ts is not None
+            else None
+        )
         if age_seconds is None or age_seconds > policy.max_age_days * 86400.0:
             status = "stale"  # §6b rule 5 — elevated safety factor until refreshed
         return PriorLookup(
@@ -335,13 +347,44 @@ class ObservationStore:
         )
 
 
+def _order_observations(
+    observations: list[_PriorObservation],
+    timestamp_parser: ObservationTimestampParser | None,
+    timestamp_order_key: ObservationTimestampOrderKey | None,
+) -> list[_PriorObservation] | None:
+    """Do not infer chronology or discard evidence when any order is unknown."""
+    parser = _timestamp_seconds if timestamp_parser is None else timestamp_parser
+    keyed: list[tuple[tuple[float, str], _PriorObservation]] = []
+    for observation in observations:
+        timestamp = observation[0]
+        if timestamp_order_key is None:
+            epoch = parser(timestamp)
+            key = None if epoch is None else (epoch, timestamp)
+        else:
+            key = timestamp_order_key(timestamp)
+        if key is None or not math.isfinite(key[0]):
+            return None
+        keyed.append((key, observation))
+    keyed.sort(key=lambda item: item[0])
+    return [observation for _, observation in keyed]
+
+
 def _timestamp_seconds(timestamp: str) -> float | None:
     """Respect explicit UTC offsets; retain local time for legacy naive records."""
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
         try:
             parsed = time.strptime(timestamp, fmt)
             if parsed.tm_gmtoff is not None:
-                return float(calendar.timegm(parsed) - parsed.tm_gmtoff)
+                # struct_time truncates fractional offsets. Parse the validated
+                # zone separately so calendar.timegm can still normalize legacy
+                # leap-second wall times, which datetime itself cannot represent.
+                zone = re.search(r"Z|[+-].*$", timestamp.partition("T")[2])
+                if zone is None:
+                    return None
+                offset = datetime.strptime(zone.group(), "%z").utcoffset()
+                if offset is None:
+                    return None
+                return calendar.timegm(parsed) - offset.total_seconds()
             return time.mktime(parsed)
         except ValueError:
             continue

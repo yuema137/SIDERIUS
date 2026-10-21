@@ -13,7 +13,8 @@ experiment selections belong to consumer repositories.
 
 `--runtime_verifier NAME` selects one `siderius.runtime_verifiers` entry point.
 Its zero-argument factory returns `RuntimeVerifierProfile(name, version, create,
-sources, qualified_assemblies, observation_timestamp_parser=None)`. `sources` maps stable relative labels to concrete
+sources, qualified_assemblies, observation_timestamp_parser=None,
+observation_timestamp_order_key=None)`. `sources` maps stable relative labels to concrete
 source paths. The profile's `RuntimeVerifierIdentity` contains name, version,
 content SHA-256 and qualified assembly SHA-256. The bounded assembly includes the
 factory, session, detector, component records, workload, calibration, executor
@@ -62,17 +63,33 @@ Native interval handling and stopping thresholds remain unchanged.
 ## Calibration and historical evidence
 
 Native freshness calculation honors an observation's explicit UTC offset.
-Legacy timestamps without an offset retain local-machine time semantics; they
-are not portable instants. Unsupported timestamps and nonfinite parsed values
-cannot yield a valid prior. Expiry thresholds, median aggregation and the
-existing lexical record ordering are unchanged by this conversion contract.
+Fractional offset seconds are retained, including signed offsets smaller than
+one second. Legacy timestamps without an offset retain local-machine time
+semantics; they are not portable instants. Previously accepted leap seconds are
+normalized using the calendar/time conversion. Unsupported timestamps and
+nonfinite parsed values cannot yield a valid prior.
+
+Native ordering uses the effective parser's epoch followed by the original
+timestamp string as a deterministic tie-breaker. Identical keys retain input
+order. This chronology drives both newest-observation selection and the recent
+drift window. If any otherwise eligible observation cannot be ordered, lookup
+returns `stale`, retains the median and observation count, and leaves
+`newest_timestamp` unset. It does not discard the uncertain record or infer
+drift from an unestablished order. Production consumers reuse only `valid`
+priors. Median aggregation and expiry/drift thresholds remain unchanged.
 
 A profile may supply `observation_timestamp_parser(timestamp: str) -> float | None`
 to interpret stored timestamps as Unix seconds. `None` means unparseable; an
 omitted callable uses native parsing. The provider must include the callable's
 implementation and dependencies in its declared sources and qualification.
-This hook controls conversion only, not eligibility, expiry policy, aggregation
-or ordering. Historical conversion implementations belong to consumer packages.
+This hook controls conversion, not eligibility, expiry policy or aggregation.
+A profile may additionally supply
+`observation_timestamp_order_key(timestamp: str) -> tuple[float, str] | None`.
+Its finite numeric primary key and textual secondary key define a stable order;
+`None` or a nonfinite primary key means chronology is unavailable. Without this
+hook, ordering uses the effective parser as described above. Historical ordering
+and conversion implementations belong to consumer packages. Both callbacks and
+their dependencies must be included in the profile's declared sources.
 The session rechecks the launch-pinned identity before reading eligible priors;
 identity errors propagate rather than degrading to absent evidence.
 

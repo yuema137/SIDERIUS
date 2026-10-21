@@ -69,7 +69,7 @@ from core.runtime_control.verifier_provider import (
     RuntimeVerifier,
     RuntimeVerifierIdentity,
     create_runtime_verifier,
-    resolve_observation_timestamp_parser,
+    resolve_observation_time_policy,
     resolve_runtime_verifier_identity,
 )
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
@@ -601,7 +601,7 @@ class RuntimeVerificationSession:
             return None
         # Provider identity errors are not missing calibration evidence. Keep
         # them outside the best-effort store read so selection cannot fall back.
-        timestamp_parser = resolve_observation_timestamp_parser(
+        timestamp_parser, timestamp_order_key = resolve_observation_time_policy(
             self.policy.runtime_verifier, self.policy.runtime_verifier_identity
         )
         try:
@@ -619,6 +619,7 @@ class RuntimeVerificationSession:
                 current_gpu_name=self._environment.get("gpu_name"),
                 current_torch_version=self._environment.get("torch_version"),
                 timestamp_parser=timestamp_parser,
+                timestamp_order_key=timestamp_order_key,
             )
             if lookup.status == "valid":
                 return lookup.prior_unit_ms

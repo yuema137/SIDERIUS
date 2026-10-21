@@ -297,7 +297,14 @@ def test_selected_timestamp_parser_is_identity_checked_before_store_read(
     def parser(timestamp):
         return 0.0
 
-    profile = replace(profile, observation_timestamp_parser=parser)
+    def order_key(timestamp):
+        return 0.0, timestamp
+
+    profile = replace(
+        profile,
+        observation_timestamp_parser=parser,
+        observation_timestamp_order_key=order_key,
+    )
     monkeypatch.setattr(
         providers,
         "entry_points",
@@ -320,16 +327,16 @@ def test_selected_timestamp_parser_is_identity_checked_before_store_read(
     calls = []
 
     def lookup(self, key, phase, **kwargs):
-        calls.append(kwargs["timestamp_parser"])
+        calls.append((kwargs["timestamp_parser"], kwargs["timestamp_order_key"]))
         return PriorLookup(status="valid", prior_unit_ms=40)
 
     monkeypatch.setattr(ObservationStore, "lookup_prior", lookup)
     assert session.lookup_phase_prior("training") == 40
-    assert calls == [parser]
+    assert calls == [(parser, order_key)]
     source.write_text("# changed timestamp semantics\n")
     with pytest.raises(ValueError, match="changed before prior lookup"):
         session.lookup_phase_prior("training")
-    assert calls == [parser]
+    assert calls == [(parser, order_key)]
 
 
 def test_timestamp_parser_requires_matching_selection_and_identity(installed_provider):
