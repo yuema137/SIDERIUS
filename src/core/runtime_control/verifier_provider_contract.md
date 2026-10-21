@@ -13,7 +13,7 @@ experiment selections belong to consumer repositories.
 
 `--runtime_verifier NAME` selects one `siderius.runtime_verifiers` entry point.
 Its zero-argument factory returns `RuntimeVerifierProfile(name, version, create,
-sources, qualified_assemblies)`. `sources` maps stable relative labels to concrete
+sources, qualified_assemblies, observation_timestamp_parser=None)`. `sources` maps stable relative labels to concrete
 source paths. The profile's `RuntimeVerifierIdentity` contains name, version,
 content SHA-256 and qualified assembly SHA-256. The bounded assembly includes the
 factory, session, detector, component records, workload, calibration, executor
@@ -61,11 +61,32 @@ Native interval handling and stopping thresholds remain unchanged.
 
 ## Calibration and historical evidence
 
+Native freshness calculation honors an observation's explicit UTC offset.
+Legacy timestamps without an offset retain local-machine time semantics; they
+are not portable instants. Unsupported timestamps and nonfinite parsed values
+cannot yield a valid prior. Expiry thresholds, median aggregation and the
+existing lexical record ordering are unchanged by this conversion contract.
+
+A profile may supply `observation_timestamp_parser(timestamp: str) -> float | None`
+to interpret stored timestamps as Unix seconds. `None` means unparseable; an
+omitted callable uses native parsing. The provider must include the callable's
+implementation and dependencies in its declared sources and qualification.
+This hook controls conversion only, not eligibility, expiry policy, aggregation
+or ordering. Historical conversion implementations belong to consumer packages.
+The session rechecks the launch-pinned identity before reading eligible priors;
+identity errors propagate rather than degrading to absent evidence.
+
 Native observations retain the existing calibration key format. Selected providers
 append their complete validated identity to that key, isolating native, different
 providers and changed source or assembly versions. New runs with the same selected
 identity can use their own eligible earlier observations. Completion-only evidence
 remains ineligible regardless of the provider.
+
+The trial preflight wrapper still uses an unqualified calibration key. It does
+not reuse selected-verifier observations and does not invoke their timestamp
+parser. Its native lookup uses corrected offset arithmetic. A clean explicitly
+selected historical workspace preserves this no-hit behavior; importing native
+rows is not a historical replay mechanism.
 
 Archived observations without provider identity are not automatically relabeled or
 imported as selected-provider priors. Consumer-owned offline replay may explicitly

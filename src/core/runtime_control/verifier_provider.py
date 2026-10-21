@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.planner_strategy_identity import source_fingerprint
 from core.runtime_control.adaptive import AdaptiveUnitVerification, AdaptiveVerificationConfig
 from core.runtime_control.completion import RuntimeCompletionPolicy
+from core.runtime_control.observation_store import ObservationTimestampParser
 from core.runtime_control.records import PhaseMeasurement, PredictionSource, RuntimePrediction
 from core.runtime_control.workload import ResolvedPhaseWorkload
 
@@ -104,6 +105,7 @@ class RuntimeVerifierProfile:
     create: RuntimeVerifierFactory
     sources: Mapping[str, Path]
     qualified_assemblies: frozenset[str]
+    observation_timestamp_parser: ObservationTimestampParser | None = None
 
     def __post_init__(self) -> None:
         if not self.sources:
@@ -150,6 +152,23 @@ def resolve_runtime_verifier_identity(
     if expected is not None and identity != expected:
         raise ValueError("Runtime verifier changed after launch or subprocess dispatch")
     return identity
+
+
+def resolve_observation_timestamp_parser(
+    selection: str | None,
+    expected: RuntimeVerifierIdentity | None,
+) -> ObservationTimestampParser | None:
+    """Resolve prior timestamp semantics under the launch-pinned provider identity."""
+    if selection is None:
+        if expected is not None:
+            raise ValueError("Native prior lookup cannot carry an external identity")
+        return None
+    if expected is None:
+        raise ValueError("Selected prior lookup requires a resolved identity")
+    profile = resolve_runtime_verifier(selection)
+    if profile.identity() != expected:
+        raise ValueError("Runtime verifier changed before prior lookup")
+    return profile.observation_timestamp_parser
 
 
 def create_runtime_verifier(

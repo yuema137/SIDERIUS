@@ -23,11 +23,13 @@ or delete API on purpose.
 
 from __future__ import annotations
 
+import calendar
 import json
 import math
 import os
 import re
 import time
+from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -36,6 +38,8 @@ from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.records import RuntimeObservation
 
 _WRITER_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
+ObservationTimestampParser = Callable[[str], float | None]
 
 #: final_status values whose observations may feed calibration (§6c).
 _CALIBRATION_ELIGIBLE_STATUSES: frozenset[str] = frozenset({"completed", "inference_complete"})
@@ -255,6 +259,7 @@ class ObservationStore:
         current_gpu_name: str | None = None,
         current_torch_version: str | None = None,
         now: float | None = None,
+        timestamp_parser: ObservationTimestampParser | None = None,
     ) -> PriorLookup:
         """Derive the historical prior for ``key`` with §6b invalidation.
 
@@ -270,6 +275,8 @@ class ObservationStore:
             current_gpu_name / current_torch_version: the environment
                     about to CONSUME the prior.
             now:    Override for age computation (tests).
+            timestamp_parser: Explicit provider's timestamp semantics; defaults
+                    to offset-aware parsing with local-time legacy naive records.
         """
         policy = policy or PriorPolicy()
         if current_gpu_name is not None and f"gpu={current_gpu_name}|" not in key + "|":
@@ -312,7 +319,7 @@ class ObservationStore:
         median = values[len(values) // 2]
         newest_ts = matching[-1][0]
         status: Literal["valid", "stale"] = "valid"
-        age_seconds = _age_seconds(newest_ts, now=now)
+        age_seconds = _age_seconds(newest_ts, now=now, timestamp_parser=timestamp_parser)
         if age_seconds is None or age_seconds > policy.max_age_days * 86400.0:
             status = "stale"  # §6b rule 5 — elevated safety factor until refreshed
         return PriorLookup(
@@ -328,12 +335,28 @@ class ObservationStore:
         )
 
 
-def _age_seconds(timestamp: str, *, now: float | None = None) -> float | None:
-    """Age of an observation timestamp (``%Y-%m-%dT%H:%M:%S%z``); None if unparseable."""
+def _timestamp_seconds(timestamp: str) -> float | None:
+    """Respect explicit UTC offsets; retain local time for legacy naive records."""
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
         try:
-            then = time.mktime(time.strptime(timestamp, fmt))
-            return (now if now is not None else time.time()) - then
+            parsed = time.strptime(timestamp, fmt)
+            if parsed.tm_gmtoff is not None:
+                return float(calendar.timegm(parsed) - parsed.tm_gmtoff)
+            return time.mktime(parsed)
         except ValueError:
             continue
     return None
+
+
+def _age_seconds(
+    timestamp: str,
+    *,
+    now: float | None = None,
+    timestamp_parser: ObservationTimestampParser | None = None,
+) -> float | None:
+    """Return age in seconds, or None when the selected parser has no evidence."""
+    parser = _timestamp_seconds if timestamp_parser is None else timestamp_parser
+    then = parser(timestamp)
+    if then is None or not math.isfinite(then):
+        return None
+    return (now if now is not None else time.time()) - then

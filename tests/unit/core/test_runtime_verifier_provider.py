@@ -283,3 +283,60 @@ def test_unselected_provider_preserves_native_timing_across_workload_scales(
     assert selected.prediction(workload, "real_training_verification") == direct.prediction(
         workload, "real_training_verification"
     )
+
+
+def test_selected_timestamp_parser_is_identity_checked_before_store_read(
+    installed_provider, tmp_path, monkeypatch
+):
+    from dataclasses import replace
+
+    from core.runtime_control.observation_store import ObservationStore, PriorLookup
+
+    profile, source, _ = installed_provider
+
+    def parser(timestamp):
+        return 0.0
+
+    profile = replace(profile, observation_timestamp_parser=parser)
+    monkeypatch.setattr(
+        providers,
+        "entry_points",
+        lambda **kwargs: [SimpleNamespace(name=profile.name, load=lambda: lambda: profile)],
+    )
+    policy = RuntimeControlPolicy(
+        runtime_verifier=profile.name, observation_store_root=str(tmp_path / "store")
+    )
+    session = RuntimeVerificationSession(str(tmp_path / "rv.json"), policy)
+    session.set_calibration_context(
+        dict(
+            precision="float32",
+            optimizer_type="adam",
+            model_family="fixture",
+            param_count=4,
+            seg_size=1,
+            batch_size=1,
+        )
+    )
+    calls = []
+
+    def lookup(self, key, phase, **kwargs):
+        calls.append(kwargs["timestamp_parser"])
+        return PriorLookup(status="valid", prior_unit_ms=40)
+
+    monkeypatch.setattr(ObservationStore, "lookup_prior", lookup)
+    assert session.lookup_phase_prior("training") == 40
+    assert calls == [parser]
+    source.write_text("# changed timestamp semantics\n")
+    with pytest.raises(ValueError, match="changed before prior lookup"):
+        session.lookup_phase_prior("training")
+    assert calls == [parser]
+
+
+def test_timestamp_parser_requires_matching_selection_and_identity(installed_provider):
+    profile, _, _ = installed_provider
+    with pytest.raises(ValueError, match="external identity"):
+        providers.resolve_observation_timestamp_parser(None, profile.identity())
+    with pytest.raises(ValueError, match="resolved identity"):
+        providers.resolve_observation_timestamp_parser(profile.name, None)
+    assert providers.resolve_observation_timestamp_parser(None, None) is None
+    assert providers.resolve_observation_timestamp_parser(profile.name, profile.identity()) is None
