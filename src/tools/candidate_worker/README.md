@@ -6,6 +6,11 @@ the synchronous CLI use the same launch boundary. It requires Linux,
 [bubblewrap](../workspace_sandbox/README.md), an installed SIDERIUS environment,
 and an explicitly prepared native proposal seed.
 
+For a first experiment, use [candidate preparation](../candidate_prepare/README.md)
+to build the seed, storage and launch request from task/data/profile selections
+without provider calls. The manual path below is for callers that already own
+complete native input records.
+
 Prepare a [supported workflow document](../workflow_preview/preview-contract.md#example-document),
 its complete `ProposalInput` JSON, and its protocol storage JSON in your external
 project. The seed must match the selected task composition and physical data
