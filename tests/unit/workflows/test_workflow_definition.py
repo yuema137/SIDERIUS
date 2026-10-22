@@ -1,0 +1,236 @@
+"""Declaration structure and native boundary drift checks, without execution."""
+
+import inspect
+import json
+import subprocess
+import sys
+from typing import Literal, get_type_hints
+
+import pytest
+from pydantic import ValidationError
+
+from workflows.definition import (
+    ArgumentBinding,
+    ExternalBinding,
+    ExternalRequest,
+    ExternalSource,
+    NodeInstance,
+    NodePosition,
+    ProtocolRequest,
+    ResultSource,
+    TaskReferences,
+    WorkflowDefinition,
+    WorkflowDocument,
+)
+from workflows.definition.catalog import CAPABILITIES, CONTRACTS, PROTOCOLS
+
+
+def definition():
+    return WorkflowDefinition(
+        task=TaskReferences(manifest="task/manifest.json", data_root="/data", workspace="runs/new"),
+        externals=(
+            ExternalBinding(id="seed", contract="proposal.input", location="inputs/proposal.json"),
+            ExternalBinding(id="storage", contract="storage", location="inputs/storage.json"),
+        ),
+        nodes=(
+            NodeInstance(
+                id="propose", capability="proposal", request=ExternalRequest(binding="seed")
+            ),
+            NodeInstance(
+                id="implement",
+                capability="implementation",
+                request=ProtocolRequest(
+                    protocol="proposal-to-implementation",
+                    arguments=(
+                        ArgumentBinding(name="output", source=ResultSource(node="propose")),
+                        ArgumentBinding(name="storage", source=ExternalSource(binding="storage")),
+                    ),
+                ),
+            ),
+            NodeInstance(
+                id="validate",
+                capability="validation",
+                request=ProtocolRequest(
+                    protocol="implementation-to-validation",
+                    arguments=(
+                        ArgumentBinding(name="output", source=ResultSource(node="implement")),
+                        ArgumentBinding(name="storage", source=ExternalSource(binding="storage")),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def test_roundtrip_and_layout_independent_declaration_digest():
+    graph = definition()
+    document = WorkflowDocument(
+        definition=graph, positions=(NodePosition(node="propose", x=1.0, y=2.0),)
+    )
+    assert WorkflowDocument.model_validate_json(document.model_dump_json()) == document
+    layout_payload = document.model_dump(mode="json")
+    layout_payload["positions"][0].update(x=500.0, y=-20.0)
+    moved = WorkflowDocument.model_validate_json(json.dumps(layout_payload))
+    assert moved.positions != document.positions
+    assert moved.definition.declaration_digest() == document.definition.declaration_digest()
+    payload = graph.model_dump(mode="json")
+    payload["task"]["workspace"] = "runs/other"
+    changed = WorkflowDefinition.model_validate_json(json.dumps(payload))
+    assert changed.declaration_digest() != graph.declaration_digest()
+
+
+@pytest.mark.parametrize(
+    "change,match",
+    [
+        (lambda p: p["nodes"][0].update(capability="tuner"), "Unsupported capability"),
+        (lambda p: p["nodes"][0].update(config={"model": "anything"}), "Extra inputs"),
+        (lambda p: p["nodes"][0]["request"].update(binding="absent"), "Unknown external"),
+        (lambda p: p["externals"][0].update(contract="storage"), "request requires"),
+        (lambda p: p["externals"].append(p["externals"][0]), "unique"),
+        (lambda p: p["nodes"].append(p["nodes"][0]), "unique"),
+        (lambda p: p["nodes"][1]["request"].update(protocol="feedback"), "Unsupported protocol"),
+        (
+            lambda p: p["nodes"][1]["request"].update(protocol="implementation-to-validation"),
+            "does not produce",
+        ),
+        (lambda p: p["nodes"][1]["request"]["arguments"].pop(), "missing protocol"),
+        (
+            lambda p: p["nodes"][1]["request"]["arguments"].append(
+                p["nodes"][1]["request"]["arguments"][0]
+            ),
+            "duplicate protocol",
+        ),
+        (
+            lambda p: p["nodes"][1]["request"]["arguments"][0].update(name="arbitrary"),
+            "unknown protocol",
+        ),
+        (
+            lambda p: p["nodes"][1]["request"]["arguments"][0]["source"].update(node="absent"),
+            "Unknown source",
+        ),
+        (
+            lambda p: p["nodes"][1]["request"]["arguments"][0]["source"].update(node="validate"),
+            "requires proposal.output",
+        ),
+        (
+            lambda p: p["nodes"][1]["request"]["arguments"][0]["source"].update(port="field"),
+            "result",
+        ),
+        (lambda p: p["externals"][0].update(contract="custom.Import"), "Unsupported external"),
+    ],
+)
+def test_invalid_declarations_fail_atomically(change, match):
+    payload = definition().model_dump(mode="json")
+    change(payload)
+    with pytest.raises(ValidationError, match=match):
+        WorkflowDefinition.model_validate_json(json.dumps(payload))
+
+
+def test_optional_arguments_and_result_reuse():
+    payload = definition().model_dump(mode="json")
+    payload["externals"].append(
+        {"id": "context", "contract": "optional.constraint-context", "location": "context.json"}
+    )
+    payload["nodes"][1]["request"]["arguments"].append(
+        {"name": "constraint_context", "source": {"kind": "external", "binding": "context"}}
+    )
+    branch = dict(payload["nodes"][1], id="second_implementor")
+    payload["nodes"].append(branch)
+    assert len(WorkflowDefinition.model_validate_json(json.dumps(payload)).nodes) == 4
+
+
+@pytest.mark.parametrize(
+    "positions",
+    [
+        [{"node": "missing", "x": 0, "y": 0}],
+        [{"node": "propose", "x": 0, "y": 0}] * 2,
+    ],
+)
+def test_layout_references_are_checked(positions):
+    with pytest.raises(ValidationError):
+        WorkflowDocument.model_validate_json(
+            json.dumps({"definition": definition().model_dump(mode="json"), "positions": positions})
+        )
+
+
+def test_import_does_not_load_native_runtime_or_resolve_external_files():
+    program = """
+import sys
+from workflows.definition import WorkflowDefinition
+WorkflowDefinition.model_validate_json(sys.argv[1])
+assert not any(n.startswith(('agent.', 'nodes.', 'torch')) for n in sys.modules)
+"""
+    subprocess.run([sys.executable, "-c", program, definition().model_dump_json()], check=True)
+
+
+def test_catalog_matches_exact_native_protocol_signatures():
+    from agent.schemas.constraint_disclosure import ConstraintContext
+    from agent.schemas.hyperparam_tuning import TaskCompositionRef
+    from agent.schemas.implementor import ImplementorInput, ImplementorOutput
+    from agent.schemas.proposal import ProposalInput, ProposalOutput
+    from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
+    from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
+    from agent.schemas.storage import StorageConfig
+    from agent.schemas.validator import ValidatorInput, ValidatorOutput
+
+    native = {
+        "proposal.input": ProposalInput,
+        "proposal.output": ProposalOutput,
+        "implementation.input": ImplementorInput,
+        "implementation.output": ImplementorOutput,
+        "validation.input": ValidatorInput,
+        "validation.output": ValidatorOutput,
+        "storage": StorageConfig,
+        "optional.constraint-context": ConstraintContext | None,
+        "optional.task-composition-ref": TaskCompositionRef | None,
+        "llm-provider": Literal["gemini", "openai", "deepseek"],
+        "optional.model-id": str | None,
+    }
+    assert native.keys() == CONTRACTS.keys()
+    for capability in CAPABILITIES.values():
+        for contract in (capability.input, capability.output):
+            cls = native[contract]
+            assert CONTRACTS[contract] == f"{cls.__module__}.{cls.__name__}"
+    for key, function in [
+        ("proposal-to-implementation", local_full_spec),
+        ("implementation-to-validation", local_all_fields),
+    ]:
+        descriptor = PROTOCOLS[key]
+        assert descriptor.owner == f"{function.__module__}.{function.__name__}"
+        signature = inspect.signature(function)
+        hints = get_type_hints(function)
+        assert tuple(signature.parameters) == tuple(arg.name for arg in descriptor.arguments)
+        assert hints["return"] is native[descriptor.output]
+        for argument in descriptor.arguments:
+            assert hints[argument.name] == native[argument.contract]
+            assert argument.required == (
+                signature.parameters[argument.name].default is inspect.Parameter.empty
+            )
+
+
+def test_report_is_not_runtime_readiness_and_revalidates_unchecked_updates():
+    from workflows.definition import inspect_declaration
+
+    document = WorkflowDocument(definition=definition())
+    report = inspect_declaration(document)
+    assert report.status == "declaration_validated"
+    assert report.execution_ready is False
+    assert len(report.unresolved) == 4
+    broken = document.model_copy(update={"positions": (NodePosition(node="absent", x=0.0, y=0.0),)})
+    with pytest.raises(ValidationError, match="layout node"):
+        inspect_declaration(broken)
+
+
+def test_many_instances_have_no_prototype_node_count_limit():
+    graph = definition()
+    # This subset has three semantic layers; independent repeated instances are valid.
+    nodes = tuple(
+        NodeInstance(
+            id=f"proposal_{i}", capability="proposal", request=ExternalRequest(binding="seed")
+        )
+        for i in range(1500)
+    )
+    assert (
+        len(WorkflowDefinition(task=graph.task, externals=graph.externals, nodes=nodes).nodes)
+        == 1500
+    )
