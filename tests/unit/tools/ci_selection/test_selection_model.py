@@ -221,6 +221,17 @@ def test_slurm_change_selects_forwarding_and_entry_contracts() -> None:
 
 
 class TestAffectedCallerCoverage:
+    def test_timestamp_subprocess_dependency_is_selected_without_area_fallback(self, monkeypatch):
+        """A hidden subprocess import needs its own declared dependency.
+
+        Broad core ownership can mask a missing or incorrect declaration;
+        disable that fallback to prove the actual timestamp owner is selected.
+        """
+        monkeypatch.setattr(mf, "AREA_OWNERS", ())
+        result = select(["src/core/runtime_control/observation_store.py"])
+        assert not result.full_suite, result.describe()
+        assert "tests/unit/core/test_observation_timestamp_precision.py" in result.modules
+
     def test_two_hop_callers_are_selected_and_cycles_terminate(self):
         """A direct-only model misses tests importing an affected caller.
 

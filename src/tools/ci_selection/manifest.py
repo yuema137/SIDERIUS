@@ -82,6 +82,10 @@ DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
         "src/workflows/task_composition.py",
         "configs/task_composition/quickstart.yaml",
     ),
+    # Host-timezone isolation keeps this import inside a subprocess script.
+    "tests/unit/core/test_observation_timestamp_precision.py": (
+        "src/core/runtime_control/observation_store.py",
+    ),
     "tests/unit/agent_generated/test_stub_plugin_template_loads.py": (
         "tests/fixtures/generated_capabilities/",
     ),
