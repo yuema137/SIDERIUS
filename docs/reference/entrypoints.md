@@ -46,12 +46,23 @@ An absolute external literature YAML is supported; relative `--lit_review_config
 paths remain checkout-root-relative. A contradictory history metric id/direction
 refuses; absent or matching stamps are not proof of whole-task compatibility.
 
-## Live workflow output names
+## Live execution output names
 
 `run_workflow()` validates its filesystem-consumed `run_name` with the shared
 component rule before launch binding or run-directory creation. Unsafe names
 raise `ValueError`; ordinary names and output layouts remain unchanged.
-This does not restrict archival decoding or read-only source selectors.
+Direct `TidmadSandbox` construction and its training, inference and scoring
+methods apply the same check before task resolution, name-derived writes or
+child launch. `StubSandbox` inherits the constructor guard and checks each
+independently supplied execution name before pseudo-state changes. Standalone
+training and inference mains check parsed `--run_name` before loading task
+contracts or preparing runtime execution, and raise `ValueError` on refusal.
+
+This does not restrict archival decoding or read-only source selectors,
+including the scoring CLI's deliverable selector. It is a component check,
+not a guarantee covering arbitrary path arguments or symlinks. The validator
+is included in both runtime-verifier and preflight source identities; historical
+profiles must qualify the changed assembly before activation.
 
 ## Infrastructure aborts
 

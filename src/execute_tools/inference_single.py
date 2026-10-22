@@ -16,6 +16,7 @@ from tqdm import tqdm
 # manifest; real-task imports must not pre-register another implementation under
 # the same id. The uncomposed compatibility path is activated explicitly below.
 from agent.schemas.model_io_contract import load_model_io_contract
+from core.generated_artifact_name import validate_generated_artifact_name
 from core.runtime_control.gpu_milestone_trace import tracer_from_environment
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from execute_tools.array2h5 import create_abra_file
@@ -580,6 +581,7 @@ def main():
     # 1. Parse arguments locally to avoid NameError scope issues
     parser = get_parser()
     args = parser.parse_args()
+    validate_generated_artifact_name(args.run_name, field="run_name")
     # Model-I/O contract — child side of the parent's transport, same two-case
     # rule as the training engine: supplied-but-broken fails closed, absent
     # keeps Regime A. Carried on `args` because `process_batch` already takes

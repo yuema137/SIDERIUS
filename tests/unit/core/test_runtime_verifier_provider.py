@@ -347,3 +347,17 @@ def test_timestamp_parser_requires_matching_selection_and_identity(installed_pro
         providers.resolve_observation_timestamp_parser(profile.name, None)
     assert providers.resolve_observation_timestamp_parser(None, None) is None
     assert providers.resolve_observation_timestamp_parser(profile.name, profile.identity()) is None
+
+
+def test_verifier_assembly_binds_generated_name_validator_bytes(monkeypatch):
+    """Omitting the live name guard from the closure lets changed admission bytes escape."""
+    baseline = providers.verifier_assembly_digest()
+    helper = Path(providers.__file__).resolve().parents[2] / "core/generated_artifact_name.py"
+    read_bytes = Path.read_bytes
+
+    def mutated_bytes(path):
+        content = read_bytes(path)
+        return content + b"\n# changed live name validation\n" if path == helper else content
+
+    monkeypatch.setattr(Path, "read_bytes", mutated_bytes)
+    assert providers.verifier_assembly_digest() != baseline
