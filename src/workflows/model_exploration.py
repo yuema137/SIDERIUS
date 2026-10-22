@@ -68,7 +68,6 @@ import time
 import warnings
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -145,7 +144,6 @@ from execute_tools.evaluation_metric import (
 )
 from execute_tools.health_checks._composition import HealthBindingState
 from execute_tools.health_checks.candidate_eligibility import resolve_run_scientific_gate_ids
-from execute_tools.impl_attempts import impl_attempt_dir
 from execute_tools.metric_order import MetricOrder
 from ml_models.model_descriptions import DescriptionSourcePolicy
 from ml_models.plugin_loader import register_model_in_memory
@@ -159,6 +157,12 @@ from nodes.result_interpretation_agent import (
     ResultInterpretationAgent,
     reconcile_metric_spec,
     tuning_output_to_model_run_summary,
+)
+from workflows.attempt_storage import (
+    ImplAttemptStorage as ImplAttemptStorage,
+)
+from workflows.attempt_storage import (
+    impl_attempt_storage as impl_attempt_storage,
 )
 from workflows.candidate_requests import (
     enrich_implementation_request,
@@ -182,6 +186,7 @@ from workflows.run_config import (
     frozen_portion_overrides,
     validate_launch_trial_overrides,
 )
+from workflows.run_context import bind_agent_run_context
 from workflows.strategy_modes import (
     ExplorationMode,
     FormalRoundStrategy,
@@ -438,43 +443,6 @@ def _make_storage(workspace: str, run_name: str) -> StorageConfig:
     return StorageConfig(
         backend="local",
         local=LocalStorageConfig(workspace=workspace, run_name=run_name),
-    )
-
-
-@dataclass(frozen=True)
-class ImplAttemptStorage:
-    """Where ONE implement→validate attempt persists (S2 / U6, #256).
-
-    Every field is derived from the nested ``impl_NNN`` directory the
-    ``execute_tools.impl_attempts`` authority names, so the implementor
-    record, the validation record and the three generated-source
-    directories of one retry can never overwrite another's.
-    """
-
-    impl_dir: str
-    storage: StorageConfig
-    plugin_dir: str
-    test_dir: str
-    loss_dir: str
-
-
-def impl_attempt_storage(attempt_dir: str, run_name: str, impl_attempt: int) -> ImplAttemptStorage:
-    """The typed persistence boundary for implementation attempt ``impl_attempt``.
-
-    Before U6 the loop reused the proposal attempt's storage and derived
-    ``models/`` / ``tests/`` / ``losses/`` from ``attempt_dir`` on every
-    retry, so a retry silently replaced the previous attempt's records and
-    sources. Extracted so the loop body only sequences; the layout is owned
-    here and read back by ``funnel_assembly`` / ``workflow_validation``
-    through the same authority.
-    """
-    impl_dir = impl_attempt_dir(attempt_dir, impl_attempt)
-    return ImplAttemptStorage(
-        impl_dir=impl_dir,
-        storage=_make_storage(impl_dir, run_name),
-        plugin_dir=os.path.join(impl_dir, "models"),
-        test_dir=os.path.join(impl_dir, "tests"),
-        loss_dir=os.path.join(impl_dir, "losses"),
     )
 
 
@@ -2623,34 +2591,17 @@ def run_workflow(
     _seed_recent_negative_feedback(state, accumulated_negative_feedback)
 
     # --- Iteration loop ---
-    from pathlib import Path as _Path
-
     from core.memory_probe import probe_memory
 
-    # Token-usage audit binder (§1.4). Closes over the workflow-local
-    # ``chain_run_name`` / ``run_id`` so each agent's bridge writes rows to
-    # ``{workspace}/token_usage.jsonl`` tagged with the immutable run_id.
-    # When either kwarg is None (legacy / pseudo-mode tests) the bind is
-    # skipped; bridges keep their default no-op behaviour. Dispatches on
-    # the agent contract:
-    #   * agents with an eager ``self.bridge`` (interpreter /
-    #     implementor / validator) get the bridge bound directly.
-    #   * the proposer binds all stage bridges through ``set_run_context``.
-    #   * the tuner exposes its own ``set_run_context`` that stashes the
-    #     args until ``run()`` builds ``brain``.
+    # Capture the current iteration at invocation, including chain offsets.
     def _bind_iter_context(agent) -> None:
-        if bindings.chain_run_name is None or bindings.run_id is None:
-            return
-        kwargs = dict(
-            workspace=_Path(bindings.workspace),
-            iter=iteration,
+        bind_agent_run_context(
+            agent,
+            workspace=bindings.workspace,
+            iteration=iteration,
             run_name=bindings.chain_run_name,
             run_id=bindings.run_id,
         )
-        if hasattr(agent, "set_run_context"):
-            agent.set_run_context(**kwargs)
-        elif hasattr(agent, "bridge") and agent.bridge is not None:
-            agent.bridge.set_run_context(**kwargs)
 
     # Step 10 P2a C1 — run-scoped so the Q-10-2 unrankable notice is printed
     # once for the whole run rather than once per iteration.
