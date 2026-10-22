@@ -64,6 +64,39 @@ invariants lock and effective health config (written via `core` /
   workspace (`plugins/{run_name}/` and its generated-library paths); the
   workflow does not make the checkout a hidden task workspace.
 
+## Candidate request enrichment
+
+`candidate_requests.enrich_implementation_request` and
+`enrich_validation_request` mutate already constructed native requests in place.
+They accept typed, resolved values and perform no I/O, task resolution, provider
+construction, request cloning or post-assignment validation. They are shared
+request-enrichment helpers, not a graph executor or complete request builder.
+
+The caller retains the ordering: create attempt storage; call `local_full_spec`
+(the proposal-to-implementation field-mapping authority); assign plugin, test
+and loss directories; load task configuration, description, `ForwardContract`
+and implementor blocks through their existing owners; then enrich the request.
+Protocol/storage failures therefore precede task-resolution failures. Candidate
+identity, custom loss and task-composition reference remain protocol-owned.
+The validator caller similarly calls `local_all_fields` first; model I/O and
+probe context travel from the implementor through that protocol. Validator
+routing stays in both the protocol arguments and agent constructor.
+
+Implementation enrichment assigns resolved task/hardware/budget fields,
+including absent optional values. Advice and prior validation failure overwrite
+only when not `None` (an empty string is an explicit value); reference code
+replaces only when nonempty. Validation advice follows the same `None` rule;
+lineage replaces only when nonempty. Helpers do not mutate upstream proposal or
+implementation outputs. Retry sequencing, failure feedback, artifact ownership
+and capability admission remain in the workflow. An alternative caller must
+establish those authorities itself before invoking the helpers.
+
+The preflight estimation assembly includes both the workflow and the extracted
+helper's source. A changed assembly changes the task composition fingerprint;
+this extraction does not authorize resuming a workspace with an older identity.
+Historical estimator profiles must explicitly qualify the selected assembly.
+Prompt-render parity on frozen inputs does not establish full historical replay.
+
 ## Non-owned semantics
 
 - Node internals → each node's `.md` under [`nodes/`](../nodes).

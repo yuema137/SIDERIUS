@@ -43,7 +43,15 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 QUICKSTART = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
 
 
-def _run_with_forced_retries(tmp_path, verdicts: tuple[bool, ...]):
+def _run_with_forced_retries(
+    tmp_path,
+    verdicts: tuple[bool, ...],
+    *,
+    proposal_override=None,
+    launch_overrides=None,
+    llm_config=None,
+    constructor_calls=None,
+):
     """Drive one iteration whose implement→validate loop needs ``len(verdicts)`` tries."""
     composition = compose_run_task_bindings(str(QUICKSTART))
     _write_tuning_output(
@@ -58,7 +66,11 @@ def _run_with_forced_retries(tmp_path, verdicts: tuple[bool, ...]):
     impl_outputs: list = []
     # The proposer mints the candidate id at run time; a class-boundary mock
     # must supply one, or nothing downstream can join (O-E-4).
-    proposal = _make_proposal_output().model_copy(update={"candidate_id": "cand_u6_layout"})
+    proposal = (
+        proposal_override
+        if proposal_override is not None
+        else _make_proposal_output().model_copy(update={"candidate_id": "cand_u6_layout"})
+    )
 
     def _propose(inp):
         # The proposer's own persistence contract (node-level pin), so the
@@ -118,9 +130,8 @@ def _run_with_forced_retries(tmp_path, verdicts: tuple[bool, ...]):
 
         with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
             run_workflow(
-                llm_config=WorkflowLLMConfig(
-                    tune=TunerLLMConfig(planner_strategy="native-timing-v1")
-                ),
+                llm_config=llm_config
+                or WorkflowLLMConfig(tune=TunerLLMConfig(planner_strategy="native-timing-v1")),
                 launch=WorkflowLaunchConfig(
                     data_dir=str(tmp_path / "data"),
                     model_types=["punet"],
@@ -128,12 +139,16 @@ def _run_with_forced_retries(tmp_path, verdicts: tuple[bool, ...]):
                     max_iterations=1,
                     max_proposal_attempts=1,
                     max_impl_attempts=len(verdicts),
+                    **(launch_overrides or {}),
                 ),
                 workspace=workspace,
                 run_name=RUN,
                 task_composition=composition,
             )
         register_calls = register.call_args_list
+        if constructor_calls is not None:
+            constructor_calls["implement"] = impl.call_args_list
+            constructor_calls["validate"] = valid.call_args_list
 
     iter_dir = os.path.join(workspace, RUN, "iteration_001")
     attempt_dir = os.path.join(iter_dir, "attempt_001_gated_tcn")
