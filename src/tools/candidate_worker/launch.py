@@ -104,6 +104,8 @@ def launch_candidate(request: CandidateRunRequest) -> CandidateRunReceipt:
     )
     publish(control / "launch.json", initial)
     try:
+        if any(path != control for path in workspace.iterdir()):
+            raise ValueError("workspace became nonempty before exclusive claim")
         publish(control / "request.json", request)
         for index, payload in enumerate(captures):
             publish_bytes_write_once(str(control / f"input_{index:03}.snapshot"), payload)

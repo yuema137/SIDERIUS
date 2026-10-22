@@ -81,7 +81,17 @@ def native_runner(monkeypatch):
 def test_native_chain_preserves_outputs_and_accounting(prepared, native_runner, reject):
     """Fails if protocol transport, native probing, output capture or accounting is bypassed."""
     native_runner.reject = reject
-    receipt = launch_candidate(prepared)
+    seed_path = Path(prepared.preview.project_root) / "seed.json"
+    raw = json.loads(seed_path.read_text())
+    debug = (
+        Path(prepared.preview.document.definition.task.workspace) / "candidate_run/debug/prompt.md"
+    )
+    raw["debug_dump_proposing_prompt_path"] = str(debug)
+    seed_path.write_text(json.dumps(raw))
+    receipt = launch_candidate(refresh(prepared))
+    assert json.loads((debug.parent.parent / "proposal_input.json").read_text())[
+        "debug_dump_proposing_prompt_path"
+    ] == str(debug)
     assert receipt.status == ("rejected" if reject else "accepted"), receipt.error
     assert receipt.validation_passed is not reject
     assert receipt.candidate_id
@@ -103,7 +113,16 @@ def test_native_chain_preserves_outputs_and_accounting(prepared, native_runner, 
 
 @pytest.mark.parametrize(
     "change",
-    ["task", "data", "storage", "debug", "missing_evidence", "missing_task", "constraints"],
+    [
+        "task",
+        "data",
+        "storage",
+        "debug",
+        "missing_evidence",
+        "missing_task",
+        "constraints",
+        "debug_snapshot",
+    ],
 )
 def test_native_input_refuses_before_provider(prepared, native_runner, change):
     """Each case exercises reconciliation absent from native single-field schemas."""
@@ -120,6 +139,11 @@ def test_native_input_refuses_before_provider(prepared, native_runner, change):
         }
     elif change == "debug":
         raw["debug_dump_proposing_prompt_path"] = str(path.parent / "escape.md")
+    elif change == "debug_snapshot":
+        raw["debug_dump_proposing_prompt_path"] = str(
+            Path(prepared.preview.document.definition.task.workspace)
+            / "candidate_run/input_000.snapshot"
+        )
     elif change == "missing_evidence":
         raw.pop("interpretation_evidence")
     elif change == "missing_task":
@@ -293,4 +317,53 @@ def test_explicit_protocol_storage_escape_precedes_provider(prepared, native_run
     receipt = launch_candidate(refresh(prepared))
     assert receipt.status == "failed"
     assert "storage disagrees" in receipt.error
+    assert not native_runner.calls
+
+
+@pytest.mark.parametrize("claim", ["time_null", "vram_null", "overrides", "timing", "epochs"])
+def test_unowned_or_conflicting_constraint_claim_refused(prepared, native_runner, claim):
+    """Claimed known nulls and unavailable controls must fail before provider work."""
+    path = Path(prepared.preview.project_root) / "seed.json"
+    raw = json.loads(path.read_text())
+    context = {"known_sections": ["execution"], "execution": {}}
+    if claim == "time_null":
+        raw["trial_time_budget_minutes"] = 5
+    elif claim == "vram_null":
+        raw["vram_budget_gb"] = 8
+    elif claim == "overrides":
+        context = {"overrides": {"max_epochs": 100}}
+    elif claim == "timing":
+        context = {
+            "timing": {
+                "plan_overrides": {},
+                "task_rules": None,
+                "workflow_rules": None,
+                "roles": [],
+                "formal_training_scope_source": "operator",
+                "formal_eval_portion": 1.0,
+                "trial_allowed": True,
+                "forced_formal": False,
+                "inheritance_strategy": "none",
+                "inheritance_values": {},
+                "inheritance_unless_authored": [],
+                "inheritance_winner": None,
+                "inheritance_recovery": None,
+                "partial_scope_strategy_overrides": {},
+                "validation_max_portion": None,
+                "validation_max_train_samples": None,
+                "validation_max_samples": None,
+                "training_validation_portion": None,
+                "training_budget_reserve_fraction": None,
+            }
+        }
+    else:
+        context["execution"] = {"max_epochs": 100}
+    raw["constraint_context"] = context
+    path.write_text(json.dumps(raw))
+    receipt = launch_candidate(refresh(prepared))
+    assert receipt.status == "failed"
+    expected = (
+        "disagrees" if claim in {"time_null", "vram_null"} else "no candidate worker authority"
+    )
+    assert expected in receipt.error
     assert not native_runner.calls

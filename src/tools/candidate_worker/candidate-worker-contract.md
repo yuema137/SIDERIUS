@@ -13,7 +13,8 @@ The parent revalidates the exact supported three-node graph, canonical selected
 paths, bytes/size hashes, declaration digest and constructor routes against the
 request. Canvas positions do not enter declaration identity. It exclusively
 creates `candidate_run/` in an absent/empty workspace; losers cannot publish
-snapshots or receipts. Source/data/workspace separation uses preview's existing
+snapshots or receipts. After claiming, the parent rechecks that no other
+workspace contents appeared. Source/data/workspace separation uses preview's existing
 checks. A failed launch never removes its claim or partial output.
 
 `candidate_run/request.json`, `launch.json` and `input_NNN.snapshot` are durable,
@@ -37,14 +38,17 @@ independently verify its historical origin or regenerate it.
 `managed_fresh` is mandatory. A missing seed storage key authorizes insertion of
 managed proposal storage; an explicit storage must match canonical workspace,
 local backend and run name. Both protocol storage arguments must match managed
-implementation storage. Debug output cannot escape the workspace. Only the
+implementation storage. Debug output must be inside `candidate_run/debug/`, separated from captured
+inputs, control receipts and native output records. Only the
 catalogued native optional context/task-ref/provider/model schemas are decoded;
 protocol arguments must agree with native seed/task/constructor authorities.
 Unused externals and result injection are unsupported.
 
 Constraint disclosure may be incomplete. Claimed task rules/objective must agree
 with composition, workflow rules with the seed, and duplicated time/VRAM facts
-with seed declarations. Unknown sections remain unknown. Hardware/VRAM inputs
+with seed declarations. Known execution sections compare duplicated budgets including explicit nulls.
+Populated overrides, timing and execution controls without a worker authority
+are refused before provider calls. Unknown sections remain unknown. Hardware/VRAM inputs
 are declarations, not measurements certified by this worker. Future training
 budgets are not training admission. Scope, sampling, allowed outputs, parameter
 locks, reasoning stages and proposal advice remain native input values.

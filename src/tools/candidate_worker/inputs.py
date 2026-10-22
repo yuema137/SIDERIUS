@@ -56,14 +56,30 @@ def check_constraints(seed: ProposalInput, ref: TaskCompositionRef) -> None:
         actual = getattr(context, name)
         if (name in context.known_sections or actual is not None) and actual != value:
             raise ValueError(f"constraint_context.{name} disagrees with native authority")
+    if context.overrides:
+        raise ValueError("constraint_context.overrides has no candidate worker authority")
+    if context.timing is not None:
+        raise ValueError("constraint_context.timing has no candidate worker authority")
     if context.execution is not None:
+        supported = {
+            "trial_time_budget_minutes",
+            "formal_time_budget_minutes",
+            "trial_vram_budget_gb",
+            "formal_vram_budget_gb",
+        }
+        for name, value in context.execution.model_dump().items():
+            if name not in supported and value is not None:
+                raise ValueError(
+                    f"constraint_context.execution.{name} has no candidate worker authority"
+                )
+        known = "execution" in context.known_sections
         for name in ("trial_time_budget_minutes", "formal_time_budget_minutes"):
             value = getattr(context.execution, name)
-            if value is not None and value != getattr(seed, name):
+            if (known or value is not None) and value != getattr(seed, name):
                 raise ValueError(f"constraint_context.execution.{name} disagrees with seed")
         budgets = (context.execution.trial_vram_budget_gb, context.execution.formal_vram_budget_gb)
         selected = budgets[0] if budgets[0] is not None else budgets[1]
-        if selected is not None and selected != seed.vram_budget_gb:
+        if (known or selected is not None) and selected != seed.vram_budget_gb:
             raise ValueError("constraint_context execution VRAM disagrees with seed")
 
 
@@ -125,9 +141,9 @@ def materialize(
         raise ValueError("proposal seed data_dir disagrees with selected physical root")
     debug = seed.debug_dump_proposing_prompt_path
     if debug is not None and (
-        not Path(debug).is_absolute() or not Path(debug).resolve().is_relative_to(workspace)
+        not Path(debug).is_absolute() or not Path(debug).resolve().is_relative_to(control / "debug")
     ):
-        raise ValueError("debug prompt path escapes managed workspace")
+        raise ValueError("debug prompt path must be inside candidate_run/debug")
     check_constraints(seed, ref)
     validator = config.get("validate")
     provider = TypeAdapter(Literal["gemini", "openai", "deepseek"]).validate_python(

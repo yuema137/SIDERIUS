@@ -46,7 +46,7 @@ request = CandidateRunRequest(
 ```
 
 Use credentials from your machine-owned launch environment, following the
-[installation instructions](../../../docs/getting-started/installation.md#api-keys).
+[installation instructions](../../../../docs/getting-started/installation.md#api-keys).
 The request carries variable names, never credential values. Launch from this
 checkout's frozen environment:
 

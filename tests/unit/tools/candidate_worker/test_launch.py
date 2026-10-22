@@ -209,3 +209,23 @@ def test_interrupted_runner_preserves_partial_outputs_without_success(prepared, 
         (Path(receipt.workspace) / "candidate_run/receipt.json").read_bytes()
     )
     assert stored == receipt
+
+
+def test_workspace_populated_after_preview_is_refused(prepared, monkeypatch):
+    """A successful claim cannot bless content created after the preview check."""
+    real_preview = launch_module.preview_workflow
+
+    def changed(request):
+        observed = real_preview(request)
+        workspace = Path(observed.workspace)
+        workspace.mkdir(parents=True)
+        (workspace / "unexpected.txt").write_text("preserve me")
+        return observed
+
+    monkeypatch.setattr(launch_module, "preview_workflow", changed)
+    monkeypatch.setattr(launch_module, "run", lambda *_: pytest.fail("must not execute"))
+    receipt = launch_candidate(prepared)
+    assert receipt.status == "failed"
+    assert "nonempty" in receipt.error
+    assert (Path(receipt.workspace) / "unexpected.txt").read_text() == "preserve me"
+    assert not (Path(receipt.workspace) / "candidate_run/request.json").exists()
