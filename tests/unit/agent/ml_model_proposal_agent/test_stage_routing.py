@@ -261,7 +261,7 @@ def test_workflow_dispatches_context_to_agent_owner(tmp_path):
             workspace=str(tmp_path), chain_run_name="routing", run_id="run-1"
         ),
         "iteration": 3,
-        "_Path": Path,
+        "bind_agent_run_context": workflow.bind_agent_run_context,
     }
     exec(compile(ast.Module(body=[binder], type_ignores=[]), workflow.__file__, "exec"), namespace)
     agent = SimpleNamespace(set_run_context=Mock(), bridge=Mock())
@@ -272,4 +272,14 @@ def test_workflow_dispatches_context_to_agent_owner(tmp_path):
         run_name="routing",
         run_id="run-1",
     )
+    agent.bridge.set_run_context.assert_not_called()
+    namespace["iteration"] = 8
+    namespace["_bind_iter_context"](agent)
+    agent.set_run_context.assert_called_with(
+        workspace=tmp_path,
+        iter=8,
+        run_name="routing",
+        run_id="run-1",
+    )
+    assert agent.set_run_context.call_count == 2
     agent.bridge.set_run_context.assert_not_called()

@@ -97,6 +97,27 @@ this extraction does not authorize resuming a workspace with an older identity.
 Historical estimator profiles must explicitly qualify the selected assembly.
 Prompt-render parity on frozen inputs does not establish full historical replay.
 
+## Candidate attempt storage and accounting
+
+`attempt_storage.ImplAttemptStorage` and `impl_attempt_storage(attempt_dir,
+run_name, impl_attempt)` derive the native `StorageConfig` and model/test/loss
+directories from `execute_tools.impl_attempts.impl_attempt_dir`. They create no
+files and preserve that owner's one-based numbering and error behavior.
+`model_exploration` re-exports both names for existing callers. The workflow
+continues to choose the proposal attempt and retry index.
+
+`run_context.bind_agent_run_context(agent, *, workspace, iteration, run_name,
+run_id)` dispatches accounting context to an agent's `set_run_context` first,
+otherwise to its non-None `bridge`. A missing run name or run ID skips binding,
+as before; callers requiring accounting must supply both. Agent-owned binding
+preserves proposer lazy stage bridges and tuner deferred brain construction.
+The workflow's nested adapter reads its current iteration at each call, so
+chain offsets and later iterations retain their original accounting identity.
+Neither helper constructs providers, invokes nodes or changes retry behavior.
+Both helpers' bytes join the preflight estimation assembly alongside the
+previously covered workflow. Historical qualification is still required for the
+changed assembly; this source move does not establish a new qualified pair.
+
 ## Non-owned semantics
 
 - Node internals → each node's `.md` under [`nodes/`](../nodes).

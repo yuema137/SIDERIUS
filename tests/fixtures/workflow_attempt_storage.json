@@ -1,0 +1,44 @@
+{
+  "1": {
+    "impl_dir": "/tmp/candidate/iteration_001/attempt_001/impl_001",
+    "storage": {
+      "backend": "local",
+      "local": {
+        "workspace": "/tmp/candidate/iteration_001/attempt_001/impl_001",
+        "run_name": "candidate"
+      },
+      "postgres": null
+    },
+    "plugin_dir": "/tmp/candidate/iteration_001/attempt_001/impl_001/models",
+    "test_dir": "/tmp/candidate/iteration_001/attempt_001/impl_001/tests",
+    "loss_dir": "/tmp/candidate/iteration_001/attempt_001/impl_001/losses"
+  },
+  "2": {
+    "impl_dir": "/tmp/candidate/iteration_001/attempt_001/impl_002",
+    "storage": {
+      "backend": "local",
+      "local": {
+        "workspace": "/tmp/candidate/iteration_001/attempt_001/impl_002",
+        "run_name": "candidate"
+      },
+      "postgres": null
+    },
+    "plugin_dir": "/tmp/candidate/iteration_001/attempt_001/impl_002/models",
+    "test_dir": "/tmp/candidate/iteration_001/attempt_001/impl_002/tests",
+    "loss_dir": "/tmp/candidate/iteration_001/attempt_001/impl_002/losses"
+  },
+  "12": {
+    "impl_dir": "/tmp/candidate/iteration_001/attempt_001/impl_012",
+    "storage": {
+      "backend": "local",
+      "local": {
+        "workspace": "/tmp/candidate/iteration_001/attempt_001/impl_012",
+        "run_name": "candidate"
+      },
+      "postgres": null
+    },
+    "plugin_dir": "/tmp/candidate/iteration_001/attempt_001/impl_012/models",
+    "test_dir": "/tmp/candidate/iteration_001/attempt_001/impl_012/tests",
+    "loss_dir": "/tmp/candidate/iteration_001/attempt_001/impl_012/losses"
+  }
+}
