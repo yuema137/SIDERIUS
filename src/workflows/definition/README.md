@@ -22,3 +22,8 @@ pass this document to an existing launcher or treat its digest as a run identity
 
 See the [contract and Python example](definition-contract.md) for the supported
 bindings, ownership and validation rules.
+
+For one connected three-node chain, the optional
+[binding preview](../../tools/workflow_preview/README.md) reads selected local
+files and reports constructor model routes. It still does not execute the chain
+or validate native payload contents.

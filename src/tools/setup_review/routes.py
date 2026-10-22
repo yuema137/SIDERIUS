@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import TypeAdapter
 
@@ -132,37 +132,41 @@ def _literature_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> 
     return [main, search]
 
 
-def standard_llm_routes(
+NodeRouteRole = Literal["interpret", "implement", "validate", "data_analysis", "propose"]
+
+
+def node_llm_routes(
     config: WorkflowLLMConfig,
+    role: NodeRouteRole,
     *,
-    literature_enabled: bool,
-    analysis_enabled: bool | None,
-    pseudo_llm: bool,
+    state: RouteApplicability = "conditional",
 ) -> list[LLMRoute]:
-    """Describe possible calls, not stage activation, invocation counts or costs."""
-    state: RouteApplicability = "pseudo" if pseudo_llm else "conditional"
+    """Project one native constructor role without resolving unrelated roles.
+
+    Names use the role namespace. A caller representing node instances must
+    rename both names and sharing references into that instance's namespace.
+    """
+    if role == "propose":
+        return _proposer_routes(config, state)
+    defaults = {
+        "interpret": INTERPRET,
+        "implement": IMPLEMENT,
+        "validate": VALIDATE,
+        "data_analysis": ANALYZE,
+    }[role]
+    options = config.get(role)
+    kwargs = node_bridge_kwargs(
+        provider=options.get("provider", defaults.provider),
+        model_id=options.get("model_id", defaults.model_id),
+        max_retries=options.get("max_retries", defaults.max_retries),
+        reasoning_effort=options.get("reasoning_effort", defaults.reasoning_effort),
+        omit_unset_retries=role == "data_analysis",
+    )
+    return [_route(role, kwargs, state)]
+
+
+def _proposer_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> list[LLMRoute]:
     routes = []
-    for node, defaults in (
-        ("interpret", INTERPRET),
-        ("implement", IMPLEMENT),
-        ("validate", VALIDATE),
-        ("data_analysis", ANALYZE),
-    ):
-        node_state = state
-        if node == "data_analysis":
-            if analysis_enabled is False:
-                node_state = "disabled"
-            elif analysis_enabled is None and not pseudo_llm:
-                node_state = "task_dependent"
-        options = config.get(node)
-        kwargs = node_bridge_kwargs(
-            provider=options.get("provider", defaults.provider),
-            model_id=options.get("model_id", defaults.model_id),
-            max_retries=options.get("max_retries", defaults.max_retries),
-            reasoning_effort=options.get("reasoning_effort", defaults.reasoning_effort),
-            omit_unset_retries=node == "data_analysis",
-        )
-        routes.append(_route(node, kwargs, node_state))
     options = config.get("propose")
     routing = resolve_proposer_routing(
         ProposerRoute(
@@ -191,6 +195,29 @@ def standard_llm_routes(
         else:
             shared_proposer_routes.append((stage_settings, name))
         routes.append(route)
+    return routes
+
+
+def standard_llm_routes(
+    config: WorkflowLLMConfig,
+    *,
+    literature_enabled: bool,
+    analysis_enabled: bool | None,
+    pseudo_llm: bool,
+) -> list[LLMRoute]:
+    """Describe possible calls, not stage activation, invocation counts or costs."""
+    state: RouteApplicability = "pseudo" if pseudo_llm else "conditional"
+    routes = []
+    roles: tuple[NodeRouteRole, ...] = ("interpret", "implement", "validate", "data_analysis")
+    for node in roles:
+        node_state = state
+        if node == "data_analysis":
+            if analysis_enabled is False:
+                node_state = "disabled"
+            elif analysis_enabled is None and not pseudo_llm:
+                node_state = "task_dependent"
+        routes.extend(node_llm_routes(config, node, state=node_state))
+    routes.extend(node_llm_routes(config, "propose", state=state))
     routes.extend(_tuner_routes(config, state))
     routes.extend(_literature_routes(config, state if literature_enabled else "disabled"))
     return routes
