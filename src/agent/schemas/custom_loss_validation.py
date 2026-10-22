@@ -19,6 +19,7 @@ from agent.schemas.custom_loss_contract import (
 from agent.schemas.model_io_contract import ModelIOContract, TensorContract
 from agent.skills.model_io_probe_skill import ProbeConstructionError, build_loss_probe_pair
 from core.capability_registry import CapabilityContractSnapshot
+from core.generated_artifact_name import validate_generated_artifact_name
 
 
 def _resolve_declared_applicability(
@@ -270,6 +271,10 @@ def validate_custom_loss_plugin_or_raise_setup(
     dependencies through the native plugin loader instead of flattening source.
     """
 
+    try:
+        validate_generated_artifact_name(loss_name, field="loss_name")
+    except ValueError as exc:
+        return str(exc)
     prediction, target, description = prepare_custom_loss_validation(
         model_io, supervision_target, applicability, pair_provider
     )

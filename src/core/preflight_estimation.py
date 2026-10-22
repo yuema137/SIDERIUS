@@ -53,6 +53,7 @@ def estimation_assembly_digest() -> str:
         root / name
         for name in (
             "core/preflight_observations.py",
+            "core/generated_artifact_name.py",
             "core/runtime_control/gpu_measurement_hold.py",
             "core/inference_preflight_policy.py",
             "core/runtime_control/inference_measurement_binding.py",

@@ -75,6 +75,8 @@ from typing import TYPE_CHECKING, Any
 import psutil as _psutil
 import yaml
 
+from core.generated_artifact_name import validate_generated_artifact_name
+
 if TYPE_CHECKING:
     from execute_tools.historical_model_inference import HistoricalModelInferenceCapability
     from workflows.data_analysis_composition import ResolvedWorkflowDataAnalysis
@@ -1254,6 +1256,9 @@ def _register_plugin(
 
     Skips gracefully if source files don't exist (e.g. unit tests with mocks).
     """
+    loss_prov = getattr(impl_output, "loss_provenance", None)
+    if dest_loss_dirs is not None and loss_prov is not None and loss_prov.action == "generated":
+        validate_generated_artifact_name(loss_prov.loss_name, field="loss_provenance.loss_name")
     if isinstance(dest_plugin_dirs, str):
         dest_plugin_dirs = [dest_plugin_dirs]
 
@@ -1386,6 +1391,7 @@ def _promote_loss_to_global(impl_output) -> None:
     if loss_prov is None or loss_prov.action != "generated":
         return
 
+    validate_generated_artifact_name(loss_prov.loss_name, field="loss_provenance.loss_name")
     from core.capability_registry import CapabilityMetadata, CapabilityRegistry
     from core.generated_library import generated_library_is_workspace_bound, generated_losses_dir
     from ml_models.loss_plugin_loader import LOSSES_DIR
@@ -1586,6 +1592,7 @@ def _promote_model_to_global(impl_output) -> None:
         print("  Warning: cannot promote model — impl_output.model_type is empty")
         return
 
+    validate_generated_artifact_name(model_name, field="model_type")
     # arXiv P1 — the promotion DESTINATION is the resolved generated-library
     # models dir, never the repository checkout. The legacy checkout dir
     # participates READ-ONLY below (Branch-B detection, content dedup,
@@ -3113,6 +3120,7 @@ def run_workflow(
                     proposal, baseline_isolation=launch.baseline_isolation
                 )
 
+                validate_generated_artifact_name(proposal.model_name, field="model_name")
                 # Rename attempt dir to include model name
                 named_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}_{proposal.model_name}")
                 os.rename(attempt_dir, named_dir)
@@ -3289,6 +3297,7 @@ def run_workflow(
         assert proposal is not None
 
         # --- Tune (set up storage + run-scoped plugin dir up front) ---
+        validate_generated_artifact_name(proposal.model_name, field="model_name")
         tuning_dir = os.path.join(iter_dir, proposal.model_name)
         os.makedirs(tuning_dir, exist_ok=True)
         tuning_storage = _make_storage(tuning_dir, bindings.run_name)

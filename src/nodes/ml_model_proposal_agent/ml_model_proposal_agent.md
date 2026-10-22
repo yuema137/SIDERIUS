@@ -446,3 +446,11 @@ Legacy refusal and pipeline structural-correction limits are unchanged. Archive
 deserialization without live context stays supported; it does not authorize a
 new run. This change enforces the existing reuse exception and does not rewrite
 historical prompt templates or expand registered configuration capabilities.
+
+
+The live availability check first applies the shared generated-artifact component
+rule from `core/generated_artifact_name.py`. Empty names, dot components, either
+separator, colons and Unicode control characters are refused through the existing
+retry feedback. Names are never sanitized. The workflow independently repeats
+this check before name-derived attempt renaming and tuning directory creation,
+including operator-supplied fixed plans; archival decoding remains permissive.
