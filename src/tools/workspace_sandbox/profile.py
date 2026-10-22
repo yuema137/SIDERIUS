@@ -113,18 +113,23 @@ class SandboxProfile(BaseModel):
 
     @model_validator(mode="after")
     def mount_boundaries(self) -> SandboxProfile:
-        control_roots = tuple(Path(p) for p in ("/proc", "/dev", "/sandbox-home"))
-        for path in (self.workspace, *self.read_only):
-            if path in (Path("/"), Path("/tmp"), Path("/etc"), Path("/home")):
-                raise ValueError(f"declare a specific project/resource path, not {path}")
-            if any(path.is_relative_to(root) for root in control_roots):
-                raise ValueError(f"path conflicts with sandbox control mounts: {path}")
-        if self.workspace.is_relative_to("/sys"):
-            raise ValueError("workspace cannot overlap read-only hardware metadata")
-        for root in (*runtime_roots(), *SYSTEM_DIRECTORIES, Path("/etc")):
-            if self.workspace.is_relative_to(root) or root.is_relative_to(self.workspace):
-                raise ValueError(f"workspace overlaps the protected runtime: {root}")
-        for path in self.read_only:
-            if self.workspace.is_relative_to(path):
-                raise ValueError("workspace cannot be inside or equal to a read-only root")
+        validate_mount_boundaries(self.workspace, self.read_only)
         return self
+
+
+def validate_mount_boundaries(workspace: Path, read_only: tuple[Path, ...]) -> None:
+    """Check mount relationships without requiring a future workspace to exist."""
+    control_roots = tuple(Path(p) for p in ("/proc", "/dev", "/sandbox-home"))
+    for path in (workspace, *read_only):
+        if path in (Path("/"), Path("/tmp"), Path("/etc"), Path("/home")):
+            raise ValueError(f"declare a specific project/resource path, not {path}")
+        if any(path.is_relative_to(root) for root in control_roots):
+            raise ValueError(f"path conflicts with sandbox control mounts: {path}")
+    if workspace.is_relative_to("/sys"):
+        raise ValueError("workspace cannot overlap read-only hardware metadata")
+    for root in (*runtime_roots(), *SYSTEM_DIRECTORIES, Path("/etc")):
+        if workspace.is_relative_to(root) or root.is_relative_to(workspace):
+            raise ValueError(f"workspace overlaps the protected runtime: {root}")
+    for path in read_only:
+        if workspace.is_relative_to(path):
+            raise ValueError("workspace cannot be inside or equal to a read-only root")

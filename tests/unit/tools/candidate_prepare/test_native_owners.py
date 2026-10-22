@@ -56,3 +56,43 @@ def test_explicit_cold_start_and_noncreating_layout(tmp_path):
         == tmp_path / "run/named/iteration_001/attempt_001"
     )
     assert not (tmp_path / "run").exists()
+
+
+def test_parent_import_is_inert_in_fresh_process():
+    """Preparation imports must not discover ambient models or construct providers."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+import tools.candidate_prepare
+assert not any(name.startswith(('nodes.', 'ml_models.')) and name not in {'nodes.llm_settings', 'nodes.proposer_routing', 'nodes.tuner_llm_settings'} for name in sys.modules)
+assert 'workflows.task_composition' not in sys.modules
+assert 'agent.llm_bridge' not in sys.modules
+""",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_cold_start_owner_changes_rendering_qualification(monkeypatch):
+    """Deterministic input semantics stay inside the historical rendering closure."""
+    from agent.prompt_rendering import rendering_assembly_digest
+
+    original = Path.read_bytes
+    before = rendering_assembly_digest()
+
+    def changed(path):
+        data = original(path)
+        if path.name == "cold_start.py" and path.parent.name == "result_interpretation_agent":
+            return data + b"\n# altered cold-start input semantics\n"
+        return data
+
+    monkeypatch.setattr(Path, "read_bytes", changed)
+    assert rendering_assembly_digest() != before
