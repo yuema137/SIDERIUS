@@ -797,3 +797,15 @@ analysis-brief generation append the shared disclosure. Evidence-only cache
 consolidation remains source-faithful. Brief receipts hash the final sent text
 and reject changed-context reuse. See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
 for coverage, ownership, incomplete direct calls and historical profiles.
+
+## Deterministic cold-start API
+
+`from nodes.result_interpretation_agent import build_cold_start_interpretation`
+accepts a validated `InterpretationInput` with explicit `cold_start=True` and
+returns the same native `InterpretationOutput` as the node's deterministic branch.
+It carries Formal-failure feedback, metric identity, runtime vocabulary,
+confirmation mapping and retained collapse fingerprints. It constructs no bridge,
+performs no persistence and does not run optional analysis. False cold-start input
+raises `ValueError`. The implementation lives in private `cold_start.py`; consumers
+use the public package export. `ResultInterpretationAgent.run` retains its live
+name guard and optional analysis-brief stage around this shared builder.

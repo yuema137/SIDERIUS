@@ -1,0 +1,937 @@
+{
+  "source": "82f298e25f55fddbb7302d8d3e90bd5f7ba03d4d",
+  "cold_start": [
+    {
+      "name": "empty",
+      "input": {
+        "summaries": [],
+        "model_knowledge_cache": {},
+        "model_types": null,
+        "cold_start": true,
+        "baseline_isolation": false,
+        "description_source_policy": "legacy",
+        "task_description": "",
+        "expert_advice": "",
+        "human_advice": null,
+        "runtime_vocab": [],
+        "previous_proposal": null,
+        "cumulative_information_gain": 0.0,
+        "prediction_outcomes_history": {
+          "confirmed": 0,
+          "partial": 0,
+          "refuted": 0
+        },
+        "vocab_link_confirmations": {},
+        "enable_structured_health_feedback": false,
+        "collapse_fingerprint_history": {},
+        "health_feedback_history_window_iterations": 3,
+        "health_feedback_history_max_entries_per_model": 8,
+        "storage": {
+          "backend": "local",
+          "local": {
+            "workspace": "/explicit/unused",
+            "run_name": "parity"
+          },
+          "postgres": null
+        },
+        "iteration": 1,
+        "active_model_top_k": 3,
+        "active_model_last_n": 2,
+        "active_model_score_delta": 0.05,
+        "prediction_outcomes_by_semantics": {},
+        "cumulative_information_gain_by_semantics": {},
+        "metric_spec": null,
+        "task_blocks": null
+      },
+      "output": {
+        "model_types": [],
+        "model_descriptions": {},
+        "total_experiments": 0,
+        "cold_start": true,
+        "per_model_best": {},
+        "per_model_best_valid": {},
+        "per_model_raw_best_health_validity": {},
+        "per_model_worst": {},
+        "scientific_aggregation": null,
+        "best_denoising_score": null,
+        "best_valid_denoising_score": null,
+        "worst_denoising_score": null,
+        "best_config": null,
+        "best_valid_config": null,
+        "model_knowledge_cache": {},
+        "key_findings": [
+          "Cold start: no prior experimental runs or score history exist yet."
+        ],
+        "bottlenecks": [],
+        "take_home_message": "This is a cold start \u2014 there is no prior experimental evidence. Propose the first experiment from the task description, the available model/loss registries (as options, not results), advice, and resource constraints. Do not claim improvement over prior runs; none exist.",
+        "per_model_score_tables": null,
+        "per_model_params": null,
+        "per_model_training_segments": null,
+        "runtime_vocab": [],
+        "prediction_evaluation": null,
+        "new_discoveries": [],
+        "vocab_changes": [],
+        "vocab_diversity_ratio": null,
+        "cumulative_information_gain": 0.0,
+        "scientific_accuracy": null,
+        "prediction_outcomes_history": {
+          "confirmed": 0,
+          "partial": 0,
+          "refuted": 0
+        },
+        "vocab_link_confirmations": {},
+        "per_model_round_health_counts": {},
+        "per_model_collapse_fingerprints": {},
+        "collapse_fingerprint_history": {},
+        "is_degraded": false,
+        "evolution_stats": {},
+        "metric_identity": null,
+        "prediction_evaluation_semantics": "legacy_v1",
+        "prediction_outcomes_by_semantics": {},
+        "cumulative_information_gain_by_semantics": {},
+        "prediction_pool_sizes": {},
+        "per_model_secondary_metrics": {},
+        "per_model_failure_counts": {}
+      }
+    },
+    {
+      "name": "higher",
+      "input": {
+        "summaries": [],
+        "model_knowledge_cache": {},
+        "model_types": null,
+        "cold_start": true,
+        "baseline_isolation": false,
+        "description_source_policy": "legacy",
+        "task_description": "",
+        "expert_advice": "",
+        "human_advice": null,
+        "runtime_vocab": [],
+        "previous_proposal": null,
+        "cumulative_information_gain": 0.0,
+        "prediction_outcomes_history": {
+          "confirmed": 0,
+          "partial": 0,
+          "refuted": 0
+        },
+        "vocab_link_confirmations": {},
+        "enable_structured_health_feedback": false,
+        "collapse_fingerprint_history": {},
+        "health_feedback_history_window_iterations": 3,
+        "health_feedback_history_max_entries_per_model": 8,
+        "storage": {
+          "backend": "local",
+          "local": {
+            "workspace": "/explicit/unused",
+            "run_name": "parity"
+          },
+          "postgres": null
+        },
+        "iteration": 1,
+        "active_model_top_k": 3,
+        "active_model_last_n": 2,
+        "active_model_score_delta": 0.05,
+        "prediction_outcomes_by_semantics": {},
+        "cumulative_information_gain_by_semantics": {},
+        "metric_spec": {
+          "id": "fixture_accuracy",
+          "direction": "higher",
+          "aggregation": "mean_over_deliverables",
+          "transform": null,
+          "transform_params": {},
+          "references": [],
+          "scoreability": {
+            "contract_id": "deliverable_presence"
+          }
+        },
+        "task_blocks": null
+      },
+      "output": {
+        "model_types": [],
+        "model_descriptions": {},
+        "total_experiments": 0,
+        "cold_start": true,
+        "per_model_best": {},
+        "per_model_best_valid": {},
+        "per_model_raw_best_health_validity": {},
+        "per_model_worst": {},
+        "scientific_aggregation": null,
+        "best_denoising_score": null,
+        "best_valid_denoising_score": null,
+        "worst_denoising_score": null,
+        "best_config": null,
+        "best_valid_config": null,
+        "model_knowledge_cache": {},
+        "key_findings": [
+          "Cold start: no prior experimental runs or score history exist yet."
+        ],
+        "bottlenecks": [],
+        "take_home_message": "This is a cold start \u2014 there is no prior experimental evidence. Propose the first experiment from the task description, the available model/loss registries (as options, not results), advice, and resource constraints. Do not claim improvement over prior runs; none exist.",
+        "per_model_score_tables": null,
+        "per_model_params": null,
+        "per_model_training_segments": null,
+        "runtime_vocab": [],
+        "prediction_evaluation": null,
+        "new_discoveries": [],
+        "vocab_changes": [],
+        "vocab_diversity_ratio": null,
+        "cumulative_information_gain": 0.0,
+        "scientific_accuracy": null,
+        "prediction_outcomes_history": {
+          "confirmed": 0,
+          "partial": 0,
+          "refuted": 0
+        },
+        "vocab_link_confirmations": {},
+        "per_model_round_health_counts": {},
+        "per_model_collapse_fingerprints": {},
+        "collapse_fingerprint_history": {},
+        "is_degraded": false,
+        "evolution_stats": {},
+        "metric_identity": {
+          "metric_id": "fixture_accuracy",
+          "direction": "higher"
+        },
+        "prediction_evaluation_semantics": "legacy_v1",
+        "prediction_outcomes_by_semantics": {},
+        "cumulative_information_gain_by_semantics": {},
+        "prediction_pool_sizes": {},
+        "per_model_secondary_metrics": {},
+        "per_model_failure_counts": {}
+      }
+    },
+    {
+      "name": "lower",
+      "input": {
+        "summaries": [],
+        "model_knowledge_cache": {},
+        "model_types": null,
+        "cold_start": true,
+        "baseline_isolation": false,
+        "description_source_policy": "legacy",
+        "task_description": "",
+        "expert_advice": "",
+        "human_advice": null,
+        "runtime_vocab": [],
+        "previous_proposal": null,
+        "cumulative_information_gain": 0.0,
+        "prediction_outcomes_history": {
+          "confirmed": 0,
+          "partial": 0,
+          "refuted": 0
+        },
+        "vocab_link_confirmations": {},
+        "enable_structured_health_feedback": false,
+        "collapse_fingerprint_history": {},
+        "health_feedback_history_window_iterations": 3,
+        "health_feedback_history_max_entries_per_model": 8,
+        "storage": {
+          "backend": "local",
+          "local": {
+            "workspace": "/explicit/unused",
+            "run_name": "parity"
+          },
+          "postgres": null
+        },
+        "iteration": 1,
+        "active_model_top_k": 3,
+        "active_model_last_n": 2,
+        "active_model_score_delta": 0.05,
+        "prediction_outcomes_by_semantics": {},
+        "cumulative_information_gain_by_semantics": {},
+        "metric_spec": {
+          "id": "fixture_mse",
+          "direction": "lower",
+          "aggregation": "mean_over_deliverables",
+          "transform": null,
+          "transform_params": {},
+          "references": [],
+          "scoreability": {
+            "contract_id": "deliverable_presence"
+          }
+        },
+        "task_blocks": null
+      },
+      "output": {
+        "model_types": [],
+        "model_descriptions": {},
+        "total_experiments": 0,
+        "cold_start": true,
+        "per_model_best": {},
+        "per_model_best_valid": {},
+        "per_model_raw_best_health_validity": {},
+        "per_model_worst": {},
+        "scientific_aggregation": null,
+        "best_denoising_score": null,
+        "best_valid_denoising_score": null,
+        "worst_denoising_score": null,
+        "best_config": null,
+        "best_valid_config": null,
+        "model_knowledge_cache": {},
+        "key_findings": [
+          "Cold start: no prior experimental runs or score history exist yet."
+        ],
+        "bottlenecks": [],
+        "take_home_message": "This is a cold start \u2014 there is no prior experimental evidence. Propose the first experiment from the task description, the available model/loss registries (as options, not results), advice, and resource constraints. Do not claim improvement over prior runs; none exist.",
+        "per_model_score_tables": null,
+        "per_model_params": null,
+        "per_model_training_segments": null,
+        "runtime_vocab": [],
+        "prediction_evaluation": null,
+        "new_discoveries": [],
+        "vocab_changes": [],
+        "vocab_diversity_ratio": null,
+        "cumulative_information_gain": 0.0,
+        "scientific_accuracy": null,
+        "prediction_outcomes_history": {
+          "confirmed": 0,
+          "partial": 0,
+          "refuted": 0
+        },
+        "vocab_link_confirmations": {},
+        "per_model_round_health_counts": {},
+        "per_model_collapse_fingerprints": {},
+        "collapse_fingerprint_history": {},
+        "is_degraded": false,
+        "evolution_stats": {},
+        "metric_identity": {
+          "metric_id": "fixture_mse",
+          "direction": "lower"
+        },
+        "prediction_evaluation_semantics": "legacy_v1",
+        "prediction_outcomes_by_semantics": {},
+        "cumulative_information_gain_by_semantics": {},
+        "prediction_pool_sizes": {},
+        "per_model_secondary_metrics": {},
+        "per_model_failure_counts": {}
+      }
+    },
+    {
+      "name": "memory",
+      "input": {
+        "summaries": [],
+        "model_knowledge_cache": {},
+        "model_types": null,
+        "cold_start": true,
+        "baseline_isolation": false,
+        "description_source_policy": "legacy",
+        "task_description": "",
+        "expert_advice": "",
+        "human_advice": null,
+        "runtime_vocab": [
+          {
+            "name": "feature",
+            "kind": "candidate",
+            "description": "carried",
+            "related_to": [],
+            "tier": "candidate",
+            "pattern": null,
+            "proposed_by_run": null,
+            "seen_in_runs": [],
+            "aliases": [],
+            "origin": null
+          }
+        ],
+        "previous_proposal": null,
+        "cumulative_information_gain": 0.0,
+        "prediction_outcomes_history": {
+          "confirmed": 0,
+          "partial": 0,
+          "refuted": 0
+        },
+        "vocab_link_confirmations": {
+          "feature:capability": [
+            "prior"
+          ]
+        },
+        "enable_structured_health_feedback": false,
+        "collapse_fingerprint_history": {
+          "example": [
+            {
+              "signature": "stability:x=1",
+              "check_name": "stability",
+              "metrics": {
+                "x": 1
+              },
+              "human_readable": "prior collapse",
+              "occurrences": [
+                {
+                  "iteration": 1,
+                  "count": 1,
+                  "source_exp_ids": [
+                    "prior"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "health_feedback_history_window_iterations": 3,
+        "health_feedback_history_max_entries_per_model": 8,
+        "storage": {
+          "backend": "local",
+          "local": {
+            "workspace": "/explicit/unused",
+            "run_name": "parity"
+          },
+          "postgres": null
+        },
+        "iteration": 2,
+        "active_model_top_k": 3,
+        "active_model_last_n": 2,
+        "active_model_score_delta": 0.05,
+        "prediction_outcomes_by_semantics": {},
+        "cumulative_information_gain_by_semantics": {},
+        "metric_spec": null,
+        "task_blocks": null
+      },
+      "output": {
+        "model_types": [],
+        "model_descriptions": {},
+        "total_experiments": 0,
+        "cold_start": true,
+        "per_model_best": {},
+        "per_model_best_valid": {},
+        "per_model_raw_best_health_validity": {},
+        "per_model_worst": {},
+        "scientific_aggregation": null,
+        "best_denoising_score": null,
+        "best_valid_denoising_score": null,
+        "worst_denoising_score": null,
+        "best_config": null,
+        "best_valid_config": null,
+        "model_knowledge_cache": {},
+        "key_findings": [
+          "Cold start: no prior experimental runs or score history exist yet."
+        ],
+        "bottlenecks": [],
+        "take_home_message": "This is a cold start \u2014 there is no prior experimental evidence. Propose the first experiment from the task description, the available model/loss registries (as options, not results), advice, and resource constraints. Do not claim improvement over prior runs; none exist.",
+        "per_model_score_tables": null,
+        "per_model_params": null,
+        "per_model_training_segments": null,
+        "runtime_vocab": [
+          {
+            "name": "feature",
+            "kind": "candidate",
+            "description": "carried",
+            "related_to": [],
+            "tier": "candidate",
+            "pattern": null,
+            "proposed_by_run": null,
+            "seen_in_runs": [],
+            "aliases": [],
+            "origin": null
+          }
+        ],
+        "prediction_evaluation": null,
+        "new_discoveries": [],
+        "vocab_changes": [],
+        "vocab_diversity_ratio": null,
+        "cumulative_information_gain": 0.0,
+        "scientific_accuracy": null,
+        "prediction_outcomes_history": {
+          "confirmed": 0,
+          "partial": 0,
+          "refuted": 0
+        },
+        "vocab_link_confirmations": {
+          "feature:capability": [
+            "prior"
+          ]
+        },
+        "per_model_round_health_counts": {},
+        "per_model_collapse_fingerprints": {},
+        "collapse_fingerprint_history": {
+          "example": [
+            {
+              "signature": "stability:x=1",
+              "check_name": "stability",
+              "metrics": {
+                "x": 1
+              },
+              "human_readable": "prior collapse",
+              "occurrences": [
+                {
+                  "iteration": 1,
+                  "count": 1,
+                  "source_exp_ids": [
+                    "prior"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "is_degraded": false,
+        "evolution_stats": {},
+        "metric_identity": null,
+        "prediction_evaluation_semantics": "legacy_v1",
+        "prediction_outcomes_by_semantics": {},
+        "cumulative_information_gain_by_semantics": {},
+        "prediction_pool_sizes": {},
+        "per_model_secondary_metrics": {},
+        "per_model_failure_counts": {}
+      }
+    },
+    {
+      "name": "expired",
+      "input": {
+        "summaries": [],
+        "model_knowledge_cache": {},
+        "model_types": null,
+        "cold_start": true,
+        "baseline_isolation": false,
+        "description_source_policy": "legacy",
+        "task_description": "",
+        "expert_advice": "",
+        "human_advice": null,
+        "runtime_vocab": [],
+        "previous_proposal": null,
+        "cumulative_information_gain": 0.0,
+        "prediction_outcomes_history": {
+          "confirmed": 0,
+          "partial": 0,
+          "refuted": 0
+        },
+        "vocab_link_confirmations": {},
+        "enable_structured_health_feedback": false,
+        "collapse_fingerprint_history": {
+          "example": [
+            {
+              "signature": "stability:x=1",
+              "check_name": "stability",
+              "metrics": {
+                "x": 1
+              },
+              "human_readable": "prior collapse",
+              "occurrences": [
+                {
+                  "iteration": 1,
+                  "count": 1,
+                  "source_exp_ids": [
+                    "prior"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "health_feedback_history_window_iterations": 3,
+        "health_feedback_history_max_entries_per_model": 8,
+        "storage": {
+          "backend": "local",
+          "local": {
+            "workspace": "/explicit/unused",
+            "run_name": "parity"
+          },
+          "postgres": null
+        },
+        "iteration": 5,
+        "active_model_top_k": 3,
+        "active_model_last_n": 2,
+        "active_model_score_delta": 0.05,
+        "prediction_outcomes_by_semantics": {},
+        "cumulative_information_gain_by_semantics": {},
+        "metric_spec": null,
+        "task_blocks": null
+      },
+      "output": {
+        "model_types": [],
+        "model_descriptions": {},
+        "total_experiments": 0,
+        "cold_start": true,
+        "per_model_best": {},
+        "per_model_best_valid": {},
+        "per_model_raw_best_health_validity": {},
+        "per_model_worst": {},
+        "scientific_aggregation": null,
+        "best_denoising_score": null,
+        "best_valid_denoising_score": null,
+        "worst_denoising_score": null,
+        "best_config": null,
+        "best_valid_config": null,
+        "model_knowledge_cache": {},
+        "key_findings": [
+          "Cold start: no prior experimental runs or score history exist yet."
+        ],
+        "bottlenecks": [],
+        "take_home_message": "This is a cold start \u2014 there is no prior experimental evidence. Propose the first experiment from the task description, the available model/loss registries (as options, not results), advice, and resource constraints. Do not claim improvement over prior runs; none exist.",
+        "per_model_score_tables": null,
+        "per_model_params": null,
+        "per_model_training_segments": null,
+        "runtime_vocab": [],
+        "prediction_evaluation": null,
+        "new_discoveries": [],
+        "vocab_changes": [],
+        "vocab_diversity_ratio": null,
+        "cumulative_information_gain": 0.0,
+        "scientific_accuracy": null,
+        "prediction_outcomes_history": {
+          "confirmed": 0,
+          "partial": 0,
+          "refuted": 0
+        },
+        "vocab_link_confirmations": {},
+        "per_model_round_health_counts": {},
+        "per_model_collapse_fingerprints": {},
+        "collapse_fingerprint_history": {},
+        "is_degraded": false,
+        "evolution_stats": {},
+        "metric_identity": null,
+        "prediction_evaluation_semantics": "legacy_v1",
+        "prediction_outcomes_by_semantics": {},
+        "cumulative_information_gain_by_semantics": {},
+        "prediction_pool_sizes": {},
+        "per_model_secondary_metrics": {},
+        "per_model_failure_counts": {}
+      }
+    },
+    {
+      "name": "formal_failure",
+      "input": {
+        "summaries": [],
+        "model_knowledge_cache": {},
+        "model_types": null,
+        "cold_start": true,
+        "baseline_isolation": false,
+        "description_source_policy": "legacy",
+        "task_description": "",
+        "expert_advice": "",
+        "human_advice": null,
+        "recent_formal_validity": [
+          {
+            "model_type": "example",
+            "formal_records_considered": 1,
+            "invalid_count": 1,
+            "unknown_validity_count": 0,
+            "execution_failure_count": 0,
+            "outcomes": [],
+            "healthgate_mode": null,
+            "evidence_absent": []
+          }
+        ],
+        "runtime_vocab": [],
+        "previous_proposal": null,
+        "cumulative_information_gain": 0.0,
+        "prediction_outcomes_history": {
+          "confirmed": 0,
+          "partial": 0,
+          "refuted": 0
+        },
+        "vocab_link_confirmations": {},
+        "enable_structured_health_feedback": false,
+        "collapse_fingerprint_history": {},
+        "health_feedback_history_window_iterations": 3,
+        "health_feedback_history_max_entries_per_model": 8,
+        "storage": {
+          "backend": "local",
+          "local": {
+            "workspace": "/explicit/unused",
+            "run_name": "parity"
+          },
+          "postgres": null
+        },
+        "iteration": 1,
+        "active_model_top_k": 3,
+        "active_model_last_n": 2,
+        "active_model_score_delta": 0.05,
+        "prediction_outcomes_by_semantics": {},
+        "cumulative_information_gain_by_semantics": {},
+        "metric_spec": null,
+        "task_blocks": null
+      },
+      "output": {
+        "model_types": [],
+        "model_descriptions": {},
+        "total_experiments": 0,
+        "cold_start": true,
+        "per_model_best": {},
+        "per_model_best_valid": {},
+        "per_model_raw_best_health_validity": {},
+        "per_model_worst": {},
+        "scientific_aggregation": null,
+        "best_denoising_score": null,
+        "best_valid_denoising_score": null,
+        "worst_denoising_score": null,
+        "best_config": null,
+        "best_valid_config": null,
+        "model_knowledge_cache": {},
+        "key_findings": [
+          "## [RECENT FORMAL VALIDITY] Failed evidence, not valid candidates or scores.\nModel example: 1 Formal records; 1 gate-invalid, 0 unknown, 0 execution failures.\n"
+        ],
+        "bottlenecks": [],
+        "take_home_message": "No valid incumbent exists. Failed Formal evidence is provided in key_findings; use it to avoid repeating unsupported configurations. Do not claim improvement over an invalid result.",
+        "per_model_score_tables": null,
+        "per_model_params": null,
+        "per_model_training_segments": null,
+        "runtime_vocab": [],
+        "prediction_evaluation": null,
+        "new_discoveries": [],
+        "vocab_changes": [],
+        "vocab_diversity_ratio": null,
+        "cumulative_information_gain": 0.0,
+        "scientific_accuracy": null,
+        "prediction_outcomes_history": {
+          "confirmed": 0,
+          "partial": 0,
+          "refuted": 0
+        },
+        "vocab_link_confirmations": {},
+        "per_model_round_health_counts": {},
+        "per_model_collapse_fingerprints": {},
+        "collapse_fingerprint_history": {},
+        "is_degraded": false,
+        "evolution_stats": {},
+        "metric_identity": null,
+        "prediction_evaluation_semantics": "legacy_v1",
+        "prediction_outcomes_by_semantics": {},
+        "cumulative_information_gain_by_semantics": {},
+        "prediction_pool_sizes": {},
+        "per_model_secondary_metrics": {},
+        "per_model_failure_counts": {}
+      }
+    }
+  ],
+  "pipelines": [
+    {
+      "name": "legacy",
+      "config": {
+        "interpret": null,
+        "data_analysis": null,
+        "propose": null,
+        "implement": null,
+        "validate_model": null,
+        "tune": null,
+        "lit_review": null
+      },
+      "kwargs": {},
+      "output": null
+    },
+    {
+      "name": "configured",
+      "config": {
+        "interpret": {
+          "provider": "openai",
+          "model_id": "gpt-5.6-luna",
+          "reasoning_effort": "medium",
+          "max_retries": 1
+        },
+        "data_analysis": {
+          "provider": "openai",
+          "model_id": "gpt-5.6-luna",
+          "reasoning_effort": "medium",
+          "max_retries": 1
+        },
+        "propose": {
+          "comparison": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          },
+          "reasoning": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          },
+          "proposing": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          }
+        },
+        "implement": {
+          "provider": "openai",
+          "model_id": "gpt-5.6-luna",
+          "reasoning_effort": "medium",
+          "max_retries": 1
+        },
+        "validate_model": {
+          "provider": "openai",
+          "model_id": "gpt-5.6-luna",
+          "reasoning_effort": "medium",
+          "max_retries": 1
+        },
+        "tune": {
+          "planner_strategy": null,
+          "planner": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          },
+          "reflector": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          }
+        },
+        "lit_review": {
+          "main": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          },
+          "search": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          }
+        }
+      },
+      "kwargs": {},
+      "output": {
+        "stages": [
+          {
+            "name": "comparison",
+            "system_prompt_key": "COMPARATIVE_ANALYSIS",
+            "output_mode": "json",
+            "enabled": true
+          },
+          {
+            "name": "causal_reasoning",
+            "system_prompt_key": "CAUSAL_REASONING",
+            "output_mode": "json",
+            "enabled": true
+          }
+        ],
+        "model_selection": {
+          "method": "top_n",
+          "params": {
+            "n": 5
+          }
+        },
+        "exploration_mode": "auto",
+        "policy": {
+          "minimum_boldness": 0.05,
+          "max_citations": 5,
+          "vocab_stagnation_threshold": 0.1,
+          "min_runs_for_promotion": 3,
+          "require_positive_delta": true,
+          "comparative_analysis_top_k": 5,
+          "prior_stage_max_chars": 4000
+        }
+      }
+    },
+    {
+      "name": "override",
+      "config": {
+        "interpret": {
+          "provider": "openai",
+          "model_id": "gpt-5.6-luna",
+          "reasoning_effort": "medium",
+          "max_retries": 1
+        },
+        "data_analysis": {
+          "provider": "openai",
+          "model_id": "gpt-5.6-luna",
+          "reasoning_effort": "medium",
+          "max_retries": 1
+        },
+        "propose": {
+          "comparison": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          },
+          "reasoning": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          },
+          "proposing": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          }
+        },
+        "implement": {
+          "provider": "openai",
+          "model_id": "gpt-5.6-luna",
+          "reasoning_effort": "medium",
+          "max_retries": 1
+        },
+        "validate_model": {
+          "provider": "openai",
+          "model_id": "gpt-5.6-luna",
+          "reasoning_effort": "medium",
+          "max_retries": 1
+        },
+        "tune": {
+          "planner_strategy": null,
+          "planner": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          },
+          "reflector": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          }
+        },
+        "lit_review": {
+          "main": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          },
+          "search": {
+            "provider": "openai",
+            "model_id": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "max_retries": 1
+          }
+        }
+      },
+      "kwargs": {
+        "exploration_mode": "explore",
+        "minimum_boldness": 0.2,
+        "n_candidates": 9
+      },
+      "output": {
+        "stages": [
+          {
+            "name": "comparison",
+            "system_prompt_key": "COMPARATIVE_ANALYSIS",
+            "output_mode": "json",
+            "enabled": true
+          },
+          {
+            "name": "causal_reasoning",
+            "system_prompt_key": "CAUSAL_REASONING",
+            "output_mode": "json",
+            "enabled": true
+          }
+        ],
+        "model_selection": {
+          "method": "top_n",
+          "params": {
+            "n": 9
+          }
+        },
+        "exploration_mode": "explore",
+        "policy": {
+          "minimum_boldness": 0.2,
+          "max_citations": 5,
+          "vocab_stagnation_threshold": 0.1,
+          "min_runs_for_promotion": 3,
+          "require_positive_delta": true,
+          "comparative_analysis_top_k": 5,
+          "prior_stage_max_chars": 4000
+        }
+      }
+    }
+  ]
+}

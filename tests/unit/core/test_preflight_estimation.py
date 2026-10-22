@@ -201,7 +201,9 @@ def test_archived_evidence_is_readable_but_new_evidence_requires_identity():
     assert json.loads(current.model_dump_json())["estimator_identity"]["assembly_sha256"]
 
 
-@pytest.mark.parametrize("helper_name", ["candidate_requests", "attempt_storage", "run_context"])
+@pytest.mark.parametrize(
+    "helper_name", ["candidate_requests", "attempt_storage", "run_context", "proposal_pipeline"]
+)
 def test_extracted_candidate_helpers_remain_in_assembly_identity(monkeypatch, helper_name):
     """Moving request code out of the workflow must not remove its source coverage."""
     helper = Path(providers.__file__).resolve().parents[1] / f"workflows/{helper_name}.py"

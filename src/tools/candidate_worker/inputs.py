@@ -22,6 +22,7 @@ from workflows.definition import ExternalRequest, ExternalSource, ProtocolReques
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition, build_task_composition_ref
 
+from .layout import candidate_proposal_dir
 from .models import CandidateRunRequest
 
 
@@ -101,7 +102,7 @@ def materialize(
     proposal_storage = StorageConfig(
         backend="local",
         local=LocalStorageConfig(
-            workspace=str(workspace / request.run_name / "iteration_001" / "attempt_001"),
+            workspace=str(candidate_proposal_dir(workspace, request.run_name)),
             run_name=request.run_name,
         ),
     )
