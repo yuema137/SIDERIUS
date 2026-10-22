@@ -72,6 +72,7 @@ from agent.skills.model_io_probe_skill import (
     expected_output_shape,
     probe_config_kwargs,
 )
+from core.generated_artifact_name import validate_generated_artifact_name
 from core.local_code.child import prepare_child
 from core.local_code.failure import raise_if_code_package_failure
 from core.subprocess_env import subprocess_env
@@ -763,6 +764,10 @@ class MLCodeValidatorAgent:
         self.bridge = self._bridge_factory(**bridge_kwargs)
 
     def run(self, inp: ValidatorInput) -> ValidatorOutput:
+        if inp.storage.local is not None:
+            validate_generated_artifact_name(
+                inp.storage.local.run_name, field="storage.local.run_name"
+            )
         # 1. Plugin load
         plugin_ok, plugin_err = _check_plugin(inp.model_file_path)
 

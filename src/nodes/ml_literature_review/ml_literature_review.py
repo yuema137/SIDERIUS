@@ -67,6 +67,7 @@ from agent.schemas.literature_review import (
 )
 from agent.schemas.proposal import AgentCard, ExpertContextItem
 from agent.skills.paper_resolver_skill.wrapper import run_skill
+from core.generated_artifact_name import validate_generated_artifact_name
 from core.layout import checkout_root, require_checkout
 from nodes.llm_settings import literature_bridge_arguments
 
@@ -308,6 +309,8 @@ class MLLiteratureReviewAgent:
     # ------------------------------------------------------------------
     def run(self, inp: LiteratureReviewInput) -> LiteratureReviewOutput:
         inp = LiteratureReviewInput.model_validate(inp)
+        if inp.storage.local is not None:
+            validate_generated_artifact_name(inp.run_name, field="run_name")
         published_agent_card = AgentCard.model_validate(
             {
                 **_AGENT_CARD.model_dump(),
@@ -961,6 +964,7 @@ class MLLiteratureReviewAgent:
         if local is None:
             logger.warning("storage.local is None; skipping node output dump")
             return
+        validate_generated_artifact_name(inp.run_name, field="run_name")
         workspace = Path(local.workspace)
         try:
             workspace.mkdir(parents=True, exist_ok=True)

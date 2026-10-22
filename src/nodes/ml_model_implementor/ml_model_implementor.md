@@ -1,5 +1,12 @@
 # MLModelImplementor
 
+## Live output names
+
+`ImplementorInput.validate_for_implementation()`, called first by `run()`,
+checks `storage.local.run_name` when the local backend is selected and local
+storage exists, before loss/model generation. Unsafe names raise `ValueError` through the shared filesystem-component rule;
+valid names are preserved unchanged. Archived schemas remain readable.
+
 > Reads a `ProposalOutput` and writes three files: a runnable PyTorch plugin (`{model_name}.py`), a description doc (`description.md`), and a test file (`test_{model_name}.py`). Two-call chain-of-thought (reasoning → code) wrapped in a 5-check validation pipeline plus a self-correction repair loop.
 
 ## Position in the pipeline

@@ -1,5 +1,13 @@
 # ResultInterpretationAgent
 
+## Live output names
+
+`run()` checks `storage.local.run_name` before cold-start or synthesis work
+when the local backend is selected and local storage exists. The independent
+primary-interpretation and analysis-brief persistence entries apply the same
+check before read/write or provider work. Unsafe names raise `ValueError` through the shared filesystem-component rule;
+valid names are preserved unchanged. Archived schemas remain readable.
+
 > Two-phase node that turns one or more `ModelRunSummary` records (per-model condensed views of a hyperparameter-tuning run) into a single `InterpretationOutput` carrying key findings, bottlenecks, runtime-vocabulary updates, and a cross-iteration knowledge cache that downstream proposal + future-iteration nodes read.
 
 ## Module layout

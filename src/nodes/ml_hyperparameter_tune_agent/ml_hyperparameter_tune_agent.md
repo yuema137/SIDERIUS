@@ -1,5 +1,11 @@
 # HyperparamTuningAgent
 
+## Live output names
+
+After native input validation, `run()` checks `storage.local.run_name` whenever
+local storage exists, before watchdog/resource setup or sandbox work. Unsafe names raise `ValueError` through the shared filesystem-component rule;
+valid names are preserved unchanged. Archived schemas remain readable.
+
 > Optimizes hyperparameters for a given model architecture over N rounds. Each round runs **plan (LLM) → resource check → train → infer → score → reflect (LLM)** in a sandbox subprocess. Supports two modes (trial = sparse sampling for fast exploration, formal = full data for canonical scoring) and uses two LLM sub-calls per round — a planner (proposes hyperparameters) and a reflector (analyses results, drives the next plan). Returns the best run + a full audit trail of every successful, OOM-skipped, and gate-rejected attempt.
 
 ## Position in the pipeline
