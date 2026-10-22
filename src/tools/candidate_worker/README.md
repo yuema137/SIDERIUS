@@ -16,7 +16,11 @@ root. The downstream storage file must name
 
 Inspect the workflow with [workflow preview](../workflow_preview/README.md) and
 save both its request and report. Construct the launch request from those
-reviewed observations:
+reviewed observations. In the linked layout, `project/workspace` is writable,
+while `project/task.yaml`, `proposal.json`, `storage.json` and `data/` are separate
+read-only inputs. Mount those selected paths individually. Any additional task
+code, profiles or dependencies need their own canonical read-only paths that do
+not contain the workspace; do not mount the whole project as read-only.
 
 ```python
 from pathlib import Path
@@ -39,7 +43,11 @@ request = CandidateRunRequest(
     timeout_seconds=600.0,
     network=True,  # Explicit permission for the configured remote providers.
     devices=(),
-    read_only=(str(project),),  # Also declare any external task/dependency roots.
+    read_only=(
+        reviewed.data_root,
+        *(item.path for item in reviewed.files),
+        # Add canonical task code/profile/dependency paths here when required.
+    ),
     environment_names=("OPENAI_API_KEY",),  # Names required by your selected providers.
 )
 (project / "candidate_request.json").write_text(request.model_dump_json(indent=2))
