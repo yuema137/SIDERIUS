@@ -1,0 +1,173 @@
+"""Reconcile captured native inputs with the selected task and managed storage.
+
+Imported only after the child binds its generated library. This is a closed
+three-node boundary, not an arbitrary protocol executor.
+"""
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+from pydantic import TypeAdapter
+
+from agent.llm_settings import default_model_for_provider
+from agent.schemas.constraint_disclosure import ConstraintContext
+from agent.schemas.hyperparam_tuning import TaskCompositionRef
+from agent.schemas.proposal import ProposalInput
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from nodes.llm_settings import VALIDATE
+from workflows.attempt_storage import ImplAttemptStorage, impl_attempt_storage
+from workflows.definition import ExternalRequest, ExternalSource, ProtocolRequest
+from workflows.llm_config import WorkflowLLMConfig
+from workflows.task_composition import RunTaskComposition, build_task_composition_ref
+
+from .models import CandidateRunRequest
+
+
+@dataclass(frozen=True)
+class NativeInputs:
+    proposal: ProposalInput
+    attempt: ImplAttemptStorage
+    validator_provider: Literal["gemini", "openai", "deepseek"]
+    validator_model: str
+
+
+def require_storage(actual: StorageConfig, expected: StorageConfig) -> None:
+    if actual.backend != "local" or actual.local is None or expected.local is None:
+        raise ValueError("candidate worker requires local managed storage")
+    if (Path(actual.local.workspace).resolve(), actual.local.run_name) != (
+        Path(expected.local.workspace).resolve(),
+        expected.local.run_name,
+    ):
+        raise ValueError("external storage disagrees with managed storage")
+
+
+def check_constraints(seed: ProposalInput, ref: TaskCompositionRef) -> None:
+    context = seed.constraint_context
+    if context is None:
+        return
+    expected = {
+        "task_rules": ref.parameter_rules,
+        "workflow_rules": seed.workflow_parameter_rules,
+        "objective": ref.objective.model_dump(mode="json") if ref.objective else None,
+    }
+    for name, value in expected.items():
+        actual = getattr(context, name)
+        if (name in context.known_sections or actual is not None) and actual != value:
+            raise ValueError(f"constraint_context.{name} disagrees with native authority")
+    if context.execution is not None:
+        for name in ("trial_time_budget_minutes", "formal_time_budget_minutes"):
+            value = getattr(context.execution, name)
+            if value is not None and value != getattr(seed, name):
+                raise ValueError(f"constraint_context.execution.{name} disagrees with seed")
+        budgets = (context.execution.trial_vram_budget_gb, context.execution.formal_vram_budget_gb)
+        selected = budgets[0] if budgets[0] is not None else budgets[1]
+        if selected is not None and selected != seed.vram_budget_gb:
+            raise ValueError("constraint_context execution VRAM disagrees with seed")
+
+
+def materialize(
+    request: CandidateRunRequest,
+    workspace: Path,
+    composition: RunTaskComposition,
+    config: WorkflowLLMConfig,
+) -> NativeInputs:
+    definition = request.preview.document.definition
+    control = workspace / "candidate_run"
+    contents = {
+        item.reference: (control / f"input_{index:03}.snapshot").read_bytes()
+        for index, item in enumerate(request.files)
+    }
+    nodes = {node.capability: node for node in definition.nodes}
+    proposal_request = nodes["proposal"].request
+    assert isinstance(proposal_request, ExternalRequest)
+    proposal_storage = StorageConfig(
+        backend="local",
+        local=LocalStorageConfig(
+            workspace=str(workspace / request.run_name / "iteration_001" / "attempt_001"),
+            run_name=request.run_name,
+        ),
+    )
+    assert proposal_storage.local is not None
+    attempt = impl_attempt_storage(proposal_storage.local.workspace, request.run_name, 1)
+    raw = json.loads(contents[f"external.{proposal_request.binding}"])
+    if not isinstance(raw, dict):
+        raise ValueError("proposal seed must be a JSON object")
+    required = {
+        "task_description",
+        "forward_contract",
+        "proposal_blocks",
+        "task_composition_ref",
+        "data_dir",
+    }
+    if not required.issubset(raw):
+        raise ValueError(
+            f"proposal seed omits task/execution facts: {sorted(required - raw.keys())}"
+        )
+    if "storage" not in raw:
+        raw["storage"] = proposal_storage.model_dump(mode="json")
+    seed = ProposalInput.model_validate(raw)
+    require_storage(seed.storage, proposal_storage)
+    seed.storage = proposal_storage
+    ref = build_task_composition_ref(composition)
+    assert ref is not None
+    for name, expected in (
+        ("task_description", composition.task_description),
+        ("forward_contract", composition.forward_contract),
+        ("proposal_blocks", composition.proposal_blocks),
+        ("task_composition_ref", ref),
+    ):
+        if getattr(seed, name) != expected:
+            raise ValueError(f"proposal seed {name} disagrees with composed task")
+    data_root = (Path(request.preview.project_root) / definition.task.data_root).resolve()
+    if seed.data_dir is None or Path(seed.data_dir).resolve() != data_root:
+        raise ValueError("proposal seed data_dir disagrees with selected physical root")
+    debug = seed.debug_dump_proposing_prompt_path
+    if debug is not None and (
+        not Path(debug).is_absolute() or not Path(debug).resolve().is_relative_to(workspace)
+    ):
+        raise ValueError("debug prompt path escapes managed workspace")
+    check_constraints(seed, ref)
+    validator = config.get("validate")
+    provider = TypeAdapter(Literal["gemini", "openai", "deepseek"]).validate_python(
+        validator.get("provider", VALIDATE.provider)
+    )
+    model = validator.get("model_id", VALIDATE.model_id) or default_model_for_provider(provider)
+    # Only these native scalar/protocol schemas may cross external boundaries.
+    schemas = {
+        "storage": TypeAdapter(StorageConfig),
+        "optional.constraint-context": TypeAdapter(ConstraintContext | None),
+        "optional.task-composition-ref": TypeAdapter(TaskCompositionRef | None),
+        "llm-provider": TypeAdapter(Literal["gemini", "openai", "deepseek"]),
+        "optional.model-id": TypeAdapter(str | None),
+    }
+    externals = {item.id: item for item in definition.externals}
+    used = {proposal_request.binding}
+    for role in ("implementation", "validation"):
+        protocol = nodes[role].request
+        assert isinstance(protocol, ProtocolRequest)
+        for argument in protocol.arguments:
+            if argument.name == "output":
+                continue  # preview already proved this exact upstream result edge
+            if not isinstance(argument.source, ExternalSource):
+                raise ValueError("only upstream output may be supplied by a result")
+            binding = externals[argument.source.binding]
+            used.add(binding.id)
+            if binding.contract not in schemas:
+                raise ValueError(f"unsupported native external: {binding.contract}")
+            value = schemas[binding.contract].validate_json(contents[f"external.{binding.id}"])
+            if argument.name == "storage":
+                require_storage(value, attempt.storage)
+            else:
+                authority = {
+                    "constraint_context": seed.constraint_context,
+                    "task_composition_ref": ref,
+                    "llm_provider": provider,
+                    "llm_model_id": model,
+                }[argument.name]
+                if value != authority:
+                    raise ValueError(f"protocol {argument.name} disagrees with resolved authority")
+    if used != set(externals):
+        raise ValueError("unused external inputs are unsupported by the candidate worker")
+    return NativeInputs(seed, attempt, provider, model)
