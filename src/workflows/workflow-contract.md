@@ -223,3 +223,14 @@ For real runs use the chain launcher
 `tests/integration/workflows/` (pseudo-mode full-loop). The composition
 fail-closed behaviour and the findings-union single-authority rule carry
 dedicated structural guards.
+
+## Proposal reasoning pipeline
+
+`proposal_pipeline.get_reasoning_pipeline(config, exploration_mode="auto",
+minimum_boldness=0.05, n_candidates=None)` owns configured comparison and causal
+reasoning stage construction. A `ProposalLLMConfig` activates those stages;
+absent legacy proposal configuration returns `None`. The native selection and
+research-policy schemas retain their defaults. `model_exploration` preserves
+`_get_reasoning_pipeline` as a compatibility import. The preflight source assembly
+includes both the workflow and this owner; moving code does not preserve an old
+qualified assembly hash.

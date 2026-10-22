@@ -122,3 +122,8 @@ explicit. There is no unsandboxed fallback, memory/VRAM ceiling, or hostile-task
 security claim. Generated code and CPU/GPU probes are code execution even though
 this tool performs no training. No GPU is automatically mounted. Abrupt parent
 death can leave only a launch receipt: incomplete/unknown, never resumable.
+
+The pure `layout.candidate_proposal_dir(workspace, run_name)` owns the fixed first
+proposal slot used by materialization and parent receipt reconciliation. It does
+not create directories. Implementation storage continues to use
+`workflows.attempt_storage.impl_attempt_storage` and the existing attempt owner.

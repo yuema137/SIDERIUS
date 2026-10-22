@@ -11,6 +11,7 @@ from tools.workflow_preview.files import observe_file
 from tools.workspace_sandbox.profile import SandboxProfile, runtime_roots
 from tools.workspace_sandbox.runner import ExecutionResult, run
 
+from .layout import candidate_proposal_dir
 from .models import CandidateRunReceipt, CandidateRunRequest
 
 
@@ -47,7 +48,7 @@ def reconcile(
             or len(child.native_output_paths) != 3
         ):
             raise ValueError("inconsistent native validation receipt")
-        proposal_dir = Path(initial.workspace) / initial.run_name / "iteration_001" / "attempt_001"
+        proposal_dir = candidate_proposal_dir(Path(initial.workspace), initial.run_name)
         implementation_dir = Path(impl_attempt_dir(str(proposal_dir), 1))
         expected_paths = (
             str(proposal_dir / f"proposal_{initial.run_name}.json"),

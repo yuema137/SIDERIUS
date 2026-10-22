@@ -22,6 +22,7 @@ from nodes.result_interpretation_agent.result_interpretation_agent import (
     _append_evolution_log,
     _compute_evolution_stats,
     _resolve_evolution_log_root,
+    build_cold_start_interpretation,
     reconcile_metric_spec,
     tuning_output_to_model_run_summary,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "_append_evolution_log",
     "_compute_evolution_stats",
     "_resolve_evolution_log_root",
+    "build_cold_start_interpretation",
     "reconcile_metric_spec",
     "tuning_output_to_model_run_summary",
 ]
