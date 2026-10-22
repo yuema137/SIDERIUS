@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 
+from core.generated_artifact_name import validate_generated_artifact_name
 from ml_models.plugin_binding import (
     active_run_model_plugins,
     declared_package_model,
@@ -58,6 +59,7 @@ def stage_model_source(
     source: str, description: str, model_name: str, destinations: list[str], *, model_type: str
 ) -> tuple[bool, str | None]:
     """Return source presence/path; an empty destination list is not missing source."""
+    validate_generated_artifact_name(model_name, field="model_name")
     declared = declared_package_model(model_type, active_run_model_plugins())
     if declared is not None:
         require_declared_model_source(declared, source)

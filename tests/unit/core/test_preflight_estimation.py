@@ -213,3 +213,17 @@ def test_extracted_candidate_enrichment_remains_in_assembly_identity(monkeypatch
 
     monkeypatch.setattr(Path, "read_bytes", changed_read)
     assert providers.estimation_assembly_digest() != before
+
+
+def test_generated_name_guard_bytes_remain_in_assembly_identity(monkeypatch):
+    """#778: a new workflow dependency must not escape the pinned source closure."""
+    helper = Path(providers.__file__).resolve().parent / "generated_artifact_name.py"
+    original_read = Path.read_bytes
+    before = providers.estimation_assembly_digest()
+
+    def changed_read(path):
+        content = original_read(path)
+        return content + b"\n# changed component guard\n" if path == helper else content
+
+    monkeypatch.setattr(Path, "read_bytes", changed_read)
+    assert providers.estimation_assembly_digest() != before

@@ -24,6 +24,7 @@ from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from core.capability_registry import CapabilityContractSnapshot, CapabilityMetadata
+from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import HardwareContext
 
 # Fields the implementor is NEVER allowed to adjust. These are owned by the
@@ -409,6 +410,23 @@ class ImplementorInput(BaseModel):
     def validate_for_implementation(self) -> None:
         """Check execution eligibility without restricting archival deserialization."""
         validate_implementation_baseline(self.baseline_config)
+        validate_generated_artifact_name(self.model_name, field="model_name")
+        if self.custom_loss_spec is not None:
+            validate_generated_artifact_name(
+                self.custom_loss_spec.loss_name, field="custom_loss_spec.loss_name"
+            )
+        else:
+            loss_config = self.baseline_config.get("loss_config") or {}
+            if isinstance(loss_config, dict) and loss_config.get("loss_type") == "custom":
+                validate_generated_artifact_name(
+                    loss_config.get("loss_name"), field="baseline_config.loss_config.loss_name"
+                )
+        model_config = self.baseline_config.get("model_config") or {}
+        reuse_name = model_config.get("model_name") if isinstance(model_config, dict) else None
+        if reuse_name:
+            validate_generated_artifact_name(
+                reuse_name, field="baseline_config.model_config.model_name"
+            )
 
     @model_validator(mode="after")
     def _resolve_generated_output_dirs(self):

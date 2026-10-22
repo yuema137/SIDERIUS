@@ -356,3 +356,15 @@ available for bounded harnesses and is recorded in provenance. It is not a
 hardware-independent estimate of runtime. See
 [cooperative training budget](cooperative-training-budget.md) for execution
 limits and Formal resource recovery.
+
+
+## Generated model and loss identifiers
+
+Live model and loss identifiers must be single filesystem components: non-empty,
+not `.` or `..`, and without `/`, `\`, colons or Unicode control characters.
+The shared rule preserves valid names unchanged. The workflow checks proposals,
+including fixed validation plans, before name-derived renaming; the implementor
+checks selected names before generation. Independent staging and promotion paths
+check before copying. Archived schemas remain readable but do not grant live
+execution eligibility. This rule does not certify generated source code or
+protect against malicious pre-existing symlinks under destination directories.

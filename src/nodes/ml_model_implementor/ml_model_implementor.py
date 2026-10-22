@@ -60,6 +60,7 @@ from core.capability_registry import (
     CapabilityMetadata,
     CapabilityRegistry,
 )
+from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import HardwareContext
 from nodes.llm_settings import IMPLEMENT, node_bridge_kwargs
 from workflows.task_config import render_forward_contract
@@ -168,6 +169,10 @@ def _smoke_test_plugin(
     a contract that cannot be realized (§15.1 row 3), which surfaces through
     the same string channel so the existing repair loop can act on it.
     """
+    try:
+        validate_generated_artifact_name(model_name, field="model_name")
+    except ValueError as exc:
+        return str(exc)
     import torch  # deferred so module-level import stays lightweight
 
     # Write to a temp file so importlib can load it
@@ -387,6 +392,10 @@ def _check_baseline_schema_compatibility(
     if not model_cfg:
         return None  # No baseline values to check — skip gracefully
 
+    try:
+        validate_generated_artifact_name(model_name, field="model_name")
+    except ValueError as exc:
+        return str(exc)
     tmp_dir = tempfile.mkdtemp(prefix="siderius_basecheck_")
     tmp_path = os.path.join(tmp_dir, f"{model_name}.py")
     try:
@@ -1939,7 +1948,9 @@ class MLModelImplementor:
         spec = inp.custom_loss_spec
         # Caller guarantees this is not None; assert is a pyright hint.
         assert spec is not None
-        loss_name = spec.loss_name
+        loss_name = validate_generated_artifact_name(
+            spec.loss_name, field="custom_loss_spec.loss_name"
+        )
         expected_snapshot = _expected_custom_loss_snapshot(inp)
         if inp.task_composition_ref is not None and spec.contract_snapshot is None:
             raise ValueError(
@@ -2320,6 +2331,7 @@ class MLModelImplementor:
         )
 
         # --- Write plugin file ---
+        validate_generated_artifact_name(inp.model_name, field="model_name")
         os.makedirs(inp.plugin_dir, exist_ok=True)
         model_file_path = os.path.abspath(os.path.join(inp.plugin_dir, f"{inp.model_name}.py"))
         with open(model_file_path, "w", encoding="utf-8") as f:

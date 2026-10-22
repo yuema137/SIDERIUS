@@ -291,3 +291,19 @@ registered model's structured configuration. Existing registry checks still own
 availability. Merely naming a registered `model_type` does not select reuse.
 The code self-check and downstream validator share the scalar-default predicate,
 so correcting a proposal cannot introduce a competing type rule downstream.
+
+
+## Generated artifact names
+
+Live eligibility also checks the model name, selected custom-loss name and
+consumed registered reuse names before any loss or model generation call.
+`core/generated_artifact_name.py` owns the component rule: reject empty names,
+`.` / `..`, either path separator, colons and Unicode control characters.
+Valid names are returned unchanged, including capitalization, hyphens, periods
+and Unicode. Unused legacy fields do not acquire new restrictions.
+
+Direct generation, probe, staging and promotion boundaries independently enforce
+this rule before name-derived effects. Probe helpers retain their error-string
+channel; live eligibility raises `ValueError`. Archival schema decoding remains
+permissive. Component validation does not promise universal OS filename
+portability, safe generated Python syntax or confinement against existing symlinks.

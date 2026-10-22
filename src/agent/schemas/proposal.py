@@ -33,6 +33,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from agent.schemas.vocab import VocabEntry
 from core.capability_registry import CapabilityContractSnapshot
+from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import HardwareContext
 from execute_tools.dataset_config import (
     DataScope,
@@ -1561,6 +1562,7 @@ class ProposalOutput(BaseModel):
         self, existing_model_types: list[str], registry_names: list[str]
     ) -> None:
         """Check generation collisions after resolving and validating the baseline."""
+        validate_generated_artifact_name(self.model_name, field="model_name")
         if self.model_name not in existing_model_types:
             return
         config = self.baseline_config.get("model_config")
