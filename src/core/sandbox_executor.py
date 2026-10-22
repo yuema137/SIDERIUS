@@ -45,6 +45,7 @@ from core.execution_calibration import (
     MalformedCeilingOverride,  # noqa: F401  (re-exported: the launch path's refusal type)
     resolve_role_ceiling_gb,
 )
+from core.generated_artifact_name import validate_generated_artifact_name
 from core.inference_defaults import inference_batch_for
 from core.layout import package_root
 
@@ -770,6 +771,7 @@ class TidmadSandbox:
         # Step 12 / PR-12d seam E: MAY be `None`. A task that names its own
         # artifacts has no indexed template, and the two glob sites below skip
         # rather than sweep with a pattern this run never wrote.
+        validate_generated_artifact_name(run_name, field="run_name")
         self.deliverable_naming = (
             deliverable_naming if deliverable_naming is not None else indexed_cleanup_naming()
         )
@@ -1057,6 +1059,7 @@ class TidmadSandbox:
         and subprocess-error paths alike — a partially written observation
         from a crashed run is still evidence (§6.2 event log).
         """
+        validate_generated_artifact_name(run_name, field="run_name")
         # Sidecar the subprocess writes its runtime observation to (RT2-B).
         # Computed up front so every return path (including exception
         # handlers) can attach whatever the subprocess managed to record.
@@ -1481,6 +1484,7 @@ class TidmadSandbox:
                              had exactly one call site — so an inference child
                              could not know what to iterate.
         """
+        validate_generated_artifact_name(run_name, field="run_name")
         policy_obj = RuntimeControlPolicy(**runtime_policy) if runtime_policy is not None else None
         validated_m, validated_l = self._validate_model_and_loss(model_type, m_cfg, l_cfg)
         selected_batch = (
@@ -1855,6 +1859,7 @@ class TidmadSandbox:
         only. ``None`` on an un-composed run, so the emitter yields nothing
         and the argv is byte-identical.
         """
+        validate_generated_artifact_name(run_name, field="run_name")
         result_dir = os.path.join(self.dirs["records"], run_name)
         _ensure_dir(result_dir)
 
@@ -2078,6 +2083,7 @@ class StubSandbox(TidmadSandbox):
         07a) is accepted and scope-validated exactly like the executor's,
         so a pseudo run exercises the same boundary as production.
         """
+        validate_generated_artifact_name(run_name, field="run_name")
         if sample_set is not None:
             try:
                 validate_sample_set(sample_set, scope=self.data_scope)
@@ -2153,6 +2159,7 @@ class StubSandbox(TidmadSandbox):
         ``runtime_policy`` accepted for RT2-D signature parity;
         ``runtime_verification=None`` is the explicit-absence shape.
         """
+        validate_generated_artifact_name(run_name, field="run_name")
         if sample_set is not None:
             try:
                 validate_sample_set(sample_set, scope=self.data_scope)
@@ -2188,6 +2195,7 @@ class StubSandbox(TidmadSandbox):
         ``loss_history`` / ``model_params`` from the cached trainer output
         appear alongside the synthetic ``denoising_score`` etc.).
         """
+        validate_generated_artifact_name(run_name, field="run_name")
         results: dict[str, Any] = {}
         results.update(self._train_results_cache.get(exp_id, {}))
         results["denoising_score"] = self._rng.uniform(-3.0, -2.0)

@@ -24,6 +24,7 @@ from agent.schemas.model_io_contract import ModelIOContract, load_model_io_contr
 from agent.schemas.model_io_resolution import resolve_model_io_contract
 from core.capability_registry import CapabilityContractSnapshot
 from core.durable_io import publish_json_atomically
+from core.generated_artifact_name import validate_generated_artifact_name
 from core.runtime_control.budget_diagnostics import report_training_budget
 from core.runtime_control.provenance import capture_storage_provenance
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
@@ -2262,6 +2263,7 @@ def _has_scope_to_train_from(args: Any, sample_set: dict | None) -> bool:
 
 def main():
     args = build_training_parser().parse_args()
+    validate_generated_artifact_name(args.run_name, field="run_name")
 
     # Dataset Profile resolution — the child side of the parent's transport.
     #
