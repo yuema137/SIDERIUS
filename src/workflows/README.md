@@ -11,6 +11,7 @@ The caller chooses settings and order; individual nodes own their reasoning.
 | --- | --- |
 | Run a chain | [Launch scripts](../../scripts/launch/README.md) |
 | Build another workflow | [Custom workflow reference](../../docs/guides/custom-workflow.md) |
+| Check a workflow declaration offline (not execute it) | [Declaration foundation](definition/README.md) |
 | Declare a task | [Task composition](../../docs/reference/task-composition.md) |
 | Inspect startup settings | [Launch resolution](../../docs/agent-reference/standard-launch-resolution.md) |
 
