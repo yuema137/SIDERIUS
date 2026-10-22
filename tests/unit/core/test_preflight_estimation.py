@@ -199,3 +199,17 @@ def test_archived_evidence_is_readable_but_new_evidence_requires_identity():
         estimator_identity=providers.active_preflight_identity(),
     )
     assert json.loads(current.model_dump_json())["estimator_identity"]["assembly_sha256"]
+
+
+def test_extracted_candidate_enrichment_remains_in_assembly_identity(monkeypatch):
+    """Moving request code out of the workflow must not remove its source coverage."""
+    helper = Path(providers.__file__).resolve().parents[1] / "workflows/candidate_requests.py"
+    original_read = Path.read_bytes
+    before = providers.estimation_assembly_digest()
+
+    def changed_read(path):
+        content = original_read(path)
+        return content + b"\n# changed request enrichment\n" if path == helper else content
+
+    monkeypatch.setattr(Path, "read_bytes", changed_read)
+    assert providers.estimation_assembly_digest() != before

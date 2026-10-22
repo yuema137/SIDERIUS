@@ -158,6 +158,10 @@ from nodes.result_interpretation_agent import (
     reconcile_metric_spec,
     tuning_output_to_model_run_summary,
 )
+from workflows.candidate_requests import (
+    enrich_implementation_request,
+    enrich_validation_request,
+)
 from workflows.constraint_disclosure import workflow_constraint_context
 from workflows.literature_config import (
     lit_review_config_sha256 as lit_review_config_sha256,
@@ -3178,24 +3182,20 @@ def run_workflow(
                     # this is a dict lookup after the first iter. See
                     # docs/design/enable_global_task_config.md § Commit T2.
                     _task_cfg = load_task_config()
-                    impl_input.task_description = get_task_description(_task_cfg)
-                    impl_input.forward_contract = ForwardContract(**_task_cfg["forward_contract"])
-                    # Step 12 / PR-12a C7-4 — task-owned IMPLEMENTOR science,
-                    # resolved by the same rule as its two siblings.
-                    impl_input.implementor_blocks = resolve_run_implementor_blocks(
-                        bindings.task_composition
+                    task_description = get_task_description(_task_cfg)
+                    forward_contract = ForwardContract(**_task_cfg["forward_contract"])
+                    implementor_blocks = resolve_run_implementor_blocks(bindings.task_composition)
+                    enrich_implementation_request(
+                        impl_input,
+                        task_description=task_description,
+                        forward_contract=forward_contract,
+                        implementor_blocks=implementor_blocks,
+                        hardware_context=bindings.hardware_context,
+                        vram_budget_gb=bindings.active_vram_budget_gb,
+                        human_advice=launch.human_advice_implement,
+                        reference_code=ref_code,
+                        previous_validation_failure=previous_validation_failure,
                     )
-                    # Step 04a (OD-S4-1): the same live manifest and budget
-                    # the proposer receives, so the implementor's capacity
-                    # prose quotes this machine instead of a stale literal.
-                    impl_input.hardware_context = bindings.hardware_context
-                    impl_input.vram_budget_gb = bindings.active_vram_budget_gb
-                    if launch.human_advice_implement is not None:
-                        impl_input.human_advice = launch.human_advice_implement
-                    if ref_code:
-                        impl_input.reference_code = ref_code
-                    if previous_validation_failure is not None:
-                        impl_input.previous_validation_failure = previous_validation_failure
 
                     _impl_agent = MLModelImplementor(
                         **bindings.llm_config.get("implement"),
@@ -3217,10 +3217,11 @@ def run_workflow(
                         llm_provider=valid_llm.get("provider", VALIDATE.provider),
                         llm_model_id=valid_llm.get("model_id", VALIDATE.model_id),
                     )
-                    if launch.human_advice_validate is not None:
-                        valid_input.human_advice = launch.human_advice_validate
-                    if hasattr(proposal, "inherited_components") and proposal.inherited_components:
-                        valid_input.inherited_components = proposal.inherited_components
+                    enrich_validation_request(
+                        valid_input,
+                        human_advice=launch.human_advice_validate,
+                        inherited_components=proposal.inherited_components,
+                    )
 
                     _valid_agent = MLCodeValidatorAgent(
                         **valid_llm,
