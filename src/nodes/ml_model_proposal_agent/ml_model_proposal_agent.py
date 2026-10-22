@@ -58,6 +58,7 @@ from agent.skills.model_io_probe_skill import ProbeConstructionError, declared_o
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
 from core.capability_registry import CapabilityRegistry
+from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import HardwareContext
 from execute_tools.dataset_config import (
     DatasetConfig,
@@ -1642,6 +1643,10 @@ class MLModelProposalAgent:
         )
 
     def run(self, inp: ProposalInput) -> ProposalOutput:
+        if inp.storage.backend == "local" and inp.storage.local is not None:
+            validate_generated_artifact_name(
+                inp.storage.local.run_name, field="storage.local.run_name"
+            )
         evidence = inp.interpretation_evidence
         print(f"Proposing new architecture based on interpretation of {evidence.model_types} ...")
 

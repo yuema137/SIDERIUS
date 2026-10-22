@@ -46,6 +46,13 @@ An absolute external literature YAML is supported; relative `--lit_review_config
 paths remain checkout-root-relative. A contradictory history metric id/direction
 refuses; absent or matching stamps are not proof of whole-task compatibility.
 
+## Live workflow output names
+
+`run_workflow()` validates its filesystem-consumed `run_name` with the shared
+component rule before launch binding or run-directory creation. Unsafe names
+raise `ValueError`; ordinary names and output layouts remain unchanged.
+This does not restrict archival decoding or read-only source selectors.
+
 ## Infrastructure aborts
 
 `run_workflow()` returns typed tuner outputs, including an output whose

@@ -1,5 +1,11 @@
 # MLModelProposalAgent
 
+## Live output names
+
+`run()` checks `storage.local.run_name` before proposal work when the local
+backend is selected and `storage.local` exists. Unsafe names raise `ValueError` through the shared filesystem-component rule;
+valid names are preserved unchanged. Archived schemas remain readable.
+
 > Reads the structured interpretation from `result_interpretation_agent` and proposes a new neural architecture that addresses the identified bottlenecks. Supports two modes: a 2-call legacy chain-of-thought (reasoning → commit) and a 3-stage configurable pipeline (comparison → causal reasoning → proposing) for production runs.
 
 ## Position in the pipeline

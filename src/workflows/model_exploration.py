@@ -2111,6 +2111,7 @@ def run_workflow(
         occurred. Callers must check ``infrastructure_abort_reason(results)``
         before continuing a campaign; a nonempty list does not imply success.
     """
+    validate_generated_artifact_name(run_name, field="run_name")
     # Step 09.5a C3 — the transit configuration is one value now. A caller
     # that supplies none gets exactly the defaults the 72 individual
     # parameters carried before; the carrier restates none of them.

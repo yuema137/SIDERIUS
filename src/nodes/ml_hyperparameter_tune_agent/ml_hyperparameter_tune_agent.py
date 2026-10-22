@@ -36,6 +36,7 @@ from agent.schemas.hyperparam_tuning import (
     validate_runtime_config,
 )
 from agent.schemas.task_config import ForwardContract
+from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import get_or_create
 from core.layout import checkout_root
 from core.record_role import observed_attempt_role
@@ -746,6 +747,10 @@ class HyperparamTuningAgent:
         """
         # --- Validate input ---
         agent_input = HyperparamTuningInput.model_validate(agent_input)
+        if agent_input.storage.local is not None:
+            validate_generated_artifact_name(
+                agent_input.storage.local.run_name, field="storage.local.run_name"
+            )
         validate_watchdog_startup(agent_input)
 
         from execute_tools.evaluation_execution import candidate_evaluation_executor

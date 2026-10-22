@@ -409,6 +409,10 @@ class ImplementorInput(BaseModel):
 
     def validate_for_implementation(self) -> None:
         """Check execution eligibility without restricting archival deserialization."""
+        if self.storage.backend == "local" and self.storage.local is not None:
+            validate_generated_artifact_name(
+                self.storage.local.run_name, field="storage.local.run_name"
+            )
         validate_implementation_baseline(self.baseline_config)
         validate_generated_artifact_name(self.model_name, field="model_name")
         if self.custom_loss_spec is not None:

@@ -21,6 +21,7 @@ from agent.schemas.data_analysis.context import AnalysisBrief, AnalysisQuestion
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
 from core.durable_io import publish_bytes_write_once
+from core.generated_artifact_name import validate_generated_artifact_name
 
 
 class _AnalysisQuestionDraft(FrozenModel):
@@ -157,6 +158,8 @@ def persist_or_resume_primary_interpretation(
     retry. Persist it before the optional brief so a process crash after brief
     generation cannot change that brief's request fingerprint on resume.
     """
+    if inp.storage.backend == "local" and inp.storage.local is not None:
+        validate_generated_artifact_name(inp.storage.local.run_name, field="storage.local.run_name")
     path = _primary_record_path(inp)
     if path is None:
         return interpretation
@@ -215,6 +218,8 @@ def generate_or_resume_analysis_brief(
 
     if not inp.analysis_brief_requested:
         raise ValueError("brief generation may only run when explicitly requested")
+    if inp.storage.backend == "local" and inp.storage.local is not None:
+        validate_generated_artifact_name(inp.storage.local.run_name, field="storage.local.run_name")
     provider, model_id = _brief_route(bridge, provider, model_id)
     system, user = _prompt(inp, interpretation)
     user = append_constraint_disclosure(user, inp.constraint_context)

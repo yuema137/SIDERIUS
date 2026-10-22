@@ -1,5 +1,13 @@
 # MLLiteratureReviewAgent
 
+## Live output names
+
+When `storage.local` exists, `run()` and the independent `_write_output()`
+check the top-level `run_name` used in the output filename before effects.
+The nested `storage.local.run_name` is unused by this writer; the two names
+need not match. Missing local storage still skips the output dump. Unsafe names raise `ValueError` through the shared filesystem-component rule;
+valid names are preserved unchanged. Archived schemas remain readable.
+
 > External-agent node that resolves root papers, dynamically searches Semantic Scholar grounded in the current iteration's bottlenecks, compresses each retrieved paper into a `PaperExtract`, and synthesizes a list of `findings` that the model-proposing agent reads alongside the experiment results.
 
 ## Position in the pipeline

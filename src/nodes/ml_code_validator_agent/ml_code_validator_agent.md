@@ -1,5 +1,11 @@
 # MLCodeValidatorAgent
 
+## Live output names
+
+`run()` checks `storage.local.run_name` whenever local storage exists, before
+plugin/test probes or provider calls, matching its existing writer selection. Unsafe names raise `ValueError` through the shared filesystem-component rule;
+valid names are preserved unchanged. Archived schemas remain readable.
+
 > 8 deterministic checks + 1 LLM code-review + 1 conditional inheritance check for agent-generated PyTorch model plugins. Combines deterministic checks (plugin loads, tests pass, description valid, scalar-only config, forbidden-pattern AST scan, instantiation + gradient flow + output-type) with one LLM code-review call (spec alignment + trainability + implementation issues). Long temporal probes run in a bounded child process so an excessive candidate allocation cannot terminate the workflow.
 
 ## Position in the pipeline

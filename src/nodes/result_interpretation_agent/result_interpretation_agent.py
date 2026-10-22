@@ -46,6 +46,7 @@ from agent.schemas.interpretation import (
     SecondaryMetricEvidence,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from core.generated_artifact_name import validate_generated_artifact_name
 from execute_tools.metric_order import MetricOrder
 from ml_models.model_descriptions import get_model_description
 from nodes.llm_settings import INTERPRET, node_bridge_kwargs
@@ -216,6 +217,10 @@ class ResultInterpretationAgent:
         self.bridge = self._bridge_factory(**bridge_kwargs)
 
     def run(self, inp: InterpretationInput) -> InterpretationOutput:
+        if inp.storage.backend == "local" and inp.storage.local is not None:
+            validate_generated_artifact_name(
+                inp.storage.local.run_name, field="storage.local.run_name"
+            )
         # --- Cold-start branch (explicit workflow state) ---
         # A cold start is the first iteration of a chain with NO prior
         # experimental evidence. There is nothing to interpret or rank, so emit
