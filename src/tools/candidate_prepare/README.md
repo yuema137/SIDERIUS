@@ -107,6 +107,9 @@ helps write your external project files; it does not use a different backend.
    .venv/bin/python -m tools.candidate_prepare --reusable-request /projects/my-task/reusable-request.json
    ```
 
+   To let the submitting command exit while preparation continues, use the
+   [detached operation route](../candidate_operations/README.md#prepare-a-reusable-workflow-in-the-background).
+
    The Python equivalent is
    `prepare_reusable_candidate(ReusableCandidatePreparationRequest.model_validate_json(payload))`.
    `preflight_reusable_candidate(request)` performs read-only admission, without

@@ -3,7 +3,7 @@
 ## Owners and public boundary
 
 `tools.candidate_operations` exports `OperationStoreConfig`, `PrepareOperation`,
-`CandidateOperation`, discriminated `OperationSubmission`, `OperationHandle`,
+`ReusablePrepareOperation`, `CandidateOperation`, discriminated `OperationSubmission`, `OperationHandle`,
 `OperationSnapshot`, `LogReadRequest`, `LogChunk`, `submit_operation`,
 `read_operation`, and `read_operation_log`. All models inherit strict frozen
 extra-forbid `PreviewModel`; requests are revalidated from JSON at use. Native
@@ -114,7 +114,7 @@ credential discovery is absent. Explicit credential binding remains the caller's
 obligation. A stronger no-dotenv policy belongs in a separate native-owner change.
 Arbitrary trusted plugin output is not universally redacted; state is not a vault.
 
-The operation process calls `prepare_candidate` or `launch_candidate` directly
+The operation process calls `prepare_candidate`, `prepare_reusable_candidate`, or `launch_candidate` directly
 with keyword-only `invocation_id=record.native_id`. Native launchers validate the
 UUID before effects and use it in their existing preparation UUID / run-ID hex
 fields; direct callers that omit it still receive native uuid4 identities.
@@ -332,3 +332,94 @@ reachability, exact-ID recovery after removal, current source edit preservation,
 CLI parity and actual two-envelope offline preparation→detached operations→native
 worker integration with test-only provider responses and CPU checks. This is no
 real API/GPU or paper-performance qualification.
+
+
+## Detached reusable preparation
+
+`ReusablePrepareOperation(kind="prepare_reusable", request_id, request)` carries
+`ReusableCandidatePreparationRequest` through the same store lock, process,
+completion and release rules. No new queue or job registry exists. The operation
+UUID, request.run_id (envelope UUID), and record.native_id (preparation invocation
+UUID) remain distinct. Static checks confine the full envelope under preparation
+roots and its workspace under candidate roots, protect selected inputs/runtime
+paths, and isolate state. The project root is a reference base, not a blanket
+output exclusion: a project may contain its configured runs directory.
+
+Fresh submission performs native inert preflight under the admission lock after
+known-ID and availability checks. The operation record retains observations in
+exact order: authored `workflow.source`, `task.manifest`, `llm_config`.
+`ReusablePreparationExpectation(request_digest, observations)` optionally binds
+reviewed intent. `observations` is the preparation-owned
+`ReusablePreparationObservations`; the digest comes from
+`operation_request_digest(submission)`. Comparison against actual admission happens
+before claim. Mismatches raise `OperationFailure(code="conflict")`; unavailable or
+invalid fresh inputs raise `reusable_preflight`. No credentials are read or passed
+to preparation. Store lock/directories may exist after refusal, but no operation
+claim or native envelope is created.
+
+```python
+from pathlib import Path
+from uuid import uuid4
+from tools.candidate_prepare import (
+    ReusableCandidatePreparationRequest, ReusablePreparationObservations,
+    preflight_reusable_candidate,
+)
+from tools.candidate_operations import (
+    ReusablePrepareOperation, ReusablePreparationExpectation,
+    operation_request_digest, submit_operation, recover_reusable_preparation,
+)
+
+request = ReusableCandidatePreparationRequest.model_validate_json(
+    Path("reusable-request.json").read_bytes()
+)
+submission = ReusablePrepareOperation(request_id=uuid4(), request=request)
+plan = preflight_reusable_candidate(request)
+expected = ReusablePreparationExpectation(
+    request_digest=operation_request_digest(submission),
+    observations=ReusablePreparationObservations.from_binding(plan.binding),
+)
+# Review and retain these typed values outside the envelope before submitting.
+handle = submit_operation(
+    config, submission, launch_environment={}, expected_reusable_inputs=expected
+)
+# After a lost response, use the retained UUID/expectation, not fresh preflight.
+recovered = recover_reusable_preparation(config, submission.request_id, expected)
+```
+
+`config` is the previously loaded `OperationStoreConfig`. Recovery returns the
+original typed submission, or None only for an absent operation directory.
+Existing-ID submit and recovery compare the durable request digest/kind and
+retained observations before mutable source/configuration or credential reads.
+Both perform current static store/config checks; neither silently changes admitted
+policy. The expectation is a call argument, not a new persisted review record.
+The request digest describes request parameters, not mutable manifest/config bytes.
+The existing JSON CLI accepts the same new submission kind without an expectation;
+it still captures and retains native admission observations.
+
+The child passes those exact observations and its native UUID to B1. B1 compares
+its actual capture before envelope claim; a second capture cannot establish a new
+baseline. Native preclaim refusal after dispatch is conservatively unknown.
+The child does not introduce a second preparation implementation.
+
+Status delegates to `candidate_prepare.reusable_terminal.read_reusable_terminal`.
+It reads only fixed retained envelope paths; no authored-source recapture, native
+task import, credentials, fresh source verification or full selection occurs.
+It binds top receipt/run/envelope/nonce, source snapshot, reconstructed native
+request, admission observations, binding hash, and any control/inner receipt.
+Success requires complete consistent control/inner evidence and prepared artifact
+references. A failed top receipt without an inner receipt is valid only with
+sufficient binding/snapshot evidence; any existing control is still checked.
+Earliest incomplete publication stays unknown. A referenced missing inner receipt
+is integrity failure. Missing top plus successful inner never establishes completion.
+`Completion.receipt_digest` pins the exact top receipt bytes and is checked on every
+subsequent read. Native failed/timed_out/interrupted statuses remain completed
+native outcomes, not candidate acceptance. Release still requires exited-process
+evidence.
+
+Native logs use `envelope/inputs/preparation/worker.log`; an absent log is normal.
+Tokens are not applicable for both preparation variants, after integrity checks.
+`read_prepared_candidate` remains legacy-only; reusable completion uses explicit
+`select_reusable_preparation` / B3 selection and full verification before launch.
+Old prepare/candidate serialized records and request digests are unchanged by this
+variant. New reusable top receipts carry the invocation UUID; legacy receipts omit
+only that new field when absent, preserving all historical null fields.

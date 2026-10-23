@@ -27,7 +27,7 @@ before candidate execution.
    must be separate from inputs, outputs and framework code. New state is private;
    existing state directories must belong to you and have mode `0700`.
 
-2. Wrap your existing native request JSON in a submission. Choose `prepare` or
+2. Wrap your existing native request JSON in a submission. Choose `prepare`, `prepare_reusable` or
    `candidate` explicitly. This example reads `native-request.json` and writes
    `submission.json`:
 
@@ -69,6 +69,31 @@ before candidate execution.
    legacy prepared bundle, review its `candidate_request_path`, wrap that file with
    `kind: "candidate"` and a new UUID, then submit explicitly.
 
+## Prepare a reusable workflow in the background
+
+Create a [reusable preparation request](../candidate_prepare/README.md#prepare-several-runs-from-one-workflow)
+from your saved workflow. Include its runs directory in both root lists in
+`store.json`; each run contains sibling `inputs/` and `workspace/` directories.
+Keep operation state separate. Wrap the request as shown above, using
+`"kind": "prepare_reusable"` and a fresh operation UUID, then save and submit it.
+The command returns after dispatch. Preparation captures saved source and runs
+trusted task composition offline; it does not launch a candidate or need provider
+credentials.
+
+Use the same status and log commands. Success is `state: "completed"` with
+`receipt.status: "prepared"`; `receipt.envelope` identifies the capture to review
+in the steps below or in the console's existing prepared-run selector. Failed,
+timed-out and interrupted preparations can also be `completed`, so check the
+native status. Missing or contradictory evidence is `unknown`.
+
+Retain the original submission for recovery. Resubmitting it with the same UUID
+returns the admitted operation even if source/configuration files disappear; it
+does not prepare again. New preparations need fresh operation and run UUIDs.
+Python integrations can bind a reviewed set of source/configuration bytes using
+the [typed expectation and recovery API](candidate-operations-contract.md#detached-reusable-preparation).
+Create the preparation request through Python or the CLI; the console can monitor
+this operation UUID.
+
 ## Run a prepared reusable workflow
 
 First [prepare your reusable workflow](../candidate_prepare/README.md#prepare-several-runs-from-one-workflow).
@@ -103,7 +128,8 @@ readers can continue to verify the native result.
 native `accepted` means candidate validation passed and proposal, implementation
 and validation outputs are available. It does not mean training or scientific
 scoring ran. Professional and Assistant use this same Python/CLI route. Reusable
-GUI launch and resuming a previous run are not available through it.
+capture launch uses the console’s prepared-run selector; resuming a previous run
+is not available through this route.
 
 For reported LLM tokens, Python callers can use the same stored operation UUID:
 

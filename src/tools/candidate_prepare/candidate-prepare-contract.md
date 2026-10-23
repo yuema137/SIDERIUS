@@ -356,3 +356,35 @@ matching the binding. They do not read external observation contents or certify
 complete preparation. Callers must apply external path/resource policy and then
 invoke full retained verification or the operation builder with the same selection.
 These are Python owner seams, not arbitrary-path HTTP endpoints.
+
+
+## Detached invocation and historical terminal identity
+
+`prepare_reusable_candidate(request, *, invocation_id=None,
+expected_observations=None)` remains the sole B1 execution owner. Omitted invocation
+ID creates a native UUID; supplied IDs are strictly validated before effects.
+`ReusablePreparationObservations` holds the original source plus ordered manifest
+and config observations derived from the plan binding. When supplied, B1 compares
+it against its actual new capture before origin verification and envelope mkdir.
+Admission prechecks cannot substitute for this comparison. Later drift continues
+to fail through the existing origin guard.
+
+New top receipts include `preparation_id`, even for failure before control
+publication. Legacy receipts may lack it: serialization omits that field alone
+when None and preserves other optional null fields. Whenever present, retained
+binding inspection verifies correspondence with control.
+
+`reusable_terminal.read_reusable_terminal(request, observations, invocation_id,
+*, expected_receipt_sha256=None)` returns a typed top receipt and its exact raw
+SHA, or None for a missing unpinned top receipt. It uses fixed bounded no-follow
+capture reads and shared source/resolution owners, not `capture`, `verify_origin`,
+`admit`, task imports or full selection verification. Contradictory identities,
+statuses/errors or incomplete referenced evidence raise. Success requires native
+control/inner receipt plus prepared artifact references. Failure without an inner
+receipt can be verified when binding/snapshot evidence exists; any present control
+is checked. Missing early binding/snapshot evidence cannot certify terminal failure.
+A missing pinned top receipt raises; an inner receipt cannot replace it.
+
+This helper establishes historical preparation identity for operation monitoring.
+It deliberately does not certify current launch eligibility. B2/B3 still use the
+full retained verifier and reobserve external inputs before candidate launch.

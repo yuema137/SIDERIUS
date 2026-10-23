@@ -435,3 +435,14 @@ Chromium environment as the editor gate plus optional `CONSOLE_EVIDENCE_DIR`.
 The real offline browser witness uses real preparation/HTTP/detached/native sandbox
 CPU validation and a local deterministic provider with fail-closed URL/proxy guards.
 It is not paid-provider, training, scientific-quality or production qualification.
+
+
+### Monitoring detached reusable preparation
+
+Known operation status accepts `kind="prepare_reusable"` from the shared operation
+owner. The console projects the reusable receipt's native `preparation_id`, not its
+envelope `run_id`; candidate validation remains null. Logs and preparation token
+not-applicable state use existing operation accessors. The legacy preparation
+review action remains restricted to `kind="prepare"`. Code/CLI users select a
+successful reusable envelope through the existing configured prepared-capture
+flow. This monitor extension adds no New run route, form or job persistence.
