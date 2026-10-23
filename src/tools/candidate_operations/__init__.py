@@ -11,9 +11,11 @@ from .models import (
     OperationSubmission,
     PreparedCandidate,
     PrepareOperation,
+    ReusablePreparationExpectation,
+    ReusablePrepareOperation,
 )
 from .prepared import read_prepared_candidate
-from .read import lookup_operation_request, read_operation
+from .read import lookup_operation_request, read_operation, recover_reusable_preparation
 from .reusable import build_reusable_operation
 from .store import digest as operation_request_digest
 from .submit import submit_operation
@@ -29,6 +31,8 @@ __all__ = [
     "OperationSubmission",
     "PrepareOperation",
     "PreparedCandidate",
+    "ReusablePreparationExpectation",
+    "ReusablePrepareOperation",
     "build_reusable_operation",
     "lookup_operation_request",
     "operation_request_digest",
@@ -36,5 +40,6 @@ __all__ = [
     "read_operation_log",
     "read_operation_tokens",
     "read_prepared_candidate",
+    "recover_reusable_preparation",
     "submit_operation",
 ]

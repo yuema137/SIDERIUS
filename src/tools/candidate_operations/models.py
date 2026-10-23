@@ -6,7 +6,12 @@ from uuid import UUID
 from pydantic import Field, TypeAdapter
 
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
-from tools.candidate_prepare.reusable_models import ReusablePreparedSelection
+from tools.candidate_prepare.reusable_models import (
+    ReusableCandidatePreparationRequest,
+    ReusablePreparationObservations,
+    ReusablePreparationReceipt,
+    ReusablePreparedSelection,
+)
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
 from tools.workflow_preview.models import FileObservation, PreviewModel
 
@@ -23,6 +28,19 @@ class PrepareOperation(PreviewModel):
     request: CandidatePreparationRequest
 
 
+class ReusablePrepareOperation(PreviewModel):
+    kind: Literal["prepare_reusable"] = "prepare_reusable"
+    request_id: UUID
+    request: ReusableCandidatePreparationRequest
+
+
+class ReusablePreparationExpectation(PreviewModel):
+    """Reviewed request identity plus native observations, separate from request parameters."""
+
+    request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    observations: ReusablePreparationObservations
+
+
 class CandidateOperation(PreviewModel):
     kind: Literal["candidate"] = "candidate"
     request_id: UUID
@@ -30,9 +48,11 @@ class CandidateOperation(PreviewModel):
     reusable_preparation: ReusablePreparedSelection | None = None
 
 
-OperationSubmission = Annotated[PrepareOperation | CandidateOperation, Field(discriminator="kind")]
+OperationSubmission = Annotated[
+    PrepareOperation | ReusablePrepareOperation | CandidateOperation, Field(discriminator="kind")
+]
 SUBMISSION = TypeAdapter(OperationSubmission)
-NativeReceipt = CandidatePreparationReceipt | CandidateRunReceipt
+NativeReceipt = CandidatePreparationReceipt | ReusablePreparationReceipt | CandidateRunReceipt
 
 
 class RuntimeIdentity(PreviewModel):
@@ -86,7 +106,7 @@ class Completion(PreviewModel):
 
 class OperationHandle(PreviewModel):
     operation_id: UUID
-    kind: Literal["prepare", "candidate"]
+    kind: Literal["prepare", "prepare_reusable", "candidate"]
     request_digest: str
     observed_at: str
     observation: Literal["starting", "existing", "operation_failed"]
@@ -94,7 +114,7 @@ class OperationHandle(PreviewModel):
 
 class OperationSnapshot(PreviewModel):
     operation_id: UUID
-    kind: Literal["prepare", "candidate"]
+    kind: Literal["prepare", "prepare_reusable", "candidate"]
     request_digest: str
     observed_at: str
     state: Literal["active", "completed", "operation_failed", "unknown"]

@@ -6,6 +6,8 @@ import stat
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from pydantic import TypeAdapter
+
 from core.durable_io import publish_bytes_write_once
 from tools.workflow_preview import WorkflowPreview
 
@@ -40,6 +42,11 @@ def prepare_reusable_candidate(
     expected_observations: ReusablePreparationObservations | None = None,
 ) -> ReusablePreparationReceipt:
     """Prepare one fresh managed-only v2 capture; never launch or resume a worker."""
+    preparation_id = (
+        uuid4()
+        if invocation_id is None
+        else TypeAdapter(UUID).validate_python(invocation_id, strict=True)
+    )
     captured = capture(request)
     plan, source, captures = captured.plan, captured.source, captured.inputs
     binding = plan.binding
@@ -53,7 +60,7 @@ def prepare_reusable_candidate(
     binding_path = envelope / "binding.json"
     binding_hash = hashlib.sha256(encoded(binding)).hexdigest()
     control = ReusablePreparationControl(
-        preparation_id=invocation_id or uuid4(),
+        preparation_id=preparation_id,
         request=binding.request,
         sources=binding.sources,
         binding_path=str(binding_path),

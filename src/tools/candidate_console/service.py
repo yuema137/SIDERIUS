@@ -18,6 +18,7 @@ from tools.candidate_operations import (
 )
 from tools.candidate_operations.models import OperationFailure
 from tools.candidate_prepare.models import CandidatePreparationReceipt, CandidatePreparationRequest
+from tools.candidate_prepare.reusable_models import ReusablePreparationReceipt
 from tools.candidate_worker import CandidateTokenSnapshot
 from tools.candidate_worker.models import CandidateRunReceipt
 
@@ -170,7 +171,7 @@ class CandidateConsole:
         receipt = snapshot.receipt
         native_id = (
             str(receipt.preparation_id)
-            if isinstance(receipt, CandidatePreparationReceipt)
+            if isinstance(receipt, (CandidatePreparationReceipt, ReusablePreparationReceipt))
             else receipt.run_id
             if isinstance(receipt, CandidateRunReceipt)
             else None

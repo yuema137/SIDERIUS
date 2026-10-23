@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+from tools.candidate_prepare.admission import validate_destination_overlap
 from tools.workflow_preview.files import resolve_location
 from tools.workspace_sandbox.profile import SandboxProfile, runtime_roots
 
@@ -64,6 +65,12 @@ def validate_config(config: OperationStoreConfig) -> OperationStoreConfig:
 def native_directory(submission: OperationSubmission) -> Path:
     if submission.kind == "prepare":
         return canonical(submission.request.output_dir) / "preparation"
+    if submission.kind == "prepare_reusable":
+        return (
+            canonical(submission.request.runs_root)
+            / str(submission.request.run_id)
+            / "inputs/preparation"
+        )
     request = submission.request
     project = canonical(request.preview.project_root)
     workspace = resolve_location(
@@ -95,6 +102,17 @@ def validate_submission(
             request.data_root,
             *request.task_read_only,
         )
+    elif submission.kind == "prepare_reusable":
+        request = submission.request
+        SandboxProfile.environment_keys(request.candidate_environment_names)
+        envelope = canonical(request.runs_root) / str(request.run_id)
+        canonical(request.project_root)
+        outputs = (
+            (envelope, config.preparation_roots),
+            (envelope / "workspace", config.candidate_roots),
+        )
+        inputs = (request.source_path, request.llm_config_file, *request.task_read_only)
+        validate_destination_overlap(envelope, tuple(canonical(value) for value in inputs))
     else:
         if submission.reusable_preparation is not None:
             validate_selection_root(config, submission.reusable_preparation)
