@@ -13,7 +13,7 @@ from .models import (
     PrepareOperation,
 )
 from .prepared import read_prepared_candidate
-from .read import read_operation
+from .read import lookup_operation_request, read_operation
 from .submit import submit_operation
 from .tokens import read_operation_tokens
 
@@ -27,6 +27,7 @@ __all__ = [
     "OperationSubmission",
     "PrepareOperation",
     "PreparedCandidate",
+    "lookup_operation_request",
     "read_operation",
     "read_operation_log",
     "read_operation_tokens",

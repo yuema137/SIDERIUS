@@ -175,3 +175,22 @@ arithmetic; `last_valid_usage_at` is the latest accepted response timestamp
 converted to UTC. Append after capture belongs to the next read. No atomic
 whole-run completeness, same-size replacement detection, deduplication, cache,
 quota, dollar cost or exactly-once/provider billing claim is made.
+
+## Optional source capture
+
+`CandidateRunRequest.workflow_source` optionally carries exact UTF-8 declaration
+text, SHA-256, diagnostic absolute origin path and inert reviewed-context
+provenance. Request validation binds source hash and the complete parsed
+`WorkflowDocument`, including layout. The origin path is never read for execution.
+After exclusive claim, launch publishes `candidate_run/workflow.py.snapshot`
+before sandbox dispatch. The child verifies that fixed file against request text
+before binding/importing native execution. Missing, changed, nonregular or alias
+snapshots refuse execution. Captures do not freeze trusted task/plugin deployment.
+Absent capture preserves ordinary native caller behavior and legacy operation
+digests; only the absent `workflow_source` key is omitted by the operation digest
+owner.
+Newly serialized requests include `workflow_source: null` when no source is
+provided. This is an additive request metadata format change, not byte parity
+with older newly written requests. Existing persisted bytes that omit the field
+remain readable and retain their old operation identity; prepared artifact hashes
+continue to describe the actual stored bytes.

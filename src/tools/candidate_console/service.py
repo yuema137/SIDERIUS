@@ -79,7 +79,9 @@ class CandidateConsole:
             launch_environment={},
         )
 
-    def _prepared(self, selection: PreparedSelection) -> tuple[PreparedCandidate, TaskChoice]:
+    def resolve_prepared_context(
+        self, selection: PreparedSelection
+    ) -> tuple[PreparedCandidate, TaskChoice]:
         selection = PreparedSelection.model_validate_json(selection.model_dump_json())
         prepared = read_prepared_candidate(
             self.config.operation_store, selection.prepare_operation_id
@@ -104,7 +106,7 @@ class CandidateConsole:
         return prepared, matches[0]
 
     def review(self, selection: PreparedSelection) -> PreparedReview:
-        prepared, task = self._prepared(selection)
+        prepared, task = self.resolve_prepared_context(selection)
         saved, request = prepared.preparation_request, prepared.request
         return PreparedReview(
             prepare_operation_id=prepared.prepare_operation_id,
@@ -137,7 +139,7 @@ class CandidateConsole:
 
     def launch(self, selection: LaunchSelection) -> OperationHandle:
         selection = LaunchSelection.model_validate_json(selection.model_dump_json())
-        prepared, _ = self._prepared(
+        prepared, _ = self.resolve_prepared_context(
             PreparedSelection(prepare_operation_id=selection.prepare_operation_id)
         )
         if selection.expected_prepared_digest != prepared.request_sha256:
