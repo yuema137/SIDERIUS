@@ -123,8 +123,17 @@ request in the external project; follow the
 and [operator steps](../../../src/tools/candidate_prepare/README.md#prepare-several-runs-from-one-workflow).
 Keep task references/advice in authored v2 source and allocate an explicit fresh
 UUID under the selected runs root. Do not edit generated v1 input or pass an
-existing envelope as resume. Check the top-level prepared receipt and digests;
-partial requests are diagnostics. Preparation is offline but imports trusted task
-code. It grants no effectful launch budget. Direct worker launch checks resolved-v1
-inputs only; a future consumer must verify original-v2 provenance before offering
-reusable launch. Do not claim current GUI selection or resume support from this API.
+existing envelope as resume. Require top-level prepared success; partial requests
+are diagnostics. Preparation is offline but imports trusted task code and grants
+no effectful launch budget. For an authorized candidate launch, use
+`select_reusable_preparation` immediately after publication (or a previously
+retained selection), then `build_reusable_operation(config, selection, request_id)`.
+Save the submission outside the envelope and call existing `submit_operation` or
+CLI `submit --request`. Follow the [operation contract and recipe](../../../src/tools/candidate_operations/candidate-operations-contract.md#retained-reusable-candidate-operations).
+The builder and admission/dispatch verify original-v2 provenance; direct worker
+launch checks resolved-v1 inputs only. Do not hash CLI stdout or require human
+digest bookkeeping. Recovery retries the same saved UUID/payload, never a newly
+selected/reconstructed request. Distinguish captured source from current edits,
+prepared from admitted from native accepted/rejected, and candidate outputs from
+training/scientific results. Do not claim reusable GUI selection, automatic GUI
+preparation or resume support from this API.

@@ -28,6 +28,7 @@ the flags that decide *what a run is*.
 |---|---|
 | inspect or explicitly probe a forensic snapshot | `python -m tools.runtime_replay`; see the [replay contract](runtime-replay.md) |
 | prepare a fresh candidate from reusable authored v2 source | `python -m tools.candidate_prepare --reusable-request PATH`; [preparation contract](../../src/tools/candidate_prepare/candidate-prepare-contract.md#managed-reusable-preparation), no launch/resume |
+| launch a retained reusable candidate capture | `build_reusable_operation(config, selection, request_id)` then existing `python -m tools.candidate_operations submit --store-config FILE --request FILE`; [operation contract](../../src/tools/candidate_operations/candidate-operations-contract.md#retained-reusable-candidate-operations) |
 | run the full multi-iteration agent loop | `scripts/launch/run_chain.sh` |
 | launch a task-specific campaign | use the campaign entrypoint in the experiment repository; it delegates to this repository's `run_chain.sh` |
 | run one arm of a task-specific comparison | use that experiment repository's launcher with an explicit SIDERIUS checkout |
@@ -396,5 +397,14 @@ Assistant callers help author the same files and explicit selections. Source
 owns task references/advice; request owns fresh run identity and runtime policy.
 The [preparation contract](../../src/tools/candidate_prepare/candidate-prepare-contract.md#managed-reusable-preparation)
 owns managed-only support, failure receipts and the authored-v2 versus generated-v1
-publication boundary. This does not replace native chain entrypoints or add
-reusable GUI launch or resume.
+publication boundary. For authorized execution, both routes retain the exact
+selection through `select_reusable_preparation` and construct
+`build_reusable_operation(config, selection, request_id)`. Save that submission
+outside the envelope and use existing `submit_operation` or CLI `submit --request`.
+The [operation contract](../../src/tools/candidate_operations/candidate-operations-contract.md#retained-reusable-candidate-operations)
+owns configured containment, original-v2 verification at admission/dispatch and
+exact-UUID recovery without relaunch. Current source edits affect future captures;
+retry uses the unchanged saved submission. Prepared inputs, admitted operation and
+native terminal validation are different states. Candidate outputs do not imply
+training or scientific scoring. This does not replace native chain entrypoints or
+add reusable GUI launch, automatic GUI preparation or resume.

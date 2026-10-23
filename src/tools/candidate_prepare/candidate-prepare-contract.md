@@ -232,15 +232,75 @@ leave request-shaped diagnostics: only a prepared top-level receipt with matchin
 digests establishes reusable success. Missing receipt is unknown. Collision is
 not retry/resume, and there is no auto-cleanup or ID substitution.
 
-The guarantee is coherence of original capture, binding and request at successful
-publication. Mutable sibling hashes are not a later independent trust anchor.
-Direct existing worker launch validates resolved-v1 inputs, not original-v2
-provenance. B exposes no standalone arbitrary-path provenance verifier. A future
-GUI/operation consumer must retain expected receipt/binding identity, safely
-verify original capture and source options/resolution, check final request bytes,
-and bind that selection into operation/review identity before launch. Such an
-adapter, run registry, resume, literal materialization, training and GUI changes
-are outside this operation.
+The preparation guarantee is coherence of original capture, binding and request
+at successful publication. Later original-v2 provenance verification is provided
+by the retained-selection API below and consumed by candidate operations.
+Direct worker launch still validates resolved-v1 inputs only. GUI preparation/
+selection/launch, resume, literal materialization and training remain outside
+this preparation API.
+
+## Retained reusable selection verification
+
+`ReusablePreparedSelection(envelope, expected_receipt_sha256)` is a strict inert
+selection: a canonical absolute UUID envelope and caller-retained lowercase
+SHA-256 of its exact `receipt.json` bytes. `select_reusable_preparation(envelope)`
+reads and verifies the currently published bundle and returns that selection.
+Call it immediately after successful preparation to select the publication, then
+retain the returned object outside the mutable envelope (for example in the
+operation submission). Calling it later explicitly selects the current bytes;
+it cannot recover independent historical authenticity. Never recompute the
+expected digest during admission or retry. A known retained digest can also be
+supplied directly through `ReusablePreparedSelection`.
+
+Published receipt bytes are indented JSON plus a trailing newline. Hashing CLI
+stdout or arbitrary model JSON does not identify those bytes. The selection API
+reads the actual fixed receipt once, hashes those same bytes, then verifies with
+that same per-pass reader. It is intended for callers selecting trusted local
+paths; operation-facing review additionally enforces configured root policy.
+
+`verify_reusable_preparation(selection) -> VerifiedReusablePreparation` performs
+fresh bounded read-only verification and returns the exact validated candidate
+request, retained selection, binding, top receipt, native preparation UUID and
+composition fingerprint. It creates no directories, executes no task code, calls
+no provider, and does not require a fresh/absent envelope or workspace. Each call
+has its own byte cache; hashing, observation and decoding use the same bytes per
+path. It uses canonical/no-follow regular-file reads capped at 16 MiB and the
+original parser's smaller source limit. Existing trusted-root path policy is
+preserved, not upgraded to hostile same-UID filesystem attestation.
+
+Verification requires a complete successful top receipt with fixed paths and
+canonical envelope UUID; it checks exact receipt, binding and candidate-request
+hashes before decoding their corresponding payloads. It compares the snapshot
+against the original observation's path/reference/hash/size, parses v2 and checks
+its semantic digest. It never calls `verify_origin` or reads current canonical
+workflow contents. Edits after preparation affect future captures only.
+
+`reusable_admission.reusable_locations` is the shared managed-only layout mapper
+for initial capture and retained verification. It independently reconstructs task
+paths from captured source/project and proposal/storage/workspace paths from the
+fixed envelope layout, then compares binding and native request destinations.
+The existing A resolver checks the authored graph and source options.
+`verify_sources` checks manifest/config references, paths and observed bytes.
+Saved reusable control must agree with pinned request/sources/binding path/hash.
+`reusable_verify.verify_reusable_bundle(read_bytes=...)` remains the sole native
+bundle verifier: artifact index, derived v1 document/source, profile, composition
+linkage, native storage and advice/output options, and independently expected
+candidate request. The exact decoded candidate must equal that expected request.
+
+The preview is hashed against the receipt and compared with the verifier's
+bindings and the preparation-time `workspace_state="absent"`; this does not assert
+that the current workspace is still absent. Native receipt status, UUID, paths,
+source observations and composition linkage must agree. Its bytes are diagnostic
+consistency evidence, not independently pinned by the top receipt. No promise
+covers every imported task dependency. Existing worker checks remain authoritative
+at actual launch. Missing/partial/failed receipts, unsafe reads, changed inputs,
+wrong graph/options/storage or mismatched native relationships refuse without
+writes. B1's two publication checks remain independent fresh passes with its
+parent-held plan/source/control, not a cache retained from an earlier pass.
+
+See [operation binding](../candidate_operations/candidate-operations-contract.md#retained-reusable-candidate-operations)
+for root-aware review, submission identity, dispatch and retry. Preparation,
+admission and native terminal state are three distinct events.
 
 
 ## Reusable request recipe
@@ -280,6 +340,6 @@ request = ReusableCandidatePreparationRequest(
 
 Substitute the operator's selected paths, budgets and enabled provider names;
 no example choice creates scientific defaults or launch permission. The API's
-receipt digests are machine-consumed integrity fields. A later provenance-aware
-consumer must validate them against caller-retained expected identity as specified
+receipt digests are machine-consumed integrity fields. The retained-selection
+consumer validates them against caller-retained expected identity as specified
 above; the human-facing success signal is prepared status and CLI exit zero.

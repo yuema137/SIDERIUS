@@ -16,7 +16,8 @@ explicit ephemeral string mapping. The environment is not serialized, hashed or
 placed in command arguments. It returns after admission/spawn, without waiting
 for native completion. Preparation never automatically launches a candidate.
 The submission's UUID is the operation UUID and directory name. The request
-digest hashes kind and canonical JSON native request values, excluding UUID,
+digest hashes kind and canonical JSON native request values, plus reusable selection
+only when present, excluding UUID,
 environment and observation times. Same UUID/digest returns an existing handle
 in any state; changed content conflicts. Existing IDs do not require fresh
 credential values and never dispatch again.
@@ -226,3 +227,108 @@ receipt and supplies the one arithmetic/quality projection. Multiple observation
 reads are not an atomic transaction. No credential read, task-choice authorization,
 submission, provider call, native launch or writes occur. Existing status-reader
 missing-final-receipt early return and all native statuses remain unchanged.
+
+
+## Retained reusable candidate operations
+
+`CandidateOperation.reusable_preparation: ReusablePreparedSelection | None = None`
+adds explicit original-v2 provenance to the existing candidate kind. It does not
+change CandidateRunRequest, worker source equality, ReviewedContext, native output
+formats, prepare-kind requests or legacy edited-v1 behavior. Missing/explicit null
+selection preserves the historical operation digest. Canonical content still uses
+sorted JSON with separators `(",", ":")` and omits absent request.workflow_source.
+Old records load without migration or rewriting. Newly serialized legacy records
+may include the additive field as null; their byte encoding is not promised equal
+to old serialization, but their identities remain equal. When present, both the
+selection and complete native request enter the immutable submission/digest.
+
+`build_reusable_operation(config, selection, request_id) -> CandidateOperation`
+is the public read-only review/builder. All three arguments are explicit, including
+the operation UUID. It validates config and confines envelope beneath preparation
+roots before mutable reads, invokes the preparation-owned retained verifier, and
+validates native destination/input policy before returning the typed operation.
+The request describes the captured original source, not today's editor contents.
+The builder does not check credential values, claim storage or launch. It is not
+a required trusted shortcut: manually constructed submissions must pass the same
+fresh provenance check in submit. Python and existing CLI `submit --request` use
+`submit_operation`; there is no new execution kind or submit engine.
+
+`reusable.validate_selection_root` performs only static canonical containment and
+state-overlap checks. It requires no surviving envelope files and is safe in
+`validate_submission` and `load_record`. Keep mutable receipt/binding/source/request
+reads out of those paths. After `existing` finds no record, under the existing
+store lock and before credentials/claim/spawn, `verify_reusable_operation` calls
+`candidate_prepare.verify_reusable_preparation` and requires exact typed request
+equality. Native fresh_preview and credential admission still follow. Errors use
+bounded credential-safe `OperationFailure(code="reusable_preparation")`. Rejected
+admission may create store lock/directories but no operation claim or workspace.
+
+The detached child repeats the same content verification with a separate fresh
+pass after runtime binding and before `entered = True`/`launch_candidate`. A proven
+failure publishes `pre_dispatch_failure` with reason `reusable_preparation_failed`,
+never ambiguous native status or worker effects. Runtime failures retain
+`runtime_binding_failed`; uncertainty after native entry retains
+`native_outcome_unresolved`. Dispatch uses `record.submission.request`, never a
+replacement loaded from the envelope. Native launch rechecks its own source and
+observed inputs. The store lock serializes operation claims, not external writers;
+these checks do not freeze the filesystem against a hostile same-UID actor.
+
+Identical operation UUID/digest returns the saved handle before provenance,
+preview or credential checks, including after receipt or whole-envelope deletion.
+Different selection/request with the same UUID conflicts. Never reconstruct the
+request or select current receipt bytes to recover an ambiguous response: retry
+the saved submission. A new UUID is a new admission and cannot resume/reuse a
+claimed native workspace. Native terminal evidence can become unknown if removed;
+this does not authorize re-execution. Envelope UUID, offline preparation UUID,
+operation UUID and native invocation UUID are distinct linked identities.
+
+### Shared Python and CLI recipe
+
+After successful preparation and explicit selection of a trusted local envelope,
+construct and save the reviewable submission outside that envelope. This example
+uses the existing store config; for reusable runs both output-root lists normally
+include `/runs/my-task`, since inputs and workspace are sibling children of each
+UUID envelope. The state directory must remain separate. Select required provider
+environment names during preparation and bind their values only at launch.
+
+```python
+from pathlib import Path
+from uuid import uuid4
+
+from tools.candidate_prepare import select_reusable_preparation
+from tools.candidate_operations import OperationStoreConfig, build_reusable_operation
+
+config = OperationStoreConfig.model_validate_json(Path("store.json").read_bytes())
+selection = select_reusable_preparation("/runs/my-task/PREPARED_ENVELOPE_UUID")
+submission = build_reusable_operation(config, selection, uuid4())
+# Retain this file for exact-ID recovery. Do not regenerate it when retrying.
+Path("reusable-submission.json").write_text(submission.model_dump_json(indent=2))
+```
+
+Substitute the actual reported envelope UUID. This helper pins current published
+receipt bytes correctly; a later scan is an explicit new selection, not proof of
+an earlier publication event. An integration that already retained the selection
+should pass that object directly instead of selecting again. No digest transcription
+or hashing of CLI stdout is required. Review task/project/workspace, node IDs,
+selected routes, limits and advice from the returned typed request before launch.
+
+```sh
+.venv/bin/python -m tools.candidate_operations submit \
+  --store-config store.json --request reusable-submission.json
+```
+
+The equivalent Python launch is
+`submit_operation(config, submission, launch_environment=explicit_environment)`.
+Both return admission/existing identity; use the existing status/log/token readers
+for native terminal results. `prepared` precedes admission; native accepted/rejected
+follows proposal/implementation/validation. None means training or scientific
+quality qualification. Professional and Assistant routes differ in how users
+choose inputs, not in these preparation/execution owners. Reusable GUI review,
+automatic preparation, source editing integration, run discovery, resume and
+whole-chain launching remain separate work.
+
+Validation: fixed legacy digest/record witnesses, production admission/dispatch
+reachability, exact-ID recovery after removal, current source edit preservation,
+CLI parity and actual two-envelope offline preparation→detached operations→native
+worker integration with test-only provider responses and CPU checks. This is no
+real API/GPU or paper-performance qualification.
