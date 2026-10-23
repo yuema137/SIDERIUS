@@ -129,6 +129,9 @@ class ParameterRule(BaseModel):
         preserves the distinct valid ``{"exact": null}`` declaration.
         """
         serialized = handler(self)
+        if self.kind == "exact" and self.exact is None:
+            # Parent null filtering must not erase an explicitly locked null value.
+            return {"exact": None}
         return {self.kind: serialized[self.kind]}
 
 
