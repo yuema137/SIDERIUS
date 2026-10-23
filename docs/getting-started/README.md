@@ -76,12 +76,22 @@ show the required JSON format: the console access token unlocks the page, while
 provider keys are read from its configured private file. Shell exports or a
 project `.env` do not satisfy that console binding.
 
-Open the printed address, enter the token and select a task. Click **Prepare**,
-review inputs, models and resources, then explicitly **Launch candidate** to
-run code and make any paid calls. Configuration checks and offline preparation
-do not prove provider access or candidate success. Keep the operation ID for
-status and logs. The optional Workflow Editor edits an existing source file;
-saving it does not change what native Prepare executes.
+Open the printed address, enter the token and connect. Choose the route that
+matches your starting point:
+
+- **Configured task:** on Home, expand **Prepare configured task**, select the
+  task and prepare its inputs. Review models and resources, then explicitly
+  **Launch candidate**. This route is independent of Workflow Editor edits.
+- **Saved reusable workflow:** in Workflow Editor, save your changes and use
+  **New run** to select the configured task/resources, review and prepare the
+  saved source. Open the prepared run, review it and explicitly launch. Each run
+  has separate captured inputs and a workspace; later edits affect future runs.
+
+Follow the [saved-source recipe](../../src/tools/candidate_console/README.md#prepare-saved-source-or-open-an-existing-run)
+for the second route. Saving and preparation never launch automatically.
+Launching runs code and may make paid calls. Configuration checks and offline
+preparation do not prove provider access or candidate success. Keep the
+operation ID to reopen status and logs without selecting an editor project.
 
 The [Quickstart pack](../../examples/quickstart/README.md) offers a synthetic CPU
 check without provider calls. It checks installation and task contracts, not
