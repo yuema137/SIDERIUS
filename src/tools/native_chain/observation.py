@@ -148,6 +148,12 @@ def observe_native_chain(
             "chain_stopped.json",
             "run_invariants_lock.json",
             "effective_config.json",
+            "health_checks_effective.yaml",
+            "memory_trace.jsonl",
+            "per_file_best.json",
+            "evolution_log.jsonl",
+            "plugins",
+            "plugin_source_sentinel",
             f"{run_name}_hardware.json",
             "generated_library",
             "STOP",
@@ -156,8 +162,18 @@ def observe_native_chain(
         anomalies = []
         with os.scandir(workspace) as entries:
             for count, entry in enumerate(entries, 1):
-                if count > bounds.final_iteration + len(controls):
+                if count > 2 * bounds.final_iteration + len(controls):
                     raise ObservationLimit()
+                hardware = re.fullmatch(r"iter_(\d+)_hardware.json", entry.name)
+                if hardware is not None:
+                    index = int(hardware[1])
+                    if (
+                        not 1 <= index <= bounds.final_iteration
+                        or entry.name != f"iter_{index:03d}_hardware.json"
+                        or entry.is_symlink()
+                    ):
+                        anomalies.append("unexpected_hardware_entry")
+                    continue
                 match = re.fullmatch(r"iter_(\d+)", entry.name)
                 if match is None:
                     if entry.name not in controls:

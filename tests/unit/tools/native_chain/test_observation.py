@@ -94,3 +94,24 @@ def test_bounded_reader_refuses_symlink_escape_and_directory_flood(tmp_path):
         (tmp_path / f"foreign{i}").touch()
     result = observe_native_chain(tmp_path, "native", bounds())
     assert result.availability == "limit_exceeded" and not result.checkpoints
+
+
+def test_native_control_entries_do_not_consume_iteration_slots(tmp_path):
+    """Actual two-iteration layout includes per-index hardware and fixed runtime files."""
+    for index in (1, 2):
+        stamp(_write_clean_chain_iter(tmp_path, index) / "manifest.json")
+        (tmp_path / f"iter_{index:03d}_hardware.json").write_text("{}")
+    for name in (
+        "plugin_source_sentinel",
+        "memory_trace.jsonl",
+        "per_file_best.json",
+        "evolution_log.jsonl",
+        "health_checks_effective.yaml",
+        "generated_library",
+        "plugins",
+        "run_invariants_lock.json",
+    ):
+        (tmp_path / name).touch()
+    result = observe_native_chain(tmp_path, "native", bounds())
+    assert result.availability == "available" and not result.anomalies
+    assert all(row.artifact_verified for row in result.checkpoints)
