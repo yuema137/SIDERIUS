@@ -2,5 +2,19 @@
 
 from .launch import prepare_candidate
 from .models import CandidatePreparationReceipt, CandidatePreparationRequest
+from .resolution import (
+    ResolvedExternalLocation,
+    ResolvedReusableCandidate,
+    ReusableCandidateLocations,
+    resolve_reusable_candidate,
+)
 
-__all__ = ["CandidatePreparationReceipt", "CandidatePreparationRequest", "prepare_candidate"]
+__all__ = [
+    "CandidatePreparationReceipt",
+    "CandidatePreparationRequest",
+    "ResolvedExternalLocation",
+    "ResolvedReusableCandidate",
+    "ReusableCandidateLocations",
+    "prepare_candidate",
+    "resolve_reusable_candidate",
+]

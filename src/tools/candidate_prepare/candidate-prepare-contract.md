@@ -126,3 +126,35 @@ publishing, importing task/node implementations or inspecting candidate workspac
 emptiness. `launch.reconcile` retains source verification, absent-workspace checks
 and publication. Public operation readers supply confined bounded reads to the
 same verifier, so rereading after launch cannot replay preparation effects.
+
+## Pure reusable declaration resolution
+
+`resolution.resolve_reusable_candidate(document, bindings)` accepts a validated
+ReusableWorkflowDocument and ReusableCandidateLocations, and returns a
+ResolvedReusableCandidate containing a revalidated v1 WorkflowDocument plus
+CandidatePreparationOptions. It is exported alongside the unchanged legacy
+preparation API, but no preparation/launch caller invokes it in this slice.
+It performs no reads, path traversal, allocation, native imports, payload
+validation, provider work or publication. It does not prepare or launch v2.
+
+ReusableCandidateLocations requires explicit manifest, data_root, workspace and
+an externals tuple of ResolvedExternalLocation(binding, location). IDs must be
+unique and maps must exactly cover declarations. Inputs are revalidated even
+when created through unchecked copies. Locations are inert strings; callers own
+physical path admission and observations. No aliases or filenames select roles.
+
+The shared candidate shape checker requires one proposal, implementation and
+validation with their expected upstream results and protocols. Resolution
+requires exactly one managed proposal alias used by the proposal request and
+managed storage aliases used only by storage arguments; all storage aliases map
+to the same explicit generated attempt-storage destination. Unused bindings,
+literal proposal/storage seeds, misrouted roles, and unsupported literal roles
+refuse. Optional constraint context, composition reference, provider and model
+literals survive using explicit alias mappings; their bytes are not read here.
+
+Resolution retains authored node/external/argument order, IDs, edges, layout and
+preparation options. It never calls legacy candidate_document(request), whose
+fixed names and graph remain unchanged. The resulting v1 declaration alone is
+insufficient to launch: no native inputs, observations, request, receipt, run
+identity or parent bundle verification are created. Those remain a separate
+bounded integration responsibility.
