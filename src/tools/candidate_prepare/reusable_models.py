@@ -49,6 +49,31 @@ class ReusableBindingCapture(PreviewModel):
     sources: tuple[FileObservation, ...]
 
 
+class ReusablePreparationObservations(PreviewModel):
+    """Admission order is authored source, task manifest, then LLM configuration."""
+
+    source: FileObservation
+    manifest: FileObservation
+    config: FileObservation
+
+    @classmethod
+    def from_binding(cls, binding: ReusableBindingCapture) -> "ReusablePreparationObservations":
+        return cls.from_inputs((binding.original_source, *binding.sources))
+
+    @classmethod
+    def from_inputs(cls, inputs: tuple[FileObservation, ...]) -> "ReusablePreparationObservations":
+        if tuple(item.reference for item in inputs) != (
+            "workflow.source",
+            "task.manifest",
+            "llm_config",
+        ):
+            raise ValueError("reusable preparation observations have invalid order or references")
+        return cls(source=inputs[0], manifest=inputs[1], config=inputs[2])
+
+    def as_inputs(self) -> tuple[FileObservation, ...]:
+        return (self.source, self.manifest, self.config)
+
+
 class ReusablePreparationPlan(PreviewModel):
     binding: ReusableBindingCapture
     document: ReusableWorkflowDocument
@@ -62,6 +87,7 @@ class ReusablePreparationControl(PreparationControl):
 
 
 class ReusablePreparationReceipt(PreviewModel):
+    preparation_id: UUID | None = Field(default=None, exclude_if=lambda value: value is None)
     run_id: UUID
     envelope: str
     status: Literal["prepared", "failed", "timed_out", "interrupted"]

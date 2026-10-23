@@ -116,7 +116,7 @@
       const status = await api('operations/' + current.id);
       if (current !== preparation) return;
       say('prepare-status', describe(status));
-      if (status.state === 'completed' && status.receipt_available) {
+      if (status.kind === 'prepare' && status.state === 'completed' && status.receipt_available) {
         const result = await api('preparations/' + current.id + '/review');
         if (currentGeneration !== generation) return;
         review = result;

@@ -8,9 +8,12 @@ from uuid import UUID
 from pydantic import BaseModel, ValidationError
 
 from tools.candidate_prepare.models import CandidatePreparationReceipt, PreparationControl
+from tools.candidate_prepare.reusable_models import ReusablePreparationObservations
+from tools.candidate_prepare.reusable_terminal import read_reusable_terminal
 from tools.candidate_worker.models import CandidateRunReceipt, CandidateRunRequest
 from tools.candidate_worker.records import verify_candidate_records
 
+from .expectation import compare_reusable_expectation
 from .files import read_bytes, read_model
 from .models import (
     Completion,
@@ -22,6 +25,7 @@ from .models import (
     OperationSubmission,
     ProcessIdentity,
     ProcessObservation,
+    ReusablePreparationExpectation,
     SpawnFailure,
 )
 from .process import observe
@@ -45,6 +49,12 @@ def bound(record: OperationRecord, marker: ProcessIdentity | Completion | SpawnF
 
 def native_receipt(record: OperationRecord) -> tuple[NativeReceipt, str] | None:
     submission = record.submission
+    if submission.kind == "prepare_reusable":
+        return read_reusable_terminal(
+            submission.request,
+            ReusablePreparationObservations.from_inputs(record.inputs),
+            record.native_id,
+        )
     control = native_directory(submission)
     try:
         payload = read_bytes(control / "receipt.json")
@@ -183,3 +193,18 @@ def lookup_operation_request(
     if not os.path.lexists(path):
         return None
     return load_record(config, operation_id).submission
+
+
+def recover_reusable_preparation(
+    config: OperationStoreConfig,
+    operation_id: UUID,
+    expected: ReusablePreparationExpectation,
+) -> OperationSubmission | None:
+    """Recover admitted identity before mutable-source/credential reads; never dispatch."""
+    config = validate_config(config)
+    path = Path(config.state_root) / "operations" / str(operation_id)
+    if not os.path.lexists(path):
+        return None
+    record = load_record(config, operation_id)
+    compare_reusable_expectation(record, expected)
+    return record.submission

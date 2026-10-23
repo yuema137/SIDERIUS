@@ -157,7 +157,7 @@ class PreparedReview(PreviewModel):
 
 class StatusView(PreviewModel):
     operation_id: UUID
-    kind: Literal["prepare", "candidate"]
+    kind: Literal["prepare", "prepare_reusable", "candidate"]
     request_digest: str
     observed_at: str
     state: Literal["active", "completed", "operation_failed", "unknown"]

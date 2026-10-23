@@ -4,7 +4,8 @@ import sys
 from pathlib import Path
 from uuid import UUID
 
-from tools.candidate_prepare import prepare_candidate
+from tools.candidate_prepare import prepare_candidate, prepare_reusable_candidate
+from tools.candidate_prepare.reusable_models import ReusablePreparationObservations
 from tools.candidate_worker import launch_candidate
 
 from .files import canonical, publish, read_model
@@ -38,6 +39,12 @@ def execute(path: Path) -> int:
         entered = True
         if record.submission.kind == "prepare":
             prepare_candidate(record.submission.request, invocation_id=record.native_id)
+        elif record.submission.kind == "prepare_reusable":
+            prepare_reusable_candidate(
+                record.submission.request,
+                invocation_id=record.native_id,
+                expected_observations=ReusablePreparationObservations.from_inputs(record.inputs),
+            )
         else:
             launch_candidate(record.submission.request, invocation_id=record.native_id)
         native = native_receipt(record)

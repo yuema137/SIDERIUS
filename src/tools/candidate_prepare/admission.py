@@ -33,6 +33,22 @@ def absent_destination(path: Path) -> None:
         raise ValueError(f"destination must be absent with an existing directory parent: {path}")
 
 
+def validate_destination_overlap(destination: Path, inputs: tuple[Path, ...]) -> None:
+    """Shared static protection; no reads or existence requirements."""
+    protected = (
+        *inputs,
+        *runtime_roots(),
+        *SYSTEM_DIRECTORIES,
+        Path("/etc"),
+        Path("/proc"),
+        Path("/dev"),
+        Path("/sys"),
+        Path("/sandbox-home"),
+    )
+    if any(overlap(destination, root) for root in protected):
+        raise ValueError(f"destination overlaps selected input or protected root: {destination}")
+
+
 def admit(
     request: CandidatePreparationRequest, *, future_parent: Path | None = None
 ) -> tuple[tuple[FileObservation, bytes], ...]:
@@ -53,19 +69,6 @@ def admit(
     SandboxProfile.environment_keys(request.candidate_environment_names)
     if not data.is_dir():
         raise ValueError("data_root must be an existing directory")
-    protected = (
-        manifest,
-        config,
-        data,
-        *sources,
-        *runtime_roots(),
-        *SYSTEM_DIRECTORIES,
-        Path("/etc"),
-        Path("/proc"),
-        Path("/dev"),
-        Path("/sys"),
-        Path("/sandbox-home"),
-    )
     destinations = (
         (output, workspace) if future_parent is None else (output, workspace, future_parent)
     )
@@ -75,10 +78,7 @@ def admit(
         elif destination.parent != future_parent or os.path.lexists(destination):
             raise ValueError("future destinations must be absent children of the envelope")
         inspect_workspace(destination, data, (manifest, config))
-        if any(overlap(destination, root) for root in protected):
-            raise ValueError(
-                f"destination overlaps selected input or protected root: {destination}"
-            )
+        validate_destination_overlap(destination, (manifest, config, data, *sources))
     if overlap(output, workspace):
         raise ValueError("output_dir and candidate_workspace must not overlap")
     validate_mount_boundaries(output, (manifest, config, data, *sources))
