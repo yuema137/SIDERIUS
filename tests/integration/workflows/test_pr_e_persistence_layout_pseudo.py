@@ -65,6 +65,7 @@ from tests.unit.agent.ml_model_proposal_agent.test_proposal_agent import (
     FAKE_INTERPRETATION,
     FAKE_REASONING,
 )
+from workflows.llm_config import TunerLLMConfig, WorkflowLLMConfig
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
@@ -255,7 +256,9 @@ def _verdict(passed: bool, name: str) -> ValidatorOutput:
 
 
 class TestAttemptDirectoryLayout:
-    def test_two_attempts_two_directories_discoverable_without_names(self, tmp_path):
+    def test_two_attempts_two_directories_discoverable_without_names(
+        self, tmp_path, offline_workflow
+    ):
         """The join-on-read premise, as behaviour.
 
         Attempt 1's validation fails (max_impl_attempts=1 → straight to a
@@ -356,6 +359,9 @@ class TestAttemptDirectoryLayout:
 
             with bind_run_task_composition(composition, physical_data_root=str(tmp_path / "data")):
                 run_workflow(
+                    llm_config=WorkflowLLMConfig(
+                        tune=TunerLLMConfig(planner_strategy="native-timing-v1")
+                    ),
                     launch=WorkflowLaunchConfig(
                         data_dir=str(tmp_path / "data"),
                         model_types=["punet"],

@@ -51,6 +51,7 @@ from core.capability_registry import CapabilityMetadata
 from core.resume import restore_prior_state
 from core.run_invariants import RUN_INVARIANTS_BASENAME
 from core.scientific_authority import ScientificAuthority
+from workflows.llm_config import TunerLLMConfig, WorkflowLLMConfig
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.run_one_iteration import write_manifest
@@ -295,7 +296,9 @@ _VALID_OUT = ValidatorOutput(
 )
 
 
-def test_fresh_run_writes_the_library_not_the_checkout(tmp_path, monkeypatch, capsys):
+def test_fresh_run_writes_the_library_not_the_checkout(
+    tmp_path, monkeypatch, capsys, offline_workflow
+):
     """Matrix rows A + B + C — see module docstring for the row mapping."""
     # Wrong-tree guard (E1): the modules under test must come from THIS
     # checkout, or every assertion below certifies the wrong tree.
@@ -353,6 +356,9 @@ def test_fresh_run_writes_the_library_not_the_checkout(tmp_path, monkeypatch, ca
         data_dir = str(data_path)
         with bind_run_task_composition(composition, physical_data_root=data_dir):
             run_workflow(
+                llm_config=WorkflowLLMConfig(
+                    tune=TunerLLMConfig(planner_strategy="native-timing-v1")
+                ),
                 launch=WorkflowLaunchConfig(
                     data_dir=data_dir,
                     model_types=["punet"],

@@ -49,9 +49,11 @@ from agent.schemas.validator import ValidatorOutput
 from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
 from tests.helpers.metric_fixtures import shipped_spec
+from workflows.llm_config import TunerLLMConfig, WorkflowLLMConfig
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.run_one_iteration import write_manifest
+from workflows.task_composition import RunTaskComposition
 
 #: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
 #: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
@@ -160,7 +162,7 @@ def _tune_output(*records) -> HyperparamTuningOutput:
     )
 
 
-def _seed_source_run(workspace: str) -> str:
+def _seed_source_run(workspace: str, composition: RunTaskComposition) -> str:
     """Write the seed tuning output iteration 1 loads, and return its data_dir.
 
     ``run_workflow`` at iteration 1 reads
@@ -171,12 +173,22 @@ def _seed_source_run(workspace: str) -> str:
     agent_dir = os.path.join(data_dir, "punet", "v1", "agent")
     os.makedirs(agent_dir, exist_ok=True)
     with open(os.path.join(agent_dir, "run_output_v1_agent.json"), "w") as f:
-        f.write(_tune_output().model_dump_json())
+        seed = _tune_output()
+        seed.metric_spec = composition.metric.spec
+        seed.task_composition_fingerprint = composition.semantic_fingerprint
+        f.write(seed.model_dump_json())
     return data_dir
 
 
-def _run_iteration(workspace: str, tune_output, **override_kwargs):
+def _run_iteration(
+    workspace: str,
+    tune_output: HyperparamTuningOutput,
+    composition: RunTaskComposition,
+    **override_kwargs,
+):
     """Real run_workflow (agents mocked) + real write_manifest."""
+    tune_output.metric_spec = composition.metric.spec
+    tune_output.task_composition_fingerprint = composition.semantic_fingerprint
     captured: list[HyperparamTuningInput] = []
 
     def _capture(inp):
@@ -207,8 +219,10 @@ def _run_iteration(workspace: str, tune_output, **override_kwargs):
         MockTune.return_value.run.side_effect = _capture
 
         run_workflow(
+            llm_config=WorkflowLLMConfig(tune=TunerLLMConfig(planner_strategy="native-timing-v1")),
+            task_composition=composition,
             launch=WorkflowLaunchConfig(
-                data_dir=_seed_source_run(workspace),
+                data_dir=_seed_source_run(workspace, composition),
                 model_types=["punet"],
                 source_run_name="v1",
                 max_iterations=1,
@@ -218,6 +232,7 @@ def _run_iteration(workspace: str, tune_output, **override_kwargs):
             **override_kwargs,
         )
 
+    assert len(captured) == 1
     iter_dir = os.path.join(workspace, "iter_001")
     model_dir = os.path.join(iter_dir, "iteration_001", "punet")
     os.makedirs(model_dir, exist_ok=True)
@@ -242,14 +257,14 @@ def _assert_agree(manifest, summary, *, resolved, source, index=0):
 # ---------------------------------------------------------------------------
 
 
-def test_agent_proposal_wins_when_no_override(tmp_path):
+def test_agent_proposal_wins_when_no_override(tmp_path, supplied_outcome_composition):
     ordering = resolve_ordering(
         resolved_scope=SCOPE,
         proposed_strategy="sequential",
         proposed_file_order=PERMUTATION,
     )
     output = _tune_output(_record("r1", 1, ordering))
-    tune_input, manifest = _run_iteration(str(tmp_path), output)
+    tune_input, manifest = _run_iteration(str(tmp_path), output, supplied_outcome_composition)
 
     # The workflow passed NO override down, so the agent decides.
     assert tune_input.order_strategy_override is None
@@ -265,7 +280,9 @@ def test_agent_proposal_wins_when_no_override(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_operator_override_wins_and_is_not_attributed_to_the_agent(tmp_path):
+def test_operator_override_wins_and_is_not_attributed_to_the_agent(
+    tmp_path, supplied_outcome_composition
+):
     ordering = resolve_ordering(
         resolved_scope=SCOPE,
         proposed_strategy="sequential",
@@ -273,7 +290,9 @@ def test_operator_override_wins_and_is_not_attributed_to_the_agent(tmp_path):
         override_strategy="shuffle",
     )
     output = _tune_output(_record("r1", 1, ordering))
-    tune_input, manifest = _run_iteration(str(tmp_path), output, order_strategy_override="shuffle")
+    tune_input, manifest = _run_iteration(
+        str(tmp_path), output, supplied_outcome_composition, order_strategy_override="shuffle"
+    )
 
     assert tune_input.order_strategy_override == "shuffle"
 
@@ -292,10 +311,12 @@ def test_operator_override_wins_and_is_not_attributed_to_the_agent(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_default_shuffle_when_nothing_is_proposed_or_overridden(tmp_path):
+def test_default_shuffle_when_nothing_is_proposed_or_overridden(
+    tmp_path, supplied_outcome_composition
+):
     ordering = resolve_ordering(resolved_scope=SCOPE)
     output = _tune_output(_record("r1", 1, ordering))
-    tune_input, manifest = _run_iteration(str(tmp_path), output)
+    tune_input, manifest = _run_iteration(str(tmp_path), output, supplied_outcome_composition)
 
     assert tune_input.order_strategy_override is None
     summary = tuning_output_to_model_run_summary(output, order=_STEP09A_ORDER)
@@ -319,10 +340,12 @@ def _rejected_ordering(**override):
     return resolve_ordering(resolved_scope=SCOPE, rejected_proposal=rejected, **override)
 
 
-def test_rejected_proposal_without_override_falls_back_and_is_recorded(tmp_path):
+def test_rejected_proposal_without_override_falls_back_and_is_recorded(
+    tmp_path, supplied_outcome_composition
+):
     ordering = _rejected_ordering()
     output = _tune_output(_record("r1", 1, ordering))
-    _tune_input, manifest = _run_iteration(str(tmp_path), output)
+    _tune_input, manifest = _run_iteration(str(tmp_path), output, supplied_outcome_composition)
 
     summary = tuning_output_to_model_run_summary(output, order=_STEP09A_ORDER)
     _assert_agree(manifest, summary, resolved="shuffle", source="default")
@@ -334,12 +357,13 @@ def test_rejected_proposal_without_override_falls_back_and_is_recorded(tmp_path)
     assert summary.round_ordering[0].proposal_rejected is True
 
 
-def test_rejected_proposal_with_override_records_both(tmp_path):
+def test_rejected_proposal_with_override_records_both(tmp_path, supplied_outcome_composition):
     ordering = _rejected_ordering(override_strategy="sequential", override_file_order=PERMUTATION)
     output = _tune_output(_record("r1", 1, ordering))
     _tune_input, manifest = _run_iteration(
         str(tmp_path),
         output,
+        supplied_outcome_composition,
         order_strategy_override="sequential",
         file_order_override=PERMUTATION,
     )
@@ -360,7 +384,9 @@ def test_rejected_proposal_with_override_records_both(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_two_rounds_with_different_ordering_stay_distinct_end_to_end(tmp_path):
+def test_two_rounds_with_different_ordering_stay_distinct_end_to_end(
+    tmp_path, supplied_outcome_composition
+):
     """The granularity rule, through the real manifest writer and the real
     interpreter summary builder."""
     seq = resolve_ordering(
@@ -368,7 +394,7 @@ def test_two_rounds_with_different_ordering_stay_distinct_end_to_end(tmp_path):
     )
     shuf = resolve_ordering(resolved_scope=SCOPE)
     output = _tune_output(_record("r1", 1, seq), _record("r2", 2, shuf))
-    _tune_input, manifest = _run_iteration(str(tmp_path), output)
+    _tune_input, manifest = _run_iteration(str(tmp_path), output, supplied_outcome_composition)
 
     assert len(manifest["ordering_by_experiment"]) == 2
     summary = tuning_output_to_model_run_summary(output, order=_STEP09A_ORDER)
@@ -377,13 +403,13 @@ def test_two_rounds_with_different_ordering_stay_distinct_end_to_end(tmp_path):
     assert [e["exp_id"] for e in manifest["ordering_by_experiment"]] == ["r1", "r2"]
 
 
-def test_manifest_block_survives_to_disk(tmp_path):
+def test_manifest_block_survives_to_disk(tmp_path, supplied_outcome_composition):
     """The manifest is a cross-process handoff, so the block must serialize."""
     ordering = resolve_ordering(
         resolved_scope=SCOPE, proposed_strategy="sequential", proposed_file_order=PERMUTATION
     )
     output = _tune_output(_record("r1", 1, ordering))
-    _run_iteration(str(tmp_path), output)
+    _run_iteration(str(tmp_path), output, supplied_outcome_composition)
     with open(os.path.join(str(tmp_path), "iter_001", "manifest.json")) as f:
         on_disk = json.load(f)
     assert on_disk["ordering_by_experiment"][0]["resolved_file_order"] == PERMUTATION

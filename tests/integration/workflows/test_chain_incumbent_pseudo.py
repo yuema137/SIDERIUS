@@ -56,9 +56,11 @@ from core.resume import restore_prior_state
 from core.scientific_authority import ScientificAuthority
 from execute_tools.metric_order import MetricOrder
 from tests.helpers.metric_fixtures import shipped_spec
+from workflows.llm_config import TunerLLMConfig, WorkflowLLMConfig
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.run_one_iteration import write_manifest
+from workflows.task_composition import RunTaskComposition
 
 # ---------------------------------------------------------------------------
 # Fixture helpers — mocked node outputs + a chain-runner-shaped disk seed
@@ -152,6 +154,7 @@ def _write_iter_disk(
     workspace: str,
     iter_idx: int,
     tune_output: HyperparamTuningOutput,
+    composition: RunTaskComposition,
     *,
     chain_incumbent_used: float | None = None,
     chain_incumbent_source: dict | None = None,
@@ -161,6 +164,8 @@ def _write_iter_disk(
 
     Returns the manifest path (for post-facto assertions on the same
     dict `write_manifest` returns)."""
+    tune_output.metric_spec = composition.metric.spec
+    tune_output.task_composition_fingerprint = composition.semantic_fingerprint
     run_name = f"iter_{iter_idx:03d}"
     iter_dir = os.path.join(workspace, run_name)
     model_dir = os.path.join(iter_dir, "iteration_001", tune_output.model_type)
@@ -238,10 +243,18 @@ _VALID_OUT = ValidatorOutput(
 )
 
 
-def _run_iter_2(workspace: str, iter2_tune_output, *, enable_gates: bool):
+def _run_iter_2(
+    workspace: str,
+    iter2_tune_output: HyperparamTuningOutput,
+    composition: RunTaskComposition,
+    *,
+    enable_gates: bool,
+):
     """Reproduce what run_one_iteration.main does at iter 2 boundary:
     real restore_prior_state → real run_workflow (mocked agents) → real
     write_manifest with the reconstructed incumbent."""
+    iter2_tune_output.metric_spec = composition.metric.spec
+    iter2_tune_output.task_composition_fingerprint = composition.semantic_fingerprint
     state = restore_prior_state(workspace, current_iter=2, seed_paths=[])
     captured_tune_inputs: list[HyperparamTuningInput] = []
 
@@ -274,8 +287,10 @@ def _run_iter_2(workspace: str, iter2_tune_output, *, enable_gates: bool):
         MockTune.return_value.run.side_effect = _capture
 
         run_workflow(
+            llm_config=WorkflowLLMConfig(tune=TunerLLMConfig(planner_strategy="native-timing-v1")),
+            task_composition=composition,
             launch=WorkflowLaunchConfig(
-                data_dir="/tmp/data",
+                data_dir=workspace,
                 model_types=["punet"],
                 source_run_name="v1",
                 start_iteration=2,
@@ -287,6 +302,7 @@ def _run_iter_2(workspace: str, iter2_tune_output, *, enable_gates: bool):
             run_name="iter_002",
             restored_state=state,
         )
+    assert len(captured_tune_inputs) == 1
     tune_input = captured_tune_inputs[0]
     # Mirror production: the tuner writes its run_output to disk before
     # write_manifest reads its sha256. Under the mocked HyperparamTuningAgent
@@ -314,7 +330,9 @@ def _run_iter_2(workspace: str, iter2_tune_output, *, enable_gates: bool):
 
 
 @pytest.mark.dual_mode
-def test_branch_a_numeric_incumbent_threads_through_full_chain(tmp_path):
+def test_branch_a_numeric_incumbent_threads_through_full_chain(
+    tmp_path, supplied_outcome_composition
+):
     """iter 1 commits valid_formal=1.25; iter 2's tuner input carries
     that value; iter 2's manifest stamps chain_incumbent_used=1.25 with
     source.iter_idx=1; iter 2's local best_valid_formal_score is
@@ -324,12 +342,14 @@ def test_branch_a_numeric_incumbent_threads_through_full_chain(tmp_path):
 
     # iter 1 → committed with a valid formal.
     iter1_out = _make_tune_output("iter_001", valid_formal=1.25, exp_id="f1")
-    _write_iter_disk(ws, 1, iter1_out)
+    _write_iter_disk(ws, 1, iter1_out, supplied_outcome_composition)
 
     # iter 2 → mocked tune returns an output with its OWN valid formal
     # (different value) so Invariant II can be asserted concretely.
     iter2_out = _make_tune_output("iter_002", valid_formal=0.60, exp_id="f2_local")
-    tune_input, manifest, state = _run_iter_2(ws, iter2_out, enable_gates=True)
+    tune_input, manifest, state = _run_iter_2(
+        ws, iter2_out, supplied_outcome_composition, enable_gates=True
+    )
 
     # Reconstruction delivered iter 1's value.
     assert state.chain_best_valid_formal_score == 1.25
@@ -361,7 +381,7 @@ def test_branch_a_numeric_incumbent_threads_through_full_chain(tmp_path):
 
 
 @pytest.mark.dual_mode
-def test_branch_b_no_incumbent_short_circuits(tmp_path):
+def test_branch_b_no_incumbent_short_circuits(tmp_path, supplied_outcome_composition):
     """iter 1 commits with no valid formal → iter 2's tuner input has
     ``current_run_best_formal_score = None`` (gates short-circuit) and
     manifest ``chain_incumbent_used = None``."""
@@ -369,10 +389,12 @@ def test_branch_b_no_incumbent_short_circuits(tmp_path):
     os.makedirs(ws)
 
     iter1_out = _make_tune_output("iter_001", valid_formal=None, exp_id=None)
-    _write_iter_disk(ws, 1, iter1_out)
+    _write_iter_disk(ws, 1, iter1_out, supplied_outcome_composition)
 
     iter2_out = _make_tune_output("iter_002", valid_formal=0.75, exp_id="f2_local")
-    tune_input, manifest, state = _run_iter_2(ws, iter2_out, enable_gates=True)
+    tune_input, manifest, state = _run_iter_2(
+        ws, iter2_out, supplied_outcome_composition, enable_gates=True
+    )
 
     # Reconstruction found no incumbent.
     assert state.chain_best_valid_formal_score is None
@@ -397,20 +419,24 @@ def test_branch_b_no_incumbent_short_circuits(tmp_path):
 
 
 @pytest.mark.dual_mode
-def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
+def test_branch_c_flag_off_reconstruction_still_stamps_source(
+    tmp_path, supplied_outcome_composition
+):
     """Flag OFF: reconstruction, provenance dict, and
     ``chain_incumbent_source`` manifest key STILL run unconditionally
     (design §3.2: OFF never reinstates 0.0; it only disables gate
     consumption). ``chain_incumbent_used`` is None because gates are
-    off. Tuner's ``current_run_best_formal_score`` sees None."""
+    off. The tuner still receives the reconstructed reference."""
     ws = str(tmp_path / "branch_c")
     os.makedirs(ws)
 
     iter1_out = _make_tune_output("iter_001", valid_formal=1.25, exp_id="f1")
-    _write_iter_disk(ws, 1, iter1_out)
+    _write_iter_disk(ws, 1, iter1_out, supplied_outcome_composition)
 
     iter2_out = _make_tune_output("iter_002", valid_formal=0.60, exp_id="f2_local")
-    tune_input, manifest, state = _run_iter_2(ws, iter2_out, enable_gates=False)
+    tune_input, manifest, state = _run_iter_2(
+        ws, iter2_out, supplied_outcome_composition, enable_gates=False
+    )
 
     # Reconstruction still recovers the incumbent (unconditional).
     assert state.chain_best_valid_formal_score == 1.25
@@ -488,7 +514,11 @@ def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
     # Step 07 PR 07b — the selection helpers judge through the run's ONE
     # order authority; this chain runs the shipped higher-is-better metric.
     order = MetricOrder(shipped_spec())
-    trial_winner = _best_trial_winner([trial_winner_record], order=order)
+    # These supplied verdicts belong to this explicit fixture roster; an
+    # omitted roster is UNKNOWN under the real eligibility owner.
+    trial_winner = _best_trial_winner(
+        [trial_winner_record], order=order, required_gate_ids=frozenset(_BLOCKING_IDS)
+    )
     assert trial_winner is not None
     assert not _should_skip_formal(
         trial_winner,
@@ -506,7 +536,7 @@ def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
 
 
 @pytest.mark.dual_mode
-def test_tampered_iter1_artifact_stops_the_chain(tmp_path):
+def test_tampered_iter1_artifact_stops_the_chain(tmp_path, supplied_outcome_composition):
     """A committed run_output whose bytes change after write_manifest
     recorded its sha256 raises ReplayIntegrityError at the next iter's
     restore_prior_state — same fail-closed behavior as the per-file
@@ -517,7 +547,7 @@ def test_tampered_iter1_artifact_stops_the_chain(tmp_path):
     os.makedirs(ws)
 
     iter1_out = _make_tune_output("iter_001", valid_formal=1.25, exp_id="f1")
-    manifest1 = _write_iter_disk(ws, 1, iter1_out)
+    manifest1 = _write_iter_disk(ws, 1, iter1_out, supplied_outcome_composition)
     output_path = manifest1["output_path"]
 
     # Tamper: append a byte after the manifest hash was recorded.
