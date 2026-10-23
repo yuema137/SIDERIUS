@@ -157,9 +157,11 @@ def test_git_inspection_failure_is_capture_refusal(context, monkeypatch):
 
 
 def test_token_fixture_dataset_and_codec_match_declared_model_contract(tmp_path, monkeypatch):
+    import json
+
     import torch
 
-    from execute_tools.evaluation_metric import MetricSpec
+    from execute_tools.evaluation_metric import metric_spec_from_declaration
     from execute_tools.task_data_path import ScopeBuildRequest
     from tests.fixtures import native_chain_task as fixture
 
@@ -180,11 +182,13 @@ def test_token_fixture_dataset_and_codec_match_declared_model_contract(tmp_path,
     monkeypatch.setattr(fixture, "deliverable_name", lambda request: "tokens.json")
     task.write_deliverable(logits, request)
     payload = task.read_evaluation_payload(request)
-    spec = MetricSpec.model_validate_json(
-        (
-            Path(__file__).resolve().parents[4]
-            / "examples/quickstart/declared/metric_accuracy.json"
-        ).read_text()
+    spec = metric_spec_from_declaration(
+        json.loads(
+            (
+                Path(__file__).resolve().parents[4]
+                / "examples/quickstart/declared/metric_accuracy.json"
+            ).read_text()
+        )
     )
     metric = fixture.TokenAccuracy(spec)
     assert metric._compute(None, evaluation_payload=payload, task_scope=scope)[0] == 1.0

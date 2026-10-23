@@ -136,7 +136,111 @@ def _admission_witnesses(capture_path, declaration, control, tmp_path):
         )
 
 
-def test_public_capture_two_native_iterations(tmp_path):
+def _shell_halt_witnesses(root, capture_path, declaration, control, env, tmp_path):
+    marker = tmp_path / "dispatches.txt"
+    capture = json.loads(capture_path.read_text())
+    source = Path(capture["source_path"])
+    original = source.read_bytes()
+    loop = r"""
+source "$1/scripts/launch/_chain_common.sh"
+shift
+parse_chain_args "$@"
+check_chain_capture() {
+    local action=$1
+    shift
+    "$EXACT_PYTHON" -m tools.native_chain.check "$action" \
+        --capture "$EXPECTED_CHAIN_CAPTURE" --sha256 "$EXPECTED_CHAIN_CAPTURE_SHA256" \
+        --input-max-bytes "$CHAIN_CAPTURE_INPUT_MAX_BYTES" "$@"
+}
+submit_iteration() {
+    printf '%s\n' "$1" >> "$DISPATCH_MARKER"
+    if [ "$REFUSAL_CASE" = drift ]; then
+        printf ' ' >> "$DECLARATION_SOURCE"
+        return 0
+    fi
+    return 78
+}
+run_chain
+"""
+    before = [
+        (path, path.read_bytes()) for path in declaration.run.workspace.glob("iter_*/manifest.json")
+    ]
+    for case in ("drift", "child"):
+        marker.unlink(missing_ok=True)
+        result = subprocess.run(
+            ["bash", "-c", loop, "--", str(root), *declaration.shell_arguments(), *control],
+            cwd=root,
+            env={
+                **env,
+                "EXACT_PYTHON": sys.executable,
+                "DISPATCH_MARKER": str(marker),
+                "DECLARATION_SOURCE": str(source),
+                "REFUSAL_CASE": case,
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        source.write_bytes(original)
+        assert result.returncode == 78, result.stdout + result.stderr
+        assert marker.read_text().splitlines() == ["1"]
+        assert not (declaration.run.workspace / "chain_stopped.json").exists()
+        assert all(path.read_bytes() == content for path, content in before)
+
+
+def _native_handler_witnesses(capture_path, tmp_path, monkeypatch):
+    from tools.native_chain.check import launch_context
+    from tools.native_chain.models import NativeChainCapture
+    from workflows import run_one_iteration
+    from workflows.native_chain_binding import NativeChainCaptureRefusal, NativeChainLaunchContext
+
+    capture = NativeChainCapture.model_validate_json(capture_path.read_bytes())
+    original_check = NativeChainLaunchContext.check_launch
+    pin_path = Path(capture.environment.current_declaration.task_manifest)
+    pin_bytes = pin_path.read_bytes()
+    for case in ("missing_pin", "projection", "scientific"):
+        workspace = tmp_path / ("native_hook_" + case)
+        context = launch_context(capture, 1).model_copy(update={"workspace": str(workspace)})
+        argv = list(capture.iteration_one_argv)
+        argv[argv.index("--workspace") + 1] = str(workspace)
+        calls = []
+
+        def workflow(_calls=calls, **kwargs):
+            _calls.append(kwargs)
+            raise ValueError("scientific failure witness")
+
+        def final_check(self, launch, state, _case=case):
+            if _case == "missing_pin":
+                pin_path.unlink()
+            if _case == "projection":
+                from dataclasses import replace
+
+                launch = replace(launch, max_rounds=launch.max_rounds + 1)
+            return original_check(self, launch, state)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(NativeChainLaunchContext, "check_launch", final_check)
+            patch.setattr("workflows.model_exploration.run_workflow", workflow)
+            if case == "scientific":
+                with pytest.raises(SystemExit) as stopped:
+                    run_one_iteration.main(argv, chain_capture=context)
+                assert stopped.value.code == 1
+                assert len(calls) == 1
+                assert (
+                    json.loads((workspace / "iter_001/manifest.json").read_text())["status"]
+                    == "failed"
+                )
+            else:
+                with pytest.raises(NativeChainCaptureRefusal):
+                    run_one_iteration.main(argv, chain_capture=context)
+                assert not calls
+                assert (workspace / "iter_001").is_dir()
+                assert not (workspace / "iter_001/manifest.json").exists()
+                assert not (workspace / ".chain_halted").exists()
+        pin_path.write_bytes(pin_bytes)
+
+
+def test_public_capture_two_native_iterations(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[3]
     inputs = tmp_path / "inputs"
     inputs.mkdir()
@@ -162,6 +266,14 @@ def test_public_capture_two_native_iterations(tmp_path):
             "1",
             "--max_epochs",
             "1",
+            "--attempts_per_round",
+            "1",
+            "--attempts_per_formal_round",
+            "1",
+            "--max_proposal_attempts",
+            "1",
+            "--max_impl_attempts",
+            "1",
             "--healthgate_mode",
             "observe_only",
             "--result_authority",
@@ -184,7 +296,8 @@ def test_public_capture_two_native_iterations(tmp_path):
             )
         )
     )
-    env = {**os.environ, "CUDA_VISIBLE_DEVICES": "", "PYTHONDONTWRITEBYTECODE": "1"}
+    # Hardware is observed read-only; pseudo factories perform no GPU training.
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     review = subprocess.run(
         [sys.executable, "-m", "tools.native_chain", "review", "--request", str(request)],
         cwd=root,
@@ -222,4 +335,27 @@ def test_public_capture_two_native_iterations(tmp_path):
         for index in (1, 2)
     ]
     assert [item["status"] for item in manifests] == ["completed", "completed"]
-    assert "Restored" in execution.stdout or "restored" in execution.stdout
+    from core.iteration_manifest import verify_iteration_manifest
+
+    for index, item in enumerate(manifests, 1):
+        verdict = verify_iteration_manifest(
+            item,
+            iter_idx=index,
+            manifest_path=str(workspace / f"iter_{index:03d}/manifest.json"),
+            output_path=item["output_path"],
+        )
+        assert verdict.manifest_verified and verdict.artifact_verified and verdict.problem is None
+    # Actual interpreter input records the source selected by native restoration.
+    interpreted = list((workspace / "iter_002").rglob("interpretation_iter_002.json"))
+    assert len(interpreted) == 1
+    first_output = manifests[0]["output_path"]
+    assert first_output in execution.stdout
+    second = json.loads(interpreted[0].read_text())
+    assert second["cold_start"] is False
+    assert second["total_experiments"] > 0
+    assert manifests[0]["model_name"] in second["model_types"]
+    findings = list((workspace / "iter_002").glob("accumulated_findings_*.json"))
+    assert len(findings) == 1
+    assert json.loads(findings[0].read_text())["source_iters"] == [1]
+    _shell_halt_witnesses(root, capture, declaration, control, env, tmp_path)
+    _native_handler_witnesses(capture, tmp_path, monkeypatch)
