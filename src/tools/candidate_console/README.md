@@ -83,44 +83,48 @@ The entry URLs are `/#home`, `/#workflow` and `/#slow-control`. An old
 Connection sharing applies within one document; separate tabs/windows connect
 independently.
 
-## Open a prepared reusable workflow
+## Prepare saved source or open an existing run
 
-First [prepare your reusable workflow with Python or CLI](../candidate_prepare/README.md#prepare-several-runs-from-one-workflow).
-Preparation saves the source and inputs in a fresh `runs/<UUID>/` directory;
-its `workspace/` child is reserved for candidate output and must remain absent
-until launch. Keep this runs directory outside the checkout. The console consumes
-these existing captures; it does not create a new reusable run from editor changes.
+Configure the authored project in `editor_projects`, enable its ID in
+`runnable_editor_projects`, and set the task's `reusable_runs_root` to an existing
+external runs directory. Include that parent in both
+`operation_store.preparation_roots` and `candidate_roots`. Restart after changing
+configuration. The source task references and output restrictions must agree with
+the configured task; the browser does not rewrite them to match your selection.
+See the [reusable configuration contract](console-contract.md#reusable-capture-consumption).
 
-Ask the operator to configure the authored project in `editor_projects`, enable
-its ID in `runnable_editor_projects`, and set the selected task's
-`reusable_runs_root` to that existing runs parent. Include that parent in both
-`operation_store.preparation_roots` and `candidate_roots` explicitly. The console
-never expands those permissions automatically. Restart after configuration changes.
-The task paths and runtime policy must match the preparation request. See the
-[reusable configuration contract](console-contract.md#reusable-capture-consumption).
+1. Connect and open **Workflow Editor**. Review and **Save** your source edits.
+   An already saved supported reusable declaration needs no extra Save. Resolve
+   any source conflict before continuing.
+2. In **New run**, explicitly choose the configured task and resources, enter a
+   run name, and select **Review preparation**. Check the source, dataset, model
+   profile, inputs/workspace destinations and resource limits. To use different
+   resources, configure another task choice outside the browser.
+3. Select **Prepare saved source**. This captures the saved source and creates
+   native inputs in `runs/<UUID>/inputs/`; `workspace/` remains absent. Preparation
+   is offline and does not need provider keys. **Check status** or **Monitor
+   preparation** shows its outcome. Saving and preparation never launch a candidate.
+4. Once preparation reports **prepared**, select **Open prepared run**, then
+   **Review capture**. Check model routes and credential readiness. Existing runs
+   made through Python or CLI can instead be selected from **Prepared run**.
+5. Select **Launch captured run** explicitly. This runs Propose → Implement →
+   Validate with the captured inputs and may call paid model APIs. Current source
+   edits remain separate. Follow **Monitor operation** for validation outcome;
+   prepared inputs alone do not mean a candidate was accepted.
 
-1. Connect and open **Workflow Editor**. In **Prepared run**, select the configured
-   task, refresh the list, choose a capture, then **Open prepared run**.
-2. Choose **Review capture**. Check the saved source version, task, output workspace,
-   model routes and credential readiness. Expand **Captured resources and version**
-   for the dataset, LLM config, advice, time limits and resource permissions.
-3. Choose **Launch captured run**. This runs Propose → Implement → Validate using
-   that capture. Saving or leaving unsaved editor changes does not retarget it.
-   An older capture remains explicitly labelled separately from current edits.
-4. Follow **Monitor operation** to Slow control. Prepared inputs and an admitted
-   operation do not mean native validation has accepted the candidate.
+The browser retains preparation and candidate intents separately before sending
+either effect. Storage failure prevents dispatch. After a lost response or reload,
+Connect and use **Check status** or retry the same operation. An unresolved intent
+blocks new effects; changing or saving source never removes it. Wait until the process has exited or a launch failure is confirmed before
+the console offers dismissal or another effect. An initial request explicitly refused before
+admission can be discarded and reviewed again; restored or ambiguous requests retain
+their UUID. No automatic retries or replacement IDs are created.
 
-The browser retains the exact launch intent before sending it. If storage fails,
-launch is not sent. After a lost response or reconnect, use **Check status** or
-**Retry same operation**; reopening the page never submits automatically. Keep the
-same operation UUID while its outcome is uncertain. A confirmed completed operation
-can be dismissed. An initial request explicitly refused before admission can be
-discarded and reviewed again; ambiguous or restored requests remain retained.
-
-While the server is live, an admitted operation can be recovered even if its
-capture, authored source or credential file disappears. Restart still validates
-configured resources; restore required files before restarting the server.
-Automatic GUI preparation, training and resume are not available.
+While the server is live, an admitted preparation can be recovered even if its
+original source or credential file disappears. Restart still validates configured
+resources. Source changes during preparation can make it fail; inspect and preserve
+that operation's evidence. A successfully prepared capture remains independent of
+later editor changes. Training and resume are not available in this reusable GUI flow.
 
 ## Credentials
 
@@ -208,5 +212,6 @@ interface, security boundary and qualification commands.
 
 To edit an ordinary workflow declaration alongside a coding agent, configure the
 optional [Workflow Editor](../workflow_authoring/README.md). It has its own source
-review/save flow. Saving a declaration does not change what native Prepare executes.
+review/save flow. Saving changes the source available to a subsequent New run;
+it never changes an existing captured run.
 Existing console configurations need no editor project to monitor operations.
