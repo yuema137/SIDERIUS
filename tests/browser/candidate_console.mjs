@@ -50,6 +50,7 @@ try {
   page.on('pageerror', error => faults.push(error.message));
   const requests = [];
   let preparation, candidate, dropPreparation = true, dropCandidate = true, staleLaunch = false, busyCandidate = true;
+  let readinessBlocked = false;
   let nativeState = 'completed', finishing = false, disconnected = false;
   const hostile = '<img src=x onerror="window.hostile=true">';
   const known = '22222222-2222-4222-8222-222222222222';
@@ -74,14 +75,14 @@ try {
     requests.push({ method: request.method(), path: url.pathname, body: request.postDataJSON() });
     const reply = (body, code = 200) => route.fulfill({ status: code, contentType: 'application/json', body: JSON.stringify(body) });
     if (disconnected) { await route.abort(); return; }
-    if (url.pathname === '/api/choices') return reply([{ task_id: 'synthetic', label: 'Synthetic ' + hostile, preparation_timeout_seconds: 120, candidate_timeout_seconds: 300 }]);
+    if (url.pathname === '/api/choices') return reply([{ task_id: 'synthetic', label: 'Synthetic ' + hostile, task_manifest: '/fixture/task.json', data_root: '/fixture/data', llm_config_file: '/fixture/llm.json', preparation_root: '/fixture/preparations', candidate_root: '/fixture/candidates', preparation_timeout_seconds: 120, candidate_timeout_seconds: 300 }]);
     if (url.pathname === '/api/preparations') {
       preparation = request.postDataJSON();
       if (dropPreparation) { dropPreparation = false; await route.abort(); return; }
       return reply({ operation_id: preparation.operation_id, kind: 'prepare', request_digest: 'a'.repeat(64), observed_at: 'now', observation: 'existing' }, 202);
     }
     if (url.pathname.endsWith('/review')) return reply({ prepare_operation_id: preparation.operation_id, prepared_digest: 'b'.repeat(64), task_id: 'synthetic', task_label: 'Synthetic ' + hostile, run_name: preparation.run_name,
-      composition_fingerprint: 'c'.repeat(64), stages: ['propose', 'implement', 'validate'], routes: [{ node_id: 'propose', provider: 'fake', model: 'offline' }],
+      credential_readiness: { required_names: ['GEMINI_API_KEY'], omitted_names: [], unresolved_routes: [], present_names: readinessBlocked ? [] : ['GEMINI_API_KEY'], missing_names: readinessBlocked ? ['GEMINI_API_KEY'] : [], file_status: 'readable', ready: !readinessBlocked, instructions: readinessBlocked ? ['Set nonempty values in credential_file.'] : [] }, composition_fingerprint: 'c'.repeat(64), stages: ['propose', 'implement', 'validate'], routes: [{ node_id: 'propose', provider: 'fake', model: 'offline' }],
       proposal_advice: preparation.proposal_advice, implementation_advice: null, validation_advice: null, task_manifest: '/external/' + 'long-path/'.repeat(20) + 'task.json', data_root: '/external/data', candidate_workspace: '/external/candidate',
       preparation_timeout_seconds: 120, candidate_timeout_seconds: 300, network: 'none', devices: [], environment_names: [], read_only: ['/external/dependency'] });
     if (url.pathname === '/api/candidates') {
@@ -220,12 +221,23 @@ try {
   assert.ok((await page.locator('#launch-status').textContent()).includes(hostile));
   assert.equal(await page.evaluate(() => window.hostile), undefined);
   assert.equal(await page.locator('img').count(), 0);
+  readinessBlocked = true;
   const frozenReview = await page.locator('#review').textContent();
   await page.getByRole('button', { name: 'New preparation', exact: true }).click();
   await page.getByLabel('Run name', { exact: true }).fill('edited-draft');
   assert.ok(frozenReview.includes('second-run')); assert.equal(await page.locator('#review').textContent(), '');
+  assert.ok((await page.locator('#configured-paths').textContent()).includes('/fixture/llm.json'));
+  await page.getByRole('button', { name: 'Prepare request', exact: true }).click();
+  await page.locator('#review-status').filter({ hasText: 'Launch blocked' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Launch candidate', exact: true }).isDisabled(), true);
+  assert.ok((await page.locator('#review').textContent()).includes('GEMINI_API_KEY'));
+  await page.screenshot({ path: join(screenshots, 'readiness-blocked.png'), fullPage: true });
+  readinessBlocked = false;
+  await page.getByRole('button', { name: 'Refresh readiness', exact: true }).click();
+  await page.locator('#review-status').filter({ hasText: 'Name presence checked' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Launch candidate', exact: true }).isEnabled(), true);
   assert.equal(faults.length, 0, faults.join('\n'));
-  console.log(`PASS: real ${browser.version()} interactions; UUID retries, explicit launch, stale/unknown/rejected/finishing, escaped text, byte cursor, GET-only reopen, memory-only token, reported-token replacement/null/partial/stale/epoch fencing and seven responsive screenshots (${screenshots}).`);
+  console.log(`PASS: real ${browser.version()} interactions; UUID retries, explicit launch, stale/unknown/rejected/finishing, escaped text, byte cursor, GET-only reopen, memory-only token, reported-token replacement/null/partial/stale/epoch fencing and readiness blockers/refresh plus eight screenshots (${screenshots}).`);
   await context.close();
 } finally {
   if (browser) await browser.close();

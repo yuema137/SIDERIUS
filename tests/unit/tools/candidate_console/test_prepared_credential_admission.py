@@ -119,3 +119,17 @@ def test_missing_binding_is_safe_public_http_and_cli_error(prepared, monkeypatch
         Path(service.config.operation_store.state_root) / "operations" / str(candidate_id)
     ).exists()
     spawn.assert_not_called()
+
+
+def test_omitted_gemini_is_visible_without_opening_credentials(prepared):
+    """#809: offline review must expose omitted Gemini before the operator presses Launch."""
+    from tools.candidate_console import PreparedSelection
+
+    service, selection, _ = prepared
+    readiness = service.review(
+        PreparedSelection(prepare_operation_id=selection.operation_id)
+    ).credential_readiness
+    assert readiness.required_names == ("GEMINI_API_KEY",)
+    assert readiness.omitted_names == ("GEMINI_API_KEY",)
+    assert readiness.missing_names == ("GEMINI_API_KEY",)
+    assert not readiness.ready

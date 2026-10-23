@@ -53,8 +53,9 @@ even when using the default models.
    Open `http://127.0.0.1:8740`. If the local forwarding port differs, configure
    `browser_origin` to that exact local address before starting the server.
 5. Paste the token from your private file into the page. Select a task, fill the
-   run name/advice, and click **Prepare**. Review the task, paths, models and
-   resource policy. **Launch candidate** starts code execution and may call paid
+   run name/advice, and inspect the manifest, data, model profile and output parents
+   shown before **Prepare**. Prepare chooses separate UUID child paths. Review
+   the resolved workspace, models and resource policy. **Launch candidate** starts code execution and may call paid
    APIs. Preparation never launches automatically.
 6. Copy the operation ID to reopen status, logs and the **Reported LLM tokens**
    table later, including operations created through Python or the operation CLI. Reenter the token after reload;
@@ -94,6 +95,13 @@ declared runtime variables. The current credential variable names are
 and `candidate_environment_names` to your reviewed profile. Do not put values in
 `console.json`, commands, browser fields or version control. A placeholder is not
 a working key; presence does not prove authentication, quota or network access.
+
+After Prepare verifies the selected task, review shows the required provider names,
+names omitted from `candidate_environment_names`, and names present or missing in
+`credential_file`. A known blocker disables **Launch candidate**. Follow the repair
+message: changing allowed names needs restart and a new Prepare; changing values
+in the same private file needs **Refresh readiness**. No key value goes to the
+browser. This check proves name presence only, not provider access or quota.
 
 At Launch, the console rereads `credential_file` and passes only the declared
 names; missing or empty declared values block submission. Shell exports and a
