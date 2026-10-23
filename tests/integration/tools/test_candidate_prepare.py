@@ -129,6 +129,8 @@ with bind_run_task_composition(composition, physical_data_root=request.preview.d
 
 def test_prepared_bundle_reaches_real_native_worker(selection, monkeypatch):
     """One saved bundle reaches native proposal/implementation/CPU validation unchanged."""
+    selection = selection.model_copy(update={"candidate_environment_names": ("OPENAI_API_KEY",)})
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-test-key")
     receipt = prepare_candidate(selection)
     assert receipt.status == "prepared", receipt.error
     request = CandidateRunRequest.model_validate_json(
@@ -193,6 +195,8 @@ def test_explicit_legacy_source_mount_and_edit_rejection(selection, monkeypatch)
 
     from tests.unit.tools.candidate_prepare.conftest import REPO
 
+    selection = selection.model_copy(update={"candidate_environment_names": ("OPENAI_API_KEY",)})
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-test-key")
     root = Path(selection.output_dir).parent
     package = root / "task-package"
     manifest_dir = package / "configs/task_composition"
