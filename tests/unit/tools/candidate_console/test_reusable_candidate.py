@@ -263,7 +263,7 @@ def test_output_restriction_direction_and_startup_root_scope(captured):
     from tools.candidate_console.reusable_policy import check_capture_policy
     from tools.candidate_prepare import inspect_current_reusable_binding
 
-    adapter, project, choice, envelope = captured
+    adapter, project, _choice, envelope = captured
     config = adapter.console.config
     task = config.tasks[0]
     inspected = inspect_current_reusable_binding(str(envelope))

@@ -2,6 +2,7 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(`editor-${id}`);
+  let candidateEnabled = false, sourceAvailable = false;
   let project = '', generation = 0, base = null, graph = null;
   let options = [], selected = null, pending = false, sourceDirty = false, mode = 'source', reviewed = null, conflict = null, saving = false;
   const clone = value => JSON.parse(JSON.stringify(value));
@@ -11,7 +12,12 @@
     const element = document.createElement(tag); element.textContent = text;
     if (parent) parent.append(element); return element;
   };
+  const projection = () => Object.freeze({projectId: project, candidateEnabled,
+    savedSha256: base?.sha256 || null, dirty: pending, sourceDirty,
+    sourceAvailable, conflict: !!conflict});
+  window.workflowEditor = Object.freeze({get state() { return projection(); }});
   function controls() {
+    window.dispatchEvent(new CustomEvent('workflow-editor-state', {detail: projection()}));
     const connected = window.consoleSession.connected;
     $('project').disabled = !connected || !$('project').options.length;
     $('review').disabled = !connected || !graph;
@@ -33,7 +39,7 @@
     status('Source changed. Pending proposal preserved; inspect current source before choosing a new base.');
   }
   function adopt(value) {
-    base = value; graph = value.document ? clone(value.document) : null; options = value.binding_options;
+    sourceAvailable = true; base = value; graph = value.document ? clone(value.document) : null; options = value.binding_options;
     $('source').value = value.source; $('source').disabled = !graph; mode = 'source'; sourceDirty = false; pending = false; conflict = null;
     $('conflict').hidden = true; selected = graph?.definition.nodes.some(n => n.id === selected) ? selected : graph?.definition.nodes[0]?.id;
     invalidate(); diagnostic(value.diagnostics); render();
@@ -96,7 +102,7 @@
   }
   function render() { renderGraph(); renderInspector(); if (sourceDirty) for (const input of document.querySelectorAll('#editor-inspector select, #editor-references input')) input.disabled = true; controls(); }
   function resetProjectState() {
-    pending = false; sourceDirty = false; mode = 'source';
+    sourceAvailable = false; pending = false; sourceDirty = false; mode = 'source';
     base = null; graph = null; conflict = null; reviewed = null; options = []; selected = null;
     $('conflict').hidden = true; $('rebase').disabled = true;
     $('source').value = ''; $('source').disabled = true;
@@ -109,7 +115,7 @@
     if (pending && ask && !window.confirm('Discard pending edits and refresh from disk?')) return;
     const id = project; invalidate(); const version = generation;
     try { const value = await api(encodeURIComponent(id)); if (current(id, version)) adopt(value); }
-    catch (error) { if (error.stale) return; if (current(id, version)) status(error.message + ' Pending state retained.'); }
+    catch (error) { if (error.stale) return; if (current(id, version)) { sourceAvailable = false; controls(); status(error.message + ' Pending state retained.'); } }
   }
   let projectsLoaded = false, loadingRevision = null;
   async function openProjects() {
@@ -118,9 +124,9 @@
     try {
       const choices = await api('projects');
       $('project').replaceChildren();
-      choices.forEach(choice => { const entry = node('option', choice.project_id, $('project')); entry.value = choice.project_id; });
+      choices.forEach(choice => { const entry = node('option', choice.project_id, $('project')); entry.value = choice.project_id; entry.dataset.runnable = String(choice.candidate_run_enabled); });
       projectsLoaded = true;
-      project = choices[0]?.project_id || ''; resetProjectState();
+      project = choices[0]?.project_id || ''; candidateEnabled = !!choices[0]?.candidate_run_enabled; resetProjectState();
       if (project) await refresh(false); else status('No editor projects configured. Monitoring remains available.');
     } catch (error) { if (!error.stale) status(error.message); }
     finally { if (loadingRevision === revision) loadingRevision = null; }
@@ -139,7 +145,7 @@
   $('project').addEventListener('change', () => {
     if (!window.consoleSession.connected) { $('project').value = project; return; }
     if (pending && !window.confirm('Discard pending edits and change project?')) { $('project').value = project; return; }
-    project = $('project').value; resetProjectState(); refresh(false);
+    project = $('project').value; candidateEnabled = $('project').selectedOptions[0]?.dataset.runnable === 'true'; resetProjectState(); refresh(false);
   });
   $('refresh').addEventListener('click', () => refresh());
   $('source').addEventListener('input', () => { mode = 'source'; sourceDirty = true; changed(); for (const input of document.querySelectorAll('#editor-inspector select, #editor-references input')) input.disabled = true; });

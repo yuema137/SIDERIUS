@@ -12,6 +12,7 @@
   <script src="/app.js" defer></script>
   <script src="/editor.js" defer></script>
   <script src="/navigation.js" defer></script>
+  <script src="/reusable-run.js" defer></script>
 </head>
 <body>
 <header><div class="brand">SIDERIUS <span>Local candidate console</span></div><p>Prepare a configured task, review its request, then explicitly launch a candidate.</p>
@@ -59,6 +60,7 @@
   </div>
   </details></section>
 <section id="view-workflow" data-view="workflow" hidden><h1 tabindex="-1">Workflow builder</h1>
+  <h2>Editing current workflow</h2>
   <section class="card">
     <label>Project <select id="editor-project" disabled></select></label>
     <button id="editor-inspect" type="button" hidden>Inspect source</button><p id="editor-status" role="status">Connect to open a configured project.</p>
@@ -105,6 +107,25 @@
     <pre id="editor-diff"></pre>
     <p>Every edit invalidates review. Save writes exactly the reviewed bytes.</p>
   </details>
+  <section class="card" aria-labelledby="capture-heading">
+    <h2 id="capture-heading">Prepared run</h2>
+    <p>Open a prepared capture, review its saved inputs, then start a candidate. Current edits apply to future captures.</p>
+    <label for="capture-task">Configured task</label><select id="capture-task" disabled></select>
+    <div class="actions"><button id="capture-refresh" disabled>Refresh prepared runs</button><button id="capture-more" hidden disabled>More runs</button></div>
+    <p id="capture-guidance">Prepare a run with Python or CLI, then refresh here. <a href="https://github.com/Galileo-Sandbox/SIDERIUS/tree/master/src/tools/candidate_prepare">Preparation instructions</a></p>
+    <label for="capture-run">Prepared capture</label><select id="capture-run" disabled><option value="">Choose a prepared run</option></select>
+    <button id="capture-open" disabled>Open prepared run</button>
+    <p id="capture-status" role="status">Connect and select a runnable project.</p>
+    <p id="capture-source"></p>
+    <button id="capture-review" disabled>Review capture</button>
+    <div id="capture-summary"></div>
+    <details><summary>Captured resources and version</summary><pre id="capture-details"></pre></details>
+    <button id="capture-launch" disabled>Launch captured run</button>
+    <section id="capture-intent" hidden aria-label="Retained candidate operation">
+      <p id="capture-operation-status" role="status"></p><p id="capture-operation-id" class="mono"></p>
+      <div class="actions"><button id="capture-check" disabled>Check status</button><button id="capture-retry" disabled>Retry same operation</button><a id="capture-monitor" hidden>Monitor operation</a><button id="capture-finish" hidden>Dismiss completed operation</button></div>
+    </section>
+  </section>
   <footer>Cooperating API writers serialize saves. An external write after the final comparison may be overwritten and absent from recovery copies. Refresh after save shows observed current bytes.</footer>
 </section>
 <section id="view-slow-control" data-view="slow-control" hidden><h1 tabindex="-1">Slow control</h1>
