@@ -61,6 +61,10 @@ source/runtime identity, selected input observations, UTC admission time and a
 required fresh `native_id` UUID. This native invocation nonce is generated once
 per new admission and is distinct from the caller UUID, including across stores.
 Existing-ID submission reuses it; readers never generate a missing nonce.
+The complete request record is encoded and checked against the 4 MiB JSON limit
+before creating its operation directory. Size refusal leaves no operation claim
+or active pointer and does not dispatch a child. Publication uses those exact
+checked bytes, including the trailing newline.
 `active.json` is a derived pointer. Every earlier operation directory must be
 proven releasable before another UUID is admitted. This includes orphan directories
 left by crashes before request or active-pointer publication. No partial directory

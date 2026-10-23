@@ -1,6 +1,7 @@
 """Candidate-specific outer admission and native launch/receipt identity projection."""
 
 from pathlib import Path
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -12,11 +13,43 @@ from tools.candidate_operations import (
     read_operation,
     submit_operation,
 )
-from tools.candidate_operations.models import OperationRecord
+from tools.candidate_operations.files import JSON_LIMIT
+from tools.candidate_operations.models import OperationFailure, OperationRecord
 from tools.candidate_operations.process import runtime_identity
 from tools.candidate_operations.store import claim, digest, locked_store, now
 from tools.candidate_worker.launch import publish as native_publish
 from tools.candidate_worker.models import CandidateRunReceipt
+
+
+def test_oversized_candidate_refuses_before_claim_and_leaves_store_available(
+    prepared, tmp_path, monkeypatch
+):
+    """#804: size refusal must not leave an empty claim blocking the next submission."""
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "state"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    spawn = Mock(side_effect=OSError("no child started"))
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", spawn)
+    oversized = CandidateOperation(
+        request_id=uuid4(),
+        request=prepared.model_copy(update={"implementation_advice": "x" * JSON_LIMIT}),
+    )
+    with pytest.raises(OperationFailure, match="4 MiB") as failure:
+        submit_operation(config, oversized, launch_environment={})
+    assert failure.value.detail.code == "record_size"
+    root = Path(config.state_root)
+    assert not (root / "operations" / str(oversized.request_id)).exists()
+    assert not (root / "active.json").exists()
+    spawn.assert_not_called()
+
+    supported = CandidateOperation(request_id=uuid4(), request=prepared)
+    handle = submit_operation(config, supported, launch_environment={})
+    assert handle.operation_id == supported.request_id
+    assert handle.observation == "operation_failed"
+    spawn.assert_called_once()
+    assert (root / "operations" / str(supported.request_id) / "request.json").is_file()
 
 
 @pytest.mark.parametrize("name", ["PYTHONPATH", "PYTHONHOME", "LD_PRELOAD"])
