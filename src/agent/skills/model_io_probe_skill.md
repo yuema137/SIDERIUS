@@ -7,6 +7,12 @@ supplies required construction fields and respects fixed temporal extents.
 `candidate_probe_extent` reads the instantiated candidate length and refuses a
 conflicting fixed temporal contract. Fallback input extent is 64 only when no
 concrete length is available; it is never an independent output constraint.
+Explicit `batch` and `symbolic` extents must be positive Python integers, excluding
+booleans. Floats (including integral-valued floats and nonfinite values), strings
+and other non-integer values raise `ProbeConstructionError` before tensor
+allocation. Values are not coerced and invalid explicit values never select a
+fallback. Omitted/`None` arguments retain the input recipe defaults; fixed
+contract dimensions remain authoritative for valid explicit extents.
 
 `model_output_geometry` owns output validation. `validate_model_output` requires
 a finite Tensor at an admissible declared output dtype, then checks rank, fixed
