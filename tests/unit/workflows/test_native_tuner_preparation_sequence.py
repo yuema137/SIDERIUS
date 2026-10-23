@@ -238,3 +238,51 @@ def test_workflow_executes_shared_staging_before_promotion_and_tuner(
         run_name="n2_staging",
     )
     assert events == ["stage", "promote_loss", "promote_model", "input", "tuner", "promote_loss"]
+
+
+@pytest.mark.parametrize("bad_seed", [False, True])
+def test_shared_startup_keeps_seed_validation_before_lock(workflow_env, monkeypatch, bad_seed):
+    """Moving scope/Health preparation must not publish a lock before seed admission."""
+    events = []
+    real_prepare = model_exploration.prepare_training_run
+    real_validate = model_exploration.validate_stamped_invariants
+    real_lock = model_exploration.ensure_run_invariants
+
+    def prepare(**kwargs):
+        events.append("prepare")
+        return real_prepare(**kwargs)
+
+    def validate(*args, **kwargs):
+        events.append("seed")
+        if bad_seed:
+            raise ValueError("invalid seed witness")
+        return real_validate(*args, **kwargs)
+
+    def lock(*args):
+        events.append("lock")
+        return real_lock(*args)
+
+    monkeypatch.setattr(model_exploration, "prepare_training_run", prepare)
+    monkeypatch.setattr(model_exploration, "validate_stamped_invariants", validate)
+    monkeypatch.setattr(model_exploration, "ensure_run_invariants", lock)
+
+    def run():
+        return workflow_tests.run_workflow(
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=0,
+            ),
+            workspace=workflow_env["workspace"],
+            run_name="startup_order",
+        )
+
+    if bad_seed:
+        with pytest.raises(ValueError, match="invalid seed"):
+            run()
+        assert events == ["prepare", "seed"]
+        assert not (Path(workflow_env["workspace"]) / "run_invariants_lock.json").exists()
+    else:
+        run()
+        assert events == ["prepare", "seed", "lock"]
