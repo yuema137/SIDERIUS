@@ -66,9 +66,26 @@ def reusable_locations(
         raise ValueError(
             "reusable preparation supports managed externals only; literal externals are unsupported"
         )
+    from .reusable_training import settings_payload
+
+    payload = settings_payload(document)
     task = document.definition.task
     manifest = resolve_location(project, task.manifest, "task.manifest")
     data = resolve_location(project, task.data_root, "task.data_root")
+    if payload is not None:
+        from workflows.candidate_training_settings import parse_training_settings
+
+        settings = parse_training_settings(payload)
+        if (
+            settings.launch.data_dir is not None
+            and Path(settings.launch.data_dir).resolve() != data
+        ):
+            raise ValueError("training data_dir disagrees with selected physical root")
+    roles = {
+        "proposal.input": "proposal.json",
+        "storage": "storage.json",
+        "native-training.settings": "training_settings.json",
+    }
     return ReusableCandidateLocations(
         manifest=str(manifest),
         data_root=str(data),
@@ -76,11 +93,7 @@ def reusable_locations(
         externals=tuple(
             ResolvedExternalLocation(
                 binding=item.id,
-                location=str(
-                    envelope
-                    / "inputs"
-                    / ("proposal.json" if item.contract == "proposal.input" else "storage.json")
-                ),
+                location=str(envelope / "inputs" / roles[item.contract]),
             )
             for item in document.definition.externals
         ),

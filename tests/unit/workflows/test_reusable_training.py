@@ -128,12 +128,17 @@ def test_json_grammar_rejects_before_construction(literal, monkeypatch):
 
 def test_source_training_validation_does_not_resolve_runtime_effects(monkeypatch):
     """Schema validation must not read task content, bind verifier factories or probe hardware."""
+    from importlib.metadata import EntryPoint
     from pathlib import Path
 
+    import torch
+
     from core import hardware_context
+    from core.runtime_control import verifier_provider
     from workflows import run_config, task_composition
 
-    source = render_workflow_source(training_document({"launch": {"sampling_seed": 19}}))
+    supplied = {"launch": {"sampling_seed": 19, "runtime_verifier": "selected-user-verifier"}}
+    source = render_workflow_source(training_document(supplied))
 
     def forbidden(*args, **kwargs):
         pytest.fail("source validation executed a runtime effect")
@@ -143,7 +148,11 @@ def test_source_training_validation_does_not_resolve_runtime_effects(monkeypatch
     monkeypatch.setattr(run_config, "bind_runtime_verifier_launch", forbidden)
     monkeypatch.setattr(task_composition, "compose_run_task_bindings", forbidden)
     monkeypatch.setattr(hardware_context, "get_or_create", forbidden)
-    assert parse_workflow_source(source).training_settings == {"launch": {"sampling_seed": 19}}
+    monkeypatch.setattr(hardware_context, "discover", forbidden)
+    monkeypatch.setattr(torch.cuda, "is_available", forbidden)
+    monkeypatch.setattr(verifier_provider, "entry_points", forbidden)
+    monkeypatch.setattr(EntryPoint, "load", forbidden)
+    assert parse_workflow_source(source).training_settings == supplied
 
 
 def test_effective_ingress_inserts_only_output_restriction_and_refuses_conflicts():
