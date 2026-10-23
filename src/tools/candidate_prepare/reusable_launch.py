@@ -4,7 +4,7 @@ import hashlib
 import os
 import stat
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from core.durable_io import publish_bytes_write_once
 from tools.workflow_preview import WorkflowPreview
@@ -16,6 +16,7 @@ from .reusable_admission import capture, safe_bytes, verify_origin
 from .reusable_models import (
     ReusableCandidatePreparationRequest,
     ReusablePreparationControl,
+    ReusablePreparationObservations,
     ReusablePreparationReceipt,
 )
 from .reusable_verify import encoded, verify_reusable_bundle
@@ -34,24 +35,32 @@ def check_claim(path: Path, claimed: os.stat_result) -> None:
 
 def prepare_reusable_candidate(
     request: ReusableCandidatePreparationRequest,
+    *,
+    invocation_id: UUID | None = None,
+    expected_observations: ReusablePreparationObservations | None = None,
 ) -> ReusablePreparationReceipt:
     """Prepare one fresh managed-only v2 capture; never launch or resume a worker."""
     captured = capture(request)
     plan, source, captures = captured.plan, captured.source, captured.inputs
     binding = plan.binding
+    if expected_observations is not None and (
+        ReusablePreparationObservations.from_binding(binding) != expected_observations
+    ):
+        raise ValueError("actual reusable capture differs from admitted observations")
     envelope = Path(binding.envelope)
     output = Path(binding.request.output_dir)
     control_dir = output / "preparation"
     binding_path = envelope / "binding.json"
     binding_hash = hashlib.sha256(encoded(binding)).hexdigest()
     control = ReusablePreparationControl(
-        preparation_id=uuid4(),
+        preparation_id=invocation_id or uuid4(),
         request=binding.request,
         sources=binding.sources,
         binding_path=str(binding_path),
         binding_sha256=binding_hash,
     )
     initial = ReusablePreparationReceipt(
+        preparation_id=control.preparation_id,
         run_id=binding.run_id,
         envelope=str(envelope),
         status="failed",

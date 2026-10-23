@@ -1,0 +1,12 @@
+{
+  "run_id": "00000000-0000-0000-0000-000000000001",
+  "envelope": "/runs/00000000-0000-0000-0000-000000000001",
+  "status": "failed",
+  "binding_path": "/runs/00000000-0000-0000-0000-000000000001/binding.json",
+  "binding_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "preparation_receipt_path": null,
+  "candidate_request_path": null,
+  "candidate_request_sha256": null,
+  "preview_sha256": null,
+  "error": null
+}

@@ -48,7 +48,7 @@ def _hashed(reader: CapturedBytes, path: Path, expected: str | None) -> bytes:
     return payload
 
 
-def _plan(
+def captured_plan(
     envelope: Path, binding: ReusableBindingCapture, reader: CapturedBytes
 ) -> tuple[ReusablePreparationPlan, bytes]:
     source = reader(envelope / "workflow.py.snapshot")
@@ -113,7 +113,8 @@ def _inspect(
         reader(output / "preparation/request.json")
     )
     if (
-        control.request != binding.request
+        (receipt.preparation_id is not None and receipt.preparation_id != control.preparation_id)
+        or control.request != binding.request
         or control.sources != binding.sources
         or control.binding_path != receipt.binding_path
         or control.binding_sha256 != receipt.binding_sha256
@@ -154,7 +155,7 @@ def _verify(
     envelope = Path(selection.envelope)
     output = envelope / "inputs"
     receipt, control = inspected.receipt, inspected.control
-    plan, source = _plan(envelope, inspected.binding, reader)
+    plan, source = captured_plan(envelope, inspected.binding, reader)
     verify_sources(control, read_file=reader.observe)
     expected, bindings, fingerprint = verify_reusable_bundle(
         plan, source, control, read_bytes=reader

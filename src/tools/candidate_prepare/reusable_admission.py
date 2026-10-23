@@ -86,25 +86,15 @@ def reusable_locations(
     )
 
 
-def capture(request: ReusableCandidatePreparationRequest) -> CapturedPreparation:
-    request = ReusableCandidatePreparationRequest.model_validate_json(request.model_dump_json())
-    source, project, runs = map(
-        canonical, (request.source_path, request.project_root, request.runs_root)
-    )
-    if not project.is_dir() or not runs.is_dir():
-        raise ValueError("project_root and runs_root must be existing directories")
-    envelope = canonical(str(runs / str(request.run_id)))
-    absent_destination(envelope)
-    payload = safe_bytes(source, MAX_INPUT_BYTES)
-    observed = observation(source, "workflow.source", payload)
-    if observed.sha256 != request.expected_source_sha256:
-        raise ValueError("workflow source hash differs from expected_source_sha256")
-    document = parse_workflow_source(payload.decode("utf-8"))
-    if not isinstance(document, ReusableWorkflowDocument):
-        raise ValueError("reusable preparation requires a v2 source")
-    locations = reusable_locations(document, project, envelope)
+def captured_request(
+    request: ReusableCandidatePreparationRequest,
+    document: ReusableWorkflowDocument,
+    locations: ReusableCandidateLocations,
+) -> CandidatePreparationRequest:
+    """Project caller parameters and source-owned options through their existing owners."""
+    envelope = Path(locations.workspace).parent
     resolved = resolve_reusable_candidate(document, locations)
-    native = CandidatePreparationRequest(
+    return CandidatePreparationRequest(
         task_manifest=locations.manifest,
         data_root=locations.data_root,
         output_dir=str(envelope / "inputs"),
@@ -123,6 +113,27 @@ def capture(request: ReusableCandidatePreparationRequest) -> CapturedPreparation
         ),
         **resolved.preparation_options.model_dump(),
     )
+
+
+def capture(request: ReusableCandidatePreparationRequest) -> CapturedPreparation:
+    request = ReusableCandidatePreparationRequest.model_validate_json(request.model_dump_json())
+    source, project, runs = map(
+        canonical, (request.source_path, request.project_root, request.runs_root)
+    )
+    if not project.is_dir() or not runs.is_dir():
+        raise ValueError("project_root and runs_root must be existing directories")
+    envelope = canonical(str(runs / str(request.run_id)))
+    absent_destination(envelope)
+    payload = safe_bytes(source, MAX_INPUT_BYTES)
+    observed = observation(source, "workflow.source", payload)
+    if observed.sha256 != request.expected_source_sha256:
+        raise ValueError("workflow source hash differs from expected_source_sha256")
+    document = parse_workflow_source(payload.decode("utf-8"))
+    if not isinstance(document, ReusableWorkflowDocument):
+        raise ValueError("reusable preparation requires a v2 source")
+    locations = reusable_locations(document, project, envelope)
+    resolved = resolve_reusable_candidate(document, locations)
+    native = captured_request(request, document, locations)
     captures = admit(native, future_parent=envelope)
     if overlap(envelope, source):
         raise ValueError("envelope overlaps authored source")
