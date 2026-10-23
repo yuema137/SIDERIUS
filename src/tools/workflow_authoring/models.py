@@ -75,6 +75,7 @@ class SourceView(Model):
 
 
 class ReviewView(Model):
+    binding_options: tuple[BindingOptions, ...]
     source: str
     sha256: Digest
     diff: str

@@ -1,0 +1,63 @@
+.editor-workspace {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+#editor-source {
+  font-family: monospace;
+  width: 100%;
+  min-height: 22rem;
+}
+
+#editor-graph {
+  display: flex;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.editor-node {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 9rem;
+  padding: 1rem;
+  border: 1px solid #67778d;
+  border-radius: .7rem;
+}
+
+.editor-node[aria-pressed="true"] {
+  border: 2px solid #78c1ff;
+}
+
+#editor-references label,
+#editor-inspector label {
+  display: block;
+  margin: .75rem 0;
+}
+
+#editor-current {
+  max-height: 18rem;
+  overflow: auto;
+}
+
+#editor-conflict {
+  border: 2px solid #bd844a;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+a {
+  color: inherit;
+}
+
+@media (max-width: 800px) {
+  .editor-workspace {
+    grid-template-columns: 1fr;
+  }
+}

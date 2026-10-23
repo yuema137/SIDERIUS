@@ -15,6 +15,7 @@ from tools.candidate_operations import LogReadRequest
 from tools.candidate_operations.models import OperationFailure
 
 from .boundary import RequestBoundary
+from .editor import editor_router
 from .files import token
 from .models import ConsoleConfig, LaunchSelection, PreparedSelection, PrepareSelection
 from .service import CandidateConsole
@@ -28,6 +29,7 @@ def create_app(config: ConsoleConfig) -> FastAPI:
     service = CandidateConsole(config)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.console = service
+    app.include_router(editor_router(service.config.editor_projects))
     app.add_middleware(RequestBoundary, config=service.config, token=token(config.auth_token_file))
 
     @app.exception_handler(RequestValidationError)
@@ -104,7 +106,13 @@ def create_app(config: ConsoleConfig) -> FastAPI:
 
     @app.get("/{asset}")
     def static(asset: str):
-        types = {"app.js": "text/javascript", "styles.css": "text/css"}
+        types = {
+            "app.js": "text/javascript",
+            "styles.css": "text/css",
+            "editor.html": "text/html",
+            "editor.js": "text/javascript",
+            "editor.css": "text/css",
+        }
         if asset not in types:
             raise HTTPException(404)
         return FileResponse(assets / asset, media_type=types[asset])

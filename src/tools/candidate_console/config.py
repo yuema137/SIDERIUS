@@ -31,6 +31,16 @@ def validate_config(config: ConsoleConfig) -> ConsoleConfig:
         for name in task.task_read_only:
             if not canonical(name).exists():
                 raise ValueError("configured dependency must exist")
+    if config.editor_projects:
+        from tools.workflow_authoring.service import WorkflowAuthoring
+
+        for project in config.editor_projects:
+            WorkflowAuthoring(project)
+            for output in (*store.preparation_roots, *store.candidate_roots):
+                output_path = Path(output)
+                recovery = project.recovery_directory
+                if recovery.is_relative_to(output_path) or output_path.is_relative_to(recovery):
+                    raise ValueError("editor recovery must be separate from run output roots")
     token(config.auth_token_file)
     if config.credential_file is not None:
         # Validate private file facts and JSON shape, without selecting/printing values.

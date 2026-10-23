@@ -171,3 +171,96 @@ def test_inert_unsupported_and_bounded_paths(editor, tmp_path):
     editor.project.source_file.symlink_to(tmp_path / "other.py")
     with pytest.raises(AuthoringError, match="symlink"):
         editor.read()
+
+
+def test_unchecked_configuration_uses_revalidated_paths(editor):
+    """Unchecked model_copy strings must become validated Paths before admission."""
+    unchecked = editor.project.model_copy(update={"source_file": str(editor.project.source_file)})
+    assert WorkflowAuthoring(unchecked).read().source == SOURCE
+
+
+def test_mode_failure_closes_temp_descriptor(editor, monkeypatch):
+    """fchmod failure before fdopen must close the descriptor and leave source."""
+    import core.durable_io as durable
+
+    descriptor = []
+    original = durable._open_temp_beside
+
+    def tracked(path):
+        fd, name = original(path)
+        descriptor.append(fd)
+        return fd, name
+
+    def fail(*args):
+        raise OSError("fchmod failed")
+
+    monkeypatch.setattr(durable, "_open_temp_beside", tracked)
+    monkeypatch.setattr(durable.os, "fchmod", fail)
+    with pytest.raises(OSError, match="fchmod"):
+        editor.save(request(editor, SOURCE.replace("old.json", "new.json")))
+    with pytest.raises(OSError):
+        os.fstat(descriptor[-1])
+    assert editor.project.source_file.read_text() == SOURCE
+
+
+def test_transport_escaped_exact_limit_and_rendered_output_limit(editor):
+    """The editor bounds UTF-8, not JSON length; generated proposals are bounded too."""
+    from tools.workflow_authoring.models import DocumentProposal
+    from workflows.definition import WorkflowDocument
+
+    exact = SOURCE + "#" + "\\" * (32768 - len(SOURCE.encode()) - 1)
+    request_json = ReviewRequest(
+        expected_sha256=editor.read().sha256, proposal=SourceProposal(kind="source", source=exact)
+    ).model_dump_json()
+    assert len(request_json.encode()) > 32768
+    review = editor.review(ReviewRequest.model_validate_json(request_json))
+    assert review.source == exact
+    definition = editor.read().document.model_dump(mode="json")
+    definition["definition"]["task"]["manifest"] = "x" * 32700
+    document = WorkflowDocument.model_validate_json(__import__("json").dumps(definition))
+    with pytest.raises(AuthoringError, match="rendered"):
+        editor.review(
+            ReviewRequest(
+                expected_sha256=editor.read().sha256,
+                proposal=DocumentProposal(kind="document", document=document),
+            )
+        )
+
+
+def test_native_catalog_projection_and_semantic_edit_preserve_structure(editor):
+    """Fails if GUI options invent contracts, lose argument order/layout, or add optional args."""
+    import json
+
+    from tests.unit.workflows.test_workflow_definition import definition
+    from tools.workflow_authoring.models import DocumentProposal
+    from workflows.definition import NodePosition, WorkflowDocument, render_workflow_source
+
+    document = WorkflowDocument(
+        definition=definition(), positions=(NodePosition(node="propose", x=12.0, y=34.0),)
+    )
+    editor.project.source_file.write_text(render_workflow_source(document))
+    view = editor.read()
+    options = {
+        (item.node, item.argument): [choice.label for choice in item.choices]
+        for item in view.binding_options
+    }
+    assert options[("propose", None)] == ["seed"]
+    assert options[("implement", "output")] == ["propose.result"]
+    assert options[("validate", "output")] == ["implement.result"]
+    assert options[("implement", "storage")] == ["storage"]
+    edited = document.model_dump(mode="json")
+    edited["definition"]["externals"][1]["location"] = "edited-storage.json"
+    reviewed = editor.review(
+        ReviewRequest(
+            expected_sha256=view.sha256,
+            proposal=DocumentProposal(
+                kind="document", document=WorkflowDocument.model_validate_json(json.dumps(edited))
+            ),
+        )
+    )
+    assert [(p.node, p.x, p.y) for p in reviewed.document.positions] == [("propose", 12.0, 34.0)]
+    assert [a.name for a in reviewed.document.definition.nodes[1].request.arguments] == [
+        "output",
+        "storage",
+    ]
+    assert reviewed.document.definition.externals[1].location == "edited-storage.json"

@@ -55,6 +55,9 @@ def _write_durably(fd: int, payload: bytes) -> None:
 def publish_bytes_atomically(path: str, payload: bytes, *, mode: int | None = None) -> None:
     """Replace ``path`` with ``payload`` atomically (temp + fsync + ``os.replace``).
 
+    ``mode=None`` retains mkstemp owner-only permissions (0600). A caller may
+    supply ordinary permission bits to set on the temp descriptor before rename.
+
     Raises:
         OSError: the payload could not be made durable or published. The
             previous version of ``path`` (if any) is untouched and the temp
@@ -65,7 +68,11 @@ def publish_bytes_atomically(path: str, payload: bytes, *, mode: int | None = No
     fd, tmp_path = _open_temp_beside(path)
     try:
         if mode is not None:
-            os.fchmod(fd, mode)
+            try:
+                os.fchmod(fd, mode)
+            except BaseException:
+                os.close(fd)
+                raise
         _write_durably(fd, payload)
         os.replace(tmp_path, path)
     finally:

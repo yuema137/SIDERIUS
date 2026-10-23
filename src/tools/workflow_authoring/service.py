@@ -41,6 +41,7 @@ def digest(payload: bytes) -> str:
 class AuthoringError(ValueError):
     def __init__(self, code: str, message: str, current: SourceView | None = None):
         self.code, self.current = code, current
+        self.proposal: ReviewView | None = None
         super().__init__(message)
 
 
@@ -55,6 +56,7 @@ def checked_path(path: Path) -> None:
 class WorkflowAuthoring:
     def __init__(self, project: Project):
         self.project = Project.model_validate_json(project.model_dump_json())
+        project = self.project
         for path in (project.project_root, project.source_file, project.recovery_directory):
             checked_path(path)
         root = project.project_root
@@ -71,7 +73,8 @@ class WorkflowAuthoring:
             "." + project.source_file.name + ".authoring.lock"
         )
         self._recovery_directory()
-        self._read_bytes()
+        checked_path(project.source_file)
+        self._source_mode(project.source_file.stat())
 
     def _recovery_directory(self) -> None:
         path = self.project.recovery_directory
@@ -84,21 +87,26 @@ class WorkflowAuthoring:
         ):
             raise AuthoringError("path", "recovery directory must be existing owner-only 0700")
 
+    @staticmethod
+    def _source_mode(info: os.stat_result) -> int:
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or info.st_uid != os.getuid()
+            or info.st_mode & 0o7000
+        ):
+            raise AuthoringError(
+                "path", "source must be an owned single-link regular file without special bits"
+            )
+        return stat.S_IMODE(info.st_mode)
+
     def _read_bytes(self) -> tuple[bytes, int]:
         path = self.project.source_file
         checked_path(path)
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
         with os.fdopen(os.open(path, flags), "rb") as handle:
             info = os.fstat(handle.fileno())
-            if (
-                not stat.S_ISREG(info.st_mode)
-                or info.st_nlink != 1
-                or info.st_uid != os.getuid()
-                or info.st_mode & 0o7000
-            ):
-                raise AuthoringError(
-                    "path", "source must be an owned single-link regular file without special bits"
-                )
+            mode = self._source_mode(info)
             payload = handle.read(MAX_SOURCE_BYTES + 1)
         if len(payload) > MAX_SOURCE_BYTES:
             raise AuthoringError("limit", "editor source exceeds 32 KiB UTF-8")
@@ -106,7 +114,7 @@ class WorkflowAuthoring:
             payload.decode("utf-8")
         except UnicodeDecodeError as error:
             raise AuthoringError("encoding", "source must be UTF-8") from error
-        return payload, stat.S_IMODE(info.st_mode)
+        return payload, mode
 
     def _view(self, payload: bytes) -> SourceView:
         source = payload.decode("utf-8")
@@ -147,7 +155,8 @@ class WorkflowAuthoring:
 
     def review(self, request: ReviewRequest) -> ReviewView:
         request = ReviewRequest.model_validate_json(request.model_dump_json())
-        base = self._base(self._read_bytes()[0], request.expected_sha256)
+        current_payload = self._read_bytes()[0]
+        base = self._view(current_payload)
         proposal = request.proposal
         source = (
             render_workflow_source(proposal.document)
@@ -166,7 +175,19 @@ class WorkflowAuthoring:
                 tofile="proposed/workflow.py",
             )
         )
-        return ReviewView(source=source, sha256=digest(payload), diff=diff, document=document)
+        review = ReviewView(
+            source=source,
+            sha256=digest(payload),
+            diff=diff,
+            document=document,
+            binding_options=binding_options(document),
+        )
+        try:
+            self._base(current_payload, request.expected_sha256)
+        except AuthoringError as error:
+            error.proposal = review
+            raise
+        return review
 
     @contextmanager
     def _locked(self) -> Iterator[None]:
