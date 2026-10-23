@@ -40,7 +40,9 @@ from .readiness import credential_readiness
 def preparation_request(
     task: TaskChoice, selection: PrepareSelection
 ) -> CandidatePreparationRequest:
-    fields = task.model_dump(exclude={"task_id", "label", "preparation_root", "candidate_root"})
+    fields = task.model_dump(
+        exclude={"task_id", "label", "preparation_root", "candidate_root", "reusable_runs_root"}
+    )
     return CandidatePreparationRequest(
         **fields,
         output_dir=str(Path(task.preparation_root) / str(selection.operation_id)),
@@ -66,6 +68,7 @@ class CandidateConsole:
                 llm_config_file=t.llm_config_file,
                 preparation_root=t.preparation_root,
                 candidate_root=t.candidate_root,
+                reusable_runs_root=t.reusable_runs_root,
                 preparation_timeout_seconds=t.preparation_timeout_seconds,
                 candidate_timeout_seconds=t.candidate_timeout_seconds,
             )

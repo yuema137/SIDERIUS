@@ -23,6 +23,21 @@ def validate_config(config: ConsoleConfig) -> ConsoleConfig:
                 path.is_relative_to(Path(parent)) for parent in allowed
             ):
                 raise ValueError("task output root is outside operation store roots")
+        if task.reusable_runs_root is not None:
+            path = canonical(task.reusable_runs_root)
+            state = canonical(store.state_root)
+            if (
+                not path.is_dir()
+                or any(
+                    not any(path.is_relative_to(canonical(parent)) for parent in roots)
+                    for roots in (store.preparation_roots, store.candidate_roots)
+                )
+                or path.is_relative_to(state)
+                or state.is_relative_to(path)
+            ):
+                raise ValueError(
+                    "reusable runs root must be separate from state and within both output scopes"
+                )
         if not canonical(task.data_root).is_dir():
             raise ValueError("configured data root must exist")
         for name in (task.task_manifest, task.llm_config_file):
